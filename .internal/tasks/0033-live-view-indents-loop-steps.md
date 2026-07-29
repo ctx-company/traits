@@ -1,0 +1,32 @@
+# 0033 — Indent loop steps in the live view
+
+**Status:** ready to implement · **Raised:** 2026-07-29
+
+The journey pane renders every step flat, so a step inside a loop body looks
+like a sibling of the loop itself. Indent steps by their nesting depth, so a
+refinement round reads as contained.
+
+```
+~ Building, round 2
+    ✓ produce · worker · 12m 04s
+    ✓ gates · passed
+    ✗ review · revise — 1 blocker
+```
+
+## Watch
+
+- **Take depth from the position path, never a render-local counter.** The
+  position path already encodes `procedure → loop#iteration → item#iteration`,
+  and it is the only source that survives a resume. This is the same rule as
+  the history lines and `story`.
+- Nested loops need a stated cap: indent by real depth, or clamp at two levels
+  so a deeply nested procedure does not walk off a narrow pane.
+- Width is scarce and shared with a 2x2 grid. Indentation competes with the
+  step label; the label and state must survive at the narrowest width, so
+  indentation is the first thing to drop.
+
+## Done when
+
+Loop-body steps render indented under their round; depth derives from the
+position path; a resumed run indents identically; narrow panes drop indentation
+before truncating labels.
