@@ -1,0 +1,47 @@
+{
+  "agent:researcher": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 19,
+    "end": 19
+  },
+  "port:question": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "port:sources": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 25,
+    "end": 25
+  },
+  "port:summary": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 44,
+    "end": 44
+  },
+  "prompt:summarize": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 63,
+    "end": 63
+  },
+  "schema:research-summary": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 32,
+    "end": 32
+  },
+  "sequence:procedure/summarize": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 60,
+    "end": 60
+  },
+  "slot:summary": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 30,
+    "end": 30
+  },
+  "trait:research-summarize": {
+    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
+    "start": 51,
+    "end": 51
+  }
+}

@@ -1,0 +1,38 @@
+[package]
+name = "ctx-traits-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Pure deterministic ctx.traits core: parse, normalize, validate, audit, resolve, compose, render-plan, pack, cache-key, and ledger planning. No IO."
+
+[features]
+default = []
+# Embed the first-party built-in meta-trait packages (generate-trait,
+# refine-trait, critique-trait, generate-evals, explain-trait, trait-spec)
+# as static byte tables. Enabled by the IO and CLI crates, never by the WASM
+# crates.
+builtin-trait-packages = []
+
+[dependencies]
+thiserror.workspace = true
+derive_more.workspace = true
+globset.workspace = true
+hex.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+strum.workspace = true
+toml.workspace = true
+camino.workspace = true
+
+[build-dependencies]
+sha2.workspace = true
+hex.workspace = true
+toml.workspace = true

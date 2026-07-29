@@ -1,0 +1,413 @@
+id = "implement-guided"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Implement Guided"
+summary = "Take the assignment as annotations from the annotation tool, draft it, implement it under bounded review, explain the approved diff hunk by hunk, then commit and push through the gate."
+
+[metadata]
+tag = [
+    "demo",
+    "implementation",
+    "review",
+    "human-in-the-loop",
+]
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.require]]
+id = "role-attributed-output"
+
+[[intent.avoid]]
+id = "unbounded-loop"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "change-walkthrough"
+direction = "output"
+schema = "schema:text"
+description = "Markdown walkthrough of the approved change, one fenced hunk per section with its intent and explanation."
+title = "Change Walkthrough"
+format = ["text"]
+value = "slot:hunk-notes"
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+description = "Final commit evidence from the git commit command step: the committed hash and subject."
+title = "Commit Report"
+format = ["text"]
+value = "slot:commit-output"
+
+[[port]]
+id = "push-report"
+direction = "output"
+schema = "schema:text"
+description = "Evidence from the gated push — the gate's own verdict plus the push result under it."
+title = "Push Report"
+format = ["text"]
+value = "slot:push-output"
+
+[[slot]]
+id = "annotations"
+schema = "schema:annotation-set"
+description = "The assignment, as typed annotations returned by the annotation tool. The scope contract every later step works from — this trait never asks a model to restate it."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "The implementation draft for the annotated assignment — the contract the build loop implements."
+hint = "Scope, files to touch, approach, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the implemented state; replaced in full each round."
+hint = "What changed (files), how it was validated, and open concerns."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "The reviewer's verdict for the current work state."
+
+[[slot]]
+id = "reviewed-diff"
+schema = "schema:text"
+description = "The approved change as unified-diff hunks, captured after the loop exits so it always describes the state the reviewer actually signed."
+hint = "git diff HEAD output with @@ hunk headers; tracked files only — a brand-new untracked file does not appear until it is staged."
+
+[[slot]]
+id = "hunk-notes"
+schema = "schema:text"
+description = "A markdown walkthrough of the approved change: one section per hunk, each with the hunk in a fenced code block followed by its intent and explanation."
+hint = "Markdown source, written to be read by a human reviewing the change — not a data structure."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Scribe's commit message for the approved work; also saved to .git/CTX_COMMITMSG for the commit command step."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "push-output"
+schema = "schema:text"
+description = "Output evidence from the gated push via ctx-gate run -- git push, including the gate's own verdict."
+
+[[schema]]
+id = "annotation-source"
+
+[schema.fields.kind]
+schema = "schema:text"
+required = true
+description = 'Where the annotated text came from, e.g. "stdin".'
+
+[[schema]]
+id = "annotation"
+
+[schema.fields.lines]
+schema = "[schema:integer]"
+required = true
+description = "The inclusive line range this annotation covers in the annotated text, as [start, end]."
+
+[schema.fields.text]
+schema = "schema:text"
+required = true
+description = "The annotation itself — what the author wants done, in their own words."
+
+[[schema]]
+id = "annotation-set"
+description = "One annotation run: the annotated source plus the annotations the author left on it."
+
+[schema.fields.annotations]
+schema = "[schema:annotation]"
+required = true
+description = "Every annotation the tool returned. Together these are the assignment; none of them is optional."
+
+[schema.fields.source]
+schema = "schema:annotation-source"
+description = "Provenance of the annotated text. Recorded, not acted on."
+
+[[schema]]
+id = "decision"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[schema]]
+id = "review-verdict"
+description = "Typed review verdict for the current work state. The loop blocks only on blockers, so taste and cosmetics never cause churn."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: naming, structure, taste, optional improvements. Never affects status and never forces another round."
+
+[schema.fields.blockers]
+schema = "schema:text"
+description = "The blocking defects that must be fixed before this work can ship: a correctness bug, a failing check, or work the annotations did not ask for. Present when status is revise; empty or absent when approved."
+
+[schema.fields.status]
+schema = "schema:decision"
+required = true
+description = "approved when no blocking defect remains (advisory notes may still exist); revise when at least one blocking defect remains. Set to approved if and only if blockers is empty."
+
+[[agent]]
+id = "smart"
+description = "Strong model: drafts the implementation from the annotations, reviews the work each round, and explains the finished diff hunk by hunk."
+summary = "Drafting, review, and explanation role."
+
+[[agent]]
+id = "worker"
+description = "Implements the draft and applies reviewer fixes each round."
+summary = "Implementation role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the commit message for the approved work; staging, committing and pushing run as command steps."
+summary = "Commit-message role."
+
+[prompt.commit-message]
+text = """
+
+                    The build loop for the annotated assignment {slot:annotations} has ended in an approved review, and the work is being committed. The final verdict is {slot:review-verdict}, and {slot:hunk-notes} is the walkthrough of what actually changed.
+                    Write a concise commit message: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated. Draw its substance from the walkthrough's stated intents rather than re-deriving the change from the working tree.
+                    Save exactly that message to the file .git/CTX_COMMITMSG at the repo root (create or overwrite it), and return the same message as your output.
+                    Do not run any git commands; staging, committing and pushing happen in later runtime steps."""
+input = [
+    "slot:annotations",
+    "slot:review-verdict",
+    "slot:hunk-notes",
+]
+output = ["slot:commit-message"]
+
+[prompt.draft]
+text = """
+
+                    Create an implementation draft for the annotated assignment {slot:annotations}.
+                    Every entry in its annotations list is part of the scope — implement exactly what they ask, together, and nothing more. Each annotation's "text" is the request; its "lines" locate it in the annotated source and are context, not work.
+                    Inspect the repository with your tools to ground the draft; do not guess at structure.
+                    Cover: scope, the files to touch, the approach, the validation plan (which of the project's own checks prove it), and the risks.
+                    Reference files by path; do not inline documents. Do not implement anything yet."""
+input = ["slot:annotations"]
+output = ["slot:draft"]
+
+[prompt.explain-hunks]
+text = """
+
+                    You have just approved this work. Now write a markdown walkthrough of it for the human who will read the change.
+                    {slot:reviewed-diff} is the approved change as unified-diff hunks.
+                    Return MARKDOWN, not a data structure. One "##" section per hunk, in the order the diff presents them, each section titled with the file path and the hunk's @@ header. Inside each section: first the hunk itself verbatim inside a fenced code block opened and closed by three backtick characters, with the language tag diff on the opening fence; then a bold **Intent:** line stating in one sentence what the change is FOR; then an **Explanation:** paragraph covering how it achieves that intent, the assumption it relies on, and any case it deliberately does not handle.
+                    One section per hunk — never merge two hunks, never invent a hunk the diff does not contain, and never describe the syntax instead of the purpose.
+                    Write for someone who has not read the annotations {slot:annotations} or the draft {slot:draft}. Return only the markdown."""
+input = [
+    "slot:reviewed-diff",
+    "slot:annotations",
+    "slot:draft",
+]
+output = ["slot:hunk-notes"]
+
+[prompt.implement]
+text = """
+
+                            Produce the work for the annotated assignment {slot:annotations} against the draft {slot:draft}.
+                            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a verdict IS attached, this is a fix round: fix every BLOCKER it names, and address advisory notes only when the fix is cheap and safe.
+                            Run the project's own checks with your tools before reporting.
+                            Return the full updated work summary — what changed (files), how you validated it, and any open concern — never a diff against your previous summary."""
+input = [
+    "slot:annotations",
+    "slot:draft",
+]
+output = ["slot:work-summary"]
+
+[prompt.review]
+text = """
+
+                            Review the implemented work for the annotated assignment {slot:annotations} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
+                            Inspect the actual working tree with your tools — never review the summary alone; re-run the project's checks if the summary does not prove they pass.
+                            A BLOCKER makes the work genuinely unshippable: a correctness bug, a failing check, or work the annotations did not ask for. Everything else — naming, structure, taste, optional improvements — is ADVISORY.
+                            Put blocking defects in blockers and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved. Do not promote taste to a blocker to earn another round.
+                            Return the typed verdict."""
+input = [
+    "slot:annotations",
+    "slot:draft",
+    "slot:work-summary",
+]
+output = ["slot:review-verdict"]
+
+[[sequence.build-round.sequence]]
+id = "implement"
+title = "Implement (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = [
+    "slot:annotations",
+    "slot:draft",
+    { slot = "slot:review-verdict", optional = true },
+]
+output = ["slot:work-summary"]
+
+[[sequence.build-round.sequence]]
+id = "review"
+title = "Review the work (smart)"
+agent = "agent:smart"
+prompt = "prompt:review"
+input = [
+    "slot:annotations",
+    "slot:draft",
+    "slot:work-summary",
+]
+output = ["slot:review-verdict"]
+
+[procedure]
+description = "Collect the assignment as annotations, draft it, implement it under bounded review, write a markdown walkthrough of the approved diff, then commit and push through the gate."
+output = [
+    "port:change-walkthrough",
+    "port:commit-report",
+    "port:push-report",
+]
+
+[[procedure.sequence]]
+id = "collect-annotations"
+title = "Collect the assignment (ctx-annotate)"
+output = ["slot:annotations"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'echo "what we doing today?" | ctx-annotate --stdin',
+]
+
+[[procedure.sequence]]
+id = "draft"
+title = "Draft the work (smart)"
+agent = "agent:smart"
+prompt = "prompt:draft"
+input = ["slot:annotations"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "building"
+title = "Implement and review"
+kind = "loop"
+sequence = "sequence:build-round"
+max-iterations = 6
+on-exhausted = "block"
+
+[procedure.sequence.until]
+slot = "slot:review-verdict"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "capture-diff"
+title = "Capture the approved diff"
+output = ["slot:reviewed-diff"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "diff",
+    "HEAD",
+    "--",
+    ".",
+    ":(exclude).agents/runs",
+]
+
+[[procedure.sequence]]
+id = "explain-hunks"
+title = "Explain the change hunk by hunk (smart)"
+agent = "agent:smart"
+prompt = "prompt:explain-hunks"
+input = [
+    "slot:reviewed-diff",
+    "slot:annotations",
+    "slot:draft",
+]
+output = ["slot:hunk-notes"]
+
+[[procedure.sequence]]
+id = "commit-message"
+title = "Write the commit message (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:commit-message"
+input = [
+    "slot:annotations",
+    "slot:review-verdict",
+    "slot:hunk-notes",
+]
+output = ["slot:commit-message"]
+
+[[procedure.sequence]]
+id = "git-stage"
+title = "Stage all changes except runtime state"
+output = ["slot:stage-output"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+    "--",
+    ":(exclude).agents/runs",
+]
+
+[[procedure.sequence]]
+id = "git-commit"
+title = "Commit the work"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-F",
+    ".git/CTX_COMMITMSG",
+]
+
+[[procedure.sequence]]
+id = "gated-push"
+title = "Push through the gate (ctx-gate)"
+input = ["slot:commit-output"]
+output = ["slot:push-output"]
+
+[procedure.sequence.command]
+argv = [
+    "ctx-gate",
+    "run",
+    "--",
+    "git",
+    "push",
+]

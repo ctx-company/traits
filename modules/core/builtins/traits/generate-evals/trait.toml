@@ -1,0 +1,8 @@
+[package]
+id = "generate-evals"
+version = "0.1.0"
+name = "Generate Evals"
+status = "ready"
+
+[dependencies]
+trait-spec = { version = "0.1.0", path = "../trait-spec" }

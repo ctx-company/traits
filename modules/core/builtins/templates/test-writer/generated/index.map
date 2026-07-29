@@ -1,0 +1,52 @@
+{
+  "agent:test-writer": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:plan": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 47,
+    "end": 47
+  },
+  "port:requirements": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 17,
+    "end": 17
+  },
+  "port:target-code": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 16,
+    "end": 16
+  },
+  "prompt:write-plan": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 67,
+    "end": 67
+  },
+  "schema:proposed-test-case": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "schema:test-plan": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 36,
+    "end": 36
+  },
+  "sequence:procedure/write-plan": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 64,
+    "end": 64
+  },
+  "slot:plan": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 34,
+    "end": 34
+  },
+  "trait:test-writer": {
+    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
+    "start": 54,
+    "end": 54
+  }
+}

@@ -1,0 +1,154 @@
+export interface CtxConfig {
+    agent?: AgentDefaults;
+    git?: GitTable;
+    harness?: Record<string, HarnessDefinition>;
+    host?: Record<string, HostOverride>;
+    merge?: MergeTable;
+    publish?: PublishTable;
+    registry?: RegistryTable;
+    repo?: Record<string, RepoOverride>;
+    run?: RunTable;
+    schemaVersion?: string;
+    worktree?: WorktreeConfig;
+}
+export interface AgentDefaults {
+    modelTier?: Record<string, ProfileAssignment>;
+    role?: Record<string, RoleAssignmentValue>;
+    variant?: Record<string, VariantOverride>;
+}
+export type AgentModelTier = "top" | "fast";
+export interface BuildCacheConfig {
+    env: string;
+}
+export interface GeneratedArtifact {
+    paths: string[];
+    rebuild: string[][];
+}
+export interface GitTable {
+    longSeconds?: number;
+}
+export interface HarnessCliConvention {
+    argv?: string[];
+    dirFlag?: string;
+    jsonSchemaFlag?: string;
+    modelFlag?: string;
+    narratorArgv?: string[];
+    output?: string;
+    promptVia?: string;
+    reasoningEffortFlag?: string;
+    resumeFlag?: string;
+    sessionFlag?: string;
+    stream?: boolean;
+    systemPromptFlag?: string;
+    warmArgv?: string[];
+}
+export interface HarnessDefinition {
+    bin?: string;
+    cli?: HarnessCliConvention;
+    kind?: string;
+    mcp?: HarnessMcpConvention;
+    transports?: RunTransport[];
+    versionProbe?: string[];
+}
+export interface HarnessMcpConvention {
+    allowedTools?: string[];
+    allowedToolsFlag?: string;
+    configVia?: string;
+    mcpConfigFlag?: string;
+    reasoningEffortFlag?: string;
+    systemPromptFlag?: string;
+}
+export interface HostOverride {
+    format?: string;
+    globalPath?: string;
+    profile?: string;
+    projectPath?: string;
+}
+export type MergeOverlap = "land" | "park";
+export interface MergeTable {
+    auto?: boolean;
+    branch?: string;
+    deep?: boolean;
+    diskFloorMb?: number;
+    gate?: string[][];
+    gateSeconds?: number;
+    generated?: GeneratedArtifact[];
+    overlap?: MergeOverlap;
+    wait?: boolean;
+}
+export interface ProfileAssignment {
+    budget?: RoleBudget;
+    extraArgs?: string[];
+    harness?: string;
+    mode?: RunAssignmentMode;
+    model?: string;
+    modelTier?: AgentModelTier;
+    reasoningEffort?: string;
+    sessionMode?: RunSessionMode;
+    systemPrompt?: string;
+    transport?: RunTransport;
+}
+export interface PublishTable {
+    exclude?: string[];
+}
+export interface RegistryTable {
+    base?: string;
+}
+export interface RepoOverride {
+    agent?: AgentDefaults;
+}
+export type RoleAssignmentValue = ProfileAssignment | ProfileAssignment[];
+export interface RoleBudget {
+    frameSeconds?: number;
+    idleSeconds?: number;
+    maxRetries?: number;
+}
+export type RunAssignmentMode = "harness" | "attach";
+export type RunSessionMode = "per-frame" | "persistent";
+export interface RunTable {
+    attachWaitSeconds?: number;
+    buildCache?: Record<string, BuildCacheConfig>;
+    frameSeconds?: number;
+    idleSeconds?: number;
+    inlinePromptBytes?: number;
+    maxFrames?: number;
+    maxInFlight?: number;
+    maxRetries?: number;
+    story?: StoryLevel;
+    strictLoops?: boolean;
+    totalSeconds?: number;
+    wait?: boolean;
+    worktree?: boolean;
+}
+export type RunTransport = "cli" | "mcp";
+export type StoryLevel = "default" | "detailed" | "assisted";
+export type TripwirePolicy = "park" | "warn";
+export interface VariantOverride {
+    role?: Record<string, RoleAssignmentValue>;
+}
+export interface WorktreeConfig {
+    confinement?: WorktreeConfinementConfig;
+    env?: Record<string, string>;
+    retention?: WorktreeRetentionConfig;
+    seed?: string[];
+    setup?: string[][];
+    setupCaptureBytes?: number;
+    setupSeconds?: number;
+    tripwire?: WorktreeTripwireConfig;
+    warm?: string[];
+}
+export interface WorktreeConfinementConfig {
+    allow?: string[];
+    enabled?: boolean;
+    sandbox?: boolean;
+}
+export interface WorktreeRetentionConfig {
+    cheap?: string[];
+    expensive?: string[];
+    expensiveGraceDays?: number;
+}
+export interface WorktreeTripwireConfig {
+    policy?: TripwirePolicy;
+    sentinel?: string[];
+}
+//# sourceMappingURL=generated.d.ts.map

@@ -1,0 +1,6 @@
+[package]
+name = "support"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Shared scaffolding for ctx-traits-cli integration tests, split into its own crate (P477) so a helper unused by one test binary but used by another is not flagged as dead code — a real lib crate's pub API is not dead-code-linted per binary the way a `mod support;`-included file was."

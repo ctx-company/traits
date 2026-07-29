@@ -1,0 +1,51 @@
+{
+  "name": "@ctx-traits/agents",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ctx-company/ctx-traits.git",
+    "directory": "packages/agents"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    ".ctx/traits/agents"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings src",
+    "format": "dprint fmt",
+    "format:check": "dprint check",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@ctx-traits/cdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "25.3.3",
+    "dprint": "0.55.1",
+    "oxlint": "1.73.0",
+    "typescript": "^7.0.2"
+  }
+}

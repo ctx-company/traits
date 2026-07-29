@@ -1,0 +1,564 @@
+id = "refactor"
+schema-version = "0.3"
+version = "0.8.0"
+name = "Refactor (Strict)"
+summary = "Surveyed refactoring procedure with verbatim execution: survey, frame, design, implement the agreed design exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
+variant = "strict"
+
+[metadata]
+tag = [
+    "first-party",
+    "refactoring",
+    "review",
+    "multi-agent",
+]
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.require]]
+id = "behavior-preserving-default"
+summary = "Preserve observed behavior unless the phase explicitly changes it."
+
+[[intent.require]]
+id = "verbatim-design-execution"
+summary = "Execute the agreed design exactly as written; record every departure instead of silently adapting."
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[intent.avoid]]
+id = "interface-widening"
+summary = "Do not broaden public interfaces without a concrete caller need."
+
+[[intent.avoid]]
+id = "silent-plan-deviation"
+summary = "Never adapt around an unsatisfiable or contradicted design without recording and disposing of the deviation."
+
+[[port]]
+id = "target"
+direction = "input"
+schema = "schema:text"
+description = 'Module, file path, or entity to refactor; append an optional emphasis after a dash (e.g. "modules/cli/src/app/run_view.rs", "crate::lockfile — typed errors only").'
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
+value = "slot:commit-output"
+
+[[slot]]
+id = "survey"
+schema = "schema:text"
+description = "Numbered refactoring candidates for the target: cluster, why coupled, smell ids, test impact. No interface proposals."
+hint = "The friction encountered while reading IS the signal. Deferred candidates stay listed here."
+
+[[slot]]
+id = "refactor-frame"
+schema = "schema:text"
+description = "The selected candidate set plus problem framing: constraints any new boundary must satisfy, dependencies, an illustrative (non-binding) sketch."
+
+[[slot]]
+id = "agreed-design"
+schema = "schema:text"
+description = "The design, complete enough to implement from: boundaries, types, migration steps, validation plan."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the refactored state; revised in place after each refinement pass."
+hint = "What changed (files), how behavior was preserved, gate results, open concerns."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Refactor commit message; injected directly into the git commit command step."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "git-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "deviation-report"
+schema = "[schema:deviation-report]"
+description = "Every proposed departure from the verbatim agreed design — including a rejected improvement the worker considered but did not make — recorded instead of silently adapted. Empty when the design was followed exactly."
+
+[[slot]]
+id = "review-verdict-1"
+schema = "schema:review-verdict-strict"
+description = "smart-1's refinement verdict for the current refactored state."
+
+[[slot]]
+id = "review-verdict-2"
+schema = "schema:review-verdict-strict"
+description = "smart-2's refinement verdict for the current refactored state."
+
+[[resource]]
+id = "architecture-dialect"
+path = "resources/architecture-dialect.md"
+hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
+trigger = "on-activation"
+
+[[resource]]
+id = "smell-catalog"
+path = "resources/smell-catalog.md"
+hint = "Eight detectable refactoring smells with detection patterns, before/after shapes, and when-not-to-apply guards."
+trigger = "on-activation"
+
+[[schema]]
+id = "blocker"
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+
+[schema.fields.done-when]
+schema = "schema:text"
+required = true
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline)."
+
+[schema.fields.recurrence-of]
+schema = "schema:text"
+description = "id of the prior-round blocker this restates; present when the prior fix did not clear its done-when."
+
+[schema.fields.required-fix]
+schema = "schema:text"
+required = true
+description = "The shape of an acceptable fix: the invariant it must establish and what to replace or delete — never just the cited call sites."
+
+[schema.fields.root-cause]
+schema = "schema:text"
+required = true
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows."
+
+[schema.fields.rule-quote]
+schema = "schema:text"
+description = "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.rule-source]
+schema = "schema:text"
+description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and the concrete failure it causes."
+
+[schema.fields.where]
+schema = "schema:text"
+required = true
+description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "deviation-report"
+description = "One proposed departure from a verbatim plan under strict authority: what was planned, what actually happened, why, and its disposition."
+
+[schema.fields.actual]
+schema = "schema:text"
+required = true
+description = "What actually happened instead."
+
+[schema.fields.disposition]
+schema = "schema:text"
+required = true
+description = "How the departure was resolved or is being handled."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this deviation, reused verbatim if it recurs."
+
+[schema.fields.planned]
+schema = "schema:text"
+required = true
+description = "What the plan specified, verbatim or tightly paraphrased."
+
+[schema.fields.rationale]
+schema = "schema:text"
+required = true
+description = "Why the departure occurred."
+
+[[schema]]
+id = "review-verdict-strict"
+description = "Typed review verdict. The loop blocks only on blockers; an incomplete migration of the broader ideal is advisory-deferred, not a blocker, so a correct framed refactor converges."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: residual pre-existing smells outside the framed change, code the agreed design did not cover, further refactoring the survey deferred, taste. Never affects status; belongs on the deferred-candidates list, not this run."
+
+[schema.fields.blockers]
+schema = "[schema:blocker]"
+description = "The blocking defects that must be fixed before merge: a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile. Fidelity to the agreed design is judged solely under this variant's authority rule, not as a separate categorical item here. Present when status is revise; empty or absent when approved."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved when the framed change is correct, behavior-preserving, and introduces no new smell — even if the broader ideal is not fully reached; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[agent]]
+id = "worker"
+description = "Implements the agreed refactor design and applies reviewer fixes."
+summary = "Implementation role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the refactor commit message from the agreed design and survey record; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
+id = "smart-1"
+description = "Strong analysis model: surveys the target against the standards, designs the boundary, and reviews in the refinement loop."
+summary = "Survey, design, reviewer."
+
+[[agent]]
+id = "smart-2"
+description = "Strong review model: independently reviews the refactored state, including every recorded deviation, in the refinement loop."
+summary = "Independent reviewer."
+
+[prompt.apply-fixes]
+text = """
+
+                            Apply the reviewer findings for {port:target}: {slot:review-verdict-1} and {slot:review-verdict-2}.
+                            Fix every BLOCKER named in either verdict while staying strictly verbatim to the agreed design {slot:agreed-design} — never introduce a new ACTUAL departure to satisfy a finding. If a blocker can only be fixed by actually departing from the design, do not deviate: STOP and say so plainly in the work summary so the loop can exhaust and block rather than silently adapting. Respect the dialect ({resource:architecture-dialect}). Re-run the repo validation gates.
+                            Return exactly two outputs: work-summary (replacing the prior one: what changed, files, gate results, open concerns) and deviation-report (the complete updated list of rejected-but-considered proposals, including any new ones this round; never an entry describing an actual departure)."""
+input = [
+    "port:target",
+    "slot:review-verdict-1",
+    "slot:review-verdict-2",
+    "slot:agreed-design",
+    "resource:architecture-dialect",
+]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
+
+[prompt.design]
+text = """
+
+            Design the refactor for the framed problem {slot:refactor-frame} on {port:target}.
+            Optimize for both faces of the standard at once: the deepest practical module — few entry points hiding the full implementation — expressed in the house dialect in {resource:architecture-dialect} (Interface/Service pairing per responsibility, surface-agnostic layers over typed Request/Response, typed Event/Command enums normalized once at the edge, entity containment, Context carriage where values re-thread, typed module-owned errors, Response enums instead of display strings). Where depth and dialect pull apart, be opinionated about the trade and say why; weigh how much the design DELETES — replacement that consumes its predecessor beats addition beside it (S9).
+            Return the complete agreed design ready to implement from: final boundaries and types, the interface signatures with one usage example per caller class, what complexity gets hidden, file-by-file migration steps, what stays byte-stable, the expected net line delta with what any growth buys, and the validation plan (the repo's standard gates). Close with an explicit "MUST" and "MUST-NOT" list — the concrete, checkable requirements a reviewer enforcing plan fidelity applies verbatim; do not leave fidelity to be inferred from prose elsewhere in the design. Stay within the framing's constraints."""
+input = [
+    "slot:refactor-frame",
+    "port:target",
+    "resource:architecture-dialect",
+]
+output = ["slot:agreed-design"]
+
+[prompt.frame]
+text = """
+
+            From the survey {slot:survey} of {port:target}, select the highest-value candidate set that honestly fits one refactoring run; name the deferred candidates explicitly so they are not lost.
+            Verify the selection against the actual code with your tools, then write the problem framing: the constraints any new boundary must satisfy (callers, serialized shapes that must stay byte-stable, gates), the dependencies involved, and a short illustrative sketch that grounds the space without prescribing the answer.
+            Judge with {resource:architecture-dialect} and {resource:smell-catalog}; behavior-preserving is the default contract."""
+input = [
+    "slot:survey",
+    "port:target",
+    "resource:architecture-dialect",
+    "resource:smell-catalog",
+]
+output = ["slot:refactor-frame"]
+
+[prompt.implement]
+text = """
+
+                    Implement the agreed design {slot:agreed-design} for {port:target} VERBATIM: execute exactly as specified, with no improvisation and no ACTUAL departure from what is written, however minor.
+                    If the design is unsatisfiable as written — it contradicts the actual code, omits a step you need, or cannot be executed against reality — STOP and say so plainly in your work summary rather than adapting around it; do not implement a modified version.
+                    If you notice a place the design could be improved, do NOT take it: record it as a typed deviation report entry instead — what was planned, what you actually did (which must match the design verbatim), the rationale for the proposed improvement, and disposition "rejected — implemented verbatim". A deviation report entry never records something you actually did differently from the design; an actual departure means the design was unsatisfiable, and that means STOP, not a recorded deviation.
+                    Respect the dialect ({resource:architecture-dialect}); do not widen any interface to make a caller compile — fix the caller. Run the repo validation gates before reporting.
+                    Return exactly two outputs: work-summary (what changed, files, gate results, open concerns) and deviation-report (every rejected-but-considered improvement recorded above; an empty list when none arose)."""
+input = [
+    "slot:agreed-design",
+    "port:target",
+    "resource:architecture-dialect",
+]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
+
+[prompt.review-1]
+text = """
+Review the refactored state of {port:target} against the agreed design {slot:agreed-design}. Current work summary: {slot:work-summary}. Recorded deviations: {slot:deviation-report}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the design verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER.
+            A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
+            Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
+            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Strict authority: require verbatim execution of the plan. Record every proposed departure as a typed deviation report — the id, what was planned, what actually happened, the rationale, and its disposition — rather than silently accepting it, and ABORT when the plan itself is unsatisfiable as written rather than improvising around it. Verbatim execution governs fidelity only; a genuine correctness defect is still a BLOCKER under REVIEW_VERDICT_DOCTRINE even in a plan executed exactly as written.
+            A BLOCKER also includes an unrecorded deviation from the agreed design, or any recorded deviation that reflects an actual departure rather than a rejected proposal. Approve ONLY verbatim work where every recorded deviation is a rejected proposal — never a proposal that was taken.
+            Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
+            If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.
+                    Consult the phase contract {slot:agreed-design} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
+                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {resource:architecture-dialect} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
+                    A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
+                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed.
+                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
+input = [
+    "port:target",
+    "slot:agreed-design",
+    "slot:work-summary",
+    "slot:deviation-report",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-1"]
+
+[prompt.review-2]
+text = """
+Independently review the refactored state of {port:target} against the agreed design {slot:agreed-design}. Current work summary: {slot:work-summary}. Recorded deviations: {slot:deviation-report}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the design verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER.
+            A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
+            Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
+            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Strict authority: require verbatim execution of the plan. Record every proposed departure as a typed deviation report — the id, what was planned, what actually happened, the rationale, and its disposition — rather than silently accepting it, and ABORT when the plan itself is unsatisfiable as written rather than improvising around it. Verbatim execution governs fidelity only; a genuine correctness defect is still a BLOCKER under REVIEW_VERDICT_DOCTRINE even in a plan executed exactly as written.
+            A BLOCKER also includes an unrecorded deviation from the agreed design, or any recorded deviation that reflects an actual departure rather than a rejected proposal. Approve ONLY verbatim work where every recorded deviation is a rejected proposal — never a proposal that was taken.
+            Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
+            If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.
+                    Consult the phase contract {slot:agreed-design} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
+                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {resource:architecture-dialect} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
+                    A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
+                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed.
+                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
+input = [
+    "port:target",
+    "slot:agreed-design",
+    "slot:work-summary",
+    "slot:deviation-report",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-2"]
+
+[prompt.summarization]
+text = """
+
+            The refinement loop for the refactor of {port:target} has ended and the work is being committed. The final reviewer verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} — read their status fields FIRST. The loop exits early once both approve, so a status still set to revise means the rounds ran out with that reviewer unsatisfied: say so plainly rather than implying a clean approval.
+            Write the commit message from the agreed design {slot:agreed-design}, the survey {slot:survey}, and those verdicts: subject line "refactor({port:target}): <boundary in a few words>", then one paragraph summarizing the new boundary and behavior preservation, then a short "Deferred candidates:" list copied from the survey (omit the list if none were deferred).
+            If either verdict status is revise, end the message with an "Unresolved reviewer blockers:" section listing each open blocker in one line — the honest record that the budget ran out before every reviewer was satisfied. Never write that section when there are none.
+            Return exactly that message as your output; the runtime injects it into the git commit step.
+            Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps."""
+input = [
+    "port:target",
+    "slot:review-verdict-1",
+    "slot:review-verdict-2",
+    "slot:agreed-design",
+    "slot:survey",
+]
+output = ["slot:commit-message"]
+
+[prompt.survey]
+text = """
+
+            Survey {port:target} for refactoring opportunities.
+            Read the target and its callers/callees with your tools — explore organically; the friction you encounter while reading IS the signal. Ground every observation in the architecture dialect ({resource:architecture-dialect}) and the smell catalog ({resource:smell-catalog}); cite smell ids (S1-S10) or a named deep-module violation for each.
+            Sweep is mandatory and complete: (a) walk ALL ten smells S1-S10 in catalog order and for each report findings or explicitly "S<n>: none found"; (b) then assess the three dialect pillars — boundaries (missing Interface/Service contracts, mixed control/view/trace responsibilities, surface-coupled layers), data flow (untyped events/commands, string dispatch), entity containment (entity vocabulary leaked across modules).
+            Return a numbered candidate list — for each: the cluster of code involved (paths), why it is coupled, which smell ids or dialect pillar it violates, and how the boundary would change what tests can prove.
+            Do NOT propose interfaces or fixes yet. List every real candidate even if it cannot fit one run."""
+input = [
+    "port:target",
+    "resource:architecture-dialect",
+    "resource:smell-catalog",
+]
+output = ["slot:survey"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "summarization"
+title = "Write the commit message (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:summarization"
+input = [
+    "port:target",
+    "slot:review-verdict-1",
+    "slot:review-verdict-2",
+    "slot:agreed-design",
+    "slot:survey",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-stage"
+title = "Stage all changes except runtime state"
+output = ["slot:stage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+    "--",
+    ":(exclude).agents/runs",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-commit"
+title = "Commit the refactor"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[[sequence.refine-refactor.sequence]]
+id = "review-1"
+title = "Review refactor (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:review-1"
+input = [
+    "port:target",
+    "slot:agreed-design",
+    "slot:work-summary",
+    "slot:deviation-report",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-1"]
+
+[[sequence.refine-refactor.sequence]]
+id = "review-2"
+title = "Review refactor (smart-2)"
+agent = "agent:smart-2"
+prompt = "prompt:review-2"
+input = [
+    "port:target",
+    "slot:agreed-design",
+    "slot:work-summary",
+    "slot:deviation-report",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-2"]
+
+[[sequence.refine-refactor.sequence]]
+id = "apply-fixes"
+title = "Apply reviewer fixes verbatim (worker)"
+agent = "agent:worker"
+prompt = "prompt:apply-fixes"
+input = [
+    "port:target",
+    "slot:review-verdict-1",
+    "slot:review-verdict-2",
+    "slot:agreed-design",
+    "resource:architecture-dialect",
+]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
+
+[procedure]
+description = "Refactor one module or entity end to end with verbatim design execution: standards-grounded survey, problem framing, boundary design, verbatim implementation with a typed deviation record, bounded dual-reviewer refinement, commit — blocking rather than adapting when the design cannot be satisfied."
+input = ["port:target"]
+output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "survey"
+title = "Survey the target (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:survey"
+input = [
+    "port:target",
+    "resource:architecture-dialect",
+    "resource:smell-catalog",
+]
+output = ["slot:survey"]
+
+[[procedure.sequence]]
+id = "frame"
+title = "Frame the problem (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:frame"
+input = [
+    "slot:survey",
+    "port:target",
+    "resource:architecture-dialect",
+    "resource:smell-catalog",
+]
+output = ["slot:refactor-frame"]
+
+[[procedure.sequence]]
+id = "design"
+title = "Design the boundary (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:design"
+input = [
+    "slot:refactor-frame",
+    "port:target",
+    "resource:architecture-dialect",
+]
+output = ["slot:agreed-design"]
+
+[[procedure.sequence]]
+id = "implement"
+title = "Implement the design verbatim (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = [
+    "slot:agreed-design",
+    "port:target",
+    "resource:architecture-dialect",
+]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
+
+[[procedure.sequence]]
+id = "refinement-loop"
+title = "Doubly-reviewed verbatim refinement"
+kind = "loop"
+sequence = "sequence:refine-refactor"
+max-iterations = 6
+on-exhausted = "block"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-2"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "check-git-status"
+title = "Check working tree status"
+output = ["slot:git-status"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
+
+[[procedure.sequence]]
+id = "maybe-commit"
+title = "Maybe Commit"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-12-maybe-commit-then"
+
+[procedure.sequence.when.not]
+slot = "slot:git-status"
+equals = ""

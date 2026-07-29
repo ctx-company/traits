@@ -1,0 +1,11 @@
+{
+  "excludes": ["dist", "node_modules"],
+  "includes": ["src/**/*.ts"],
+  "plugins": ["https://plugins.dprint.dev/typescript-0.95.13.wasm"],
+  "typescript": {
+    "lineWidth": 120,
+    "quoteStyle": "alwaysDouble",
+    "semiColons": "always",
+    "useTabs": false
+  }
+}

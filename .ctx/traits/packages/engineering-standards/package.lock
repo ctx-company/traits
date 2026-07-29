@@ -1,0 +1,20 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "engineering-standards"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:9ecbef84b6a215253f47f3b126ae5ef894ca0115aa92fab37614eb2ed82fd8f5"
+canonical = "sha256:128992934ccd552f88adf4c997f51491efd1bbf17d1622d72b5fb4fec99e565e"
+model-visible = "sha256:acc094cff5e810831f084d2af69dbd3eaea2869b70cc1979907985fa8127b0b4"
+resource-manifest = "sha256:a9281be164eb8fdedcc1a6208285c48d25de94daa08dce86acf26bf704250c80"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/engineering-standards/SKILL.md"
+digest = "sha256:3c1f1622ba9d414c9955e84fc65c732d4d0f0903056f2d0b0d87abe489f85ea2"

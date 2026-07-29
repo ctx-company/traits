@@ -1,0 +1,5 @@
+[package]
+id = "trait-spec"
+version = "0.1.0"
+name = "Trait Specification"
+status = "ready"

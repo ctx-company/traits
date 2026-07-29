@@ -1,0 +1,8 @@
+schema-version = "0.1"
+
+[budget]
+max-frames = 200
+frame-seconds = 1800
+total-seconds = 21600
+max-retries = 2
+idle-seconds = 600

@@ -1,0 +1,114 @@
+id = "plan"
+schema-version = "0.3"
+version = "0.3.0"
+name = "Plan (Direct)"
+summary = "Format a described task into one well-formed house-format plan group with wording kept near-verbatim, then append it to .plans/EXECUTION_PLAN.md — no refinement, no invention, the fastest path to just implement."
+variant = "direct"
+
+[metadata]
+tag = [
+    "task",
+    "plan",
+    "bootstrap",
+    "planning",
+]
+
+[[intent.focus]]
+id = "specific"
+
+[[intent.focus]]
+id = "correctness"
+
+[[intent.avoid]]
+id = "speculative-claim"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "task"
+direction = "input"
+schema = "schema:text"
+description = "The task you describe, in your own words — rough is fine."
+
+[[port]]
+id = "written-file"
+direction = "output"
+schema = "schema:text"
+description = "Path of the file written (.plans/EXECUTION_PLAN.md)."
+value = "slot:result"
+
+[[slot]]
+id = "execution-plan"
+schema = "schema:text"
+description = "The phased plan for .plans/EXECUTION_PLAN.md — a group of small dependency-ordered phases."
+hint = "One '## Group ...' with phases as '- [ ] **P1** — title' bullets; each phase ~10-15 min of agent work, with a Markdown checklist and a Definition of Done."
+
+[[slot]]
+id = "result"
+schema = "schema:text"
+description = "Confirmation of the file written (path)."
+
+[[agent]]
+id = "smart-1"
+description = "Formats the task text into one well-formed plan group, near-verbatim."
+summary = "Format role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the execution plan to .plans/EXECUTION_PLAN.md."
+summary = "Write role."
+
+[prompt.format]
+text = """
+Format the task below into exactly one well-formed execution-plan group for .plans/EXECUTION_PLAN.md.
+                    Task as described: {port:task}
+                    Keep the task's own wording near-verbatim. Do NOT refine, invent, or add requirements the task does not state; do not read the codebase or ground it in anything beyond the task text itself.
+                    Format as a single Markdown group: a "## Group: <short task name>" heading with a one-paragraph preamble, then each phase as a checklist bullet "- [ ] **P1** — <title>" followed by an indented body with a short description, a "Checklist" as a Markdown checkbox list (each item "- [ ] step"), a "Definition of Done" (the observable condition proving the phase is complete), and "Deps". Size every phase to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a phase would be larger, split it further. Order phases so each depends only on earlier ones.
+                    Do not implement anything."""
+input = ["port:task"]
+output = ["slot:execution-plan"]
+
+[prompt.write]
+text = """
+
+                    Write the execution plan group below to .plans/EXECUTION_PLAN.md, at the repo root.
+                    Execution plan group: {slot:execution-plan}
+                    Create the .plans directory if missing. Keep the group faithful — do not add or drop material.
+                    Do NOT overwrite existing content: if the file already exists, APPEND the group as a new group at the end. If the file does not exist, create it with this content. Do not write .docs/PRODUCT.md.
+                    Return one line naming the path you wrote."""
+input = ["slot:execution-plan"]
+output = ["slot:result"]
+
+[procedure]
+description = "Format the described task into one well-formed house-format plan group with wording kept near-verbatim, then append it to .plans/EXECUTION_PLAN.md."
+input = ["port:task"]
+output = ["port:written-file"]
+
+[[procedure.sequence]]
+id = "format"
+title = "Format into a plan group (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:format"
+input = ["port:task"]
+output = ["slot:execution-plan"]
+
+[[procedure.sequence]]
+id = "write"
+title = "Write EXECUTION_PLAN.md (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:write"
+input = ["slot:execution-plan"]
+output = ["slot:result"]

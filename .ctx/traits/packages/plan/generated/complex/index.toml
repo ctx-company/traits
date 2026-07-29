@@ -1,0 +1,209 @@
+id = "plan"
+schema-version = "0.3"
+version = "0.3.0"
+name = "Plan (Complex)"
+summary = "Turn a described task into a codebase-grounded product contract and a phased execution plan, then independently critique and revise both once before writing .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md."
+variant = "complex"
+
+[metadata]
+tag = [
+    "task",
+    "plan",
+    "bootstrap",
+    "planning",
+    "review",
+]
+
+[[intent.focus]]
+id = "specific"
+
+[[intent.focus]]
+id = "correctness"
+
+[[intent.avoid]]
+id = "speculative-claim"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "task"
+direction = "input"
+schema = "schema:text"
+description = "The task you describe, in your own words — rough is fine."
+
+[[port]]
+id = "written-files"
+direction = "output"
+schema = "schema:text"
+description = "Paths of the files written (.docs/PRODUCT.md and .plans/EXECUTION_PLAN.md)."
+value = "slot:result"
+
+[[slot]]
+id = "product-context"
+schema = "schema:text"
+description = "The product contract for .docs/PRODUCT.md — project overview, conventions, validation gates, invariants, and the house rules this work must respect."
+hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact commands), architectural invariants, dependency/unsafe-code/stability rules, and constraints an implementer and reviewer must honor."
+
+[[slot]]
+id = "execution-plan"
+schema = "schema:text"
+description = "The phased plan for .plans/EXECUTION_PLAN.md — a group of small dependency-ordered phases."
+hint = "One '## Group ...' with phases as '- [ ] **P1** — title' bullets; each phase ~10-15 min of agent work, with a Markdown checklist and a Definition of Done."
+
+[[slot]]
+id = "result"
+schema = "schema:text"
+description = "Confirmation of the files written (paths)."
+
+[[slot]]
+id = "critique"
+schema = "schema:text"
+description = "Independent critique of the product contract and execution plan: sizing, DoD verifiability, dependency order, and omitted rules/gates."
+
+[[agent]]
+id = "smart-1"
+description = "Strong model: refines the task, grounds it in the codebase, derives the product contract, splits it into phases, and critiques both artifacts."
+summary = "Refinement + grounding + critique role."
+
+[[agent]]
+id = "scribe"
+description = "Applies the critique to the contract and plan, then writes both to .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md."
+summary = "Revise-and-write role."
+
+[prompt.critique]
+text = """
+
+                    Independently critique the product contract {slot:product-context} and the execution plan {slot:execution-plan}, as if reviewing someone else's work.
+                    Check every phase for: roughly 10-15 minute sizing (flag anything larger or vaguer); an observable, verifiable Definition of Done; dependency ordering (each phase depends only on earlier ones); and any house rule or validation gate from the contract that a phase omits or contradicts.
+                    Return the concrete list of defects to fix, each naming the phase or contract section and the specific change needed. If nothing needs fixing, say so explicitly."""
+input = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = ["slot:critique"]
+
+[prompt.refine]
+text = """
+
+                    Refine the task below and ground it in THIS codebase, then derive the product contract for it.
+                    Task as described: {port:task}
+                    Read the relevant parts of the repository with your tools: identify the concrete files, modules, and patterns the task touches; the build/test/lint commands (the repo's validation gates, with exact invocations); architectural invariants; and any dependency, unsafe-code, or stability rules the work must respect.
+                    Produce the PRODUCT CONTRACT — the content for .docs/PRODUCT.md: a short project/context overview, the house rules and invariants an implementer and reviewer must honor, the validation gates (exact commands), and the constraints specific to this task. This is the rules-and-context document later steps hold the work to; it is NOT the step-by-step plan. Do not implement anything."""
+input = ["port:task"]
+output = ["slot:product-context"]
+
+[prompt.revise]
+text = """
+
+                    Apply the critique {slot:critique} to the product contract {slot:product-context} and the execution plan {slot:execution-plan}, in one bounded pass — do not expand scope beyond what the critique names.
+                    Return the full revised product contract and the full revised execution plan, each replacing the artifact it corresponds to."""
+input = [
+    "slot:critique",
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+
+[prompt.split]
+text = """
+Break the refined task into small, ordered implementation phases for .plans/EXECUTION_PLAN.md.
+                    Product contract: {slot:product-context}
+                    Format as a single Markdown group: a "## Group: <short task name>" heading with a one-paragraph preamble, then each phase as a checklist bullet "- [ ] **P1** — <title>" followed by an indented body with a short description, a "Checklist" as a Markdown checkbox list (each item "- [ ] step"), a "Definition of Done" (the observable condition proving the phase is complete), and "Deps". Size every phase to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a phase would be larger, split it further. Order phases so each depends only on earlier ones.
+                    Ground each phase in the codebase specifics from the contract. Do not implement anything."""
+input = [
+    "port:task",
+    "slot:product-context",
+]
+output = ["slot:execution-plan"]
+
+[prompt.write]
+text = """
+
+                    Write the two files implement-phase needs, at the repo root.
+                    Product contract (for .docs/PRODUCT.md): {slot:product-context}
+                    Execution plan group (for .plans/EXECUTION_PLAN.md): {slot:execution-plan}
+                    Create the .docs and .plans directories if missing. Write the product contract to .docs/PRODUCT.md and the plan group to .plans/EXECUTION_PLAN.md, keeping each faithful — do not add or drop material.
+                    Do NOT overwrite existing content: if a file already exists, APPEND (add the plan as a new group at the end of .plans/EXECUTION_PLAN.md; add the contract as a clearly-headed new section in .docs/PRODUCT.md). If a file does not exist, create it with that content.
+                    Return one line naming both paths you wrote."""
+input = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = ["slot:result"]
+
+[procedure]
+description = "Refine the described task against the codebase into a product contract, split it into small phases, independently critique both artifacts, apply one bounded revise pass, and write both .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md so implement-phase can run."
+input = ["port:task"]
+output = ["port:written-files"]
+
+[[procedure.sequence]]
+id = "refine"
+title = "Refine + derive the product contract (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:refine"
+input = ["port:task"]
+output = ["slot:product-context"]
+
+[[procedure.sequence]]
+id = "split"
+title = "Split into phases (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:split"
+input = [
+    "port:task",
+    "slot:product-context",
+]
+output = ["slot:execution-plan"]
+
+[[procedure.sequence]]
+id = "critique"
+title = "Critique the contract and plan (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:critique"
+input = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = ["slot:critique"]
+
+[[procedure.sequence]]
+id = "revise"
+title = "Apply the critique (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:revise"
+input = [
+    "slot:critique",
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+
+[[procedure.sequence]]
+id = "write"
+title = "Write PRODUCT.md + EXECUTION_PLAN.md (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:write"
+input = [
+    "slot:product-context",
+    "slot:execution-plan",
+]
+output = ["slot:result"]

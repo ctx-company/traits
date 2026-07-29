@@ -1,0 +1,6 @@
+[package]
+id = "test-writer"
+version = "0.1.0"
+name = "Test Writer"
+description = "Proposes a structured test plan for a piece of code against stated requirements."
+status = "draft"

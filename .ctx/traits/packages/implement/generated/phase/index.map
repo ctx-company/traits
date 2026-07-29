@@ -1,0 +1,392 @@
+{
+  "agent:clerk": {
+    "file": "packages/agents/src/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "agent:scribe": {
+    "file": "packages/agents/src/index.ts",
+    "start": 37,
+    "end": 37
+  },
+  "agent:smart-1": {
+    "file": "packages/agents/src/index.ts",
+    "start": 51,
+    "end": 51
+  },
+  "agent:smart-2": {
+    "file": "packages/agents/src/index.ts",
+    "start": 51,
+    "end": 51
+  },
+  "agent:worker": {
+    "file": "packages/agents/src/index.ts",
+    "start": 27,
+    "end": 27
+  },
+  "port:commit-report": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 196,
+    "end": 196
+  },
+  "port:leftovers": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 213,
+    "end": 213
+  },
+  "port:park-report": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 142,
+    "end": 142
+  },
+  "port:phase": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 53,
+    "end": 53
+  },
+  "prompt:building-produce": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 387,
+    "end": 387
+  },
+  "prompt:building-review-1": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 435,
+    "end": 435
+  },
+  "prompt:building-review-2": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 435,
+    "end": 435
+  },
+  "prompt:phase-extraction": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 266,
+    "end": 266
+  },
+  "prompt:planning-produce": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 290,
+    "end": 290
+  },
+  "prompt:planning-review": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 320,
+    "end": 320
+  },
+  "prompt:product-extraction": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 279,
+    "end": 279
+  },
+  "prompt:shipping-message": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 527,
+    "end": 527
+  },
+  "resource:execution-plan": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 69,
+    "end": 69
+  },
+  "resource:review-rubric": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 42,
+    "end": 42
+  },
+  "resource:rule-authority": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 80,
+    "end": 80
+  },
+  "schema:blocker": {
+    "file": "packages/agents/src/index.ts",
+    "start": 188,
+    "end": 188
+  },
+  "schema:correctness-findings": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 65,
+    "end": 65
+  },
+  "schema:decision": {
+    "file": "packages/agents/src/process.ts",
+    "start": 31,
+    "end": 31
+  },
+  "schema:gates-ran-findings": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 65,
+    "end": 65
+  },
+  "schema:house-rules-findings": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 65,
+    "end": 65
+  },
+  "schema:leftover": {
+    "file": "packages/agents/src/index.ts",
+    "start": 342,
+    "end": 342
+  },
+  "schema:owner-item": {
+    "file": "packages/agents/src/index.ts",
+    "start": 295,
+    "end": 295
+  },
+  "schema:product-brief": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 110,
+    "end": 110
+  },
+  "schema:product-rule": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 95,
+    "end": 95
+  },
+  "schema:repo-gates-result": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 185,
+    "end": 185
+  },
+  "schema:review-finding": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 49,
+    "end": 49
+  },
+  "schema:review-verdict-default": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 251,
+    "end": 251
+  },
+  "schema:reviewer-verdict": {
+    "file": "packages/agents/src/process.ts",
+    "start": 28,
+    "end": 28
+  },
+  "schema:scope-findings": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 65,
+    "end": 65
+  },
+  "sequence:building-body": {
+    "file": "packages/agents/src/process.ts",
+    "start": 205,
+    "end": 205
+  },
+  "sequence:building-body/building-produce": {
+    "file": "packages/agents/src/process.ts",
+    "start": 190,
+    "end": 190
+  },
+  "sequence:building-body/building-review-1": {
+    "file": "packages/agents/src/process.ts",
+    "start": 197,
+    "end": 197
+  },
+  "sequence:building-body/building-review-2": {
+    "file": "packages/agents/src/process.ts",
+    "start": 197,
+    "end": 197
+  },
+  "sequence:building-body/building-seal": {
+    "file": "packages/agents/src/process.ts",
+    "start": 217,
+    "end": 217
+  },
+  "sequence:building-body/building-unseal": {
+    "file": "packages/agents/src/process.ts",
+    "start": 210,
+    "end": 210
+  },
+  "sequence:building-body/capture-diff": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 338,
+    "end": 338
+  },
+  "sequence:building-body/park-report-clear": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 504,
+    "end": 504
+  },
+  "sequence:building-body/park-report-record-1": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 509,
+    "end": 509
+  },
+  "sequence:building-body/park-report-record-2": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 509,
+    "end": 509
+  },
+  "sequence:building-body/repo-gates": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 329,
+    "end": 329
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 188,
+    "end": 188
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
+    "file": "packages/agents/src/process.ts",
+    "start": 333,
+    "end": 333
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
+    "file": "packages/agents/src/process.ts",
+    "start": 316,
+    "end": 316
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
+    "file": "packages/agents/src/process.ts",
+    "start": 327,
+    "end": 327
+  },
+  "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 512,
+    "end": 512
+  },
+  "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then/park-report-append-2": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 512,
+    "end": 512
+  },
+  "sequence:planning-body": {
+    "file": "packages/agents/src/process.ts",
+    "start": 205,
+    "end": 205
+  },
+  "sequence:planning-body/planning-produce": {
+    "file": "packages/agents/src/process.ts",
+    "start": 190,
+    "end": 190
+  },
+  "sequence:planning-body/planning-review": {
+    "file": "packages/agents/src/process.ts",
+    "start": 197,
+    "end": 197
+  },
+  "sequence:procedure/building": {
+    "file": "packages/agents/src/process.ts",
+    "start": 240,
+    "end": 240
+  },
+  "sequence:procedure/phase-extraction": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 263,
+    "end": 263
+  },
+  "sequence:procedure/planning": {
+    "file": "packages/agents/src/process.ts",
+    "start": 240,
+    "end": 240
+  },
+  "sequence:procedure/product-extraction": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 276,
+    "end": 276
+  },
+  "sequence:procedure/shipping-maybe-commit": {
+    "file": "packages/agents/src/process.ts",
+    "start": 341,
+    "end": 341
+  },
+  "sequence:procedure/shipping-status": {
+    "file": "packages/agents/src/process.ts",
+    "start": 308,
+    "end": 308
+  },
+  "signal:recurring-blocker-unresolved": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 106,
+    "end": 106
+  },
+  "slot:building-sealed": {
+    "file": "packages/agents/src/process.ts",
+    "start": 204,
+    "end": 204
+  },
+  "slot:commit-output": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 165,
+    "end": 165
+  },
+  "slot:draft": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 128,
+    "end": 128
+  },
+  "slot:leftovers": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 139,
+    "end": 139
+  },
+  "slot:park-report": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 136,
+    "end": 136
+  },
+  "slot:phase-brief": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 89,
+    "end": 89
+  },
+  "slot:planning-verdict": {
+    "file": "packages/agents/src/process.ts",
+    "start": 184,
+    "end": 184
+  },
+  "slot:product-brief": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 108,
+    "end": 108
+  },
+  "slot:repo-gates-passed": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 181,
+    "end": 181
+  },
+  "slot:review-diff": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 169,
+    "end": 169
+  },
+  "slot:review-verdict-1": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 255,
+    "end": 255
+  },
+  "slot:review-verdict-2": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 255,
+    "end": 255
+  },
+  "slot:shipping-message": {
+    "file": "packages/agents/src/process.ts",
+    "start": 297,
+    "end": 297
+  },
+  "slot:shipping-stage-output": {
+    "file": "packages/agents/src/process.ts",
+    "start": 304,
+    "end": 304
+  },
+  "slot:shipping-status": {
+    "file": "packages/agents/src/process.ts",
+    "start": 290,
+    "end": 290
+  },
+  "slot:work-summary": {
+    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "start": 133,
+    "end": 133
+  },
+  "trait:implement": {
+    "file": ".ctx/traits/implement/source/variants/phase.ts",
+    "start": 152,
+    "end": 152
+  }
+}

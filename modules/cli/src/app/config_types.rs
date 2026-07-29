@@ -1,0 +1,447 @@
+//! P457: render `packages/config/src/generated.ts` — the TypeScript type
+//! mirror of `ctx_traits_io::harness_config::RuntimeConfig`, derived
+//! in-process from `schemars::schema_for!` rather than a second hand-copied
+//! vocabulary. Closed in the Rust model (field names, enum values, shape,
+//! optionality — `deny_unknown_fields` renders as `additionalProperties:
+//! false`) is closed in TS; anything the loader leaves as a free-form
+//! `Option<String>` (`harness`, `model`, `reasoning-effort`) stays `string`
+//! here too, since narrowing it would invent a constraint the loader
+//! doesn't enforce — exactly the second drift source the phase forbids.
+
+use serde_json::Value;
+
+/// The root Rust type's schema title is renamed to `CtxConfig` in the
+/// rendered output — the name `defineConfig`/`assignment()` (in
+/// `packages/config/src/index.ts`) actually anchor to — while every other
+/// `$defs` entry keeps its Rust struct/enum name verbatim (already
+/// PascalCase).
+const ROOT_TYPE_NAME: &str = "CtxConfig";
+
+/// Load `RuntimeConfig`'s `schemars`-derived JSON Schema once, as the root
+/// object plus its `$defs` map. Shared by [`render`] (the TS mirror) and
+/// [`camel_to_kebab`] (the JS-object -> Rust-model key rewrite every
+/// `config build` runs before validation).
+fn load_schema() -> crate::Result<(
+    serde_json::Map<String, Value>,
+    serde_json::Map<String, Value>,
+)> {
+    let schema: schemars::Schema =
+        schemars::schema_for!(ctx_traits_io::harness_config::RuntimeConfig);
+    let schema: Value = serde_json::to_value(&schema)
+        .map_err(|source| crate::Error::json("serialize RuntimeConfig JSON schema", source))?;
+    let object = schema
+        .as_object()
+        .cloned()
+        .ok_or_else(|| crate::Error::Command {
+            message: "RuntimeConfig schema root is not a JSON object".to_string(),
+        })?;
+    let defs = object
+        .get("$defs")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    Ok((object, defs))
+}
+
+/// Rewrite a `config build`-emitted JS object's keys from the generated
+/// TypeScript surface's camelCase field names back to the kebab-case names
+/// `RuntimeConfig` (and the TOML it loads) actually use — walking the same
+/// schema [`render`] mirrors, so the two can never drift apart. Only keys
+/// that are themselves schema *field names* are renamed: a `Record<string,
+/// T>` map's keys (harness IDs, role names, `[worktree.env]` variable names,
+/// ...) are author-chosen identifiers and pass through byte-for-byte. A key
+/// with no matching field in its object's schema (a typo) is left exactly
+/// as authored, so `RuntimeConfig`'s `deny_unknown_fields` decode error
+/// names the real, un-renamed mistake rather than a silently kebab-cased
+/// guess.
+pub(crate) fn camel_to_kebab(value: &Value) -> crate::Result<Value> {
+    let (root, defs) = load_schema()?;
+    convert(value, &root, &defs)
+}
+
+fn convert(
+    value: &Value,
+    schema: &serde_json::Map<String, Value>,
+    defs: &serde_json::Map<String, Value>,
+) -> crate::Result<Value> {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let name = ref_name(reference);
+        let resolved = defs
+            .get(&name)
+            .and_then(Value::as_object)
+            .cloned()
+            .ok_or_else(|| crate::Error::Command {
+                message: format!("RuntimeConfig schema $ref {name} not found in $defs"),
+            })?;
+        return convert(value, &resolved, defs);
+    }
+    if let Some(variants) = schema.get("anyOf").and_then(Value::as_array) {
+        return convert_union(value, variants, defs);
+    }
+    if let Some(variants) = schema.get("oneOf").and_then(Value::as_array) {
+        return convert_union(value, variants, defs);
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+                let mut out = serde_json::Map::new();
+                for (key, entry) in map {
+                    let kebab = camel_to_kebab_str(key);
+                    let converted = match properties.get(&kebab).and_then(Value::as_object) {
+                        Some(property_schema) => convert(entry, property_schema, defs)?,
+                        None => entry.clone(),
+                    };
+                    let out_key = if properties.contains_key(&kebab) {
+                        kebab
+                    } else {
+                        key.clone()
+                    };
+                    out.insert(out_key, converted);
+                }
+                Ok(Value::Object(out))
+            } else if let Some(additional) = schema.get("additionalProperties") {
+                match additional.as_object() {
+                    Some(inner) => {
+                        let mut out = serde_json::Map::new();
+                        for (key, entry) in map {
+                            out.insert(key.clone(), convert(entry, inner, defs)?);
+                        }
+                        Ok(Value::Object(out))
+                    }
+                    None => Ok(value.clone()),
+                }
+            } else {
+                Ok(value.clone())
+            }
+        }
+        Value::Array(items) => match schema.get("items").and_then(Value::as_object) {
+            Some(item_schema) => Ok(Value::Array(
+                items
+                    .iter()
+                    .map(|item| convert(item, item_schema, defs))
+                    .collect::<crate::Result<_>>()?,
+            )),
+            None => Ok(value.clone()),
+        },
+        _ => Ok(value.clone()),
+    }
+}
+
+/// Pick the `anyOf`/`oneOf` variant matching `value`'s JSON shape (a
+/// nullable-field wrapper, or `RoleAssignmentValue`'s untagged
+/// `ProfileAssignment | ProfileAssignment[]`) and recurse into it. Every
+/// other value kind (string, number, bool, null) needs no key rewriting
+/// regardless of which variant is "correct", so any resolvable variant is
+/// sufficient.
+fn convert_union(
+    value: &Value,
+    variants: &[Value],
+    defs: &serde_json::Map<String, Value>,
+) -> crate::Result<Value> {
+    if value.is_null() {
+        return Ok(Value::Null);
+    }
+    for variant in variants {
+        let Some(variant_schema) = variant.as_object() else {
+            continue;
+        };
+        if variant_schema.get("type").and_then(Value::as_str) == Some("null") {
+            continue;
+        }
+        let resolved = resolve_variant(variant_schema, defs)?;
+        let matches = match value {
+            Value::Array(_) => resolved.get("type").and_then(Value::as_str) == Some("array"),
+            Value::Object(_) => {
+                resolved.contains_key("properties") || resolved.contains_key("additionalProperties")
+            }
+            _ => true,
+        };
+        if matches {
+            return convert(value, variant_schema, defs);
+        }
+    }
+    Ok(value.clone())
+}
+
+fn resolve_variant(
+    schema: &serde_json::Map<String, Value>,
+    defs: &serde_json::Map<String, Value>,
+) -> crate::Result<serde_json::Map<String, Value>> {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let name = ref_name(reference);
+        return defs
+            .get(&name)
+            .and_then(Value::as_object)
+            .cloned()
+            .ok_or_else(|| crate::Error::Command {
+                message: format!("RuntimeConfig schema $ref {name} not found in $defs"),
+            });
+    }
+    Ok(schema.clone())
+}
+
+/// Lower-camel-case to kebab-case (`sessionMode` -> `session-mode`), the
+/// inverse of [`to_camel_case`].
+fn camel_to_kebab_str(name: &str) -> String {
+    let mut out = String::new();
+    for character in name.chars() {
+        if character.is_uppercase() {
+            out.push('-');
+            out.extend(character.to_lowercase());
+        } else {
+            out.push(character);
+        }
+    }
+    out
+}
+
+pub(crate) fn render() -> crate::Result<String> {
+    let (object, defs) = load_schema()?;
+    let object = &object;
+
+    let mut out = String::new();
+    out.push_str("// GENERATED FILE — do not edit by hand.\n");
+    out.push_str("// Regenerate with `ctx traits sdk-generate`.\n\n");
+
+    out.push_str(&render_named(ROOT_TYPE_NAME, object)?);
+    out.push('\n');
+
+    let mut names: Vec<&String> = defs.keys().collect();
+    names.sort();
+    for name in names {
+        let def =
+            defs.get(name)
+                .and_then(Value::as_object)
+                .ok_or_else(|| crate::Error::Command {
+                    message: format!("RuntimeConfig schema $defs.{name} is not a JSON object"),
+                })?;
+        out.push_str(&render_named(name, def)?);
+        out.push('\n');
+    }
+
+    Ok(out)
+}
+
+fn render_named(name: &str, schema: &serde_json::Map<String, Value>) -> crate::Result<String> {
+    if schema.contains_key("properties") || is_object_type(schema) {
+        return render_interface(name, schema);
+    }
+    let ty = ts_type(&Value::Object(schema.clone()))?;
+    Ok(format!("export type {name} = {ty};\n"))
+}
+
+fn is_object_type(schema: &serde_json::Map<String, Value>) -> bool {
+    schema.contains_key("properties")
+        || (matches!(schema.get("type").and_then(Value::as_str), Some("object"))
+            && schema.get("additionalProperties").and_then(Value::as_bool) != Some(false))
+}
+
+fn render_interface(name: &str, schema: &serde_json::Map<String, Value>) -> crate::Result<String> {
+    // A record-shaped def (`additionalProperties: { ... }`, no fixed
+    // `properties`) renders as a type alias to `Record<string, T>` instead
+    // of an interface.
+    if !schema.contains_key("properties") {
+        if let Some(additional) = schema.get("additionalProperties") {
+            if additional.is_object() {
+                let value_ty = ts_type(additional)?;
+                return Ok(format!(
+                    "export type {name} = Record<string, {value_ty}>;\n"
+                ));
+            }
+        }
+    }
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required: Vec<String> = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut names: Vec<&String> = properties.keys().collect();
+    names.sort();
+    let mut body = String::new();
+    for property_name in names {
+        let property_schema = &properties[property_name];
+        let ts_ty = ts_type(property_schema)?;
+        let optional = !required.contains(property_name);
+        let field = to_camel_case(property_name);
+        body.push_str(&format!(
+            "  {field}{}: {ts_ty};\n",
+            if optional { "?" } else { "" }
+        ));
+    }
+    Ok(format!("export interface {name} {{\n{body}}}\n"))
+}
+
+/// Render a JSON Schema fragment as a TypeScript type expression. Handles
+/// exactly the shapes `schemars::schema_for!` produces for this crate's
+/// config model: `$ref`, `anyOf`/`oneOf` (nullable wrappers, untagged
+/// unions, and const-per-variant enums), string enums, primitives, arrays,
+/// and `additionalProperties` maps. Anything else is a controlled
+/// generation error naming the unhandled shape, rather than a silently
+/// wrong `any`.
+fn ts_type(schema: &Value) -> crate::Result<String> {
+    let Some(object) = schema.as_object() else {
+        return Ok("unknown".to_string());
+    };
+    if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+        return Ok(ref_name(reference));
+    }
+    if let Some(variants) = object.get("anyOf").and_then(Value::as_array) {
+        return render_union(variants);
+    }
+    if let Some(variants) = object.get("oneOf").and_then(Value::as_array) {
+        return render_union(variants);
+    }
+    if let Some(values) = object.get("enum").and_then(Value::as_array) {
+        return Ok(string_literal_union(values));
+    }
+    if let Some(additional) = object.get("additionalProperties") {
+        if additional.is_object() {
+            let value_ty = ts_type(additional)?;
+            return Ok(format!("Record<string, {value_ty}>"));
+        }
+    }
+    if object.contains_key("properties") {
+        return render_inline_object(object);
+    }
+    let kind = match object.get("type") {
+        Some(Value::Array(types)) => {
+            let mut kinds: Vec<&str> = types
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|kind| *kind != "null")
+                .collect();
+            kinds.dedup();
+            match kinds.as_slice() {
+                [kind] => Some((*kind).to_string()),
+                _ => None,
+            }
+        }
+        Some(Value::String(kind)) => Some(kind.clone()),
+        _ => None,
+    };
+    match kind.as_deref() {
+        Some("array") => {
+            let items = object.get("items").cloned().unwrap_or(Value::Bool(true));
+            let item_ty = ts_type(&items)?;
+            Ok(format!("{item_ty}[]"))
+        }
+        Some(kind) => Ok(primitive_ts_type(kind)),
+        None => Ok("unknown".to_string()),
+    }
+}
+
+fn render_inline_object(object: &serde_json::Map<String, Value>) -> crate::Result<String> {
+    let properties = object
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required: Vec<String> = object
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut names: Vec<&String> = properties.keys().collect();
+    names.sort();
+    let mut parts = Vec::new();
+    for name in names {
+        let ty = ts_type(&properties[name])?;
+        let optional = !required.contains(name);
+        parts.push(format!(
+            "{}{}: {ty}",
+            to_camel_case(name),
+            if optional { "?" } else { "" }
+        ));
+    }
+    Ok(format!("{{ {} }}", parts.join("; ")))
+}
+
+fn render_union(variants: &[Value]) -> crate::Result<String> {
+    let mut parts = Vec::new();
+    for variant in variants {
+        if variant.get("type").and_then(Value::as_str) == Some("null") {
+            continue;
+        }
+        // A const-per-variant enum (schemars' rendering of a documented
+        // fieldless enum, e.g. `AgentModelTier`): collect the literal
+        // instead of recursing, so the union stays flat.
+        if let Some(constant) = variant.get("const").and_then(Value::as_str) {
+            parts.push(format!("\"{constant}\""));
+            continue;
+        }
+        parts.push(ts_type(variant)?);
+    }
+    match parts.as_slice() {
+        [] => Ok("null".to_string()),
+        _ => {
+            parts.dedup();
+            Ok(parts.join(" | "))
+        }
+    }
+}
+
+fn string_literal_union(values: &[Value]) -> String {
+    values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn primitive_ts_type(kind: &str) -> String {
+    match kind {
+        "string" => "string".to_string(),
+        "boolean" => "boolean".to_string(),
+        "integer" | "number" => "number".to_string(),
+        "null" => "null".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn ref_name(reference: &str) -> String {
+    reference
+        .rsplit('/')
+        .next()
+        .unwrap_or(reference)
+        .to_string()
+}
+
+/// Deterministic kebab-case JSON property name to lower-camel-case
+/// TypeScript field name (`session-mode` -> `sessionMode`).
+fn to_camel_case(name: &str) -> String {
+    let mut result = String::new();
+    for part in name.split('-') {
+        if part.is_empty() {
+            continue;
+        }
+        if result.is_empty() {
+            result.push_str(part);
+            continue;
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            result.extend(first.to_uppercase());
+            result.push_str(chars.as_str());
+        }
+    }
+    result
+}

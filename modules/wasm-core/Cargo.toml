@@ -1,0 +1,15 @@
+[package]
+name = "ctx-traits-wasm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Pure WASM JSON ABI over ctx.traits core: validate, audit, resolve, compose, render, pack, and explain calls with no host side effects."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ctx-traits-core.workspace = true

@@ -1,0 +1,6952 @@
+//! P423 session-manager dashboard: bare interactive `ctx traits` on a TTY.
+//!
+//! Four polling screens — SESSIONS, TRAITS, MERGES, TRUST — sharing one
+//! [`super::tui_ratatui::RatatuiPane`] terminal owner. Every action reuses an
+//! existing entity operation (drive registration/probing, trust update, plain
+//! merge, trait resolution) instead of shelling out or re-parsing CLI output;
+//! see the referenced modules for the canonical logic. No daemon is
+//! introduced: `n` detaches a plain `ctx traits run` child that registers
+//! itself under the same driver lock every other drive uses, so externally
+//! started drives are indistinguishable from dashboard-spawned ones.
+//!
+//! P469 turns SESSIONS into a master-detail surface with six one-keypress
+//! verbs (preview, enter, back, resume, kill, delete), all routed through
+//! [`tui_kit::ModalHost`] so no keypress can trigger a side effect without a
+//! resolved modal.
+//!
+//! P471 turns TRAITS into the same master-detail shape: a live preview pane
+//! (summary, procedure shape, digest/trust facts, a bounded source excerpt),
+//! APPROVE/DENY collected through the kit's text-input modal (the `$EDITOR`
+//! temp-file reason path is gone — for TRAITS *and* TRUST, since both
+//! screens' reason-collection now routes through [`open_trait_trust_modal`]
+//! / [`open_trust_digest_modal`] and [`apply_trait_action`]), and an
+//! identity-addressed EDIT SOURCE round-trip that returns to the same row
+//! and refreshes the preview in place, degrading inline on a broken rebuild
+//! rather than crashing. `SessionAction` generalized to `Action` (`Exit` /
+//! `Session(..)` / `Trait(..)`) so both screens share one `ModalHost`.
+//! MERGES is untouched by this phase.
+
+use std::collections::HashSet;
+use std::io::IsTerminal;
+use std::time::Duration;
+
+use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::layout::{Constraint, Direction, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line as RLine, Span};
+use ratatui::widgets::Paragraph;
+
+use super::frame_prompt::resolved_human_question_body;
+use super::lifecycle_reporting::{
+    DashboardTraitRow, dashboard_trait_drift, dashboard_trait_editable_source,
+    dashboard_trait_inventory,
+};
+use super::merge::{MergeInputs, merge};
+use super::merge_story;
+use super::report_check::sequence_kind_label;
+use super::run_view;
+use super::trust_story;
+use super::tui;
+use super::tui_kit::{self, MarkSet, Modal, ModalHost, ModalOutcome, ScrollDelta, ScrollList};
+use super::tui_panes::{self, FocusRing, PaneId, PaneLayoutResult, PaneScrolls, PaneTree};
+use super::tui_ratatui::{self, RatatuiPane, render_line};
+
+mod worker;
+
+const TICK: Duration = Duration::from_millis(250);
+/// Bound on how long a list screen (SESSIONS/TRAITS/MERGES/TRUST) can go
+/// without an automatic reload while idle, so externally started, dashboard-
+/// spawned, or externally completed runs surface without a keypress. Also
+/// the cadence [`refresh_attached_view`] rebuilds a stale SESSIONS
+/// preview/attach pane on — never the 250ms draw loop (see its own doc).
+const RELOAD_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Cadence of the periodic full liveness sweep, in reload ticks
+/// (`RELOAD_INTERVAL` apart). Every 10th tick at the default 2s interval is
+/// 20s — bounded cost (still far fewer probes than an every-row,
+/// every-tick baseline) against an honest worst case: a row-less held lock
+/// (adoption) becomes visible within one sweep interval, never instantly and
+/// never never.
+const FULL_SWEEP_EVERY_TICKS: u64 = 10;
+
+/// `State::reload()` durations at or above this are surfaced in the
+/// SESSIONS pane border title; below it, nothing is shown. Zero during
+/// development to read the real number; kept as a named threshold (not
+/// inlined) so tightening it later is a one-line change.
+const RELOAD_WARN_THRESHOLD: Duration = Duration::from_millis(50);
+
+// Narrow-terminal degradation thresholds (P506 §3.2): below `left_min +
+// right_min`, a screen's pane tree collapses to the list alone — `PaneTree`
+// itself deliberately has no floor/cap policy (`tui_panes.rs`'s own doc), so
+// this is decided here, pre-tree, rather than re-imported.
+const SESSIONS_LEFT_MIN: u16 = 60;
+const SESSIONS_RIGHT_MIN: u16 = 30;
+
+const TRAITS_LEFT_MIN: u16 = 50;
+const TRAITS_RIGHT_MIN: u16 = 40;
+
+const MERGES_LEFT_MIN: u16 = 50;
+const MERGES_RIGHT_MIN: u16 = 40;
+
+const TRUST_LEFT_MIN: u16 = 50;
+const TRUST_RIGHT_MIN: u16 = 40;
+
+const PANE_SESSIONS_LIST: PaneId = "sessions-list";
+const PANE_SESSIONS_PROGRESS: PaneId = "sessions-progress";
+const PANE_SESSIONS_NARRATION: PaneId = "sessions-narration";
+const PANE_TRAITS_LIST: PaneId = "traits-list";
+const PANE_TRAITS_PREVIEW: PaneId = "traits-preview";
+const PANE_MERGES_LIST: PaneId = "merges-list";
+const PANE_MERGES_PREVIEW: PaneId = "merges-preview";
+const PANE_TRUST_LIST: PaneId = "trust-list";
+const PANE_TRUST_PREVIEW: PaneId = "trust-preview";
+
+/// Truly bare interactive `ctx traits`: stdin and the rendering terminal
+/// (stderr, matching `--progress tui`'s existing check) are both TTYs and
+/// `TERM` is not `dumb`. Anything else — CI, pipes, `TERM=dumb` — keeps the
+/// byte-identical line-mode output the caller already prints.
+pub(crate) fn interactive_available() -> bool {
+    if std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb")) {
+        return false;
+    }
+    // Some CI runners allocate a pseudo-terminal for job output, so
+    // `is_terminal()` alone is not sufficient: a set `CI` env var (the de
+    // facto convention every major CI provider honors) always keeps the
+    // exact non-interactive line-mode output.
+    if std::env::var_os("CI").is_some() {
+        return false;
+    }
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Screen {
+    Sessions,
+    Traits,
+    Merges,
+    Trust,
+}
+
+impl Screen {
+    fn title(self) -> &'static str {
+        match self {
+            Screen::Sessions => "SESSIONS",
+            Screen::Traits => "TRAITS",
+            Screen::Merges => "MERGES",
+            Screen::Trust => "TRUST",
+        }
+    }
+
+    fn all() -> [Screen; 4] {
+        [
+            Screen::Sessions,
+            Screen::Traits,
+            Screen::Merges,
+            Screen::Trust,
+        ]
+    }
+}
+
+/// One row's verb eligibility, decided in exactly this one place so every
+/// key handler and every rendered hint reads the same classification rather
+/// than re-deriving it. `Held` (any status) always wins as `Live`; otherwise
+/// a readable ledger's own `Status` decides `Terminal` vs `Resumable`; an
+/// unparseable ledger is `Unreadable`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SessionClass {
+    Live,
+    Resumable,
+    Terminal,
+    Unreadable,
+}
+
+impl SessionClass {
+    fn can_resume(self) -> bool {
+        self == SessionClass::Resumable
+    }
+
+    fn can_attach(self) -> bool {
+        self != SessionClass::Unreadable
+    }
+}
+
+#[derive(Clone)]
+struct SessionRow {
+    session_id: String,
+    ledger_path: camino::Utf8PathBuf,
+    /// The ledger's internal run-id — distinct from `session_id` (the ledger
+    /// file's basename) — used to look up this run's debug-trace directory
+    /// (`ctx_traits_io::debug_trace::tail_latest_attempt_trace` is keyed by
+    /// run-id, not session-id). Empty for an unreadable ledger.
+    run_id: String,
+    /// State column: `live` when a driver holds the lock, else the ledger's
+    /// own status word ([`run_view::session_status`]).
+    state_text: String,
+    /// Phase column: status plus the current step title
+    /// ([`run_view::phase_text`]).
+    phase: String,
+    elapsed_text: String,
+    tokens_text: String,
+    /// Repository/ad-hoc identity key this row belongs to (P439 ALL mode) —
+    /// `None` in the default current-repository-only scope.
+    repo_key: Option<String>,
+    /// Absolute repository path for this row (P439 ALL mode only); used to
+    /// gate cwd-anchored git operations (resume/delete worktree cleanup) to
+    /// rows that actually belong to the current repository (§3.6).
+    repo_path: Option<String>,
+    class: SessionClass,
+    /// The ledger's own `Status`, or `None` for an unreadable ledger — feeds
+    /// [`session_group`] (§3.1). Not re-derived from `state_text`/`phase`
+    /// (both display strings), so grouping stays a pure function of the
+    /// typed status rather than a re-parse of what the row already renders.
+    status: Option<ctx_traits_core::procedure::session::Status>,
+    /// The ledger's last-recorded drive outcome kind, or `None` for an
+    /// unreadable ledger or a session that has never driven. Threaded into
+    /// [`SessionState::derive`][ctx_traits_core::procedure::activity::SessionState::derive]
+    /// alongside `status` so a cancelled parked ask (status still
+    /// `WaitingOnHuman`, outcome `Interrupted`) classifies `Cancelled` rather
+    /// than staying grouped as an open ask.
+    outcome: Option<ctx_traits_core::procedure::session::DriveOutcomeKind>,
+}
+
+#[derive(Clone)]
+struct TraitRow {
+    id: String,
+    version: String,
+    status: String,
+    trust: String,
+    canonical_digest: String,
+    source_path: String,
+    /// The read error for an unreadable package, carried through unchanged
+    /// from [`super::lifecycle_reporting::DashboardTraitRow::error`] rather
+    /// than re-derived from `status`/`trust` text — the preview's degrade
+    /// path (§4.6) checks this directly.
+    error: Option<String>,
+}
+
+/// The reconstructed live-view pane for one TRAITS row (P471 §4.1),
+/// mirroring [`AttachedView`]'s cache discipline: `trait_id` +
+/// `canonical_digest` is the cache key (never a list index), so a moved
+/// digest — or a source edit that leaves the digest untouched but changes
+/// what the preview must say (§4.6) — is what forces a rebuild, never the
+/// 2s reload tick alone.
+struct TraitPreview {
+    trait_id: String,
+    canonical_digest: String,
+    /// Carries the degraded rendering (§4.6) with the error at the top in
+    /// `Tone::Fail` when the trait failed to load/check — never a crash,
+    /// never an empty pane. The error text lives in these lines, not a
+    /// separate field: there is no other consumer that needs it apart from
+    /// what's drawn.
+    lines: Vec<RLine<'static>>,
+}
+
+/// Pure facts [`trait_preview_lines`] renders from — no IO in this type or
+/// in the function that renders it; [`build_trait_preview`] is the only
+/// place that does the loading/reading (§4.2).
+struct TraitPreviewFacts {
+    id: String,
+    version: String,
+    status: String,
+    canonical_digest: String,
+    trust_state: String,
+    trust_reason: String,
+    /// The trust record's own digest differs from `canonical_digest` — the
+    /// re-approval-required case (§4.2 point 3), reusing `load_trust`'s
+    /// stale notion.
+    trust_stale: bool,
+    has_trust_record: bool,
+    drift: String,
+    /// Whether `drift` covers the authored source (`source/index.ts`), not
+    /// only the lock/manifest layers `dashboard_trait_drift` compares
+    /// (blocker `trait-preview-drift-omits-authored-source`): today this is
+    /// always `false`, since `dashboard_trait_drift` unconditionally passes
+    /// `skip_cdk_drift: true`. Kept as an explicit fact rather than a
+    /// hard-coded render string so the renderer stays correct if that ever
+    /// changes.
+    source_drift_checked: bool,
+    procedure: ProcedureShape,
+    source_path: String,
+    source_excerpt: Vec<String>,
+    error: Option<String>,
+}
+
+/// Procedure shape as the preview must present it — three states, never
+/// collapsed to a boolean (blocker `preview-mislabels-unloadable-trait-as-
+/// guidance-only`): `Sequence` is a trait that loaded with `[procedure]`
+/// present; `GuidanceOnly` is a trait that loaded and deliberately declares
+/// none (a legitimate classification, PRODUCT.md §Non-Negotiables); `Unknown`
+/// is a trait that could not be read/checked at all. The pane must never
+/// assert the positive `GuidanceOnly` claim about a trait it failed to load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProcedureShape {
+    /// `(item id, item kind)` per `[[procedure.sequence]]` entry, in order.
+    Sequence(Vec<(String, String)>),
+    GuidanceOnly,
+    Unknown,
+}
+
+/// MERGES-screen row classification (P472 §3.3): decided once, in one place,
+/// from [`ctx_traits_core::procedure::session::MergeStatus::is_terminal`] and
+/// [`super::run::disposition_for_merge_status`] — never re-derived from
+/// string status text. `Mergeable` is a completed drive with worktree
+/// provenance that has never reached a terminal merge frame; `Parked`/
+/// `Failed`/`Landed` classify the last terminal frame, with
+/// `PostMergeCleanupFailure`/`RecoveryFailure` always `Failed`, never
+/// `Parked` (`session.rs`'s own doc comment on `MergeStatus`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MergeClass {
+    Mergeable,
+    Parked,
+    Failed,
+    Landed,
+}
+
+impl MergeClass {
+    /// `m`/`d` retry is offered for every class except a landed run (nothing
+    /// left to retry) — a still-running (non-terminal, no worktree
+    /// provenance) row never reaches this screen at all.
+    fn can_retry(self) -> bool {
+        self != MergeClass::Landed
+    }
+
+    /// DROP (`x`) is scoped to terminal rows: a `Mergeable` row may still be
+    /// held by a live driver, so dropping it from the queue here would race
+    /// an in-progress run — SESSIONS' own DELETE already owns that case.
+    fn can_drop(self) -> bool {
+        self != MergeClass::Mergeable
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            MergeClass::Mergeable => "mergeable",
+            MergeClass::Parked => "parked",
+            MergeClass::Failed => "failed",
+            MergeClass::Landed => "landed",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct MergeRow {
+    session_id: String,
+    run_id: String,
+    ledger_path: camino::Utf8PathBuf,
+    class: MergeClass,
+    /// The last terminal merge frame's stage, or `None` for a `Mergeable` row
+    /// that has never attempted a merge.
+    stage: Option<ctx_traits_core::procedure::session::MergeStage>,
+    /// The translated one-line headline ([`merge_story::Explanation::headline`])
+    /// for a parked/failed row — empty for `Mergeable`/`Landed`.
+    headline: String,
+    phase: Option<String>,
+    trait_id: String,
+    /// The last terminal merge frame, kept for the detail pane's translation
+    /// and gate-evidence rendering — `None` for `Mergeable`/rows with no
+    /// terminal frame yet.
+    last_frame: Option<ctx_traits_core::procedure::session::MergeFrame>,
+    worktree: Option<ctx_traits_core::procedure::session::WorktreeProvenance>,
+    /// Repository/ad-hoc identity path this row belongs to (P439 ALL mode) —
+    /// `None` in the default current-repository-only scope, mirroring
+    /// [`SessionRow::repo_path`].
+    repo_path: Option<String>,
+}
+
+/// The reconstructed live-view pane for one MERGES row (P472 §3.4), mirroring
+/// [`TraitPreview`]'s cache discipline: `session_id` + the last frame's
+/// identity + the worktree's branch name is the cache key, so a Git-shelling
+/// rebuild happens on selection change or when that key moves, never on the
+/// 250ms draw tick.
+struct MergePreview {
+    session_id: String,
+    cache_key: (String, String),
+    lines: Vec<RLine<'static>>,
+}
+
+/// Pure facts [`merge_preview_lines`] renders from — no IO in this type or in
+/// the function that renders it; [`build_merge_preview`] is the only place
+/// that shells out to Git or reads the ledger.
+struct MergePreviewFacts {
+    run_id: String,
+    phase: Option<String>,
+    trait_id: String,
+    class: MergeClass,
+    stage: Option<ctx_traits_core::procedure::session::MergeStage>,
+    /// What the run produced, already classified — `None` when the worktree
+    /// is no longer registered (landed/cleaned up) and Git facts could not be
+    /// computed.
+    produced: Option<MergeProduced>,
+    explanation: Option<merge_story::Explanation>,
+    gate_rows: Vec<merge_story::GateRow>,
+    worktree_path: Option<String>,
+    worktree_branch: Option<String>,
+}
+
+enum MergeProduced {
+    Nothing,
+    DocsOnly { files: usize },
+    Commits { commits: usize, files: usize },
+}
+
+/// One TRUST-screen row (P473 §4.2): trait-centric, unlike the old
+/// digest-centric shape — `trait_id: None` marks exactly the [`Orphaned`]
+/// rows appended for a recorded decision that names no visible trait (never
+/// synthesized for a resolvable trait). Covers every tier `InventoryContext`
+/// sees, including built-ins (unlike [`State::traits`]), so a built-in
+/// package still needing a verified digest to auto-activate is visible here.
+///
+/// [`Orphaned`]: trust_story::TrustClass::Orphaned
+#[derive(Clone)]
+struct TrustRow {
+    trait_id: Option<String>,
+    /// Display label for the winning tier: `"repo"` for repo-authored,
+    /// otherwise the origin string [`super::lifecycle_reporting::DashboardTraitRow`]
+    /// already carries (`"built-in"`, an npm origin, ...). `"orphaned"` for
+    /// an orphan row, which names no resolvable trait to report an origin
+    /// for.
+    origin: String,
+    family: Option<String>,
+    variant: Option<String>,
+    /// The trait's current resolved canonical digest — empty for an orphan
+    /// row (no trait resolves to name one).
+    current_digest: String,
+    recorded_digest: Option<String>,
+    class: trust_story::TrustClass,
+    updated_at: Option<String>,
+    reason: Option<String>,
+}
+
+/// One run-ledger row's identity/digest/recency, projected once per reload
+/// from the same run inventory scan [`sessions_from_inventory_tagged`]/
+/// [`merges_from_inventory`] already consume (§4.4) — cheap owned data so a
+/// selection-time [`run_sighting`] lookup never re-scans the ledger store.
+#[derive(Clone)]
+struct RunSightingRow {
+    trait_id: String,
+    canonical_digest: String,
+    run_id: String,
+    session_id: String,
+    modified_epoch_secs: u64,
+}
+
+/// The reconstructed live-view pane for one TRUST row (P473 §4.5), mirroring
+/// [`TraitPreview`]'s cache discipline for resolvable rows: `trait_id` +
+/// `current_digest` + the resolved [`trust_story::TrustClass`] is the cache
+/// key (never a list index), so a trust write — which never moves the digest,
+/// only the class — still forces a rebuild. Orphans rebuild on every selection
+/// because append-only records can share a digest while carrying distinct
+/// timestamps or reasons.
+struct TrustPreview {
+    trait_id: Option<String>,
+    current_digest: String,
+    class: trust_story::TrustClass,
+    lines: Vec<RLine<'static>>,
+}
+
+/// Pure facts [`trust_preview_lines`] renders from — no IO in this type or
+/// in the function that renders it; [`build_trust_preview`] is the only
+/// place that resolves a run sighting (§4.4).
+struct TrustPreviewFacts {
+    trait_id: Option<String>,
+    origin: String,
+    family: Option<String>,
+    variant: Option<String>,
+    current_digest: String,
+    recorded_digest: Option<String>,
+    class: trust_story::TrustClass,
+    updated_at: Option<String>,
+    reason: Option<String>,
+    sighting: Option<trust_story::RunSighting>,
+    /// Every member of this row's family (including this row itself), each
+    /// with its own class — present only when `family` is `Some` (§4.5:
+    /// "for a family row, every member with its own class, so `A`'s blast
+    /// radius is visible before any keypress"). Including the selected row
+    /// is deliberate: `A`'s write also covers it, so it belongs in its own
+    /// blast-radius roster.
+    family_members: Vec<(String, trust_story::TrustClass)>,
+}
+
+/// The reconstructed live-view pane for one session (P469 §3.2): the same
+/// `Vec<RLine>` backs both the SESSIONS master-detail preview and the
+/// attached full view — they differ only in the rect they're drawn into and
+/// each carrying its own [`ViewportScroll`] offset. Rebuilt by
+/// [`refresh_attached_view`] on selection change and on the reload tick
+/// (never per-draw — reconstruction re-parses a trait package).
+#[derive(Clone)]
+struct AttachedView {
+    session_id: String,
+    ledger_path: camino::Utf8PathBuf,
+    run_id: String,
+    /// The ledger's `state_digest` as of the last successful reconstruction,
+    /// so an unchanged ledger skips the expensive trait+plan rebuild on the
+    /// next reload tick.
+    state_digest: String,
+    /// The rebuilt ledger view without its diagnostic trace suffix. This lets
+    /// a new flushed trace replace only that suffix while the ledger digest is
+    /// unchanged.
+    base_lines: Vec<RLine<'static>>,
+    trace_tail: Vec<String>,
+    lines: Vec<RLine<'static>>,
+    /// Set when trait resolution failed and `lines` is the plain-ledger
+    /// fallback instead of the reconstructed run tree (§3.2 degrade path).
+    degraded: Option<String>,
+}
+
+/// Identity the renderer asks the IO worker to refresh. The renderer only
+/// creates this from its selected or attached row; all filesystem work remains
+/// on the worker thread.
+#[derive(Clone)]
+struct SessionPreviewRequest {
+    session_id: String,
+    ledger_path: camino::Utf8PathBuf,
+    run_id: String,
+}
+
+/// The single-keypress action model's tag (P469 §3.3, generalized by P471
+/// §"one shared abstraction"): every tag carries the target's identity,
+/// never its list index, so a reload that reorders or removes rows never
+/// misapplies an action to the wrong row — the handler re-looks-up by id and
+/// re-checks eligibility before acting. One `ModalHost<Action>` backs every
+/// screen's actions; `Exit` stays screen-agnostic at the top level.
+#[derive(Clone)]
+enum Action {
+    Exit,
+    Session(SessionAction),
+    Trait(TraitAction),
+    Merge(MergeAction),
+}
+
+#[derive(Clone)]
+enum SessionAction {
+    Kill(String),
+    Resume(String),
+    Delete(String, DeletePlan),
+    Answer {
+        session_id: String,
+        state_digest: String,
+        target: String,
+        schema_ref: Option<String>,
+    },
+    /// `n`'s spawn request (P506 §3.5): the modal itself carries the typed
+    /// argument text, resolved to `ModalOutcome::Submitted` on confirm — no
+    /// captured payload needed on the tag itself.
+    Spawn,
+}
+
+/// TRAITS'/TRUST's one shared identity-bound trust-write tag (P471 §4.4,
+/// unified for N members by P473 §4.7): `members` is 1..N `(trait_id,
+/// digest-captured-when-the-modal-opened)` pairs — TRAITS' `a`/`b` and
+/// TRUST's `a`/`b` each pass exactly one; TRUST's `A` (approve/block the
+/// whole `metadata.family`) passes every member. Every member is re-checked
+/// against `state.trust` before any write, and the whole set aborts naming
+/// the offender if any one member's digest moved since the modal opened —
+/// so a reload racing an open modal never gets silently (partially)
+/// applied.
+#[derive(Clone)]
+enum TraitAction {
+    Trust {
+        /// The trait id (single write) or family name (block write), for the
+        /// confirmation message.
+        label: String,
+        members: Vec<(String, String)>,
+        verdict: ctx_traits_io::trust::TrustState,
+    },
+}
+
+/// MERGES' own actions (P472 §3.5): `Retry` re-runs `merge::merge` for the
+/// selected run (standard or `--deep`); `PrintPath` writes the run's
+/// worktree path into the footer message; `Drop` reuses SESSIONS' own
+/// `DeletePlan`/`plan_delete`/`execute_delete` mechanism unchanged, so there
+/// is exactly one destructive artifact-removal path in the dashboard.
+#[derive(Clone)]
+enum MergeAction {
+    Retry {
+        run_id: String,
+        deep: bool,
+    },
+    Drop {
+        session_id: String,
+        plan: DeletePlan,
+    },
+}
+
+/// The exact artifact list a DELETE confirms before touching anything, and a
+/// pure function of already-resolved inputs (§3.4): the caller does the git
+/// probing (`plan_delete_for_ledger`) and passes the resolved worktree location
+/// in, so this function itself does no IO and is directly unit-testable.
+#[derive(Clone)]
+struct DeletePlan {
+    ledger_path: camino::Utf8PathBuf,
+    driver_lock_path: Option<camino::Utf8PathBuf>,
+    sidecars_root: Option<camino::Utf8PathBuf>,
+    /// `(repo_root, worktree_path, branch)`, present only when provenance
+    /// named a worktree AND its registration was verified in the current
+    /// repository.
+    worktree: Option<(camino::Utf8PathBuf, camino::Utf8PathBuf, String)>,
+    /// Explains why a provenance-named worktree/branch is NOT in `worktree`
+    /// above (foreign repository, or registration failed) — rendered
+    /// verbatim in the confirm modal so it never implies a cleaner sweep
+    /// than what will actually happen.
+    worktree_note: Option<String>,
+}
+
+impl DeletePlan {
+    fn artifact_lines(&self) -> Vec<String> {
+        let mut lines = vec![format!("ledger: {}", self.ledger_path)];
+        if let Some(path) = &self.driver_lock_path {
+            lines.push(format!("driver lock: {path}"));
+        }
+        if let Some(root) = &self.sidecars_root {
+            lines.push(format!("sidecars: {root}"));
+        }
+        if let Some((_, path, branch)) = &self.worktree {
+            lines.push(format!("worktree: {path}"));
+            lines.push(format!("branch: {branch}"));
+        }
+        if let Some(note) = &self.worktree_note {
+            lines.push(note.clone());
+        }
+        lines
+    }
+}
+
+struct State {
+    screen: Screen,
+    sessions: Vec<SessionRow>,
+    /// The SESSIONS list actually rendered/navigated (P506 §3.1): headers
+    /// plus session rows, rebuilt by [`rebuild_visible_sessions`] on every
+    /// reload and every collapse toggle. [`selected_session`] is the only
+    /// accessor any action key reads a row through.
+    sessions_visible: Vec<VisibleRow>,
+    /// Which [`SessionGroup`]s are collapsed to their count-row form.
+    /// `Completed` starts collapsed (P506 Done-when).
+    collapsed_groups: HashSet<SessionGroup>,
+    traits: Vec<TraitRow>,
+    merges: Vec<MergeRow>,
+    /// Complete security-visible trust history. `trust_visible` is only the
+    /// list projection; hiding orphans never removes them from this set.
+    trust: Vec<TrustRow>,
+    /// Backing indices for the TRUST list. Orphans start collapsed but remain
+    /// reachable with `o`; every selection consumer goes through
+    /// [`selected_trust`] to avoid mixing visible and backing index spaces.
+    trust_visible: Vec<usize>,
+    show_trust_orphans: bool,
+    /// Per-screen list scroll/selection (P506 §3.7): switching screens no
+    /// longer resets the OTHER screens' position, so leaving and returning
+    /// to a screen restores exactly where the user left it.
+    list_sessions: ScrollList,
+    list_traits: ScrollList,
+    list_merges: ScrollList,
+    list_trust: ScrollList,
+    message: Option<String>,
+    quit: bool,
+    /// SESSIONS scope (P439): current repository/ad-hoc invocation only
+    /// (default, byte-identical to pre-P439 behavior) or every indexed
+    /// repository/ad-hoc identity machine-wide, toggled with `v`.
+    all_repos: bool,
+    /// Pane focus for the CURRENT screen (P506 §3.3): rebuilt with that
+    /// screen's own leaf ids on every [`State::switch_screen`], since the
+    /// leaf id set differs per screen. `Tab`/`Shift-Tab` stay on the screen
+    /// tabs (unlike the `tui-demo` proof); this ring moves on `alt`+arrows
+    /// and the retained `Enter`/`Esc` pair (enter -> preview pane, esc ->
+    /// list pane) — a deliberate divergence from `tui_demo`'s own binding,
+    /// preserving every dashboard muscle-memory key (P506 §3.3 risk 5).
+    focus: FocusRing,
+    /// The last-resolved pane rects for the current screen, cached so
+    /// `alt`+arrow directional movement reads the SAME rects a frame just
+    /// drew rather than re-resolving the tree outside a draw pass (mirrors
+    /// `tui_demo::DemoState::last_pane_layout`).
+    last_pane_layout: PaneLayoutResult,
+    /// Per-pane scroll state for every non-list (preview/progress/narration)
+    /// pane across all four screens — one map, keyed by [`PaneId`], replacing
+    /// the four separate `ViewportScroll` fields the pre-pane-tree preview
+    /// structs each carried (P506 §3.7).
+    pane_scrolls: PaneScrolls,
+    session_preview: Option<AttachedView>,
+    /// Attached-pane identity is retained independently from the last worker
+    /// preview so an initial or delayed worker result still has a target.
+    attached_session_id: Option<String>,
+    /// Attachment explicitly follows live trace updates until the user scrolls
+    /// away from the tail; list-focused previews stay top-aligned.
+    session_preview_follow: bool,
+    trait_preview: Option<TraitPreview>,
+    trait_explanation: Option<(String, String, Result<String, String>, std::time::Instant)>,
+    merge_preview: Option<MergePreview>,
+    trust_preview: Option<TrustPreview>,
+    /// Current repository's run inventory, projected to the cheap identity/
+    /// digest/recency facts [`run_sighting`] needs (§4.4) — captured once per
+    /// reload, before [`merges_from_inventory`] consumes the owning scan by
+    /// value, so a TRUST preview rebuild never re-scans the ledger store.
+    run_sightings: Vec<RunSightingRow>,
+    modal_host: ModalHost<Action>,
+    /// TRUST's block-approve mark set (P506 §3.6), keyed by trait id — never
+    /// by list index, since TRUST reloads and re-sorts every 2s.
+    trust_marks: MarkSet<String>,
+    /// Parse cache, held across ticks so an unchanged ledger is a
+    /// refcount bump instead of a full re-parse. One-shot callers elsewhere
+    /// (`stats`, `dispatch_preflight`, `run_queue`) allocate their own
+    /// throwaway cache instead — this is the one long-lived instance.
+    inventory_cache: ctx_traits_io::run_session::InventoryCache,
+    /// Count of [`State::reload`] calls, used only to pace the periodic full
+    /// liveness sweep (§3.3) — never displayed.
+    reload_ticks: u64,
+    /// Most recent [`State::reload`] wall-clock duration (§5), surfaced in
+    /// the SESSIONS border title only above [`RELOAD_WARN_THRESHOLD`].
+    reload_duration: Option<Duration>,
+    worker: Option<worker::Handle>,
+    loading: bool,
+    /// P550 `S`-key story view: set while the SESSIONS row's story is open,
+    /// rendered by `draw_screen` as a single full-area lines pane in place of
+    /// the screen's tree. Read-only and never advances a run — a keypress
+    /// must not spend tokens, so this always resolves the free level.
+    story_view: Option<StoryView>,
+}
+
+/// P550 dashboard `S`-key state: a snapshot of one session's story, built
+/// synchronously from local ledger + best-effort plan reads at keypress
+/// time (never a live view — a still-running session's story is exactly
+/// that: a snapshot, stated in its own disposition line).
+struct StoryView {
+    session: ctx_traits_core::procedure::session::Session,
+    report: ctx_traits_core::procedure::story::StoryReport,
+    title: String,
+    scroll: tui_kit::ViewportScroll,
+}
+
+/// Immutable IO-derived data transferred from the worker to the renderer.
+/// UI focus, selection, modal text, marks, and scroll state deliberately stay
+/// out of this value.
+struct DashboardSnapshot {
+    sessions: Vec<SessionRow>,
+    traits: Vec<TraitRow>,
+    merges: Vec<MergeRow>,
+    trust: Vec<TrustRow>,
+    run_sightings: Vec<RunSightingRow>,
+    reload_duration: Option<Duration>,
+    session_preview: Option<AttachedView>,
+}
+
+impl DashboardSnapshot {
+    fn from_state(state: &State) -> Self {
+        Self {
+            sessions: state.sessions.clone(),
+            traits: state.traits.clone(),
+            merges: state.merges.clone(),
+            trust: state.trust.clone(),
+            run_sightings: state.run_sightings.clone(),
+            reload_duration: state.reload_duration,
+            session_preview: state.session_preview.clone(),
+        }
+    }
+}
+
+impl State {
+    fn new() -> Self {
+        let mut state = Self::new_without_worker();
+        state.worker = Some(worker::Handle::new());
+        state
+    }
+
+    /// The worker owns the only mutable IO model. The render state never uses
+    /// this constructor, so it cannot accidentally scan stores while drawing.
+    fn new_without_worker() -> Self {
+        let mut collapsed_groups = HashSet::new();
+        collapsed_groups.insert(SessionGroup::Completed);
+        Self {
+            screen: Screen::Sessions,
+            sessions: Vec::new(),
+            sessions_visible: Vec::new(),
+            collapsed_groups,
+            traits: Vec::new(),
+            merges: Vec::new(),
+            trust: Vec::new(),
+            trust_visible: Vec::new(),
+            show_trust_orphans: false,
+            list_sessions: ScrollList::new(),
+            list_traits: ScrollList::new(),
+            list_merges: ScrollList::new(),
+            list_trust: ScrollList::new(),
+            message: None,
+            quit: false,
+            all_repos: false,
+            focus: FocusRing::new(vec![PANE_SESSIONS_LIST]),
+            last_pane_layout: PaneLayoutResult::default(),
+            pane_scrolls: PaneScrolls::new(),
+            session_preview: None,
+            attached_session_id: None,
+            session_preview_follow: false,
+            trait_preview: None,
+            trait_explanation: None,
+            merge_preview: None,
+            trust_preview: None,
+            run_sightings: Vec::new(),
+            modal_host: ModalHost::new(),
+            trust_marks: MarkSet::new(),
+            inventory_cache: ctx_traits_io::run_session::InventoryCache::new(),
+            reload_ticks: 0,
+            reload_duration: None,
+            worker: None,
+            loading: false,
+            story_view: None,
+        }
+    }
+
+    fn current_list(&self) -> &ScrollList {
+        match self.screen {
+            Screen::Sessions => &self.list_sessions,
+            Screen::Traits => &self.list_traits,
+            Screen::Merges => &self.list_merges,
+            Screen::Trust => &self.list_trust,
+        }
+    }
+
+    fn current_list_mut(&mut self) -> &mut ScrollList {
+        match self.screen {
+            Screen::Sessions => &mut self.list_sessions,
+            Screen::Traits => &mut self.list_traits,
+            Screen::Merges => &mut self.list_merges,
+            Screen::Trust => &mut self.list_trust,
+        }
+    }
+
+    fn selected(&self) -> usize {
+        self.current_list().selected()
+    }
+
+    /// Switches to `screen`, resetting the pane focus ring to that screen's
+    /// list pane (P506 §3.3). The ring is reconciled against the real,
+    /// width-resolved tree on the very next draw (`draw_screen`), so
+    /// starting it here from a hypothetical widest-possible tree is neither
+    /// needed nor safe — see `FocusRing::reconcile`. Deliberately does NOT
+    /// touch any screen's own `ScrollList` — per-screen scroll/selection
+    /// persists across a switch (§3.7).
+    fn switch_screen(&mut self, screen: Screen) {
+        if self.screen == Screen::Sessions && screen != Screen::Sessions {
+            self.attached_session_id = None;
+            self.session_preview_follow = false;
+        }
+        self.screen = screen;
+        self.focus = FocusRing::new(vec![list_pane_id(screen)]);
+        self.reload();
+    }
+
+    fn move_selection(&mut self, delta: i32) {
+        // The visible-row window is only known at draw time (the pane
+        // area's height varies with the terminal), so key handling only
+        // moves the selection; the render pass re-clamps the scroll offset
+        // against the real rect height on the next render.
+        self.current_list_mut().move_by(delta as i64, usize::MAX);
+    }
+
+    fn reload(&mut self) {
+        if let Some(worker) = &self.worker {
+            worker.refresh(self.all_repos, self.screen, self.session_preview_request());
+            self.loading = true;
+        }
+    }
+
+    fn session_preview_request(&self) -> Option<SessionPreviewRequest> {
+        if self.screen != Screen::Sessions {
+            return None;
+        }
+        let attached = matches!(
+            self.focus.current(),
+            Some(PANE_SESSIONS_PROGRESS) | Some(PANE_SESSIONS_NARRATION)
+        );
+        if attached {
+            let session_id = self.attached_session_id.as_deref()?;
+            let row = self
+                .sessions
+                .iter()
+                .find(|row| row.session_id == session_id)?;
+            return Some(SessionPreviewRequest {
+                session_id: row.session_id.clone(),
+                ledger_path: row.ledger_path.clone(),
+                run_id: row.run_id.clone(),
+            });
+        }
+        let row = selected_session(self)?;
+        row.class.can_attach().then(|| SessionPreviewRequest {
+            session_id: row.session_id.clone(),
+            ledger_path: row.ledger_path.clone(),
+            run_id: row.run_id.clone(),
+        })
+    }
+
+    fn apply_snapshots(&mut self) {
+        let Some(worker) = &self.worker else {
+            return;
+        };
+        for result in worker.explanation_results() {
+            if self.traits.get(self.selected()).is_some_and(|row| {
+                row.id == result.trait_id && row.canonical_digest == result.canonical_digest
+            }) {
+                if let (Some(preview), Ok(explanation)) = (&mut self.trait_preview, &result.result)
+                {
+                    preview.lines.push(RLine::from(""));
+                    preview.lines.push(RLine::styled(
+                        "generated explanation (advisory)",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ));
+                    preview.lines.extend(
+                        explanation
+                            .lines()
+                            .map(|line| RLine::from(line.to_string())),
+                    );
+                }
+                self.trait_explanation = Some((
+                    result.trait_id,
+                    result.canonical_digest,
+                    result.result,
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+        let Some(snapshot) = worker.latest_snapshot() else {
+            return;
+        };
+        self.sessions = snapshot.sessions.clone();
+        self.traits = snapshot.traits.clone();
+        self.merges = snapshot.merges.clone();
+        self.trust = snapshot.trust.clone();
+        self.run_sightings = snapshot.run_sightings.clone();
+        self.reload_duration = snapshot.reload_duration;
+        self.loading = false;
+        rebuild_visible_sessions(self);
+        rebuild_visible_trust(self);
+        let trust_ids: Vec<String> = self
+            .trust
+            .iter()
+            .filter_map(|row| row.trait_id.clone())
+            .collect();
+        self.trust_marks.retain_existing(&trust_ids);
+        self.list_traits.set_len(self.traits.len());
+        self.list_merges.set_len(self.merges.len());
+        if self.screen == Screen::Sessions {
+            let attached = matches!(
+                self.focus.current(),
+                Some(PANE_SESSIONS_PROGRESS) | Some(PANE_SESSIONS_NARRATION)
+            );
+            if attached {
+                refresh_attached_session(self);
+            } else if self.session_preview.as_ref().is_some_and(|preview| {
+                selected_session(self).is_none_or(|row| row.session_id != preview.session_id)
+            }) {
+                self.session_preview = None;
+            }
+            if let Some(preview) = &snapshot.session_preview {
+                if session_preview_matches_current(self, &preview.session_id) {
+                    follow_session_preview(
+                        state_pane_scroll_rows(self, PANE_SESSIONS_PROGRESS),
+                        self.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
+                        self.session_preview_follow,
+                        preview.lines.len(),
+                    );
+                    self.session_preview = Some(preview.clone());
+                }
+            }
+        }
+    }
+
+    /// Worker-only inventory refresh. It is intentionally separate from
+    /// [`State::reload`], whose render-side contract is channel-only.
+    fn reload_sync(&mut self) {
+        let reload_started = std::time::Instant::now();
+        // Bound this tick's driver-lock probes to the local
+        // liveness index's own rows (typically a handful), except on a
+        // periodic full sweep, which also probes every other row to catch a
+        // row-less held lock (adoption: an externally started driver, or one
+        // predating this index). `reload_ticks` is bumped once per call
+        // regardless of scope, so the cadence is wall-clock-uniform whether
+        // or not `all_repos` is toggled mid-session.
+        self.reload_ticks = self.reload_ticks.wrapping_add(1);
+        let full_sweep = self.reload_ticks % FULL_SWEEP_EVERY_TICKS == 0;
+        let indexed_ids = ctx_traits_io::run_liveness::indexed_session_ids(
+            &ctx_traits_io::run_control::runtime_root(),
+        );
+        // `None` means the liveness index itself is unavailable this tick:
+        // fail OPEN (probe every row, exactly like a full sweep) rather than
+        // fail closed on an empty probe set, which would silently render
+        // every live session as not-live (unknown, never
+        // a fabricated dead/not-live answer).
+        let probe_budget = match &indexed_ids {
+            Some(ids) if !full_sweep => ProbeBudget::IndexOnly(ids),
+            _ => ProbeBudget::Sweep,
+        };
+        if self.all_repos {
+            let machine_wide = ctx_traits_io::run_session::machine_wide_run_inventory_cached(
+                &mut self.inventory_cache,
+            )
+            .unwrap_or_default();
+            let mut sessions = Vec::new();
+            let mut merges = Vec::new();
+            for entry in machine_wide {
+                sessions.extend(sessions_from_inventory_tagged(
+                    &entry.rows,
+                    Some(&entry.repo_key),
+                    Some(&entry.repo_path),
+                    &probe_budget,
+                ));
+                merges.extend(merges_from_inventory(entry.rows, Some(&entry.repo_path)));
+            }
+            // Each block above is already Live-first internally; a stable
+            // sort over the concatenation makes "active first" hold
+            // machine-wide rather than only within each repo's own block,
+            // without disturbing the most-recently-modified order within
+            // either class.
+            sessions.sort_by_key(|row| {
+                if row.class == SessionClass::Live {
+                    0
+                } else {
+                    1
+                }
+            });
+            self.sessions = sessions;
+            self.merges = merges;
+            // TRUST is machine-local (§5: no `all_repos` semantics), so its
+            // run-sighting projection always comes from THIS repository's
+            // inventory regardless of the `v` toggle — a second, separate
+            // scan only in ALL mode. Shares the same cache: this repository's
+            // rows were very likely already touched by the machine-wide scan
+            // above, so this is typically all cache hits.
+            let sighting_inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
+                &mut self.inventory_cache,
+            )
+            .unwrap_or_default();
+            self.run_sightings = run_sighting_rows(&sighting_inventory);
+        } else {
+            let inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
+                &mut self.inventory_cache,
+            )
+            .unwrap_or_default();
+            self.run_sightings = run_sighting_rows(&inventory);
+            self.sessions = sessions_from_inventory_tagged(&inventory, None, None, &probe_budget);
+            self.merges = merges_from_inventory(inventory, None);
+        }
+        rebuild_visible_sessions(self);
+        if matches!(self.screen, Screen::Traits | Screen::Trust) {
+            let (traits, trust) = load_traits_and_trust().unwrap_or_default();
+            self.traits = traits;
+            self.trust = trust;
+        }
+        rebuild_visible_trust(self);
+        let trust_ids: Vec<String> = self
+            .trust
+            .iter()
+            .filter_map(|row| row.trait_id.clone())
+            .collect();
+        self.trust_marks.retain_existing(&trust_ids);
+        self.list_traits.set_len(self.traits.len());
+        self.list_merges.set_len(self.merges.len());
+        if self.screen == Screen::Merges {
+            refresh_merge_preview_for_selection(self);
+        }
+        if self.screen == Screen::Traits {
+            refresh_trait_preview_for_selection(self);
+        }
+        if self.screen == Screen::Trust {
+            refresh_trust_preview_for_selection(self);
+        }
+        // Measurement recorded unconditionally (cheap — one
+        // `Instant::now()` diff) but only surfaced in the SESSIONS border
+        // title above `RELOAD_WARN_THRESHOLD`, so a healthy steady state
+        // shows nothing and a future regression has a permanent, honest
+        // signal to page off of.
+        self.reload_duration = Some(reload_started.elapsed());
+    }
+}
+
+/// SESSIONS-screen rows, projected from one shared run inventory scan (also
+/// consumed by [`merges_from_inventory`]) rather than each screen
+/// re-scanning the session stores independently. `repo_key`/`repo_path` tag
+/// every produced row with its repository/ad-hoc identity for ALL-mode
+/// display and cwd-anchored git gating (P439); both `None` in the default
+/// current-repository-only scope. Rows are ordered `Live` first, preserving
+/// the inventory's existing most-recently-modified order within each class
+/// (a stable sort over an already most-recently-modified-sorted input).
+/// Pure `(live, status) -> SessionClass` mapping (§3.1), extracted out of
+/// `sessions_from_inventory_tagged`'s inventory scan so the classification
+/// table itself is directly unit-testable without an inventory scan, a
+/// driver-lock probe, or any other IO. `Held` (any status) always wins as
+/// `Live`; otherwise a readable ledger's own terminal/non-terminal `Status`
+/// decides `Terminal` vs `Resumable`.
+fn classify_session(
+    live: bool,
+    status: &ctx_traits_core::procedure::session::Status,
+    outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
+) -> SessionClass {
+    match ctx_traits_core::procedure::activity::SessionState::derive(status, outcome, live) {
+        ctx_traits_core::procedure::activity::SessionState::Running => SessionClass::Live,
+        state if state.is_terminal() => SessionClass::Terminal,
+        _ => SessionClass::Resumable,
+    }
+}
+
+/// Blocker 3 (P509): the dashboard lists sessions machine-wide, but a
+/// relative `trait_source.path` resolves against the *dashboard's own* cwd
+/// unless overridden. When the row carries an ALL-mode `repo_path`, join it
+/// against that path and hand the caller an absolute override; otherwise
+/// return `None` so the default-mode resolution (relative to the dashboard's
+/// own cwd, which the default scope guarantees IS the session's repo) is
+/// left untouched. Shared by every answer-path trait load (modal open, row
+/// presentation, the Answer applier's `run::set`) so all three agree.
+fn resolve_answer_trait_file(
+    session: &ctx_traits_core::procedure::session::Session,
+    repo_path: Option<&str>,
+) -> Option<String> {
+    let source_path = session.provenance.trait_source.as_ref()?.path.as_str();
+    resolve_answer_trait_file_path(source_path, repo_path)
+}
+
+fn resolve_answer_trait_file_path(source_path: &str, repo_path: Option<&str>) -> Option<String> {
+    let path = camino::Utf8Path::new(source_path);
+    if path.is_absolute() {
+        return None;
+    }
+    let repo_path = repo_path?;
+    Some(camino::Utf8Path::new(repo_path).join(path).to_string())
+}
+
+/// Ask-specific row presentation is resolved once at inventory projection and
+/// uses the same prompt helper as the answer modal.
+fn parked_ask_presentation(
+    session: &ctx_traits_core::procedure::session::Session,
+    repo_path: Option<&str>,
+) -> Option<String> {
+    let frame = session.next_frame.as_ref()?;
+    if session.status != ctx_traits_core::procedure::session::Status::WaitingOnHuman
+        || frame.kind != ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
+    {
+        return None;
+    }
+    if matches!(
+        session.last_drive_outcome.as_ref().map(|o| &o.outcome),
+        Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
+    ) {
+        return None;
+    }
+    let trait_file = resolve_answer_trait_file(session, repo_path);
+    let loaded = ctx_traits_io::run::load_trait_for_session(
+        trait_file.as_deref(),
+        None,
+        session,
+        "dashboard",
+    )
+    .ok()?;
+    let question = resolved_human_question_body(&loaded, session, frame)
+        .ok()?
+        .chars()
+        .take(80)
+        .collect::<String>();
+    let wait = session
+        .last_drive_outcome
+        .as_ref()
+        .filter(|outcome| {
+            outcome.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::WaitingOnHuman
+        })
+        .map(|outcome| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .saturating_sub(outcome.recorded_at_epoch)
+        })
+        .map(|seconds| tui::elapsed_text(Duration::from_secs(seconds)))
+        .unwrap_or_else(|| "wait unknown".to_string());
+    Some(format!("ask: {question} ({wait})"))
+}
+
+/// SESSIONS-screen grouping (P506 §3.1/§1.1): the owner's four buckets, in
+/// the fixed order [`SessionGroup::order`] renders them. Sourced today from
+/// [`SessionClass`]/`Status` behind the single [`session_group`] seam, so a
+/// later P504 typed-session-state landing is a one-function change.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum SessionGroup {
+    NeedsUserInput,
+    Pending,
+    Failed,
+    Completed,
+}
+
+impl SessionGroup {
+    /// The owner's fixed display order.
+    fn order() -> [SessionGroup; 4] {
+        [
+            SessionGroup::NeedsUserInput,
+            SessionGroup::Pending,
+            SessionGroup::Failed,
+            SessionGroup::Completed,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SessionGroup::NeedsUserInput => "needs user input",
+            SessionGroup::Pending => "pending",
+            SessionGroup::Failed => "failed",
+            SessionGroup::Completed => "completed",
+        }
+    }
+}
+
+/// Pure `(class, status) -> SessionGroup` mapping (P506 §3.1, §1.1), decided
+/// in exactly one place so a later P504 typed-session-state landing is a
+/// one-function change rather than a re-derivation scattered across the
+/// render path. `status` is `None` only for [`SessionClass::Unreadable`]
+/// (no ledger was ever parsed) — that case always lands in `Failed`, the
+/// "look at me, this is not moving" bucket, matching every other blocked
+/// status: the owner's four buckets have no home for a row that will never
+/// progress on its own, and hiding it inside `Pending` would be dishonest.
+/// `Live` always wins as `Pending` (rendered with its own live-driver
+/// indicator inside that group) regardless of the ledger's last-recorded
+/// status, mirroring [`classify_session`]'s own `Live`-wins-first rule.
+fn session_group(
+    class: SessionClass,
+    status: Option<&ctx_traits_core::procedure::session::Status>,
+    outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
+) -> SessionGroup {
+    match status {
+        None => SessionGroup::Failed,
+        Some(status) => match ctx_traits_core::procedure::activity::SessionState::derive(
+            status,
+            outcome,
+            class == SessionClass::Live,
+        ) {
+            ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman => {
+                SessionGroup::NeedsUserInput
+            }
+            ctx_traits_core::procedure::activity::SessionState::Completed => {
+                SessionGroup::Completed
+            }
+            ctx_traits_core::procedure::activity::SessionState::Running
+            | ctx_traits_core::procedure::activity::SessionState::WaitingOnAgent => {
+                SessionGroup::Pending
+            }
+            ctx_traits_core::procedure::activity::SessionState::Blocked
+            | ctx_traits_core::procedure::activity::SessionState::Failed
+            | ctx_traits_core::procedure::activity::SessionState::Cancelled => SessionGroup::Failed,
+        },
+    }
+}
+
+/// One row of the SESSIONS screen's visible list once grouping (P506 §3.1)
+/// breaks the "selection is a direct index into `sessions`" invariant: a
+/// group header (which has no verb — Enter/space toggles its own collapse)
+/// or a real session, addressed by its index into `State::sessions`. Rebuilt
+/// on every reload and every collapse toggle by [`rebuild_visible_sessions`];
+/// [`selected_session`] is the ONLY accessor every action key routes
+/// through, so a second index-into-`sessions` read never regresses (P506
+/// risk 1).
+enum VisibleRow {
+    GroupHeader {
+        group: SessionGroup,
+        count: usize,
+        collapsed: bool,
+    },
+    Session(usize),
+}
+
+/// Rebuilds [`State::sessions_visible`] from `state.sessions` and
+/// `state.collapsed_groups` — called after every reload and every collapse
+/// toggle, never in the draw path. Groups with no members emit no header
+/// (§ validation plan point 2).
+fn rebuild_visible_sessions(state: &mut State) {
+    let mut buckets: Vec<(SessionGroup, Vec<usize>)> = SessionGroup::order()
+        .into_iter()
+        .map(|g| (g, Vec::new()))
+        .collect();
+    for (idx, row) in state.sessions.iter().enumerate() {
+        let group = session_group(row.class, row.status.as_ref(), row.outcome.as_ref());
+        if let Some((_, indices)) = buckets.iter_mut().find(|(g, _)| *g == group) {
+            indices.push(idx);
+        }
+    }
+    let mut visible = Vec::new();
+    for (group, indices) in buckets {
+        if indices.is_empty() {
+            continue;
+        }
+        let collapsed = state.collapsed_groups.contains(&group);
+        visible.push(VisibleRow::GroupHeader {
+            group,
+            count: indices.len(),
+            collapsed,
+        });
+        if !collapsed {
+            visible.extend(indices.into_iter().map(VisibleRow::Session));
+        }
+    }
+    state.sessions_visible = visible;
+    state.list_sessions.set_len(state.sessions_visible.len());
+}
+
+/// Rebuilds TRUST's list projection while retaining the complete trust history
+/// in `State::trust`. Only classified orphan records are collapsed.
+fn rebuild_visible_trust(state: &mut State) {
+    state.trust_visible = state
+        .trust
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            state.show_trust_orphans || row.class != trust_story::TrustClass::Orphaned
+        })
+        .map(|(index, _)| index)
+        .collect();
+    state.list_trust.set_len(state.trust_visible.len());
+}
+
+/// The only mapping from TRUST's visible selection to its backing record.
+fn selected_trust(state: &State) -> Option<&TrustRow> {
+    state
+        .trust_visible
+        .get(state.list_trust.selected())
+        .and_then(|index| state.trust.get(*index))
+}
+
+fn toggle_trust_orphans(state: &mut State) {
+    state.show_trust_orphans = !state.show_trust_orphans;
+    rebuild_visible_trust(state);
+    refresh_trust_preview_for_selection(state);
+}
+
+/// The ONLY accessor SESSIONS' action keys (`x`/`s`/`d`/Enter/attach/preview
+/// refresh) route through (P506 §3.1, risk 1) — `None` when the cursor sits
+/// on a group header (which has no verb) or the index is out of range.
+/// Re-resolving the header/row split from the live selection, rather than
+/// caching it, means a reload that changes which index the cursor lands on
+/// is automatically safe: the existing "re-resolve by session id, never by
+/// index" doctrine still governs every ACTION's own target lookup once
+/// confirmed.
+fn selected_session(state: &State) -> Option<&SessionRow> {
+    match state.sessions_visible.get(state.list_sessions.selected())? {
+        VisibleRow::Session(idx) => state.sessions.get(*idx),
+        VisibleRow::GroupHeader { .. } => None,
+    }
+}
+
+/// P550 `S`: opens the story view for the selected SESSIONS row. Loading is
+/// synchronous — a ledger read plus a best-effort `load_plan` that degrades
+/// to ledger-only enrichment on any failure (both local file reads) — and
+/// NEVER makes a model call: the free `StoryLevel::Default` is the only
+/// level a keypress can ever resolve to (`draw_screen`'s story branch, not
+/// this function, is where that level is fixed).
+fn open_story_view(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        state.message = Some("no session selected".to_string());
+        return;
+    };
+    if row.run_id.is_empty() {
+        state.message = Some("story: no run-id recorded for this session".to_string());
+        return;
+    }
+    let run_id = row.run_id.clone();
+    match super::story::resolve_run(&run_id, None) {
+        Ok((ledger_path, session)) => {
+            let plan = super::story::load_plan(&session);
+            let activity = super::story::load_activity(&ledger_path);
+            let report = ctx_traits_core::procedure::story::build(
+                &session,
+                plan.as_ref(),
+                activity.as_ref(),
+            );
+            let title = format!(
+                "story · {} · {}",
+                session.run_id.as_str(),
+                super::story::disposition_sentence(&session, &report)
+            );
+            state.story_view = Some(StoryView {
+                session,
+                report,
+                title,
+                scroll: tui_kit::ViewportScroll::new(),
+            });
+        }
+        Err(err) => {
+            state.message = Some(format!("story: {err}"));
+        }
+    }
+}
+
+/// Every key while [`State::story_view`] is set: `q`/`Esc`/`S` closes and
+/// returns to SESSIONS with list state intact, anything scroll-shaped
+/// scrolls, everything else is a no-op — the view is read-only and never
+/// advances a run.
+fn handle_story_view_key(state: &mut State, key: &crossterm::event::KeyEvent) -> crate::Result<()> {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('S') => {
+            state.story_view = None;
+        }
+        _ => {
+            if let Some(delta) = tui_kit::scroll_key(key)
+                && let Some(view) = state.story_view.as_mut()
+            {
+                view.scroll.apply(delta, usize::MAX);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Enter/space on a SESSIONS group header (P506 §3.1): flips its collapsed
+/// state and rebuilds the visible-row list. A no-op on a session row (no
+/// group to toggle) or when nothing is selected.
+fn toggle_selected_group(state: &mut State) {
+    let Some(VisibleRow::GroupHeader { group, .. }) =
+        state.sessions_visible.get(state.list_sessions.selected())
+    else {
+        return;
+    };
+    let group = *group;
+    if !state.collapsed_groups.remove(&group) {
+        state.collapsed_groups.insert(group);
+    }
+    rebuild_visible_sessions(state);
+}
+
+/// Probe budget: which rows this tick's [`sessions_from_inventory_tagged`]
+/// call is allowed to spend a `flock` probe on. Bounding the per-tick probe
+/// set to the liveness index's own rows (typically a handful) is what gets
+/// `State::reload()` from O(every ledger) down to O(live drivers); a
+/// row-less held lock (adoption — an externally started driver, or one from
+/// before this index existed) is instead caught by [`ProbeBudget::Sweep`] on
+/// a slower cadence, never by probing every ledger every tick.
+enum ProbeBudget<'a> {
+    /// Probe only sessions the local liveness index has a row for.
+    IndexOnly(&'a std::collections::HashSet<String>),
+    /// Probe every row this call sees (the periodic full sweep).
+    Sweep,
+}
+
+impl ProbeBudget<'_> {
+    fn allows(&self, session_id: &str) -> bool {
+        match self {
+            ProbeBudget::IndexOnly(ids) => ids.contains(session_id),
+            ProbeBudget::Sweep => true,
+        }
+    }
+}
+
+fn sessions_from_inventory_tagged(
+    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
+    repo_key: Option<&str>,
+    repo_path: Option<&str>,
+    probe_budget: &ProbeBudget<'_>,
+) -> Vec<SessionRow> {
+    let mut rows = Vec::new();
+    for row in inventory {
+        let probe = if probe_budget.allows(&row.session_id) {
+            ctx_traits_io::run_control::probe(&row.ledger_path).unwrap_or(
+                ctx_traits_io::run_control::DriverProbe::Unheld {
+                    stale_metadata: None,
+                },
+            )
+        } else {
+            ctx_traits_io::run_control::DriverProbe::Unheld {
+                stale_metadata: None,
+            }
+        };
+        let (live, holder_pid) = match &probe {
+            ctx_traits_io::run_control::DriverProbe::Held(holder) => {
+                (true, holder.as_ref().map(|holder| holder.pid).unwrap_or(0))
+            }
+            ctx_traits_io::run_control::DriverProbe::Unheld { .. } => (false, 0),
+        };
+        // A slower full sweep discovers pre-index drivers and publishes the
+        // same pointer evidence ordinary machine-wide reporting consumes.
+        if live && matches!(probe_budget, ProbeBudget::Sweep) {
+            if let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
+                &row.status
+            {
+                let facts = ctx_traits_io::run_liveness::LiveRunFacts {
+                    session_id: row.session_id.clone(),
+                    run_id: session.run_id.as_str().to_string(),
+                    repo_key: repo_key.unwrap_or_default().to_string(),
+                    repo_path: repo_path.unwrap_or_default().to_string(),
+                    ledger_path: row.ledger_path.clone(),
+                    worktree_path: session
+                        .provenance
+                        .worktree
+                        .as_ref()
+                        .and_then(|worktree| worktree.path.clone()),
+                    branch: session
+                        .provenance
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.branch.clone()),
+                    log_path: None,
+                };
+                let _ = ctx_traits_io::run_liveness::upsert_row(
+                    &ctx_traits_io::run_control::runtime_root(),
+                    &facts,
+                    holder_pid,
+                    session.provenance.started_at_epoch.unwrap_or(0),
+                );
+            }
+        }
+        let (state_text, phase, elapsed_text, tokens_text, run_id, class, status, outcome) =
+            match &row.status {
+                ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
+                    let outcome = session
+                        .last_drive_outcome
+                        .as_ref()
+                        .map(|outcome| outcome.outcome.clone());
+                    let class = classify_session(live, &session.status, outcome.as_ref());
+                    let state_text = if live {
+                        "live".to_string()
+                    } else {
+                        run_view::session_status(&session.status).to_string()
+                    };
+                    let phase = parked_ask_presentation(session, repo_path)
+                        .unwrap_or_else(|| run_view::phase_text(session));
+                    let elapsed_text =
+                        tui::elapsed_text(Duration::from_secs(session.ledger.elapsed_seconds));
+                    let token_usage = session
+                        .last_drive_outcome
+                        .as_ref()
+                        .and_then(|outcome| outcome.token_usage.as_ref());
+                    let tokens_text = match token_usage {
+                        Some(usage)
+                            if usage.work_tokens.is_some() || usage.narrator_tokens.is_some() =>
+                        {
+                            format!(
+                                "{}/{}",
+                                usage
+                                    .work_tokens
+                                    .map(tui::token_text)
+                                    .unwrap_or_else(|| "-".to_string()),
+                                usage
+                                    .narrator_tokens
+                                    .map(tui::token_text)
+                                    .unwrap_or_else(|| "-".to_string())
+                            )
+                        }
+                        _ => "-".to_string(),
+                    };
+                    (
+                        state_text,
+                        phase,
+                        elapsed_text,
+                        tokens_text,
+                        session.run_id.as_str().to_string(),
+                        class,
+                        Some(session.status.clone()),
+                        outcome,
+                    )
+                }
+                ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
+                    "unreadable".to_string(),
+                    error.clone(),
+                    "-".to_string(),
+                    "-".to_string(),
+                    String::new(),
+                    SessionClass::Unreadable,
+                    None,
+                    None,
+                ),
+            };
+        rows.push(SessionRow {
+            session_id: row.session_id.clone(),
+            ledger_path: row.ledger_path.clone(),
+            run_id,
+            state_text,
+            phase,
+            elapsed_text,
+            tokens_text,
+            repo_key: repo_key.map(str::to_string),
+            repo_path: repo_path.map(str::to_string),
+            class,
+            status,
+            outcome,
+        });
+    }
+    rows.sort_by_key(|row| {
+        if row.class == SessionClass::Live {
+            0
+        } else {
+            1
+        }
+    });
+    rows
+}
+
+/// Builds both TRAITS' and TRUST's rows from the single
+/// [`dashboard_trait_inventory`] scan (P473 §4.1): TRAITS filters
+/// `origin != Some("built-in")` (byte-identical to pre-P473 rows); TRUST
+/// projects the full tier set via [`build_trust_rows`]. No second inventory
+/// scan, no second trust-store read.
+fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
+    let all = dashboard_trait_inventory()?;
+    let traits = all
+        .iter()
+        .filter(|row| row.origin.as_deref() != Some("built-in"))
+        .map(|row| TraitRow {
+            id: row.id.clone(),
+            version: row.version.clone(),
+            status: row.error.clone().unwrap_or_else(|| row.status.clone()),
+            trust: if row.error.is_some() {
+                "unreadable".to_string()
+            } else {
+                row.trust.clone()
+            },
+            canonical_digest: row.canonical_digest.clone(),
+            source_path: row.source_path.clone(),
+            error: row.error.clone(),
+        })
+        .collect();
+    let trust = build_trust_rows(&all)?;
+    Ok((traits, trust))
+}
+
+/// Projects a run inventory scan to the cheap owned facts [`run_sighting`]
+/// needs (§4.4) — called before [`merges_from_inventory`] consumes the same
+/// scan by value.
+fn run_sighting_rows(
+    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
+) -> Vec<RunSightingRow> {
+    inventory
+        .iter()
+        .filter_map(|row| {
+            let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
+                &row.status
+            else {
+                return None;
+            };
+            let canonical_digest = session.canonical_digest.as_ref()?.as_str().to_string();
+            Some(RunSightingRow {
+                trait_id: session.trait_id.clone(),
+                canonical_digest,
+                run_id: session.run_id.as_str().to_string(),
+                session_id: row.session_id.clone(),
+                modified_epoch_secs: row.modified_epoch_secs,
+            })
+        })
+        .collect()
+}
+
+/// The most recent readable run-ledger sighting (§4.4) whose `trait_id` and
+/// canonical digest both match — pure over the already-in-hand
+/// [`RunSightingRow`] projection, never re-scanning the ledger store.
+fn run_sighting(
+    rows: &[RunSightingRow],
+    trait_id: &str,
+    digest: &str,
+) -> Option<trust_story::RunSighting> {
+    rows.iter()
+        .filter(|row| row.trait_id == trait_id && row.canonical_digest == digest)
+        .max_by_key(|row| row.modified_epoch_secs)
+        .map(|row| trust_story::RunSighting {
+            run_id: row.run_id.clone(),
+            session_id: row.session_id.clone(),
+            when: format_epoch_ago(row.modified_epoch_secs),
+        })
+}
+
+/// `"<elapsed> ago"` from a Unix-epoch-seconds timestamp — the ledger's own
+/// `modified_epoch_secs`, never a claim about when the digest itself
+/// changed (§4.4: a sighting is evidence bytes ran, not evidence of when
+/// they moved).
+fn format_epoch_ago(epoch_secs: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(epoch_secs);
+    let elapsed = now.saturating_sub(epoch_secs);
+    format_elapsed_ago(Duration::from_secs(elapsed))
+}
+
+fn format_elapsed_ago(elapsed: Duration) -> String {
+    format!("{} ago", tui::human_elapsed_text(elapsed))
+}
+
+/// Pure `(last terminal frame, drive-completed) -> MergeClass` mapping
+/// (P472 §3.3), extracted out of [`merges_from_inventory`]'s inventory scan
+/// so the classification is directly unit-testable without an inventory scan
+/// or any IO. Reuses [`ctx_traits_core::procedure::session::MergeStatus::is_terminal`]
+/// and [`super::run::disposition_for_merge_status`] rather than inventing a
+/// second classifier; `drive_completed` is the exact `merge::merge`-applied
+/// test (`Status::Completed` + `last_drive_outcome.outcome == "completed"`).
+fn classify_merge(
+    last_terminal_frame: Option<&ctx_traits_core::procedure::session::MergeFrame>,
+    drive_completed: bool,
+) -> Option<MergeClass> {
+    match last_terminal_frame {
+        Some(frame) => Some(
+            match super::run::disposition_for_merge_status(frame.status) {
+                super::run::CompletionDisposition::Merged => MergeClass::Landed,
+                super::run::CompletionDisposition::Parked => MergeClass::Parked,
+                _ => MergeClass::Failed,
+            },
+        ),
+        None if drive_completed => Some(MergeClass::Mergeable),
+        None => None,
+    }
+}
+
+/// The list row's translated one-line headline (`MergeRow::headline`'s own
+/// doc contract: empty for `Mergeable`/`Landed`). A landed run has nothing
+/// to explain, so showing `merge_story`'s "landed cleanly" headline next to
+/// the `landed` class column would be redundant, not
+/// translated-vs-untranslated; a row with no terminal frame yet
+/// (`Mergeable`) has nothing to translate at all.
+fn merge_row_headline(
+    class: MergeClass,
+    last_terminal_frame: Option<&ctx_traits_core::procedure::session::MergeFrame>,
+) -> String {
+    match (class, last_terminal_frame) {
+        (MergeClass::Landed, _) | (_, None) => String::new(),
+        (_, Some(frame)) => merge_story::explain_frame(frame).headline,
+    }
+}
+
+/// MERGES-screen rows, projected from the same inventory scan
+/// [`sessions_from_inventory_tagged`] uses. Consumes `inventory` by value
+/// since each row's merge-frame history is owned data. Widened from P468's
+/// "latest frame is Parked" to every readable ledger whose last *terminal*
+/// merge frame (or completed-drive-with-no-attempt) classifies as
+/// mergeable/parked/failed/landed (§3.3) — an unreadable ledger, or a
+/// non-terminal in-progress row, produces no row. `repo_path` tags every
+/// produced row for ALL-mode git-fact gating (§3.4), mirroring
+/// `sessions_from_inventory_tagged`.
+fn merges_from_inventory(
+    inventory: Vec<ctx_traits_io::run_session::RunInventoryRow>,
+    repo_path: Option<&str>,
+) -> Vec<MergeRow> {
+    let mut rows = Vec::new();
+    for row in inventory {
+        let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } = row.status
+        else {
+            continue;
+        };
+        let last_terminal_frame = session
+            .provenance
+            .merge_frames
+            .iter()
+            .rev()
+            .find(|frame| frame.status.is_terminal());
+        let drive_completed = session.status
+            == ctx_traits_core::procedure::session::Status::Completed
+            && session
+                .last_drive_outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.outcome.is_completed());
+        let Some(class) = classify_merge(last_terminal_frame, drive_completed) else {
+            continue;
+        };
+        let stage = last_terminal_frame.map(|frame| frame.stage);
+        let headline = merge_row_headline(class, last_terminal_frame);
+        rows.push(MergeRow {
+            session_id: row.session_id,
+            run_id: session.run_id.as_str().to_string(),
+            ledger_path: row.ledger_path,
+            class,
+            stage,
+            headline,
+            phase: ctx_traits_io::run_session::session_phase(&session),
+            trait_id: session.trait_id.clone(),
+            last_frame: last_terminal_frame.cloned(),
+            worktree: session.provenance.worktree.clone(),
+            repo_path: repo_path.map(str::to_string),
+        });
+    }
+    rows
+}
+
+/// Builds TRUST's trait-centric rows (P473 §4.2): joins each visible trait
+/// (every tier, including built-ins — `all` is [`dashboard_trait_inventory`]'s
+/// unfiltered result) against its identity-bound-or-legacy trust record —
+/// the same preference [`trust_record_facts`] already implements for TRAITS
+/// — then appends one row per record [`ctx_traits_io::trust::classify_records`]
+/// classifies `Orphaned` (names no visible trait), so nothing in
+/// `trust.toml` becomes invisible. An unreadable trait row (no canonical
+/// digest was ever computed) is skipped, matching the old digest-centric
+/// `load_trust`'s own rule.
+fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
+    let document = ctx_traits_io::trust::read_store()?;
+    let current: Vec<(String, String)> = all
+        .iter()
+        .filter(|row| row.error.is_none() && !row.canonical_digest.is_empty())
+        .map(|row| (row.id.clone(), row.canonical_digest.clone()))
+        .collect();
+
+    let mut rows = Vec::new();
+    for row in all {
+        if row.error.is_some() || row.canonical_digest.is_empty() {
+            continue;
+        }
+        let record = document
+            .record_for_trait(&row.id)
+            .or_else(|| document.record(&row.canonical_digest));
+        let report_row = record.map(|record| ctx_traits_io::trust::TrustReportRow {
+            trait_id: Some(row.id.clone()),
+            digest: record.digest.clone(),
+            current_digest: Some(row.canonical_digest.clone()),
+            state: record.state,
+            freshness: if record.digest == row.canonical_digest {
+                ctx_traits_io::trust::TrustFreshness::Current
+            } else {
+                ctx_traits_io::trust::TrustFreshness::Stale
+            },
+            updated_at: record.updated_at.clone(),
+            reason: record.reason.clone(),
+            seq: record.seq,
+            superseded: false,
+        });
+        rows.push(TrustRow {
+            trait_id: Some(row.id.clone()),
+            origin: row.origin.clone().unwrap_or_else(|| "repo".to_string()),
+            family: row.family.clone(),
+            variant: row.variant.clone(),
+            current_digest: row.canonical_digest.clone(),
+            recorded_digest: record.map(|record| record.digest.clone()),
+            class: trust_story::classify_trust(report_row.as_ref()),
+            updated_at: record.and_then(|record| record.updated_at.clone()),
+            reason: record.and_then(|record| record.reason.clone()),
+        });
+    }
+
+    let classified = ctx_traits_io::trust::classify_records(&document, &current);
+    for orphan in classified
+        .into_iter()
+        .filter(|row| row.freshness == ctx_traits_io::trust::TrustFreshness::Orphaned)
+    {
+        rows.push(TrustRow {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: Some(orphan.digest.clone()),
+            class: trust_story::TrustClass::Orphaned,
+            updated_at: orphan.updated_at.clone(),
+            reason: orphan.reason.clone(),
+        });
+    }
+
+    sort_trust_rows(&mut rows);
+    Ok(rows)
+}
+
+/// The one ordering site for TRUST rows: actionable rows (a resolvable
+/// trait) sort before orphan rows, on which `a`/`b`/`A` all refuse by
+/// design — an orphan-heavy trust store must never leave the list opening
+/// on a row nothing can be done with. Ties broken by trait id, then
+/// recorded digest, mirroring `sessions_from_inventory_tagged`'s existing
+/// stable-sort precedent in this file.
+fn sort_trust_rows(rows: &mut [TrustRow]) {
+    rows.sort_by(|a, b| {
+        a.trait_id
+            .is_none()
+            .cmp(&b.trait_id.is_none())
+            .then_with(|| {
+                a.trait_id
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.trait_id.as_deref().unwrap_or(""))
+            })
+            .then_with(|| {
+                a.recorded_digest
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.recorded_digest.as_deref().unwrap_or(""))
+            })
+    });
+}
+
+/// Entry point: run the dashboard until the user quits. Returns cleanly on
+/// every path (quit key, panic-safe teardown via `RatatuiPane`); dashboard
+/// exit never signals or otherwise touches any listed run.
+pub(crate) fn run() -> crate::Result<()> {
+    let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
+        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+            path: "<tty>".to_string(),
+            source,
+        })
+    })?;
+    let mut state = State::new();
+    state.reload();
+    // `State::new()` already seeds `focus` on the SESSIONS list pane, which
+    // every tree (even the narrow-terminal single-leaf one) includes; the
+    // first `draw_screen` call reconciles it against the real tree.
+    let mut last_reload = std::time::Instant::now();
+    while !state.quit && !pane.detached() {
+        state.apply_snapshots();
+        draw_screen(&mut pane, &mut state).map_err(|source| {
+            ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+                path: "<tty>".to_string(),
+                source,
+            })
+        })?;
+        let key = pane.poll_key(TICK).map_err(|source| {
+            ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+                path: "<tty>".to_string(),
+                source,
+            })
+        })?;
+        let Some(key) = key else {
+            state.apply_snapshots();
+            // Timed out waiting for a key: on a bounded interval, reload the
+            // list screens' stores so an externally started/completed drive
+            // (or one spawned by `n`, or a run that finished while listed)
+            // appears without the user having to press `r`. `State::reload`
+            // also refreshes the SESSIONS preview/attach pane at this same
+            // cadence — never per-draw.
+            if last_reload.elapsed() >= RELOAD_INTERVAL {
+                state.reload();
+                last_reload = std::time::Instant::now();
+            }
+            continue;
+        };
+        // Dashboard action failures are rendered in-place. Terminal polling
+        // and drawing remain fatal because the terminal can no longer be
+        // safely owned after either fails.
+        if let Err(error) = handle_key(&mut pane, &mut state, key) {
+            state.message = Some(error.to_string());
+        }
+        last_reload = std::time::Instant::now();
+    }
+    Ok(())
+}
+
+fn handle_key(
+    pane: &mut RatatuiPane,
+    state: &mut State,
+    key: crossterm::event::KeyEvent,
+) -> crate::Result<()> {
+    if let Some((tag, outcome)) = state.modal_host.handle_key(&key) {
+        return apply_action(pane, state, tag, outcome);
+    }
+    if state.modal_host.is_open() {
+        // The modal is still open and consumed this key as an edit
+        // keystroke (`ModalOutcome::Pending`) — every other key routes
+        // through it exclusively (the focus trap), never falling through to
+        // screen-level handling below.
+        return Ok(());
+    }
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state
+            .modal_host
+            .open(Action::Exit, Modal::confirm("exit", "Quit ctx traits?"));
+        return Ok(());
+    }
+    if state.story_view.is_some() {
+        return handle_story_view_key(state, &key);
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        let dir = match key.code {
+            KeyCode::Up => Some(tui_panes::MoveDir::Up),
+            KeyCode::Down => Some(tui_panes::MoveDir::Down),
+            KeyCode::Left => Some(tui_panes::MoveDir::Left),
+            KeyCode::Right => Some(tui_panes::MoveDir::Right),
+            _ => None,
+        };
+        if let Some(dir) = dir {
+            let was_attached = session_progress_attached(state);
+            state.focus.move_dir(dir, &state.last_pane_layout);
+            update_session_attachment_for_focus(state, was_attached);
+            return Ok(());
+        }
+    }
+    if handle_navigation_key(state, &key) {
+        return Ok(());
+    }
+    if handle_focus_key(state, &key) {
+        return Ok(());
+    }
+    match key.code {
+        KeyCode::Char('q') => {
+            state
+                .modal_host
+                .open(Action::Exit, Modal::confirm("exit", "Quit ctx traits?"));
+        }
+        KeyCode::Tab => {
+            let screens = Screen::all();
+            let idx = screens.iter().position(|s| *s == state.screen).unwrap_or(0);
+            state.switch_screen(screens[(idx + 1) % screens.len()]);
+        }
+        KeyCode::BackTab => {
+            let screens = Screen::all();
+            let idx = screens.iter().position(|s| *s == state.screen).unwrap_or(0);
+            state.switch_screen(screens[(idx + screens.len() - 1) % screens.len()]);
+        }
+        KeyCode::Char('1') => state.switch_screen(Screen::Sessions),
+        KeyCode::Char('2') => state.switch_screen(Screen::Traits),
+        KeyCode::Char('3') => state.switch_screen(Screen::Merges),
+        KeyCode::Char('4') => state.switch_screen(Screen::Trust),
+        KeyCode::Char('r') => state.reload(),
+        KeyCode::Char(' ') if state.screen == Screen::Sessions => toggle_selected_group(state),
+        KeyCode::Char('n') if state.screen == Screen::Sessions => {
+            open_spawn_modal(state);
+        }
+        KeyCode::Char('x') if state.screen == Screen::Sessions => open_kill_modal(state),
+        KeyCode::Char('s') if state.screen == Screen::Sessions => open_resume_modal(state),
+        KeyCode::Char('S') if state.screen == Screen::Sessions => open_story_view(state),
+        KeyCode::Char('a') if state.screen == Screen::Sessions => open_answer_modal(state),
+        KeyCode::Char('d') if state.screen == Screen::Sessions => open_delete_modal(state),
+        KeyCode::Char('v')
+            if state.screen == Screen::Sessions || state.screen == Screen::Merges =>
+        {
+            state.all_repos = !state.all_repos;
+            state.list_sessions.reset();
+            state.list_merges.reset();
+            state.reload();
+        }
+        KeyCode::Char('a') if state.screen == Screen::Traits => {
+            open_trait_trust_modal(state, ctx_traits_io::trust::TrustState::Verified);
+        }
+        KeyCode::Char('b') if state.screen == Screen::Traits => {
+            open_trait_trust_modal(state, ctx_traits_io::trust::TrustState::Blocked);
+        }
+        KeyCode::Char('e') if state.screen == Screen::Traits => {
+            edit_selected_trait_source(pane, state)?;
+        }
+        KeyCode::Char('x') if state.screen == Screen::Traits => {
+            explain_selected_trait(state);
+        }
+        KeyCode::Char('m') if state.screen == Screen::Merges => {
+            open_merge_retry_modal(state, false)
+        }
+        KeyCode::Char('d') if state.screen == Screen::Merges => open_merge_retry_modal(state, true),
+        KeyCode::Char('p') if state.screen == Screen::Merges => print_merge_worktree_path(state),
+        KeyCode::Char('x') if state.screen == Screen::Merges => open_merge_drop_modal(state),
+        KeyCode::Char('o') if state.screen == Screen::Trust => {
+            toggle_trust_orphans(state);
+        }
+        KeyCode::Char('a') if state.screen == Screen::Trust => {
+            open_trust_modal(state, ctx_traits_io::trust::TrustState::Verified);
+        }
+        KeyCode::Char('b') if state.screen == Screen::Trust => {
+            open_trust_modal(state, ctx_traits_io::trust::TrustState::Blocked);
+        }
+        KeyCode::Char(' ') if state.screen == Screen::Trust => {
+            if let Some(row) = selected_trust(state) {
+                if let Some(id) = row.trait_id.clone() {
+                    state.trust_marks.toggle(id);
+                }
+            }
+        }
+        KeyCode::Char('A') if state.screen == Screen::Trust => {
+            if state.trust_marks.is_empty() {
+                open_trust_family_modal(state, ctx_traits_io::trust::TrustState::Verified);
+            } else {
+                open_trust_marked_modal(state, ctx_traits_io::trust::TrustState::Verified);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Focus transitions are local state changes, kept apart from action routing
+/// so `Enter` and `Esc` remain directly state-machine-testable.
+fn handle_focus_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            if state.screen == Screen::Sessions {
+                state.attached_session_id = None;
+                state.session_preview_follow = false;
+            }
+            focus_pane(&mut state.focus, list_pane_id(state.screen));
+            true
+        }
+        KeyCode::Enter if state.screen == Screen::Sessions => {
+            match state.sessions_visible.get(state.list_sessions.selected()) {
+                Some(VisibleRow::GroupHeader { .. }) => toggle_selected_group(state),
+                _ => attach_selected(state),
+            }
+            true
+        }
+        KeyCode::Enter => {
+            focus_pane(&mut state.focus, preview_pane_id(state.screen));
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Dashboard-local navigation deliberately differs from the generic focused
+/// pane behavior: list movement is always available, while paging addresses a
+/// preview even before it has received focus.
+fn handle_navigation_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
+    let selection_delta = match key.code {
+        KeyCode::Down | KeyCode::Char('j') => Some(1),
+        KeyCode::Up | KeyCode::Char('k') => Some(-1),
+        _ => None,
+    };
+    if let Some(delta) = selection_delta {
+        // Moving the list must also make its focus and SESSIONS attachment
+        // agree with the row the next preview request will address.
+        focus_pane(&mut state.focus, list_pane_id(state.screen));
+        state.move_selection(delta);
+        state.trait_explanation = None;
+        match state.screen {
+            Screen::Sessions => refresh_preview_for_selection(state),
+            Screen::Traits => refresh_trait_preview_for_selection(state),
+            Screen::Merges => refresh_merge_preview_for_selection(state),
+            Screen::Trust => refresh_trust_preview_for_selection(state),
+        }
+        return true;
+    }
+
+    let Some(delta @ (ScrollDelta::Up(_) | ScrollDelta::Down(_))) = tui_kit::scroll_key(key) else {
+        return false;
+    };
+    if !matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
+        return false;
+    }
+    let pane_id = if session_progress_attached(state) {
+        // An explicitly attached SESSIONS pane keeps its progress/narration
+        // target; every other page key targets the screen's primary preview.
+        state
+            .focus
+            .current()
+            .unwrap_or(preview_pane_id(state.screen))
+    } else {
+        preview_pane_id(state.screen)
+    };
+    apply_pane_scroll(state, pane_id, delta);
+    if pane_id == PANE_SESSIONS_PROGRESS {
+        state.session_preview_follow = state
+            .pane_scrolls
+            .get(pane_id)
+            .is_at_bottom(state_pane_scroll_rows(state, pane_id));
+    }
+    true
+}
+
+/// The `PaneId` of `screen`'s own list pane — the target `Esc` focuses back
+/// onto and list movement restores before refreshing its preview.
+fn list_pane_id(screen: Screen) -> PaneId {
+    match screen {
+        Screen::Sessions => PANE_SESSIONS_LIST,
+        Screen::Traits => PANE_TRAITS_LIST,
+        Screen::Merges => PANE_MERGES_LIST,
+        Screen::Trust => PANE_TRUST_LIST,
+    }
+}
+
+/// The `PaneId` `Enter` focuses on `screen` (P506 §3.3) — SESSIONS' progress
+/// pane, or the single preview pane on every other screen.
+fn preview_pane_id(screen: Screen) -> PaneId {
+    match screen {
+        Screen::Sessions => PANE_SESSIONS_PROGRESS,
+        Screen::Traits => PANE_TRAITS_PREVIEW,
+        Screen::Merges => PANE_MERGES_PREVIEW,
+        Screen::Trust => PANE_TRUST_PREVIEW,
+    }
+}
+
+/// Moves `ring`'s focus to `target`, bounded by the ring's own (small, fixed)
+/// leaf count — a no-op if `target` is not one of its leaves.
+fn focus_pane(ring: &mut FocusRing, target: PaneId) {
+    for _ in 0..8 {
+        if ring.current() == Some(target) {
+            return;
+        }
+        ring.next();
+    }
+}
+
+fn session_progress_attached(state: &State) -> bool {
+    state.screen == Screen::Sessions
+        && matches!(
+            state.focus.current(),
+            Some(PANE_SESSIONS_PROGRESS) | Some(PANE_SESSIONS_NARRATION)
+        )
+}
+
+fn update_session_attachment_for_focus(state: &mut State, was_attached: bool) {
+    let now_attached = session_progress_attached(state);
+    if state.screen != Screen::Sessions || was_attached == now_attached {
+        return;
+    }
+    if now_attached {
+        state.attached_session_id = selected_session(state).map(|row| row.session_id.clone());
+        state.session_preview_follow = true;
+        follow_current_session_preview(state);
+        state.reload();
+    } else {
+        state.attached_session_id = None;
+        state.session_preview_follow = false;
+    }
+}
+
+fn state_pane_scroll_rows(state: &State, pane_id: PaneId) -> usize {
+    state
+        .last_pane_layout
+        .rect(pane_id)
+        .map_or(0, |rect| rect.height.saturating_sub(2) as usize)
+}
+
+/// Applies the explicit attachment follow state. Master-list previews never
+/// enter this path and therefore retain their normal top-aligned position.
+fn follow_session_preview(
+    rows: usize,
+    scroll: &mut tui_kit::ViewportScroll,
+    follow: bool,
+    new_len: usize,
+) {
+    scroll.set_len(new_len);
+    if follow {
+        scroll.apply(ScrollDelta::Down(new_len), rows);
+    }
+}
+
+fn follow_current_session_preview(state: &mut State) {
+    let rows = state_pane_scroll_rows(state, PANE_SESSIONS_PROGRESS);
+    let len = state
+        .session_preview
+        .as_ref()
+        .map_or(0, |view| view.lines.len());
+    follow_session_preview(
+        rows,
+        state.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
+        state.session_preview_follow,
+        len,
+    );
+}
+
+/// The scrollable content length backing `pane_id`, for clamping its
+/// [`ViewportScroll`](tui_kit::ViewportScroll) before applying a scroll
+/// delta — mirrors each screen's own preview-length source.
+fn pane_content_len(state: &State, pane_id: PaneId) -> usize {
+    if pane_id == PANE_SESSIONS_PROGRESS {
+        state.session_preview.as_ref().map_or(0, |p| p.lines.len())
+    } else if pane_id == PANE_SESSIONS_NARRATION {
+        sessions_narration_lines(state).len()
+    } else if pane_id == PANE_TRAITS_PREVIEW {
+        state.trait_preview.as_ref().map_or(0, |p| p.lines.len())
+    } else if pane_id == PANE_MERGES_PREVIEW {
+        state.merge_preview.as_ref().map_or(0, |p| p.lines.len())
+    } else if pane_id == PANE_TRUST_PREVIEW {
+        state.trust_preview.as_ref().map_or(0, |p| p.lines.len())
+    } else {
+        0
+    }
+}
+
+fn apply_pane_scroll(state: &mut State, pane_id: PaneId, delta: ScrollDelta) {
+    let rows = state_pane_scroll_rows(state, pane_id);
+    if rows == 0 {
+        return;
+    }
+    let len = pane_content_len(state, pane_id);
+    let scroll = state.pane_scrolls.get_mut(pane_id);
+    scroll.set_len(len);
+    scroll.apply(delta, rows);
+}
+
+/// The draw pass knows the actual content and inner viewport dimensions, so it
+/// is the authoritative place to repair persisted offsets after resize or
+/// content changes.
+fn clamp_visible_pane_scroll(state: &mut State, pane_id: PaneId) {
+    let rows = state_pane_scroll_rows(state, pane_id);
+    if rows == 0 {
+        return;
+    }
+    let len = pane_content_len(state, pane_id);
+    let scroll = state.pane_scrolls.get_mut(pane_id);
+    scroll.set_len(len);
+    scroll.clamp(rows);
+}
+
+// ---------------------------------------------------------------------------
+// SESSIONS: preview/attach reconstruction (P469 §3.2)
+// ---------------------------------------------------------------------------
+
+/// Rebuilds (or reuses) [`State::session_preview`] for the currently
+/// selected SESSIONS row. A selection change always rebuilds (a different
+/// session_id is a different cache key); an unchanged selection only
+/// rebuilds when the ledger's `state_digest` moved since the last build
+/// (checked by [`refresh_attached_view`]) — so the 2s reload tick never
+/// re-parses a trait package for a session that has not advanced.
+fn refresh_preview_for_selection(state: &mut State) {
+    // Preview reads are worker-owned. Do not show a prior row while the new
+    // selected row's request is in flight.
+    state.session_preview = None;
+    state.attached_session_id = None;
+    state.session_preview_follow = false;
+    state.reload();
+}
+
+/// Reload-path refresh for the attached progress/narration pane: the
+/// invariant §3.3 already established for actions (identity-addressed by
+/// `session_id`, re-resolved by id rather than by list position) applies
+/// here too — once attached, the pane must never be substituted with a
+/// different row's view just because a reload reordered or removed rows.
+/// Re-points the SESSIONS list's selection at the attached session's current
+/// VISIBLE position when it is still listed (so backing out lands on the
+/// right row, expanding its group if that group is collapsed); when the
+/// attached session has left the inventory entirely, the pane says so in
+/// place rather than being replaced by whatever now occupies the old index.
+fn refresh_attached_session(state: &mut State) {
+    let Some(session_id) = state.attached_session_id.clone().or_else(|| {
+        state
+            .session_preview
+            .as_ref()
+            .map(|preview| preview.session_id.clone())
+    }) else {
+        return;
+    };
+    match state
+        .sessions
+        .iter()
+        .position(|row| row.session_id == session_id)
+    {
+        Some(idx) => {
+            if let Some(group) = state
+                .sessions
+                .get(idx)
+                .map(|row| session_group(row.class, row.status.as_ref(), row.outcome.as_ref()))
+            {
+                if state.collapsed_groups.remove(&group) {
+                    rebuild_visible_sessions(state);
+                }
+            }
+            if let Some(visible_idx) = state.sessions_visible.iter().position(
+                |row| matches!(row, VisibleRow::Session(session_idx) if *session_idx == idx),
+            ) {
+                state.list_sessions.set_selected(visible_idx);
+            }
+        }
+        None => {
+            if let Some(preview) = &mut state.session_preview {
+                preview.lines = vec![RLine::from(Span::styled(
+                    format!("({session_id} is no longer listed)"),
+                    Style::default().add_modifier(Modifier::DIM),
+                ))];
+                preview.degraded = Some("session no longer listed".to_string());
+            }
+        }
+    }
+}
+
+fn build_attached_view(
+    session_id: &str,
+    ledger_path: &camino::Utf8PathBuf,
+    hint_run_id: &str,
+) -> AttachedView {
+    match ctx_traits_io::run_session::read_run_session(ledger_path) {
+        Ok(session) => {
+            let state_digest = session.state_digest.to_string();
+            let run_id = session.run_id.as_str().to_string();
+            let trace_tail = latest_trace_tail(&run_id);
+            let (base_lines, degraded) = match reconstruct_lines(&session) {
+                Ok(lines) => (lines, None),
+                Err(error) => (
+                    fallback_lines(&session, &error.to_string()),
+                    Some(error.to_string()),
+                ),
+            };
+            AttachedView {
+                session_id: session_id.to_string(),
+                ledger_path: ledger_path.clone(),
+                run_id,
+                state_digest,
+                lines: compose_trace_lines(&base_lines, &trace_tail),
+                base_lines,
+                trace_tail,
+                degraded,
+            }
+        }
+        Err(error) => AttachedView {
+            session_id: session_id.to_string(),
+            ledger_path: ledger_path.clone(),
+            run_id: hint_run_id.to_string(),
+            state_digest: String::new(),
+            base_lines: Vec::new(),
+            trace_tail: Vec::new(),
+            lines: vec![RLine::from(format!("(unreadable: {error})"))],
+            degraded: Some(error.to_string()),
+        },
+    }
+}
+
+/// Re-reads `view`'s own ledger. An unchanged digest skips trait+plan
+/// reconstruction but still replaces a changed flushed trace suffix.
+fn refresh_attached_view(view: &mut AttachedView) {
+    match ctx_traits_io::run_session::read_run_session(&view.ledger_path) {
+        Ok(session) => {
+            let state_digest = session.state_digest.to_string();
+            let trace_tail = latest_trace_tail(session.run_id.as_str());
+            if state_digest == view.state_digest && !view.base_lines.is_empty() {
+                replace_trace_tail(view, trace_tail);
+                return;
+            }
+            view.state_digest = state_digest;
+            view.run_id = session.run_id.as_str().to_string();
+            match reconstruct_lines(&session) {
+                Ok(lines) => {
+                    view.base_lines = lines;
+                    view.trace_tail = trace_tail;
+                    view.lines = compose_trace_lines(&view.base_lines, &view.trace_tail);
+                    view.degraded = None;
+                }
+                Err(error) => {
+                    view.base_lines = fallback_lines(&session, &error.to_string());
+                    view.trace_tail = trace_tail;
+                    view.lines = compose_trace_lines(&view.base_lines, &view.trace_tail);
+                    view.degraded = Some(error.to_string());
+                }
+            }
+        }
+        Err(error) => {
+            mark_view_unreadable(view, error.to_string());
+        }
+    }
+}
+
+/// The one reconstruction path (§3.2): resolves the ledger's own recorded
+/// trait source (with digest verification), rebuilds the plan, and renders
+/// through the exact same function the live `--progress tui` pane uses.
+fn reconstruct_lines(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> crate::Result<Vec<RLine<'static>>> {
+    let loaded = ctx_traits_io::run::load_trait_for_session(None, None, session, "dashboard")?;
+    let plan = ctx_traits_core::procedure::run::plan_procedure_run(
+        &loaded.trait_ref,
+        session.run_id.clone(),
+    )?;
+    let lines = run_view::render_ledger_run_view(&loaded.trait_ref, &plan, session);
+    Ok(lines.iter().map(tui_ratatui::render_line).collect())
+}
+
+/// Degrade path (§3.2): trait resolution can fail (source moved, digests
+/// moved, or a foreign-repository row) — this is never a crash or an empty
+/// pane, just today's plain ledger summary plus the sanitized trace tail.
+fn fallback_lines(
+    session: &ctx_traits_core::procedure::session::Session,
+    resolution_error: &str,
+) -> Vec<RLine<'static>> {
+    let mut lines = vec![
+        RLine::from(Span::styled(
+            format!("(live view unavailable: {resolution_error})"),
+            Style::default().add_modifier(Modifier::DIM),
+        )),
+        RLine::default(),
+        RLine::from(format!(
+            "status: {}",
+            run_view::session_status(&session.status)
+        )),
+        RLine::from(format!(
+            "elapsed-seconds: {}",
+            session.ledger.elapsed_seconds
+        )),
+    ];
+    if let Some(outcome) = &session.last_drive_outcome {
+        lines.push(RLine::from(format!(
+            "last-drive-outcome: {}",
+            outcome.outcome.as_str()
+        )));
+    }
+    lines
+}
+
+fn latest_trace_tail(run_id: &str) -> Vec<String> {
+    (!run_id.is_empty())
+        .then(|| ctx_traits_io::debug_trace::tail_latest_attempt_trace(run_id, 20))
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn compose_trace_lines(
+    base_lines: &[RLine<'static>],
+    trace_tail: &[String],
+) -> Vec<RLine<'static>> {
+    let mut lines = base_lines.to_vec();
+    if !trace_tail.is_empty() {
+        lines.push(RLine::default());
+        lines.push(RLine::from("recent trace (best-effort):"));
+        lines.extend(
+            trace_tail
+                .iter()
+                .map(|line| RLine::from(sanitize_trace_line(line))),
+        );
+    }
+    lines
+}
+
+fn replace_trace_tail(view: &mut AttachedView, trace_tail: Vec<String>) {
+    if view.trace_tail != trace_tail {
+        view.trace_tail = trace_tail;
+        view.lines = compose_trace_lines(&view.base_lines, &view.trace_tail);
+    }
+}
+
+fn mark_view_unreadable(view: &mut AttachedView, error: String) {
+    // Force a recovered ledger with the same prior digest through reconstruction.
+    view.state_digest.clear();
+    view.base_lines.clear();
+    view.trace_tail.clear();
+    view.lines = vec![RLine::from(format!("(unreadable: {error})"))];
+    view.degraded = Some(error);
+}
+
+fn session_preview_matches_current(state: &State, session_id: &str) -> bool {
+    let attached = matches!(
+        state.focus.current(),
+        Some(PANE_SESSIONS_PROGRESS) | Some(PANE_SESSIONS_NARRATION)
+    );
+    if attached {
+        state.attached_session_id.as_deref() == Some(session_id)
+    } else {
+        selected_session(state).is_some_and(|row| row.session_id == session_id)
+    }
+}
+
+/// Strip ASCII control bytes (including raw ANSI escape sequences) from one
+/// best-effort debug-trace line before it reaches the terminal: this text
+/// originates from an external harness's raw captured stdout — never a
+/// trusted internal source — and rendering it unsanitized could otherwise
+/// let a misbehaving/malicious harness inject cursor-control or
+/// alternate-screen escapes into the dashboard's own terminal state.
+fn sanitize_trace_line(line: &str) -> String {
+    line.chars()
+        .filter(|ch| !ch.is_control() || *ch == '\t')
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// TRAITS: preview reconstruction (P471 §4.2–4.3)
+// ---------------------------------------------------------------------------
+
+/// The cache gate (§4.3, test-covered): a pure predicate over the cached key
+/// (if any) and the selected row's current key, so the 2s reload tick and
+/// every selection change funnel through the exact same "does this need a
+/// rebuild" decision as the unit tests exercise, no wall-clock or call-count
+/// involved.
+fn trait_preview_needs_rebuild(
+    cached: Option<(&str, &str)>,
+    trait_id: &str,
+    canonical_digest: &str,
+) -> bool {
+    match cached {
+        Some((cached_id, cached_digest)) => {
+            cached_id != trait_id || cached_digest != canonical_digest
+        }
+        None => true,
+    }
+}
+
+/// Rebuilds (or reuses) [`State::trait_preview`] for the currently selected
+/// TRAITS row, gated by [`trait_preview_needs_rebuild`] — never in the draw
+/// path, only on selection change, reload, and (forced) after an edit.
+fn refresh_trait_preview_for_selection(state: &mut State) {
+    refresh_trait_preview_impl(state, false);
+}
+
+/// Forces a rebuild regardless of the cache key: used after an EDIT SOURCE
+/// round-trip (§4.6), where the canonical digest deliberately does NOT move
+/// (editing authored source never touches the generated artifact) but the
+/// preview's drift/error facts must still refresh.
+fn force_rebuild_trait_preview_for_selection(state: &mut State) {
+    refresh_trait_preview_impl(state, true);
+}
+
+fn refresh_trait_preview_impl(state: &mut State, force: bool) {
+    let Some(row) = state.traits.get(state.selected()) else {
+        state.trait_preview = None;
+        return;
+    };
+    let cached = state
+        .trait_preview
+        .as_ref()
+        .map(|preview| (preview.trait_id.as_str(), preview.canonical_digest.as_str()));
+    if !force && !trait_preview_needs_rebuild(cached, &row.id, &row.canonical_digest) {
+        return;
+    }
+    let trust_document = ctx_traits_io::trust::read_store().unwrap_or_default();
+    state.trait_preview = Some(build_trait_preview(row, &trust_document));
+}
+
+/// IO edge (§4.2): resolves the trait document, the trust record, and a
+/// bounded source excerpt, then hands off to the pure [`trait_preview_lines`]
+/// for rendering. `trust_document` is passed in rather than re-read per
+/// selection — `load_trust` already reads it once per reload.
+fn build_trait_preview(
+    row: &TraitRow,
+    trust_document: &ctx_traits_io::trust::Document,
+) -> TraitPreview {
+    let facts = trait_preview_facts(row, trust_document);
+    let lines = trait_preview_lines(&facts)
+        .iter()
+        .map(tui_ratatui::render_line)
+        .collect();
+    TraitPreview {
+        trait_id: row.id.clone(),
+        canonical_digest: row.canonical_digest.clone(),
+        lines,
+    }
+}
+
+fn trait_preview_facts(
+    row: &TraitRow,
+    trust_document: &ctx_traits_io::trust::Document,
+) -> TraitPreviewFacts {
+    let (trust_state, trust_reason, trust_stale, has_trust_record) =
+        trust_record_facts(trust_document, &row.id, &row.canonical_digest);
+    if let Some(error) = &row.error {
+        return TraitPreviewFacts {
+            id: row.id.clone(),
+            version: row.version.clone(),
+            status: row.status.clone(),
+            canonical_digest: row.canonical_digest.clone(),
+            trust_state,
+            trust_reason,
+            trust_stale,
+            has_trust_record,
+            // Drift is intentionally a selected-preview cost, never part of
+            // the TRAITS inventory scan.
+            drift: dashboard_trait_drift(&row.source_path),
+            source_drift_checked: false,
+            procedure: ProcedureShape::Unknown,
+            source_path: row.source_path.clone(),
+            source_excerpt: Vec::new(),
+            error: Some(error.clone()),
+        };
+    }
+    let (procedure, load_error) = match ctx_traits_io::run::load_trait(&row.source_path) {
+        Ok((trait_ref, ..)) => {
+            let procedure = match &trait_ref.procedure {
+                None => ProcedureShape::GuidanceOnly,
+                Some(procedure) => ProcedureShape::Sequence(
+                    procedure
+                        .sequence
+                        .iter()
+                        .map(|item| {
+                            (
+                                item.id.clone().unwrap_or_else(|| "(unnamed)".to_string()),
+                                item.kind
+                                    .map(sequence_kind_label)
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| "(no kind)".to_string()),
+                            )
+                        })
+                        .collect(),
+                ),
+            };
+            (procedure, None)
+        }
+        Err(error) => (ProcedureShape::Unknown, Some(error.to_string())),
+    };
+    let editable_source = dashboard_trait_editable_source(&row.source_path);
+    let source_path = editable_source
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| row.source_path.clone());
+    let source_excerpt = editable_source
+        .as_deref()
+        .map(|path| read_source_excerpt(path, 40))
+        .unwrap_or_default();
+    TraitPreviewFacts {
+        id: row.id.clone(),
+        version: row.version.clone(),
+        status: row.status.clone(),
+        canonical_digest: row.canonical_digest.clone(),
+        trust_state,
+        trust_reason,
+        trust_stale,
+        has_trust_record,
+        drift: dashboard_trait_drift(&row.source_path),
+        // `dashboard_trait_drift` unconditionally passes `skip_cdk_drift:
+        // true` (lifecycle_reporting.rs), so the authored source is never
+        // actually compared here yet.
+        source_drift_checked: false,
+        procedure,
+        source_path,
+        source_excerpt,
+        error: load_error,
+    }
+}
+
+/// Joins `trust_document` against `trait_id`/`canonical_digest` (§4.2 point
+/// 3): an identity-bound record (`record_for_trait`) is preferred, matching
+/// the write path this screen itself now uses (§4.4); a legacy digest-only
+/// record is the fallback. Returns `(state, reason, stale, has_record)` —
+/// `stale` is `load_trust`'s own "record's digest moved" notion, reused
+/// rather than re-derived.
+fn trust_record_facts(
+    document: &ctx_traits_io::trust::Document,
+    trait_id: &str,
+    canonical_digest: &str,
+) -> (String, String, bool, bool) {
+    if let Some(record) = document.record_for_trait(trait_id) {
+        let stale = record.digest != canonical_digest;
+        return (
+            record.state.as_str().to_string(),
+            record.reason.clone().unwrap_or_default(),
+            stale,
+            true,
+        );
+    }
+    if let Some(record) = document.record(canonical_digest) {
+        return (
+            record.state.as_str().to_string(),
+            record.reason.clone().unwrap_or_default(),
+            false,
+            true,
+        );
+    }
+    ("pending".to_string(), String::new(), false, false)
+}
+
+/// Bounded read (§4.2 point 4): reads at most `max_lines` lines via a
+/// `BufReader`, never slurping an arbitrarily large source file into memory
+/// first.
+fn read_source_excerpt(path: &camino::Utf8Path, max_lines: usize) -> Vec<String> {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
+        return Vec::new();
+    };
+    std::io::BufReader::new(file)
+        .lines()
+        .take(max_lines)
+        .map_while(Result::ok)
+        .collect()
+}
+
+/// Pure renderer (§4.2, directly unit-testable): no IO, just `facts` ->
+/// styled lines. An error surfaces at the top in `Tone::Fail` (§4.6's degrade
+/// path) with the rest of the pane still rendering from whatever facts
+/// survive — never an empty pane.
+fn trait_preview_lines(facts: &TraitPreviewFacts) -> Vec<tui::Line> {
+    let mut lines = Vec::new();
+    if let Some(error) = &facts.error {
+        let mut line = tui::Line::blank();
+        line.push(format!("({error})"), tui::Tone::Fail);
+        lines.push(line);
+        lines.push(tui::Line::blank());
+    }
+
+    let mut header = tui::Line::blank();
+    header.push(format!("{} ", facts.id), tui::Tone::Bold);
+    header.push(format!("v{}", facts.version), tui::Tone::Muted);
+    lines.push(header);
+
+    let mut status_line = tui::Line::blank();
+    status_line.push("status: ", tui::Tone::Muted);
+    status_line.push(facts.status.clone(), tui::Tone::Default);
+    lines.push(status_line);
+    lines.push(tui::Line::blank());
+
+    let mut procedure_header = tui::Line::blank();
+    procedure_header.push("procedure:", tui::Tone::Muted);
+    lines.push(procedure_header);
+    match &facts.procedure {
+        ProcedureShape::Unknown => {
+            let mut line = tui::Line::blank();
+            line.push(
+                "(procedure unknown — trait could not be read)",
+                tui::Tone::Fail,
+            );
+            lines.push(line);
+        }
+        ProcedureShape::GuidanceOnly => {
+            let mut line = tui::Line::blank();
+            line.push("(no procedure — guidance-only trait)", tui::Tone::Muted);
+            lines.push(line);
+        }
+        ProcedureShape::Sequence(items) if items.is_empty() => {
+            let mut line = tui::Line::blank();
+            line.push(
+                "(procedure declared with no sequence items)",
+                tui::Tone::Muted,
+            );
+            lines.push(line);
+        }
+        ProcedureShape::Sequence(items) => {
+            for (id, kind) in items {
+                let mut line = tui::Line::blank();
+                line.push(format!("  {id} "), tui::Tone::Default);
+                line.push(format!("({kind})"), tui::Tone::Muted);
+                lines.push(line);
+            }
+        }
+    }
+    lines.push(tui::Line::blank());
+
+    let mut digest_line = tui::Line::blank();
+    digest_line.push("digest: ", tui::Tone::Muted);
+    digest_line.push(
+        if facts.canonical_digest.is_empty() {
+            "(unreadable)".to_string()
+        } else {
+            facts.canonical_digest.clone()
+        },
+        tui::Tone::Default,
+    );
+    lines.push(digest_line);
+
+    let mut trust_line = tui::Line::blank();
+    trust_line.push("trust: ", tui::Tone::Muted);
+    let trust_tone = match facts.trust_state.as_str() {
+        "verified" => tui::Tone::Pass,
+        "blocked" => tui::Tone::Fail,
+        _ => tui::Tone::Default,
+    };
+    trust_line.push(facts.trust_state.clone(), trust_tone);
+    lines.push(trust_line);
+
+    if !facts.trust_reason.is_empty() {
+        let mut reason_line = tui::Line::blank();
+        reason_line.push("reason: ", tui::Tone::Muted);
+        reason_line.push(facts.trust_reason.clone(), tui::Tone::Default);
+        lines.push(reason_line);
+    }
+
+    if facts.has_trust_record && facts.trust_stale {
+        let mut line = tui::Line::blank();
+        line.push(
+            "trust record is for an older digest — re-approval required",
+            tui::Tone::Warn,
+        );
+        lines.push(line);
+    }
+
+    let mut drift_line = tui::Line::blank();
+    drift_line.push("drift: ", tui::Tone::Muted);
+    drift_line.push(facts.drift.clone(), tui::Tone::Default);
+    lines.push(drift_line);
+    // The pane must never present a positive all-clear over a narrower
+    // scope than it appears to cover (blocker
+    // `trait-preview-drift-omits-authored-source`) — this qualifier is a
+    // required, always-present fact, not a conditional decoration, so an
+    // authored-source edit that leaves the canonical digest untouched can
+    // never look like an unqualified clean bill.
+    if !facts.source_drift_checked {
+        let mut line = tui::Line::blank();
+        line.push(
+            "authored source not re-checked — run `ctx traits build` to verify",
+            tui::Tone::Warn,
+        );
+        lines.push(line);
+    }
+    lines.push(tui::Line::blank());
+
+    let mut source_header = tui::Line::blank();
+    source_header.push(format!("source: {}", facts.source_path), tui::Tone::Muted);
+    lines.push(source_header);
+    for text in &facts.source_excerpt {
+        let mut line = tui::Line::blank();
+        line.push(text.clone(), tui::Tone::Default);
+        lines.push(line);
+    }
+
+    lines
+}
+
+/// Identity-addressed re-location (§4.6 point 1, mirrors
+/// [`refresh_attached_session`]'s own re-lookup-by-id): the new index of
+/// `trait_id` within `traits`, or `None` when an edit made it vanish from
+/// the inventory entirely (never "select whatever now sits at the old
+/// index").
+fn reposition_trait_selection(traits: &[TraitRow], trait_id: &str) -> Option<usize> {
+    traits.iter().position(|row| row.id == trait_id)
+}
+
+/// One resolved trust-write attempt's outcome, decided as a pure function of
+/// already-resolved inputs (§4.4 step 3, test-covered): no IO, so the
+/// digest-movement refusal is directly unit-testable without a trust store
+/// or a modal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TrustApplyDecision {
+    Proceed,
+    RowGone,
+    DigestMoved { captured: String, current: String },
+}
+
+/// Every member of a `TraitAction::Trust` write (TRAITS' or TRUST's) is
+/// re-looked-up in `state.trust` — the superset of all tiers both screens
+/// share (§4.7) — rather than `state.traits`, so a family block-approve's
+/// whole-set abort checks the same source TRUST itself lists from, no IO, so
+/// the digest-movement refusal is directly unit-testable without a trust
+/// store or a modal.
+fn decide_member_apply(
+    trust_rows: &[TrustRow],
+    trait_id: &str,
+    captured_digest: &str,
+) -> TrustApplyDecision {
+    let current = trust_rows
+        .iter()
+        .find(|row| row.trait_id.as_deref() == Some(trait_id))
+        .map(|row| row.current_digest.as_str());
+    match current {
+        None => TrustApplyDecision::RowGone,
+        Some(current) if current != captured_digest => TrustApplyDecision::DigestMoved {
+            captured: captured_digest.to_string(),
+            current: current.to_string(),
+        },
+        Some(_) => TrustApplyDecision::Proceed,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TRUST: preview reconstruction (P473 §4.5)
+// ---------------------------------------------------------------------------
+
+/// Rebuilds (or reuses) [`State::trust_preview`] for the currently selected
+/// TRUST row, gated by [`trust_preview_needs_rebuild`]-style identity
+/// caching (§4.5) — a selection change, a moved digest, or a class change
+/// (a trust write never moves the digest, only the class) forces a rebuild.
+fn refresh_trust_preview_for_selection(state: &mut State) {
+    refresh_trust_preview_impl(state, false);
+}
+
+/// Forces a rebuild regardless of the cache key — used after a trust write
+/// applies (§4.7), where the digest deliberately does not move but the
+/// class/recorded-digest facts must still refresh.
+fn force_rebuild_trust_preview_for_selection(state: &mut State) {
+    refresh_trust_preview_impl(state, true);
+}
+
+fn refresh_trust_preview_impl(state: &mut State, force: bool) {
+    let Some(row) = selected_trust(state) else {
+        state.trust_preview = None;
+        return;
+    };
+    let unchanged = !force
+        && row.class != trust_story::TrustClass::Orphaned
+        && state.trust_preview.as_ref().is_some_and(|preview| {
+            preview.trait_id == row.trait_id
+                && preview.current_digest == row.current_digest
+                && preview.class == row.class
+        });
+    if unchanged {
+        return;
+    }
+    state.trust_preview = Some(build_trust_preview(row, &state.trust, &state.run_sightings));
+}
+
+/// IO edge (§4.5): resolves the run-ledger sighting and this row's family
+/// members, then hands off to the pure [`trust_preview_lines`] for
+/// rendering.
+fn build_trust_preview(
+    row: &TrustRow,
+    all_trust: &[TrustRow],
+    run_sightings: &[RunSightingRow],
+) -> TrustPreview {
+    let sighting = row
+        .trait_id
+        .as_deref()
+        .filter(|_| !row.current_digest.is_empty())
+        .and_then(|trait_id| run_sighting(run_sightings, trait_id, &row.current_digest));
+    let family_members = match &row.family {
+        Some(family) => all_trust
+            .iter()
+            .filter(|member| member.family.as_deref() == Some(family.as_str()))
+            .filter_map(|member| Some((member.trait_id.clone()?, member.class)))
+            .collect(),
+        None => Vec::new(),
+    };
+    let facts = TrustPreviewFacts {
+        trait_id: row.trait_id.clone(),
+        origin: row.origin.clone(),
+        family: row.family.clone(),
+        variant: row.variant.clone(),
+        current_digest: row.current_digest.clone(),
+        recorded_digest: row.recorded_digest.clone(),
+        class: row.class,
+        updated_at: row.updated_at.clone(),
+        reason: row.reason.clone(),
+        sighting,
+        family_members,
+    };
+    let lines = trust_preview_lines(&facts)
+        .iter()
+        .map(tui_ratatui::render_line)
+        .collect();
+    TrustPreview {
+        trait_id: row.trait_id.clone(),
+        current_digest: row.current_digest.clone(),
+        class: row.class,
+        lines,
+    }
+}
+
+/// Renders [`TrustPreviewFacts`] into the TRUST detail pane (§4.5): identity,
+/// state sentence + next action, what changed (recorded → current digest),
+/// run sighting, the fixed "what approving means" block, and — for a family
+/// row — every member with its own class, so a block-approve's blast radius
+/// is visible before any keypress.
+fn trust_preview_lines(facts: &TrustPreviewFacts) -> Vec<tui::Line> {
+    let mut lines = Vec::new();
+
+    let mut header = tui::Line::blank();
+    header.push(
+        facts.trait_id.as_deref().unwrap_or("(orphaned record)"),
+        tui::Tone::Default,
+    );
+    lines.push(header);
+
+    if facts.class != trust_story::TrustClass::Orphaned {
+        let mut origin_line = tui::Line::blank();
+        origin_line.push("origin: ", tui::Tone::Muted);
+        origin_line.push(facts.origin.clone(), tui::Tone::Default);
+        if let Some(family) = &facts.family {
+            origin_line.push("  family: ", tui::Tone::Muted);
+            origin_line.push(family.clone(), tui::Tone::Default);
+        }
+        if let Some(variant) = &facts.variant {
+            origin_line.push("  variant: ", tui::Tone::Muted);
+            origin_line.push(variant.clone(), tui::Tone::Default);
+        }
+        lines.push(origin_line);
+    }
+    lines.push(tui::Line::blank());
+
+    let mut state_line = tui::Line::blank();
+    state_line.push(trust_story::state_sentence(facts.class), tui::Tone::Default);
+    lines.push(state_line);
+    let mut next_line = tui::Line::blank();
+    next_line.push("next: ", tui::Tone::Muted);
+    next_line.push(
+        trust_story::next_action(
+            facts.class,
+            facts.family.as_deref(),
+            &trust_story::Surface::Tui,
+        ),
+        tui::Tone::Default,
+    );
+    lines.push(next_line);
+    lines.push(tui::Line::blank());
+
+    let mut digest_line = tui::Line::blank();
+    digest_line.push("current digest: ", tui::Tone::Muted);
+    digest_line.push(
+        if facts.current_digest.is_empty() {
+            "(none)".to_string()
+        } else {
+            facts.current_digest.clone()
+        },
+        tui::Tone::Default,
+    );
+    lines.push(digest_line);
+    let mut recorded_line = tui::Line::blank();
+    recorded_line.push("recorded digest: ", tui::Tone::Muted);
+    recorded_line.push(
+        facts
+            .recorded_digest
+            .clone()
+            .unwrap_or_else(|| "(none)".to_string()),
+        tui::Tone::Default,
+    );
+    lines.push(recorded_line);
+    if let Some(updated_at) = &facts.updated_at {
+        let mut updated_line = tui::Line::blank();
+        updated_line.push("updated at: ", tui::Tone::Muted);
+        updated_line.push(updated_at.clone(), tui::Tone::Default);
+        lines.push(updated_line);
+    }
+    if let Some(reason) = &facts.reason {
+        let mut reason_line = tui::Line::blank();
+        reason_line.push("recorded reason: ", tui::Tone::Muted);
+        reason_line.push(reason.clone(), tui::Tone::Default);
+        lines.push(reason_line);
+    }
+    lines.push(tui::Line::blank());
+
+    let mut sighting_line = tui::Line::blank();
+    sighting_line.push(
+        trust_story::sighting_sentence(facts.sighting.as_ref()),
+        tui::Tone::Muted,
+    );
+    lines.push(sighting_line);
+    lines.push(tui::Line::blank());
+
+    let mut meaning_header = tui::Line::blank();
+    meaning_header.push("what approving means:", tui::Tone::Muted);
+    lines.push(meaning_header);
+    for meaning in trust_story::approval_meaning() {
+        let mut line = tui::Line::blank();
+        line.push(format!("  - {meaning}"), tui::Tone::Default);
+        lines.push(line);
+    }
+
+    if !facts.family_members.is_empty() {
+        lines.push(tui::Line::blank());
+        let mut family_header = tui::Line::blank();
+        family_header.push(
+            format!(
+                "family {} members ({}):",
+                facts.family.as_deref().unwrap_or(""),
+                facts.family_members.len()
+            ),
+            tui::Tone::Muted,
+        );
+        lines.push(family_header);
+        for (member_id, member_class) in &facts.family_members {
+            let mut line = tui::Line::blank();
+            line.push(format!("  {member_id}: "), tui::Tone::Default);
+            line.push(member_class.label(), tui::Tone::Muted);
+            lines.push(line);
+        }
+    }
+
+    lines
+}
+
+// ---------------------------------------------------------------------------
+// MERGES: preview reconstruction (P472 §3.4)
+// ---------------------------------------------------------------------------
+
+/// Rebuilds (or reuses) [`State::merge_preview`] for the currently selected
+/// MERGES row, gated by the same identity-plus-revision cache key discipline
+/// [`trait_preview_needs_rebuild`] established — never in the draw path,
+/// only on selection change and reload.
+fn refresh_merge_preview_for_selection(state: &mut State) {
+    let Some(row) = state.merges.get(state.selected()) else {
+        state.merge_preview = None;
+        return;
+    };
+    let cache_key = merge_preview_cache_key(row);
+    let same_selection = state
+        .merge_preview
+        .as_ref()
+        .is_some_and(|preview| preview.session_id == row.session_id);
+    if same_selection {
+        if let Some(preview) = &state.merge_preview {
+            if preview.cache_key == cache_key {
+                return;
+            }
+        }
+    }
+    state.merge_preview = Some(build_merge_preview(row, cache_key));
+}
+
+/// The cache key for a MERGES row's preview: the last terminal frame's stage
+/// and status (moves whenever a retry appends a new frame) paired with the
+/// worktree's branch (moves if the row's worktree identity itself changes,
+/// which never happens in practice but keeps the key honest).
+fn merge_preview_cache_key(row: &MergeRow) -> (String, String) {
+    let frame_identity = row
+        .last_frame
+        .as_ref()
+        .map(|frame| format!("{:?}/{:?}", frame.stage, frame.status))
+        .unwrap_or_else(|| "none".to_string());
+    let branch = row
+        .worktree
+        .as_ref()
+        .map(|worktree| worktree.branch.clone())
+        .unwrap_or_default();
+    (frame_identity, branch)
+}
+
+/// IO edge (§3.4): resolves git facts (merge-base, changed paths, commit
+/// count) for a same-repository row with a still-registered worktree, then
+/// hands off to the pure [`merge_preview_lines`] for rendering. Never claims
+/// a produced-artifact fact it could not compute — a foreign-repository row
+/// or an unregistered worktree renders "gone"/unavailable, never guessed.
+fn build_merge_preview(row: &MergeRow, cache_key: (String, String)) -> MergePreview {
+    let explanation = row.last_frame.as_ref().map(merge_story::explain_frame);
+    let gate_rows = row
+        .last_frame
+        .as_ref()
+        .map(|frame| merge_story::gate_rows(&frame.evidence))
+        .unwrap_or_default();
+    let worktree_path = resolve_merge_worktree_path(row);
+    let produced = worktree_path.as_ref().and_then(|path| {
+        merge_produced(
+            path,
+            row.worktree
+                .as_ref()
+                .map(|worktree| worktree.branch.as_str()),
+        )
+    });
+    let facts = MergePreviewFacts {
+        run_id: row.run_id.clone(),
+        phase: row.phase.clone(),
+        trait_id: row.trait_id.clone(),
+        class: row.class,
+        stage: row.stage,
+        produced,
+        explanation,
+        gate_rows,
+        worktree_path: worktree_path.as_ref().map(|path| path.to_string()),
+        worktree_branch: row
+            .worktree
+            .as_ref()
+            .map(|worktree| worktree.branch.clone()),
+    };
+    let lines = merge_preview_lines(&facts)
+        .iter()
+        .map(tui_ratatui::render_line)
+        .collect();
+    MergePreview {
+        session_id: row.session_id.clone(),
+        cache_key,
+        lines,
+    }
+}
+
+/// Classifies what a run produced (§3.4 point 2): `merge_base(main, branch)`
+/// then `changed_paths` then a commit count — never run for a row whose
+/// worktree could not be resolved (the caller already degraded to `None`).
+fn merge_produced(worktree_path: &camino::Utf8Path, branch: Option<&str>) -> Option<MergeProduced> {
+    let branch = branch?;
+    let repo_root = ctx_traits_io::repository::discover_repo_root().ok()?;
+    let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
+    let default_branch =
+        ctx_traits_io::worktree::resolve_default_branch(&repo_root, None, &mut warnings)
+            .ok()?
+            .0;
+    let base =
+        ctx_traits_io::worktree::merge_base(&repo_root, &default_branch, branch, &mut warnings)
+            .ok()?;
+    let changed =
+        ctx_traits_io::worktree::changed_paths(worktree_path, &base, "HEAD", &mut warnings).ok()?;
+    if changed.is_empty() {
+        return Some(MergeProduced::Nothing);
+    }
+    let docs_only = changed.iter().all(|path| {
+        path.starts_with(".docs/") || path.starts_with(".plans/") || path.ends_with(".md")
+    });
+    if docs_only {
+        return Some(MergeProduced::DocsOnly {
+            files: changed.len(),
+        });
+    }
+    let commits = ctx_traits_io::worktree::commits_touching_paths(
+        worktree_path,
+        &base,
+        "HEAD",
+        &[],
+        &mut warnings,
+    )
+    .ok()?;
+    Some(MergeProduced::Commits {
+        commits: commits.len(),
+        files: changed.len(),
+    })
+}
+
+/// Pure renderer (§3.4, directly unit-testable): no IO, just `facts` ->
+/// styled lines.
+fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
+    let mut lines = Vec::new();
+
+    let mut header = tui::Line::blank();
+    header.push(format!("run {} ", facts.run_id), tui::Tone::Bold);
+    if let Some(phase) = &facts.phase {
+        header.push(format!("phase {phase} "), tui::Tone::Muted);
+    }
+    header.push(format!("trait {}", facts.trait_id), tui::Tone::Muted);
+    lines.push(header);
+    lines.push(tui::Line::blank());
+
+    let mut class_line = tui::Line::blank();
+    class_line.push("status: ", tui::Tone::Muted);
+    let tone = match facts.class {
+        MergeClass::Landed => tui::Tone::Pass,
+        MergeClass::Failed => tui::Tone::Fail,
+        MergeClass::Parked => tui::Tone::Warn,
+        MergeClass::Mergeable => tui::Tone::Default,
+    };
+    class_line.push(facts.class.label().to_string(), tone);
+    lines.push(class_line);
+
+    let mut produced_line = tui::Line::blank();
+    produced_line.push("produced: ", tui::Tone::Muted);
+    produced_line.push(
+        match &facts.produced {
+            Some(MergeProduced::Nothing) => "nothing".to_string(),
+            Some(MergeProduced::DocsOnly { files }) => format!("docs only ({files} file(s))"),
+            Some(MergeProduced::Commits { commits, files }) => {
+                format!("{commits} commit(s), {files} file(s)")
+            }
+            None => "(unavailable — worktree not registered or unreachable)".to_string(),
+        },
+        tui::Tone::Default,
+    );
+    lines.push(produced_line);
+
+    let mut stage_line = tui::Line::blank();
+    stage_line.push("reached: ", tui::Tone::Muted);
+    stage_line.push(
+        facts
+            .stage
+            .map(merge_story::stage_sentence)
+            .unwrap_or("no merge attempted yet")
+            .to_string(),
+        tui::Tone::Default,
+    );
+    lines.push(stage_line);
+
+    if let Some(explanation) = &facts.explanation {
+        if facts.class == MergeClass::Parked || facts.class == MergeClass::Failed {
+            lines.push(tui::Line::blank());
+            let mut why_line = tui::Line::blank();
+            why_line.push("why: ", tui::Tone::Muted);
+            why_line.push(explanation.sentence.clone(), tui::Tone::Fail);
+            lines.push(why_line);
+            let mut next_line = tui::Line::blank();
+            next_line.push("next: ", tui::Tone::Muted);
+            next_line.push(explanation.next_action.clone(), tui::Tone::Default);
+            lines.push(next_line);
+        }
+    }
+
+    if !facts.gate_rows.is_empty() {
+        lines.push(tui::Line::blank());
+        let mut evidence_header = tui::Line::blank();
+        evidence_header.push("evidence:", tui::Tone::Muted);
+        lines.push(evidence_header);
+        for row in &facts.gate_rows {
+            let mut line = tui::Line::blank();
+            line.push(format!("  {}: ", row.label), tui::Tone::Muted);
+            line.push(row.value.clone(), tui::Tone::Default);
+            lines.push(line);
+        }
+    }
+
+    lines.push(tui::Line::blank());
+    let mut worktree_line = tui::Line::blank();
+    worktree_line.push("worktree: ", tui::Tone::Muted);
+    worktree_line.push(
+        facts
+            .worktree_path
+            .clone()
+            .unwrap_or_else(|| "(gone — not registered)".to_string()),
+        tui::Tone::Default,
+    );
+    lines.push(worktree_line);
+    if let Some(branch) = &facts.worktree_branch {
+        let mut branch_line = tui::Line::blank();
+        branch_line.push("branch: ", tui::Tone::Muted);
+        branch_line.push(branch.clone(), tui::Tone::Default);
+        lines.push(branch_line);
+    }
+
+    lines
+}
+
+// ---------------------------------------------------------------------------
+// SESSIONS: verbs (P469 §3.3–3.6)
+// ---------------------------------------------------------------------------
+
+/// `Enter` on a SESSIONS row (P506 §1: the attached view is a pane, not a
+/// mode): requests the selected row's live view from the worker, resets the
+/// progress pane's scroll, and moves pane focus into it.
+fn attach_selected(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        return;
+    };
+    if !row.class.can_attach() {
+        state.message = Some(format!(
+            "attach refused: session {} is unreadable",
+            state_short_session(state, &row.session_id)
+        ));
+        return;
+    }
+    let session_id = row.session_id.clone();
+    if state
+        .session_preview
+        .as_ref()
+        .is_none_or(|preview| preview.session_id != session_id)
+    {
+        state.session_preview = None;
+    }
+    state.attached_session_id = Some(session_id);
+    state.session_preview_follow = true;
+    *state.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS) = tui_kit::ViewportScroll::new();
+    focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+    follow_current_session_preview(state);
+    state.reload();
+}
+
+/// `x`: opens the KILL confirm modal for the selected row. Refuses outright
+/// (no modal) when the row is not currently `Live` — opening a modal that
+/// cannot proceed would be less honest than refusing before it opens.
+fn open_kill_modal(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        return;
+    };
+    let session_id = row.session_id.clone();
+    let display_id = state_short_session(state, &session_id);
+    let (title, body) = match ctx_traits_io::run_control::probe(&row.ledger_path) {
+        Ok(ctx_traits_io::run_control::DriverProbe::Held(_)) => (
+            "stop session",
+            format!(
+                "Request cooperative stop for {display_id}?\n\nIt finishes the current frame, then parks. This will not force-kill it."
+            ),
+        ),
+        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) if has_running_evidence(row) => {
+            (
+                "clear orphaned driver",
+                format!(
+                    "No driver holds {display_id}'s lock, but persisted evidence says a drive was running. Clear this orphaned driver evidence and mark the drive interrupted?"
+                ),
+            )
+        }
+        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. })
+            if row.status == Some(ctx_traits_core::procedure::session::Status::WaitingOnHuman) =>
+        {
+            (
+                "cancel parked question",
+                format!("Mark the unanswered question in {display_id} interrupted?"),
+            )
+        }
+        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) => {
+            state.message = Some(format!(
+                "stop refused: {display_id} has no driver; resume or delete it instead"
+            ));
+            return;
+        }
+        Err(error) => {
+            state.message = Some(format!(
+                "stop refused: could not probe {display_id}'s driver lock: {error}"
+            ));
+            return;
+        }
+    };
+    state.modal_host.open(
+        Action::Session(SessionAction::Kill(session_id)),
+        Modal::confirm(title, body),
+    );
+}
+
+fn open_answer_modal(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        return;
+    };
+    let display_id = state_short_session(state, &row.session_id);
+    let session = match ctx_traits_io::run_session::read_run_session(&row.ledger_path) {
+        Ok(session) => session,
+        Err(error) => {
+            state.message = Some(format!(
+                "answer refused: could not read {display_id}: {error}"
+            ));
+            return;
+        }
+    };
+    if matches!(
+        session.last_drive_outcome.as_ref().map(|o| &o.outcome),
+        Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
+    ) {
+        state.message = Some(format!(
+            "answer refused: {display_id}'s question was cancelled"
+        ));
+        return;
+    }
+    let Some(frame) = session.next_frame.as_ref().filter(|frame| {
+        session.status == ctx_traits_core::procedure::session::Status::WaitingOnHuman
+            && frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
+    }) else {
+        state.message = Some(format!(
+            "answer refused: {display_id} is not waiting for a human"
+        ));
+        return;
+    };
+    let Some(output) = frame.requested_outputs.first() else {
+        state.message = Some(format!(
+            "answer refused: {display_id}'s question has no answer slot"
+        ));
+        return;
+    };
+    let trait_file = resolve_answer_trait_file(&session, row.repo_path.as_deref());
+    let loaded = match ctx_traits_io::run::load_trait_for_session(
+        trait_file.as_deref(),
+        None,
+        &session,
+        "dashboard",
+    ) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            state.message = Some(format!(
+                "answer unavailable: could not resolve question for {display_id}: {error}"
+            ));
+            return;
+        }
+    };
+    let question = match resolved_human_question_body(&loaded, &session, frame) {
+        Ok(body) => format!(
+            "{body}\n---\nanswer slot: {} (schema: {})",
+            output.slot_ref,
+            output.schema_ref.as_deref().unwrap_or("schema:any")
+        ),
+        Err(error) => {
+            state.message = Some(format!(
+                "answer unavailable: could not resolve question for {display_id}: {error}"
+            ));
+            return;
+        }
+    };
+    state.modal_host.open(
+        Action::Session(SessionAction::Answer {
+            session_id: row.session_id.clone(),
+            state_digest: session.state_digest.as_str().to_string(),
+            target: output.slot_ref.to_string(),
+            schema_ref: output.schema_ref.clone(),
+        }),
+        Modal::text_input_with_body("answer question", question, "", true),
+    );
+}
+
+fn has_running_evidence(row: &SessionRow) -> bool {
+    ctx_traits_io::run_session::read_run_session(&row.ledger_path)
+        .ok()
+        .and_then(|session| session.last_drive_outcome)
+        .is_some_and(|outcome| {
+            outcome.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::Running
+        })
+}
+
+/// `s`: opens the RESUME confirm modal for the selected row. Refuses outright
+/// when the row is not `Resumable` (a live or terminal session cannot be
+/// resumed).
+fn open_resume_modal(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        return;
+    };
+    let can_resume = row.class.can_resume();
+    let session_id = row.session_id.clone();
+    let display_id = state_short_session(state, &session_id);
+    let ledger_path = row.ledger_path.clone();
+    if !can_resume {
+        state.message = Some(format!(
+            "resume refused: session {display_id} cannot be resumed from its current state"
+        ));
+        return;
+    }
+    let worktree_line = ctx_traits_io::run_session::read_run_session(&ledger_path)
+        .ok()
+        .and_then(|session| session.provenance.worktree)
+        .map(|worktree| format!(" (worktree {}, branch {})", worktree.id, worktree.branch))
+        .unwrap_or_default();
+    let body = format!(
+        "Resume {display_id}{worktree_line} as a detached `ctx traits drive` child, reusing its \
+         recorded worktree provenance?"
+    );
+    state.modal_host.open(
+        Action::Session(SessionAction::Resume(session_id)),
+        Modal::confirm("resume session", body),
+    );
+}
+
+/// `d`: opens the DELETE confirm modal for the selected row, listing every
+/// artifact it will remove by exact path/ref first. Refuses outright on a
+/// `Live` or `Resumable` row — DELETE is scoped to terminal sessions only.
+fn open_delete_modal(state: &mut State) {
+    let Some(row) = selected_session(state) else {
+        return;
+    };
+    let session_id = row.session_id.clone();
+    let display_id = state_short_session(state, &session_id);
+    let ledger_path = row.ledger_path.clone();
+    let repo_path = row.repo_path.clone();
+    match ctx_traits_io::run_control::probe(&ledger_path) {
+        Ok(ctx_traits_io::run_control::DriverProbe::Unheld { .. }) => {}
+        Ok(ctx_traits_io::run_control::DriverProbe::Held(_)) => {
+            state.message = Some(format!(
+                "delete refused: {display_id}'s driver lock is held"
+            ));
+            return;
+        }
+        Err(error) => {
+            state.message = Some(format!(
+                "delete refused: could not probe {display_id}'s driver lock: {error}"
+            ));
+            return;
+        }
+    }
+    let plan = plan_delete_for_ledger(&ledger_path, repo_path.as_deref());
+    let warning = if row.class == SessionClass::Resumable {
+        "Deleting discards resumable state.\n\n"
+    } else if row.class == SessionClass::Unreadable {
+        "Ledger provenance cannot be recovered; only known derivable artifacts will be touched.\n\n"
+    } else {
+        ""
+    };
+    let body = format!(
+        "{warning}Delete the following?\n\n{}",
+        plan.artifact_lines().join("\n")
+    );
+    state.modal_host.open(
+        Action::Session(SessionAction::Delete(session_id, plan)),
+        Modal::confirm("delete session", body),
+    );
+}
+
+/// Resolves the delete plan's worktree location with exactly one git probe
+/// (§3.4/§3.6), then hands off to the pure [`plan_delete`] to build the
+/// artifact list. Only reached from `open_delete_modal` — an action edge,
+/// never the draw path.
+/// Resolves a DELETE/DROP plan's worktree location with exactly one git
+/// probe (§3.4/§3.6), then hands off to the pure [`plan_delete`] to build the
+/// artifact list. Narrowed to `(ledger_path, repo_path)` rather than
+/// `&SessionRow` (P472 §3.5) so both SESSIONS' DELETE and MERGES' DROP call
+/// it — a genuine extraction, not a copy.
+fn plan_delete_for_ledger(ledger_path: &camino::Utf8Path, repo_path: Option<&str>) -> DeletePlan {
+    let driver_lock = ctx_traits_io::run_control::driver_lock_path(ledger_path);
+    let driver_lock_path = driver_lock.as_std_path().exists().then_some(driver_lock);
+    let sidecars = ctx_traits_io::run_branch::sidecars_root(ledger_path);
+    let sidecars_root = sidecars.as_std_path().exists().then_some(sidecars);
+    let worktree = ctx_traits_io::run_session::read_run_session(ledger_path)
+        .ok()
+        .and_then(|session| session.provenance.worktree);
+    let Some(worktree) = worktree else {
+        return plan_delete(
+            ledger_path,
+            driver_lock_path,
+            sidecars_root,
+            None,
+            true,
+            None,
+        );
+    };
+    let repo_root = ctx_traits_io::repository::discover_repo_root().ok();
+    let same_repo =
+        repo_path.is_none() || repo_root.as_ref().map(|root| root.as_str()) == repo_path;
+    let verified = if same_repo {
+        repo_root.as_ref().and_then(|root| {
+            let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
+            ctx_traits_io::worktree::verify_worktree_registration(
+                &worktree.id,
+                &worktree.branch,
+                &mut warnings,
+            )
+            .ok()
+            .map(|path| (root.clone(), path))
+        })
+    } else {
+        None
+    };
+    plan_delete(
+        ledger_path,
+        driver_lock_path,
+        sidecars_root,
+        Some((worktree.id.as_str(), worktree.branch.as_str())),
+        same_repo,
+        verified,
+    )
+}
+
+/// Pure artifact-list builder (§3.4, test-covered): `worktree_provenance` is
+/// `None` when the ledger names no worktree; `verified` is the resolved
+/// `(repo_root, worktree_path)` only when `same_repo` AND registration was
+/// confirmed. No IO — every input is already resolved by the caller.
+fn plan_delete(
+    ledger_path: &camino::Utf8Path,
+    driver_lock_path: Option<camino::Utf8PathBuf>,
+    sidecars_root: Option<camino::Utf8PathBuf>,
+    worktree_provenance: Option<(&str, &str)>,
+    same_repo: bool,
+    verified: Option<(camino::Utf8PathBuf, camino::Utf8PathBuf)>,
+) -> DeletePlan {
+    let (worktree, worktree_note) = match worktree_provenance {
+        None => (None, None),
+        Some((id, branch)) => {
+            if !same_repo {
+                (
+                    None,
+                    Some(format!(
+                        "worktree {id} (branch {branch}) belongs to a different repository; left behind"
+                    )),
+                )
+            } else if let Some((repo_root, path)) = verified {
+                (Some((repo_root, path, branch.to_string())), None)
+            } else {
+                (
+                    None,
+                    Some(format!(
+                        "worktree {id} (branch {branch}) is not registered; left behind"
+                    )),
+                )
+            }
+        }
+    };
+    DeletePlan {
+        ledger_path: ledger_path.to_path_buf(),
+        driver_lock_path,
+        sidecars_root,
+        worktree,
+        worktree_note,
+    }
+}
+
+/// Executes a confirmed [`DeletePlan`]: `remove_worktree` then `delete_branch`
+/// (which uses `-d`, so git itself refuses an unmerged branch rather than
+/// this code forcing `-D`), then the ledger and its known-orphaned siblings.
+/// Reports every artifact's own outcome so a partial failure never claims
+/// more than actually happened.
+fn execute_delete(plan: &DeletePlan) -> String {
+    let mut messages = Vec::new();
+    if let Some((repo_root, path, branch)) = &plan.worktree {
+        let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
+        match ctx_traits_io::worktree::remove_worktree(repo_root, path, &mut warnings) {
+            Ok(()) => {
+                messages.push(format!("worktree {path} removed"));
+                let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
+                match ctx_traits_io::worktree::delete_branch(repo_root, branch, &mut warnings) {
+                    Ok(()) => messages.push(format!("branch {branch} deleted")),
+                    Err(error) => {
+                        messages.push(format!("branch {branch} left in place: {error}"));
+                    }
+                }
+            }
+            Err(error) => {
+                messages.push(format!("worktree {path} left in place: {error}"));
+                messages.push(format!(
+                    "branch {branch} left in place (worktree removal failed)"
+                ));
+            }
+        }
+    }
+    match std::fs::remove_file(plan.ledger_path.as_std_path()) {
+        Ok(()) => messages.push("ledger deleted".to_string()),
+        Err(error) => messages.push(format!("ledger left in place: {error}")),
+    }
+    // Keep the lock file's inode stable. Removing it while holding flock would
+    // let a new driver lock a replacement inode before this guard drops.
+    if plan.driver_lock_path.is_some() {
+        messages.push("driver lock retained (stable lock inode)".to_string());
+    }
+    if let Some(root) = &plan.sidecars_root {
+        match std::fs::remove_dir_all(root.as_std_path()) {
+            Ok(()) => messages.push("sidecars deleted".to_string()),
+            Err(error) => messages.push(format!("sidecars left in place: {error}")),
+        }
+    }
+    ctx_traits_io::run_summary::remove_summary_for_ledger(&plan.ledger_path);
+    ctx_traits_io::activity_sidecar::remove_activity_for_ledger(&plan.ledger_path);
+    messages.join("; ")
+}
+
+/// Resolve the current executable path as UTF-8 and the session-keyed log
+/// path both dashboard spawn call sites share, rather than each
+/// hand-rolling its own exe/log-path construction. `log_key` is the session
+/// id when known ahead of spawn (RESUME); a spawn-request `ctx traits run`
+/// mints its session id only after the child starts, so that call site
+/// passes its own pid-keyed fallback instead.
+fn resolve_spawn_exe_and_log(
+    log_key: &str,
+) -> crate::Result<(camino::Utf8PathBuf, camino::Utf8PathBuf)> {
+    let exe = std::env::current_exe().map_err(|source| {
+        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+            path: "<current-exe>".to_string(),
+            source,
+        })
+    })?;
+    let exe = camino::Utf8PathBuf::from_path_buf(exe).map_err(|_| crate::Error::Command {
+        message: "current executable path is not UTF-8".to_string(),
+    })?;
+    let log_dir = ctx_traits_io::state::current_global_debug_root()?;
+    std::fs::create_dir_all(log_dir.as_std_path()).ok();
+    let log_path = log_dir.join(format!("dashboard-spawn-{log_key}.log"));
+    Ok((exe, log_path))
+}
+
+/// `s` confirmed: spawns `ctx traits drive --session <id> --progress none`
+/// detached (never `--worktree` — the drive's own `resolve_resume_worktree`
+/// reuses the ledger's recorded provenance by construction), with `cwd` set
+/// to the row's own repository path so ALL-mode resume is correct
+/// cross-repo (§3.6).
+fn spawn_resume(row: &SessionRow) -> crate::Result<()> {
+    let (exe, log_path) = resolve_spawn_exe_and_log(&row.session_id)?;
+    let cwd = match &row.repo_path {
+        Some(path) => camino::Utf8PathBuf::from(path.clone()),
+        None => super::lifecycle_reporting::current_utf8_dir()?,
+    };
+    let args = resume_argv(&row.session_id);
+    ctx_traits_io::process::spawn_detached(
+        &exe,
+        &args,
+        &cwd,
+        &log_path,
+        &[(
+            ctx_traits_io::run_liveness::SPAWNED_LOG_PATH_ENV,
+            log_path.as_str(),
+        )],
+    )?;
+    Ok(())
+}
+
+/// The exact argv RESUME spawns: `traits drive --session <id> --progress
+/// none`, deliberately with no `--worktree` (§3.5).
+fn resume_argv(session_id: &str) -> Vec<String> {
+    vec![
+        "traits".to_string(),
+        "drive".to_string(),
+        "--session".to_string(),
+        session_id.to_string(),
+        "--progress".to_string(),
+        "none".to_string(),
+    ]
+}
+
+/// Applies a resolved SESSIONS modal outcome (§3.3): a `Cancelled` outcome
+/// never mutates anything for any tag, including `Exit` — cancelling leaves
+/// `quit == false` and sets no stop flag (the pane's own
+/// `CtrlCPolicy::ForwardKey` already guarantees the latter). Every other
+/// outcome re-looks-up its row by `session_id` and re-checks classification
+/// before acting (test 6: identity survives a reload).
+/// Top-level dispatcher for a resolved `Action` (P471's `Action`
+/// generalization of P469's `SessionAction`): a `Cancelled` outcome never
+/// mutates anything for any tag, including `Exit` — cancelling leaves
+/// `quit == false` and sets no stop flag. Every other outcome routes to its
+/// own family's applier, which re-looks-up its target by identity and
+/// re-checks eligibility before acting.
+/// The footer message for a `Cancelled` outcome (P473 §1 note 1, pure and
+/// unit-tested): a trust modal (TRAITS' or TRUST's `a`/`b`/`A`) reports
+/// these exact words — nothing was written — every other screen keeps the
+/// generic "cancelled".
+fn cancel_message(tag: &Action) -> String {
+    match tag {
+        Action::Trait(_) => "no trust change recorded".to_string(),
+        _ => "cancelled".to_string(),
+    }
+}
+
+fn apply_action(
+    pane: &mut RatatuiPane,
+    state: &mut State,
+    tag: Action,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    if outcome == ModalOutcome::Cancelled {
+        state.message = Some(cancel_message(&tag));
+        return Ok(());
+    }
+    match tag {
+        Action::Exit => {
+            if outcome == ModalOutcome::Confirmed {
+                state.quit = true;
+            }
+            Ok(())
+        }
+        Action::Session(action) => apply_session_action(pane, state, action, outcome),
+        Action::Trait(action) => apply_trait_action(state, action, outcome),
+        Action::Merge(action) => apply_merge_action(state, action, outcome),
+    }
+}
+
+fn apply_session_action(
+    pane: &mut RatatuiPane,
+    state: &mut State,
+    tag: SessionAction,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    let _ = pane;
+    // `Cancelled` is already filtered out by `apply_action` before any tag
+    // reaches here. Kill/Resume/Delete are `Confirm` modals, which resolve to
+    // exactly `Confirmed` at this point, so there is nothing left for those
+    // branches to switch on; `Spawn` is a `TextInput` modal and reads its
+    // typed text from `outcome` directly.
+    if let SessionAction::Spawn = tag {
+        let ModalOutcome::Submitted(text) = outcome else {
+            return Ok(());
+        };
+        return apply_spawn_request(state, text);
+    }
+    match tag {
+        SessionAction::Spawn => unreachable!("handled above"),
+        SessionAction::Answer {
+            session_id,
+            state_digest,
+            target,
+            schema_ref,
+        } => {
+            let ModalOutcome::Submitted(text) = outcome else {
+                return Ok(());
+            };
+            let display_id = state_short_session(state, &session_id);
+            let Some(row) = state
+                .sessions
+                .iter()
+                .find(|row| row.session_id == session_id)
+            else {
+                state.message = Some(format!(
+                    "answer refused: session {display_id} is no longer listed"
+                ));
+                return Ok(());
+            };
+            let Some(maintenance) =
+                ctx_traits_io::run_control::try_acquire_maintenance(&row.ledger_path)?
+            else {
+                state.message = Some(format!(
+                    "answer refused: {display_id}'s driver lock is held"
+                ));
+                state.reload();
+                return Ok(());
+            };
+            let current = ctx_traits_io::run_session::read_run_session(&row.ledger_path)?;
+            // Re-check against the *derived* state (blocker 2, P509), not raw
+            // `status`: `record_interrupted_outcome` never rewrites `status`
+            // away from `WaitingOnHuman`, so a cancel that lands between
+            // modal open and submit is only visible through the outcome the
+            // derivation folds in. This closes the TOCTOU the raw-status
+            // check left open.
+            let current_outcome = current.last_drive_outcome.as_ref().map(|o| &o.outcome);
+            let current_state = ctx_traits_core::procedure::activity::SessionState::derive(
+                &current.status,
+                current_outcome,
+                false,
+            );
+            let valid = current_state
+                == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman
+                && current.state_digest.as_str() == state_digest
+                && current.next_frame.as_ref().is_some_and(|frame| {
+                    frame.kind == ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask
+                        && frame.requested_outputs.first().is_some_and(|output| {
+                            output.slot_ref.to_string() == target && output.schema_ref == schema_ref
+                        })
+                });
+            if !valid {
+                let message = if current_state
+                    == ctx_traits_core::procedure::activity::SessionState::Cancelled
+                {
+                    format!("answer refused: {display_id}'s question was cancelled")
+                } else {
+                    format!("answer refused: {display_id}'s question changed; reopen it")
+                };
+                state.message = Some(message);
+                state.reload();
+                return Ok(());
+            }
+            let value = if schema_ref.as_deref() == Some("schema:text") {
+                serde_json::Value::String(text)
+            } else {
+                match serde_json::from_str(&text) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        state.message = Some(format!(
+                            "answer rejected: enter JSON for {}: {error}",
+                            schema_ref.as_deref().unwrap_or("schema:any")
+                        ));
+                        return Ok(());
+                    }
+                }
+            };
+            let answer_trait_file = resolve_answer_trait_file(&current, row.repo_path.as_deref());
+            let result = ctx_traits_io::run::set(ctx_traits_io::run::SetRequest {
+                trait_file: answer_trait_file.as_deref(),
+                trait_id: None,
+                session: row.ledger_path.as_str(),
+                session_store: None,
+                target: &target,
+                value,
+                out: None,
+                caller: ctx_traits_core::procedure::session::CallerProvenance {
+                    surface: "dashboard".to_string(),
+                    caller: "ctx traits dashboard".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                existing_input_evidence: "ctx traits dashboard answer",
+            });
+            drop(maintenance);
+            match result {
+                Ok(ctx_traits_io::run::SetOutcome::Call { response, .. })
+                    if response.response_kind == ctx_traits_core::procedure::session::CallResponseKind::RejectedCorrectionRequired => {
+                    state.message = Some("answer rejected; correct it and reopen the question".to_string());
+                }
+                Ok(ctx_traits_io::run::SetOutcome::Call { response, .. })
+                    if response.session.status == ctx_traits_core::procedure::session::Status::Completed => {
+                    state.message = Some(format!("answer accepted; {display_id} completed"));
+                }
+                Ok(ctx_traits_io::run::SetOutcome::Call { .. }) => match spawn_resume(row) {
+                    Ok(()) => state.message = Some(format!("answer accepted; resume started for {display_id}")),
+                    Err(error) => state.message = Some(format!("answer accepted, but resume failed: {error}")),
+                },
+                Ok(ctx_traits_io::run::SetOutcome::Session { .. }) => {
+                    state.message = Some("answer refused: question did not route to its current frame".to_string());
+                }
+                Err(error) => state.message = Some(format!("answer rejected: {error}")),
+            }
+            state.reload();
+        }
+        SessionAction::Kill(session_id) => {
+            let display_id = state_short_session(state, &session_id);
+            let Some(row) = state
+                .sessions
+                .iter()
+                .find(|row| row.session_id == session_id)
+            else {
+                state.message = Some(format!(
+                    "stop refused: session {display_id} is no longer listed"
+                ));
+                return Ok(());
+            };
+            let ledger_path = row.ledger_path.clone();
+            state.message = Some(match ctx_traits_io::run_control::probe(&ledger_path)? {
+                ctx_traits_io::run_control::DriverProbe::Held(_) => {
+                    if ctx_traits_io::run_control::request_interrupt(&ledger_path)? {
+                        format!("stop requested for {display_id}")
+                    } else {
+                        format!(
+                            "stop refused: {display_id}'s driver did not acknowledge the request"
+                        )
+                    }
+                }
+                ctx_traits_io::run_control::DriverProbe::Unheld { .. }
+                    if has_running_evidence(row)
+                        || row.status
+                            == Some(
+                                ctx_traits_core::procedure::session::Status::WaitingOnHuman,
+                            ) =>
+                {
+                    let Some(mut maintenance) =
+                        ctx_traits_io::run_control::try_acquire_maintenance(&ledger_path)?
+                    else {
+                        state.reload();
+                        return Ok(());
+                    };
+                    ctx_traits_io::run_session::record_interrupted_outcome(&ledger_path)?;
+                    maintenance.clear_stale_metadata()?;
+                    let _ = ctx_traits_io::run_liveness::remove_row(
+                        &ctx_traits_io::run_control::runtime_root(),
+                        &session_id,
+                    );
+                    format!("recorded interrupted outcome for {display_id}")
+                }
+                ctx_traits_io::run_control::DriverProbe::Unheld { .. } => {
+                    format!("stop refused: {display_id} has no driver; resume or delete it instead")
+                }
+            });
+            state.reload();
+        }
+        SessionAction::Resume(session_id) => {
+            let display_id = state_short_session(state, &session_id);
+            let Some(row) = state
+                .sessions
+                .iter()
+                .find(|row| row.session_id == session_id)
+            else {
+                state.message = Some(format!(
+                    "resume refused: session {display_id} is no longer listed"
+                ));
+                return Ok(());
+            };
+            if !row.class.can_resume() {
+                state.message = Some(format!(
+                    "resume refused: session {display_id} can no longer be resumed"
+                ));
+                return Ok(());
+            }
+            match spawn_resume(row) {
+                Ok(()) => {
+                    let id = row.session_id.clone();
+                    state.message = Some(format!("resume started for {display_id}"));
+                    state.session_preview = None;
+                    state.attached_session_id = Some(id);
+                    state.session_preview_follow = true;
+                    focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+                    state.reload();
+                }
+                Err(error) => {
+                    state.message = Some(format!("resume failed: {error}"));
+                }
+            }
+        }
+        SessionAction::Delete(session_id, plan) => {
+            let display_id = state_short_session(state, &session_id);
+            let Some(row) = state
+                .sessions
+                .iter()
+                .find(|row| row.session_id == session_id)
+            else {
+                state.message = Some(format!(
+                    "delete refused: session {display_id} is no longer listed"
+                ));
+                return Ok(());
+            };
+            let Some(mut maintenance) =
+                ctx_traits_io::run_control::try_acquire_maintenance(&row.ledger_path)?
+            else {
+                state.message = Some(format!(
+                    "delete refused: {display_id}'s driver lock is now held"
+                ));
+                state.reload();
+                return Ok(());
+            };
+            let refreshed = plan_delete_for_ledger(&row.ledger_path, row.repo_path.as_deref());
+            if refreshed.artifact_lines() != plan.artifact_lines() {
+                state.message =
+                    Some("delete plan changed; review the refreshed artifact list".to_string());
+                state.reload();
+                return Ok(());
+            }
+            maintenance.clear_stale_metadata()?;
+            state.message = Some(execute_delete(&refreshed));
+            state.reload();
+        }
+    }
+    Ok(())
+}
+
+/// `m`/`d`: opens the retry confirm modal for the selected MERGES row,
+/// naming the run and warning that the merge runs synchronously on the UI
+/// thread (§3.5 risk 2 — moving it off-thread is new behavior, out of this
+/// phase's scope). Refuses outright — no modal — on a `Landed` row, which
+/// has nothing left to retry.
+fn open_merge_retry_modal(state: &mut State, deep: bool) {
+    let Some(row) = state.merges.get(state.selected()) else {
+        return;
+    };
+    let session_id = row.session_id.clone();
+    let display_id = state_short_session(state, &session_id);
+    if !row.class.can_retry() {
+        state.message = Some(format!(
+            "merge refused: session {display_id} is already landed"
+        ));
+        return;
+    }
+    let verb = if deep { "deep-merge" } else { "merge" };
+    let body = format!(
+        "Retry {verb} for {}?\n\nThe UI is unresponsive while the gate runs — this is not backgrounded.",
+        display_id
+    );
+    state.modal_host.open(
+        Action::Merge(MergeAction::Retry {
+            run_id: row.run_id.clone(),
+            deep,
+        }),
+        Modal::confirm(if deep { "deep-merge" } else { "merge" }, body),
+    );
+}
+
+/// `p`: writes the selected row's worktree path into the footer message
+/// line. No clipboard — the house rules forbid a new dependency for it; the
+/// path is also visible in the detail pane for manual selection.
+fn print_merge_worktree_path(state: &mut State) {
+    let Some(row) = state.merges.get(state.selected()) else {
+        return;
+    };
+    match resolve_merge_worktree_path(row) {
+        Some(path) => state.message = Some(format!("worktree: {path}")),
+        None => {
+            state.message = Some(format!(
+                "worktree unavailable: session {} has no registered worktree",
+                state_short_session(state, &row.session_id)
+            ));
+        }
+    }
+}
+
+/// Resolves the selected row's worktree path via one git registration probe
+/// — `None` when the row names no worktree, belongs to a foreign repository
+/// (ALL mode), or is no longer registered.
+fn resolve_merge_worktree_path(row: &MergeRow) -> Option<camino::Utf8PathBuf> {
+    let worktree = row.worktree.as_ref()?;
+    let repo_root = ctx_traits_io::repository::discover_repo_root().ok()?;
+    let same_repo = row.repo_path.is_none() || row.repo_path.as_deref() == Some(repo_root.as_str());
+    if !same_repo {
+        return None;
+    }
+    let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
+    ctx_traits_io::worktree::verify_worktree_registration(
+        &worktree.id,
+        &worktree.branch,
+        &mut warnings,
+    )
+    .ok()
+}
+
+/// `x`: opens the DROP confirm modal for the selected MERGES row, reusing
+/// SESSIONS' own `plan_delete`/`DeletePlan` mechanism unchanged (§3.5) so
+/// there is exactly one destructive artifact-removal path. Refuses outright
+/// on a `Mergeable` row — a driver may still hold it.
+fn open_merge_drop_modal(state: &mut State) {
+    let Some(row) = state.merges.get(state.selected()) else {
+        return;
+    };
+    let display_id = state_short_session(state, &row.session_id);
+    if !row.class.can_drop() {
+        state.message = Some(format!(
+            "drop refused: session {display_id} is still mergeable"
+        ));
+        return;
+    }
+    let plan = plan_delete_for_ledger(&row.ledger_path, row.repo_path.as_deref());
+    let body = format!(
+        "Drop the following from the merge queue?\n\n{}",
+        plan.artifact_lines().join("\n")
+    );
+    state.modal_host.open(
+        Action::Merge(MergeAction::Drop {
+            session_id: row.session_id.clone(),
+            plan,
+        }),
+        Modal::confirm("drop from queue", body),
+    );
+}
+
+/// Applies a resolved MERGES modal (§3.5): `Cancelled` is handled by the
+/// caller (`apply_action`). Every tag re-looks-up its row by `session_id`
+/// and re-checks eligibility before acting (mirrors `apply_session_action`'s
+/// identity-addressed re-lookup).
+fn apply_merge_action(
+    state: &mut State,
+    tag: MergeAction,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    let _ = outcome;
+    match tag {
+        MergeAction::Retry { run_id, deep } => {
+            let Some(row) = state.merges.iter().find(|row| row.run_id == run_id) else {
+                state.message = Some(format!("run {run_id} is no longer listed"));
+                return Ok(());
+            };
+            if !row.class.can_retry() {
+                state.message = Some(format!("run {run_id} is already landed"));
+                return Ok(());
+            }
+            state.message = Some(format!(
+                "{} {run_id}\u{2026}",
+                if deep { "deep-merging" } else { "merging" }
+            ));
+            let report = merge(MergeInputs {
+                run_id: &run_id,
+                session_store: None,
+                session_path_override: None,
+                assignments: &[],
+                no_wait: false,
+                force_wait: false,
+                json: false,
+                force_merger: false,
+                park_on_overlap: false,
+                force_land_on_overlap: false,
+                allow_stale_overlap: false,
+                deep,
+                live: None,
+                merger_stdout_observer: None,
+            })?;
+            let explanation = merge_story::explain_report(&report);
+            state.message = Some(if report.status == "merged" {
+                format!("merge {run_id}: landed")
+            } else {
+                format!("merge {run_id}: {}", explanation.sentence)
+            });
+            state.reload();
+        }
+        MergeAction::Drop { session_id, plan } => {
+            let display_id = state_short_session(state, &session_id);
+            let Some(row) = state.merges.iter().find(|row| row.session_id == session_id) else {
+                state.message = Some(format!(
+                    "drop refused: session {display_id} is no longer listed"
+                ));
+                return Ok(());
+            };
+            if !row.class.can_drop() {
+                state.message = Some(format!(
+                    "drop refused: session {display_id} is still mergeable"
+                ));
+                return Ok(());
+            }
+            state.message = Some(execute_delete(&plan));
+            state.reload();
+        }
+    }
+    Ok(())
+}
+
+fn trust_verb(verdict: ctx_traits_io::trust::TrustState) -> &'static str {
+    match verdict {
+        ctx_traits_io::trust::TrustState::Verified => "approve",
+        ctx_traits_io::trust::TrustState::Blocked => "block",
+    }
+}
+
+/// First 12 chars after a `sha256:`-style prefix, for compact modal-body
+/// enumeration — never used for the actual write, only display.
+fn short_digest(digest: &str) -> String {
+    let bare = digest
+        .split_once(':')
+        .map(|(_, rest)| rest)
+        .unwrap_or(digest);
+    bare.chars().take(12).collect()
+}
+
+/// Bound on how many members a block-approve modal body enumerates before
+/// collapsing the remainder into an explicit `+N more` count (P489: never a
+/// silent cut).
+const TRUST_MODAL_BODY_CAP: usize = 8;
+
+/// `a`/`b` on TRAITS: opens the reason modal under an identity-bound
+/// `Action::Trait(TraitAction::Trust)` tag with exactly one member (§4.4).
+/// Refuses outright — no modal — when the row is unreadable (no canonical
+/// digest was ever computed): opening a modal that cannot proceed is less
+/// honest than refusing before it opens (the P469 `open_kill_modal`
+/// precedent).
+fn open_trait_trust_modal(state: &mut State, verdict: ctx_traits_io::trust::TrustState) {
+    let Some(row) = state.traits.get(state.selected()) else {
+        return;
+    };
+    if row.canonical_digest.is_empty() {
+        state.message = Some(format!("{} is unreadable; nothing to trust", row.id));
+        return;
+    }
+    state.modal_host.open(
+        Action::Trait(TraitAction::Trust {
+            label: row.id.clone(),
+            members: vec![(row.id.clone(), row.canonical_digest.clone())],
+            verdict,
+        }),
+        Modal::text_input(format!("{} {}", trust_verb(verdict), row.id), "", false),
+    );
+}
+
+/// `a`/`b` on TRUST: single-member identity-bound write, sharing the same
+/// `Action::Trait(TraitAction::Trust)` tag TRAITS uses (§4.7 — one write
+/// path). Refuses outright — no modal — for an orphan row (`trait_id: None`)
+/// or a row with no current digest (§4.6).
+fn open_trust_modal(state: &mut State, verdict: ctx_traits_io::trust::TrustState) {
+    let Some(row) = selected_trust(state) else {
+        return;
+    };
+    let Some(trait_id) = &row.trait_id else {
+        state.message = Some("orphaned record; nothing to approve".to_string());
+        return;
+    };
+    if row.current_digest.is_empty() {
+        state.message = Some(format!("{trait_id} is unreadable; nothing to trust"));
+        return;
+    }
+    state.modal_host.open(
+        Action::Trait(TraitAction::Trust {
+            label: trait_id.clone(),
+            members: vec![(trait_id.clone(), row.current_digest.clone())],
+            verdict,
+        }),
+        Modal::text_input(format!("{} {trait_id}", trust_verb(verdict)), "", false),
+    );
+}
+
+/// `A` on TRUST: family-level block-approve (§4.6) — one modal, one reason,
+/// applied to every member of `metadata.family`, keyed off `state.trust`
+/// (not a package layout) so P450's later variants-map fold needs no rework.
+/// Refuses outright when the row has no family (no degenerating into `a`) or
+/// is an orphan/unreadable row. The modal body enumerates every member and
+/// its class — bounded, with an explicit `+N more` count, never a silent
+/// cut — so the blast radius is visible before any keypress.
+fn open_trust_family_modal(state: &mut State, verdict: ctx_traits_io::trust::TrustState) {
+    let Some(row) = selected_trust(state) else {
+        return;
+    };
+    if row.trait_id.is_none() {
+        state.message = Some("orphaned record; nothing to approve".to_string());
+        return;
+    }
+    let Some(family) = row.family.clone() else {
+        state.message =
+            Some("no family on this trait — use `a`/`b` for a single approve".to_string());
+        return;
+    };
+    let members: Vec<&TrustRow> = state
+        .trust
+        .iter()
+        .filter(|member| member.family.as_deref() == Some(family.as_str()))
+        .filter(|member| member.trait_id.is_some() && !member.current_digest.is_empty())
+        .collect();
+    if members.is_empty() {
+        state.message = Some(format!("no readable members in family {family}"));
+        return;
+    }
+    let (body_lines, write_members) = trust_block_approve_body(&members);
+    state.modal_host.open(
+        Action::Trait(TraitAction::Trust {
+            label: family.clone(),
+            members: write_members,
+            verdict,
+        }),
+        Modal::text_input_with_body(
+            format!("{} family {family}", trust_verb(verdict)),
+            body_lines.join("\n"),
+            "",
+            false,
+        ),
+    );
+}
+
+/// `A` on TRUST when marks exist (P506 §3.6): the same block-approve write
+/// path as [`open_trust_family_modal`], sourced from [`State::trust_marks`]
+/// instead of `metadata.family` — a different source of the member list, not
+/// a second apply path. Refuses outright when no marked row still resolves
+/// to a readable trait.
+fn open_trust_marked_modal(state: &mut State, verdict: ctx_traits_io::trust::TrustState) {
+    let members: Vec<&TrustRow> = state
+        .trust
+        .iter()
+        .filter(|row| {
+            row.trait_id
+                .as_deref()
+                .is_some_and(|id| state.trust_marks.contains(&id.to_string()))
+        })
+        .filter(|row| !row.current_digest.is_empty())
+        .collect();
+    if members.is_empty() {
+        state.message = Some("no readable marked members to approve".to_string());
+        return;
+    }
+    let (body_lines, write_members) = trust_block_approve_body(&members);
+    let label = format!("{} marked", write_members.len());
+    state.modal_host.open(
+        Action::Trait(TraitAction::Trust {
+            label: label.clone(),
+            members: write_members,
+            verdict,
+        }),
+        Modal::text_input_with_body(
+            format!("{} {label} traits", trust_verb(verdict)),
+            body_lines.join("\n"),
+            "",
+            false,
+        ),
+    );
+}
+
+/// The block-approve modal body/write-set builder shared by
+/// [`open_trust_family_modal`] and [`open_trust_marked_modal`] (P506 §3.6):
+/// bounded enumeration with an explicit `+N more` count — never a silent cut
+/// — plus the `(trait_id, digest-captured-now)` pairs [`apply_trait_action`]
+/// re-checks before writing.
+fn trust_block_approve_body(members: &[&TrustRow]) -> (Vec<String>, Vec<(String, String)>) {
+    let mut body_lines: Vec<String> = members
+        .iter()
+        .take(TRUST_MODAL_BODY_CAP)
+        .map(|member| {
+            format!(
+                "{} {} ({})",
+                member.trait_id.as_deref().unwrap_or(""),
+                short_digest(&member.current_digest),
+                member.class.label()
+            )
+        })
+        .collect();
+    if members.len() > TRUST_MODAL_BODY_CAP {
+        body_lines.push(format!("+{} more", members.len() - TRUST_MODAL_BODY_CAP));
+    }
+    let write_members: Vec<(String, String)> = members
+        .iter()
+        .filter_map(|member| Some((member.trait_id.clone()?, member.current_digest.clone())))
+        .collect();
+    (body_lines, write_members)
+}
+
+/// Applies a resolved TRAITS/TRUST trust modal (§4.4, unified for N members
+/// by §4.7): `Cancelled` is handled by the caller (`apply_action`); only
+/// `Submitted` ever writes. Every member is re-looked-up in `state.trust`
+/// (the superset of all tiers both screens share) and the WHOLE set aborts,
+/// naming the offending member, if any one digest moved out from under the
+/// open modal — fail-closed, so nobody ever approves bytes they did not see.
+fn apply_trait_action(
+    state: &mut State,
+    action: TraitAction,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    let ModalOutcome::Submitted(reason) = outcome else {
+        return Ok(());
+    };
+    let reason = Some(reason).filter(|text| !text.trim().is_empty());
+    let TraitAction::Trust {
+        label,
+        members,
+        verdict,
+    } = action;
+    for (trait_id, captured_digest) in &members {
+        match decide_member_apply(&state.trust, trait_id, captured_digest) {
+            TrustApplyDecision::RowGone => {
+                state.message = Some(format!(
+                    "{trait_id} is no longer listed; no trust change recorded"
+                ));
+                return Ok(());
+            }
+            TrustApplyDecision::DigestMoved { captured, current } => {
+                state.message = Some(format!(
+                    "{trait_id}'s digest moved since this reason was opened (was {captured}, now {current}); no trust change recorded — re-open to re-approve"
+                ));
+                return Ok(());
+            }
+            TrustApplyDecision::Proceed => {}
+        }
+    }
+    let updates: Vec<ctx_traits_io::trust::DigestTrustUpdate> = members
+        .iter()
+        .map(|(trait_id, digest)| {
+            ctx_traits_io::trust::DigestTrustUpdate::named(
+                trait_id.clone(),
+                digest.clone(),
+                verdict,
+                reason.clone(),
+            )
+        })
+        .collect();
+    ctx_traits_io::trust::update_digests_locked(&updates)?;
+    state.message = Some(format!("trust {label} -> {}", verdict.as_str()));
+    // Every write path (single `a`/`b`, family `A`, marked `A`) lands here —
+    // clearing marks unconditionally after any successful write means a
+    // block-approve never leaves stale marks that would silently re-apply on
+    // the next `A` press.
+    state.trust_marks.clear();
+    state.reload();
+    // Only the writing screen's own preview needs a forced rebuild here —
+    // `state.reload()` already rebuilds whichever preview belongs to
+    // `state.screen` via `State::reload`'s own per-screen dispatch; the
+    // other screen's preview is rebuilt for free when it is next selected.
+    match state.screen {
+        Screen::Traits => force_rebuild_trait_preview_for_selection(state),
+        Screen::Trust => force_rebuild_trust_preview_for_selection(state),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// `e`: opens `$EDITOR` on the selected trait's authored source, then
+/// (§4.6) re-locates it by `trait_id` after the reload — never by index —
+/// and force-rebuilds the preview so the drift/error facts refresh even
+/// though the canonical digest itself never moves from an authored-source
+/// edit.
+fn edit_selected_trait_source(pane: &mut RatatuiPane, state: &mut State) -> crate::Result<()> {
+    let Some(row) = state.traits.get(state.selected()) else {
+        return Ok(());
+    };
+    let Some(path) = dashboard_trait_editable_source(&row.source_path) else {
+        state.message = Some(format!("{} has no editable authored source", row.id));
+        return Ok(());
+    };
+    let trait_id = row.id.clone();
+    let ok = tui_kit::edit_file(pane, &path)?;
+    state.message = Some(if ok {
+        format!("edited {}", path)
+    } else {
+        format!("editor exited nonzero for {}", path)
+    });
+    state.reload();
+    match reposition_trait_selection(&state.traits, &trait_id) {
+        Some(idx) => state.list_traits.set_selected(idx),
+        None => state.message = Some(format!("{trait_id} is no longer listed")),
+    }
+    force_rebuild_trait_preview_for_selection(state);
+    Ok(())
+}
+
+/// Explicitly checks for an already-generated advisory explanation. This
+/// never runs during selection or preview refresh, keeping those paths free
+/// of model work. A cache miss remains an in-pane failure until a configured
+/// narrator is available.
+fn explain_selected_trait(state: &mut State) {
+    let Some(row) = state.traits.get(state.selected()) else {
+        return;
+    };
+    let request = worker::ExplanationRequest {
+        trait_id: row.id.clone(),
+        canonical_digest: row.canonical_digest.clone(),
+        canonical_path: row.source_path.clone(),
+    };
+    state.trait_explanation = Some((
+        request.trait_id.clone(),
+        request.canonical_digest.clone(),
+        Err("working...".to_string()),
+        std::time::Instant::now(),
+    ));
+    if let Some(worker) = &state.worker {
+        worker.explain(request);
+    }
+}
+
+/// `n`: opens the kit's own multi-line text-input modal seeded with a
+/// one-argument-per-line template (P506 §3.5 — the `$EDITOR` temp-file round
+/// trip is gone). Submission is resolved through [`apply_spawn_request`].
+fn open_spawn_modal(state: &mut State) {
+    let seed = "# One argument per line. First non-comment line is the trait id.\n\
+                # Example:\n\
+                # my-trait\n\
+                # --set\n\
+                # code-diff=...\n";
+    state.modal_host.open(
+        Action::Session(SessionAction::Spawn),
+        Modal::text_input("spawn run", seed, true),
+    );
+}
+
+/// Validates a submitted spawn request through the real clap parser, injects
+/// `--progress none`, and detaches a `ctx traits run` child. Never runs
+/// anything the parser itself would not accept as a plain `ctx traits run`
+/// invocation.
+fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
+    let user_args: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect();
+    if user_args.is_empty() {
+        state.message = Some("spawn request was empty".to_string());
+        return Ok(());
+    }
+    const FORBIDDEN: &[&str] = &[
+        "--no-drive",
+        "--ephemeral",
+        "--out",
+        "--session-store",
+        "--json",
+        "--progress",
+    ];
+    for arg in &user_args {
+        let flag = arg.split('=').next().unwrap_or(arg);
+        if FORBIDDEN.contains(&flag) {
+            state.message = Some(format!(
+                "{flag} is not permitted in a dashboard spawn request"
+            ));
+            return Ok(());
+        }
+    }
+    let mut full_argv: Vec<std::ffi::OsString> = vec!["ctx".into(), "traits".into(), "run".into()];
+    full_argv.extend(user_args.iter().map(std::ffi::OsString::from));
+    full_argv.push("--progress".into());
+    full_argv.push("none".into());
+    match super::surface::cli::parse(full_argv.clone()) {
+        Ok(Some(super::surface::cli::Command::Traits {
+            subcommand: Some(super::surface::cli::TraitsCommand::Run { .. }),
+            ..
+        })) => {}
+        Ok(_) => {
+            state.message = Some("spawn request did not parse as `ctx traits run`".to_string());
+            return Ok(());
+        }
+        Err(error) => {
+            state.message = Some(format!("spawn request rejected: {error}"));
+            return Ok(());
+        }
+    }
+    // No session id exists yet (minted by the child once it starts), so this
+    // call site keys its log by pid instead of session id — the one place
+    // the shared `resolve_spawn_exe_and_log` helper's session-keyed naming
+    // (§3.8) cannot apply.
+    let (exe, log_path) = resolve_spawn_exe_and_log(&format!("pid-{}", std::process::id()))?;
+    let cwd = super::lifecycle_reporting::current_utf8_dir()?;
+    let mut args: Vec<String> = vec!["traits".to_string(), "run".to_string()];
+    args.extend(user_args);
+    args.push("--progress".to_string());
+    args.push("none".to_string());
+    let _child = ctx_traits_io::process::spawn_detached(
+        &exe,
+        &args,
+        &cwd,
+        &log_path,
+        &[(
+            ctx_traits_io::run_liveness::SPAWNED_LOG_PATH_ENV,
+            log_path.as_str(),
+        )],
+    )?;
+    state.message = Some("spawn started".to_string());
+    state.reload();
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()> {
+    pane.draw(|frame| {
+        let area = frame.area();
+        // P550: while a story view is open, it replaces the screen's own
+        // tree with a single full-area lines pane — precedent: the attached
+        // session view is already a state-swapped rendering of the same
+        // area. The footer still draws below it (`footer_line` branches on
+        // `story_view` too) so the close hint stays visible.
+        if let Some(view) = state.story_view.as_mut() {
+            let regions = tui_panes::screen_regions(area);
+            let inner = tui_panes::render_pane(frame, regions[1], &view.title, true);
+            let styled = super::story::story_document(
+                &view.session,
+                &view.report,
+                ctx_traits_core::procedure::story::StoryLevel::Default,
+            );
+            let rendered: Vec<ratatui::text::Line<'static>> =
+                styled.iter().map(render_line).collect();
+            let wrapped = tui_panes::wrapped_lines(&rendered, inner.width.max(1));
+            view.scroll.set_len(wrapped.len());
+            tui_panes::render_lines_pane(frame, inner, &wrapped, view.scroll);
+            frame.render_widget(footer_line(state), regions[2]);
+            if let Some(modal) = state.modal_host.modal() {
+                tui_kit::render_modal(frame, area, modal);
+            }
+            return;
+        }
+        let regions = tui_panes::screen_regions(area);
+        let titles: Vec<String> = Screen::all()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, screen)| format!("[{}] {}", idx + 1, screen.title()))
+            .collect();
+        let current_idx = Screen::all()
+            .iter()
+            .position(|s| *s == state.screen)
+            .unwrap_or(0);
+        frame.render_widget(tui_panes::tab_bar(&titles, current_idx), regions[0]);
+
+        let tree = build_tree_for_screen(state, regions[1].width);
+        // Reconciled against THIS tree — the one actually resolved at the
+        // real terminal width — never a hypothetical maximum-width one, so
+        // focus can never name a pane that has no rect this frame (P506
+        // review: `focus-ring-includes-undrawn-panes`).
+        state
+            .focus
+            .reconcile(tree.leaf_ids(), list_pane_id(state.screen));
+        let resolved = tree.resolve(regions[1]);
+        // Cached so `alt`+arrow directional focus movement in `handle_key`
+        // reads the SAME rects this frame just drew, instead of
+        // re-resolving the tree outside a draw pass.
+        state.last_pane_layout = resolved.clone();
+        for id in tree.leaf_ids() {
+            clamp_visible_pane_scroll(state, id);
+            let Some(rect) = resolved.rect(id) else {
+                continue;
+            };
+            let focused = state.focus.is_focused(id);
+            let title = tree.title(id).unwrap_or(id).to_string();
+            let inner = tui_panes::render_pane(frame, rect, &title, focused);
+            render_pane_content(frame, id, inner, state);
+        }
+
+        frame.render_widget(footer_line(state), regions[2]);
+        if let Some(modal) = state.modal_host.modal() {
+            tui_kit::render_modal(frame, area, modal);
+        }
+    })
+}
+
+/// The pane tree for `state.screen`, at `width` columns (P506 §3.2). Below
+/// each screen's own narrow-terminal threshold, degrades to the list pane
+/// alone — `PaneTree` itself has no floor/cap policy (`tui_panes.rs`'s own
+/// doc), so that decision is made here, before the tree is built, rather
+/// than re-imported.
+fn build_tree_for_screen(state: &State, width: u16) -> PaneTree {
+    match state.screen {
+        Screen::Sessions => build_sessions_tree(state, width),
+        Screen::Traits => build_two_pane_tree(
+            PANE_TRAITS_LIST,
+            "traits",
+            PANE_TRAITS_PREVIEW,
+            traits_preview_title(state),
+            TRAITS_LEFT_MIN,
+            TRAITS_RIGHT_MIN,
+            width,
+        ),
+        Screen::Merges => build_two_pane_tree(
+            PANE_MERGES_LIST,
+            "merges",
+            PANE_MERGES_PREVIEW,
+            "preview".to_string(),
+            MERGES_LEFT_MIN,
+            MERGES_RIGHT_MIN,
+            width,
+        ),
+        Screen::Trust => build_two_pane_tree(
+            PANE_TRUST_LIST,
+            "trust",
+            PANE_TRUST_PREVIEW,
+            "preview".to_string(),
+            TRUST_LEFT_MIN,
+            TRUST_RIGHT_MIN,
+            width,
+        ),
+    }
+}
+
+/// SESSIONS' pane tree (P506 §3.2): list left, preview right split
+/// progress-top/narration-bottom, per the owner's reference layout.
+fn build_sessions_tree(state: &State, width: u16) -> PaneTree {
+    // A permanent, operator-useful regression signal — invisible in
+    // a healthy steady state (below `RELOAD_WARN_THRESHOLD`), present the
+    // moment a reload genuinely slows down.
+    let list_title = match state.reload_duration {
+        Some(duration) if duration >= RELOAD_WARN_THRESHOLD => {
+            format!("sessions (reload {}ms)", duration.as_millis())
+        }
+        _ => "sessions".to_string(),
+    };
+    let list_leaf = PaneTree::Leaf {
+        id: PANE_SESSIONS_LIST,
+        title: list_title,
+    };
+    if width < SESSIONS_LEFT_MIN + SESSIONS_RIGHT_MIN {
+        return list_leaf;
+    }
+    let progress_title = state
+        .session_preview
+        .as_ref()
+        .map(|preview| {
+            let suffix = preview
+                .degraded
+                .as_deref()
+                .map(|_| " (degraded: plain summary)")
+                .unwrap_or_default();
+            format!("attached: {}{suffix}", preview.session_id)
+        })
+        .unwrap_or_else(|| "progress".to_string());
+    PaneTree::Split {
+        dir: Direction::Horizontal,
+        children: vec![
+            (Constraint::Min(SESSIONS_LEFT_MIN), list_leaf),
+            (
+                Constraint::Percentage(50),
+                PaneTree::Split {
+                    dir: Direction::Vertical,
+                    children: vec![
+                        (
+                            Constraint::Percentage(50),
+                            PaneTree::Leaf {
+                                id: PANE_SESSIONS_PROGRESS,
+                                title: progress_title,
+                            },
+                        ),
+                        (
+                            Constraint::Percentage(50),
+                            PaneTree::Leaf {
+                                id: PANE_SESSIONS_NARRATION,
+                                title: "narration".to_string(),
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
+    }
+}
+
+/// The list+single-preview shape TRAITS/MERGES/TRUST each build (P506 §3.2)
+/// — one genuine extraction, since all three screens are otherwise identical
+/// two-pane trees differing only in ids/titles/width floors.
+fn build_two_pane_tree(
+    list_id: PaneId,
+    list_title: &str,
+    preview_id: PaneId,
+    preview_title: String,
+    left_min: u16,
+    right_min: u16,
+    width: u16,
+) -> PaneTree {
+    let list_leaf = PaneTree::Leaf {
+        id: list_id,
+        title: list_title.to_string(),
+    };
+    if width < left_min + right_min {
+        return list_leaf;
+    }
+    PaneTree::Split {
+        dir: Direction::Horizontal,
+        children: vec![
+            (Constraint::Min(left_min), list_leaf),
+            (
+                Constraint::Percentage(50),
+                PaneTree::Leaf {
+                    id: preview_id,
+                    title: preview_title,
+                },
+            ),
+        ],
+    }
+}
+
+fn traits_preview_title(state: &State) -> String {
+    state
+        .trait_preview
+        .as_ref()
+        .map(|preview| format!("preview: {}", preview.trait_id))
+        .unwrap_or_else(|| "preview".to_string())
+}
+
+/// Dispatches a single leaf's content render by pane id — the one place a
+/// new pane's content gets wired up, mirroring `tui_demo::draw`'s own
+/// id-dispatch shape.
+fn render_pane_content(frame: &mut ratatui::Frame<'_>, id: PaneId, inner: Rect, state: &State) {
+    if id == PANE_SESSIONS_LIST {
+        render_sessions_list_pane(frame, inner, state);
+    } else if id == PANE_SESSIONS_PROGRESS {
+        render_sessions_progress_pane(frame, inner, state);
+    } else if id == PANE_SESSIONS_NARRATION {
+        render_sessions_narration_pane(frame, inner, state);
+    } else if id == PANE_TRAITS_LIST {
+        render_traits_list_pane(frame, inner, state);
+    } else if id == PANE_TRAITS_PREVIEW {
+        render_lines_preview_pane(
+            frame,
+            inner,
+            state.trait_preview.as_ref().map(|p| p.lines.as_slice()),
+            "(no trait selected)",
+            PANE_TRAITS_PREVIEW,
+            state,
+        );
+    } else if id == PANE_MERGES_LIST {
+        render_merges_list_pane(frame, inner, state);
+    } else if id == PANE_MERGES_PREVIEW {
+        render_lines_preview_pane(
+            frame,
+            inner,
+            state.merge_preview.as_ref().map(|p| p.lines.as_slice()),
+            "(no run selected)",
+            PANE_MERGES_PREVIEW,
+            state,
+        );
+    } else if id == PANE_TRUST_LIST {
+        render_trust_list_pane(frame, inner, state);
+    } else if id == PANE_TRUST_PREVIEW {
+        render_lines_preview_pane(
+            frame,
+            inner,
+            state.trust_preview.as_ref().map(|p| p.lines.as_slice()),
+            "(no trait selected)",
+            PANE_TRUST_PREVIEW,
+            state,
+        );
+    }
+}
+
+/// The generic `ViewportScroll`-backed preview-pane renderer shared by
+/// TRAITS/MERGES/TRUST (P506 §3.2): `None` content renders `empty_message`
+/// instead — never an empty pane with no explanation.
+fn render_lines_preview_pane(
+    frame: &mut ratatui::Frame<'_>,
+    inner: Rect,
+    lines: Option<&[RLine<'static>]>,
+    empty_message: &'static str,
+    pane_id: PaneId,
+    state: &State,
+) {
+    let scroll = state.pane_scrolls.get(pane_id);
+    match lines {
+        Some(lines) => {
+            tui_panes::render_lines_pane(frame, inner, lines, scroll);
+        }
+        None => {
+            tui_panes::render_lines_pane(frame, inner, &[RLine::from(empty_message)], scroll);
+        }
+    }
+}
+
+fn render_sessions_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    // In `v` ALL mode `state.sessions` spans every indexed repository rather
+    // than each row's own store alone, so this is a strict superset of the
+    // per-repo id set short-id uniqueness is actually judged against
+    // elsewhere (P506 §3.4) — it can only ever lengthen a short id, never
+    // make one ambiguous, so computing it globally here is safe as-is.
+    let all_ids: Vec<String> = state
+        .sessions
+        .iter()
+        .map(|row| row.session_id.clone())
+        .collect();
+    tui_panes::render_list_pane(
+        frame,
+        inner,
+        &state.sessions_visible,
+        &state.list_sessions,
+        |row| session_visible_row_label(row, &state.sessions, &all_ids),
+        |_| false,
+    );
+}
+
+/// The list's content budget in an 80-column terminal: two border columns and
+/// the kit's two-column selection marker leave 76 display columns.
+const LIST_LABEL_WIDTH: usize = 76;
+const SESSION_CLOCK_WIDTH: usize = 8;
+
+fn short_session(session_id: &str, all_ids: &[String]) -> String {
+    ctx_traits_io::run_session::short_session_display(session_id, all_ids)
+}
+
+fn state_short_session(state: &State, session_id: &str) -> String {
+    let all_ids = state
+        .sessions
+        .iter()
+        .map(|row| row.session_id.clone())
+        .chain(state.merges.iter().map(|row| row.session_id.clone()))
+        .collect::<Vec<_>>();
+    short_session(session_id, &all_ids)
+}
+
+fn list_field(text: &str, width: usize) -> String {
+    let text = tui::truncate_display_width_end(text, width);
+    let padding = width.saturating_sub(tui::display_width(&text));
+    format!("{text}{}", " ".repeat(padding))
+}
+
+fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
+    let short_id = short_session(&row.session_id, all_ids);
+    let id_width = tui::display_width(&short_id);
+    // Session identity is never clipped: steal cells from descriptive columns.
+    let remaining = LIST_LABEL_WIDTH.saturating_sub(id_width + 5);
+    let phase_width = remaining.saturating_sub(32).min(19);
+    let repo_width = remaining.saturating_sub(19 + phase_width).min(12);
+    let state_width = remaining
+        .saturating_sub(repo_width + phase_width + 10)
+        .min(9);
+    let elapsed_width = remaining
+        .saturating_sub(repo_width + state_width + phase_width + 3)
+        .min(SESSION_CLOCK_WIDTH);
+    let tokens_width =
+        remaining.saturating_sub(repo_width + state_width + phase_width + elapsed_width);
+    let label = format!(
+        "{} {} {} {} {} {}",
+        list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
+        short_id,
+        list_field(&row.state_text, state_width),
+        list_field(&row.phase, phase_width),
+        list_field(&row.elapsed_text, elapsed_width),
+        list_field(&row.tokens_text, tokens_width),
+    );
+    debug_assert!(tui::display_width(&label) <= LIST_LABEL_WIDTH);
+    label
+}
+
+/// One SESSIONS visible row's list label (P506 §3.1/§3.4): a group header
+/// (`▾`/`▸` plus its owner-facing label and count) or a real session row,
+/// with the session id shortened per [`short_session_display`] against the
+/// whole store's id set — `all_ids` is computed once by the caller, not
+/// per-row.
+fn session_visible_row_label(
+    row: &VisibleRow,
+    sessions: &[SessionRow],
+    all_ids: &[String],
+) -> String {
+    match row {
+        VisibleRow::GroupHeader {
+            group,
+            count,
+            collapsed,
+        } => {
+            let marker = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
+            format!("{marker} {} ({count})", group.label())
+        }
+        VisibleRow::Session(idx) => {
+            let Some(row) = sessions.get(*idx) else {
+                return String::new();
+            };
+            session_row_label(row, all_ids)
+        }
+    }
+}
+
+fn render_sessions_progress_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    let scroll = state.pane_scrolls.get(PANE_SESSIONS_PROGRESS);
+    match &state.session_preview {
+        Some(preview) => {
+            tui_panes::render_lines_pane(frame, inner, &preview.lines, scroll);
+        }
+        None => {
+            tui_panes::render_lines_pane(
+                frame,
+                inner,
+                &[RLine::from("(no session selected)")],
+                scroll,
+            );
+        }
+    }
+}
+
+/// The narration pane's honest content (P506 §3.2): there is no narration
+/// source today ([`run_view::render_ledger_run_view`] always passes
+/// `narration: None`, per its own doc) — this pane exists because the
+/// contract's layout requires it and because P521/P522 are expected to fill
+/// it, so it renders a truthful placeholder rather than fabricating content
+/// or silently duplicating the progress pane.
+fn sessions_narration_lines(state: &State) -> Vec<RLine<'static>> {
+    if state.session_preview.is_none() {
+        return Vec::new();
+    }
+    vec![RLine::from(Span::styled(
+        "(no narration recorded for this session)",
+        Style::default().add_modifier(Modifier::DIM),
+    ))]
+}
+
+fn render_sessions_narration_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    let scroll = state.pane_scrolls.get(PANE_SESSIONS_NARRATION);
+    tui_panes::render_lines_pane(frame, inner, &sessions_narration_lines(state), scroll);
+}
+
+fn render_traits_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    tui_panes::render_list_pane(
+        frame,
+        inner,
+        &state.traits,
+        &state.list_traits,
+        trait_row_label,
+        |_| false,
+    );
+}
+
+fn trait_row_label(row: &TraitRow) -> String {
+    let label = format!(
+        "{} {} {} {}",
+        list_field(&row.id, 24),
+        list_field(&row.version, 10),
+        list_field(&row.status, 18),
+        list_field(&row.trust, 21),
+    );
+    debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+    label
+}
+
+fn render_merges_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    let all_ids: Vec<String> = state
+        .sessions
+        .iter()
+        .map(|row| row.session_id.clone())
+        .collect();
+    tui_panes::render_list_pane(
+        frame,
+        inner,
+        &state.merges,
+        &state.list_merges,
+        |row| merge_row_label(row, &all_ids),
+        |_| false,
+    );
+}
+
+/// The MERGES list row: `short session-id · class · stage · headline` (the
+/// translated short label — never the raw reason, per §3.3), the short id
+/// applied per §3.4.
+fn merge_row_label(row: &MergeRow, all_ids: &[String]) -> String {
+    // A landed row's stage is always `cleanup` (the frame the `Merged`
+    // status lands on) — truthful but redundant next to the `landed` class
+    // column, so it's blanked here rather than shown.
+    let stage = if row.class == MergeClass::Landed {
+        "-".to_string()
+    } else {
+        row.stage
+            .map(merge_story::stage_text)
+            .unwrap_or("-")
+            .to_string()
+    };
+    let short_id = short_session(&row.session_id, all_ids);
+    let remaining = LIST_LABEL_WIDTH.saturating_sub(tui::display_width(&short_id) + 3);
+    let class_width = remaining.min(10);
+    let stage_width = remaining.saturating_sub(class_width).min(12);
+    let headline_width = remaining.saturating_sub(class_width + stage_width);
+    let label = format!(
+        "{} {} {} {}",
+        short_id,
+        list_field(row.class.label(), class_width),
+        list_field(&stage, stage_width),
+        list_field(&row.headline, headline_width),
+    );
+    debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+    label
+}
+
+fn render_trust_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    tui_panes::render_list_pane(
+        frame,
+        inner,
+        &state.trust_visible,
+        &state.list_trust,
+        |index| trust_row_label(&state.trust[*index]),
+        |index| {
+            let row = &state.trust[*index];
+            row.trait_id
+                .as_deref()
+                .is_some_and(|id| state.trust_marks.contains(&id.to_string()))
+        },
+    );
+}
+
+/// The TRUST list row: `trait-id · state · family/variant · short digest`
+/// (§4.8). An orphan leads with its recorded digest; the orphan-only list
+/// context already supplies its class, so it is not printed redundantly.
+fn trust_row_label(row: &TrustRow) -> String {
+    if row.class == trust_story::TrustClass::Orphaned {
+        let label = format!(
+            "{} {} {} {}",
+            list_field(
+                &short_digest(row.recorded_digest.as_deref().unwrap_or("")),
+                20
+            ),
+            list_field("", 14),
+            list_field("", 20),
+            list_field("", 19),
+        );
+        debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+        return label;
+    }
+    let family_variant = match (&row.family, &row.variant) {
+        (Some(family), Some(variant)) => format!("{family}/{variant}"),
+        (Some(family), None) => family.clone(),
+        (None, _) => String::new(),
+    };
+    let digest = short_digest(
+        row.recorded_digest
+            .as_deref()
+            .unwrap_or(&row.current_digest),
+    );
+    let label = format!(
+        "{} {} {} {}",
+        list_field(row.trait_id.as_deref().unwrap_or("(orphaned)"), 20),
+        list_field(row.class.label(), 14),
+        list_field(&family_variant, 20),
+        list_field(&digest, 19),
+    );
+    debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+    label
+}
+
+fn footer_line(state: &State) -> Paragraph<'static> {
+    if state.story_view.is_some() {
+        return tui_kit::keymap_footer(
+            "↑↓/jk scroll  PgUp/PgDn page  q/Esc/S close",
+            state.message.as_deref(),
+        );
+    }
+    let scope_suffix = if state.all_repos { " [ALL]" } else { "" };
+    let navigation = "↑↓/jk list  PgUp/PgDn preview  Enter focus  Esc list";
+    let hint = match state.screen {
+        Screen::Sessions => {
+            format!(
+                "{navigation}  Enter attach/expand  space expand  a answer  s resume  S story  x stop  d delete  n spawn  v {}  r reload  Tab/1-4 screens  q quit{scope_suffix}",
+                if state.all_repos {
+                    "this repo only"
+                } else {
+                    "all repos"
+                }
+            )
+        }
+        Screen::Traits => {
+            format!(
+                "{navigation}  a approve  b block  e edit source  x explain  r reload  Tab/1-4 screens  q quit"
+            )
+        }
+        Screen::Merges => format!(
+            "{navigation}  m merge  d deep-merge  p print path  x drop  v {}  r reload  Tab/1-4 screens  q quit{scope_suffix}",
+            if state.all_repos {
+                "this repo only"
+            } else {
+                "all repos"
+            }
+        ),
+        Screen::Trust => format!(
+            "{navigation}  a approve  b block  space mark  A approve family/marked  o {} {} orphaned  r reload  Tab/1-4 screens  q quit  [{} marked]",
+            if state.show_trust_orphans {
+                "hide"
+            } else {
+                "show"
+            },
+            state
+                .trust
+                .iter()
+                .filter(|row| row.class == trust_story::TrustClass::Orphaned)
+                .count(),
+            state.trust_marks.len(),
+        ),
+    };
+    let hint = format!("{hint}  [{}]", state.current_list().position_text());
+    let generated_task = state
+        .trait_explanation
+        .as_ref()
+        .and_then(|(_, _, result, started)| {
+            result
+                .as_ref()
+                .err()
+                .map(|message| explanation_task_text(message, started.elapsed()))
+        });
+    let task = if state.loading {
+        Some("loading...")
+    } else if let Some(task) = generated_task.as_deref() {
+        Some(task)
+    } else {
+        state.message.as_deref()
+    };
+    tui_kit::keymap_footer(hint, task)
+}
+
+fn explanation_task_text(message: &str, elapsed: Duration) -> String {
+    if message == "working..." {
+        format!("working... {}", tui::elapsed_text(elapsed))
+    } else {
+        format!("generated explanation unavailable: {message}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(class: SessionClass) -> SessionRow {
+        row_with_id("s1", class)
+    }
+
+    fn row_with_id(id: &str, class: SessionClass) -> SessionRow {
+        use ctx_traits_core::procedure::session::Status;
+        let status = match class {
+            SessionClass::Live | SessionClass::Resumable => Some(Status::AwaitingAgentOutput),
+            SessionClass::Terminal => Some(Status::Completed),
+            SessionClass::Unreadable => None,
+        };
+        SessionRow {
+            session_id: id.to_string(),
+            ledger_path: camino::Utf8PathBuf::from(format!("/tmp/{id}.json")),
+            run_id: format!("r-{id}"),
+            state_text: "x".to_string(),
+            phase: "x".to_string(),
+            elapsed_text: "-".to_string(),
+            tokens_text: "-".to_string(),
+            repo_key: None,
+            repo_path: None,
+            class,
+            status,
+            outcome: None,
+        }
+    }
+
+    #[test]
+    fn explanation_activity_timer_uses_the_shared_clock() {
+        assert_eq!(
+            explanation_task_text("working...", Duration::from_secs(59)),
+            "working... 00:00:59"
+        );
+        assert_eq!(
+            explanation_task_text("working...", Duration::from_secs(60)),
+            "working... 00:01:00"
+        );
+    }
+
+    fn attached_view_for(id: &str) -> AttachedView {
+        AttachedView {
+            session_id: id.to_string(),
+            ledger_path: camino::Utf8PathBuf::from(format!("/tmp/{id}.json")),
+            run_id: format!("r-{id}"),
+            state_digest: String::new(),
+            base_lines: vec![RLine::from("stub")],
+            trace_tail: Vec::new(),
+            lines: vec![RLine::from("stub")],
+            degraded: None,
+        }
+    }
+
+    #[test]
+    fn changed_trace_replaces_only_the_cached_trace_suffix() {
+        let mut view = attached_view_for("s1");
+        view.base_lines = vec![RLine::from("run tree")];
+        view.trace_tail = vec!["first".to_string()];
+        view.lines = compose_trace_lines(&view.base_lines, &view.trace_tail);
+
+        replace_trace_tail(&mut view, vec!["second".to_string()]);
+
+        let rendered: Vec<String> = view.lines.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            rendered,
+            vec!["run tree", "", "recent trace (best-effort):", "second"]
+        );
+        assert_eq!(view.base_lines[0].to_string(), "run tree");
+    }
+
+    #[test]
+    fn unchanged_trace_leaves_cached_lines_alone() {
+        let mut view = attached_view_for("s1");
+        view.trace_tail = vec!["same".to_string()];
+        view.lines = compose_trace_lines(&view.base_lines, &view.trace_tail);
+        let before: Vec<String> = view.lines.iter().map(ToString::to_string).collect();
+
+        replace_trace_tail(&mut view, vec!["same".to_string()]);
+
+        assert_eq!(
+            view.lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            before
+        );
+    }
+
+    #[test]
+    fn unreadable_view_clears_digest_for_same_digest_recovery() {
+        let mut view = attached_view_for("s1");
+        view.state_digest = "unchanged-after-recovery".to_string();
+
+        mark_view_unreadable(&mut view, "temporary read failure".to_string());
+
+        assert!(view.state_digest.is_empty());
+        assert!(view.base_lines.is_empty());
+        assert!(view.trace_tail.is_empty());
+    }
+
+    #[test]
+    fn trace_composition_sanitizes_tail_for_every_view_kind() {
+        let base = vec![RLine::from("reconstructed or fallback base")];
+        let rendered: Vec<String> = compose_trace_lines(&base, &["ok\u{1b}[2J\u{7}".to_string()])
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        assert_eq!(rendered[0], "reconstructed or fallback base");
+        assert_eq!(rendered[2], "recent trace (best-effort):");
+        assert_eq!(rendered[3], "ok[2J");
+    }
+
+    #[test]
+    fn delayed_worker_preview_is_ignored_after_selection_moves() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("A", SessionClass::Live),
+            row_with_id("B", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(2);
+
+        assert!(!session_preview_matches_current(&state, "A"));
+        assert!(session_preview_matches_current(&state, "B"));
+    }
+
+    #[test]
+    fn focus_enter_and_leave_keep_the_attached_identity_in_sync() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("A", SessionClass::Live),
+            row_with_id("B", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.focus = FocusRing::new(vec![PANE_SESSIONS_LIST, PANE_SESSIONS_PROGRESS]);
+        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+
+        update_session_attachment_for_focus(&mut state, false);
+        assert_eq!(state.attached_session_id.as_deref(), Some("A"));
+
+        focus_pane(&mut state.focus, PANE_SESSIONS_LIST);
+        update_session_attachment_for_focus(&mut state, true);
+        assert!(state.attached_session_id.is_none());
+
+        state.list_sessions.set_selected(2);
+        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+        update_session_attachment_for_focus(&mut state, false);
+        assert_eq!(state.attached_session_id.as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn live_trace_follow_keeps_new_tail_visible_until_manual_scroll() {
+        let mut scroll = tui_kit::ViewportScroll::new();
+        follow_session_preview(3, &mut scroll, false, 8);
+        assert_eq!(scroll.window(3), 0..3);
+
+        follow_session_preview(3, &mut scroll, true, 8);
+        assert_eq!(scroll.window(3), 5..8);
+
+        scroll.apply(ScrollDelta::Up(1), 3);
+        follow_session_preview(3, &mut scroll, false, 10);
+        assert_eq!(scroll.window(3), 4..7);
+    }
+
+    #[test]
+    fn attaching_an_existing_tall_preview_enables_tail_follow() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("A", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        let mut preview = attached_view_for("A");
+        preview.lines = (0..8).map(|line| RLine::from(line.to_string())).collect();
+        state.session_preview = Some(preview);
+
+        attach_selected(&mut state);
+
+        assert!(state.session_preview_follow);
+        assert_eq!(
+            state.pane_scrolls.get(PANE_SESSIONS_PROGRESS).window(3),
+            5..8
+        );
+    }
+
+    // Classification table (draft test 1), now covering the real mapping
+    // site rather than only the `can_*` verb table it feeds.
+    #[test]
+    fn classify_session_maps_live_and_terminal_and_resumable() {
+        use ctx_traits_core::procedure::session::Status;
+        assert_eq!(
+            classify_session(true, &Status::Completed, None),
+            SessionClass::Live
+        );
+        assert_eq!(
+            classify_session(true, &Status::Failed, None),
+            SessionClass::Live
+        );
+        assert_eq!(
+            classify_session(false, &Status::Completed, None),
+            SessionClass::Terminal
+        );
+        assert_eq!(
+            classify_session(false, &Status::Failed, None),
+            SessionClass::Terminal
+        );
+        assert_eq!(
+            classify_session(false, &Status::AwaitingInput, None),
+            SessionClass::Resumable
+        );
+        assert_eq!(
+            classify_session(false, &Status::AwaitingAgentOutput, None),
+            SessionClass::Resumable
+        );
+    }
+
+    // Blocker 2 (P509): a parked ask cancelled via STOP still carries
+    // `status == WaitingOnHuman` (record_interrupted_outcome never rewrites
+    // status) — only the outcome distinguishes it from a still-open ask.
+    #[test]
+    fn classify_session_maps_cancelled_parked_ask_to_terminal() {
+        use ctx_traits_core::procedure::session::{DriveOutcomeKind, Status};
+        assert_eq!(
+            classify_session(
+                false,
+                &Status::WaitingOnHuman,
+                Some(&DriveOutcomeKind::Interrupted)
+            ),
+            SessionClass::Terminal
+        );
+        assert_eq!(
+            classify_session(false, &Status::WaitingOnHuman, None),
+            SessionClass::Resumable
+        );
+    }
+
+    // Blocker 3 (P509): a relative trait path joins against the row's
+    // ALL-mode `repo_path`; an absolute path or the default (no ALL-mode
+    // tag) single-repo scope both pass through unchanged so the existing
+    // cwd-relative resolution keeps working.
+    #[test]
+    fn resolve_answer_trait_file_path_joins_relative_against_repo_path() {
+        assert_eq!(
+            resolve_answer_trait_file_path(".ctx/traits/demo/trait.toml", Some("/repos/foo")),
+            Some("/repos/foo/.ctx/traits/demo/trait.toml".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_answer_trait_file_path_passes_absolute_path_through_unchanged() {
+        assert_eq!(
+            resolve_answer_trait_file_path("/abs/trait.toml", Some("/repos/foo")),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_answer_trait_file_path_defers_to_default_resolution_without_repo_path() {
+        assert_eq!(
+            resolve_answer_trait_file_path(".ctx/traits/demo/trait.toml", None),
+            None
+        );
+    }
+
+    #[test]
+    fn session_group_maps_cancelled_parked_ask_to_failed_not_needs_user_input() {
+        use ctx_traits_core::procedure::session::{DriveOutcomeKind, Status};
+        assert_eq!(
+            session_group(SessionClass::Resumable, Some(&Status::WaitingOnHuman), None),
+            SessionGroup::NeedsUserInput
+        );
+        assert_eq!(
+            session_group(
+                SessionClass::Terminal,
+                Some(&Status::WaitingOnHuman),
+                Some(&DriveOutcomeKind::Interrupted)
+            ),
+            SessionGroup::Failed
+        );
+    }
+
+    // MERGES row classification (P472 §3.3): a `merges_from_inventory`-level
+    // table over terminal-frame/drive-completed combinations, mirroring
+    // `classify_session_maps_live_and_terminal_and_resumable`'s own shape.
+    // `PostMergeCleanupFailure`/`RecoveryFailure` must never map to
+    // `Parked` — see `session.rs`'s own doc comment on `MergeStatus`.
+    #[test]
+    fn classify_merge_maps_terminal_frames_and_mergeable() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus};
+
+        let frame = |status: MergeStatus| MergeFrame {
+            stage: MergeStage::Gates,
+            status,
+            reason: None,
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        };
+
+        assert_eq!(
+            classify_merge(Some(&frame(MergeStatus::Merged)), false),
+            Some(MergeClass::Landed)
+        );
+        assert_eq!(
+            classify_merge(Some(&frame(MergeStatus::Parked)), false),
+            Some(MergeClass::Parked)
+        );
+        assert_eq!(
+            classify_merge(Some(&frame(MergeStatus::PostMergeCleanupFailure)), false),
+            Some(MergeClass::Failed)
+        );
+        assert_eq!(
+            classify_merge(Some(&frame(MergeStatus::RecoveryFailure)), false),
+            Some(MergeClass::Failed)
+        );
+        assert_eq!(classify_merge(None, true), Some(MergeClass::Mergeable));
+        assert_eq!(classify_merge(None, false), None);
+    }
+
+    #[test]
+    fn merge_class_retry_and_drop_eligibility() {
+        assert!(MergeClass::Mergeable.can_retry());
+        assert!(MergeClass::Parked.can_retry());
+        assert!(MergeClass::Failed.can_retry());
+        assert!(!MergeClass::Landed.can_retry());
+
+        assert!(!MergeClass::Mergeable.can_drop());
+        assert!(MergeClass::Parked.can_drop());
+        assert!(MergeClass::Failed.can_drop());
+        assert!(MergeClass::Landed.can_drop());
+    }
+
+    // `MergeRow::headline` must honor its own documented contract (empty for
+    // `Landed`/`Mergeable`) rather than showing a translated headline the
+    // list row has no use for — guards the recurrence of
+    // `merged-frames-still-routed-through-the-park-classifier` at the
+    // dashboard layer, not just inside `merge_story`.
+    #[test]
+    fn merge_row_headline_is_blank_for_landed_and_never_reads_unrecognized() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus};
+
+        let merged_frame = MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        };
+        assert_eq!(
+            merge_row_headline(MergeClass::Landed, Some(&merged_frame)),
+            ""
+        );
+        assert_eq!(merge_row_headline(MergeClass::Mergeable, None), "");
+
+        let parked_frame = MergeFrame {
+            stage: MergeStage::Gates,
+            status: MergeStatus::Parked,
+            reason: Some("pre-landing gate just-test failed: exit=Some(1)".to_string()),
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        };
+        let headline = merge_row_headline(MergeClass::Parked, Some(&parked_frame));
+        assert!(!headline.is_empty());
+        assert!(!headline.contains("unrecognized"));
+    }
+
+    // Blocker attached-view-index-addressed: once attached, the pane must
+    // never adopt another row's identity just because that row now sits at
+    // the frozen selection index after a reorder.
+    #[test]
+    fn attached_session_survives_reorder_and_never_adopts_another_rows_identity() {
+        let mut state = State::new();
+        state.screen = Screen::Sessions;
+        state.sessions = vec![row_with_id("A", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.session_preview = Some(attached_view_for("A"));
+
+        // Reorder: B now occupies A's old index (0); A moves to index 1 and
+        // becomes Terminal (Completed group, collapsed by default) — mirrors
+        // `State::reload`'s own order: the visible-row rebuild runs against
+        // the new row set before the attached-pane refresh.
+        state.sessions = vec![
+            row_with_id("B", SessionClass::Live),
+            row_with_id("A", SessionClass::Terminal),
+        ];
+        rebuild_visible_sessions(&mut state);
+        refresh_attached_session(&mut state);
+
+        assert_eq!(
+            state
+                .session_preview
+                .as_ref()
+                .map(|p| p.session_id.as_str()),
+            Some("A")
+        );
+        // A's now-Completed group was collapsed by default — the refresh
+        // must expand it so the selection can land on A's own row rather
+        // than a collapsed count header.
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("A")
+        );
+    }
+
+    // Blocker attached-view-index-addressed: when the attached session
+    // leaves the inventory entirely, the pane must say so rather than being
+    // silently substituted with whatever row now occupies the old index.
+    #[test]
+    fn attached_session_reports_gone_when_it_leaves_the_inventory() {
+        let mut state = State::new();
+        state.screen = Screen::Sessions;
+        state.sessions = vec![row_with_id("A", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.session_preview = Some(attached_view_for("A"));
+
+        state.sessions = Vec::new();
+        refresh_attached_session(&mut state);
+
+        let preview = state.session_preview.as_ref().expect("preview retained");
+        assert_eq!(preview.session_id, "A");
+        assert!(preview.degraded.is_some());
+    }
+
+    // Session classes remain presentation-only; attach/resume display policy
+    // must not grow back into stop/delete authorization.
+    #[test]
+    fn session_class_only_controls_presentation_verbs() {
+        assert!(!SessionClass::Live.can_resume());
+        assert!(SessionClass::Live.can_attach());
+
+        assert!(SessionClass::Resumable.can_resume());
+        assert!(SessionClass::Resumable.can_attach());
+
+        assert!(!SessionClass::Terminal.can_resume());
+        assert!(SessionClass::Terminal.can_attach());
+
+        assert!(!SessionClass::Unreadable.can_attach());
+        assert!(!SessionClass::Unreadable.can_resume());
+    }
+
+    // Test 8 (resume argv): exact argv, no `--worktree`.
+    #[test]
+    fn resume_argv_is_exact_and_never_carries_worktree() {
+        let argv = resume_argv("abc123");
+        assert_eq!(
+            argv,
+            vec![
+                "traits",
+                "drive",
+                "--session",
+                "abc123",
+                "--progress",
+                "none"
+            ]
+        );
+        assert!(!argv.iter().any(|arg| arg == "--worktree"));
+    }
+
+    // Test 7 (delete plan enumeration): the pure planner's three cases.
+    #[test]
+    fn delete_plan_ledger_only_without_worktree_provenance() {
+        let plan = plan_delete(
+            camino::Utf8Path::new("/runs/s1.json"),
+            None,
+            None,
+            None,
+            true,
+            None,
+        );
+        assert_eq!(plan.artifact_lines(), vec!["ledger: /runs/s1.json"]);
+    }
+
+    #[test]
+    fn delete_plan_includes_worktree_when_registration_verified() {
+        let plan = plan_delete(
+            camino::Utf8Path::new("/runs/s1.json"),
+            None,
+            None,
+            Some(("wt1", "ctx/run/wt1")),
+            true,
+            Some((
+                camino::Utf8PathBuf::from("/repo"),
+                camino::Utf8PathBuf::from("/worktrees/wt1"),
+            )),
+        );
+        assert_eq!(
+            plan.artifact_lines(),
+            vec![
+                "ledger: /runs/s1.json",
+                "worktree: /worktrees/wt1",
+                "branch: ctx/run/wt1",
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_plan_notes_unregistered_worktree_and_leaves_it_out() {
+        let plan = plan_delete(
+            camino::Utf8Path::new("/runs/s1.json"),
+            None,
+            None,
+            Some(("wt1", "ctx/run/wt1")),
+            true,
+            None,
+        );
+        assert!(plan.worktree.is_none());
+        let lines = plan.artifact_lines();
+        assert_eq!(lines[0], "ledger: /runs/s1.json");
+        assert!(lines[1].contains("not registered"));
+    }
+
+    #[test]
+    fn delete_plan_notes_foreign_repository_without_probing_git() {
+        let plan = plan_delete(
+            camino::Utf8Path::new("/runs/s1.json"),
+            None,
+            None,
+            Some(("wt1", "ctx/run/wt1")),
+            false,
+            None,
+        );
+        assert!(plan.worktree.is_none());
+        assert!(plan.worktree_note.unwrap().contains("different repository"));
+    }
+
+    #[test]
+    fn list_labels_fit_an_80_column_pane_and_clip_each_dynamic_field() {
+        let id = format!("session-{}", "a".repeat(64));
+        let other = format!("session-{}", "a".repeat(12) + &"b".repeat(52));
+        let mut session = row_with_id(&id, SessionClass::Live);
+        session.repo_key = Some("repository-key-that-is-far-too-wide".to_string());
+        session.state_text = "state-that-is-far-too-wide".to_string();
+        session.phase = "phase-that-is-far-too-wide-for-a-session-list-row".to_string();
+        session.elapsed_text = "1234567890s".to_string();
+        session.tokens_text = "123456 tokens".to_string();
+        let session_label = session_visible_row_label(
+            &VisibleRow::Session(0),
+            std::slice::from_ref(&session),
+            &[id.clone(), other.clone()],
+        );
+        assert_eq!(tui::display_width(&session_label), LIST_LABEL_WIDTH);
+        assert!(!session_label.contains(&id));
+        assert!(session_label.contains(&short_session(&id, &[id.clone(), other])));
+
+        session.repo_key = Some("界\u{0301}".repeat(20));
+        session.phase = "界\u{0301}".repeat(40);
+        let wide_label = session_row_label(&session, std::slice::from_ref(&id));
+        assert!(tui::display_width(&wide_label) <= LIST_LABEL_WIDTH);
+
+        let trait_row = TraitRow {
+            id: "trait-id-that-is-far-too-wide-for-this-column".to_string(),
+            version: "version-that-is-too-wide".to_string(),
+            status: "status-that-is-too-wide".to_string(),
+            trust: "trust-state-that-is-too-wide".to_string(),
+            canonical_digest: String::new(),
+            source_path: String::new(),
+            error: None,
+        };
+        let trait_label = trait_row_label(&trait_row);
+        assert_eq!(tui::display_width(&trait_label), LIST_LABEL_WIDTH);
+
+        let merge = MergeRow {
+            session_id: id.clone(),
+            run_id: String::new(),
+            ledger_path: camino::Utf8PathBuf::new(),
+            class: MergeClass::Failed,
+            stage: None,
+            headline: "headline-that-is-far-too-wide-for-the-merge-list-row".to_string(),
+            phase: None,
+            trait_id: String::new(),
+            last_frame: None,
+            worktree: None,
+            repo_path: None,
+        };
+        assert_eq!(
+            tui::display_width(&merge_row_label(&merge, std::slice::from_ref(&id))),
+            LIST_LABEL_WIDTH
+        );
+
+        let trust = TrustRow {
+            trait_id: Some("trait-id-that-is-far-too-wide-for-this-column".to_string()),
+            origin: String::new(),
+            family: Some("family-that-is-far-too-wide".to_string()),
+            variant: Some("variant-that-is-far-too-wide".to_string()),
+            current_digest: "d".repeat(64),
+            recorded_digest: None,
+            class: trust_story::TrustClass::MovedApproval,
+            updated_at: None,
+            reason: None,
+        };
+        assert_eq!(
+            tui::display_width(&trust_row_label(&trust)),
+            LIST_LABEL_WIDTH
+        );
+    }
+
+    #[test]
+    fn relative_age_keeps_human_unit_prose() {
+        assert_eq!(format_elapsed_ago(Duration::from_secs(128)), "2m 8s ago");
+    }
+
+    #[test]
+    fn session_clock_column_is_fixed_across_duration_boundaries() {
+        let durations = ["00:00:59", "00:01:00", "00:59:59", "01:00:00"];
+        let labels = durations.map(|elapsed_text| {
+            let mut session = row_with_id("session-1", SessionClass::Live);
+            session.phase = "building".to_string();
+            session.elapsed_text = elapsed_text.to_string();
+            session.tokens_text = "12 tok".to_string();
+            session_row_label(&session, &["session-1".to_string()])
+        });
+
+        let clock_start = labels[0].find(durations[0]).expect("clock duration");
+        let tokens_start = labels[0].find("12 tok").expect("tokens");
+        assert_eq!(tokens_start - clock_start, SESSION_CLOCK_WIDTH + 1);
+        for (label, duration) in labels.iter().zip(durations) {
+            assert_eq!(tui::display_width(label), LIST_LABEL_WIDTH);
+            assert_eq!(label.find(duration), Some(clock_start));
+            assert_eq!(label.find("12 tok"), Some(tokens_start));
+        }
+    }
+
+    // Test 6 (target identity survives a reload): an action tag addresses a
+    // session_id, not an index; a re-lookup after the backing rows changed
+    // must find the same session or report it gone — never whatever now
+    // occupies the old index.
+    #[test]
+    fn action_tag_reresolves_by_session_id_not_index() {
+        let rows = [row(SessionClass::Live)];
+        let found = rows.iter().find(|row| row.session_id == "s1");
+        assert!(found.is_some());
+        let reloaded: Vec<SessionRow> = Vec::new();
+        let found_after_reload = reloaded.iter().find(|row| row.session_id == "s1");
+        assert!(found_after_reload.is_none());
+    }
+
+    // Test 3/4/5-supporting: the kit's `ModalHost` (exercised directly here
+    // for SessionAction, mirroring `tui_kit`'s own coverage) never yields a
+    // tag without a resolved outcome, so no action key can mutate state
+    // without its modal resolving first — see `tui_kit::tests` for the
+    // exhaustive state-machine coverage this type reuses unchanged.
+    #[test]
+    fn modal_host_gates_every_session_action() {
+        let mut host: ModalHost<SessionAction> = ModalHost::new();
+        assert!(!host.is_open());
+        host.open(
+            SessionAction::Kill("s1".to_string()),
+            Modal::confirm("stop session", "body"),
+        );
+        assert!(host.is_open());
+        let pending = host.handle_key(&crossterm::event::KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::NONE,
+        ));
+        assert!(pending.is_none());
+        assert!(host.is_open());
+        let resolved = host.handle_key(&crossterm::event::KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::NONE,
+        ));
+        assert!(matches!(
+            resolved,
+            Some((SessionAction::Kill(id), ModalOutcome::Confirmed)) if id == "s1"
+        ));
+        assert!(!host.is_open());
+    }
+
+    // P472: an `m`/`d`/`x` keypress on MERGES opens a modal (the `ModalHost`
+    // tag) rather than performing the side effect directly — mirrors
+    // `modal_host_gates_every_session_action` for `MergeAction`.
+    #[test]
+    fn modal_host_gates_every_merge_action() {
+        let mut host: ModalHost<MergeAction> = ModalHost::new();
+        host.open(
+            MergeAction::Retry {
+                run_id: "r1".to_string(),
+                deep: false,
+            },
+            Modal::confirm("merge", "body"),
+        );
+        assert!(host.is_open());
+        let resolved = host.handle_key(&crossterm::event::KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::NONE,
+        ));
+        assert!(matches!(
+            resolved,
+            Some((MergeAction::Retry { run_id, deep: false }, ModalOutcome::Confirmed))
+                if run_id == "r1"
+        ));
+        assert!(!host.is_open());
+    }
+
+    // ------------------------------------------------------------------
+    // P471: TRAITS master-detail preview/trust/edit
+    // ------------------------------------------------------------------
+
+    fn trait_row(id: &str, digest: &str) -> TraitRow {
+        TraitRow {
+            id: id.to_string(),
+            version: "1.0.0".to_string(),
+            status: "active".to_string(),
+            trust: "pending".to_string(),
+            canonical_digest: digest.to_string(),
+            source_path: "/traits/x/index.toml".to_string(),
+            error: None,
+        }
+    }
+
+    fn trust_row(id: &str, digest: &str, class: trust_story::TrustClass) -> TrustRow {
+        TrustRow {
+            trait_id: Some(id.to_string()),
+            origin: "repo".to_string(),
+            family: None,
+            variant: None,
+            current_digest: digest.to_string(),
+            recorded_digest: None,
+            class,
+            updated_at: None,
+            reason: None,
+        }
+    }
+
+    fn orphan_trust_row(recorded_digest: &str) -> TrustRow {
+        TrustRow {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: Some(recorded_digest.to_string()),
+            class: trust_story::TrustClass::Orphaned,
+            updated_at: None,
+            reason: None,
+        }
+    }
+
+    // An orphan-heavy trust store (the exact shape observed live: 207
+    // orphaned records ahead of 9 current ones) must never leave the TRUST
+    // list opening on a row `a`/`b`/`A` all refuse — actionable rows sort
+    // first regardless of how many orphan rows exist.
+    #[test]
+    fn sort_trust_rows_puts_orphan_rows_after_actionable_rows() {
+        let mut rows = vec![
+            orphan_trust_row("sha256:orphan-1"),
+            orphan_trust_row("sha256:orphan-2"),
+            trust_row("t1", "sha256:aaa", trust_story::TrustClass::Unreviewed),
+        ];
+        sort_trust_rows(&mut rows);
+        assert_eq!(rows[0].trait_id.as_deref(), Some("t1"));
+        assert!(rows[1].trait_id.is_none());
+        assert!(rows[2].trait_id.is_none());
+    }
+
+    #[test]
+    fn trust_orphan_projection_toggles_the_measured_store_shape() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Trust;
+        state.trust.extend((0..8).map(|index| {
+            trust_row(
+                &format!("live-{index}"),
+                &format!("sha256:live-{index}"),
+                trust_story::TrustClass::Verified,
+            )
+        }));
+        state
+            .trust
+            .extend((0..208).map(|index| orphan_trust_row(&format!("sha256:orphan-{index}"))));
+        rebuild_visible_trust(&mut state);
+
+        assert_eq!(state.trust_visible.len(), 8);
+        assert!(
+            state
+                .trust_visible
+                .iter()
+                .all(|index| state.trust[*index].trait_id.is_some())
+        );
+
+        toggle_trust_orphans(&mut state);
+        assert_eq!(state.trust_visible.len(), 216);
+
+        toggle_trust_orphans(&mut state);
+        assert_eq!(state.trust_visible.len(), 8);
+    }
+
+    #[test]
+    fn selected_trust_uses_visible_indices_and_hidden_orphans_cannot_act() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Trust;
+        state.trust = vec![
+            trust_row("live", "sha256:live", trust_story::TrustClass::Verified),
+            orphan_trust_row("sha256:orphan"),
+        ];
+        rebuild_visible_trust(&mut state);
+        assert_eq!(
+            selected_trust(&state).and_then(|row| row.trait_id.as_deref()),
+            Some("live")
+        );
+
+        // The backing orphan is inaccessible while hidden; selection remains
+        // on the live record rather than accidentally addressing index one.
+        state.list_trust.move_by(1, usize::MAX);
+        assert_eq!(
+            selected_trust(&state).and_then(|row| row.trait_id.as_deref()),
+            Some("live")
+        );
+        assert!(state.trust_marks.is_empty());
+
+        toggle_trust_orphans(&mut state);
+        state.list_trust.move_by(1, usize::MAX);
+        assert!(selected_trust(&state).is_some_and(|row| row.trait_id.is_none()));
+        toggle_trust_orphans(&mut state);
+        assert_eq!(
+            selected_trust(&state).and_then(|row| row.trait_id.as_deref()),
+            Some("live")
+        );
+    }
+
+    #[test]
+    fn trust_footer_always_exposes_the_orphan_toggle_and_count() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Trust;
+        state.trust = vec![
+            trust_row("live", "sha256:live", trust_story::TrustClass::Verified),
+            orphan_trust_row("sha256:orphan"),
+        ];
+        rebuild_visible_trust(&mut state);
+        assert!(format!("{:?}", footer_line(&state)).contains("o show 1 orphaned"));
+        toggle_trust_orphans(&mut state);
+        assert!(format!("{:?}", footer_line(&state)).contains("o hide 1 orphaned"));
+    }
+
+    #[test]
+    fn orphan_trust_presentation_uses_the_digest_without_repeating_its_class() {
+        let mut orphan = orphan_trust_row("sha256:0123456789abcdef");
+        orphan.reason = Some("retired trait".to_string());
+        let label = trust_row_label(&orphan);
+        assert!(label.starts_with(&short_digest("sha256:0123456789abcdef")));
+        assert!(!label.contains("orphaned"));
+        assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+
+        let normal_label = trust_row_label(&trust_row(
+            "live",
+            "sha256:live",
+            trust_story::TrustClass::Verified,
+        ));
+        assert!(normal_label.contains("live"));
+        assert!(normal_label.contains("verified"));
+
+        let facts = TrustPreviewFacts {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: orphan.recorded_digest.clone(),
+            class: orphan.class,
+            updated_at: Some("now".to_string()),
+            reason: orphan.reason.clone(),
+            sighting: None,
+            family_members: Vec::new(),
+        };
+        let rendered: Vec<String> = trust_preview_lines(&facts).iter().map(text_of).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("sha256:0123456789abcdef"))
+        );
+        assert!(rendered.iter().any(|line| line.contains("retired trait")));
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("origin: orphaned"))
+        );
+
+        let normal = TrustPreviewFacts {
+            trait_id: Some("live".to_string()),
+            origin: "repo".to_string(),
+            family: None,
+            variant: None,
+            current_digest: "sha256:live".to_string(),
+            recorded_digest: None,
+            class: trust_story::TrustClass::Verified,
+            updated_at: None,
+            reason: None,
+            sighting: None,
+            family_members: Vec::new(),
+        };
+        assert!(
+            trust_preview_lines(&normal)
+                .iter()
+                .map(text_of)
+                .any(|line| line.contains("origin: repo"))
+        );
+    }
+
+    #[test]
+    fn orphan_preview_rebuilds_for_each_selected_orphan_record() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Trust;
+        let mut first = orphan_trust_row("sha256:first-orphan");
+        first.reason = Some("first reason".to_string());
+        let mut second = orphan_trust_row("sha256:second-orphan");
+        second.reason = Some("second reason".to_string());
+        state.trust = vec![first, second];
+        state.show_trust_orphans = true;
+        rebuild_visible_trust(&mut state);
+
+        refresh_trust_preview_for_selection(&mut state);
+        let first_preview = state.trust_preview.as_ref().expect("first orphan preview");
+        let first_rendered: String = first_preview
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(first_rendered.contains("sha256:first-orphan"));
+        assert!(first_rendered.contains("first reason"));
+
+        state.list_trust.move_by(1, usize::MAX);
+        refresh_trust_preview_for_selection(&mut state);
+        let second_preview = state.trust_preview.as_ref().expect("second orphan preview");
+        let rendered: String = second_preview
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(rendered.contains("sha256:second-orphan"));
+        assert!(rendered.contains("second reason"));
+        assert!(!rendered.contains("sha256:first-orphan"));
+        assert!(!rendered.contains("first reason"));
+    }
+
+    #[test]
+    fn orphan_preview_rebuilds_when_records_share_a_digest() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Trust;
+        let mut first = orphan_trust_row("sha256:shared");
+        first.updated_at = Some("first timestamp".to_string());
+        first.reason = Some("first reason".to_string());
+        let mut second = orphan_trust_row("sha256:shared");
+        second.updated_at = Some("second timestamp".to_string());
+        second.reason = Some("second reason".to_string());
+        state.trust = vec![first, second];
+        state.show_trust_orphans = true;
+        rebuild_visible_trust(&mut state);
+
+        refresh_trust_preview_for_selection(&mut state);
+        state.list_trust.move_by(1, usize::MAX);
+        refresh_trust_preview_for_selection(&mut state);
+        let rendered: String = state
+            .trust_preview
+            .as_ref()
+            .expect("second orphan preview")
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(rendered.contains("second timestamp"));
+        assert!(rendered.contains("second reason"));
+        assert!(!rendered.contains("first timestamp"));
+        assert!(!rendered.contains("first reason"));
+    }
+
+    fn text_of(line: &tui::Line) -> String {
+        line.segments().map(|(text, _)| text).collect()
+    }
+
+    fn facts_stub() -> TraitPreviewFacts {
+        TraitPreviewFacts {
+            id: "my-trait".to_string(),
+            version: "1.0.0".to_string(),
+            status: "active".to_string(),
+            canonical_digest: "sha256:abc".to_string(),
+            trust_state: "pending".to_string(),
+            trust_reason: String::new(),
+            trust_stale: false,
+            has_trust_record: false,
+            drift: "clean".to_string(),
+            source_drift_checked: false,
+            procedure: ProcedureShape::Sequence(vec![
+                ("step-one".to_string(), "prompt".to_string()),
+                ("step-two".to_string(), "command".to_string()),
+            ]),
+            source_path: "/traits/my-trait/index.ts".to_string(),
+            source_excerpt: vec!["export const meta = {}".to_string()],
+            error: None,
+        }
+    }
+
+    // Test 1: `trait_preview_lines` is pure and complete — the digest, the
+    // trust state, and one procedure-shape row per sequence item are all
+    // present.
+    #[test]
+    fn trait_preview_lines_covers_digest_trust_and_procedure_shape() {
+        let facts = facts_stub();
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(rendered.iter().any(|l| l.contains("sha256:abc")));
+        assert!(rendered.iter().any(|l| l.contains("pending")));
+        assert!(rendered.iter().any(|l| l.contains("step-one")));
+        assert!(rendered.iter().any(|l| l.contains("step-two")));
+    }
+
+    // Test 1 (guidance-only case): no `[procedure]` produces the explicit
+    // no-procedure row, never an empty section.
+    #[test]
+    fn trait_preview_lines_guidance_only_trait_is_explicit() {
+        let mut facts = facts_stub();
+        facts.procedure = ProcedureShape::GuidanceOnly;
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|l| l.contains("no procedure — guidance-only trait"))
+        );
+    }
+
+    // Blocker `preview-mislabels-unloadable-trait-as-guidance-only`: a trait
+    // that could not be read/checked must never render the positive
+    // guidance-only claim — it renders the distinct "unknown" row instead.
+    #[test]
+    fn trait_preview_lines_unknown_procedure_never_says_guidance_only() {
+        let mut facts = facts_stub();
+        facts.procedure = ProcedureShape::Unknown;
+        facts.error = Some("parse failed".to_string());
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(!rendered.iter().any(|l| l.contains("guidance-only")));
+        assert!(
+            rendered
+                .iter()
+                .any(|l| l.contains("procedure unknown — trait could not be read"))
+        );
+    }
+
+    // Blocker `trait-preview-drift-omits-authored-source`: the drift row
+    // must never present an unqualified all-clear when the authored source
+    // was not part of the comparison — the qualifier is required and
+    // always present in that case, present or not depending on the fact.
+    #[test]
+    fn trait_preview_lines_flags_unchecked_authored_source() {
+        let mut facts = facts_stub();
+        facts.source_drift_checked = false;
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|l| l.contains("authored source not re-checked"))
+        );
+    }
+
+    #[test]
+    fn trait_preview_lines_omits_qualifier_when_authored_source_was_checked() {
+        let mut facts = facts_stub();
+        facts.source_drift_checked = true;
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(
+            !rendered
+                .iter()
+                .any(|l| l.contains("authored source not re-checked"))
+        );
+    }
+
+    // Test 2: stale-trust rendering — a trust record digest that no longer
+    // matches the canonical digest produces the re-approval-required row.
+    #[test]
+    fn trait_preview_lines_flags_stale_trust_record() {
+        let mut facts = facts_stub();
+        facts.has_trust_record = true;
+        facts.trust_stale = true;
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(rendered.iter().any(|l| l.contains("re-approval required")));
+    }
+
+    #[test]
+    fn trait_preview_lines_current_trust_record_has_no_stale_warning() {
+        let mut facts = facts_stub();
+        facts.has_trust_record = true;
+        facts.trust_stale = false;
+        let lines = trait_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(!rendered.iter().any(|l| l.contains("re-approval required")));
+    }
+
+    // Test 3: digest-movement refusal — the pure decision function, no IO,
+    // no trust store. Now keyed against `state.trust` (§4.7's shared
+    // re-lookup source for both screens) rather than `state.traits`.
+    #[test]
+    fn decide_member_apply_proceeds_when_digest_unchanged() {
+        let rows = vec![trust_row(
+            "t1",
+            "sha256:aaa",
+            trust_story::TrustClass::Unreviewed,
+        )];
+        assert_eq!(
+            decide_member_apply(&rows, "t1", "sha256:aaa"),
+            TrustApplyDecision::Proceed
+        );
+    }
+
+    #[test]
+    fn decide_member_apply_refuses_when_digest_moved() {
+        let rows = vec![trust_row(
+            "t1",
+            "sha256:bbb",
+            trust_story::TrustClass::Unreviewed,
+        )];
+        assert_eq!(
+            decide_member_apply(&rows, "t1", "sha256:aaa"),
+            TrustApplyDecision::DigestMoved {
+                captured: "sha256:aaa".to_string(),
+                current: "sha256:bbb".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn decide_member_apply_reports_gone_when_row_missing() {
+        let rows: Vec<TrustRow> = Vec::new();
+        assert_eq!(
+            decide_member_apply(&rows, "t1", "sha256:aaa"),
+            TrustApplyDecision::RowGone
+        );
+    }
+
+    // Test 4: an unreadable row (empty canonical digest) refuses before the
+    // modal opens.
+    #[test]
+    fn open_trait_trust_modal_refuses_unreadable_row_before_opening() {
+        let mut state = State::new();
+        state.screen = Screen::Traits;
+        state.traits = vec![trait_row("t1", "")];
+        state.list_traits.set_len(state.traits.len());
+        open_trait_trust_modal(&mut state, ctx_traits_io::trust::TrustState::Verified);
+        assert!(!state.modal_host.is_open());
+        assert!(state.message.unwrap().contains("unreadable"));
+    }
+
+    #[test]
+    fn open_trait_trust_modal_opens_for_readable_row() {
+        let mut state = State::new();
+        state.screen = Screen::Traits;
+        state.traits = vec![trait_row("t1", "sha256:aaa")];
+        state.list_traits.set_len(state.traits.len());
+        open_trait_trust_modal(&mut state, ctx_traits_io::trust::TrustState::Verified);
+        assert!(state.modal_host.is_open());
+    }
+
+    // Test 5: cancelling a trust modal never writes.
+    #[test]
+    fn apply_trait_action_cancelled_never_writes() {
+        let mut state = State::new();
+        state.traits = vec![trait_row("t1", "sha256:aaa")];
+        let action = TraitAction::Trust {
+            label: "t1".to_string(),
+            members: vec![("t1".to_string(), "sha256:aaa".to_string())],
+            verdict: ctx_traits_io::trust::TrustState::Verified,
+        };
+        let result = apply_trait_action(&mut state, action, ModalOutcome::Cancelled);
+        assert!(result.is_ok());
+        assert!(state.message.is_none());
+    }
+
+    // A whole family write aborts naming the offender when any one member's
+    // digest moved since the modal opened — never a partial apply.
+    #[test]
+    fn decide_member_apply_covers_a_multi_member_set() {
+        let rows = vec![
+            trust_row("t1", "sha256:aaa", trust_story::TrustClass::Unreviewed),
+            trust_row("t2", "sha256:bbb", trust_story::TrustClass::Unreviewed),
+        ];
+        assert_eq!(
+            decide_member_apply(&rows, "t1", "sha256:aaa"),
+            TrustApplyDecision::Proceed
+        );
+        assert_eq!(
+            decide_member_apply(&rows, "t2", "sha256:old"),
+            TrustApplyDecision::DigestMoved {
+                captured: "sha256:old".to_string(),
+                current: "sha256:bbb".to_string(),
+            }
+        );
+    }
+
+    // Test 6: identity-addressed position restore — re-locates the edited
+    // trait by id after a row-set change moves its index, and reports it
+    // gone (never a neighbor) when it left the inventory.
+    #[test]
+    fn reposition_trait_selection_finds_moved_row_by_id() {
+        let traits = vec![trait_row("b", "sha256:b"), trait_row("a", "sha256:a")];
+        assert_eq!(reposition_trait_selection(&traits, "a"), Some(1));
+    }
+
+    #[test]
+    fn reposition_trait_selection_reports_none_when_gone() {
+        let traits = vec![trait_row("b", "sha256:b")];
+        assert_eq!(reposition_trait_selection(&traits, "a"), None);
+    }
+
+    // Test 7: the preview cache gate — an unchanged (trait_id,
+    // canonical_digest) pair does not trigger a rebuild; a moved digest
+    // does.
+    #[test]
+    fn trait_preview_needs_rebuild_gate() {
+        assert!(!trait_preview_needs_rebuild(
+            Some(("t1", "sha256:aaa")),
+            "t1",
+            "sha256:aaa"
+        ));
+        assert!(trait_preview_needs_rebuild(
+            Some(("t1", "sha256:aaa")),
+            "t1",
+            "sha256:bbb"
+        ));
+        assert!(trait_preview_needs_rebuild(
+            Some(("t1", "sha256:aaa")),
+            "t2",
+            "sha256:aaa"
+        ));
+        assert!(trait_preview_needs_rebuild(None, "t1", "sha256:aaa"));
+    }
+
+    // P506 §3.3: `focus_pane` moves the ring to a target leaf (bounded by
+    // the ring's own small fixed leaf count) and is a no-op once already
+    // there.
+    #[test]
+    fn focus_pane_moves_ring_to_target_and_is_idempotent() {
+        let mut ring = FocusRing::new(vec![PANE_SESSIONS_LIST, PANE_SESSIONS_PROGRESS]);
+        assert_eq!(ring.current(), Some(PANE_SESSIONS_LIST));
+        focus_pane(&mut ring, PANE_SESSIONS_PROGRESS);
+        assert_eq!(ring.current(), Some(PANE_SESSIONS_PROGRESS));
+        focus_pane(&mut ring, PANE_SESSIONS_PROGRESS);
+        assert_eq!(ring.current(), Some(PANE_SESSIONS_PROGRESS));
+        focus_pane(&mut ring, PANE_SESSIONS_LIST);
+        assert_eq!(ring.current(), Some(PANE_SESSIONS_LIST));
+    }
+
+    #[test]
+    fn enter_focuses_preview_and_esc_restores_the_list() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Traits;
+        state.focus = FocusRing::new(vec![PANE_TRAITS_LIST, PANE_TRAITS_PREVIEW]);
+
+        assert!(handle_focus_key(
+            &mut state,
+            &crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ));
+        assert_eq!(state.focus.current(), Some(PANE_TRAITS_PREVIEW));
+
+        assert!(handle_focus_key(
+            &mut state,
+            &crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        ));
+        assert_eq!(state.focus.current(), Some(PANE_TRAITS_LIST));
+    }
+
+    // List movement is independent of preview focus and returns visible focus
+    // to the list. Leaving an attached SESSIONS pane also clears its identity
+    // before the selected row's preview is refreshed.
+    #[test]
+    fn list_navigation_works_from_preview_focus_and_detaches_sessions() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Sessions;
+        state.sessions = vec![
+            row_with_id("A", SessionClass::Live),
+            row_with_id("B", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+        state.focus = FocusRing::new(vec![PANE_SESSIONS_LIST, PANE_SESSIONS_PROGRESS]);
+        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+        state.attached_session_id = Some("A".to_string());
+
+        assert!(handle_navigation_key(
+            &mut state,
+            &crossterm::event::KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        ));
+
+        assert_eq!(state.focus.current(), Some(PANE_SESSIONS_LIST));
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("B")
+        );
+        assert!(state.attached_session_id.is_none());
+    }
+
+    // P506 review blocker `focus-ring-includes-undrawn-panes`: below a
+    // screen's narrow-terminal floor the tree degrades to the list leaf
+    // alone, so a focus previously moved to the preview/progress pane must
+    // never survive into that drawn frame — `draw_screen` reconciles the
+    // ring against the tree it actually resolves, every time, rather than a
+    // hypothetical maximum-width one. Below-floor width for every screen:
+    // SESSIONS 60+30=90, TRAITS/MERGES/TRUST 50+40=90; 80 columns (the
+    // classic terminal default) is below all four.
+    #[test]
+    fn focus_reconciles_to_the_drawn_tree_below_every_screens_narrow_floor() {
+        const NARROW_WIDTH: u16 = 80;
+        for screen in Screen::all() {
+            let mut state = State::new();
+            state.screen = screen;
+            // Simulate focus having moved to the preview/progress pane at a
+            // wide layout on a prior frame, before the terminal narrowed.
+            state.focus = FocusRing::new(vec![list_pane_id(screen), preview_pane_id(screen)]);
+            focus_pane(&mut state.focus, preview_pane_id(screen));
+            assert_eq!(state.focus.current(), Some(preview_pane_id(screen)));
+
+            let tree = build_tree_for_screen(&state, NARROW_WIDTH);
+            state.focus.reconcile(tree.leaf_ids(), list_pane_id(screen));
+
+            let leaves = tree.leaf_ids();
+            assert!(
+                state.focus.current().is_some_and(|id| leaves.contains(&id)),
+                "{screen:?}: focused pane must be a leaf of the drawn (narrow) tree"
+            );
+            assert_eq!(
+                state.focus.current(),
+                Some(list_pane_id(screen)),
+                "{screen:?}: narrow layouts restore list focus"
+            );
+        }
+    }
+
+    // `apply_pane_scroll` clamps against the pane's own content length
+    // rather than an arbitrary/persisted one.
+    #[test]
+    fn apply_pane_scroll_clamps_to_pane_content_len() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Traits;
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 3));
+        state.trait_preview = Some(TraitPreview {
+            trait_id: "t1".to_string(),
+            canonical_digest: "sha256:aaa".to_string(),
+            lines: vec![RLine::from("a"), RLine::from("b"), RLine::from("c")],
+        });
+        apply_pane_scroll(&mut state, PANE_TRAITS_PREVIEW, ScrollDelta::Down(100));
+        let scroll = state.pane_scrolls.get(PANE_TRAITS_PREVIEW);
+        assert_eq!(scroll.window(1), 2..3);
+    }
+
+    #[test]
+    fn paging_from_list_focus_moves_only_the_preview_and_saturates() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Traits;
+        state.focus = FocusRing::new(vec![PANE_TRAITS_LIST, PANE_TRAITS_PREVIEW]);
+        state.traits = vec![
+            trait_row("one", "sha256:one"),
+            trait_row("two", "sha256:two"),
+        ];
+        state.list_traits.set_len(state.traits.len());
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 10));
+        state.trait_preview = Some(TraitPreview {
+            trait_id: "one".to_string(),
+            canonical_digest: "sha256:one".to_string(),
+            lines: (0..30).map(|n| RLine::from(n.to_string())).collect(),
+        });
+
+        for _ in 0..10 {
+            assert!(handle_navigation_key(
+                &mut state,
+                &crossterm::event::KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            ));
+        }
+
+        assert_eq!(state.list_traits.selected(), 0);
+        assert_eq!(state.focus.current(), Some(PANE_TRAITS_LIST));
+        assert_eq!(
+            state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(8),
+            22..30
+        );
+    }
+
+    #[test]
+    fn paging_an_absent_preview_is_a_no_op_and_draw_clamping_tracks_resize() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Traits;
+        state.trait_preview = Some(TraitPreview {
+            trait_id: "one".to_string(),
+            canonical_digest: "sha256:one".to_string(),
+            lines: (0..20).map(|n| RLine::from(n.to_string())).collect(),
+        });
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 10));
+        apply_pane_scroll(&mut state, PANE_TRAITS_PREVIEW, ScrollDelta::Down(100));
+        assert_eq!(
+            state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(8),
+            12..20
+        );
+
+        state.last_pane_layout = PaneLayoutResult::default();
+        apply_pane_scroll(&mut state, PANE_TRAITS_PREVIEW, ScrollDelta::Up(10));
+        assert_eq!(
+            state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(8),
+            12..20
+        );
+
+        state.trait_preview.as_mut().unwrap().lines.truncate(5);
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 12));
+        clamp_visible_pane_scroll(&mut state, PANE_TRAITS_PREVIEW);
+        assert_eq!(state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(10), 0..5);
+    }
+
+    #[test]
+    fn screen_switch_preserves_list_and_preview_scroll_state() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Traits;
+        state.list_traits.set_len(5);
+        state.list_traits.set_selected(3);
+        state.trait_preview = Some(TraitPreview {
+            trait_id: "one".to_string(),
+            canonical_digest: "sha256:one".to_string(),
+            lines: (0..20).map(|n| RLine::from(n.to_string())).collect(),
+        });
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 10));
+        apply_pane_scroll(&mut state, PANE_TRAITS_PREVIEW, ScrollDelta::Down(100));
+        let preview_window = state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(8);
+
+        state.switch_screen(Screen::Merges);
+        state.switch_screen(Screen::Traits);
+
+        assert_eq!(state.list_traits.selected(), 3);
+        assert_eq!(
+            state.pane_scrolls.get(PANE_TRAITS_PREVIEW).window(8),
+            preview_window
+        );
+    }
+
+    #[test]
+    fn every_footer_starts_with_navigation_and_return_hints() {
+        for screen in Screen::all() {
+            let mut state = State::new_without_worker();
+            state.screen = screen;
+            let rendered = format!("{:?}", footer_line(&state));
+            assert!(rendered.contains("↑↓/jk list"));
+            assert!(rendered.contains("PgUp/PgDn preview"));
+            assert!(rendered.contains("Enter focus"));
+            assert!(rendered.contains("Esc list"));
+        }
+    }
+
+    // Unreadable-row facts (row.error is Some): the preview degrades rather
+    // than attempting a trait load, surfacing the error inline at the top
+    // of the rendered lines rather than crashing or rendering an empty pane.
+    #[test]
+    fn build_trait_preview_degrades_for_unreadable_row() {
+        let mut row = trait_row("broken", "");
+        row.error = Some("parse failed".to_string());
+        let preview = build_trait_preview(&row, &ctx_traits_io::trust::Document::default());
+        assert!(!preview.lines.is_empty());
+        let rendered: String = preview.lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(rendered.contains("parse failed"));
+    }
+
+    // ------------------------------------------------------------------
+    // P473: TRUST trait-centric master-detail
+    // ------------------------------------------------------------------
+
+    fn dashboard_trait_row(
+        id: &str,
+        digest: &str,
+        origin: Option<&str>,
+        family: Option<&str>,
+    ) -> DashboardTraitRow {
+        DashboardTraitRow {
+            id: id.to_string(),
+            version: "1.0.0".to_string(),
+            status: "active".to_string(),
+            trust: "pending".to_string(),
+            canonical_digest: digest.to_string(),
+            source_path: format!("/traits/{id}/index.toml"),
+            error: None,
+            origin: origin.map(str::to_string),
+            family: family.map(str::to_string),
+            variant: None,
+        }
+    }
+
+    // `load_traits_and_trust`'s TRAITS-side projection (§4.1): filtering
+    // `origin != Some("built-in")` from the shared inventory scan excludes a
+    // built-in trait from TRAITS while leaving it in the unfiltered `all`
+    // set TRUST's own `build_trust_rows` projects from — exercised as a pure
+    // filter here (no trust-store IO); `build_trust_rows` itself reads the
+    // real machine-local trust store, so it is exercised indirectly through
+    // `classify_records`-level tests instead of directly in this module.
+    #[test]
+    fn traits_filter_excludes_built_ins_leaving_them_for_trust() {
+        let all = [
+            dashboard_trait_row("repo-trait", "sha256:aaa", None, None),
+            dashboard_trait_row("builtin-trait", "sha256:bbb", Some("built-in"), None),
+        ];
+        let traits: Vec<&str> = all
+            .iter()
+            .filter(|row| row.origin.as_deref() != Some("built-in"))
+            .map(|row| row.id.as_str())
+            .collect();
+        assert_eq!(traits, vec!["repo-trait"]);
+        let trust_ids: Vec<&str> = all.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(trust_ids, vec!["repo-trait", "builtin-trait"]);
+    }
+
+    // A recorded decision naming a trait id no longer visible anywhere
+    // classifies `Orphaned` (§4.2) — exercised directly against
+    // `ctx_traits_io::trust::classify_records`, the same join
+    // `build_trust_rows` delegates its orphan bucket to, so this is a
+    // structural assertion on the shared classifier rather than a test that
+    // touches the real machine-local trust store.
+    #[test]
+    fn classify_records_marks_a_vanished_trait_id_as_orphaned() {
+        let document = ctx_traits_io::trust::Document {
+            digests: vec![ctx_traits_io::trust::TrustRecord {
+                digest: "sha256:ccc".to_string(),
+                state: ctx_traits_io::trust::TrustState::Verified,
+                trait_id: Some("gone-trait".to_string()),
+                act: None,
+                updated_at: None,
+                reason: None,
+                seq: Some(1),
+            }],
+        };
+        let current = vec![("repo-trait".to_string(), "sha256:aaa".to_string())];
+        let rows = ctx_traits_io::trust::classify_records(&document, &current);
+        let orphan = rows
+            .iter()
+            .find(|row| row.trait_id.as_deref() == Some("gone-trait"))
+            .expect("expected the gone-trait record");
+        assert_eq!(
+            orphan.freshness,
+            ctx_traits_io::trust::TrustFreshness::Orphaned
+        );
+        assert_eq!(
+            trust_story::classify_trust(Some(orphan)),
+            trust_story::TrustClass::Orphaned
+        );
+    }
+
+    // Orphan rows and rows with no current digest refuse `a`/`b` before any
+    // modal opens (§4.6) — the same "refuse honestly" precedent as
+    // `open_trait_trust_modal_refuses_unreadable_row_before_opening`.
+    #[test]
+    fn open_trust_modal_refuses_orphan_row_before_opening() {
+        let mut state = State::new();
+        state.screen = Screen::Trust;
+        state.trust = vec![TrustRow {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: Some("sha256:ccc".to_string()),
+            class: trust_story::TrustClass::Orphaned,
+            updated_at: None,
+            reason: None,
+        }];
+        rebuild_visible_trust(&mut state);
+        open_trust_modal(&mut state, ctx_traits_io::trust::TrustState::Verified);
+        assert!(!state.modal_host.is_open());
+    }
+
+    // `A` gathers exactly the selected row's family members — never a
+    // neighboring family, never a family-less row.
+    #[test]
+    fn open_trust_family_modal_gathers_exact_family_members() {
+        let mut state = State::new();
+        state.screen = Screen::Trust;
+        state.trust = vec![
+            trust_row_with_family("a1", "sha256:a1", "widgets"),
+            trust_row_with_family("a2", "sha256:a2", "widgets"),
+            trust_row_with_family("b1", "sha256:b1", "gadgets"),
+        ];
+        rebuild_visible_trust(&mut state);
+        open_trust_family_modal(&mut state, ctx_traits_io::trust::TrustState::Verified);
+        assert!(state.modal_host.is_open());
+        // Resolve the modal (single-line input, Enter submits) to read back
+        // the tag `ModalHost` was opened with — the only way to observe it
+        // without a second, kit-only accessor.
+        let enter = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let (tag, _) = state
+            .modal_host
+            .handle_key(&enter)
+            .expect("modal resolves on enter");
+        let Action::Trait(TraitAction::Trust { members, label, .. }) = tag else {
+            panic!("expected a trust action");
+        };
+        assert_eq!(label, "widgets");
+        let ids: Vec<&str> = members.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["a1", "a2"]);
+    }
+
+    // A family write aborts the whole set, naming the offender, if one
+    // member's digest moved after the modal opened — never a partial apply.
+    #[test]
+    fn apply_trait_action_aborts_whole_family_set_when_a_member_moved() {
+        let mut state = State::new();
+        state.trust = vec![
+            trust_row_with_family("a1", "sha256:a1", "widgets"),
+            trust_row_with_family("a2", "sha256:MOVED", "widgets"),
+        ];
+        let action = TraitAction::Trust {
+            label: "widgets".to_string(),
+            members: vec![
+                ("a1".to_string(), "sha256:a1".to_string()),
+                ("a2".to_string(), "sha256:a2".to_string()),
+            ],
+            verdict: ctx_traits_io::trust::TrustState::Verified,
+        };
+        let result = apply_trait_action(
+            &mut state,
+            action,
+            ModalOutcome::Submitted("looks good".to_string()),
+        );
+        assert!(result.is_ok());
+        let message = state.message.unwrap();
+        assert!(message.contains("a2"));
+        assert!(message.contains("moved"));
+    }
+
+    // The cancel path on any trust modal (TRAITS' or TRUST's) writes
+    // nothing and says so in these exact words (§1 note 1); every other
+    // screen keeps the generic "cancelled".
+    #[test]
+    fn cancel_message_names_trust_specifically() {
+        let trust_tag = Action::Trait(TraitAction::Trust {
+            label: "t1".to_string(),
+            members: vec![("t1".to_string(), "sha256:aaa".to_string())],
+            verdict: ctx_traits_io::trust::TrustState::Verified,
+        });
+        assert_eq!(cancel_message(&trust_tag), "no trust change recorded");
+
+        let exit_tag = Action::Exit;
+        assert_eq!(cancel_message(&exit_tag), "cancelled");
+    }
+
+    // `trust_preview_lines` degrades to an explicit "(none)" on a
+    // digest-less orphan row rather than panicking or rendering blank, and
+    // always includes the fixed approval-meaning block.
+    #[test]
+    fn trust_preview_lines_degrades_on_digest_less_row_and_covers_approval_meaning() {
+        let facts = TrustPreviewFacts {
+            trait_id: None,
+            origin: "orphaned".to_string(),
+            family: None,
+            variant: None,
+            current_digest: String::new(),
+            recorded_digest: Some("sha256:ccc".to_string()),
+            class: trust_story::TrustClass::Orphaned,
+            updated_at: None,
+            reason: None,
+            sighting: None,
+            family_members: Vec::new(),
+        };
+        let lines = trust_preview_lines(&facts);
+        let rendered: Vec<String> = lines.iter().map(text_of).collect();
+        assert!(rendered.iter().any(|l| l.contains("(none)")));
+        assert!(rendered.iter().any(|l| l.contains("what approving means")));
+        assert!(
+            rendered
+                .iter()
+                .any(|l| l.contains("no run ledger on this machine recorded these bytes"))
+        );
+    }
+
+    fn trust_row_with_family(id: &str, digest: &str, family: &str) -> TrustRow {
+        TrustRow {
+            trait_id: Some(id.to_string()),
+            origin: "repo".to_string(),
+            family: Some(family.to_string()),
+            variant: None,
+            current_digest: digest.to_string(),
+            recorded_digest: None,
+            class: trust_story::TrustClass::Unreviewed,
+            updated_at: None,
+            reason: None,
+        }
+    }
+}

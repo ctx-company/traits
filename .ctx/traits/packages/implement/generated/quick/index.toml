@@ -1,0 +1,436 @@
+id = "implement"
+schema-version = "0.3"
+version = "0.19.0"
+name = "Implement (Quick)"
+summary = "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit."
+variant = "quick"
+
+[metadata]
+tag = [
+    "dogfood",
+    "implementation",
+    "review",
+    "lean",
+]
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.require]]
+id = "leanness"
+
+[[intent.require]]
+id = "reuse-over-reimplement"
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.avoid]]
+id = "over-engineering"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "phase"
+direction = "input"
+schema = "schema:text"
+description = 'Phase or group to implement, exactly as named in .plans/EXECUTION_PLAN.md (e.g. "P196-fix" or "Group 43").'
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
+value = "slot:commit-output"
+
+[[slot]]
+id = "review-diff"
+schema = "schema:text"
+description = "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
+hint = "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content."
+
+[[slot]]
+id = "repo-gates-passed"
+schema = "schema:repo-gates-result"
+description = "This round's repository gate result: whether the phase-mandated gate chain passed, and the exact command that decided it."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "smart-1's implementation draft for the phase — the contract the worker implements."
+hint = "Scope (restated from the plan), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the implemented state; revised in place after each refinement pass."
+hint = "What changed (files), how it was validated, and open concerns. Revised after every apply-fixes pass."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "smart-1's refinement verdict for the current work state."
+
+[[slot]]
+id = "shipping-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "shipping-message"
+schema = "schema:text"
+description = "The commit message the scribe writes for the completed work."
+
+[[slot]]
+id = "shipping-stage-output"
+schema = "schema:text"
+description = "Verbatim output of the git-add staging command."
+
+[[resource]]
+id = "execution-plan"
+path = ".plans/EXECUTION_PLAN.md"
+root = "repo"
+hint = "Repo-root path for the execution plan; agents read that file with their own tools and never inline it."
+trigger = "on-demand"
+
+[[resource]]
+id = "product-doc"
+path = ".docs/PRODUCT.md"
+root = "repo"
+hint = "Repo-root path for the product contract: ADVISORY context, and the only document standing rules may be cited from — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a rule. The phase contract outranks it wherever they conflict. Agents read this file with their own tools and never inline it."
+trigger = "on-demand"
+
+[[schema]]
+id = "blocker"
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+
+[schema.fields.done-when]
+schema = "schema:text"
+required = true
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline)."
+
+[schema.fields.recurrence-of]
+schema = "schema:text"
+description = "id of the prior-round blocker this restates; present when the prior fix did not clear its done-when."
+
+[schema.fields.required-fix]
+schema = "schema:text"
+required = true
+description = "The shape of an acceptable fix: the invariant it must establish and what to replace or delete — never just the cited call sites."
+
+[schema.fields.root-cause]
+schema = "schema:text"
+required = true
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows."
+
+[schema.fields.rule-quote]
+schema = "schema:text"
+description = "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.rule-source]
+schema = "schema:text"
+description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and the concrete failure it causes."
+
+[schema.fields.where]
+schema = "schema:text"
+required = true
+description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "repo-gates-result"
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+description = "The exact argv the gate ran. This is the command that decides done-ness — re-run THIS, not a command named anywhere else."
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+description = "True when the gate command exited successfully."
+
+[[schema]]
+id = "review-verdict"
+description = "Typed single-pass review verdict. The loop blocks only on blockers; forgivable plan-fidelity gaps are recorded, not silently dropped."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: subjective style, naming, taste, optional improvements, follow-up work. Never affects status and never forces another refinement round."
+
+[schema.fields.blockers]
+schema = "[schema:blocker]"
+required = true
+description = "The blocking defects that must be fixed before merge: correctness bugs, house-rule violations (core purity, a new dependency, a new #[allow], required byte-stability broken), failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the phase), OR un-abstracted duplication. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+
+[schema.fields.forgiveness-reason]
+schema = "schema:text"
+description = "Present ONLY when this verdict forgives a plan-fidelity gap — a missing or altered draft step that changed nothing an observer could break. One line naming the gap and why it was reasonable to diverge. Never present for a genuine defect, which is always a blocker regardless of reason."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved when the draft is correct and introduces no new smell — even if a forgivable plan-fidelity gap remains; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[schema.fields.wall-id]
+schema = "schema:text"
+required = true
+description = """Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the phase's execution-plan section, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure."""
+
+[[agent]]
+id = "smart-1"
+description = "Strong model: drafts the implementation plan, and is the sole reviewer in the refinement loop."
+summary = "Drafting and reviewer role."
+
+[[agent]]
+id = "worker"
+description = "Implements the draft and applies reviewer fixes."
+summary = "Implementation role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the commit message for the completed phase from the execution plan; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[prompt.building-produce]
+text = """
+Implement {port:phase} following the draft {slot:draft}.
+    No reviewer verdict attached means this is round 1: implement the draft in full. A verdict IS attached on every later round: fix every BLOCKER it names. A blocker you have seen before means your last fix treated the symptom — make the structural change it asks for instead of widening the previous patch.
+    A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports.
+    Run this phase's own Definition-of-Done gates before reporting.
+    Return the full work summary: what changed (files), how you validated it, open concerns."""
+input = [
+    "port:phase",
+    "slot:draft",
+]
+output = ["slot:work-summary"]
+
+[prompt.building-review]
+text = """
+Review the work for {port:phase} against the draft {slot:draft}. Work summary: {slot:work-summary}.
+    {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index, not the change. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's gate verdict; false is grounds for a blocker on its own.
+    A BLOCKER is a correctness bug, a failing gate this phase's Definition of Done requires, a house-rule violation the phase does not itself supersede, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
+    Cite house rules only from {resource:product-doc}, read with your tools. The phase contract outranks it: a product-doc statement the phase contradicts is never a blocker — require only that the work summary names the sections now stale.
+    Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it."""
+input = [
+    "port:phase",
+    "slot:draft",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+    "resource:product-doc",
+]
+output = ["slot:review-verdict"]
+
+[prompt.draft-writing]
+text = """
+
+        Create an implementation draft for {port:phase} from its section in the execution plan {resource:execution-plan}. Read that section and the house rules in {resource:product-doc} with your tools.
+        The phase contract is the sole binding authority; the product doc is advisory context. Where they conflict, the phase wins — note which product-doc sections the change makes stale.
+        Cover: scope, files to touch, approach, validation plan, risks.
+        Take the leanest correct approach. Reuse what exists rather than re-implementing beside it. Reference files by path. Do not implement anything."""
+input = [
+    "port:phase",
+    "resource:execution-plan",
+    "resource:product-doc",
+]
+output = ["slot:draft"]
+
+[prompt.shipping-message]
+text = """
+The review has ended approved and the work is being committed.
+    Write a concise commit message from the draft {slot:draft} and the verdict {slot:review-verdict}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
+    Return exactly that message. Do not run git commands and do not write files."""
+input = [
+    "slot:draft",
+    "slot:review-verdict",
+]
+output = ["slot:shipping-message"]
+
+[[sequence.building-body.sequence]]
+id = "building-produce"
+title = "Building Produce"
+agent = "agent:worker"
+prompt = "prompt:building-produce"
+input = [
+    "port:phase",
+    "slot:draft",
+    { slot = "slot:review-verdict", optional = true },
+    { slot = "slot:repo-gates-passed", optional = true },
+]
+output = ["slot:work-summary"]
+
+[[sequence.building-body.sequence]]
+id = "repo-gates"
+title = "Run the repository gate chain"
+kind = "check"
+output = ["slot:repo-gates-passed"]
+
+[sequence.building-body.sequence.command]
+argv = [
+    "just",
+    "implement-phase-gates",
+]
+
+[[sequence.building-body.sequence]]
+id = "capture-diff"
+title = "Capture the changed-file inventory"
+output = ["slot:review-diff"]
+
+[sequence.building-body.sequence.command]
+argv = [
+    "git",
+    "diff",
+    "--stat",
+    "--",
+    ".",
+    ":(exclude).agents/runs",
+]
+
+[[sequence.building-body.sequence]]
+id = "building-review"
+title = "Building Review"
+agent = "agent:smart-1"
+prompt = "prompt:building-review"
+input = [
+    "port:phase",
+    "slot:draft",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+    "resource:product-doc",
+    { slot = "slot:review-verdict", optional = true },
+]
+output = ["slot:review-verdict"]
+
+[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
+id = "shipping-message"
+title = "Write the commit message (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:shipping-message"
+input = [
+    "slot:draft",
+    "slot:review-verdict",
+]
+output = ["slot:shipping-message"]
+
+[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
+id = "shipping-stage"
+title = "Stage all changes except runtime state"
+output = ["slot:shipping-stage-output"]
+
+[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+    "--",
+    ":!.agents/runs",
+]
+
+[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
+id = "shipping-commit"
+title = "Commit the work"
+input = ["slot:shipping-message"]
+output = ["slot:commit-output"]
+
+[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:shipping-message}",
+]
+
+[procedure]
+description = "Implement one execution-plan phase: draft it from the plan, implement it, and repeat worker-then-review until the reviewer approves — then commit."
+input = ["port:phase"]
+output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "draft-writing"
+title = "Draft the work"
+agent = "agent:smart-1"
+prompt = "prompt:draft-writing"
+input = [
+    "port:phase",
+    "resource:execution-plan",
+    "resource:product-doc",
+]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "building"
+title = "Building"
+kind = "loop"
+sequence = "sequence:building-body"
+max-iterations = 10
+on-exhausted = "block"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:repo-gates-passed"
+field = "ok"
+equals = true
+
+[[procedure.sequence]]
+id = "shipping-status"
+title = "Check working tree status"
+output = ["slot:shipping-status"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
+
+[[procedure.sequence]]
+id = "shipping-maybe-commit"
+title = "Shipping Maybe Commit"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then"
+
+[procedure.sequence.when.not]
+slot = "slot:shipping-status"
+equals = ""

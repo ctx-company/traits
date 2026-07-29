@@ -1,0 +1,52 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "plan"
+variant = "complex"
+requested-version = "0.3.0"
+resolved-version = "0.3.0"
+
+[trait.digests]
+source = "sha256:2a906a8ebcafb1002f5bcc448564b3d46ed1e56bcebdc295222179e660f8a7e7"
+canonical = "sha256:bfcb38c7211fae7d5cd2ca8bee37fe1665c94256aab906d501d6050ce9714c32"
+model-visible = "sha256:d7dd11fdcdbf53a0da6e234f7d99c42de1964c33f14e4a93a2a57413ecfb4d7c"
+resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
+
+[[trait]]
+id = "plan"
+variant = "default"
+requested-version = "0.3.0"
+resolved-version = "0.3.0"
+
+[trait.digests]
+source = "sha256:11a627e8e377e64012d94e4ef793ea7cb10e75af677ed9d1a09d2c3cfef38a56"
+canonical = "sha256:3cd5d49c26f5d0245e924b5faaeca59d65d139af0bb54a392dee7589475fd2ef"
+model-visible = "sha256:9989056d5d3055b8f8b0f8fabc7b7becb3b276d7a81a6e03304db118e67a4d14"
+resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
+
+[[trait]]
+id = "plan"
+variant = "direct"
+requested-version = "0.3.0"
+resolved-version = "0.3.0"
+
+[trait.digests]
+source = "sha256:501b9104ab5da9529643146379f97922367cbb9022f9817545b4241f3d0cadc2"
+canonical = "sha256:472cb4cb70962f8edab215ab291c13e5d2d4f9b8efc416420a702d777ba79eda"
+model-visible = "sha256:165f17a783b030bb246b82962c2fc578b16823aa46a786b1e5a912ba0c953e6e"
+resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
+
+[[trait]]
+id = "plan"
+variant = "quick"
+requested-version = "0.3.0"
+resolved-version = "0.3.0"
+
+[trait.digests]
+source = "sha256:a01a094bdb2e3afb3f5fcc5e6d7824c1de856dac01abc7b02cdac3316a4de123"
+canonical = "sha256:2df8fde3ba720edce69b1a6a86adb1e928a56e601340b1cb36d91b07b3a06b60"
+model-visible = "sha256:77495d3ac12db561c6bd5547a97fa880592d55bc7bea4d7bad6d2f4a697c45dc"
+resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"

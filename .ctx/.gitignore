@@ -1,0 +1,7 @@
+# P569: machine-local, never committed. Everything else under .ctx/traits/ —
+# vendor.toml, vendor.lock, and the packages themselves — is the committed
+# half and travels with the repo.
+traits/runtime.toml
+traits/vendor/
+worktrees/
+config.ts

@@ -1,0 +1,8 @@
+[package]
+id = "refactor-rust"
+version = "0.1.0"
+name = "Refactor (Rust)"
+status = "ready"
+
+[dependencies]
+rust = { version = "0.1.0", path = "../rust" }

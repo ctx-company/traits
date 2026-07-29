@@ -1,0 +1,15 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "pr-description"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:d9c0643509df60a721deb92df968c5979f9272861dcb8f15d71e9051dba4c6b9"
+canonical = "sha256:0130b256c634adff667d73f3edf8b30d21824b1fcdaf58e0337c25ed4202c6a2"
+model-visible = "sha256:8428a824eee6cd2c18e8c69211e143572c0226f2efb7adc88ef8cec68abeebf7"
+resource-manifest = "sha256:c830c3062838093f51b0090060eda48ef95779ae7492c9971541a2e734a474f4"

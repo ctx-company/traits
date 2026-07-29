@@ -1,0 +1,62 @@
+{
+  "agent:generator": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 3,
+    "end": 3
+  },
+  "port:candidate": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "port:scaffold": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 8,
+    "end": 8
+  },
+  "port:source": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 9,
+    "end": 9
+  },
+  "port:source-profile": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 10,
+    "end": 10
+  },
+  "port:target-schema": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 12,
+    "end": 12
+  },
+  "port:trait-id": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 11,
+    "end": 11
+  },
+  "prompt:import": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 34,
+    "end": 34
+  },
+  "schema:trait-draft": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 15,
+    "end": 15
+  },
+  "sequence:procedure/import": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 30,
+    "end": 30
+  },
+  "slot:candidate": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 13,
+    "end": 13
+  },
+  "trait:import-trait": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 20,
+    "end": 20
+  }
+}

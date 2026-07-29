@@ -1,0 +1,14 @@
+[package]
+name = "ctx-fixture-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "P461: a dev-only, std-only, multi-role stub CLI harness for ctx-traits-cli's proof suites — the cargo-test replacement for scripts/byte_compare.rs's self-exec fixture roles (fixture_dual_review_clerk, fixture_p414_worker, ...). Never used by the `ctx` binary itself."
+
+[[bin]]
+name = "ctx-fixture-agent"
+path = "src/main.rs"

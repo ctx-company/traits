@@ -1,0 +1,15 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "deep-research"
+requested-version = "0.2.0"
+resolved-version = "0.2.0"
+
+[trait.digests]
+source = "sha256:0ffec5bb4729908843c4927e7375ae4225cd21a049e52d54d3cd62b0da125630"
+canonical = "sha256:1867ca6a4e94f02b3df5a32f6c404d279c394015716f4977fff833aaaa3d28c9"
+model-visible = "sha256:faec6612ee4c4411f8fd77883f9f1b96f87b3b96af9ac1ce351f0faf4a1fa262"
+resource-manifest = "sha256:e71c53162c005e5944a8674f0973ce4796da23d1c68f922cbf485428e81c5c40"

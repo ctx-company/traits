@@ -1,0 +1,1044 @@
+id = "deep-research"
+schema-version = "0.2"
+version = "0.2.0"
+name = "Deep Research"
+summary = "Typed deep-research contracts and standards for evidence collection, triangulation, synthesis, and verification."
+
+[metadata]
+tag = [
+    "research",
+    "evidence",
+    "citations",
+    "verification",
+]
+
+[[port]]
+id = "topic"
+direction = "input"
+schema = "schema:text"
+description = "Research topic or question supplied by the just research recipe."
+
+[[port]]
+id = "quality"
+direction = "input"
+schema = "schema:research-quality-level"
+optional = true
+description = "Optional evidence-quality level (basic, standard, or rigorous). Defaults to standard when omitted."
+
+[[port]]
+id = "depth"
+direction = "input"
+schema = "schema:research-depth-level"
+optional = true
+description = "Optional research-depth level (basic, standard, or rigorous). Defaults to standard when omitted."
+
+[[port]]
+id = "research-report"
+direction = "output"
+schema = "schema:text"
+description = "Final deep-research delivery report and output path."
+title = "Research Delivery"
+format = ["markdown"]
+value = "slot:delivery-report"
+
+[[slot]]
+id = "topic-slug"
+schema = "schema:text"
+description = "Kebab-case campaign directory name derived from the natural-language topic."
+
+[[slot]]
+id = "streams"
+schema = "[schema:research-stream]"
+description = "The executable stream collection consumed directly by serial for-each: three to six non-overlapping streams."
+
+[[slot]]
+id = "manifest-streams"
+schema = "[schema:research-stream]"
+description = "Independently authored comparison list of three to six non-overlapping streams, used only by the plan cardinality gate. Not consumed by execution; until P432 lands count-to-count equality, its role is a second independent 3-6 count proof rather than a duplicate-detection check."
+
+[[slot]]
+id = "deliverables-manifest"
+schema = "schema:deliverables-manifest"
+description = "Typed output and evidence contract for the campaign."
+
+[[slot]]
+id = "plan-receipt"
+schema = "schema:text"
+description = "Paths of the plan and manifest files written from the typed plan."
+
+[[slot]]
+id = "current-stream"
+schema = "schema:research-stream"
+description = "Current serial for-each stream binding."
+
+[[slot]]
+id = "findings"
+schema = "[schema:research-finding]"
+description = "Ordered receipts from completed research streams."
+
+[[slot]]
+id = "triangulation"
+schema = "schema:text"
+description = "Cross-stream contradiction, corroboration, source-quality, and gap analysis."
+
+[[slot]]
+id = "quality-verdict"
+schema = "schema:quality-verdict"
+description = "Canonical quality verdict for current evidence."
+
+[[slot]]
+id = "quality-score"
+schema = "schema:number"
+description = "Numeric projection of quality-verdict.overall-score, emitted with the verdict because ordered object-field guards are not supported."
+
+[[slot]]
+id = "synthesis-draft"
+schema = "schema:text"
+description = "Current synthesis receipt and paths, revised in place by the verification loop."
+
+[[slot]]
+id = "verification-verdict"
+schema = "schema:verification-verdict"
+description = "Latest bounded Chain-of-Verification verdict."
+
+[[slot]]
+id = "final-review-verdict"
+schema = "schema:verification-verdict"
+description = "Independent final review of the completed research package."
+
+[[slot]]
+id = "delivery-report"
+schema = "schema:text"
+description = "Final campaign path, quality score, limitations, and deliverable summary."
+
+[[slot]]
+id = "cardinality-check-receipt"
+schema = "schema:text"
+description = "Deterministic checkpoint marker for the stream-count cardinality guard."
+
+[[resource]]
+id = "research-standards"
+path = "resources/research-standards.md"
+hint = "Canonical research process, citation, source-rating, verification, quality-gate, output-layout, and Mermaid guidance distilled from the source system."
+trigger = "on-demand"
+
+[[resource]]
+id = "quality-rubric"
+path = "resources/quality-rubric.md"
+hint = "Reviewer guidance mapped onto the quality-verdict schema's canonical dimensions."
+trigger = "on-demand"
+
+[[resource]]
+id = "source-quality-guide"
+path = "resources/source-quality-guide.md"
+hint = "Domain examples for applying the canonical A-E source-quality scale."
+trigger = "on-demand"
+
+[[resource]]
+id = "citation-style"
+path = "resources/citation-style.md"
+hint = "Source-type citation formats and verification rules."
+trigger = "on-demand"
+
+[[resource]]
+id = "evidence-table-template"
+path = "resources/evidence-table-template.csv"
+hint = "Verbatim CSV template for claim-to-source evidence tracking."
+trigger = "on-demand"
+
+[[resource]]
+id = "research-brief-template"
+path = "resources/research-brief-template.md"
+hint = "Research-plan scaffold with the runtime-native output tree."
+trigger = "on-demand"
+
+[[resource]]
+id = "research-readme-template"
+path = "resources/research-readme-template.md"
+hint = "Navigation README template for a completed research campaign."
+trigger = "on-demand"
+
+[[resource]]
+id = "source-note-template"
+path = "resources/source-note-template.md"
+hint = "Verbatim per-source provenance, credibility, evidence, and limitation template."
+trigger = "on-demand"
+
+[[schema]]
+id = "research-quality-level"
+schema = "schema:text"
+allowed = [
+    "basic",
+    "standard",
+    "rigorous",
+]
+description = "Requested evidence-quality level; standard is the default."
+
+[[schema]]
+id = "research-depth-level"
+schema = "schema:text"
+allowed = [
+    "basic",
+    "standard",
+    "rigorous",
+]
+description = "Requested research depth; standard is the default."
+
+[[schema]]
+id = "research-stream"
+description = "One non-overlapping serial research stream. Runtime status, attempts, heartbeats, and completion markers are deliberately absent."
+
+[schema.fields.focus]
+schema = "schema:text"
+required = true
+description = "Complete research question and scope assigned to this stream."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Unique stable stream identifier."
+
+[schema.fields.min-citations]
+schema = "schema:integer"
+required = true
+description = "Minimum cited sources expected from this stream."
+
+[schema.fields.target]
+schema = "schema:text"
+required = true
+description = "Relative findings path, normally under 03_findings/."
+
+[[schema]]
+id = "research-deliverable"
+description = "One expected research artifact. Completion markers are omitted because typed step outputs and the run ledger own completion."
+
+[schema.fields.category]
+schema = "schema:text"
+required = true
+description = "Output-tree category for this deliverable."
+allowed = [
+    "plan",
+    "summary",
+    "report",
+    "findings",
+    "sources",
+    "visuals",
+    "metadata",
+]
+
+[schema.fields.comment]
+schema = "schema:text"
+description = "Optional planning note."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Unique deliverable identifier."
+
+[schema.fields.min-bytes]
+schema = "schema:integer"
+required = true
+description = "Minimum accepted file size checked by independent review."
+
+[schema.fields.min-citations]
+schema = "schema:integer"
+required = true
+description = "Minimum accepted citation count checked by independent review."
+
+[schema.fields.required]
+schema = "schema:boolean"
+required = true
+description = "Whether final delivery requires this artifact."
+
+[schema.fields.target]
+schema = "schema:text"
+required = true
+description = "Relative output path under research/<topic>/."
+
+[[schema]]
+id = "research-quality-criteria"
+description = "Campaign-wide evidence and citation thresholds."
+
+[schema.fields.citation-format]
+schema = "schema:text"
+required = true
+description = "Citation format selected for the campaign."
+
+[schema.fields.max-c-rated-percent]
+schema = "schema:number"
+required = true
+description = "Maximum percentage of C-rated sources."
+
+[schema.fields.min-total-sources]
+schema = "schema:integer"
+required = true
+description = "Minimum source count for the campaign."
+
+[schema.fields.require-multiple-corroboration]
+schema = "schema:boolean"
+required = true
+description = "Whether critical claims require independent corroboration."
+
+[schema.fields.target-a-b-rated-percent]
+schema = "schema:number"
+required = true
+description = "Target percentage of A- or B-rated sources."
+
+[[schema]]
+id = "deliverables-manifest"
+description = "Expected outputs and evidence thresholds for one research campaign."
+
+[schema.fields.created]
+schema = "schema:text"
+required = true
+description = "ISO 8601 UTC creation timestamp."
+
+[schema.fields.deliverables]
+schema = "[schema:research-deliverable]"
+required = true
+description = "Ordered expected artifacts."
+
+[schema.fields.depth-level]
+schema = "schema:research-depth-level"
+required = true
+description = "Selected research depth."
+
+[schema.fields.quality-criteria]
+schema = "schema:research-quality-criteria"
+required = true
+description = "Campaign-wide evidence thresholds."
+
+[schema.fields.quality-target]
+schema = "schema:research-quality-level"
+required = true
+description = "Selected evidence-quality target."
+
+[schema.fields.topic]
+schema = "schema:text"
+required = true
+description = "Kebab-case campaign topic identifier."
+
+[[schema]]
+id = "quality-dimension-score"
+description = "One canonical quality dimension score."
+
+[schema.fields.max]
+schema = "schema:number"
+required = true
+description = "Maximum dimension score; fixed at 3."
+allowed = [3]
+
+[schema.fields.notes]
+schema = "schema:text"
+required = true
+description = "Evidence and rationale for the score."
+
+[schema.fields.score]
+schema = "schema:number"
+required = true
+description = "Dimension score from 0 (not met) through 3 (fully met)."
+allowed = [
+    0,
+    1,
+    2,
+    3,
+]
+
+[[schema]]
+id = "quality-dimensions"
+description = "The eight canonical dimensions from references/json-schemas.md used by this procedure's quality contract."
+
+[schema.fields.actionability]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.citation-density]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.claim-verification]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.clarity]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.coherence]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.completeness]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.depth]
+schema = "schema:quality-dimension-score"
+required = true
+
+[schema.fields.source-quality]
+schema = "schema:quality-dimension-score"
+required = true
+
+[[schema]]
+id = "quality-review"
+description = "Independent review evidence attached to a quality verdict."
+
+[schema.fields.completed]
+schema = "schema:boolean"
+required = true
+description = "Whether the independent review completed."
+
+[schema.fields.recommendations]
+schema = "[schema:text]"
+required = true
+description = "Concrete corrections or improvements."
+
+[schema.fields.score]
+schema = "schema:number"
+required = true
+description = "Reviewer's normalized 0-10 score."
+
+[[schema]]
+id = "quality-verdict"
+description = "Typed 0-10 quality assessment used by review and guard steps."
+
+[schema.fields.assessed-at]
+schema = "schema:text"
+required = true
+description = "ISO 8601 UTC assessment timestamp."
+
+[schema.fields.assessed-by]
+schema = "schema:text"
+required = true
+description = "Kind of assessor that produced the verdict."
+allowed = [
+    "review-capability",
+    "human",
+    "self-review",
+    "automated-gate",
+]
+
+[schema.fields.dimensions]
+schema = "schema:quality-dimensions"
+required = true
+
+[schema.fields.overall-score]
+schema = "schema:number"
+required = true
+description = "Dimension average multiplied by 3.33, on a 0-10 scale."
+
+[schema.fields.review]
+schema = "schema:quality-review"
+required = true
+
+[schema.fields.target-score]
+schema = "schema:number"
+required = true
+description = "Required normalized score: 7.0 for basic, 8.5 for standard, or 9.2 for rigorous."
+
+[[schema]]
+id = "research-finding"
+description = "One stream's durable finding receipt."
+
+[schema.fields.citation-count]
+schema = "schema:integer"
+required = true
+description = "Number of citations in the written finding."
+
+[schema.fields.contradictions]
+schema = "[schema:text]"
+required = true
+description = "Contradictions or unresolved evidence gaps found by the stream."
+
+[schema.fields.source-types]
+schema = "[schema:text]"
+required = true
+description = "Independent source types represented in the finding."
+
+[schema.fields.stream-id]
+schema = "schema:text"
+required = true
+description = "The research stream that produced this finding."
+
+[schema.fields.summary]
+schema = "schema:text"
+required = true
+description = "Concise summary of the stream's evidence-backed findings."
+
+[schema.fields.target]
+schema = "schema:text"
+required = true
+description = "Relative findings file written for the stream."
+
+[[schema]]
+id = "verification-verdict"
+description = "One Chain-of-Verification review verdict."
+
+[schema.fields.issues]
+schema = "[schema:text]"
+required = true
+description = "Unsupported claims, citation defects, contradictions, or missing deliverables."
+
+[schema.fields.notes]
+schema = "schema:text"
+required = true
+description = "Chain-of-Verification evidence and reviewer rationale."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "Approved only when every critical claim is supported or removed."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[agent]]
+id = "probe"
+description = "Decomposes the topic into research streams and gathers targeted evidence with web-capable tools."
+summary = "Fast research planning and evidence-probe role."
+system = "Use web retrieval when available, cite inspected sources, distinguish evidence from inference, and never invent access or citations."
+
+[[agent]]
+id = "worker"
+description = "Researches one typed stream at a time, writes only its declared findings target, and returns a structured finding receipt."
+summary = "Serial evidence-collection role."
+system = "Follow the stream contract exactly, preserve source provenance, search for counterevidence, and write no runtime task or heartbeat files."
+
+[[agent]]
+id = "synthesis"
+description = "Triangulates streams, assesses quality, synthesizes deliverables, and applies reviewer corrections."
+summary = "Research synthesis and correction role."
+system = "Prefer supportable conclusions over completeness theater; expose contradictions, uncertainty, and evidence gaps plainly."
+
+[[agent]]
+id = "reviewer"
+description = "Independently verifies critical claims, deliverables, contradictions, and citation support in a fresh review session."
+summary = "Independent research-verification role."
+system = "Do not trust the synthesis summary. Inspect the written research and cited sources, and approve only supportable, complete work."
+
+[prompt.assess-quality]
+text = """
+
+        Assess {slot:findings} and {slot:triangulation} against {slot:deliverables-manifest}, {resource:research-standards}, and {resource:quality-rubric}.
+        Score the canonical eight dimensions from 0 to 3, calculate overall-score on the 0-10 scale, and set target-score from quality-target (basic=7.0, standard=8.5, rigorous=9.2).
+        Return exactly two typed outputs: quality-verdict and quality-score. quality-score MUST equal quality-verdict.overall-score exactly; it is the numeric projection the runtime guard reads.
+        Write the verdict to research/{slot:topic-slug}/06_metadata/quality_verdict.json. Do not add a model-authored passed boolean."""
+input = [
+    "slot:findings",
+    "slot:triangulation",
+    "slot:deliverables-manifest",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "slot:topic-slug",
+]
+output = [
+    "slot:quality-verdict",
+    "slot:quality-score",
+]
+
+[prompt.deliver]
+text = """
+
+        Report the completed research for {port:topic} from {slot:synthesis-draft}, {slot:quality-verdict}, and {slot:final-review-verdict}. The numeric quality gate, bounded verification loop, and independent final review all passed before this step became ready.
+        Return the campaign path, required deliverables, normalized quality score and target, source/citation summary, known limitations, and next steps."""
+input = [
+    "port:topic",
+    "slot:synthesis-draft",
+    "slot:quality-verdict",
+    "slot:final-review-verdict",
+]
+output = ["slot:delivery-report"]
+
+[prompt.final-review]
+text = """
+
+        Perform a final review of research/{slot:topic-slug}/ for {port:topic} against {slot:deliverables-manifest}.
+        Inspect every required path and minimum size/citation expectation, then inspect the executive summary, report, findings, bibliography, source ratings, methodology, quality verdict, contradictions, evidence table, internal links, and unfinished markers.
+        Return approved only when the package is coherent, decision-useful, appropriately caveated, and faithful to inspected sources; otherwise return revise with concrete issues."""
+input = [
+    "slot:topic-slug",
+    "port:topic",
+    "slot:deliverables-manifest",
+]
+output = ["slot:final-review-verdict"]
+
+[prompt.final-review-revise]
+text = """
+
+        Apply {slot:final-review-verdict} to the completed research package under research/{slot:topic-slug}/.
+        Correct, qualify, or remove unsupported claims; repair citation, deliverable, or packaging defects; preserve valid evidence and structure. If status is approved, make no changes and return the existing synthesis receipt.
+        Return the complete updated synthesis receipt and paths."""
+input = [
+    "slot:final-review-verdict",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[prompt.plan]
+text = """
+
+        Plan deep research for {port:topic} without asking clarification questions.
+        Read optional port:quality and port:depth from Resolved input values. If either is absent, treat it as unavailable and use the middle level standard for that setting.
+        Apply {resource:research-standards}, {resource:quality-rubric}, and {resource:source-quality-guide}.
+        Produce exactly four typed outputs:
+        1. topic-slug: a safe kebab-case campaign directory name with no slashes or traversal segments.
+        2. streams: three to six non-overlapping research streams with id, focus, target, and min-citations; this is the campaign's one and only executable stream collection, consumed directly by serial for-each.
+        3. manifest-streams: an independently authored three to six non-overlapping research streams with id, focus, target, and min-citations, used only by the cardinality guard.
+        4. deliverables-manifest: topic-slug, quality-target, depth-level, ISO timestamp, runtime-native deliverables, and quality criteria.
+        Copy supplied quality and depth exactly; never infer a different level. Do not include status, attempts, heartbeats, result markers, done-marker, locks, or logs."""
+input = [
+    "port:topic",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "resource:source-quality-guide",
+    "port:quality",
+    "port:depth",
+]
+output = [
+    "slot:topic-slug",
+    "slot:streams",
+    "slot:manifest-streams",
+    "slot:deliverables-manifest",
+]
+
+[prompt.research-stream]
+text = """
+
+        Research {slot:current-stream} for {port:topic} under the contract {slot:deliverables-manifest}.
+        Use {resource:research-standards}, {resource:source-quality-guide}, {resource:citation-style}, and {resource:source-note-template}.
+        Inspect every cited source, prefer primary A-B evidence, seek independent counterevidence, and write only the stream's declared target under research/{slot:topic-slug}/.
+        Do not write task registries, heartbeats, result markers, journals, locks, logs, or files outside this campaign.
+        Return one research-finding object with stream-id, target, summary, citation-count, source-types, and contradictions."""
+input = [
+    "slot:current-stream",
+    "port:topic",
+    "slot:deliverables-manifest",
+    "resource:research-standards",
+    "resource:source-quality-guide",
+    "resource:citation-style",
+    "resource:source-note-template",
+    "slot:topic-slug",
+]
+output = ["slot:findings"]
+
+[prompt.revise]
+text = """
+
+        Apply {slot:verification-verdict} to the current research {slot:synthesis-draft} under research/{slot:topic-slug}/.
+        Correct, qualify, or remove unsupported claims; repair citation and deliverable defects; preserve valid evidence and structure. If status is approved, make no changes and return the existing synthesis receipt.
+        Return the complete updated synthesis receipt and paths."""
+input = [
+    "slot:verification-verdict",
+    "slot:synthesis-draft",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[prompt.synthesize]
+text = """
+
+        Synthesize {slot:findings}, {slot:triangulation}, and {slot:quality-verdict} for {port:topic} using {resource:research-standards}, {resource:citation-style}, {resource:research-readme-template}, and {slot:deliverables-manifest}.
+        Write the required executive summary, full report, bibliography, source ratings, methodology, useful tables or safely quoted Mermaid diagrams, and campaign README under research/{slot:topic-slug}/.
+        Every factual claim must be cited. Preserve counterevidence, uncertainty, inaccessible-source caveats, and the quality verdict. Return the paths written and a concise synthesis summary."""
+input = [
+    "slot:findings",
+    "slot:triangulation",
+    "slot:quality-verdict",
+    "port:topic",
+    "resource:research-standards",
+    "resource:citation-style",
+    "resource:research-readme-template",
+    "slot:deliverables-manifest",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[prompt.triangulate]
+text = """
+
+        Triangulate {slot:findings} for {port:topic} using {resource:research-standards}, {resource:quality-rubric}, and {resource:source-quality-guide}.
+        Cross-reference critical claims across independent source types, reconcile or expose contradictions, identify paywalled or inaccessible evidence, and perform targeted gap searches with web-capable tools when available.
+        Update the bibliography, source ratings, evidence table, and a cross-verification finding under research/{slot:topic-slug}/.
+        Return a concise contradiction, corroboration, source-quality, and remaining-gap analysis."""
+input = [
+    "slot:findings",
+    "port:topic",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "resource:source-quality-guide",
+    "slot:topic-slug",
+]
+output = ["slot:triangulation"]
+
+[prompt.verify]
+text = """
+
+        Independently verify the current research {slot:synthesis-draft} for {port:topic} using Chain-of-Verification in {resource:research-standards}, the contract {slot:deliverables-manifest}, and the source files under research/{slot:topic-slug}/.
+        Check critical claims against inspected sources, citation accessibility and support, contradictions, required paths, minimum size/citation expectations, banned markers, internal links, and promised diagrams.
+        Return status approved only when every critical claim is supported or removed and all required deliverables are coherent; otherwise return revise with concrete issues."""
+input = [
+    "slot:synthesis-draft",
+    "port:topic",
+    "resource:research-standards",
+    "slot:deliverables-manifest",
+    "slot:topic-slug",
+]
+output = ["slot:verification-verdict"]
+
+[prompt.write-plan]
+text = """
+
+        Materialize the approved plan for {port:topic} under the safe root research/{slot:topic-slug}/.
+        Create the runtime-native 00_plan through 06_metadata directory structure. Fill {resource:research-brief-template} with the approved {port:topic}, {slot:streams}, and {slot:deliverables-manifest} and write the completed brief to 00_plan/00_research_plan.md; do not invent a parallel plan format. Write {slot:deliverables-manifest} to 06_metadata/deliverables/manifest.json.
+        Initialize 06_metadata/evidence_table.csv from {resource:evidence-table-template} without creating runtime task, heartbeat, result-marker, log, lock, or gate.ok files.
+        Return the paths written."""
+input = [
+    "port:topic",
+    "slot:topic-slug",
+    "resource:research-brief-template",
+    "slot:streams",
+    "slot:deliverables-manifest",
+    "resource:evidence-table-template",
+]
+output = ["slot:plan-receipt"]
+
+[[sequence.assess-evidence-quality.sequence]]
+id = "assess-quality"
+title = "Assess the numeric quality gate"
+agent = "agent:synthesis"
+prompt = "prompt:assess-quality"
+input = [
+    "slot:findings",
+    "slot:triangulation",
+    "slot:deliverables-manifest",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "slot:topic-slug",
+]
+output = [
+    "slot:quality-verdict",
+    "slot:quality-score",
+]
+
+[[sequence.plan-cardinality-guard.sequence]]
+id = "cardinality-check"
+title = "Deterministic checkpoint for the cardinality guard"
+output = ["slot:cardinality-check-receipt"]
+
+[sequence.plan-cardinality-guard.sequence.command]
+argv = ["true"]
+
+[[sequence.research-one-stream.sequence]]
+id = "research-stream"
+title = "Research one evidence stream"
+agent = "agent:worker"
+prompt = "prompt:research-stream"
+input = [
+    "slot:current-stream",
+    "port:topic",
+    "slot:deliverables-manifest",
+    "resource:research-standards",
+    "resource:source-quality-guide",
+    "resource:citation-style",
+    "resource:source-note-template",
+    "slot:topic-slug",
+]
+
+[[sequence.research-one-stream.sequence.output]]
+slot = "slot:findings"
+operation = "append"
+
+[[sequence.review-and-revise-final.sequence]]
+id = "final-review"
+title = "Perform independent final review"
+agent = "agent:reviewer"
+prompt = "prompt:final-review"
+input = [
+    "slot:topic-slug",
+    "port:topic",
+    "slot:deliverables-manifest",
+]
+output = ["slot:final-review-verdict"]
+
+[[sequence.review-and-revise-final.sequence]]
+id = "final-review-revise"
+title = "Apply final-review corrections"
+agent = "agent:synthesis"
+prompt = "prompt:final-review-revise"
+input = [
+    "slot:final-review-verdict",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[[sequence.verify-and-revise.sequence]]
+id = "verify"
+title = "Verify critical claims and deliverables"
+agent = "agent:reviewer"
+prompt = "prompt:verify"
+input = [
+    "slot:synthesis-draft",
+    "port:topic",
+    "resource:research-standards",
+    "slot:deliverables-manifest",
+    "slot:topic-slug",
+]
+output = ["slot:verification-verdict"]
+
+[[sequence.verify-and-revise.sequence]]
+id = "revise"
+title = "Apply verification corrections"
+agent = "agent:synthesis"
+prompt = "prompt:revise"
+input = [
+    "slot:verification-verdict",
+    "slot:synthesis-draft",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[procedure]
+description = "Plan typed research contracts from topic plus optional quality and depth, research streams serially, triangulate and gate evidence, synthesize, verify in a bounded loop, and deliver a structured research campaign."
+input = [
+    "port:topic",
+    "port:quality",
+    "port:depth",
+]
+output = ["port:research-report"]
+
+[[procedure.sequence]]
+id = "plan"
+title = "Plan typed streams and deliverables"
+agent = "agent:probe"
+prompt = "prompt:plan"
+input = [
+    "port:topic",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "resource:source-quality-guide",
+    "port:quality",
+    "port:depth",
+]
+output = [
+    "slot:topic-slug",
+    "slot:streams",
+    "slot:manifest-streams",
+    "slot:deliverables-manifest",
+]
+
+[[procedure.sequence]]
+id = "plan-gate"
+title = "Guard stream-count cardinality before materialization"
+kind = "loop"
+sequence = "sequence:plan-cardinality-guard"
+max-iterations = 1
+on-exhausted = "block"
+
+[[procedure.sequence.until.all]]
+
+[[procedure.sequence.until.all.any]]
+equals = 3
+count = "slot:streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 4
+count = "slot:streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 5
+count = "slot:streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 6
+count = "slot:streams"
+
+[[procedure.sequence.until.all]]
+
+[[procedure.sequence.until.all.any]]
+equals = 3
+count = "slot:manifest-streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 4
+count = "slot:manifest-streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 5
+count = "slot:manifest-streams"
+
+[[procedure.sequence.until.all.any]]
+equals = 6
+count = "slot:manifest-streams"
+
+[[procedure.sequence]]
+id = "write-plan"
+title = "Write the research plan"
+agent = "agent:probe"
+prompt = "prompt:write-plan"
+input = [
+    "port:topic",
+    "slot:topic-slug",
+    "resource:research-brief-template",
+    "slot:streams",
+    "slot:deliverables-manifest",
+    "resource:evidence-table-template",
+]
+output = ["slot:plan-receipt"]
+
+[[procedure.sequence]]
+id = "research-streams"
+title = "Research streams serially"
+kind = "for-each"
+output = ["slot:findings"]
+sequence = "sequence:research-one-stream"
+over = "slot:streams"
+item = "slot:current-stream"
+max-items = 6
+
+[[procedure.sequence]]
+id = "triangulate"
+title = "Triangulate sources and contradictions"
+agent = "agent:synthesis"
+prompt = "prompt:triangulate"
+input = [
+    "slot:findings",
+    "port:topic",
+    "resource:research-standards",
+    "resource:quality-rubric",
+    "resource:source-quality-guide",
+    "slot:topic-slug",
+]
+output = ["slot:triangulation"]
+
+[[procedure.sequence]]
+id = "quality-gate"
+title = "Assess and gate evidence quality"
+kind = "loop"
+sequence = "sequence:assess-evidence-quality"
+max-iterations = 1
+on-exhausted = "block"
+
+[[procedure.sequence.until.any]]
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "basic"
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:quality-score"
+at-least = 7
+
+[[procedure.sequence.until.any]]
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "standard"
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:quality-score"
+at-least = 8.5
+
+[[procedure.sequence.until.any]]
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "rigorous"
+
+[[procedure.sequence.until.any.all]]
+slot = "slot:quality-score"
+at-least = 9.2
+
+[[procedure.sequence.stop-if.not.any]]
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "basic"
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:quality-score"
+at-least = 7
+
+[[procedure.sequence.stop-if.not.any]]
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "standard"
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:quality-score"
+at-least = 8.5
+
+[[procedure.sequence.stop-if.not.any]]
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:deliverables-manifest"
+field = "quality-target"
+equals = "rigorous"
+
+[[procedure.sequence.stop-if.not.any.all]]
+slot = "slot:quality-score"
+at-least = 9.2
+
+[[procedure.sequence]]
+id = "synthesize"
+title = "Synthesize the research deliverables"
+agent = "agent:synthesis"
+prompt = "prompt:synthesize"
+input = [
+    "slot:findings",
+    "slot:triangulation",
+    "slot:quality-verdict",
+    "port:topic",
+    "resource:research-standards",
+    "resource:citation-style",
+    "resource:research-readme-template",
+    "slot:deliverables-manifest",
+    "slot:topic-slug",
+]
+output = ["slot:synthesis-draft"]
+
+[[procedure.sequence]]
+id = "verification-loop"
+title = "Bounded Chain-of-Verification"
+kind = "loop"
+sequence = "sequence:verify-and-revise"
+max-iterations = 3
+on-exhausted = "block"
+
+[procedure.sequence.until]
+slot = "slot:verification-verdict"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "final-review-gate"
+title = "Gate packaging on final review"
+kind = "loop"
+sequence = "sequence:review-and-revise-final"
+max-iterations = 3
+on-exhausted = "block"
+
+[procedure.sequence.until]
+slot = "slot:final-review-verdict"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "deliver"
+title = "Report the research delivery"
+agent = "agent:synthesis"
+prompt = "prompt:deliver"
+input = [
+    "port:topic",
+    "slot:synthesis-draft",
+    "slot:quality-verdict",
+    "slot:final-review-verdict",
+]
+output = ["slot:delivery-report"]

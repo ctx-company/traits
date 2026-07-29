@@ -1,0 +1,8 @@
+[package]
+id = "guarded-change"
+version = "0.1.0"
+name = "Guarded Change"
+status = "ready"
+
+[dependencies]
+engineering-standards = { version = "0.1.0", path = "../engineering-standards" }

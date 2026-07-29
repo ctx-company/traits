@@ -1,0 +1,8 @@
+[package]
+id = "refine-trait"
+version = "0.1.0"
+name = "Refine Trait"
+status = "ready"
+
+[dependencies]
+trait-spec = { version = "0.1.0", path = "../trait-spec" }

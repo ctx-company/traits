@@ -1,0 +1,88 @@
+id = "generate-trait"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Generate Trait"
+summary = "Generates one complete trait draft grounded in the trait specification dependency."
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+version = "0.1.0"
+
+[dependency.source]
+path = "../trait-spec"
+
+[metadata]
+tag = [
+    "first-party",
+    "meta-trait",
+    "generation",
+]
+
+[[port]]
+id = "name"
+direction = "input"
+schema = "schema:text"
+description = "Human-readable trait name."
+
+[[port]]
+id = "brief"
+direction = "input"
+schema = "schema:text"
+description = "Goal and constraints for the new trait."
+
+[[port]]
+id = "candidate"
+direction = "output"
+schema = "schema:trait-draft"
+description = "Generated trait candidate."
+value = "slot:candidate"
+
+[[slot]]
+id = "candidate"
+schema = "schema:trait-draft"
+description = "Structured trait draft emitted for candidate validation."
+
+[[schema]]
+id = "trait-draft"
+description = "One complete canonical trait draft; the candidate gate validates its full shape."
+
+[schema.fields.trait]
+schema = "schema:any"
+required = true
+
+[[agent]]
+id = "generator"
+description = "Produces one complete trait draft from a concise authoring goal."
+summary = "Trait draft generator."
+
+[prompt.generate]
+text = "Create exactly one complete canonical trait draft for {port:name} from {port:brief}. Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return structured output only."
+input = [
+    "port:name",
+    "port:brief",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:candidate"]
+
+[procedure]
+description = "Produce one structured trait draft; deterministic candidate gates verify it downstream."
+input = [
+    "port:name",
+    "port:brief",
+]
+output = ["port:candidate"]
+
+[[procedure.sequence]]
+id = "generate"
+title = "Generate trait"
+agent = "agent:generator"
+prompt = "prompt:generate"
+input = [
+    "port:name",
+    "port:brief",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:candidate"]

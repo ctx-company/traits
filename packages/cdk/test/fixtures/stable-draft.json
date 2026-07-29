@@ -1,0 +1,1 @@
+{"id":"stable","name":"Stable","procedure":{"description":"No steps.","sequence":[]},"schema-version":"0.2","slot":[{"description":"Runtime slot result.","id":"result","schema":"schema:text"}],"summary":"A deterministic fixture.","version":"0.1.0"}

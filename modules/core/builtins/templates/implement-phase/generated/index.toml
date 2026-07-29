@@ -1,0 +1,133 @@
+id = "implement-phase"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Implement Phase"
+summary = "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict."
+
+[metadata]
+tag = [
+    "template",
+    "implementation",
+    "review",
+]
+
+[[port]]
+id = "task"
+direction = "input"
+schema = "schema:text"
+description = "The task to implement, in enough detail to plan from (scope, constraints, done-when)."
+
+[[port]]
+id = "verdict"
+direction = "output"
+schema = "schema:implementation-verdict"
+description = "The reviewer's final verdict on the implemented work."
+value = "slot:verdict"
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "The implementation draft: scope, approach, files to touch, and how it will be validated."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "What the worker changed and how it was validated."
+
+[[slot]]
+id = "verdict"
+schema = "schema:implementation-verdict"
+description = "The reviewer's structured verdict for the implemented work."
+
+[[schema]]
+id = "decision"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[schema]]
+id = "implementation-verdict"
+description = "The reviewer's approved/revise verdict for the implemented work."
+
+[schema.fields.notes]
+schema = "schema:text"
+required = true
+
+[schema.fields.status]
+schema = "schema:decision"
+required = true
+
+[[agent]]
+id = "planner"
+description = "Drafts a concrete implementation approach for the stated task."
+summary = "Implementation planner."
+
+[[agent]]
+id = "worker"
+description = "Implements the draft, then reports what changed."
+summary = "Implementer."
+
+[[agent]]
+id = "reviewer"
+description = "Reviews the implemented work against the draft and reports a verdict."
+summary = "Implementation reviewer."
+
+[prompt.draft]
+text = "Draft an implementation approach for {port:task}. Cover scope, the concrete approach, files or areas likely to change, and how the result will be validated. Do not implement anything yet."
+input = ["port:task"]
+output = ["slot:draft"]
+
+[prompt.implement]
+text = "Implement {port:task} following the draft {slot:draft}. Prefer the minimal, correct change the draft calls for. Report what changed and how you validated it."
+input = [
+    "port:task",
+    "slot:draft",
+]
+output = ["slot:work-summary"]
+
+[prompt.review]
+text = "Review the implemented work for {port:task} against the draft {slot:draft}. The reported work summary is {slot:work-summary}. Return a verdict of approved or revise, with notes explaining the verdict."
+input = [
+    "port:task",
+    "slot:draft",
+    "slot:work-summary",
+]
+output = ["slot:verdict"]
+
+[procedure]
+description = "Plan, implement, and review one task end to end."
+input = ["port:task"]
+output = ["port:verdict"]
+
+[[procedure.sequence]]
+id = "draft"
+title = "Draft the approach"
+agent = "agent:planner"
+prompt = "prompt:draft"
+input = ["port:task"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "implement"
+title = "Implement the draft"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = [
+    "port:task",
+    "slot:draft",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "review"
+title = "Review the result"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+input = [
+    "port:task",
+    "slot:draft",
+    "slot:work-summary",
+]
+output = ["slot:verdict"]

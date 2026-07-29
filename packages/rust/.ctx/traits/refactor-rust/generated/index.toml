@@ -1,0 +1,124 @@
+id = "refactor-rust"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Refactor (Rust)"
+summary = "Minimal Rust refactor procedure: implement the requested change and hold it to this repo's Rust engineering-standards and gate-conventions, then review once against the same doctrine — no refinement loop, no commit."
+
+[[dependency]]
+alias = "rust"
+id = "rust"
+version = "0.1.0"
+
+[dependency.source]
+path = "../rust"
+
+[metadata]
+family = "refactor"
+variant = "rust"
+tag = [
+    "first-party",
+    "refactoring",
+    "rust",
+]
+
+[[port]]
+id = "target"
+direction = "input"
+schema = "schema:text"
+description = "Crate, module, or file path to refactor."
+
+[[port]]
+id = "work-report"
+direction = "output"
+schema = "schema:text"
+description = "Final report of the refactored state."
+value = "slot:work-summary"
+
+[[port]]
+id = "review-report"
+direction = "output"
+schema = "schema:text"
+description = "Final reviewer judgment of the refactored state."
+value = "slot:review-notes"
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the refactored state."
+hint = "What changed (files), and the exact gate commands (fmt --check, check, clippy) run and their result."
+
+[[slot]]
+id = "review-notes"
+schema = "schema:text"
+description = "Reviewer's judgment of the implemented refactor against the gate-conventions and engineering-standards."
+hint = "Whether the gates actually pass, and any blocking defect found by inspecting the working tree directly."
+
+[[agent]]
+id = "worker"
+description = "Implements the requested Rust refactor and holds it to the repo's own gates. Holds every change to this repo's Rust engineering-standards and gate-conventions."
+summary = "Implementation role."
+
+[[agent]]
+id = "reviewer"
+description = "Reviews the implemented Rust refactor once against the repo's engineering-standards and gate-conventions. Judges the work against this repo's Rust engineering-standards and gate-conventions."
+summary = "Rust review role."
+
+[prompt.implement]
+text = """
+
+                    Implement the requested refactor for {port:target}.
+                    Hold the change to the engineering-standards {resource:rust/engineering-standards} and run the gates named in {resource:rust/gate-conventions} (fmt --check, check, clippy -D warnings) before reporting.
+                    Return a work summary: what changed (files), the exact gate commands you ran, and their result."""
+input = [
+    "port:target",
+    "resource:rust/engineering-standards",
+    "resource:rust/gate-conventions",
+]
+output = ["slot:work-summary"]
+
+[prompt.review]
+text = """
+
+                    Review the refactored state of {port:target} against the work summary {slot:work-summary}.
+                    Consult the engineering-standards {resource:rust/engineering-standards} and gate-conventions {resource:rust/gate-conventions}, and inspect the actual working tree and gate output with your tools — never review the summary alone.
+                    Return your judgment: whether the gates genuinely pass and the standards are held, naming any blocking defect found."""
+input = [
+    "port:target",
+    "slot:work-summary",
+    "resource:rust/engineering-standards",
+    "resource:rust/gate-conventions",
+]
+output = ["slot:review-notes"]
+
+[procedure]
+description = "Implement a Rust refactor for the target, holding it to the rust pack's engineering-standards and gate-conventions, then review it once against the same doctrine."
+input = ["port:target"]
+output = [
+    "port:work-report",
+    "port:review-report",
+]
+
+[[procedure.sequence]]
+id = "implement"
+title = "Implement the refactor (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = [
+    "port:target",
+    "resource:rust/engineering-standards",
+    "resource:rust/gate-conventions",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "review"
+title = "Review the refactor (reviewer)"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+input = [
+    "port:target",
+    "slot:work-summary",
+    "resource:rust/engineering-standards",
+    "resource:rust/gate-conventions",
+]
+output = ["slot:review-notes"]

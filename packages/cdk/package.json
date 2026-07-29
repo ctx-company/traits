@@ -1,0 +1,52 @@
+{
+  "name": "@ctx-traits/cdk",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ctx-company/ctx-traits.git",
+    "directory": "packages/cdk"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "lint": "oxlint --deny-warnings src test",
+    "format": "dprint fmt",
+    "format:check": "dprint check",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "25.3.3",
+    "dprint": "0.55.1",
+    "oxlint": "1.73.0",
+    "typescript": "^7.0.2",
+    "vitest": "4.1.10",
+    "zod": "3.25.76",
+    "zod-to-json-schema": "3.25.2"
+  }
+}

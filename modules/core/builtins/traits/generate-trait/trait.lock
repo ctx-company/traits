@@ -1,0 +1,36 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "generate-trait"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:35140588eb404c0b621b62c3b3308e7b403486bcfa4afbdd8e92f3c723527739"
+canonical = "sha256:7f6018acc4e79fc0a752fb1ece5eec1cb8f738ccf064012f5184cfc219b34def"
+model-visible = "sha256:a50ea154044ed6a848a20cae46bb9d8ffc71b032c1cdb5a92a5f7cb2c15eb319"
+resource-manifest = "sha256:de671b72dc4289a72b370132d9e1f5c2ab377ffaef0cfe67506222f1d6417898"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/generate-trait/SKILL.md"
+digest = "sha256:d1c8cfb08a14b9cb081e91730d08be6e31a9574b73bcbeace69cb5d7ce7bffed"
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+vendored-path = ".ctx/traits/vendor/trait-spec"
+
+[dependency.source]
+path = "../trait-spec"
+
+[dependency.digests]
+source = "sha256:2e679fed106ad0d7ba791d5a88b74a03d48c1cf84fe0d8786fbc971689db7f59"
+canonical = "sha256:6b6dabf47b2ff4f583405fca4e6a4cf87fea7aa8efa6b7298e28a15e126b3ff7"
+model-visible = "sha256:16efa105137138e4466db43f274ea2509cbe208008d1b370df730d83459bd30d"
+resource-manifest = "sha256:0df7adcc175a94c51c60e501d1fbde585ae1e70507f1753631eb97dcc37bfa0e"

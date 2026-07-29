@@ -1,0 +1,351 @@
+id = "refactor"
+schema-version = "0.3"
+version = "0.8.0"
+name = "Refactor (Quick)"
+summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
+variant = "quick"
+
+[metadata]
+tag = [
+    "first-party",
+    "refactoring",
+    "review",
+    "multi-agent",
+]
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "behavior-preserving-default"
+summary = "Preserve observed behavior unless the phase explicitly changes it."
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[intent.avoid]]
+id = "interface-widening"
+summary = "Do not broaden public interfaces without a concrete caller need."
+
+[[port]]
+id = "target"
+direction = "input"
+schema = "schema:text"
+description = 'Module, file path, or entity to refactor; append an optional emphasis after a dash (e.g. "modules/cli/src/app/run_view.rs", "crate::lockfile — typed errors only").'
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
+value = "slot:commit-output"
+
+[[slot]]
+id = "checklist"
+schema = "schema:text"
+description = "Actionable checklist for the target: concrete steps, no framing or design prose."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the refactored state; revised once after the single review pass."
+hint = "What changed (files), how behavior was preserved, gate results, open concerns."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Refactor commit message; injected directly into the git commit command step."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "git-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "smart-1's single review verdict for the implemented checklist."
+
+[[resource]]
+id = "architecture-dialect"
+path = "resources/architecture-dialect.md"
+hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
+trigger = "on-activation"
+
+[[schema]]
+id = "blocker"
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+
+[schema.fields.done-when]
+schema = "schema:text"
+required = true
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline)."
+
+[schema.fields.recurrence-of]
+schema = "schema:text"
+description = "id of the prior-round blocker this restates; present when the prior fix did not clear its done-when."
+
+[schema.fields.required-fix]
+schema = "schema:text"
+required = true
+description = "The shape of an acceptable fix: the invariant it must establish and what to replace or delete — never just the cited call sites."
+
+[schema.fields.root-cause]
+schema = "schema:text"
+required = true
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows."
+
+[schema.fields.rule-quote]
+schema = "schema:text"
+description = "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.rule-source]
+schema = "schema:text"
+description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and the concrete failure it causes."
+
+[schema.fields.where]
+schema = "schema:text"
+required = true
+description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "review-verdict"
+description = "Typed single-pass review verdict. The loop blocks only on blockers; forgivable plan-fidelity gaps are recorded, not silently dropped."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: taste, follow-up, deferred cleanup. Never affects status."
+
+[schema.fields.blockers]
+schema = "[schema:blocker]"
+description = "The blocking defects that must be fixed before merge: a behavior break, a new smell, or an interface widened to make a caller compile. Checklist-item fidelity is judged solely under the authority rule below — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Present when status is revise; empty or absent when approved."
+
+[schema.fields.forgiveness-reason]
+schema = "schema:text"
+description = "Present ONLY when this verdict forgives a plan-fidelity gap — a missing or altered checklist step that changed nothing an observer could break. One line naming the gap and why it was reasonable to diverge. Never present for a genuine defect, which is always a blocker regardless of reason."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved when the checklist is correct, behavior-preserving, and introduces no new smell; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[agent]]
+id = "smart-1"
+description = "Turns the target into an actionable checklist and reviews the implemented work once."
+summary = "Checklist and reviewer."
+
+[[agent]]
+id = "worker"
+description = "Implements the checklist and applies the reviewer's single pass."
+summary = "Implementation role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the refactor commit message from the checklist and review record; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[prompt.apply-fixes]
+text = """
+
+                    Apply the reviewer findings for {port:target}: {slot:review-verdict}.
+                    Fix every BLOCKER named in the verdict — those are mandatory to merge. This is the only round: leave nothing planned for a next pass that does not exist. Re-run the repo validation gates.
+                    Then return the full updated work summary replacing {slot:work-summary}: what changed (files), how behavior was preserved, gate results, open concerns."""
+input = [
+    "port:target",
+    "slot:review-verdict",
+    "slot:work-summary",
+]
+output = ["slot:work-summary"]
+
+[prompt.checklist]
+text = """
+
+                    Turn {port:target} into an actionable refactoring checklist.
+                    Read the target with your tools; list concrete steps only — no framing prose, no illustrative design. Keep it to what honestly fits one quick run.
+                    Return the checklist."""
+input = ["port:target"]
+output = ["slot:checklist"]
+
+[prompt.implement]
+text = """
+
+                    Implement the checklist {slot:checklist} for {port:target}.
+                    Behavior-preserving is the contract: serialized shapes, digests, and CLI output stay byte-stable. Do not widen any interface to make a caller compile — fix the caller.
+                    Run the repo validation gates before reporting. Return a work summary: what changed (files), how behavior was preserved, gate results, open concerns."""
+input = [
+    "slot:checklist",
+    "port:target",
+]
+output = ["slot:work-summary"]
+
+[prompt.review]
+text = """
+Review the implemented state of {port:target} against the checklist {slot:checklist}. Current work summary: {slot:work-summary}.
+                    A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. Checklist-item fidelity is judged SOLELY by the authority rule below — apply it directly, with no separate "undone step is always a blocker" rule layered on top. PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Quick authority: forgive a plan-fidelity gap ONLY when you record the reason it was reasonable to diverge; a genuine correctness defect is never forgivable regardless of reason, and remains a BLOCKER exactly as REVIEW_VERDICT_DOCTRINE requires. Forgiveness excuses missing or altered plan steps that changed nothing an observer could break; it never excuses a bug, a house-rule violation, or un-abstracted duplication.
+                    This is the ONLY review pass — the worker applies your findings once and the run commits.
+                    Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
+                    If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.
+                    Consult the phase contract {slot:checklist} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
+                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {resource:architecture-dialect} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
+                    A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
+                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed.
+                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
+input = [
+    "port:target",
+    "slot:checklist",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict"]
+
+[prompt.summarization]
+text = """
+
+                        The single review pass for the refactor of {port:target} has ended and the work is being committed. The reviewer verdict is {slot:review-verdict} — read its status field FIRST; a status still set to revise means the one round did not fully satisfy the reviewer: say so plainly.
+                        Write the commit message from the checklist {slot:checklist} and that verdict: subject line "refactor({port:target}): <boundary in a few words>", then one paragraph summarizing what changed and behavior preservation.
+                        If the verdict carries a forgiveness-reason, add one line noting the forgiven plan-fidelity gap and its reason. If status is revise, end with an "Unresolved reviewer blockers:" section listing each open blocker in one line. Omit both sections when not applicable.
+                        Return exactly that message as your output; the runtime injects it into the git commit step.
+                        Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps."""
+input = [
+    "port:target",
+    "slot:review-verdict",
+    "slot:checklist",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "summarization"
+title = "Write the commit message (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:summarization"
+input = [
+    "port:target",
+    "slot:review-verdict",
+    "slot:checklist",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-stage"
+title = "Stage all changes except runtime state"
+output = ["slot:stage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+    "--",
+    ":(exclude).agents/runs",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-commit"
+title = "Commit the refactor"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[procedure]
+description = "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit."
+input = ["port:target"]
+output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "checklist"
+title = "Checklist the target (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:checklist"
+input = ["port:target"]
+output = ["slot:checklist"]
+
+[[procedure.sequence]]
+id = "implement"
+title = "Implement the checklist (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = [
+    "slot:checklist",
+    "port:target",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "review"
+title = "Review the implementation (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:review"
+input = [
+    "port:target",
+    "slot:checklist",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict"]
+
+[[procedure.sequence]]
+id = "apply-fixes"
+title = "Apply the reviewer's pass (worker)"
+agent = "agent:worker"
+prompt = "prompt:apply-fixes"
+input = [
+    "port:target",
+    "slot:review-verdict",
+    "slot:work-summary",
+]
+output = ["slot:work-summary"]
+
+[[procedure.sequence]]
+id = "check-git-status"
+title = "Check working tree status"
+output = ["slot:git-status"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
+
+[[procedure.sequence]]
+id = "maybe-commit"
+title = "Maybe Commit"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-12-maybe-commit-then"
+
+[procedure.sequence.when.not]
+slot = "slot:git-status"
+equals = ""

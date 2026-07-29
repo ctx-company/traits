@@ -1,0 +1,44 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "agents"
+requested-version = "0.2.0"
+resolved-version = "0.2.0"
+
+[trait.digests]
+source = "sha256:4d60b1680550f9f3cf77e9e3c05ad1dd05ce8f1d219828f9270ef58563401cc5"
+canonical = "sha256:bd1a4894ac809a977fa6aaaa7a656016f0f27826c89e1725cea702057c60ea94"
+model-visible = "sha256:e377d654aeb03368f8164f1181bbfd91ee5fb77c49cf880a1e0baf07254d7d03"
+resource-manifest = "sha256:4322bd3db7bad36bb081e1c760931e2626be12f31684e8f04d92d6dfecd3d669"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/agents/SKILL.md"
+digest = "sha256:b8ef085c56e0b372b58d1b5727bfd7f380dae8aedb47a67a1baf215d6b9281e0"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:6d583648fe71bfd04e8c2db4f979cde57535b02b51a782030f0d49daaab0dce0"
+canonical = "sha256:418c77633c88e2d7107f89ef41953af30178795bc7e284e72043175b0927a230"
+model-visible = "sha256:88a469b103193503b8fa9557b94489b07758967118cd9641fc6e359682b286b6"
+render = "sha256:d1033d0ec5248e939d85c67f3c59fbb3ab056977df3fb6a9939f130a6f8bd08e"
+generated-markdown = "sha256:b8ef085c56e0b372b58d1b5727bfd7f380dae8aedb47a67a1baf215d6b9281e0"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/agents/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]

@@ -1,0 +1,115 @@
+id = "import-trait"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Import Trait"
+summary = "Enriches a deterministic import scaffold with source-grounded trait content, grounded in the trait specification dependency."
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+version = "0.1.0"
+
+[dependency.source]
+path = "../trait-spec"
+
+[metadata]
+tag = [
+    "first-party",
+    "meta-trait",
+    "import",
+]
+
+[[port]]
+id = "scaffold"
+direction = "input"
+schema = "schema:text"
+description = "Deterministic import scaffold (trait.toml text) to use as the authoritative baseline."
+
+[[port]]
+id = "source"
+direction = "input"
+schema = "schema:text"
+description = "Raw source text (e.g. SKILL.md) to ground enrichment in."
+
+[[port]]
+id = "source-profile"
+direction = "input"
+schema = "schema:text"
+description = "Profile describing the source format and its known fields."
+
+[[port]]
+id = "trait-id"
+direction = "input"
+schema = "schema:text"
+description = "Trait id the imported package must keep."
+
+[[port]]
+id = "target-schema"
+direction = "input"
+schema = "schema:text"
+description = "Target canonical schema (agent-traits/canonical-trait) the draft must conform to."
+
+[[port]]
+id = "candidate"
+direction = "output"
+schema = "schema:trait-draft"
+description = "Imported trait candidate."
+value = "slot:candidate"
+
+[[slot]]
+id = "candidate"
+schema = "schema:trait-draft"
+description = "Structured trait draft emitted for candidate validation."
+
+[[schema]]
+id = "trait-draft"
+description = "One complete canonical trait draft; the candidate gate validates its full shape."
+
+[schema.fields.trait]
+schema = "schema:any"
+required = true
+
+[[agent]]
+id = "generator"
+description = "Enriches a deterministic import scaffold with source-grounded trait content."
+summary = "Trait import enrichment agent."
+
+[prompt.import]
+text = "Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make. Conform to {port:target-schema}, grounding the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured trait draft."
+input = [
+    "port:scaffold",
+    "port:source",
+    "port:source-profile",
+    "port:trait-id",
+    "port:target-schema",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:candidate"]
+
+[procedure]
+description = "Produce one structured trait draft grounded in the deterministic scaffold and raw source; deterministic candidate gates verify it downstream."
+input = [
+    "port:scaffold",
+    "port:source",
+    "port:source-profile",
+    "port:trait-id",
+    "port:target-schema",
+]
+output = ["port:candidate"]
+
+[[procedure.sequence]]
+id = "import"
+title = "Import trait"
+agent = "agent:generator"
+prompt = "prompt:import"
+input = [
+    "port:scaffold",
+    "port:source",
+    "port:source-profile",
+    "port:trait-id",
+    "port:target-schema",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:candidate"]

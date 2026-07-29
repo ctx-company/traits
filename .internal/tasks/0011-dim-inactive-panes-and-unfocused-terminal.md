@@ -1,0 +1,26 @@
+# 0011 — Dim the inactive panes further, and dim everything when the terminal loses focus
+
+**Status:** ready to implement (half 2 needs a capability probe first) · **Raised:** 2026-07-28
+
+## Half 1 — inactive panes are not dim enough
+
+`render_pane` (`tui_panes.rs:155-178`) styles an unfocused pane's border and title with `Modifier::DIM` and a focused one with default/BOLD. The distinction exists but does not read strongly enough at a glance.
+
+Deepen it — but stay inside the two-tone doctrine: named ANSI only, no truecolour, no new palette. The room available is in *what* is dimmed rather than *how much*: today only the border and title carry the modifier while the pane's CONTENT renders at full strength in both states. Dimming an unfocused pane's content is the change that actually reads.
+
+## Half 2 — dim the whole view when the terminal is not focused
+
+The ask: in tmux (or any multiplexer / unfocused window), a ctx pane that is not the active one should render dim, so the eye goes to the pane being used.
+
+This needs terminal focus reporting — `crossterm`'s `EnableFocusChange` and the `Event::FocusGained`/`FocusLost` events. **`rg 'FocusGained|EnableFocusChange' tui_ratatui.rs` returns nothing**: ctx does not enable or handle them today. So half 2 is: enable focus reporting on pane construction, handle the two events in the input pump, and hold a `terminal_focused` flag that styling reads.
+
+## Watch
+
+- **Focus reporting is not universal.** It is a DEC private mode (`?1004`); tmux passes it through only when its own `focus-events` option is on, and some terminals ignore it entirely. Treat "never received a focus event" as focused — a view that renders permanently dim because a terminal is silent is worse than one that never dims. Probe/degrade, do not assume.
+- **Enable and DISABLE it symmetrically.** Leaving `?1004` on after exit means the next program in that terminal receives focus escape sequences it did not ask for and may print as garbage. It belongs in the same setup/restore ladder as raw mode and the alternate screen, including the panic path.
+- Two dim states now interact: unfocused-pane and unfocused-terminal. Decide whether they stack (an unfocused pane in an unfocused terminal is dimmer still) or whether terminal-unfocused simply dims everything uniformly. Uniform is simpler and probably right — the point is "this whole view is not where you are."
+- The dashboard and the live view share the pane kit, so both inherit this. Check the dashboard does not end up with an all-dim screen in a state where it is genuinely the active thing.
+
+## Done when
+
+An unfocused pane reads as clearly secondary including its content; the whole view dims when the terminal loses focus and restores when it regains it; a terminal that never reports focus renders normally; and focus reporting is disabled on every exit path including panic.

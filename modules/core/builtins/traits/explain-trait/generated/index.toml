@@ -1,0 +1,102 @@
+id = "explain-trait"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Explain Trait"
+summary = "Produces a generated advisory explanation grounded in canonical trait data."
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+version = "0.1.0"
+
+[dependency.source]
+path = "../trait-spec"
+
+[metadata]
+tag = [
+    "first-party",
+    "meta-trait",
+    "explain",
+]
+
+[[port]]
+id = "source-trait-id"
+direction = "input"
+schema = "schema:text"
+description = "Explained trait identity."
+
+[[port]]
+id = "canonical-digest"
+direction = "input"
+schema = "schema:text"
+description = "Canonical digest that identifies the explained bytes."
+
+[[port]]
+id = "canonical-trait"
+direction = "input"
+schema = "schema:text"
+description = "Serialized normalized canonical trait data."
+
+[[port]]
+id = "explanation"
+direction = "output"
+schema = "schema:trait-narration"
+description = "Generated advisory trait explanation."
+value = "slot:explanation"
+
+[[slot]]
+id = "explanation"
+schema = "schema:trait-narration"
+description = "Generated advisory narration, bound to one trait identity and canonical digest."
+
+[[schema]]
+id = "trait-narration"
+
+[schema.fields.canonical-digest]
+schema = "schema:text"
+required = true
+
+[schema.fields.explanation]
+schema = "schema:text"
+required = true
+
+[schema.fields.source-trait-id]
+schema = "schema:text"
+required = true
+
+[[agent]]
+id = "generator"
+description = "Writes a plain-language advisory narration of a canonical trait."
+summary = "Trait explanation narrator."
+
+[prompt.explain-trait]
+text = "Explain canonical trait {port:source-trait-id} at {port:canonical-digest} in plain language using only {port:canonical-trait}. Return exactly one trait-narration object repeating source-trait-id and canonical-digest verbatim with a non-empty explanation. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the canonical data does not establish. Use {resource:trait-spec/agent-traits-schema} only to understand the canonical structure."
+input = [
+    "port:source-trait-id",
+    "port:canonical-digest",
+    "port:canonical-trait",
+    "resource:trait-spec/agent-traits-schema",
+]
+output = ["slot:explanation"]
+
+[procedure]
+description = "Generate one untrusted plain-language narration bound to the supplied canonical trait identity and digest."
+input = [
+    "port:source-trait-id",
+    "port:canonical-digest",
+    "port:canonical-trait",
+]
+output = ["port:explanation"]
+
+[[procedure.sequence]]
+id = "explain-trait"
+title = "Explain trait"
+agent = "agent:generator"
+prompt = "prompt:explain-trait"
+input = [
+    "port:source-trait-id",
+    "port:canonical-digest",
+    "port:canonical-trait",
+    "resource:trait-spec/agent-traits-schema",
+]
+output = ["slot:explanation"]

@@ -1,0 +1,62 @@
+{
+  "agent:reviewer": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 28,
+    "end": 28
+  },
+  "port:diff": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 34,
+    "end": 34
+  },
+  "port:focus": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "port:review": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 70,
+    "end": 70
+  },
+  "prompt:review": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 96,
+    "end": 96
+  },
+  "schema:code-review-finding": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 42,
+    "end": 42
+  },
+  "schema:code-review-scaffold": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 58,
+    "end": 58
+  },
+  "schema:severity": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 45,
+    "end": 45
+  },
+  "schema:verdict": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:procedure/review": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 92,
+    "end": 92
+  },
+  "slot:review": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 56,
+    "end": 56
+  },
+  "trait:code-review": {
+    "file": "modules/core/builtins/templates/code-review/source/index.ts",
+    "start": 77,
+    "end": 77
+  }
+}

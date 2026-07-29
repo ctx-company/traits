@@ -1,0 +1,146 @@
+id = "refine-trait"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Refine Trait"
+summary = "Produces a validated source-anchored trait refinement scaffold."
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+version = "0.1.0"
+
+[dependency.source]
+path = "../trait-spec"
+
+[metadata]
+tag = [
+    "first-party",
+    "meta-trait",
+    "refinement",
+]
+
+[[port]]
+id = "source"
+direction = "input"
+schema = "schema:text"
+description = "Canonical source trait text."
+
+[[port]]
+id = "source-digest"
+direction = "input"
+schema = "schema:text"
+description = "sha256 digest of the source trait."
+
+[[port]]
+id = "source-path"
+direction = "input"
+schema = "schema:text"
+description = "Filesystem path whose lines anchors must reference."
+
+[[port]]
+id = "change-request"
+direction = "input"
+schema = "schema:text"
+description = "Requested refinement."
+
+[[port]]
+id = "refinement"
+direction = "output"
+schema = "schema:refine-scaffold"
+description = "Refinement scaffold."
+value = "slot:refinement"
+
+[[slot]]
+id = "refinement"
+schema = "schema:refine-scaffold"
+description = "Typed refinement scaffold for validation and candidate evaluation."
+
+[[schema]]
+id = "source-anchor"
+description = "A one-based inclusive source location."
+
+[schema.fields.end]
+schema = "schema:number"
+required = true
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+
+[schema.fields.start]
+schema = "schema:number"
+required = true
+
+[[schema]]
+id = "refine-patch"
+description = "One requested source-anchored refinement."
+
+[schema.fields.anchor]
+schema = "schema:source-anchor"
+required = true
+
+[schema.fields.change]
+schema = "schema:text"
+required = true
+
+[[schema]]
+id = "refine-scaffold"
+description = "A source-anchored refinement proposal."
+
+[schema.fields.patches]
+schema = "[schema:refine-patch]"
+required = true
+
+[schema.fields.proposed-trait]
+schema = "schema:any"
+required = true
+
+[schema.fields.source-digest]
+schema = "schema:text"
+required = true
+
+[schema.fields.source-trait-id]
+schema = "schema:text"
+required = true
+
+[[agent]]
+id = "refiner"
+description = "Produces source-anchored trait refinement scaffolds."
+summary = "Trait refinement agent."
+
+[prompt.refine]
+text = "Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}. Ground the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured refine scaffold with anchored patches."
+input = [
+    "port:source",
+    "port:source-digest",
+    "port:source-path",
+    "port:change-request",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:refinement"]
+
+[procedure]
+description = "Propose one refinement scaffold whose trait identity remains equal to the source identity."
+input = [
+    "port:source",
+    "port:source-digest",
+    "port:source-path",
+    "port:change-request",
+]
+output = ["port:refinement"]
+
+[[procedure.sequence]]
+id = "refine"
+title = "Refine trait"
+agent = "agent:refiner"
+prompt = "prompt:refine"
+input = [
+    "port:source",
+    "port:source-digest",
+    "port:source-path",
+    "port:change-request",
+    "resource:trait-spec/agent-traits-schema",
+    "resource:trait-spec/design-rubric",
+]
+output = ["slot:refinement"]

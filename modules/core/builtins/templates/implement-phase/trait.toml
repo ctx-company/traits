@@ -1,0 +1,6 @@
+[package]
+id = "implement-phase"
+version = "0.1.0"
+name = "Implement Phase"
+description = "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict."
+status = "draft"

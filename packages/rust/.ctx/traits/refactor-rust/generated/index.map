@@ -1,0 +1,62 @@
+{
+  "agent:reviewer": {
+    "file": "packages/agents/src/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:worker": {
+    "file": "packages/agents/src/index.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:review-report": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "port:target": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 10,
+    "end": 10
+  },
+  "port:work-report": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 30,
+    "end": 30
+  },
+  "prompt:implement": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "prompt:review": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 71,
+    "end": 71
+  },
+  "sequence:procedure/implement": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 58,
+    "end": 58
+  },
+  "sequence:procedure/review": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 68,
+    "end": 68
+  },
+  "slot:review-notes": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "slot:work-summary": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 19,
+    "end": 19
+  },
+  "trait:refactor-rust": {
+    "file": "packages/rust/.ctx/traits/refactor-rust/source/index.ts",
+    "start": 41,
+    "end": 41
+  }
+}

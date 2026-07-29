@@ -1,0 +1,31 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "import-trait"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:f5b706d9d3ae8ee5bd6dc94bc274e366842b2430defdfb2167a90364da5431c9"
+canonical = "sha256:53f4eae7a5be882e9780b65582a915eacddd43d3bb626a75d35a1e67c248e5ab"
+model-visible = "sha256:b251fccf7d37e9165c6495b5554633ec3acc8cc1a85c121f6bcd329546646f6f"
+resource-manifest = "sha256:209b89868547c14c47a14797febd0d0a9e6d78682e91540d24955187c305a57a"
+
+[[dependency]]
+alias = "trait-spec"
+id = "trait-spec"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+vendored-path = ".ctx/traits/vendor/trait-spec"
+
+[dependency.source]
+path = "../trait-spec"
+
+[dependency.digests]
+source = "sha256:2e679fed106ad0d7ba791d5a88b74a03d48c1cf84fe0d8786fbc971689db7f59"
+canonical = "sha256:6b6dabf47b2ff4f583405fca4e6a4cf87fea7aa8efa6b7298e28a15e126b3ff7"
+model-visible = "sha256:16efa105137138e4466db43f274ea2509cbe208008d1b370df730d83459bd30d"
+resource-manifest = "sha256:0df7adcc175a94c51c60e501d1fbde585ae1e70507f1753631eb97dcc37bfa0e"

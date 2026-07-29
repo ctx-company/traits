@@ -1,0 +1,14 @@
+# SDK-facing sections (consumed by schema.rs -> generated.ts).
+# Legacy single-string format: summary defaults to description.
+[verbosity]
+brief = "Keep responses concise."
+
+# ---------------------------------------------------------------------------
+# Full catalog: behavior axes (verbatim from compile.rs behavior_builtin).
+# ---------------------------------------------------------------------------
+
+[behavior_verbosity]
+brief = { summary = "Keep output compact unless risk explanation needs detail.", description = "Avoid long generic explanations. Expand only when needed to explain impact or a minimal repair.", directive = "Keep output compact unless risk explanation needs detail." }
+terse = { summary = "Use the shortest useful answer.", description = "Omit nonessential commentary and preserve only the facts or actions needed for the task." }
+normal = { summary = "Use normal concise detail.", description = "Provide enough context to be actionable without expanding into exhaustive background." }
+detailed = { summary = "Use detailed explanations when they improve correctness.", description = "Include rationale, evidence, and edge cases when the user needs them to trust or apply the answer." }

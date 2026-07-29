@@ -1,0 +1,113 @@
+id = "code-review"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Code Review"
+summary = "Reviews a diff against a stated focus and returns structured, source-anchored findings with a pass/needs-changes verdict."
+
+[metadata]
+tag = [
+    "template",
+    "review",
+]
+
+[[port]]
+id = "diff"
+direction = "input"
+schema = "schema:text"
+description = "The diff or changed-files excerpt to review."
+
+[[port]]
+id = "focus"
+direction = "input"
+schema = "schema:text"
+description = 'What to focus the review on, e.g. "correctness and error handling" or "public API surface".'
+
+[[port]]
+id = "review"
+direction = "output"
+schema = "schema:code-review-scaffold"
+description = "Structured review verdict and findings."
+value = "slot:review"
+
+[[slot]]
+id = "review"
+schema = "schema:code-review-scaffold"
+description = "The reviewer's structured verdict and findings."
+
+[[schema]]
+id = "severity"
+schema = "schema:text"
+allowed = [
+    "blocker",
+    "advisory",
+]
+
+[[schema]]
+id = "code-review-finding"
+description = "One reviewer finding tied to a specific file."
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+
+[schema.fields.severity]
+schema = "schema:severity"
+required = true
+description = "Whether this finding must be fixed before merge, or is a lower-priority suggestion."
+
+[schema.fields.summary]
+schema = "schema:text"
+required = true
+
+[[schema]]
+id = "verdict"
+schema = "schema:text"
+allowed = [
+    "pass",
+    "fail",
+    "needs-changes",
+]
+
+[[schema]]
+id = "code-review-scaffold"
+description = "A structured code review: a pass/fail/needs-changes verdict plus per-file findings."
+
+[schema.fields.findings]
+schema = "[schema:code-review-finding]"
+required = true
+
+[schema.fields.verdict]
+schema = "schema:verdict"
+required = true
+
+[[agent]]
+id = "reviewer"
+description = "Reviews a diff for correctness, risk, and scope, and reports findings the author can act on."
+summary = "Diff reviewer."
+
+[prompt.review]
+text = "Review {port:diff} with a focus on {port:focus}. Return exactly one structured review: a verdict of pass, needs-changes, or fail, and one finding per issue you find, each naming its file, a severity of blocker or advisory, and a concise summary. Do not rewrite the diff; report only."
+input = [
+    "port:diff",
+    "port:focus",
+]
+output = ["slot:review"]
+
+[procedure]
+description = "Review a diff for the stated focus and return one structured verdict with findings."
+input = [
+    "port:diff",
+    "port:focus",
+]
+output = ["port:review"]
+
+[[procedure.sequence]]
+id = "review"
+title = "Review the diff"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+input = [
+    "port:diff",
+    "port:focus",
+]
+output = ["slot:review"]

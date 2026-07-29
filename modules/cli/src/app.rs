@@ -1,0 +1,68 @@
+//! Thin app boundary: entry, error, formatting, and CLI surface.
+//!
+//! Entry routes commands and converts results to exit status. Error defines the
+//! app-edge error type with miette diagnostics. Surface parses CLI arguments.
+//! Product semantics live in `ctx-traits-core` and `ctx-traits-io`, not here.
+
+mod agent_dispatch;
+mod cdk_build;
+mod command_handlers;
+mod compose;
+mod config_build;
+mod config_types;
+mod context_cache;
+mod dashboard;
+mod distribution;
+mod doctor;
+mod drive;
+pub mod entry;
+pub mod error;
+mod eval;
+mod explain_inspect;
+mod frame_prompt;
+mod generate;
+mod harness_stream;
+mod help_surface;
+mod hook;
+mod host_install;
+mod import_analysis;
+mod import_handlers;
+mod interrupt;
+mod launch_reports;
+mod lifecycle_handlers;
+mod lifecycle_reporting;
+mod merge;
+mod merge_story;
+mod new;
+pub mod presentation;
+mod preview;
+mod refine;
+mod report_check;
+mod report_claim;
+mod report_drift;
+mod report_eval;
+mod report_handlers;
+mod report_import;
+mod report_render;
+mod report_resources;
+mod report_runtime;
+mod resolve;
+mod run;
+mod run_format;
+mod run_view;
+mod running;
+mod schema_synth_build;
+mod sdk_generate;
+mod search;
+mod stats;
+mod story;
+mod story_view;
+mod structured_output;
+pub mod surface;
+mod trait_editor;
+mod trust_story;
+mod tui;
+mod tui_demo;
+mod tui_kit;
+mod tui_panes;
+mod tui_ratatui;

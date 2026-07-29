@@ -1,0 +1,131 @@
+id = "refactor"
+schema-version = "0.3"
+version = "0.8.0"
+name = "Refactor (Direct)"
+summary = "Turns human annotations into directly implemented changes — no review loop, no commit."
+variant = "direct"
+
+[metadata]
+tag = [
+    "first-party",
+    "refactoring",
+    "annotations",
+]
+
+[[intent.require]]
+id = "annotation-fidelity"
+summary = "Every annotation becomes exactly one checklist item; nothing is dropped or merged away."
+
+[[intent.require]]
+id = "preserve-scope"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "over-engineering"
+
+[[port]]
+id = "work-report"
+direction = "output"
+schema = "schema:text"
+description = "Final report of the implemented annotation checklist."
+
+[[slot]]
+id = "annotations"
+schema = "schema:annotations-doc"
+description = "Typed ctx-annotate output, validated against this schema before use."
+
+[[slot]]
+id = "checklist"
+schema = "schema:text"
+description = "Ordered checklist: one actionable item per annotation with file, location, and change."
+
+[[schema]]
+id = "line-point"
+description = "One end of an exact text range."
+
+[schema.fields.column]
+schema = "schema:integer"
+required = true
+description = "1-based column within the line."
+
+[schema.fields.number]
+schema = "schema:integer"
+required = true
+description = "1-based line number."
+
+[[schema]]
+id = "annotation"
+description = "One human annotation captured by ctx-annotate."
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+description = "Repo-relative path of the annotated file."
+
+[schema.fields.lines]
+schema = "([schema:integer]|[schema:line-point])"
+required = true
+description = "Whole-line form: [start, end] line numbers, BOTH inclusive. Free-text form: exactly two line-point objects marking the start and end of the exact range."
+
+[schema.fields.text]
+schema = "schema:text"
+required = true
+description = "The human's instruction for this annotated range."
+
+[[schema]]
+id = "annotations-doc"
+description = "The typed ctx-annotate output document."
+
+[schema.fields.annotations]
+schema = "[schema:annotation]"
+required = true
+
+[[agent]]
+id = "smart-1"
+description = "Strong model: turns the captured annotations into a concrete, ordered checklist of changes."
+summary = "Checklist-planning role."
+
+[[agent]]
+id = "worker"
+description = "Implements every checklist item and validates the result."
+summary = "Implementation role."
+
+[prompt.checklist]
+text = "Turn the captured annotations {slot:annotations} into a checklist."
+input = ["slot:annotations"]
+output = ["slot:checklist"]
+
+[prompt.implement]
+text = "Implement every item in the checklist {slot:checklist}."
+input = ["slot:checklist"]
+
+[procedure]
+description = "Collect human annotations interactively, plan them as a checklist, implement every item, and report."
+output = ["port:work-report"]
+
+[[procedure.sequence]]
+id = "annotate"
+title = "Collect annotations (ctx-annotate)"
+output = ["slot:annotations"]
+
+[procedure.sequence.command]
+argv = ["ctx-annotate"]
+timeout-ms = 3600000
+
+[[procedure.sequence]]
+id = "checklist"
+title = "Build the checklist"
+agent = "agent:smart-1"
+prompt = "prompt:checklist"
+input = ["slot:annotations"]
+output = ["slot:checklist"]
+
+[[procedure.sequence]]
+id = "implement"
+title = "Implement the checklist"
+agent = "agent:worker"
+prompt = "prompt:implement"
+input = ["slot:checklist"]
+output = ["port:work-report"]

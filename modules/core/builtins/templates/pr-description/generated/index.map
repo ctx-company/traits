@@ -1,0 +1,52 @@
+{
+  "agent:writer": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:context": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 17,
+    "end": 17
+  },
+  "port:description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 37,
+    "end": 37
+  },
+  "port:diff": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 16,
+    "end": 16
+  },
+  "prompt:write-description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 56,
+    "end": 56
+  },
+  "schema:pr-description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "schema:pr-risk": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 30,
+    "end": 30
+  },
+  "sequence:procedure/write-description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 53,
+    "end": 53
+  },
+  "slot:description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "trait:pr-description": {
+    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
+    "start": 44,
+    "end": 44
+  }
+}

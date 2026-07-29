@@ -1,0 +1,719 @@
+import {
+  Directness as GeneratedDirectness,
+  Format as GeneratedFormat,
+  Initiative as GeneratedInitiative,
+  Intent as GeneratedIntent,
+  Method as GeneratedMethod,
+  ScopeControl as GeneratedScopeControl,
+  Tone as GeneratedTone,
+  Uncertainty as GeneratedUncertainty,
+  Verbosity as GeneratedVerbosity,
+} from "./generated.js";
+import type {
+  CanonicalContract,
+  CanonicalDeclaration,
+  CanonicalDependency,
+  CanonicalEval,
+  CanonicalExtensions,
+  CanonicalRelations,
+  CanonicalScenario,
+  CanonicalTraitDraft,
+  DirectnessBuiltIn,
+  FormatBuiltIn,
+  InitiativeBuiltIn,
+  IntentAvoidBuiltIn,
+  IntentBlockBuiltIn,
+  IntentFocusBuiltIn,
+  IntentRequireBuiltIn,
+  JsonObject,
+  MethodBuiltIn,
+  ScopeControlBuiltIn,
+  ToneBuiltIn,
+  UncertaintyBuiltIn,
+  VerbosityBuiltIn,
+} from "./generated.js";
+export type {
+  DirectnessBuiltIn,
+  FormatBuiltIn,
+  InitiativeBuiltIn,
+  IntentAvoidBuiltIn,
+  IntentBlockBuiltIn,
+  IntentBuiltIn,
+  IntentFocusBuiltIn,
+  IntentRequireBuiltIn,
+  MethodBuiltIn,
+  ScopeControlBuiltIn,
+  ToneBuiltIn,
+  UncertaintyBuiltIn,
+  VerbosityBuiltIn,
+} from "./generated.js";
+import type {
+  AgentHandle,
+  ConditionHandle,
+  PortHandle,
+  ProcedureHandle,
+  PromptHandle,
+  ResourceHandle,
+  SchemaHandle,
+  SequenceHandle,
+  SequenceLinearHandle,
+  SessionHandle,
+  SignalHandle,
+  SlotHandle,
+  TraitFamilyHandle,
+  TraitHandle,
+} from "./handles.js";
+import { recordDiagnostic, withMeta } from "./meta.js";
+import type { CdkDiagnostic, SourceMap } from "./meta.js";
+import {
+  canonicalTraitFields,
+  collectDiagnostics,
+  collectMany,
+  collectSourceMaps,
+  compact,
+  conditionMap,
+  explicitDeclarations,
+  finalizedPortDeclarations,
+  isSlug,
+  mergeDeclarationSets,
+  mutableJsonArray,
+  normalizeBehavior,
+  normalizeIntent,
+  normalizeValue,
+  promptMap,
+  resolveGeneratedBranchArmIds,
+  sequenceLinearMap,
+  stableObject,
+  summaryFromTraitFields,
+  withoutKeys,
+} from "./normalize.js";
+import { buildTraitFamily } from "./variant.js";
+import type { TraitFamilyMap } from "./variant.js";
+
+/** A slug-identified guidance item with optional local render text. */
+export interface GuidanceItem<Id extends string = string> {
+  readonly id: Id;
+  readonly summary?: string;
+  readonly description?: string;
+}
+/**
+ * A behavior or intent value: a built-in slug, an arbitrary custom slug, or a rich guidance item.
+ * `string & {}` keeps literal auto-complete for `Id` while still accepting any string — a closed
+ * union would reject the custom-slug fallback that authoring (and existing traits) rely on.
+ */
+export type GuidanceInput<Id extends string> = Id | (string & {}) | GuidanceItem<Id | (string & {})>;
+
+export interface BehaviorFields {
+  readonly tone?: Tone | readonly Tone[];
+  readonly method?: Method | readonly Method[];
+  readonly verbosity?: Verbosity;
+  readonly directness?: GuidanceInput<DirectnessBuiltIn>;
+  readonly scopeControl?: GuidanceInput<ScopeControlBuiltIn>;
+  readonly initiative?: GuidanceInput<InitiativeBuiltIn>;
+  readonly uncertainty?: GuidanceInput<UncertaintyBuiltIn>;
+  readonly format?: GuidanceInput<FormatBuiltIn> | readonly GuidanceInput<FormatBuiltIn>[];
+}
+
+/** `[intent]` authoring shape: `require`/`focus`/`avoid`/`block` guidance facets. */
+export interface IntentSpec {
+  readonly require?: GuidanceInput<IntentRequireBuiltIn> | readonly GuidanceInput<IntentRequireBuiltIn>[];
+  readonly focus?: GuidanceInput<IntentFocusBuiltIn> | readonly GuidanceInput<IntentFocusBuiltIn>[];
+  readonly avoid?: GuidanceInput<IntentAvoidBuiltIn> | readonly GuidanceInput<IntentAvoidBuiltIn>[];
+  readonly block?: GuidanceInput<IntentBlockBuiltIn> | readonly GuidanceInput<IntentBlockBuiltIn>[];
+}
+
+/**
+ * `[metadata]` facets: search/browse taxonomy plus the family/variant pair
+ * that groups variant packages (`<family>-<variant>`, bare `<family>` =
+ * default variant). Display-only — never drives activation; the Rust synth
+ * validates slugs and the family/id convention (advisory) at build time.
+ */
+export interface TraitMetadata {
+  readonly family?: string;
+  readonly variant?: string;
+  readonly job?: string | readonly string[];
+  readonly domain?: string | readonly string[];
+  readonly artifact?: string | readonly string[];
+  readonly audience?: string | readonly string[];
+  readonly environment?: string | readonly string[];
+  readonly tag?: string | readonly string[];
+}
+
+export interface TraitFields {
+  readonly "schema-version"?: SchemaVersion;
+  readonly id?: Slug;
+  readonly name?: string;
+  readonly version?: SemVer;
+  readonly summary?: string;
+  readonly description?: string;
+  readonly behavior?: BehaviorFields;
+  readonly metadata?: TraitMetadata;
+  readonly intent?: IntentSpec;
+  /** `[activation]` section. @see {@link rule} */
+  readonly activation?: CanonicalDeclaration;
+  /** `[composition]` section: conflict/merge policy against other traits. */
+  readonly composition?: CanonicalContract;
+  /** `[relations]` section: `conflicts`/`requires`/`suggests` against other traits. */
+  readonly relations?: CanonicalRelations;
+  /** `[extensions]` section: non-standard runtime extensions (`extensions.ctx.*`). */
+  readonly extensions?: CanonicalExtensions;
+  /** `[[dependency]]` declarations. @see {@link dependency} */
+  readonly dependency?: CanonicalDependency | readonly CanonicalDependency[];
+  /** The trait's procedure. @see {@link procedure} */
+  readonly procedure?: ProcedureHandle;
+  /** Declared agents. @example `agent: [worker("impl", {...})]` @see {@link agent} */
+  readonly agent?: AgentHandle | readonly AgentHandle[];
+  /** Alias of {@link TraitFields.agent}. */
+  readonly agents?: AgentHandle | readonly AgentHandle[];
+  /** Declared ports. @example `port: [port.input.text({ id: "diff" })]` @see {@link port} */
+  readonly port?: PortHandle | readonly PortHandle[];
+  /** Alias of {@link TraitFields.port}. */
+  readonly ports?: PortHandle | readonly PortHandle[];
+  /** Declared slots. @example `slot: [slot.text("review")]` @see {@link slot} */
+  readonly slot?: SlotHandle | readonly SlotHandle[];
+  /** Alias of {@link TraitFields.slot}. */
+  readonly slots?: SlotHandle | readonly SlotHandle[];
+  /** Declared prompts. @see {@link prompt} */
+  readonly prompt?: PromptHandle | readonly PromptHandle[];
+  /** Alias of {@link TraitFields.prompt}. */
+  readonly prompts?: PromptHandle | readonly PromptHandle[];
+  /** Declared named sequences. @see {@link sequence} */
+  readonly sequence?: SequenceHandle | SequenceLinearHandle | readonly (SequenceHandle | SequenceLinearHandle)[];
+  /** Alias of {@link TraitFields.sequence}. */
+  readonly sequences?: SequenceHandle | SequenceLinearHandle | readonly (SequenceHandle | SequenceLinearHandle)[];
+  /** Declared named conditions. @see {@link condition} */
+  readonly condition?: ConditionHandle | readonly ConditionHandle[];
+  /** Alias of {@link TraitFields.condition}. */
+  readonly conditions?: ConditionHandle | readonly ConditionHandle[];
+  /** Declared resources (`resource`/`checklist`/`rubric`). @see {@link resource} */
+  readonly resource?: ResourceHandle | readonly ResourceHandle[];
+  /** Alias of {@link TraitFields.resource}. */
+  readonly resources?: ResourceHandle | readonly ResourceHandle[];
+  /** Declared signals. @see {@link signal} */
+  readonly signal?: SignalHandle | readonly SignalHandle[];
+  /** Alias of {@link TraitFields.signal}. */
+  readonly signals?: SignalHandle | readonly SignalHandle[];
+  /** Declared sessions. @see {@link session} */
+  readonly session?: SessionHandle | readonly SessionHandle[];
+  /** Alias of {@link TraitFields.session}. */
+  readonly sessions?: SessionHandle | readonly SessionHandle[];
+  /** Declared named schemas. @see {@link schema} */
+  readonly schema?: SchemaHandle | readonly SchemaHandle[];
+  /** Alias of {@link TraitFields.schema}. */
+  readonly schemas?: SchemaHandle | readonly SchemaHandle[];
+  /** `[[scenario]]` declarations: product review behavior examples. */
+  readonly scenario?: CanonicalScenario | readonly CanonicalScenario[];
+  /** `[[eval]]` declarations: declared product evaluation checks. */
+  readonly eval?: CanonicalEval | readonly CanonicalEval[];
+  /**
+   * The one sanctioned raw-JSON escape hatch: spread directly into the
+   * canonical draft ahead of every other field, for canonical keys this
+   * interface does not (yet) type. Prefer a typed field above whenever one
+   * exists.
+   */
+  readonly unsafeJson?: JsonObject;
+  /**
+   * Declares this call as a native variant family instead of a single trait:
+   * a (possibly nested) map of variant leaves, keyed by segment and joined
+   * with `:` (e.g. `variants: { quick: variant.import("./quick.js").default(),
+   * strict: variant.default({ thorough: variant({...}).default(), brief:
+   * variant.import("./brief.js") }) }` — `quick` is the root map's default
+   * child, and `thorough` is the default child of the nested `strict` map).
+   * Every map level (including the root) must have exactly one default
+   * child so a bare family or intermediate prefix resolves deterministically.
+   * Mutually exclusive with authoring a single trait body directly — when
+   * present, every other declaration field is read from each leaf's own
+   * `variant(...)`/`variant.import(...)` definition instead of from this
+   * call's fields. Never reaches canonical JSON.
+   * @see {@link variant}
+   */
+  readonly variants?: TraitFamilyMap;
+  /**
+   * Not a canonical trait field. Status moved to the team-edited
+   * `[package].status` (`draft | ready`) in the package's root `trait.toml`;
+   * it is never authored on the canonical trait document itself.
+   */
+  readonly status?: never;
+  /**
+   * Not a canonical trait field. Trust is machine-local only, keyed by
+   * canonical digest in `~/.config/ctx/trust.toml`; set it via
+   * `ctx traits review --approve`/`--deny`, never on the canonical trait
+   * document.
+   */
+  readonly trust?: never;
+}
+
+/**
+ * Fields a `trait(id, { variants })` family call accepts: identity and
+ * topology only. Every other declaration lives in each leaf's own
+ * `variant(...)`/`variant.import(...)` definition — a family call is
+ * mutually exclusive with authoring a trait body directly, so `trait()`
+ * rejects any other `TraitFields` key at runtime.
+ */
+export interface FamilyFields {
+  readonly id?: Slug;
+  readonly version?: SemVer;
+  readonly variants: TraitFamilyMap;
+}
+
+/** The only keys a `trait(id, { variants })` family call may supply. @see {@link FamilyFields} */
+const FAMILY_OWNED_KEYS = new Set<string>(["id", "version", "variants"]);
+
+/**
+ * Assembles a complete trait draft from declarations and a procedure: the
+ * top-level call every CDK trait source ends with, producing the
+ * `TraitHandle` that `ctx traits build` normalizes to the canonical
+ * `generated/index.toml` document.
+ *
+ * Authoring a trait document directly in TOML/JSON means every declared
+ * agent/port/slot/prompt/sequence/schema has to be hand-collected into the
+ * right top-level array, in the right shape, with ids kept unique and
+ * consistent across every place they're referenced — the exact bookkeeping
+ * `trait(...)` automates by walking the fields it's given and collecting
+ * every declaration reachable from them (ports referenced by a procedure,
+ * schemas referenced by slots, etc.) rather than requiring an exhaustive
+ * top-level list.
+ *
+ * @param fields Trait identity, declarations, and procedure.
+ * @example
+ * ```ts
+ * const diff = port.input.text({ id: "diff" });
+ * const focus = port.input.text({ id: "focus" });
+ * const review = slot.text("review");
+ * const output = port.output.of({ id: "review", schema: "schema:text", value: review });
+ * const reviewStep = sequence.prompt("review", { text: prompt.text`Review ${diff} with a focus on ${focus}.`, output: review });
+ * export default trait("code-review", {
+ *   version: "0.1.0",
+ *   summary: "Reviews a diff against a stated focus and returns a structured verdict.",
+ *   procedure: procedure({
+ *     description: "Review a diff for the stated focus.",
+ *     input: [diff, focus],
+ *     output,
+ *     sequence: reviewStep,
+ *   }),
+ * });
+ * ```
+ * @see {@link procedure}
+ */
+export function trait<const Id extends string>(
+  id: ValidSlug<Id>,
+  fields: Omit<FamilyFields, "id">,
+): TraitFamilyHandle;
+export function trait<const Fields extends FamilyFields>(
+  fields: Fields & ValidTraitFields<Fields>,
+): TraitFamilyHandle;
+export function trait<const Id extends string>(id: ValidSlug<Id>, fields: Omit<TraitFields, "id">): TraitHandle;
+export function trait<const Fields extends TraitFields>(fields: Fields & ValidTraitFields<Fields>): TraitHandle;
+export function trait(
+  first: string | TraitFields,
+  second?: Omit<TraitFields, "id">,
+): TraitHandle | TraitFamilyHandle {
+  const fields = canonicalTraitFields(
+    (typeof first === "string" ? { ...second, id: first } : first) as TraitFields,
+  ) as TraitFields;
+  if (fields.variants !== undefined) {
+    const rejectedKeys = Object.entries(fields)
+      .filter(([key, value]) => value !== undefined && !FAMILY_OWNED_KEYS.has(key))
+      .map(([key]) => key);
+    if (rejectedKeys.length > 0) {
+      throw new Error(
+        `trait(): a variant family only accepts id/version/variants — remove ${rejectedKeys.join(", ")} `
+          + "(declare them in each leaf's own variant(...) definition instead)",
+      );
+    }
+    return buildTraitFamily(fields);
+  }
+  const assembled = assembleSingleTraitDraft(fields);
+  return withMeta(stableObject(assembled.draft), {
+    kind: "trait",
+    declaration: assembled.draft,
+    declarations: assembled.merged,
+    diagnostics: assembled.diagnostics,
+    sourceMap: assembled.sourceMap,
+  });
+}
+
+/**
+ * The single-definition assembly shared by a plain `trait()` call and each
+ * leaf of a `variants` family: walks a `TraitFields` value's declarations,
+ * merges/dedupes them, and produces the canonical draft JSON plus its
+ * diagnostics and source map. `trait()` wraps this once per call; family
+ * assembly (`variant.ts`) invokes it once per resolved leaf, after
+ * injecting the family's shared `id`/`version`/`schema-version`/`variant`.
+ */
+export function assembleSingleTraitDraft(fields: TraitFields): {
+  readonly draft: CanonicalTraitDraft;
+  readonly merged: ReturnType<typeof mergeDeclarationSets>;
+  readonly diagnostics: readonly CdkDiagnostic[];
+  readonly sourceMap: SourceMap;
+} {
+  const declarationSources = [
+    fields.procedure,
+    fields.sequence,
+    fields.condition,
+    fields.agent,
+    fields.port,
+    fields.slot,
+    fields.prompt,
+    fields.resource,
+    fields.signal,
+    fields.session,
+    fields.schema,
+  ];
+  const collected = collectMany(declarationSources);
+  const authored = explicitDeclarations(fields);
+  resolveGeneratedBranchArmIds([fields.procedure, fields.sequence], collected, authored);
+  const explicit = explicitDeclarations(fields);
+  const procedureValue = fields.procedure === undefined ? undefined : normalizeValue(fields.procedure);
+  const merged = mergeDeclarationSets(collected, explicit);
+  const draft = compact({
+    ...fields.unsafeJson,
+    ...withoutKeys(fields as Record<string, unknown>, [
+      "description",
+      "behavior",
+      "intent",
+      "dependency",
+      "procedure",
+      "agent",
+      "agents",
+      "port",
+      "ports",
+      "slot",
+      "slots",
+      "prompt",
+      "prompts",
+      "sequence",
+      "sequences",
+      "condition",
+      "conditions",
+      "resource",
+      "resources",
+      "signal",
+      "signals",
+      "session",
+      "sessions",
+      "schema",
+      "schemas",
+      "unsafeJson",
+      "variants",
+    ]),
+    "schema-version": fields["schema-version"] ?? "0.2",
+    version: fields.version ?? "0.1.0",
+    behavior: normalizeBehavior(fields.behavior),
+    intent: normalizeIntent(fields.intent),
+    summary: summaryFromTraitFields(fields),
+    ...(fields.dependency === undefined
+      ? {}
+      : { dependency: Array.isArray(fields.dependency) ? [...fields.dependency] : [fields.dependency] }),
+    agent: mutableJsonArray(merged.agent),
+    procedure: procedureValue,
+    port: finalizedPortDeclarations(merged.port ?? []),
+    slot: mutableJsonArray(merged.slot),
+    prompt: promptMap(merged.prompt),
+    sequence: sequenceLinearMap(merged.sequence),
+    condition: conditionMap([fields.condition, merged.condition]),
+    resource: mutableJsonArray(merged.resource),
+    signal: mutableJsonArray(merged.signal),
+    session: mutableJsonArray(merged.session),
+    schema: mutableJsonArray(merged.schema),
+    // P481 §4.5: the draft is assembled dynamically (spread + `withoutKeys`
+    // over a runtime `TraitFields` record), so the producer side cannot be
+    // statically checked without rewriting that assembly — one documented
+    // cast at this return boundary; the type's payoff is at the consumer
+    // boundary (`toDraftJson`'s `DraftOf<T>`).
+  }) as unknown as CanonicalTraitDraft;
+  return {
+    draft,
+    merged,
+    diagnostics: collectDiagnostics(declarationSources),
+    sourceMap: collectSourceMaps(declarationSources),
+  };
+}
+
+export type CustomSlug = string & { readonly __customSlugBrand: never; };
+/** A lowercase trait identifier. Literal ids are checked for slug syntax by `trait`. */
+export type Slug = Lowercase<string>;
+/**
+ * The canonical trait document schema version. `"0.3"` is reserved for
+ * native-variant leaves (`variant`/`variant.import` under `trait(id, {
+ * variants })`) and is injected automatically — never authored directly.
+ */
+export type SchemaVersion = "0.2" | "0.3";
+/** A three-component semantic version for trait releases. */
+export type SemVer = `${number}.${number}.${number}`;
+export type Tone = GuidanceInput<ToneBuiltIn>;
+export type Method = GuidanceInput<MethodBuiltIn>;
+export type Verbosity = GuidanceInput<VerbosityBuiltIn>;
+
+type SlugCharacter =
+  | "a"
+  | "b"
+  | "c"
+  | "d"
+  | "e"
+  | "f"
+  | "g"
+  | "h"
+  | "i"
+  | "j"
+  | "k"
+  | "l"
+  | "m"
+  | "n"
+  | "o"
+  | "p"
+  | "q"
+  | "r"
+  | "s"
+  | "t"
+  | "u"
+  | "v"
+  | "w"
+  | "x"
+  | "y"
+  | "z"
+  | "0"
+  | "1"
+  | "2"
+  | "3"
+  | "4"
+  | "5"
+  | "6"
+  | "7"
+  | "8"
+  | "9";
+type ValidSlugTail<Value extends string> = Value extends "" ? true
+  : Value extends `${SlugCharacter}${infer Rest}` ? ValidSlugTail<Rest>
+  : Value extends `-${infer Rest}` ? Rest extends "" | `-${string}` ? false : ValidSlugTail<Rest>
+  : false;
+type ValidSlug<Value extends string> = string extends Value ? Value
+  : Value extends `${SlugCharacter}${infer Rest}` ? ValidSlugTail<Rest> extends true ? Value : never
+  : never;
+type ValidTraitFields<Fields extends { readonly id?: string; }> = Fields["id"] extends string
+  ? ValidSlug<Fields["id"]> extends never ? never : unknown
+  : unknown;
+
+type CallableNamespace<Values extends Record<string, string>> = ((value: string) => CustomSlug) & CaseAliases<Values>;
+
+/**
+ * Builds a lowercase callable namespace for a flat generated vocabulary map:
+ * calling it validates a custom slug, and its PascalCase/camelCase/
+ * SCREAMING_SNAKE_CASE properties resolve to the same built-in values.
+ */
+function callableNamespace<Values extends Record<string, string>>(values: Values): CallableNamespace<Values> {
+  return Object.assign((value: string): CustomSlug => customSlug(value), caseAliases(values));
+}
+
+type IntentAxisAliases<Axes extends Record<string, Record<string, string>>> = {
+  readonly [Axis in keyof Axes]: CaseAliases<Axes[Axis]>;
+};
+
+/** All leaf keys declared across every axis of an intent-style facet map. */
+type IntentLeafKeys<Axes> = { [Axis in keyof Axes]: keyof Axes[Axis]; }[keyof Axes] & string;
+/** The axis (or union of axes, if the leaf key is ambiguous) that owns a given leaf key. */
+type IntentLeafOwners<Axes, Key extends PropertyKey> = {
+  [Axis in keyof Axes]: Key extends keyof Axes[Axis] ? Axis : never;
+}[keyof Axes];
+/** True when `Union` has more than one member — used to detect a leaf key owned by >1 axis. */
+type IsUnion<Union, Copy = Union> = Union extends Union ? ([Copy] extends [Union] ? false : true) : never;
+/** Leaf keys owned by exactly one axis — the only ones eligible for a bare root alias. */
+type UniqueIntentLeafKeys<Axes> = {
+  [Key in IntentLeafKeys<Axes>]: IsUnion<IntentLeafOwners<Axes, Key>> extends true ? never : Key;
+}[IntentLeafKeys<Axes>];
+type UniqueIntentLeafOwner<Axes, Key extends PropertyKey> = IntentLeafOwners<Axes, Key> extends infer Axis
+  ? Axis extends keyof Axes ? Axis : never
+  : never;
+/** Slug values of every unbiquitously-owned leaf, keyed by their base (camelCase) name. */
+type UniqueIntentLeafValues<Axes> = {
+  [Key in UniqueIntentLeafKeys<Axes>]: Key extends keyof Axes[UniqueIntentLeafOwner<Axes, Key>]
+    ? Axes[UniqueIntentLeafOwner<Axes, Key>][Key]
+    : never;
+};
+/** Bare root aliases for every unambiguous leaf, with the same casing forms as `CaseAliases`. */
+type IntentRootAliases<Axes extends Record<string, Record<string, string>>> = CaseAliases<UniqueIntentLeafValues<Axes>>;
+
+type IntentNamespace<Axes extends Record<string, Record<string, string>>> =
+  & ((value: string) => CustomSlug)
+  & IntentAxisAliases<Axes>
+  & IntentRootAliases<Axes>;
+
+/**
+ * Builds the `intent` callable namespace: one level of nested aliasing over
+ * the `require`/`focus`/`avoid`/`block` axes, reusing the flat `caseAliases`
+ * conversion per axis instead of a second camel-to-SCREAMING implementation.
+ * Leaves owned by exactly one axis are also installed on the root, non-
+ * enumerably, under the same casing forms (e.g. `intent.avoid.ScopeCreep`
+ * is also reachable as `intent.ScopeCreep`). A leaf owned by more than one
+ * axis stays qualified-only: it is absent from the root's own keys, and
+ * bare access throws naming every valid qualified form.
+ */
+export function callableIntentNamespace<Axes extends Record<string, Record<string, string>>>(
+  axes: Axes,
+): IntentNamespace<Axes> {
+  const aliasedAxes = {} as { [Axis in keyof Axes]: CaseAliases<Axes[Axis]>; };
+  const owningAxes = new Map<string, string[]>();
+  for (const axis of Object.keys(axes) as (keyof Axes)[]) {
+    const axisMap = axes[axis] as Record<string, string>;
+    aliasedAxes[axis] = caseAliases(axisMap) as CaseAliases<Axes[typeof axis]>;
+    for (const leafKey of Object.keys(axisMap)) {
+      const owners = owningAxes.get(leafKey) ?? [];
+      owners.push(axis as string);
+      owningAxes.set(leafKey, owners);
+    }
+  }
+  const root = Object.assign((value: string): CustomSlug => customSlug(value), aliasedAxes);
+  const ambiguousAliases = new Map<string, readonly string[]>();
+  for (const [leafKey, owners] of owningAxes) {
+    // A leaf key that shadows an axis name (e.g. a facet named `avoid`) never
+    // gets a bare alias — the qualified namespace at that key always wins.
+    if (leafKey in root) continue;
+    if (owners.length > 1) {
+      for (const aliasKey of aliasFormsOf(leafKey)) ambiguousAliases.set(aliasKey, owners);
+      continue;
+    }
+    const [owner] = owners;
+    const value = (axes[owner as keyof Axes] as Record<string, string>)[leafKey];
+    for (const aliasKey of aliasFormsOf(leafKey)) {
+      if (aliasKey in root) continue;
+      Object.defineProperty(root, aliasKey, { value, enumerable: false, configurable: true });
+    }
+  }
+  if (ambiguousAliases.size === 0) {
+    return root as IntentNamespace<Axes>;
+  }
+  return new Proxy(root, {
+    get(target, property, receiver) {
+      if (typeof property === "string") {
+        const owners = ambiguousAliases.get(property);
+        if (owners !== undefined) {
+          throw new Error(
+            `intent.${property} is ambiguous across facets — use ${
+              owners.map((axis) => `intent.${axis}.${property}`).join(" or ")
+            }`,
+          );
+        }
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  }) as IntentNamespace<Axes>;
+}
+
+/**
+ * Builds a validated custom tone slug for `behavior.tone` alongside the
+ * generated `Tone` built-ins (also reachable as `tone.Direct`,
+ * `tone.DIRECT`, etc. via the same case-alias map).
+ * @example `trait("review", { behavior: { tone: tone("blunt") } })`
+ */
+export const tone = callableNamespace(GeneratedTone);
+/**
+ * Builds a validated custom method slug for `behavior.method` alongside the
+ * generated `Method` built-ins.
+ * @example `trait("review", { behavior: { method: method("socratic") } })`
+ */
+export const method = callableNamespace(GeneratedMethod);
+/**
+ * Builds a validated custom verbosity slug for `behavior.verbosity`
+ * alongside the generated `Verbosity` built-ins.
+ * @example `trait("review", { behavior: { verbosity: verbosity("terse") } })`
+ */
+export const verbosity = callableNamespace(GeneratedVerbosity);
+/** Builds a validated custom directness slug for `behavior.directness` alongside the generated built-ins. */
+export const directness = callableNamespace(GeneratedDirectness);
+/** Builds a validated custom scope-control slug for `behavior.scopeControl` alongside the generated built-ins. */
+export const scopeControl = callableNamespace(GeneratedScopeControl);
+/** Builds a validated custom initiative slug for `behavior.initiative` alongside the generated built-ins. */
+export const initiative = callableNamespace(GeneratedInitiative);
+/** Builds a validated custom uncertainty slug for `behavior.uncertainty` alongside the generated built-ins. */
+export const uncertainty = callableNamespace(GeneratedUncertainty);
+/** Builds a validated custom format slug for `behavior.format` alongside the generated built-ins. */
+export const format = callableNamespace(GeneratedFormat);
+
+/**
+ * Builds a validated custom intent slug for use alongside the generated
+ * `Intent` facets (`require`/`focus`/`avoid`/`block`), each reachable as
+ * e.g. `intent.avoid.ScopeCreep`, `intent.avoid.scopeCreep`, or
+ * `intent.avoid.SCOPE_CREEP`.
+ *
+ * Behavior/intent facets accept any lowercase slug, not just the generated
+ * built-ins — `intent(...)` (and the other behavior namespaces above)
+ * validate that a custom facet is actually slug-shaped at build time instead
+ * of letting an arbitrary string through to fail synth with a less specific
+ * error.
+ *
+ * @example `trait("review", { intent: { require: [intent("cite-evidence")] } })`
+ */
+export const intent = callableIntentNamespace(GeneratedIntent);
+
+function deprecatedNamespace<T extends object>(namespace: T, name: string): T {
+  return new Proxy(namespace, {
+    get(target, property, receiver) {
+      // Proxy reads of function metadata and symbols are implementation
+      // details, not use of a deprecated vocabulary namespace.
+      if (typeof property === "string" && property in target && !["length", "name", "prototype"].includes(property)) {
+        recordDiagnostic(
+          "cdk-pascalcase-vocabulary",
+          name,
+          `PascalCase vocabulary namespace ${name} is deprecated; use the lowercase vocabulary namespace`,
+        );
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+}
+
+/** @deprecated Use {@link tone} — same object, kept for source compatibility. */
+export const Tone = deprecatedNamespace(tone, "Tone");
+/** @deprecated Use {@link method} — same object, kept for source compatibility. */
+export const Method = deprecatedNamespace(method, "Method");
+/** @deprecated Use {@link verbosity} — same object, kept for source compatibility. */
+export const Verbosity = deprecatedNamespace(verbosity, "Verbosity");
+/** @deprecated Use {@link directness} — same object, kept for source compatibility. */
+export const Directness = deprecatedNamespace(directness, "Directness");
+/** @deprecated Use {@link scopeControl} — same object, kept for source compatibility. */
+export const ScopeControl = deprecatedNamespace(scopeControl, "ScopeControl");
+/** @deprecated Use {@link initiative} — same object, kept for source compatibility. */
+export const Initiative = deprecatedNamespace(initiative, "Initiative");
+/** @deprecated Use {@link uncertainty} — same object, kept for source compatibility. */
+export const Uncertainty = deprecatedNamespace(uncertainty, "Uncertainty");
+/** @deprecated Use {@link format} — same object, kept for source compatibility. */
+export const Format = deprecatedNamespace(format, "Format");
+/** @deprecated Use {@link intent} — same object, kept for source compatibility. */
+export const Intent = deprecatedNamespace(intent, "Intent");
+
+type PascalCase<Key extends string> = Key extends `${infer Head}${infer Rest}` ? `${Uppercase<Head>}${Rest}` : Key;
+type ScreamingSnakeCase<Key extends string> = Key extends `${infer Head}${infer Rest}`
+  ? Head extends Uppercase<Head> ? `_${Head}${ScreamingSnakeCase<Rest>}`
+  : `${Uppercase<Head>}${ScreamingSnakeCase<Rest>}`
+  : Key;
+type CaseAliases<Values extends Record<string, string>> = {
+  [Key in keyof Values as Key | PascalCase<Key & string> | ScreamingSnakeCase<Key & string>]: Values[Key];
+};
+
+function pascalKey(key: string): string {
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+function screamingKey(key: string): string {
+  return key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase();
+}
+/** The `camelCase`/`PascalCase`/`SCREAMING_SNAKE_CASE` forms of a single lower-camel-case key. */
+function aliasFormsOf(key: string): readonly string[] {
+  return [key, pascalKey(key), screamingKey(key)];
+}
+
+/** Adds `PascalCase` and `SCREAMING_SNAKE_CASE` aliases to a lower-camel-case built-in value map. */
+function caseAliases<Values extends Record<string, string>>(values: Values): CaseAliases<Values> {
+  const aliases: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    for (const aliasKey of aliasFormsOf(key)) {
+      aliases[aliasKey] = value;
+    }
+  }
+  return aliases as CaseAliases<Values>;
+}
+
+function customSlug<T extends string>(value: T): T & CustomSlug {
+  if (!isSlug(value)) {
+    throw new Error(`custom slug: expected lowercase slug, got ${JSON.stringify(value)}`);
+  }
+  return value as T & CustomSlug;
+}

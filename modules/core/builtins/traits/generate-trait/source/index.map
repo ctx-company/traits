@@ -1,0 +1,47 @@
+{
+  "agent:generator": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 3,
+    "end": 3
+  },
+  "port:brief": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 9,
+    "end": 9
+  },
+  "port:candidate": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 15,
+    "end": 15
+  },
+  "port:name": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 8,
+    "end": 8
+  },
+  "prompt:generate": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 31,
+    "end": 31
+  },
+  "schema:trait-draft": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 12,
+    "end": 12
+  },
+  "sequence:procedure/generate": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 27,
+    "end": 27
+  },
+  "slot:candidate": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 10,
+    "end": 10
+  },
+  "trait:generate-trait": {
+    "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
+    "start": 17,
+    "end": 17
+  }
+}

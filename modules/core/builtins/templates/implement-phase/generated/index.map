@@ -1,0 +1,87 @@
+{
+  "agent:planner": {
+    "file": "modules/core/builtins/templates/implement-phase/source/agent.ts",
+    "start": 7,
+    "end": 7
+  },
+  "agent:reviewer": {
+    "file": "modules/core/builtins/templates/implement-phase/source/agent.ts",
+    "start": 15,
+    "end": 15
+  },
+  "agent:worker": {
+    "file": "modules/core/builtins/templates/implement-phase/source/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:task": {
+    "file": "modules/core/builtins/templates/implement-phase/source/data.ts",
+    "start": 6,
+    "end": 6
+  },
+  "port:verdict": {
+    "file": "modules/core/builtins/templates/implement-phase/source/data.ts",
+    "start": 29,
+    "end": 29
+  },
+  "prompt:draft": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/draft.ts",
+    "start": 9,
+    "end": 9
+  },
+  "prompt:implement": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/implementation.ts",
+    "start": 9,
+    "end": 9
+  },
+  "prompt:review": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/review.ts",
+    "start": 9,
+    "end": 9
+  },
+  "schema:decision": {
+    "file": "modules/core/builtins/templates/implement-phase/source/schema.ts",
+    "start": 6,
+    "end": 6
+  },
+  "schema:implementation-verdict": {
+    "file": "modules/core/builtins/templates/implement-phase/source/schema.ts",
+    "start": 3,
+    "end": 3
+  },
+  "sequence:procedure/draft": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/draft.ts",
+    "start": 6,
+    "end": 6
+  },
+  "sequence:procedure/implement": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/implementation.ts",
+    "start": 6,
+    "end": 6
+  },
+  "sequence:procedure/review": {
+    "file": "modules/core/builtins/templates/implement-phase/source/sequence/review.ts",
+    "start": 6,
+    "end": 6
+  },
+  "slot:draft": {
+    "file": "modules/core/builtins/templates/implement-phase/source/data.ts",
+    "start": 15,
+    "end": 15
+  },
+  "slot:verdict": {
+    "file": "modules/core/builtins/templates/implement-phase/source/data.ts",
+    "start": 23,
+    "end": 23
+  },
+  "slot:work-summary": {
+    "file": "modules/core/builtins/templates/implement-phase/source/data.ts",
+    "start": 19,
+    "end": 19
+  },
+  "trait:implement-phase": {
+    "file": "modules/core/builtins/templates/implement-phase/source/index.ts",
+    "start": 50,
+    "end": 50
+  }
+}

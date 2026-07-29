@@ -1,0 +1,45 @@
+name: CI
+
+'on':
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Install tools & packages
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      # Install remote dependencies
+      - name: Install command-line gates (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes just jq ripgrep
+      - name: Install command-line gates (macOS)
+        if: runner.os == 'macOS'
+        run: brew install just jq ripgrep
+
+      # Install local dependencies
+      - run: pnpm install --frozen-lockfile
+      - run: just ts-build
+
+      # `just test` runs sdk-check, ts-format-check, `just lint`
+      # (fmt + clippy + doc) and the cargo suite.
+      - run: just test
+      - run: just ts-typecheck
+      - run: just ts-lint
+      - run: just ts-test

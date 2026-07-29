@@ -1,0 +1,15 @@
+[package]
+name = "ctx-traits-wasm-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Host-neutral WASM plugin runtime: lifecycle event to action translation for ctx.traits host adapters, with no direct side effects."
+
+[dependencies]
+serde.workspace = true
+strum.workspace = true
+ctx-traits-core.workspace = true

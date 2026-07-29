@@ -1,0 +1,6 @@
+[package]
+id = "pr-description"
+version = "0.1.0"
+name = "PR Description"
+description = "Writes a structured pull-request description — title, summary, testing notes, and risk — from a diff and its context."
+status = "draft"

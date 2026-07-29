@@ -1,0 +1,1436 @@
+//! Generate, critique, and evaluation-generation command handlers.
+
+use crate::app::entry::{build_file_evidence_from_io, to_json_value};
+use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
+use crate::app::surface::cli;
+use ctx_traits_core::response::CommandOutput;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct GenerateAssistContext<'a> {
+    name: &'a str,
+    brief: &'a str,
+    slugified_trait_id: String,
+    model: &'a str,
+    target_schema: &'static str,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct RefineAssistContext<'a> {
+    pub(crate) change_request: &'a str,
+    pub(crate) trait_id: String,
+    pub(crate) source_digest: String,
+    pub(crate) target_schema: &'static str,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct RefineEvidenceReport {
+    pub(crate) source_trait_id: String,
+    pub(crate) source_path: String,
+    pub(crate) source_digest: ctx_traits_core::digest::Digest,
+    pub(crate) candidate_trait_id: Option<String>,
+    pub(crate) candidate_canonical_digest: Option<ctx_traits_core::digest::Digest>,
+    pub(crate) canonical_text_differs: bool,
+    pub(crate) target_path: String,
+    pub(crate) apply: bool,
+}
+
+pub(crate) struct GenerateInputs<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) brief: &'a str,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) assignments: &'a [String],
+    pub(crate) out: Option<&'a str>,
+    pub(crate) candidate_path: Option<&'a str>,
+    pub(crate) check: bool,
+    pub(crate) json: bool,
+}
+
+pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<CommandOutput<()>> {
+    let GenerateInputs {
+        name,
+        brief,
+        model,
+        assignments,
+        out,
+        candidate_path,
+        check,
+        json,
+    } = input;
+    let trait_id = ctx_traits_core::synth::slugify_trait_id(name)?;
+    let (_package_path, output_path) = trait_package_output_paths(&trait_id, out);
+
+    let candidate =
+        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
+            operation: ctx_traits_core::assist::Operation::Generate,
+            source_trait_ids: vec![trait_id.clone()],
+            source_paths: Vec::new(),
+            source_digests: Vec::new(),
+            user_request: format!("{name}: {brief}"),
+            model: model.map(str::to_string),
+            target_path: output_path.clone(),
+            provider_available: candidate_path.is_none(),
+            context: to_json_value(
+                &GenerateAssistContext {
+                    name,
+                    brief,
+                    slugified_trait_id: trait_id.clone(),
+                    model: model.unwrap_or("provider-default"),
+                    target_schema: "agent-traits/canonical-trait",
+                },
+                "serialize generate assist context",
+            )?,
+        })?;
+
+    let (raw, encoding) = match candidate_path {
+        Some(cand_path) => {
+            let cand_utf8 = camino::Utf8Path::new(cand_path);
+            (
+                ctx_traits_io::read::read_text(cand_utf8)?,
+                ctx_traits_core::encoding::Encoding::from_path(cand_utf8)?,
+            )
+        }
+        None => (
+            match run_builtin_trait(
+                "generate-trait",
+                vec![runtime_input("name", name), runtime_input("brief", brief)],
+                assignments,
+                model,
+                None,
+            ) {
+                Ok(raw) => raw,
+                Err(error) => return blocked_assist_candidate(candidate, json, error.to_string()),
+            },
+            ctx_traits_core::encoding::Encoding::Json,
+        ),
+    };
+    let (candidate_text, wrapped_draft) = match decode_generate_candidate(&raw) {
+        Ok(decoded) => decoded,
+        Err(error) => return blocked_assist_candidate(candidate, json, error.to_string()),
+    };
+    let candidate_encoding = if wrapped_draft.is_some() {
+        ctx_traits_core::encoding::Encoding::Json
+    } else {
+        encoding
+    };
+    let mut evaluation = ctx_traits_core::assist::evaluate_supplied_candidate(
+        candidate,
+        &candidate_text,
+        candidate_encoding,
+    );
+    if wrapped_draft.is_some() {
+        // The runtime emits a typed wrapper, but the candidate gate remains the
+        // single trait validation path. Its audit identity must name the full
+        // model output rather than the extracted trait alone.
+        evaluation.candidate.raw_output_digest =
+            Some(ctx_traits_core::digest::Digest::source(&raw));
+        evaluation.candidate.parsed_candidate_digest = Some(
+            ctx_traits_core::digest::Digest::canonical(&canonical_json_value(&raw)?),
+        );
+        evaluation.candidate =
+            ctx_traits_core::assist::audit_wrapper_output(evaluation.candidate, &raw, &trait_id);
+    }
+
+    let actual_trait_id = evaluation
+        .candidate
+        .candidate_trait_id
+        .clone()
+        .unwrap_or_else(|| trait_id.clone());
+    let (package, target) = trait_package_output_paths(&actual_trait_id, out);
+    let trait_root = camino::Utf8Path::new(&package);
+    let mut candidate = attach_assist_check_report(
+        evaluation.candidate,
+        evaluation.normalized_trait.as_ref(),
+        evaluation.normalized_output_text.as_deref(),
+        trait_root,
+    )?;
+    if actual_trait_id != trait_id {
+        candidate.warnings.push(
+            "candidate-id-overrode-default: output target recomputed from candidate trait ID"
+                .to_string(),
+        );
+    }
+    if check {
+        candidate = apply_assist_check_drift(
+            candidate,
+            &target,
+            evaluation.normalized_output_text.as_deref(),
+        );
+    }
+
+    let final_candidate = if candidate.gate_summary.all_passed()
+        && candidate.status != ctx_traits_core::assist::CandidateStatus::Blocked
+        && !check
+    {
+        match evaluation.normalized_output_text.as_deref() {
+            Some(text) => {
+                match ctx_traits_io::write::write_candidate(
+                    ctx_traits_io::write::CandidateWriteRequest {
+                        target_path: camino::Utf8Path::new(&target),
+                        trait_id: &actual_trait_id,
+                        content: text,
+                        mode: ctx_traits_io::write::CandidateWriteMode::NewCandidate,
+                    },
+                ) {
+                    Ok(result) => ctx_traits_core::assist::mark_written(candidate, &result.path),
+                    Err(_) => {
+                        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+                        candidate.warnings.push(
+                            "write gate failed: safe writer rejected target path".to_string(),
+                        );
+                        candidate
+                    }
+                }
+            }
+            None => candidate,
+        }
+    } else {
+        candidate
+    };
+
+    print_assist_candidate(&final_candidate, json)?;
+
+    if final_candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
+        return Err(crate::Error::Command {
+            message: if check {
+                "generate --check failed: candidate was blocked by validation gates".to_string()
+            } else {
+                "generate failed: candidate was blocked by validation gates; no file was written"
+                    .to_string()
+            },
+        });
+    }
+
+    Ok(CommandOutput::new(()))
+}
+
+pub(crate) struct CritiqueInputs<'a> {
+    pub(crate) file: &'a str,
+    pub(crate) source_map: Option<&'a str>,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) assignments: &'a [String],
+    pub(crate) candidate_path: Option<&'a str>,
+    pub(crate) json: bool,
+}
+
+pub(crate) fn handle_critique(input: CritiqueInputs<'_>) -> crate::Result<CommandOutput<()>> {
+    let trait_path = camino::Utf8Path::new(input.file);
+    let map_path = match input.source_map {
+        Some(path) => camino::Utf8Path::new(path).to_path_buf(),
+        None => crate::app::cdk_build::package_source_map(trait_path)?,
+    };
+    let source_map: ctx_traits_core::source_map::SourceMap =
+        serde_json::from_str(&ctx_traits_io::read::read_text(&map_path)?)
+            .map_err(|error| crate::Error::json(format!("decode source map {map_path}"), error))?;
+    ctx_traits_core::source_map::validate_source_map(&source_map)?;
+    let source_map = crate::app::cdk_build::rebase_source_map(
+        source_map,
+        &crate::app::cdk_build::stable_repo_root(trait_path)?,
+    );
+
+    let (source_trait, _, source_digest, _) = ctx_traits_io::run::load_trait(input.file)?;
+    let source_text = ctx_traits_io::read::read_text(trait_path)?;
+    let source_trait_id = source_trait.id.as_str().to_string();
+    let candidate =
+        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
+            operation: ctx_traits_core::assist::Operation::Critique,
+            source_trait_ids: vec![source_trait_id.clone()],
+            source_paths: vec![input.file.to_string()],
+            source_digests: vec![source_digest.clone()],
+            user_request: "source-backed advisory design critique".to_string(),
+            model: input.model.map(str::to_string),
+            target_path: "advisory-no-write-target".to_string(),
+            provider_available: input.candidate_path.is_none(),
+            context: serde_json::json!({
+                "trait-id": source_trait_id,
+                "source-digest": source_digest,
+                "source-map": source_map,
+                "target-schema": "agent-traits/review-scaffold"
+            }),
+        })?;
+    let raw = match input.candidate_path {
+        Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
+        None => match run_builtin_trait(
+            "critique-trait",
+            vec![
+                runtime_input("source", source_text),
+                runtime_input("source-digest", source_digest.as_str()),
+                runtime_input("source-path", input.file),
+                runtime_input(
+                    "source-map",
+                    serde_json::to_string(&source_map).map_err(|error| {
+                        crate::Error::json("serialize critique source map", error)
+                    })?,
+                ),
+            ],
+            input.assignments,
+            input.model,
+            None,
+        ) {
+            Ok(raw) => raw,
+            Err(error) => {
+                return blocked_assist_candidate(candidate, input.json, error.to_string());
+            }
+        },
+    };
+    let evaluation =
+        ctx_traits_core::assist::evaluate_supplied_review_scaffold(candidate, &raw, &source_map);
+    let mut candidate = evaluation.candidate;
+    let scaffold = match evaluation.scaffold {
+        Some(scaffold) => scaffold,
+        None => {
+            return blocked_assist_candidate(
+                candidate,
+                input.json,
+                evaluation
+                    .error
+                    .unwrap_or_else(|| "review scaffold was rejected".to_string()),
+            );
+        }
+    };
+    if scaffold.source_trait_id != source_trait.id.as_str()
+        || scaffold.source_digest != source_digest.as_str()
+    {
+        return blocked_assist_candidate(
+            candidate,
+            input.json,
+            "critique scaffold identity or source digest does not match the reviewed trait"
+                .to_string(),
+        );
+    }
+    let eval_reports: Vec<String> = Vec::new();
+    let check_report =
+        crate::app::report_check::build_check_report(&crate::app::report_check::CheckInputs {
+            file: input.file,
+            locked: false,
+            skip_cdk_drift: false,
+            json: false,
+            plain: true,
+            no_animate: true,
+            verbose: false,
+            run_ledger: None,
+            eval_reports: &eval_reports,
+        })?;
+    candidate = ctx_traits_core::assist::attach_check_report(candidate, check_report);
+    if candidate.gate_summary.audit.ok {
+        candidate = ctx_traits_core::assist::with_context_evidence(
+            candidate,
+            serde_json::json!({ "review-scaffold": scaffold }),
+        );
+    }
+    print_assist_candidate(&candidate, input.json)?;
+    if candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
+        return Err(crate::Error::Command {
+            message: "critique failed: candidate was blocked by validation gates".to_string(),
+        });
+    }
+    Ok(CommandOutput::new(()))
+}
+
+pub(crate) struct GenerateEvalsInputs<'a> {
+    pub(crate) file: &'a str,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) assignments: &'a [String],
+    pub(crate) candidate_path: Option<&'a str>,
+    pub(crate) json: bool,
+}
+
+pub(crate) fn handle_generate_evals(
+    input: GenerateEvalsInputs<'_>,
+) -> crate::Result<CommandOutput<()>> {
+    let trait_path = camino::Utf8Path::new(input.file);
+    let (source_trait, _, source_digest, _) = ctx_traits_io::run::load_trait(input.file)?;
+    let source_text = ctx_traits_io::read::read_text(trait_path)?;
+    let source_trait_id = source_trait.id.as_str().to_string();
+    let candidate =
+        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
+            operation: ctx_traits_core::assist::Operation::GenerateEvals,
+            source_trait_ids: vec![source_trait_id.clone()],
+            source_paths: vec![input.file.to_string()],
+            source_digests: vec![source_digest.clone()],
+            user_request: "generate deferred behavioral/runtime eval declarations".to_string(),
+            model: input.model.map(str::to_string),
+            target_path: "in-memory-complete-trait".to_string(),
+            provider_available: input.candidate_path.is_none(),
+            context: serde_json::json!({
+                "source": &source_text,
+                "source-trait-id": &source_trait_id,
+                "source-digest": source_digest,
+                "io-contract": &source_trait.ports,
+                "target-schema": "agent-traits/eval-synthesis-scaffold"
+            }),
+        })?;
+    let raw = match input.candidate_path {
+        Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
+        None => match run_builtin_trait(
+            "generate-evals",
+            vec![
+                runtime_input("source", source_text),
+                runtime_input("source-trait-id", source_trait_id.as_str()),
+                runtime_input("source-digest", source_digest.as_str()),
+                runtime_input(
+                    "io-contract",
+                    serde_json::to_string(&source_trait.ports).map_err(|error| {
+                        crate::Error::json("serialize source I/O contract", error)
+                    })?,
+                ),
+            ],
+            input.assignments,
+            input.model,
+            None,
+        ) {
+            Ok(raw) => raw,
+            Err(error) => {
+                return blocked_assist_candidate(candidate, input.json, error.to_string());
+            }
+        },
+    };
+    let mut scaffold: ctx_traits_core::scaffold::EvalSynthesisScaffold =
+        match serde_json::from_str(&raw) {
+            Ok(scaffold) => scaffold,
+            Err(error) => {
+                return blocked_assist_candidate(candidate, input.json, error.to_string());
+            }
+        };
+    scaffold
+        .scenarios
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    scaffold.evals.sort_by(|left, right| left.id.cmp(&right.id));
+    if let Err(error) = scaffold.validate(&source_trait, &source_digest) {
+        return blocked_wrapper_candidate(
+            candidate,
+            &raw,
+            ctx_traits_core::encoding::Encoding::Json,
+            &source_trait_id,
+            input.json,
+            error.to_string(),
+        );
+    }
+    let merged = scaffold.merge_into(&source_trait);
+    let complete = serde_json::to_string(&merged)
+        .map_err(|error| crate::Error::json("serialize merged eval candidate", error))?;
+    let mut evaluation = ctx_traits_core::assist::evaluate_supplied_candidate(
+        candidate,
+        &complete,
+        ctx_traits_core::encoding::Encoding::Json,
+    );
+    evaluation.candidate.raw_output_digest = Some(ctx_traits_core::digest::Digest::source(&raw));
+    evaluation.candidate.parsed_candidate_digest = Some(
+        ctx_traits_core::digest::Digest::canonical(&canonical_json_value(&raw)?),
+    );
+    evaluation.candidate =
+        ctx_traits_core::assist::audit_wrapper_output(evaluation.candidate, &raw, &source_trait_id);
+    let trait_root = ctx_traits_io::layout::package_root_for_manifest(trait_path)
+        .unwrap_or_else(|| camino::Utf8Path::new("."));
+    let mut candidate = attach_assist_check_report(
+        evaluation.candidate,
+        evaluation.normalized_trait.as_ref(),
+        evaluation.normalized_output_text.as_deref(),
+        trait_root,
+    )?;
+    if candidate.gate_summary.all_passed() {
+        candidate = ctx_traits_core::assist::with_context_evidence(
+            candidate,
+            serde_json::json!({ "eval-synthesis-scaffold": scaffold }),
+        );
+    }
+    print_assist_candidate(&candidate, input.json)?;
+    if candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
+        return Err(crate::Error::Command {
+            message: "generate-evals failed: candidate was blocked by validation gates".to_string(),
+        });
+    }
+    Ok(CommandOutput::new(()))
+}
+
+pub(crate) fn runtime_input(
+    id: &str,
+    value: impl Into<serde_json::Value>,
+) -> ctx_traits_core::procedure::runtime::StepSlotOutput {
+    ctx_traits_core::procedure::runtime::StepSlotOutput {
+        ref_text: format!("port:{id}"),
+        value: value.into(),
+        source: None,
+        producer_evidence: Some("native built-in trait runner input".to_string()),
+        command_execution: None,
+        producer_agent: None,
+        producer_harness: None,
+    }
+}
+
+pub(crate) fn run_builtin_trait(
+    trait_id: &str,
+    input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
+    assignments: &[String],
+    model: Option<&str>,
+    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
+) -> crate::Result<String> {
+    let agent_role = match trait_id {
+        "generate-trait" => "generator",
+        "refine-trait" => "refiner",
+        "critique-trait" => "critic",
+        "generate-evals" => "generator",
+        "explain-trait" => "generator",
+        "import-trait" => "generator",
+        _ => {
+            return Err(crate::Error::Command {
+                message: format!("unsupported built-in trait runner {trait_id:?}"),
+            });
+        }
+    };
+    // Resolve through the universal trait-id resolver: repo-local
+    // `.ctx/traits/<id>` shadows the built-in when present, otherwise the
+    // embedded package is materialized to a real store path (P337).
+    let (trait_file, _source_kind) =
+        ctx_traits_io::run::resolve_trait_path(None, Some(trait_id), "run-builtin")?;
+    if let Some(profile) = run_profile {
+        let (declared_trait, ..) = ctx_traits_io::run::load_trait(trait_file.as_str())?;
+        let declared_roles: std::collections::BTreeSet<String> = declared_trait
+            .agents
+            .iter()
+            .map(|agent| agent.id.clone())
+            .collect();
+        ctx_traits_io::harness_config::validate_run_profile_roles(profile, &declared_roles)?;
+    }
+    let assignments = builtin_assignments(agent_role, assignments, model, run_profile)?;
+    let outcome = ctx_traits_io::run::start(ctx_traits_io::run::StartRequest {
+        // Internal driving traits keep the declared loop policy.
+        strict_loops: false,
+        defer_commands: false,
+        trait_file: Some(trait_file.as_str()),
+        trait_id: None,
+        query: None,
+        trait_args: &[],
+        input_values,
+        out: None,
+        session_store: None,
+        ephemeral: false,
+        resource_evidence: ctx_traits_io::run::ResourceEvidenceMode::ReadDeclared {
+            root_override: None,
+        },
+        assign_overrides: &assignments,
+        agent_assignments: None,
+        provider_capability_reports: Vec::new(),
+        provider_warnings: Vec::new(),
+        harness_probes: Vec::new(),
+        caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+        state_source: "ctx traits built-in meta-trait runner",
+        trait_arg_evidence: "ctx traits built-in meta-trait runner inputs",
+        worktree: None,
+        merge_rung: None,
+    })?;
+    let session = outcome
+        .session_path
+        .as_ref()
+        .ok_or_else(|| crate::Error::Command {
+            message: "built-in trait runner did not persist a driveable session".to_string(),
+        })?;
+    // A selected run profile's `[budget]` ranks above the package
+    // `config.toml` sidecar `drive` resolves internally: there is no other
+    // "explicit drive value" tier at this built-in call site, so injecting
+    // the profile's budget fields here (rather than leaving them `None`)
+    // achieves that precedence via `drive`'s own `budget_from` overlay.
+    let profile_budget = run_profile.map(|profile| &profile.budget);
+    let report = crate::app::drive::drive(crate::app::drive::DriveInputs {
+        file: Some(trait_file.as_str()),
+        session: session.as_str(),
+        session_store: None,
+        assignments: &assignments,
+        max_frames: profile_budget.and_then(|budget| budget.max_frames),
+        frame_seconds: profile_budget.and_then(|budget| budget.frame_seconds),
+        total_seconds: profile_budget.and_then(|budget| budget.total_seconds),
+        max_retries: profile_budget.and_then(|budget| budget.max_retries),
+        attach_wait_seconds: profile_budget.and_then(|budget| budget.attach_wait_seconds),
+        idle_seconds: profile_budget.and_then(|budget| budget.idle_seconds),
+        max_in_flight: 1,
+        // Built-in meta-trait runners are explicitly serial and never wait
+        // on a conductor lease: they always run at the default width and
+        // never contend with a concurrent conductor for this ephemeral
+        // session.
+        wait: false,
+        progress: cli::DriveProgress::Status,
+        worktree: None,
+        execution_dir: None,
+        clear_merge_intent: false,
+        panel_handoff: None,
+    })?;
+    if report.status != "completed" {
+        return Err(crate::Error::Command {
+            message: format!("{trait_id} run did not complete: {}", report.status),
+        });
+    }
+    let session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
+        trait_file: Some(trait_file.as_str()),
+        trait_id: None,
+        session: session.as_str(),
+        session_store: None,
+        elapsed_seconds: None,
+    })?
+    .session;
+    let outputs = session
+        .completion
+        .as_ref()
+        .map(|completion| &completion.final_outputs)
+        .ok_or_else(|| crate::Error::Command {
+            message: format!("{trait_id} completed without a final output"),
+        })?;
+    let [output] = outputs.as_slice() else {
+        return Err(crate::Error::Command {
+            message: format!(
+                "{trait_id} completed with {} final outputs; exactly one is required",
+                outputs.len()
+            ),
+        });
+    };
+    match &output.value {
+        serde_json::Value::String(value) => Ok(value.clone()),
+        value => serde_json::to_string(value)
+            .map_err(|e| crate::Error::json("serialize built-in trait output", e)),
+    }
+}
+
+fn builtin_assignments(
+    role: &str,
+    assignments: &[String],
+    model: Option<&str>,
+    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
+) -> crate::Result<Vec<String>> {
+    if model.is_none() && run_profile.is_none() {
+        return Ok(assignments.to_vec());
+    }
+    let mut resolved = ctx_traits_io::harness_config::resolve_runtime_assignments(assignments)?;
+    // A selected run profile's `[assign.<role>]` becomes the "explicit"
+    // layer `resolved_assignment_for_role` merges over `.ctx/config.toml`
+    // role defaults, but only when `--assign` did not already supply this
+    // role: `resolve_runtime_assignments` above already inserted any
+    // `--assign` override into `resolved.assignments`, so `--assign` still
+    // wins over the profile.
+    if let Some(profile) = run_profile {
+        if let Some(profile_assignment) = profile.assign.get(role) {
+            resolved
+                .assignments
+                .entry(role.to_string())
+                .or_insert_with(|| profile_assignment.clone().into_profile_assignment());
+        }
+    }
+    // Layer every configured seat of the role (role/tier defaults <
+    // `.ctx/config.toml` role table/list < profile < `--assign`) without
+    // resolving models against a harness catalog yet: `--model` still needs
+    // to replace whatever selector this layering produced before any
+    // resolution happens, so catalog resolution stays solely owned by the
+    // existing start/drive path over the serialized overrides below. A
+    // list-backed role (P456) resolves every seat here rather than the
+    // role-only, first-entry-or-nothing lookup `assignment_for_role` gives.
+    let seats =
+        resolved
+            .configured_seats_for_role(role)
+            .map_err(|error| crate::Error::Command {
+                message: format!(
+                    "no harness assignment is configured for built-in role {role:?}: {error}"
+                ),
+            })?;
+    if seats.is_empty() {
+        return Err(crate::Error::Command {
+            message: format!("no harness assignment is configured for built-in role {role:?}"),
+        });
+    }
+    if model.is_some()
+        && seats.iter().any(|(assignment, _)| {
+            assignment.mode == ctx_traits_io::harness_config::RunAssignmentMode::Attach
+        })
+    {
+        return Err(crate::Error::Command {
+            message: format!("--model cannot be used with attach-mode role {role:?}"),
+        });
+    }
+    // Drop this role's prior whole-role/seat overrides: they are already
+    // folded into `seats` above, and re-emitting a fresh override per seat
+    // below alongside the originals would trip the duplicate-selector
+    // rejection.
+    let mut overrides = assignments
+        .iter()
+        .filter(|item| {
+            let target = item
+                .split_once('=')
+                .map_or(item.as_str(), |(target, _)| target);
+            target != role && !target.starts_with(&format!("{role}."))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for (mut assignment, seat_info) in seats {
+        if let Some(model) = model {
+            assignment.model = Some(model.to_string());
+        }
+        let serialized = serde_json::to_string(&assignment)
+            .map_err(|error| crate::Error::json("serialize built-in model assignment", error))?;
+        let selector = match seat_info {
+            Some(seat_info) => format!("{role}.{}", seat_info.seat_index),
+            None => role.to_string(),
+        };
+        overrides.push(format!("{selector}=json:{serialized}"));
+    }
+    Ok(overrides)
+}
+
+pub(crate) fn decode_generate_candidate(
+    raw: &str,
+) -> crate::Result<(String, Option<serde_json::Value>)> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Ok((raw.to_string(), None));
+    };
+    let Some(draft) = value.get("trait") else {
+        return Ok((raw.to_string(), None));
+    };
+    let draft = draft.clone();
+    let candidate = serde_json::to_string(&draft)
+        .map_err(|e| crate::Error::json("serialize generated trait draft", e))?;
+    Ok((candidate, Some(value)))
+}
+
+pub(crate) fn canonical_json_value(raw: &str) -> crate::Result<String> {
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| crate::Error::json("parse structured candidate output", e))?;
+    ctx_traits_core::digest::canonical_json(&value).map_err(|e| crate::Error::Command {
+        message: format!("canonicalize structured candidate output: {e}"),
+    })
+}
+
+pub(crate) fn blocked_assist_candidate(
+    mut candidate: ctx_traits_core::assist::Candidate,
+    json: bool,
+    message: String,
+) -> crate::Result<CommandOutput<()>> {
+    candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+    candidate.warnings.push(message.clone());
+    print_assist_candidate(&candidate, json)?;
+    Err(crate::Error::Command { message })
+}
+
+pub(crate) fn blocked_wrapper_candidate(
+    candidate: ctx_traits_core::assist::Candidate,
+    raw: &str,
+    encoding: ctx_traits_core::encoding::Encoding,
+    trait_id: &str,
+    json: bool,
+    message: String,
+) -> crate::Result<CommandOutput<()>> {
+    let mut candidate =
+        ctx_traits_core::assist::evaluate_supplied_candidate(candidate, raw, encoding).candidate;
+    candidate = ctx_traits_core::assist::audit_wrapper_output(candidate, raw, trait_id);
+    candidate.warnings.push(message.clone());
+    print_assist_candidate(&candidate, json)?;
+    Err(crate::Error::Command { message })
+}
+
+pub(crate) fn print_assist_candidate(
+    candidate: &ctx_traits_core::assist::Candidate,
+    json: bool,
+) -> crate::Result<()> {
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            let text = serde_json::to_string_pretty(candidate).unwrap_or_else(|e| {
+                format!("{{\"error\": \"failed to serialize candidate: {e}\"}}")
+            });
+            println!("{text}");
+        }
+        OutputMode::Human(mode) => {
+            let panel = assist_candidate_panel(candidate);
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(())
+}
+
+fn assist_candidate_panel(candidate: &ctx_traits_core::assist::Candidate) -> Panel {
+    let status = match candidate.status {
+        ctx_traits_core::assist::CandidateStatus::Blocked => {
+            PanelStatus::Blocked("blocked".to_string())
+        }
+        _ => PanelStatus::Passed("passed".to_string()),
+    };
+    let mut panel = Panel::new("ctx", candidate.operation.as_str(), status)
+        .row(PanelRow::toned(
+            "status",
+            crate::app::presentation::wire_name(&candidate.status),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "provider-available",
+            candidate.provider.provider_available.to_string(),
+            RowTone::Default,
+        ));
+    if let Some(ref id) = candidate.provider.provider_id {
+        panel = panel.row(PanelRow::toned("provider", id, RowTone::Default));
+    }
+    if let Some(ref id) = candidate.provider.model_id {
+        panel = panel.row(PanelRow::toned("model", id, RowTone::Default));
+    }
+    if !candidate.provider.provider_parameters.is_empty() {
+        let value = candidate
+            .provider
+            .provider_parameters
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        panel = panel.row(PanelRow::toned(
+            "provider-parameters",
+            value,
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref reason) = candidate.provider.reason {
+        panel = panel.row(PanelRow::toned("provider-reason", reason, RowTone::Default));
+    }
+    let plan = &candidate.request_plan;
+    if !plan.source_trait_ids.is_empty() {
+        panel = panel.row(PanelRow::toned(
+            "source-trait-ids",
+            plan.source_trait_ids.join(", "),
+            RowTone::Default,
+        ));
+    }
+    panel = panel
+        .row(PanelRow::toned(
+            "user-request-digest",
+            plan.user_request_digest.as_str(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "prompt-context-digest",
+            plan.prompt_context_digest.as_str(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "target-path",
+            plan.target_path.as_str(),
+            RowTone::Default,
+        ));
+
+    if let Some(ref d) = candidate.raw_output_digest {
+        panel = panel.row(PanelRow::toned(
+            "raw-output-digest",
+            d.as_str(),
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref d) = candidate.parsed_candidate_digest {
+        panel = panel.row(PanelRow::toned(
+            "parsed-candidate-digest",
+            d.as_str(),
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref d) = candidate.canonical_digest {
+        panel = panel.row(PanelRow::toned(
+            "canonical-digest",
+            d.as_str(),
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref d) = candidate.normalized_output_digest {
+        panel = panel.row(PanelRow::toned(
+            "normalized-output-digest",
+            d.as_str(),
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref id) = candidate.candidate_trait_id {
+        panel = panel.row(PanelRow::toned("candidate-trait-id", id, RowTone::Default));
+    }
+    if let Some(ref before) = candidate.before {
+        panel = panel.row(PanelRow::toned(
+            "candidate-before",
+            format!("status={}, trust={}", before.status, before.trust),
+            RowTone::Default,
+        ));
+    }
+    if let Some(ref after) = candidate.after {
+        panel = panel.row(PanelRow::toned(
+            "candidate-after",
+            format!("status={}, trust={}", after.status, after.trust),
+            RowTone::Default,
+        ));
+    }
+
+    let gates = &candidate.gate_summary;
+    panel = panel
+        .row(PanelRow::toned(
+            "gate-parse",
+            gates.parse.ok.to_string(),
+            if gates.parse.ok {
+                RowTone::Pass
+            } else {
+                RowTone::Fail
+            },
+        ))
+        .row(PanelRow::toned(
+            "gate-audit",
+            gates.audit.ok.to_string(),
+            if gates.audit.ok {
+                RowTone::Pass
+            } else {
+                RowTone::Fail
+            },
+        ))
+        .row(PanelRow::toned(
+            "gate-check",
+            gates.check.ok.to_string(),
+            if gates.check.ok {
+                RowTone::Pass
+            } else {
+                RowTone::Fail
+            },
+        ));
+    if gates.audit.blocking > 0 {
+        panel = panel.row(PanelRow::toned(
+            "audit-blocking",
+            gates.audit.blocking.to_string(),
+            RowTone::Fail,
+        ));
+    }
+    if let Some(ref e) = gates.validation_error_code {
+        panel = panel.row(PanelRow::toned("validation-error", e, RowTone::Fail));
+    }
+    if !gates.check.failed_sections.is_empty() {
+        panel = panel.row(PanelRow::toned(
+            "check-failed-sections",
+            gates.check.failed_sections.join(", "),
+            RowTone::Fail,
+        ));
+    }
+
+    if let Some(ref report) = candidate.check_report {
+        let rows = report
+            .sections
+            .iter()
+            .map(|section| {
+                PanelRow::toned(
+                    section.name.as_str(),
+                    format!("{} ({})", section.ok, section.summary),
+                    if section.ok {
+                        RowTone::Pass
+                    } else {
+                        RowTone::Fail
+                    },
+                )
+            })
+            .collect();
+        panel = panel.section(crate::app::presentation::PanelSection::new(
+            "check-sections",
+            rows,
+        ));
+    }
+    if !candidate.diagnostics.is_empty() {
+        let rows = candidate
+            .diagnostics
+            .iter()
+            .map(|diag| {
+                let field = diag.field.as_deref().unwrap_or("-");
+                PanelRow::toned(
+                    format!("{}:{}", diag.gate, diag.code),
+                    format!("{field}: {}", diag.message),
+                    RowTone::Default,
+                )
+            })
+            .collect();
+        panel = panel.section(crate::app::presentation::PanelSection::new(
+            "diagnostics",
+            rows,
+        ));
+    }
+    if let Some(ref evidence) = candidate.context_evidence {
+        if evidence.get("plan-result").is_some() {
+            panel = panel.section(crate::app::presentation::PanelSection::new(
+                "context-evidence",
+                compose_context_evidence_rows(evidence),
+            ));
+        } else {
+            panel = panel.row(PanelRow::toned(
+                "context-evidence",
+                evidence.to_string(),
+                RowTone::Default,
+            ));
+        }
+    }
+
+    if candidate.warnings.is_empty() {
+        panel = panel.row(PanelRow::toned("warnings", "none", RowTone::Pass));
+    } else {
+        let rows = candidate
+            .warnings
+            .iter()
+            .map(|w| PanelRow::toned("warning", w.as_str(), RowTone::Fail))
+            .collect();
+        panel = panel.section(crate::app::presentation::PanelSection::new(
+            "warnings", rows,
+        ));
+    }
+    if !candidate.unsupported_capabilities.is_empty() {
+        panel = panel.row(PanelRow::toned(
+            "unsupported-capabilities",
+            candidate.unsupported_capabilities.join(", "),
+            RowTone::Default,
+        ));
+    }
+    panel = panel.row(PanelRow::toned(
+        "write-status",
+        crate::app::presentation::wire_name(&candidate.write_status),
+        RowTone::Default,
+    ));
+    if let Some(ref p) = candidate.written_path {
+        panel = panel.next(PanelRow::toned("written-path", p, RowTone::Default));
+    }
+    panel
+}
+
+fn compose_context_evidence_rows(evidence: &serde_json::Value) -> Vec<PanelRow> {
+    let mut rows = vec![
+        PanelRow::toned(
+            "composition-result",
+            evidence
+                .get("plan-result")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown"),
+            RowTone::Default,
+        ),
+        PanelRow::toned(
+            "composition-sources",
+            format!(
+                "ids={}, paths={}, digests={}",
+                evidence
+                    .get("source-trait-ids")
+                    .map_or_else(|| "[]".to_string(), serde_json::Value::to_string),
+                evidence
+                    .get("source-paths")
+                    .map_or_else(|| "[]".to_string(), serde_json::Value::to_string),
+                evidence
+                    .get("source-digests")
+                    .map_or_else(|| "[]".to_string(), serde_json::Value::to_string),
+            ),
+            RowTone::Default,
+        ),
+        PanelRow::toned(
+            "composition-counts",
+            format!(
+                "conflicts={}, warnings={}, bindings={}, port-compatibility={}",
+                evidence
+                    .get("conflict-count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                evidence
+                    .get("warning-count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                evidence
+                    .get("binding-proposal-count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                evidence
+                    .get("port-compatibility-count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+            ),
+            RowTone::Default,
+        ),
+    ];
+    if let Some(conflicts) = evidence
+        .get("conflicts")
+        .and_then(serde_json::Value::as_array)
+    {
+        for conflict in conflicts {
+            rows.push(PanelRow::toned(
+                "composition-conflict",
+                format!(
+                    "{} [{}]: {}",
+                    conflict
+                        .get("field-path")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown"),
+                    conflict
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown"),
+                    conflict
+                        .get("description")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("redacted")
+                ),
+                RowTone::Fail,
+            ));
+        }
+    }
+    if let Some(warnings) = evidence
+        .get("warnings")
+        .and_then(serde_json::Value::as_array)
+    {
+        for warning in warnings {
+            rows.push(PanelRow::toned(
+                "composition-warning",
+                format!(
+                    "{}: {}",
+                    warning
+                        .get("code")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown"),
+                    warning
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("redacted")
+                ),
+                RowTone::Fail,
+            ));
+        }
+    }
+    rows
+}
+
+pub(crate) fn trait_package_output_paths(trait_id: &str, out: Option<&str>) -> (String, String) {
+    match out {
+        Some(out_path) => {
+            let path = camino::Utf8Path::new(out_path);
+            if path.extension().is_some() {
+                let package = ctx_traits_io::layout::package_root_for_manifest(path)
+                    .map_or(".", camino::Utf8Path::as_str);
+                (package.to_string(), path.to_string())
+            } else {
+                (
+                    path.to_string(),
+                    ctx_traits_io::layout::package_manifest_write_path(path).to_string(),
+                )
+            }
+        }
+        None => {
+            let package =
+                camino::Utf8Path::new(ctx_traits_io::layout::trait_protocol_root()).join(trait_id);
+            // The default package root under `trait_protocol_root()` is
+            // always a canonical v2 package root, so its write path must go
+            // through the same `is_canonical_package_root` branch every
+            // other write path uses (`package_manifest_write_path`,
+            // `write_complete_import_package`) rather than hardcoding the
+            // legacy `generated/trait.toml` name.
+            let output = ctx_traits_io::layout::package_manifest_write_path(&package);
+            (package.to_string(), output.to_string())
+        }
+    }
+}
+
+pub(crate) fn safe_assist_context_text(value: &str) -> String {
+    if value.len() > 240 {
+        return "redacted long assist context evidence".to_string();
+    }
+    let findings = ctx_traits_core::audit::scan_hidden_content(
+        value,
+        "assist-context",
+        Some("context-evidence"),
+    );
+    if findings
+        .iter()
+        .any(|finding| !matches!(finding.severity, ctx_traits_core::audit::Severity::Advisory))
+    {
+        "redacted hidden/deceptive content in assist context evidence".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+pub(crate) fn attach_assist_check_report(
+    candidate: ctx_traits_core::assist::Candidate,
+    normalized_trait: Option<&ctx_traits_core::Trait>,
+    normalized_text: Option<&str>,
+    trait_root: &camino::Utf8Path,
+) -> crate::Result<ctx_traits_core::assist::Candidate> {
+    let Some(trait_ref) = normalized_trait else {
+        return Ok(candidate);
+    };
+    let Some(text) = normalized_text else {
+        return Ok(candidate);
+    };
+
+    let trait_id = trait_ref.id.as_str().to_string();
+    let source_digest = ctx_traits_core::digest::Digest::source(text);
+    let mut check_warnings = Vec::new();
+    let mut resource_evidence_ok = true;
+    let mut manifest_digest = None;
+    let mut manifest_warning_count = 0usize;
+
+    let roots_result =
+        ctx_traits_io::resource::resolve_resource_roots(trait_root, &trait_ref.resources);
+    let file_evidence = match roots_result.as_ref().ok().and_then(|roots| {
+        ctx_traits_io::resource::digest_resources(
+            roots,
+            trait_ref.id.as_str(),
+            &trait_ref.resources,
+        )
+        .ok()
+    }) {
+        Some(manifest) => {
+            manifest_digest = Some(manifest.manifest_digest.as_str().to_string());
+            manifest_warning_count = manifest.warnings.len();
+            build_file_evidence_from_io(&manifest)
+        }
+        None => {
+            resource_evidence_ok = false;
+            check_warnings.push(ctx_traits_core::check::CheckWarning {
+                section: ctx_traits_core::check::Section::Resources,
+                code: "resource-io-unavailable".to_string(),
+                field: Some(trait_root.to_string()),
+                message: "candidate resource evidence unavailable; raw IO detail redacted"
+                    .to_string(),
+            });
+            Vec::new()
+        }
+    };
+
+    let (resource_body_evidence, body_read_warnings) =
+        match roots_result.as_ref().ok().and_then(|roots| {
+            crate::app::report_resources::scan_resource_bodies(roots, trait_ref).ok()
+        }) {
+            Some(result) => result,
+            None => {
+                resource_evidence_ok = false;
+                check_warnings.push(ctx_traits_core::check::CheckWarning {
+                    section: ctx_traits_core::check::Section::Resources,
+                    code: "resource-body-io-unavailable".to_string(),
+                    field: Some(trait_root.to_string()),
+                    message: "candidate resource body evidence unavailable; raw IO detail redacted"
+                        .to_string(),
+                });
+                (Vec::new(), Vec::new())
+            }
+        };
+    let resource_plan = ctx_traits_core::resource_plan::plan_resource_inclusion_with_bodies(
+        trait_ref,
+        &file_evidence,
+        &resource_body_evidence,
+        &[],
+    );
+    let resource_budget = ctx_traits_core::resource_plan::estimate_context_budget(&resource_plan);
+    let mut resource_read_warnings = Vec::new();
+    resource_read_warnings.extend(crate::app::report_resources::resource_read_warning_strings(
+        &body_read_warnings,
+    ));
+    let render_plan = ctx_traits_core::render::plan_render_with_resource_body_evidence(
+        trait_ref,
+        ctx_traits_core::render::ExtendedRenderProfile::AgentSkills,
+        source_digest.as_str(),
+        ctx_traits_core::render::ResourceEvidenceInputs {
+            file_evidence: &file_evidence,
+            body_evidence: &resource_body_evidence,
+            dependency_resources: &[],
+            manifest_digest: manifest_digest.as_deref(),
+            read_warnings: resource_read_warnings,
+        },
+    );
+    check_warnings.extend(
+        crate::app::report_check::check_warnings_from_render_and_resources(
+            &render_plan,
+            &resource_plan,
+            &body_read_warnings,
+        ),
+    );
+    check_warnings.extend(crate::app::report_check::sequence_control_check_warnings(
+        trait_ref,
+    ));
+    let resource_audit = match roots_result.as_ref().ok().and_then(|roots| {
+        crate::app::report_resources::audit_declared_text_resources(roots, trait_ref).ok()
+    }) {
+        Some(evidence) => evidence,
+        None => {
+            resource_evidence_ok = false;
+            check_warnings.push(ctx_traits_core::check::CheckWarning {
+                section: ctx_traits_core::check::Section::Resources,
+                code: "resource-audit-unavailable".to_string(),
+                field: Some(trait_root.to_string()),
+                message: "candidate resource audit evidence unavailable; raw IO detail redacted"
+                    .to_string(),
+            });
+            crate::app::report_resources::ResourceTextAuditEvidence {
+                findings: Vec::new(),
+                warnings: Vec::new(),
+                skipped: Vec::new(),
+            }
+        }
+    };
+    let mut audit = ctx_traits_core::audit::scan_hidden_content(text, &trait_id, Some("candidate"));
+    audit.extend(resource_audit.findings);
+    audit.extend(render_plan.model_view.post_audit_findings.clone());
+    audit.sort_by(|a, b| {
+        a.severity
+            .cmp(&b.severity)
+            .then(a.code.cmp(&b.code))
+            .then(a.path.cmp(&b.path))
+            .then(a.line.cmp(&b.line))
+            .then(a.byte_offset.cmp(&b.byte_offset))
+            .then(a.message.cmp(&b.message))
+    });
+
+    let audit_ok = audit
+        .iter()
+        .all(|finding| matches!(finding.severity, ctx_traits_core::audit::Severity::Advisory));
+    // The canonical document carries no status/trust field (Group 95,
+    // 2026-07-19), so there is nothing on `trait_ref` to check here:
+    // candidate output is always package status=draft and machine
+    // trust=unreviewed until an explicit, separate human review action.
+    let lifecycle_ok = true;
+    let resource_ok = resource_evidence_ok
+        && resource_plan.warnings.iter().all(|warning| {
+            !matches!(
+                warning,
+                ctx_traits_core::resource_plan::InclusionWarning::SymlinkDetected { .. }
+                    | ctx_traits_core::resource_plan::InclusionWarning::DependencyResourceUnavailable {
+                        ..
+                    }
+            )
+        });
+    let render_ok = resource_evidence_ok
+        && render_plan.resource_warnings.is_empty()
+        && !render_plan.model_view.has_blocking_post_audit_findings();
+    let scenario_audit = ctx_traits_core::r#trait::scenario::audit_scenarios(&trait_ref.scenarios);
+    let scenario_ids: std::collections::BTreeSet<&str> =
+        trait_ref.scenarios.iter().map(|s| s.id.as_str()).collect();
+    let eval_audit = ctx_traits_core::r#trait::eval::audit_evals(&trait_ref.evals, &scenario_ids);
+
+    let report = ctx_traits_core::check::CheckReport::new(&trait_id, true)
+        .with_section(
+            ctx_traits_core::check::Section::Validation,
+            "candidate decoded and normalized successfully",
+            true,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::CandidateLifecycleTrust,
+            "status=draft, trust=unreviewed (structural invariant; the canonical document carries \
+             no status/trust field to normalize)",
+            lifecycle_ok,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::Resources,
+            &format!(
+                "manifest={}, read-warnings={}, inclusion-warnings={}, budget={} bytes/~{} tokens, text-audit-skipped={}",
+                manifest_digest.as_deref().unwrap_or("unavailable"),
+                manifest_warning_count + resource_audit.warnings.len(),
+                resource_plan.warnings.len(),
+                resource_budget.total_bytes,
+                resource_budget.estimated_tokens,
+                resource_audit.skipped.len(),
+            ),
+            resource_ok,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::RenderReadiness,
+            &format!(
+                "capability-warnings={}, resource-warnings={}, model-view-warnings={}",
+                render_plan.capability_warnings.len(),
+                render_plan.resource_warnings.len(),
+                render_plan.model_view.warnings.len(),
+            ),
+            render_ok,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::HiddenContentAudit,
+            &format!("{} finding(s)", audit.len()),
+            audit_ok,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::ScenarioEvalAudit,
+            &format!(
+                "scenario-warnings={}, eval-warnings={}",
+                scenario_audit.len(),
+                eval_audit.len(),
+            ),
+            true,
+        )
+        .with_section(
+            ctx_traits_core::check::Section::ModelView,
+            &format!(
+                "digest={}, sections={}, normalizations={}",
+                render_plan.model_view.content_digest,
+                render_plan.model_view.sections.len(),
+                render_plan.model_view.normalizations.len(),
+            ),
+            !render_plan.model_view.has_blocking_post_audit_findings(),
+        )
+        .with_unsupported_capabilities(vec![
+            "activation.request-facts-missing".to_string(),
+            "dependencies.project-manifest-check-not-wired".to_string(),
+        ])
+        .with_audit(audit)
+        .with_warnings(check_warnings);
+
+    Ok(ctx_traits_core::assist::attach_check_report(
+        candidate, report,
+    ))
+}
+
+pub(crate) fn apply_assist_check_drift(
+    mut candidate: ctx_traits_core::assist::Candidate,
+    target_path: &str,
+    normalized_text: Option<&str>,
+) -> ctx_traits_core::assist::Candidate {
+    if candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
+        return candidate;
+    }
+    let Some(expected_text) = normalized_text else {
+        return candidate;
+    };
+
+    let path = camino::Utf8Path::new(target_path);
+    let actual_text = match ctx_traits_io::read::read_text(path) {
+        Ok(text) => text,
+        Err(_) => {
+            candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+            candidate
+                .diagnostics
+                .push(ctx_traits_core::assist::Diagnostic {
+                    gate: ctx_traits_core::assist::Gate::Drift,
+                    code: ctx_traits_core::assist::DiagnosticCode::TargetMissing,
+                    field: Some(target_path.to_string()),
+                    message: "target path is missing; check mode refuses to write".to_string(),
+                });
+            candidate
+                .gate_summary
+                .check
+                .failed_sections
+                .push("drift".to_string());
+            candidate.gate_summary.check.ok = false;
+            candidate
+                .warnings
+                .push("check drift gate failed: target is missing".to_string());
+            return candidate;
+        }
+    };
+
+    let expected = ctx_traits_core::digest::Digest::source(expected_text)
+        .as_str()
+        .to_string();
+    let actual = ctx_traits_core::digest::Digest::source(&actual_text)
+        .as_str()
+        .to_string();
+    if expected != actual {
+        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+        candidate.diagnostics.push(ctx_traits_core::assist::Diagnostic {
+            gate: ctx_traits_core::assist::Gate::Drift,
+            code: ctx_traits_core::assist::DiagnosticCode::TargetDrift,
+            field: Some(target_path.to_string()),
+            message: format!(
+                "target content differs from normalized candidate: expected {expected}, actual {actual}"
+            ),
+        });
+        candidate
+            .gate_summary
+            .check
+            .failed_sections
+            .push("drift".to_string());
+        candidate.gate_summary.check.ok = false;
+        candidate
+            .warnings
+            .push("check drift gate failed: target differs from normalized candidate".to_string());
+    }
+    candidate
+}
+
+pub(crate) use handle_critique as critique;
+pub(crate) use handle_generate as handle;
+pub(crate) use handle_generate_evals as generate_evals;

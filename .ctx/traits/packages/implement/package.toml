@@ -1,0 +1,30 @@
+[package]
+id = "implement"
+version = "0.19.0"
+name = "Implement"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.leaf]
+
+[family.leaf.quick]
+path = "generated/quick/index.toml"
+aliases = ["implement-quick"]
+
+[family.leaf.default]
+path = "generated/default/index.toml"
+aliases = ["implement-default"]
+
+[family.leaf.smart]
+path = "generated/smart/index.toml"
+aliases = ["implement-smart"]
+
+[family.leaf.strict]
+path = "generated/strict/index.toml"
+aliases = ["implement-strict"]
+
+[family.leaf.phase]
+path = "generated/phase/index.toml"
+aliases = ["implement-phase"]

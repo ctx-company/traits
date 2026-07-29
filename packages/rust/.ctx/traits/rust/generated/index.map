@@ -1,0 +1,27 @@
+{
+  "agent:reviewer": {
+    "file": "packages/agents/src/index.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:worker": {
+    "file": "packages/agents/src/index.ts",
+    "start": 11,
+    "end": 11
+  },
+  "resource:engineering-standards": {
+    "file": "packages/rust/.ctx/traits/rust/source/index.ts",
+    "start": 10,
+    "end": 10
+  },
+  "resource:gate-conventions": {
+    "file": "packages/rust/.ctx/traits/rust/source/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "trait:rust": {
+    "file": "packages/rust/.ctx/traits/rust/source/index.ts",
+    "start": 26,
+    "end": 26
+  }
+}
