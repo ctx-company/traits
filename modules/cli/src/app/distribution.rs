@@ -30,21 +30,49 @@ fn resolve_scope(global: bool) -> crate::Result<DistributionScope> {
 /// single-package panel and `handle_update`'s per-package section so the two
 /// commands can never render a package's facts differently.
 fn install_report_rows(report: &InstallReport) -> Vec<PanelRow> {
-    let mut rows = vec![
-        PanelRow::toned("alias", report.alias.as_str(), RowTone::Default),
-        PanelRow::toned("requested", report.requested.as_str(), RowTone::Default),
-        PanelRow::toned(
+    let mut rows = vec![PanelRow::toned(
+        "alias",
+        report.alias.as_str(),
+        RowTone::Default,
+    )];
+    if report.transport == "path" {
+        // A path install has no npm registry evidence at all: never print
+        // "requested"/"resolved-version"/"integrity" rows that would imply
+        // one.
+        rows.push(PanelRow::toned("source", "path", RowTone::Default));
+        rows.push(PanelRow::toned(
+            "path",
+            report.path.as_deref().unwrap_or(""),
+            RowTone::Default,
+        ));
+    } else {
+        rows.push(PanelRow::toned("source", "npm", RowTone::Default));
+        rows.push(PanelRow::toned(
+            "requested",
+            report.requested.as_deref().unwrap_or(""),
+            RowTone::Default,
+        ));
+        rows.push(PanelRow::toned(
             "resolved-version",
-            report.resolved_version.as_str(),
+            report.resolved_version.as_deref().unwrap_or(""),
             RowTone::Default,
-        ),
-        PanelRow::toned("integrity", report.integrity.as_str(), RowTone::Default),
-        PanelRow::toned(
-            "vendored-path",
-            report.vendored_path.as_str(),
+        ));
+        rows.push(PanelRow::toned(
+            "integrity",
+            report.integrity.as_deref().unwrap_or(""),
             RowTone::Default,
-        ),
-    ];
+        ));
+    }
+    rows.push(PanelRow::toned(
+        "tree-digest",
+        report.tree_digest.as_str(),
+        RowTone::Default,
+    ));
+    rows.push(PanelRow::toned(
+        "vendored-path",
+        report.vendored_path.as_str(),
+        RowTone::Default,
+    ));
     if report.inherited {
         rows.push(PanelRow::toned(
             "inherited",
@@ -79,6 +107,16 @@ fn install_report_rows(report: &InstallReport) -> Vec<PanelRow> {
     rows
 }
 
+/// The install/update panel headline identity: the npm package identifier,
+/// or `path:<path>` for a path-transport report — never a blank title.
+fn report_headline(report: &InstallReport) -> String {
+    if report.transport == "path" {
+        format!("path:{}", report.path.as_deref().unwrap_or(""))
+    } else {
+        report.package.clone().unwrap_or_default()
+    }
+}
+
 pub(crate) fn handle_install(
     spec: &str,
     alias: Option<&str>,
@@ -99,7 +137,7 @@ pub(crate) fn handle_install(
         OutputMode::Human(mode) => {
             let mut panel = Panel::new(
                 "ctx",
-                format!("dependency add {}", report.package),
+                format!("dependency add {}", report_headline(&report)),
                 PanelStatus::Passed("passed".to_string()),
             );
             for row in install_report_rows(&report) {
@@ -202,7 +240,7 @@ pub(crate) fn handle_update(
             } else {
                 for report in &reports {
                     panel = panel.section(PanelSection::new(
-                        report.package.as_str(),
+                        report_headline(report),
                         install_report_rows(report),
                     ));
                 }
@@ -239,14 +277,34 @@ pub(crate) fn handle_outdated(json: bool) -> crate::Result<CommandOutput<()>> {
                 let entry_rows = rows
                     .iter()
                     .map(|row: &OutdatedRow| {
-                        PanelRow::toned(
-                            format!("{} ({})", row.alias, row.package),
-                            format!(
-                                "current={} wanted={} latest={}",
-                                row.current, row.wanted, row.latest
-                            ),
-                            RowTone::Default,
-                        )
+                        if row.transport == "path" {
+                            let path = row.path.as_deref().unwrap_or("");
+                            let drift = match row.drift {
+                                Some(true) => "yes — run `ctx traits dependency update` to accept",
+                                Some(false) => "no",
+                                None => "unknown — source unreadable",
+                            };
+                            PanelRow::toned(
+                                format!("{} (path:{path})", row.alias),
+                                format!(
+                                    "locked-tree-digest={} current-tree-digest={} drift={drift}",
+                                    row.locked_tree_digest.as_deref().unwrap_or(""),
+                                    row.current_tree_digest.as_deref().unwrap_or(""),
+                                ),
+                                RowTone::Default,
+                            )
+                        } else {
+                            PanelRow::toned(
+                                format!("{} ({})", row.alias, row.package.as_deref().unwrap_or("")),
+                                format!(
+                                    "current={} wanted={} latest={}",
+                                    row.current.as_deref().unwrap_or(""),
+                                    row.wanted.as_deref().unwrap_or(""),
+                                    row.latest.as_deref().unwrap_or(""),
+                                ),
+                                RowTone::Default,
+                            )
+                        }
                     })
                     .collect();
                 panel = panel.section(PanelSection::new("packages", entry_rows));
@@ -269,17 +327,24 @@ pub(crate) fn handle_info(spec: &str, json: bool) -> crate::Result<CommandOutput
             print_json_report(&report, "info report")?;
         }
         OutputMode::Human(mode) => {
+            let headline = if report.transport == "path" {
+                format!("path:{}", report.path.as_deref().unwrap_or(""))
+            } else {
+                report.package.clone().unwrap_or_default()
+            };
             let mut panel = Panel::new(
                 "ctx",
-                format!("dependency info {}", report.package),
+                format!("dependency info {headline}"),
                 PanelStatus::Passed("passed".to_string()),
-            )
-            .row(PanelRow::toned(
-                "resolved-version",
-                report.resolved_version.as_str(),
-                RowTone::Default,
-            ))
-            .row(PanelRow::toned(
+            );
+            if report.transport != "path" {
+                panel = panel.row(PanelRow::toned(
+                    "resolved-version",
+                    report.resolved_version.as_deref().unwrap_or(""),
+                    RowTone::Default,
+                ));
+            }
+            panel = panel.row(PanelRow::toned(
                 "claim",
                 report.claim.as_str(),
                 RowTone::Default,

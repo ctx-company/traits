@@ -206,7 +206,16 @@ fn staging_path() -> Utf8PathBuf {
         .join(format!("ctx-traits-publish-{suffix}"))
 }
 
-fn copy_safe(source: &Utf8Path, dest: &Utf8Path, excludes: &[String]) -> crate::Result<()> {
+/// No-symlink, no-special-file, exclude-aware recursive copy of `source`
+/// into `dest`. The one safe local-tree copy primitive in this crate: npm
+/// publication staging (this module) and P535 local `path:` package staging
+/// ([`crate::distribution::stage_local_package`]) both call this rather than
+/// each walking the source tree themselves.
+pub(crate) fn copy_safe(
+    source: &Utf8Path,
+    dest: &Utf8Path,
+    excludes: &[String],
+) -> crate::Result<()> {
     let metadata = std::fs::symlink_metadata(source).map_err(|e| filesystem(source, e))?;
     if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
         return Err(Error::Unsafe {

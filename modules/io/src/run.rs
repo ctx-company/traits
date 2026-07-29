@@ -1073,45 +1073,58 @@ pub fn load_trait_source(
 /// `Err` immediately: a bad local package must surface its own error rather
 /// than being treated as absent and silently falling through to a fallback
 /// id or a further tier.
+/// Repo-authored `.ctx/traits/<id>` precheck shared by every resolution path
+/// that must check whether `id` shadows every other tier before falling
+/// through — `resolve_local_or_builtin_trait_id` and the merged ordinary/
+/// family-tier resolution inside `try_resolve_trait_id` both call this one
+/// implementation rather than each re-probing the filesystem independently.
+///
+/// Any outcome other than "does not exist at all" (a file, a directory with
+/// a bad manifest, a permission error, a symlink) must surface its own error
+/// rather than silently falling through. Only a confirmed `NotFound` may
+/// consult a further tier. Mirrors `InventoryContext::resolve_tiers`: the
+/// repo-authored precheck only applies inside a genuine Git repository. An
+/// ad-hoc invocation must not treat a stray local `.ctx/traits/<id>`
+/// directory as malformed-or-shadowing; it goes straight to the shared tier
+/// scan, which itself omits project tiers for `Adhoc` (P439).
+fn repo_authored_precheck(
+    context: &crate::inventory::InventoryContext,
+    id: &str,
+) -> crate::Result<Option<(Utf8PathBuf, String)>> {
+    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+        return Ok(None);
+    }
+    let repo_root = context.repo_root_for_paths();
+    let local_package_root = crate::layout::trait_authoring_root_path(repo_root).join(id);
+    let local_exists = match std::fs::symlink_metadata(local_package_root.as_std_path()) {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    };
+    if !local_exists {
+        return Ok(None);
+    }
+    let path = crate::layout::trait_manifest_path(repo_root, id)?;
+    if path.exists() {
+        return Ok(Some((path, "trait-id".to_string())));
+    }
+    // A local package directory exists but has no manifest at the expected
+    // path: this id is malformed/unreadable, not absent, so it must not be
+    // treated as a fallback opportunity.
+    Err(invalid_request_error(
+        "trait-id",
+        format!(
+            "trait ID {id:?} has a local package at {local_package_root} but no manifest at {path}; fix or remove it before retrying"
+        ),
+    ))
+}
+
 fn resolve_local_or_builtin_trait_id(
     context: &crate::inventory::InventoryContext,
     id: &str,
 ) -> crate::Result<Option<(Utf8PathBuf, String)>> {
-    // Repo-authored `.ctx/traits/<id>` always shadows every other tier of the
-    // same id: any outcome other than "does not exist at all" (a file, a
-    // directory with a bad manifest, a permission error, a symlink) must
-    // surface its own error rather than silently falling through. Only a
-    // confirmed `NotFound` may consult a further tier — checked here, before
-    // the shared inventory scan, so this repository-subdirectory-safe
-    // malformed-package diagnostic keeps citing the exact repo-authored path
-    // that is broken.
-    // Mirrors `InventoryContext::resolve_tiers`: the repo-authored precheck
-    // only applies inside a genuine Git repository. An ad-hoc invocation
-    // must not treat a stray local `.ctx/traits/<id>` directory as
-    // malformed-or-shadowing; it goes straight to the shared tier scan,
-    // which itself omits project tiers for `Adhoc` (P439).
-    let repo_root = context.repo_root_for_paths();
-    let local_package_root = crate::layout::trait_authoring_root_path(repo_root).join(id);
-    let local_exists = matches!(context.invocation(), crate::state::InvocationRoot::Repo(_))
-        && match std::fs::symlink_metadata(local_package_root.as_std_path()) {
-            Ok(_) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(_) => true,
-        };
-    if local_exists {
-        let path = crate::layout::trait_manifest_path(repo_root, id)?;
-        if path.exists() {
-            return Ok(Some((path, "trait-id".to_string())));
-        }
-        // A local package directory exists but has no manifest at the
-        // expected path: this id is malformed/unreadable, not absent, so it
-        // must not be treated as a fallback opportunity.
-        return Err(invalid_request_error(
-            "trait-id",
-            format!(
-                "trait ID {id:?} has a local package at {local_package_root} but no manifest at {path}; fix or remove it before retrying"
-            ),
-        ));
+    if let Some(resolved) = repo_authored_precheck(context, id)? {
+        return Ok(Some(resolved));
     }
     match context.resolve_tiers(id)? {
         Some(resolution) => Ok(Some((resolution.winner.path, resolution.winner.origin))),
@@ -1150,20 +1163,31 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
 
     let context = crate::inventory::InventoryContext::discover()?;
 
-    // Native family package resolution (P531 Stage 1): before falling back
-    // to the legacy `family-variant` sibling-directory shape, check whether
-    // `family` is itself a local package carrying a `[family]` table naming
-    // `variant` as one of its leaves — a folded family package resolves
-    // straight to that leaf's `generated/<selector>/` output. A bare id with
-    // no colon means `variant = "default"` (same as `family:default`, which
-    // desugars to the bare id above).
+    let mut id_parts = original_id.splitn(2, ':');
+    let family = id_parts.next().unwrap_or_default();
+    let explicit_variant = id_parts.next();
+    let variant = explicit_variant.unwrap_or("default");
+
+    // Repo-authored always outranks every other tier outright, so every
+    // repo-authored candidate shape for this id is checked first, before any
+    // lower-tier candidate is even built. A repo-authored family table's leaf
+    // for `variant` is checked first (P531 Stage 1: a folded family package
+    // resolves straight to that leaf's `generated/<selector>/` output,
+    // ahead of an ordinary same-named package shape), then the exact
+    // ordinary id ([`repo_authored_precheck`]), then a repo-authored family
+    // table's legacy hyphenated alias. A malformed repo-authored package or
+    // `[family]` table surfaces its own error immediately rather than ever
+    // being masked by a lower-tier candidate.
+    if let Some(resolved) = resolve_local_family_leaf(&context, family, variant)? {
+        return Ok(Some(resolved));
+    }
+    if let Some(resolved) = repo_authored_precheck(&context, id)? {
+        return Ok(Some(resolved));
+    }
+    if !original_id.contains(':')
+        && let Some(resolved) = resolve_local_family_alias(&context, original_id)?
     {
-        let mut parts = original_id.splitn(2, ':');
-        let family = parts.next().unwrap_or_default();
-        let variant = parts.next().unwrap_or("default");
-        if let Some(resolved) = resolve_family_leaf(&context, family, variant)? {
-            return Ok(Some(resolved));
-        }
+        return Ok(Some(resolved));
     }
 
     // `family:default` desugars to the bare `family` id above, so bare-family
@@ -1172,23 +1196,39 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
     // `family-default` package shape — never on a malformed/unreadable bare
     // package, which must surface its own error instead of silently
     // resolving elsewhere.
-    let default_fallback_id = {
-        let mut parts = original_id.splitn(2, ':');
-        let family = parts.next().unwrap_or_default();
-        match parts.next() {
-            Some("default") => Some(format!("{family}-default")),
-            _ => None,
-        }
+    //
+    // This fallback only fires for an *explicit* `family:default` reference,
+    // never a bare `family` id: `explicit_variant` is `None` for a bare id
+    // and `variant` collapses both shapes to `"default"`, so matching on
+    // `variant` here would make an unrelated ordinary `<id>-default`
+    // package unintentionally resolve for every bare id that has no other
+    // candidate — changing pre-existing resolution behavior outside P535.
+    let default_fallback_id = match explicit_variant {
+        Some("default") => Some(format!("{family}-default")),
+        _ => None,
     };
 
-    if let Some(resolved) = resolve_local_or_builtin_trait_id(&context, id)? {
-        return Ok(Some(resolved));
+    // Below repo-authored, merge ordinary desugared-id candidates, vendored
+    // native-family-leaf candidates, and vendored family-alias candidates
+    // under one shared tier ordering (repo-vendored, user-global, built-in)
+    // instead of resolving one kind fully across every tier before ever
+    // consulting the others. This is what keeps a project-vendored family
+    // leaf or alias from losing to a global or built-in legacy package, and
+    // a global vendored family leaf or alias from losing to a built-in
+    // package: each candidate is tagged with the tier it was found at and
+    // the lowest tier wins, exactly as
+    // [`crate::inventory::InventoryContext::resolve_tiers`] already does for
+    // purely-ordinary ids.
+    let mut candidates = merged_lower_tier_candidates(&context, id, family, variant, original_id)?;
+    if !candidates.is_empty() {
+        candidates.sort_by_key(|candidate| candidate.tier);
+        let winner = candidates
+            .into_iter()
+            .next()
+            .expect("checked non-empty above");
+        return Ok(Some((winner.path, winner.origin)));
     }
-    // A native family owns its published historical aliases.  Do this only
-    // after ordinary package lookup so a real local package keeps precedence.
-    if let Some(resolved) = resolve_family_alias(&context, original_id)? {
-        return Ok(Some(resolved));
-    }
+
     if let Some(fallback_id) = &default_fallback_id
         && ctx_traits_core::shared::validate_slug_shape(fallback_id, field_path).is_ok()
         && let Some(resolved) = resolve_local_or_builtin_trait_id(&context, fallback_id)?
@@ -1198,21 +1238,24 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
     Ok(None)
 }
 
-/// Resolve `family:variant` against a local repo-authored native family
-/// package's `[family]` table, if `family` is one. Returns `Ok(None)` when
-/// `family` is not a local package at all, or is a local package but not a
-/// native family (no `[family]` table) — both cases are "not a family leaf",
-/// letting the caller fall through to legacy `family-variant` resolution
-/// rather than treating either as an error.
-fn resolve_family_leaf(
+/// Resolve `family:variant` against a *repo-authored* local native family
+/// package's `[family]` table only. Returns `Ok(None)` when `family` has no
+/// repo-authored local package, or that package has no `[family]` table —
+/// letting the caller fall through to ordinary desugared-id resolution and
+/// then, if that also comes back empty, vendored family resolution
+/// ([`resolve_vendored_family_leaf`]). A repo-authored `[family]` table that
+/// exists but is malformed, or that names `variant` but is missing the
+/// leaf's canonical file, always surfaces its own error here rather than
+/// ever being treated as absent.
+fn resolve_local_family_leaf(
     context: &crate::inventory::InventoryContext,
     family: &str,
     variant: &str,
 ) -> crate::Result<Option<(Utf8PathBuf, String)>> {
-    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+    if ctx_traits_core::shared::validate_slug_shape(family, "trait-id.family").is_err() {
         return Ok(None);
     }
-    if ctx_traits_core::shared::validate_slug_shape(family, "trait-id.family").is_err() {
+    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
         return Ok(None);
     }
     let repo_root = context.repo_root_for_paths();
@@ -1235,18 +1278,122 @@ fn resolve_family_leaf(
     Ok(Some((leaf_path, "trait-id".to_string())))
 }
 
-/// Resolve a legacy hyphenated selector published in a local native family's
-/// manifest.  The alias is manifest data rather than a guessed suffix, which
-/// keeps arbitrary package names from accidentally becoming family leaves.
-fn resolve_family_alias(
+/// Build the merged candidate list for every tier *below* repo-authored —
+/// repo-vendored, user-global, built-in — combining ordinary desugared-id
+/// candidates, vendored native-family-leaf candidates for `family:variant`,
+/// and vendored family-alias candidates for the bare hyphenated `alias`
+/// (P535), each tagged with the tier it was found at. Callers sort by tier
+/// and take the lowest: this is what keeps a project-vendored family leaf or
+/// alias from losing to a global or built-in legacy package, and a global
+/// vendored family leaf or alias from losing to a built-in package, instead
+/// of any one candidate kind being resolved fully across every tier before
+/// the others are ever consulted.
+///
+/// Called only after the repo-authored prechecks in `try_resolve_trait_id`
+/// have all come back empty, so nothing here can shadow (or mask the error
+/// from) a repo-authored candidate at the same nominal id.
+fn merged_lower_tier_candidates(
+    context: &crate::inventory::InventoryContext,
+    id: &str,
+    family: &str,
+    variant: &str,
+    alias: &str,
+) -> crate::Result<Vec<crate::inventory::Candidate>> {
+    let mut candidates: Vec<crate::inventory::Candidate> = Vec::new();
+    if let Some(resolution) = context.resolve_tiers(id)? {
+        candidates.push(resolution.winner);
+        candidates.extend(resolution.shadowed);
+    }
+    // Repo-authored is already confirmed absent by the caller's prechecks,
+    // so any `RepoAuthored` candidate `resolve_tiers` reports here would be
+    // a contradiction; it is filtered out defensively rather than trusted to
+    // outrank a real family-leaf or alias candidate.
+    candidates.retain(|candidate| candidate.tier != crate::inventory::Tier::RepoAuthored);
+
+    let family_valid =
+        ctx_traits_core::shared::validate_slug_shape(family, "trait-id.family").is_ok();
+    let alias_valid = !alias.contains(':');
+    let in_repo = matches!(context.invocation(), crate::state::InvocationRoot::Repo(_));
+
+    if in_repo {
+        let repo_root = context.repo_root_for_paths();
+        let project_scope = crate::distribution::DistributionScope::project(repo_root);
+        if family_valid
+            && crate::distribution::vendored_family_leaf_exists(&project_scope, family, variant)?
+            && let Some((path, origin)) = crate::distribution::resolve_vendored_trait_variant(
+                &project_scope,
+                family,
+                Some(variant),
+            )?
+        {
+            candidates.push(crate::inventory::Candidate {
+                tier: crate::inventory::Tier::RepoVendored,
+                path,
+                origin,
+            });
+        }
+        if alias_valid
+            && let Some((path, origin)) =
+                crate::distribution::resolve_vendored_trait_alias(&project_scope, alias)?
+        {
+            candidates.push(crate::inventory::Candidate {
+                tier: crate::inventory::Tier::RepoVendored,
+                path,
+                origin,
+            });
+        }
+    }
+
+    let global_scope = crate::distribution::DistributionScope::global()?;
+    if family_valid
+        && crate::distribution::vendored_family_leaf_exists(&global_scope, family, variant)?
+        && let Some((path, origin)) = crate::distribution::resolve_vendored_trait_variant(
+            &global_scope,
+            family,
+            Some(variant),
+        )?
+    {
+        candidates.push(crate::inventory::Candidate {
+            tier: crate::inventory::Tier::UserGlobal,
+            path,
+            origin,
+        });
+    }
+    if alias_valid
+        && let Some((path, origin)) =
+            crate::distribution::resolve_vendored_trait_alias(&global_scope, alias)?
+    {
+        candidates.push(crate::inventory::Candidate {
+            tier: crate::inventory::Tier::UserGlobal,
+            path,
+            origin,
+        });
+    }
+
+    Ok(candidates)
+}
+
+/// Resolve a legacy hyphenated selector published in a *repo-authored* local
+/// native family's manifest only. Vendored family-alias candidates (P535)
+/// are resolved together with ordinary and family-leaf candidates by
+/// [`merged_lower_tier_candidates`] instead, so a project- or global-tier
+/// alias competes under the same tier ordering as every other candidate
+/// kind rather than being checked only after ordinary resolution has
+/// already picked a winner across all tiers. The alias is manifest data
+/// rather than a guessed suffix, which keeps arbitrary package names from
+/// accidentally becoming family leaves.
+fn resolve_local_family_alias(
     context: &crate::inventory::InventoryContext,
     alias: &str,
 ) -> crate::Result<Option<(Utf8PathBuf, String)>> {
-    if alias.contains(':') || !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_))
-    {
+    if alias.contains(':') {
         return Ok(None);
     }
-    let traits_root = crate::layout::trait_authoring_root_path(context.repo_root_for_paths());
+    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+        return Ok(None);
+    }
+    let repo_root = context.repo_root_for_paths();
+    let traits_root = crate::layout::trait_authoring_root_path(repo_root);
     let entries = match std::fs::read_dir(&traits_root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),

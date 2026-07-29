@@ -16,9 +16,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use ctx_traits_core::distribution::{self as core_distribution, PackageSpec, VersionSelector};
+use ctx_traits_core::distribution::{
+    self as core_distribution, InstallSpec, PackageSpec, PathSpec, VersionSelector,
+};
 use ctx_traits_core::manifest::{ProjectManifest, ProjectPackageDependency};
-use ctx_traits_core::project_lock::{BaseLockEntry, PackageLockEntry, ProjectLock, TraitLockEntry};
+use ctx_traits_core::project_lock::{
+    BaseLockEntry, PackageLockEntry, PackageTransport, ProjectLock, TraitLockEntry,
+};
 use serde::Serialize;
 
 use crate::dependency::LoadedDependency;
@@ -162,18 +166,40 @@ pub struct StagedTraitReport {
 }
 
 /// Result of a successful `install`.
+///
+/// Transport-only fields are `Option`, omitted from JSON entirely for the
+/// transport that does not carry them (P535 fix): a path install must never
+/// print `resolved-version`/`integrity` as fabricated empty-string npm
+/// evidence, and an npm install must never print a `path`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct InstallReport {
     pub alias: String,
-    pub package: String,
-    pub requested: String,
-    pub resolved_version: String,
-    pub integrity: String,
+    /// `"npm"` or `"path"` (P535) — which fields below carry real evidence.
+    pub transport: String,
+    /// Full npm package identifier. Absent for a path-transport install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    /// Authored relative path (P535). Absent for an npm-transport install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// npm version selector authored at install time. Absent for path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested: Option<String>,
+    /// Exact resolved npm version. Absent for path, which has no version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_version: Option<String>,
+    /// npm SRI tarball integrity. Absent for path, which has no tarball.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<String>,
+    /// Aggregate digest over the complete vendored tree (both transports).
+    pub tree_digest: String,
     pub vendored_path: String,
     pub traits: Vec<StagedTraitReport>,
     /// `true` when this package was merged in from a resolved `extends`
-    /// base rather than a local `[dependencies]` declaration (P443).
+    /// base rather than a local `[dependencies]` declaration (P443). Always
+    /// `false` for a path-transport install: path dependencies are never
+    /// inherited (P535 scope).
     pub inherited: bool,
     pub claim: String,
     pub review_hint: String,
@@ -184,18 +210,49 @@ pub struct InstallReport {
 #[serde(rename_all = "kebab-case")]
 pub struct RemoveReport {
     pub alias: String,
+    /// The removed entry's source identity: an npm package identifier, or
+    /// `"path:<path>"` for a path-transport entry.
     pub package: String,
 }
 
-/// One `outdated` row.
+/// One `outdated` row. An npm-transport row carries registry version
+/// evidence (`current`/`wanted`/`latest`); a path-transport row (P535) has
+/// no registry range to be outdated against, so it instead carries the
+/// locked-vs-current tree digest drift evidence — never both, and never a
+/// fabricated empty npm field for the transport that has none.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct OutdatedRow {
     pub alias: String,
-    pub package: String,
-    pub current: String,
-    pub wanted: String,
-    pub latest: String,
+    /// `"npm"` or `"path"` (P535).
+    pub transport: String,
+    /// Full npm package identifier. Absent for a path-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    /// Authored relative path (P535). Absent for an npm-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Locked npm version. Absent for a path-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    /// Highest version satisfying the manifest selector. Absent for path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wanted: Option<String>,
+    /// Registry-latest version. Absent for path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest: Option<String>,
+    /// The locked full-tree digest. Present only for a path-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locked_tree_digest: Option<String>,
+    /// The tree digest a fresh restage of the current source produces right
+    /// now. Present only for a path-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_tree_digest: Option<String>,
+    /// `true` when `current_tree_digest != locked_tree_digest`: the source
+    /// has moved since the last `dependency update`. Present only for a
+    /// path-transport row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drift: Option<bool>,
 }
 
 /// `info` inspection report. Read-only: never mutates manifest, lock,
@@ -204,8 +261,17 @@ pub struct OutdatedRow {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct InfoReport {
-    pub package: String,
-    pub resolved_version: String,
+    /// `"npm"` or `"path"` (P535).
+    pub transport: String,
+    /// Full npm package identifier. Absent for a path-transport spec.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    /// Authored relative path (P535). Absent for an npm-transport spec.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Absent for a path-transport spec, which has no registry version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_version: Option<String>,
     pub claim: String,
     pub traits: Vec<TraitInfo>,
 }
@@ -224,6 +290,52 @@ pub struct TraitInfo {
 
 const CLAIM_ABSENT: &str = "absent (unclaimed; digests below are computed, not publisher-asserted)";
 const CLAIM_VERIFIED: &str = "verified (publisher ctx.digests claim matches computed digests)";
+/// A path-transport install has no `package.json` `ctx.digests` publisher
+/// claim mechanism at all (that is an npm registry concept) — this is
+/// reported distinctly from [`CLAIM_ABSENT`] so a path install is never
+/// described in npm terms.
+const CLAIM_NOT_APPLICABLE_PATH: &str = "not applicable (path installs have no publisher digest claim; digests below are computed from the vendored copy)";
+
+/// The unambiguous identity of a package being published through
+/// [`publish_staged_package`]: an npm package plus its requested selector, or
+/// a project-scoped local path (P535). Generalizes the identity/report
+/// fields `publish_staged_package` threads through the manifest/lock commit
+/// rather than duplicating its transaction for a second transport.
+#[derive(Debug, Clone)]
+enum PackageIdentity {
+    Npm { package: String, requested: String },
+    Path { path: String },
+}
+
+impl PackageIdentity {
+    /// The unambiguous source identity used for alias-collision and
+    /// lock-compatibility comparisons — matches
+    /// [`ctx_traits_core::manifest::ProjectPackageDependency::identity`] and
+    /// [`ctx_traits_core::project_lock::PackageLockEntry::identity`].
+    fn identity_key(&self) -> String {
+        match self {
+            Self::Npm { package, .. } => package.clone(),
+            Self::Path { path } => format!("path:{path}"),
+        }
+    }
+
+    fn transport(&self) -> PackageTransport {
+        match self {
+            Self::Npm { .. } => PackageTransport::Npm,
+            Self::Path { .. } => PackageTransport::Path,
+        }
+    }
+
+    /// The `requested` selector text recorded in the audit journal: the
+    /// authored npm version selector, or empty for a path source, which has
+    /// none.
+    fn requested_display(&self) -> String {
+        match self {
+            Self::Npm { requested, .. } => requested.clone(),
+            Self::Path { .. } => String::new(),
+        }
+    }
+}
 
 /// Registry base URL override plumbing. `None` uses
 /// [`crate::registry::DEFAULT_REGISTRY_BASE`].
@@ -321,7 +433,37 @@ pub fn install(
     alias_override: Option<&str>,
     registry: RegistryOptions<'_>,
 ) -> crate::Result<InstallReport> {
-    install_internal(scope, spec_input, alias_override, false, false, registry)
+    install_internal(
+        scope,
+        spec_input,
+        alias_override,
+        false,
+        false,
+        false,
+        registry,
+    )
+}
+
+/// Explicit `ctx traits dependency update <alias>` (P535): the sole operation
+/// permitted to accept changed `path:` source bytes and replace the locked
+/// snapshot. For an npm-transport dependency this behaves exactly like
+/// [`install`] (npm `update` has always re-resolved the manifest selector
+/// fresh); `force_path_update` only changes path-transport behavior.
+fn install_for_update(
+    scope: &DistributionScope,
+    spec_input: &str,
+    alias_override: Option<&str>,
+    registry: RegistryOptions<'_>,
+) -> crate::Result<InstallReport> {
+    install_internal(
+        scope,
+        spec_input,
+        alias_override,
+        false,
+        true,
+        true,
+        registry,
+    )
 }
 
 /// Shared install/re-resolve implementation behind the public [`install`]
@@ -340,15 +482,68 @@ pub fn install(
 /// local override, and back again (or a base update changing what package
 /// an inherited alias points to) is the exact behavior P443 exists to
 /// support, not a conflict to refuse.
+///
+/// `force_path_update` governs only path-transport publication (P535): a
+/// direct, user-issued `ctx traits dependency add path:...` (`false`) under
+/// an alias already locked to that same path source stays lock-authoritative
+/// — it never republishes current source bytes just because `add` was
+/// repeated, only `ctx traits dependency update <alias>` (`true`) may replace
+/// the locked snapshot with changed bytes. Every other call site
+/// (reconciliation resolving a fresh or ownership-transitioned binding, which
+/// has no previously-matching lock entry to be authoritative over) passes
+/// `true` too, since there is nothing for it to preserve.
 fn install_internal(
     scope: &DistributionScope,
     spec_input: &str,
     alias_override: Option<&str>,
     inherited: bool,
     allow_ownership_transition: bool,
+    force_path_update: bool,
     registry: RegistryOptions<'_>,
 ) -> crate::Result<InstallReport> {
-    let spec = core_distribution::parse_spec(spec_input).map_err(ctx_traits_core::Error::from)?;
+    match core_distribution::parse_install_spec(spec_input).map_err(ctx_traits_core::Error::from)? {
+        InstallSpec::Npm(spec) => install_npm_internal(
+            scope,
+            spec,
+            alias_override,
+            inherited,
+            allow_ownership_transition,
+            registry,
+        ),
+        InstallSpec::Path(path_spec) => {
+            if inherited {
+                // P535 explicitly excludes path-valued `extends` and
+                // inherited path declarations: a base package's manifest
+                // referencing a path only meaningful in the *producer's*
+                // repository can never be honored by a consumer.
+                return Err(crate::environment::Error::Filesystem {
+                    path: path_spec.relative_path.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "path: dependencies cannot be inherited through extends; only npm dependencies may be inherited",
+                    ),
+                }
+                .into());
+            }
+            install_path_internal(
+                scope,
+                &path_spec,
+                alias_override,
+                allow_ownership_transition,
+                force_path_update,
+            )
+        }
+    }
+}
+
+fn install_npm_internal(
+    scope: &DistributionScope,
+    spec: PackageSpec,
+    alias_override: Option<&str>,
+    inherited: bool,
+    allow_ownership_transition: bool,
+    registry: RegistryOptions<'_>,
+) -> crate::Result<InstallReport> {
     let alias = alias_override.unwrap_or(&spec.default_alias).to_string();
 
     // Reject an alias collision before any remote fetch or cache mutation:
@@ -366,11 +561,14 @@ fn install_internal(
         other => other.as_str().to_string(),
     };
 
-    publish_staged_package(
+    let identity = PackageIdentity::Npm {
+        package: spec.package.full(),
+        requested: requested.clone(),
+    };
+    let tree_digest = publish_staged_package(
         scope,
         &alias,
-        &spec.package.full(),
-        &requested,
+        &identity,
         &staged,
         PackageOwnership {
             inherited,
@@ -397,10 +595,13 @@ fn install_internal(
 
     Ok(InstallReport {
         alias: alias.clone(),
-        package: spec.package.full(),
-        requested,
-        resolved_version: staged.resolved_version,
-        integrity: staged.integrity,
+        transport: "npm".to_string(),
+        package: Some(spec.package.full()),
+        path: None,
+        requested: Some(requested),
+        resolved_version: Some(staged.resolved_version),
+        integrity: Some(staged.integrity),
+        tree_digest,
         vendored_path: scope.vendor_root().join(&alias).to_string(),
         traits,
         inherited,
@@ -409,13 +610,171 @@ fn install_internal(
     })
 }
 
+/// Build an [`InstallReport`] describing an already-locked path package
+/// without touching disk: used when a repeated `dependency add` of the same
+/// path source stays lock-authoritative (P535) rather than republishing.
+fn install_report_from_locked_path(
+    scope: &DistributionScope,
+    alias: &str,
+    entry: &PackageLockEntry,
+) -> InstallReport {
+    let traits = entry
+        .traits
+        .iter()
+        .map(|t| StagedTraitReport {
+            id: t.id.clone(),
+            canonical_path: t.canonical_path.clone(),
+            canonical_digest: t.canonical_digest.clone(),
+            schema_version: t.schema_version.clone(),
+        })
+        .collect::<Vec<_>>();
+    InstallReport {
+        alias: alias.to_string(),
+        transport: "path".to_string(),
+        package: None,
+        path: Some(entry.path.clone()),
+        requested: None,
+        resolved_version: None,
+        integrity: None,
+        tree_digest: entry.tree_digest.clone(),
+        vendored_path: scope.vendor_root().join(alias).to_string(),
+        traits,
+        inherited: entry.inherited,
+        claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
+        review_hint: "already locked to this source; run `ctx traits trust approve <trait>` for each canonical digest above before running it, or `ctx traits dependency update <alias>` to accept changed source bytes".to_string(),
+    }
+}
+
+/// Install (or re-install, for `update`/reconciliation) one project-scoped
+/// local `path:` package (P535). Project-scoped only: a global `-g` install
+/// has no repository whose relative path could ever mean anything.
+///
+/// `force_update` distinguishes the two operations P535 requires to behave
+/// differently for an alias already locked to this same path source: a plain
+/// `dependency add` repeated under the same alias/path (`false`) must stay
+/// lock-authoritative and never adopt bytes the source has moved on to since
+/// — it only ever repairs a missing/tampered vendor tree back to the exact
+/// locked digest, refusing when the current source can no longer reproduce
+/// it. Only explicit `dependency update <alias>` (`true`) may republish
+/// changed source bytes and replace the locked snapshot.
+fn install_path_internal(
+    scope: &DistributionScope,
+    path_spec: &PathSpec,
+    alias_override: Option<&str>,
+    allow_ownership_transition: bool,
+    force_update: bool,
+) -> crate::Result<InstallReport> {
+    let DistributionScope::Project(repo_root) = scope else {
+        return Err(crate::environment::Error::Filesystem {
+            path: path_spec.relative_path.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path: dependencies are project-scoped only; the global tier (-g) has no repository to resolve a relative path against",
+            ),
+        }
+        .into());
+    };
+    let alias = alias_override
+        .unwrap_or(&path_spec.default_alias)
+        .to_string();
+    let identity = PackageIdentity::Path {
+        path: path_spec.relative_path.clone(),
+    };
+    reject_alias_collision(scope, &alias, &identity.identity_key())?;
+
+    if !force_update
+        && let Some(existing) = scope
+            .read_lock()?
+            .and_then(|lock| lock.package_entry(&alias).cloned())
+        && existing.transport == PackageTransport::Path
+        && existing.path == path_spec.relative_path
+    {
+        if !vendor_matches_lock(repo_root, &existing) {
+            // The vendor tree went missing or was tampered with: repair it
+            // back to the exact locked snapshot, refusing (via the same
+            // explicit-update remedy message reconciliation already uses) if
+            // the current source no longer reproduces that digest.
+            replay_locked_path_package(repo_root, &alias, &existing)?;
+        }
+        if !manifest_declares_identity(scope, &alias, &identity.identity_key())? {
+            // The lock/vendor snapshot is already correct, but the
+            // `[dependencies]` declaration this same alias/path was
+            // installed under is missing (e.g. hand-edited away). Restore
+            // it from the normalized requested source without restaging or
+            // touching the locked snapshot: the lock, not the manifest,
+            // stays the source of truth for what bytes are vendored.
+            restore_manifest_dependency_declaration(scope, &alias, &identity)?;
+        }
+        return Ok(install_report_from_locked_path(scope, &alias, &existing));
+    }
+
+    let local = stage_local_package(repo_root, &path_spec.relative_path)?;
+    let tree_digest = publish_staged_package(
+        scope,
+        &alias,
+        &identity,
+        &local.staged,
+        PackageOwnership {
+            inherited: false,
+            allow_transition: allow_ownership_transition,
+        },
+        Some(crate::audit_journal::AuditAction::Install),
+    )?;
+
+    let traits = local
+        .staged
+        .traits
+        .iter()
+        .map(|t| StagedTraitReport {
+            id: t.id.clone(),
+            canonical_path: t.canonical_path.clone(),
+            canonical_digest: t.canonical_digest.clone(),
+            schema_version: t.schema_version.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(InstallReport {
+        alias: alias.clone(),
+        transport: "path".to_string(),
+        package: None,
+        path: Some(path_spec.relative_path.clone()),
+        requested: None,
+        resolved_version: None,
+        integrity: None,
+        tree_digest,
+        vendored_path: scope.vendor_root().join(&alias).to_string(),
+        traits,
+        inherited: false,
+        claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
+        review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
+    })
+}
+
+/// Normalize a `remove`/`update` operand's source identity exactly as the
+/// manifest itself normalizes it at decode/install time: a `path:` operand
+/// collapses `.`/redundant separators through the same typed parser
+/// `parse_install_spec` uses, so `path:./producer/demo` compares equal to
+/// the persisted `path:producer/demo` identity. Non-path operands (npm
+/// names, aliases) pass through untouched — npm identity comparison never
+/// needed normalization and must not gain any.
+fn normalize_operand_identity(operand: &str) -> String {
+    if operand.starts_with("path:") {
+        if let Ok(InstallSpec::Path(spec)) = core_distribution::parse_install_spec(operand) {
+            return format!("path:{}", spec.relative_path);
+        }
+    }
+    operand.to_string()
+}
+
 /// Resolve a user-supplied `remove`/`update` operand against the project
-/// manifest by either its alias (vendor-directory key) or its exact npm
-/// package name, requiring exactly one unambiguous match. Aliases remain
-/// accepted as convenience input, but the contracted operand is the
-/// user-facing npm package identity recorded in the manifest/lock, so
-/// `ctx traits remove @scope/name` must work after `ctx traits install
-/// @scope/name` even when the alias differs.
+/// manifest by either its alias (vendor-directory key) or its exact source
+/// identity (npm package name, or normalized `path:<relative-path>`),
+/// requiring exactly one unambiguous match. Aliases remain accepted as
+/// convenience input, but the contracted operand is the user-facing source
+/// identity recorded in the manifest/lock, so `ctx traits remove
+/// @scope/name` must work after `ctx traits install @scope/name` even when
+/// the alias differs, and the same holds for the exact `path:` spelling
+/// originally passed to `add`.
 fn resolve_installed_operand<'a>(
     manifest: &'a ctx_traits_core::manifest::ProjectManifest,
     operand: &str,
@@ -427,10 +786,11 @@ fn resolve_installed_operand<'a>(
             .find(|alias| alias.as_str() == operand)
             .expect("just checked contains_key"));
     }
+    let normalized_operand = normalize_operand_identity(operand);
     let by_package: Vec<&str> = manifest
         .packages
         .iter()
-        .filter(|(_, dependency)| dependency.npm == operand)
+        .filter(|(_, dependency)| dependency.identity() == normalized_operand)
         .map(|(alias, _)| alias.as_str())
         .collect();
     match by_package.as_slice() {
@@ -439,7 +799,7 @@ fn resolve_installed_operand<'a>(
             path: operand.to_string(),
             source: std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("no installed dependency matches alias or npm package {operand:?}"),
+                format!("no installed dependency matches alias or source {operand:?}"),
             ),
         }
         .into()),
@@ -463,7 +823,7 @@ fn resolve_installed_operand<'a>(
 pub fn remove(scope: &DistributionScope, operand: &str) -> crate::Result<RemoveReport> {
     let manifest = scope.read_manifest()?;
     let alias = resolve_installed_operand(&manifest, operand)?.to_string();
-    let package = manifest.packages[&alias].npm.clone();
+    let package = manifest.packages[&alias].identity();
 
     let manifest_path = scope.manifest_path("toml");
     assert_no_symlink_ancestors(&manifest_path, scope.boundary())?;
@@ -605,8 +965,8 @@ pub fn update(
                 continue;
             }
         }
-        let spec_input = format!("{}@{}", dependency.npm, dependency.version);
-        let report = install(scope, &spec_input, Some(entry_alias), registry)?;
+        let report =
+            install_for_update(scope, &dependency.spec_input(), Some(entry_alias), registry)?;
         reports.push(report);
     }
     Ok(reports)
@@ -633,12 +993,12 @@ fn update_base_and_inherited(
 
     let mut reports = Vec::new();
     for (alias, dependency) in &effective {
-        let spec_input = format!("{}@{}", dependency.npm, dependency.version);
         let report = install_internal(
             scope,
-            &spec_input,
+            &dependency.spec_input(),
             Some(alias),
             inherited_aliases.contains(alias),
+            true,
             true,
             registry,
         )?;
@@ -686,33 +1046,77 @@ pub fn outdated(
     let lock = crate::project_lock::read_project_lock(repo_root)?;
     let mut rows = Vec::new();
     for (alias, dependency) in &manifest.packages {
-        let current = lock
-            .as_ref()
-            .and_then(|lock| lock.package_entry(alias))
-            .map(|entry| entry.resolved_version.clone())
-            .unwrap_or_else(|| "unlocked".to_string());
-        let metadata = crate::registry::fetch_metadata(registry.base(), &dependency.npm)?;
-        let versions = metadata.version_list();
-        let selector = parse_selector(&dependency.version)?;
-        let wanted = core_distribution::resolve_version(
-            &dependency.npm,
-            &versions,
-            &metadata.dist_tags,
-            &selector,
-        )
-        .map_err(ctx_traits_core::Error::from)?;
-        let latest = metadata
-            .dist_tags
-            .get("latest")
-            .cloned()
-            .unwrap_or_else(|| wanted.clone());
-        rows.push(OutdatedRow {
-            alias: alias.clone(),
-            package: dependency.npm.clone(),
-            current,
-            wanted,
-            latest,
-        });
+        match dependency.as_npm() {
+            Some((npm, version)) => {
+                let current = lock
+                    .as_ref()
+                    .and_then(|lock| lock.package_entry(alias))
+                    .map(|entry| entry.resolved_version.clone())
+                    .unwrap_or_else(|| "unlocked".to_string());
+                let metadata = crate::registry::fetch_metadata(registry.base(), npm)?;
+                let versions = metadata.version_list();
+                let selector = parse_selector(version)?;
+                let wanted = core_distribution::resolve_version(
+                    npm,
+                    &versions,
+                    &metadata.dist_tags,
+                    &selector,
+                )
+                .map_err(ctx_traits_core::Error::from)?;
+                let latest = metadata
+                    .dist_tags
+                    .get("latest")
+                    .cloned()
+                    .unwrap_or_else(|| wanted.clone());
+                rows.push(OutdatedRow {
+                    alias: alias.clone(),
+                    transport: "npm".to_string(),
+                    package: Some(npm.to_string()),
+                    path: None,
+                    current: Some(current),
+                    wanted: Some(wanted),
+                    latest: Some(latest),
+                    locked_tree_digest: None,
+                    current_tree_digest: None,
+                    drift: None,
+                });
+            }
+            None => {
+                // A path-transport dependency (P535) has no registry range
+                // to be "outdated" against: its drift concept is the locked
+                // full-tree digest versus a fresh restage of the current
+                // source, computed read-only here (no vendor/lock write).
+                let Some(relative_path) = dependency.as_path() else {
+                    continue;
+                };
+                let locked_tree_digest = lock
+                    .as_ref()
+                    .and_then(|lock| lock.package_entry(alias))
+                    .map(|entry| entry.tree_digest.clone());
+                let current_tree_digest = match stage_local_package(repo_root, relative_path) {
+                    Ok(local) => Some(crate::registry::compute_tree_digest(
+                        &local.staged.staging_root,
+                    )?),
+                    Err(_) => None,
+                };
+                let drift = match (&locked_tree_digest, &current_tree_digest) {
+                    (Some(locked), Some(current)) => Some(locked != current),
+                    _ => None,
+                };
+                rows.push(OutdatedRow {
+                    alias: alias.clone(),
+                    transport: "path".to_string(),
+                    package: None,
+                    path: Some(relative_path.to_string()),
+                    current: None,
+                    wanted: None,
+                    latest: None,
+                    locked_tree_digest,
+                    current_tree_digest,
+                    drift,
+                });
+            }
+        }
     }
     Ok(rows)
 }
@@ -725,14 +1129,39 @@ pub fn info(
     spec_input: &str,
     registry: RegistryOptions<'_>,
 ) -> crate::Result<InfoReport> {
-    let _ = repo_root;
-    let spec = core_distribution::parse_spec(spec_input).map_err(ctx_traits_core::Error::from)?;
-    let staged = stage_npm_package(&spec, registry)?;
-    let claim_label = match staged.claim_verdict {
-        core_distribution::ClaimVerification::Absent => CLAIM_ABSENT,
-        core_distribution::ClaimVerification::Verified => CLAIM_VERIFIED,
-    };
-    let traits = staged
+    match core_distribution::parse_install_spec(spec_input).map_err(ctx_traits_core::Error::from)? {
+        InstallSpec::Npm(spec) => {
+            let staged = stage_npm_package(&spec, registry)?;
+            let claim_label = match staged.claim_verdict {
+                core_distribution::ClaimVerification::Absent => CLAIM_ABSENT,
+                core_distribution::ClaimVerification::Verified => CLAIM_VERIFIED,
+            };
+            let traits = trait_info_from_staged(&staged);
+            Ok(InfoReport {
+                transport: "npm".to_string(),
+                package: Some(spec.package.full()),
+                path: None,
+                resolved_version: Some(staged.resolved_version),
+                claim: claim_label.to_string(),
+                traits,
+            })
+        }
+        InstallSpec::Path(path_spec) => {
+            let local = stage_local_package(repo_root, &path_spec.relative_path)?;
+            Ok(InfoReport {
+                transport: "path".to_string(),
+                package: None,
+                path: Some(path_spec.relative_path),
+                resolved_version: None,
+                claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
+                traits: trait_info_from_staged(&local.staged),
+            })
+        }
+    }
+}
+
+fn trait_info_from_staged(staged: &StagedPackage) -> Vec<TraitInfo> {
+    staged
         .traits
         .iter()
         .map(|t| TraitInfo {
@@ -744,13 +1173,7 @@ pub fn info(
             resource_roots: t.capabilities.resource_roots.clone(),
             agent_roles: t.capabilities.agent_roles.clone(),
         })
-        .collect();
-    Ok(InfoReport {
-        package: spec.package.full(),
-        resolved_version: staged.resolved_version,
-        claim: claim_label.to_string(),
-        traits,
-    })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -759,6 +1182,13 @@ pub fn info(
 
 pub(crate) struct StagedTrait {
     pub(crate) id: String,
+    /// The native family leaf selector this trait resolved from, or `None`
+    /// for an ordinary (non-family) trait (P535).
+    pub(crate) variant: Option<String>,
+    /// `true` when `variant` is the family's declared default leaf.
+    pub(crate) is_default_variant: bool,
+    /// Legacy hyphenated package aliases this leaf publishes.
+    pub(crate) aliases: Vec<String>,
     pub(crate) canonical_path: String,
     /// The discovered trait package's own root, relative to the staging
     /// root (e.g. `packages/foo`, or empty for a package rooted at the
@@ -790,6 +1220,14 @@ pub struct LocalTraitPackage {
     pub manifest_path: Utf8PathBuf,
     pub package_manifest: Option<ctx_traits_core::manifest::PackageManifest>,
     pub loaded: LoadedDependency,
+    /// The native family leaf selector this package resolved from (e.g.
+    /// `"quick"`), or `None` for an ordinary (non-family) package (P535).
+    pub variant: Option<String>,
+    /// `true` when `variant` is the family's declared default leaf.
+    pub is_default_variant: bool,
+    /// Legacy hyphenated package aliases this leaf publishes. Empty for a
+    /// non-family package.
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -826,6 +1264,17 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
     let mut packages = Vec::new();
     for discovered_package in discovered {
         let package_manifest = read_package_manifest(&discovered_package.absolute_root)?;
+        let relative_root_label = discovered_package.relative_root.as_str().trim_matches('/');
+        if let Some(manifest) = &package_manifest {
+            if let Some(family_packages) = family_leaf_local_packages(
+                &discovered_package.absolute_root,
+                relative_root_label,
+                manifest,
+            )? {
+                packages.extend(family_packages);
+                continue;
+            }
+        }
         let Some(manifest_path) = canonical_manifest(
             &discovered_package.absolute_root,
             package_manifest.is_some(),
@@ -833,7 +1282,7 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
             continue;
         };
         let loaded = crate::dependency::load_dependency_package(
-            discovered_package.relative_root.as_str().trim_matches('/'),
+            relative_root_label,
             package_manifest
                 .as_ref()
                 .map(|manifest| manifest.package.id.as_str()),
@@ -847,11 +1296,18 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
             manifest_path,
             package_manifest,
             loaded,
+            variant: None,
+            is_default_variant: false,
+            aliases: Vec::new(),
         });
     }
     if packages.is_empty() {
         if let Some(package_manifest) = read_package_manifest(root)? {
-            if let Some(manifest_path) = canonical_manifest(root, true) {
+            if let Some(family_packages) =
+                family_leaf_local_packages(root, "self", &package_manifest)?
+            {
+                packages.extend(family_packages);
+            } else if let Some(manifest_path) = canonical_manifest(root, true) {
                 let loaded = crate::dependency::load_dependency_package(
                     "self",
                     Some(package_manifest.package.id.as_str()),
@@ -863,6 +1319,9 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
                     manifest_path,
                     package_manifest: Some(package_manifest),
                     loaded,
+                    variant: None,
+                    is_default_variant: false,
+                    aliases: Vec::new(),
                 });
             }
         }
@@ -941,6 +1400,53 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
         canonical_digests,
         excluded,
     })
+}
+
+/// When `root`'s package manifest declares a native `[family]` table
+/// (P530/P531), enumerate one [`LocalTraitPackage`] per declared leaf instead
+/// of the single canonical document ordinary (non-family) packages resolve
+/// to — a folded family package (e.g. `.ctx/traits/packages/implement/`)
+/// otherwise has no single `generated/index.toml`, so treating it like an
+/// ordinary package would silently install zero or one of its variants
+/// (P535 risk). Returns `Ok(None)` when `root` is not a native family at
+/// all, letting the caller fall through to ordinary single-trait resolution.
+fn family_leaf_local_packages(
+    root: &Utf8Path,
+    relative_root_label: &str,
+    package_manifest: &ctx_traits_core::manifest::PackageManifest,
+) -> crate::Result<Option<Vec<LocalTraitPackage>>> {
+    let package_manifest_path = crate::layout::package_manifest_path(root);
+    let Some(table) = crate::family_manifest::read_family_table(&package_manifest_path)? else {
+        return Ok(None);
+    };
+    let mut packages = Vec::new();
+    for (selector, leaf) in &table.leaves {
+        let leaf_manifest_path = root.join(&leaf.relative_path);
+        // Family leaf ids are read from the leaf's own canonical document,
+        // not asserted against the family package's own `[package].id`: one
+        // folded package legitimately publishes several distinct trait ids
+        // (e.g. `implement` and `implement:quick`'s underlying id). Real
+        // folded packages instead share one `id` across every leaf and
+        // differ only by `variant` — `selector`/`is_default_variant`/
+        // `aliases` below are what let lock/resolution tell them apart
+        // (P535 fix: they used to collapse onto `loaded.id` alone).
+        let loaded = crate::dependency::load_dependency_package(
+            relative_root_label,
+            None,
+            None,
+            &leaf_manifest_path,
+        )?;
+        packages.push(LocalTraitPackage {
+            root: root.to_path_buf(),
+            manifest_path: leaf_manifest_path,
+            package_manifest: Some(package_manifest.clone()),
+            loaded,
+            variant: Some(selector.clone()),
+            is_default_variant: selector == &table.default,
+            aliases: leaf.aliases.clone(),
+        });
+    }
+    Ok(Some(packages))
 }
 
 fn canonical_manifest(root: &Utf8Path, has_package_manifest: bool) -> Option<Utf8PathBuf> {
@@ -1049,9 +1555,32 @@ pub(crate) fn stage_npm_package(
     }
 
     let claim = crate::registry::load_publisher_claim(&staging_root)?;
+    let (traits, computed_digests) = staged_traits_from_inspection(&inspection, &staging_root)?;
 
+    let claim_verdict =
+        core_distribution::verify_publisher_claim(claim.as_ref(), &computed_digests)
+            .map_err(ctx_traits_core::Error::from)?;
+
+    Ok(StagedPackage {
+        resolved_version,
+        integrity,
+        staging_root,
+        traits,
+        claim_verdict,
+    })
+}
+
+/// Shared trait-loading/digesting core of [`stage_npm_package`] and
+/// [`stage_local_package`]: validates every discovered trait's schema
+/// version, computes its canonical digest keyed by staging-root-relative
+/// path, and projects its capability surface. Neither staging pipeline can
+/// vendor a trait the other would have refused.
+fn staged_traits_from_inspection(
+    inspection: &LocalPackageInspection,
+    staging_root: &Utf8Path,
+) -> crate::Result<(Vec<StagedTrait>, BTreeMap<String, String>)> {
     let mut traits = Vec::new();
-    let mut computed_digests = std::collections::BTreeMap::new();
+    let mut computed_digests = BTreeMap::new();
     for inspected_package in &inspection.packages {
         let manifest_path = &inspected_package.manifest_path;
         let loaded = &inspected_package.loaded;
@@ -1072,7 +1601,7 @@ pub(crate) fn stage_npm_package(
             .into());
         }
         let canonical_path = manifest_path
-            .strip_prefix(&staging_root)
+            .strip_prefix(staging_root)
             .unwrap_or(manifest_path)
             .to_string();
         computed_digests.insert(
@@ -1082,10 +1611,13 @@ pub(crate) fn stage_npm_package(
         let capabilities = core_distribution::project_capability_surface(&loaded.trait_ref)?;
         traits.push(StagedTrait {
             id: loaded.id.clone(),
+            variant: inspected_package.variant.clone(),
+            is_default_variant: inspected_package.is_default_variant,
+            aliases: inspected_package.aliases.clone(),
             canonical_path,
             package_root: inspected_package
                 .root
-                .strip_prefix(&staging_root)
+                .strip_prefix(staging_root)
                 .unwrap_or(&inspected_package.root)
                 .as_str()
                 .trim_matches('/')
@@ -1098,18 +1630,111 @@ pub(crate) fn stage_npm_package(
             capabilities,
         });
     }
+    Ok((traits, computed_digests))
+}
 
-    let claim_verdict =
-        core_distribution::verify_publisher_claim(claim.as_ref(), &computed_digests)
-            .map_err(ctx_traits_core::Error::from)?;
+/// A private staged copy of a project-scoped local `path:` source (P535),
+/// with an RAII guard that removes the temporary staging directory once the
+/// caller is done with it (successful publication copies it again into the
+/// vendor tree; it is never itself the long-lived vendor copy, unlike an
+/// npm tarball's registry-cache extraction root).
+pub(crate) struct StagedLocalPackage {
+    pub(crate) staged: StagedPackage,
+    _cleanup: TempStagingGuard,
+}
 
-    Ok(StagedPackage {
-        resolved_version,
-        integrity,
-        staging_root,
-        traits,
-        claim_verdict,
+pub(crate) struct TempStagingGuard(Utf8PathBuf);
+
+impl Drop for TempStagingGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Stage a project-scoped local `path:` source (P535): copy `relative_path`
+/// (resolved against `repo_root`, which may legitimately climb outside it
+/// via `..` to reach a sibling repository) into a private staging directory
+/// via the same no-symlink, no-special-file, exclude-aware copy publication
+/// uses ([`crate::publish::copy_safe`]), then inspect and digest the STAGED
+/// copy rather than the live source — closing the inspect-then-copy race a
+/// second read of the live source would otherwise leave open. Reuses
+/// [`inspect_local_package`] (and, through it, native family enumeration)
+/// exactly like npm staging, so neither pipeline can vendor a package the
+/// other would refuse.
+pub(crate) fn stage_local_package(
+    repo_root: &Utf8Path,
+    relative_path: &str,
+) -> crate::Result<StagedLocalPackage> {
+    let source_root = repo_root.join(relative_path);
+    let metadata = std::fs::symlink_metadata(&source_root).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: source_root.to_string(),
+            source,
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(crate::publish::Error::Unsafe {
+            path: source_root.to_string(),
+            message: "path: source root must not be a symlink".to_string(),
+        }
+        .into());
+    }
+    if !metadata.is_dir() {
+        return Err(crate::publish::Error::Unsafe {
+            path: source_root.to_string(),
+            message: "path: source root must be a directory".to_string(),
+        }
+        .into());
+    }
+
+    let staging_root = local_staging_path();
+    let excludes = crate::harness_config::resolve_pack_excludes(&source_root);
+    crate::publish::copy_safe(&source_root, &staging_root, &excludes)?;
+    let cleanup = TempStagingGuard(staging_root.clone());
+
+    let inspection = inspect_local_package(&staging_root)?;
+    if inspection.packages.is_empty() {
+        return Err(crate::environment::Error::Filesystem {
+            path: source_root.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "path: {relative_path} does not contain a trait package (no {} declaring a canonical trait)",
+                    crate::layout::PACKAGE_MANIFEST
+                ),
+            ),
+        }
+        .into());
+    }
+
+    let (traits, _computed_digests) = staged_traits_from_inspection(&inspection, &staging_root)?;
+
+    Ok(StagedLocalPackage {
+        staged: StagedPackage {
+            resolved_version: String::new(),
+            integrity: String::new(),
+            staging_root,
+            traits,
+            claim_verdict: core_distribution::ClaimVerification::Absent,
+        },
+        _cleanup: cleanup,
     })
+}
+
+/// Monotonic per-process counter backstopping [`local_staging_path`]'s
+/// uniqueness: `epoch_nanos()` alone is not fine-grained enough to guarantee
+/// two concurrent staging calls in the same process (e.g. two overlapping
+/// `dependency add path:...` operations, or two tests in one binary) never
+/// compute the identical directory name, which would otherwise merge their
+/// copied trees together.
+static LOCAL_STAGING_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn local_staging_path() -> Utf8PathBuf {
+    let counter = LOCAL_STAGING_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let suffix = format!("{}-{}-{counter}", std::process::id(), epoch_nanos());
+    Utf8PathBuf::from_path_buf(std::env::temp_dir())
+        .unwrap_or_else(|_| Utf8PathBuf::from("/tmp"))
+        .join(format!("ctx-traits-path-stage-{suffix}"))
 }
 
 /// Deterministic, repo-keyed root for the single shared registry cache
@@ -1203,6 +1828,29 @@ fn resolve_base(spec_input: &str, registry: RegistryOptions<'_>) -> crate::Resul
                 std::io::ErrorKind::InvalidData,
                 format!(
                     "extends base {} itself declares extends; nested extends is refused (P443 is depth-one only)",
+                    spec.package.full()
+                ),
+            ),
+        }
+        .into());
+    }
+    // A base's `[dependencies]` entry naming a `path:` source is
+    // machine/repository-specific to the *base's own* publication — it
+    // cannot mean anything to a consumer inheriting it through `extends`
+    // (P535 explicitly excludes inherited path declarations). Refuse the
+    // whole base rather than silently dropping just that one entry, so the
+    // author sees exactly why inheritance failed.
+    if let Some((alias, _)) = manifest
+        .packages
+        .iter()
+        .find(|(_, dependency)| dependency.as_path().is_some())
+    {
+        return Err(crate::environment::Error::Filesystem {
+            path: manifest_path.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "extends base {} declares a path: dependency ({alias:?}), which cannot be inherited; only npm dependencies may appear in an extends base's [dependencies]",
                     spec.package.full()
                 ),
             ),
@@ -1464,17 +2112,18 @@ struct PackageOwnership {
 /// updated lock text, and a complete vendor-directory copy before touching
 /// any live file, then commits via symlink-safe atomic writes and a
 /// rename-based vendor swap. A failure at any commit step restores every
-/// artifact already touched by this call.
+/// artifact already touched by this call. Returns the computed tree digest,
+/// so a caller building a report never has to recompute it a second time.
 fn publish_staged_package(
     scope: &DistributionScope,
     alias: &str,
-    package: &str,
-    requested: &str,
+    identity: &PackageIdentity,
     staged: &StagedPackage,
     ownership: PackageOwnership,
     audit_action: Option<crate::audit_journal::AuditAction>,
-) -> crate::Result<()> {
-    reject_alias_collision(scope, alias, package)?;
+) -> crate::Result<String> {
+    let identity_key = identity.identity_key();
+    reject_alias_collision(scope, alias, &identity_key)?;
 
     // An inherited (P443 `extends`-merged) package is never declared in the
     // local `[dependencies]` table: only its lock/vendor evidence is
@@ -1489,8 +2138,7 @@ fn publish_staged_package(
         let manifest_text = prepare_manifest_dependency_text(
             manifest_snapshot.previous.as_deref(),
             alias,
-            package,
-            requested,
+            identity,
             &manifest_path,
         )?;
         Some((manifest_snapshot, manifest_text))
@@ -1501,26 +2149,51 @@ fn publish_staged_package(
     let lock_snapshot = FileSnapshot::capture(&lock_path)?;
     let mut lock = scope.read_lock()?.unwrap_or_default();
     if let Some(existing) = lock.package_entry(alias) {
-        if existing.package != package && !ownership.allow_transition {
-            return Err(alias_collision_error(alias, &existing.package, package));
+        if existing.identity() != identity_key && !ownership.allow_transition {
+            return Err(alias_collision_error(
+                alias,
+                &existing.identity(),
+                &identity_key,
+            ));
         }
     }
     let vendored_path = scope.vendored_path_string(alias);
     let tree_digest = crate::registry::compute_tree_digest(&staged.staging_root)?;
+    let (package, requested, resolved_version, integrity, path) = match identity {
+        PackageIdentity::Npm { package, requested } => (
+            package.clone(),
+            requested.clone(),
+            staged.resolved_version.clone(),
+            staged.integrity.clone(),
+            String::new(),
+        ),
+        PackageIdentity::Path { path } => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            path.clone(),
+        ),
+    };
     lock.upsert_package(PackageLockEntry {
         alias: alias.to_string(),
-        package: package.to_string(),
-        requested: requested.to_string(),
-        resolved_version: staged.resolved_version.clone(),
-        integrity: staged.integrity.clone(),
+        transport: identity.transport(),
+        package,
+        requested,
+        resolved_version,
+        integrity,
+        path,
         vendored_path,
-        tree_digest,
+        tree_digest: tree_digest.clone(),
         inherited: ownership.inherited,
         traits: staged
             .traits
             .iter()
             .map(|t| TraitLockEntry {
                 id: t.id.clone(),
+                variant: t.variant.clone(),
+                is_default_variant: t.is_default_variant,
+                aliases: t.aliases.clone(),
                 canonical_path: t.canonical_path.clone(),
                 schema_version: t.schema_version.clone(),
                 source_digest: t.source_digest.clone(),
@@ -1662,8 +2335,8 @@ fn publish_staged_package(
             .collect();
         if let Err(err) = append_audit(
             action,
-            package,
-            requested,
+            &identity_key,
+            &identity.requested_display(),
             &staged.resolved_version,
             &trait_digests,
             scope,
@@ -1689,22 +2362,22 @@ fn publish_staged_package(
         let _ = std::fs::remove_dir_all(&vendor_backup);
     }
 
-    Ok(())
+    Ok(tree_digest)
 }
 
 /// Reject publication before any staging work when `alias` is already
-/// declared in the project manifest for a *different* npm package: a
-/// reinstall/update of the same package under its existing alias, or a
+/// declared in the project manifest for a *different* source identity: a
+/// reinstall/update of the same source under its existing alias, or a
 /// first install of a fresh alias, both proceed. A missing manifest means no
 /// alias is yet claimed, but a manifest that exists and fails to parse is
 /// propagated rather than silently treated as collision-free. Called both
-/// up front in `install` (before any remote fetch) and again inside
-/// `publish_staged_package` against the lock as a second, independent
-/// race/drift guard.
+/// up front in `install` (before any remote fetch or local staging) and
+/// again inside `publish_staged_package` against the lock as a second,
+/// independent race/drift guard.
 fn reject_alias_collision(
     scope: &DistributionScope,
     alias: &str,
-    package: &str,
+    identity_key: &str,
 ) -> crate::Result<()> {
     let manifest_path = scope.manifest_path("toml");
     if !manifest_path.exists() {
@@ -1712,8 +2385,13 @@ fn reject_alias_collision(
     }
     let manifest = scope.read_manifest()?;
     if let Some(existing) = manifest.packages.get(alias) {
-        if existing.npm != package {
-            return Err(alias_collision_error(alias, &existing.npm, package));
+        let existing_identity = existing.identity();
+        if existing_identity != identity_key {
+            return Err(alias_collision_error(
+                alias,
+                &existing_identity,
+                identity_key,
+            ));
         }
     }
     Ok(())
@@ -1784,11 +2462,57 @@ fn with_notes(err: crate::Error, notes: Vec<String>) -> crate::Error {
 /// Build the edited `.ctx/traits.toml` text with `alias`'s `[dependencies]`
 /// entry set to `{ npm = package, version = requested }`, without writing
 /// anything. Pure preparation so a parse failure never mutates live state.
+/// `true` when the project manifest already declares `alias` pointing at
+/// `identity_key`. Used by the lock-authoritative repeated-add shortcut to
+/// tell "already declared, nothing to do" apart from "lock/vendor evidence
+/// exists but the `[dependencies]` entry itself is missing or stale",
+/// which still requires a (manifest-only) write.
+fn manifest_declares_identity(
+    scope: &DistributionScope,
+    alias: &str,
+    identity_key: &str,
+) -> crate::Result<bool> {
+    let manifest_path = scope.manifest_path("toml");
+    if !manifest_path.exists() {
+        return Ok(false);
+    }
+    let manifest = scope.read_manifest()?;
+    Ok(manifest
+        .packages
+        .get(alias)
+        .is_some_and(|existing| existing.identity() == identity_key))
+}
+
+/// Write (or repair) only the `[dependencies]` declaration for `alias`,
+/// transactionally, without touching the lock or vendor tree. Used to
+/// restore a manifest entry that went missing under an alias whose
+/// lock/vendor evidence is already correct and must not be restaged or
+/// replaced by this repair.
+fn restore_manifest_dependency_declaration(
+    scope: &DistributionScope,
+    alias: &str,
+    identity: &PackageIdentity,
+) -> crate::Result<()> {
+    let manifest_path = scope.manifest_path("toml");
+    assert_no_symlink_ancestors(&manifest_path, scope.boundary())?;
+    let manifest_snapshot = FileSnapshot::capture(&manifest_path)?;
+    let manifest_text = prepare_manifest_dependency_text(
+        manifest_snapshot.previous.as_deref(),
+        alias,
+        identity,
+        &manifest_path,
+    )?;
+    if let Err(source) = atomic_write(&manifest_path, &manifest_text) {
+        let notes = manifest_snapshot.restore().into_iter().collect();
+        return Err(with_notes(source, notes));
+    }
+    Ok(())
+}
+
 fn prepare_manifest_dependency_text(
     existing_text: Option<&str>,
     alias: &str,
-    package: &str,
-    requested: &str,
+    identity: &PackageIdentity,
     manifest_path: &Utf8Path,
 ) -> crate::Result<String> {
     let text = existing_text
@@ -1813,8 +2537,15 @@ fn prepare_manifest_dependency_text(
             ),
         })?;
     let mut entry = toml_edit::InlineTable::new();
-    entry.insert("npm", toml_edit::Value::from(package));
-    entry.insert("version", toml_edit::Value::from(requested));
+    match identity {
+        PackageIdentity::Npm { package, requested } => {
+            entry.insert("npm", toml_edit::Value::from(package.as_str()));
+            entry.insert("version", toml_edit::Value::from(requested.as_str()));
+        }
+        PackageIdentity::Path { path } => {
+            entry.insert("path", toml_edit::Value::from(path.as_str()));
+        }
+    }
     deps.insert(
         alias,
         toml_edit::Item::Value(toml_edit::Value::InlineTable(entry)),
@@ -1968,10 +2699,10 @@ pub fn reconcile_project_dependencies(
                     inherited_aliases.insert(entry.alias.clone());
                     effective.insert(
                         entry.alias.clone(),
-                        ProjectPackageDependency {
-                            npm: entry.package.clone(),
-                            version: entry.requested.clone(),
-                        },
+                        ProjectPackageDependency::npm(
+                            entry.package.clone(),
+                            entry.requested.clone(),
+                        ),
                     );
                 }
             }
@@ -2017,10 +2748,7 @@ pub fn reconcile_project_dependencies(
                 inherited_aliases.insert(entry.alias.clone());
                 effective.insert(
                     entry.alias.clone(),
-                    ProjectPackageDependency {
-                        npm: entry.package.clone(),
-                        version: entry.requested.clone(),
-                    },
+                    ProjectPackageDependency::npm(entry.package.clone(), entry.requested.clone()),
                 );
             }
         }
@@ -2039,8 +2767,7 @@ pub fn reconcile_project_dependencies(
         // truthful, and so a later stale-entry prune keys off correct
         // evidence.
         let compatible = locked_entry.is_some_and(|entry| {
-            entry.package == dependency.npm
-                && entry.requested == dependency.version
+            entry_matches_declared(entry, dependency)
                 && entry.inherited == inherited_aliases.contains(alias)
         });
         if compatible {
@@ -2051,26 +2778,29 @@ pub fn reconcile_project_dependencies(
             if locked {
                 warnings.push(format!(
                     "dependencies.{alias} drift: vendored content for {} does not match locked evidence (run `ctx traits sync` without --locked to repair)",
-                    dependency.npm
+                    dependency.identity()
                 ));
                 continue;
             }
-            replay_locked_package(repo_root, alias, entry, registry)?;
+            match entry.transport {
+                PackageTransport::Npm => replay_locked_package(repo_root, alias, entry, registry)?,
+                PackageTransport::Path => replay_locked_path_package(repo_root, alias, entry)?,
+            }
             continue;
         }
         if locked {
             warnings.push(format!(
                 "dependencies.{alias} drift: project lock missing or stale for {} (run `ctx traits sync` without --locked, or `ctx traits update {alias}`)",
-                dependency.npm
+                dependency.identity()
             ));
             continue;
         }
-        let spec_input = format!("{}@{}", dependency.npm, dependency.version);
         install_internal(
             &DistributionScope::project(repo_root),
-            &spec_input,
+            &dependency.spec_input(),
             Some(alias),
             inherited_aliases.contains(alias),
+            true,
             true,
             registry,
         )?;
@@ -2103,6 +2833,20 @@ pub fn reconcile_project_dependencies(
     }
 
     Ok(warnings)
+}
+
+/// Whether a locked entry's source evidence still agrees with what the
+/// manifest currently declares: transport-aware sibling of the pre-P535
+/// npm-only `entry.package == dependency.npm && entry.requested ==
+/// dependency.version` comparison.
+fn entry_matches_declared(entry: &PackageLockEntry, dependency: &ProjectPackageDependency) -> bool {
+    match (entry.transport, dependency) {
+        (PackageTransport::Npm, ProjectPackageDependency::Npm { npm, version }) => {
+            &entry.package == npm && &entry.requested == version
+        }
+        (PackageTransport::Path, ProjectPackageDependency::Path { path }) => &entry.path == path,
+        _ => false,
+    }
 }
 
 /// Recompute every locked trait's canonical and resource-manifest digest
@@ -2139,10 +2883,13 @@ fn vendor_matches_lock_resolved(
         Ok(digest) if digest == entry.tree_digest => {}
         _ => return false,
     }
-    for trait_entry in &entry.traits {
-        let Some(manifest_path) = resolved.trait_manifest_paths.get(&trait_entry.id) else {
-            return false;
-        };
+    // Zipped by construction order rather than looked up by id: a native
+    // family package's leaves all share one `id`, so an id-keyed lookup
+    // here would collapse them onto whichever entry happened to win.
+    // `resolved.traits` was built from `entry.traits` in the same order by
+    // `resolve_package_lock_paths_in`, so pairing by position is exact.
+    for (trait_entry, resolved_trait) in entry.traits.iter().zip(resolved.traits.iter()) {
+        let manifest_path = &resolved_trait.path;
         let Ok(loaded) =
             crate::dependency::load_dependency_package(&entry.alias, None, None, manifest_path)
         else {
@@ -2201,8 +2948,10 @@ fn replay_locked_package(
     publish_staged_package(
         &DistributionScope::project(repo_root),
         alias,
-        &entry.package,
-        &entry.requested,
+        &PackageIdentity::Npm {
+            package: entry.package.clone(),
+            requested: entry.requested.clone(),
+        },
         &staged,
         PackageOwnership {
             inherited: entry.inherited,
@@ -2210,6 +2959,51 @@ fn replay_locked_package(
         },
         None,
     )
+    .map(|_tree_digest| ())
+}
+
+/// Restage a locked path-transport package's current source and republish it
+/// only when the freshly staged tree digest still matches the locked
+/// evidence exactly — the ordinary-reconciliation half of P535's
+/// lock-authoritative propagation rule: a vendor tree that went missing (or
+/// was tampered with) is repaired by reproducing the exact locked bytes, but
+/// a producer that has since moved on to different bytes is refused rather
+/// than silently adopted. `ctx traits dependency update <alias>` is the only
+/// operation that accepts changed source bytes.
+fn replay_locked_path_package(
+    repo_root: &Utf8Path,
+    alias: &str,
+    entry: &PackageLockEntry,
+) -> crate::Result<()> {
+    let local = stage_local_package(repo_root, &entry.path)?;
+    let tree_digest = crate::registry::compute_tree_digest(&local.staged.staging_root)?;
+    if tree_digest != entry.tree_digest {
+        return Err(crate::environment::Error::Filesystem {
+            path: entry.path.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "path source for {alias:?} ({}) no longer matches the locked snapshot; run `ctx traits dependency update {alias}` to accept the change",
+                    entry.path
+                ),
+            ),
+        }
+        .into());
+    }
+    publish_staged_package(
+        &DistributionScope::project(repo_root),
+        alias,
+        &PackageIdentity::Path {
+            path: entry.path.clone(),
+        },
+        &local.staged,
+        PackageOwnership {
+            inherited: false,
+            allow_transition: false,
+        },
+        None,
+    )
+    .map(|_tree_digest| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -2263,10 +3057,18 @@ fn find_installed_package(
     let Some(lock) = scope.read_lock()? else {
         return Ok(None);
     };
+    // Matches by alias (every transport), by bare npm package name (npm
+    // transport only — `entry.package` is empty for a path entry, so this
+    // never spuriously matches a blank operand), or by full source identity
+    // (`"path:<path>"` for a path entry, which `entry.identity()` already
+    // subsumes the npm-name case for) — a path-transport package has no
+    // npm package name to be found by otherwise.
     let matches: Vec<&PackageLockEntry> = lock
         .packages
         .iter()
-        .filter(|entry| entry.alias == operand || entry.package == operand)
+        .filter(|entry| {
+            entry.alias == operand || entry.package == operand || entry.identity() == operand
+        })
         .collect();
     match matches.as_slice() {
         [] => Ok(None),
@@ -2316,6 +3118,60 @@ pub fn approve_package(
     reason: Option<String>,
 ) -> crate::Result<PackageApproveReport> {
     let resolved = resolve_installed_package(repo_root, operand)?;
+    approve_resolved_package(resolved, reason)
+}
+
+/// Whether `operand` (no `:`, so never a `family:variant` reference) names an
+/// *installed* package — any transport — whose locked evidence makes it a
+/// native family: at least one trait entry carrying explicit `variant`
+/// metadata (only ever populated for a family leaf; see `TraitLockEntry`).
+/// Trait *count* is deliberately not evidence: an ordinary multi-trait npm
+/// package has no family structure and must keep resolving/approving its one
+/// named trait exactly as before P535. Used by `trust approve` (P535) to
+/// route a default-aliased vendored family package (e.g. a folded
+/// `implement` package installed via `path:`) through whole-package approval
+/// instead of ordinary named-trait resolution, which would only ever resolve
+/// to — and so only ever approve — the family's default leaf. Returns
+/// `Ok(None)` both when `operand` is colon-shaped and when no installed
+/// package matches it at all, so the caller falls through to its existing
+/// trait-then-package resolution unchanged in either case.
+pub fn resolve_family_package(
+    repo_root: Option<&Utf8Path>,
+    operand: &str,
+) -> crate::Result<Option<ResolvedInstalledPackage>> {
+    if operand.contains(':') {
+        return Ok(None);
+    }
+    let resolved = if let Some(repo_root) = repo_root {
+        let scope = DistributionScope::project(repo_root);
+        find_installed_package(&scope, operand)?
+            .map(|entry| ResolvedInstalledPackage { scope, entry })
+    } else {
+        None
+    };
+    let resolved = match resolved {
+        Some(resolved) => Some(resolved),
+        None => {
+            let scope = DistributionScope::global()?;
+            find_installed_package(&scope, operand)?
+                .map(|entry| ResolvedInstalledPackage { scope, entry })
+        }
+    };
+    let Some(resolved) = resolved else {
+        return Ok(None);
+    };
+    let is_family = resolved.entry.traits.iter().any(|t| t.variant.is_some());
+    Ok(is_family.then_some(resolved))
+}
+
+/// Core of [`approve_package`], shared with [`resolve_family_package`]'s
+/// caller so a package already resolved (e.g. a vendored native family found
+/// by alias) is verified and approved through the identical vendor/lock
+/// re-verification and single-locked-write path, never a second copy.
+pub fn approve_resolved_package(
+    resolved: ResolvedInstalledPackage,
+    reason: Option<String>,
+) -> crate::Result<PackageApproveReport> {
     // Re-verify the vendored tree and every trait's canonical/resource
     // digest against the lock's recorded evidence immediately before
     // writing trust: `traits.lock` alone is not proof the bytes on disk
@@ -2330,7 +3186,7 @@ pub fn approve_package(
                 std::io::ErrorKind::InvalidData,
                 format!(
                     "vendored content for package {:?} at {} scope does not match locked evidence; run `ctx traits update {}{}` to repair before approving",
-                    resolved.entry.package,
+                    resolved.entry.identity(),
                     resolved.scope.audit_scope(),
                     resolved.entry.alias,
                     if matches!(resolved.scope, DistributionScope::Global(_)) {
@@ -2364,7 +3220,7 @@ pub fn approve_package(
         .collect();
     let written = crate::trust::update_digests_locked(&updates)?;
     Ok(PackageApproveReport {
-        package: resolved.entry.package,
+        package: resolved.entry.identity(),
         alias: resolved.entry.alias,
         scope: resolved.scope.audit_scope().to_string(),
         digests,
@@ -2406,6 +3262,41 @@ pub fn vendored_trait_ids(scope: &DistributionScope) -> crate::Result<Vec<Vendor
     Ok(refs)
 }
 
+/// Whether `scope`'s locked evidence carries a native family package (P535)
+/// publishing `variant` under `id` — i.e. more than one locked entry shares
+/// `id`, or the matching entry is itself marked with a `variant`. Gates
+/// [`crate::run`]'s family-first resolution seam so a *vendored* family
+/// leaf is tried there exactly when a *repo-authored* one already would be,
+/// without also short-circuiting an ordinary single-id vendored package
+/// ahead of repo-authored shadow precedence.
+pub fn vendored_family_leaf_exists(
+    scope: &DistributionScope,
+    id: &str,
+    variant: &str,
+) -> crate::Result<bool> {
+    let Some(lock) = scope.read_lock()? else {
+        return Ok(false);
+    };
+    for package in &lock.packages {
+        let matches: Vec<_> = package.traits.iter().filter(|t| t.id == id).collect();
+        if matches.is_empty() {
+            continue;
+        }
+        let is_family = matches.len() > 1 || matches.iter().any(|t| t.variant.is_some());
+        if !is_family {
+            continue;
+        }
+        if variant == "default"
+            || matches
+                .iter()
+                .any(|t| t.variant.as_deref() == Some(variant))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 // ---------------------------------------------------------------------------
 // Vendored trait-id resolution (shared by project and global tiers, P439)
 // ---------------------------------------------------------------------------
@@ -2424,10 +3315,31 @@ pub fn resolve_vendored_trait_id(
     scope: &DistributionScope,
     id: &str,
 ) -> crate::Result<Option<(Utf8PathBuf, String)>> {
+    resolve_vendored_trait_variant(scope, id, None)
+}
+
+/// [`resolve_vendored_trait_id`], generalized with an optional native family
+/// variant selector (P535 fix): a folded family package's leaves (e.g.
+/// `.ctx/traits/packages/implement/`) all share one `id`, distinguished only
+/// by `variant`/`is_default_variant` — `variant: None` (or `Some("default")`)
+/// resolves the family's declared default leaf, `Some(other)` resolves that
+/// exact selector.
+pub fn resolve_vendored_trait_variant(
+    scope: &DistributionScope,
+    id: &str,
+    variant: Option<&str>,
+) -> crate::Result<Option<(Utf8PathBuf, String)>> {
     let Some(lock) = scope.read_lock()? else {
         return Ok(None);
     };
     for package in &lock.packages {
+        if !package
+            .traits
+            .iter()
+            .any(|trait_entry| trait_entry.id == id)
+        {
+            continue;
+        }
         for trait_entry in &package.traits {
             if trait_entry.id != id {
                 continue;
@@ -2438,32 +3350,100 @@ pub fn resolve_vendored_trait_id(
                     source: std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!(
-                            "trait {id:?} (npm package {}, vendored at {}) declares schema-version {} which this binary does not support; upgrade ctx",
-                            package.package, package.vendored_path, trait_entry.schema_version
+                            "trait {id:?} ({}, vendored at {}) declares schema-version {} which this binary does not support; upgrade ctx",
+                            package.identity(),
+                            package.vendored_path,
+                            trait_entry.schema_version
                         ),
                     ),
                 }
                 .into());
             }
-            let resolved = scope.resolve_lock_paths(package)?;
-            let path = resolved
-                .trait_manifest_paths
-                .get(id)
-                .cloned()
-                .expect("trait_entry.id == id was just matched above");
-            let origin = match scope {
-                DistributionScope::Project(_) => {
-                    format!("npm:{}@{}", package.package, package.resolved_version)
-                }
-                DistributionScope::Global(_) => {
-                    format!(
-                        "npm (global):{}@{}",
-                        package.package, package.resolved_version
-                    )
-                }
-            };
-            return Ok(Some((path, origin)));
         }
+        let resolved = scope.resolve_lock_paths(package)?;
+        let path = match variant {
+            None | Some("default") => resolved.path_for_id(id),
+            Some(selector) => resolved.path_for_variant(id, selector),
+        };
+        let Some(path) = path.cloned() else {
+            continue;
+        };
+        let origin = match (scope, package.transport) {
+            (DistributionScope::Project(_), PackageTransport::Npm) => {
+                format!("npm:{}@{}", package.package, package.resolved_version)
+            }
+            (DistributionScope::Global(_), PackageTransport::Npm) => {
+                format!(
+                    "npm (global):{}@{}",
+                    package.package, package.resolved_version
+                )
+            }
+            // Path installs are project-scoped only (P535): the global
+            // arm here is unreachable in practice, but is handled rather
+            // than panicking should a lock ever carry one.
+            (_, PackageTransport::Path) => format!("path:{}", package.path),
+        };
+        return Ok(Some((path, origin)));
+    }
+    Ok(None)
+}
+
+/// Resolve a legacy hyphenated package alias (e.g. `implement-quick`)
+/// published by a native family leaf, at `scope`, via that scope's locked
+/// evidence (P535 fix — the pre-existing sibling-directory alias shape
+/// resolved only against repo-authored packages).
+pub fn resolve_vendored_trait_alias(
+    scope: &DistributionScope,
+    alias: &str,
+) -> crate::Result<Option<(Utf8PathBuf, String)>> {
+    let Some(lock) = scope.read_lock()? else {
+        return Ok(None);
+    };
+    for package in &lock.packages {
+        if !package
+            .traits
+            .iter()
+            .any(|trait_entry| trait_entry.aliases.iter().any(|a| a == alias))
+        {
+            continue;
+        }
+        for trait_entry in &package.traits {
+            if !trait_entry.aliases.iter().any(|a| a == alias) {
+                continue;
+            }
+            if !ctx_traits_core::r#trait::is_schema_version_supported(&trait_entry.schema_version) {
+                return Err(crate::environment::Error::Filesystem {
+                    path: scope.lock_path().to_string(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "trait alias {alias:?} ({}, vendored at {}) declares schema-version {} which this binary does not support; upgrade ctx",
+                            package.identity(),
+                            package.vendored_path,
+                            trait_entry.schema_version
+                        ),
+                    ),
+                }
+                .into());
+            }
+        }
+        let resolved = scope.resolve_lock_paths(package)?;
+        let Some(path) = resolved.path_for_alias(alias).cloned() else {
+            continue;
+        };
+        let origin = match (scope, package.transport) {
+            (DistributionScope::Project(_), PackageTransport::Npm) => {
+                format!("npm:{}@{}", package.package, package.resolved_version)
+            }
+            (DistributionScope::Global(_), PackageTransport::Npm) => {
+                format!(
+                    "npm (global):{}@{}",
+                    package.package, package.resolved_version
+                )
+            }
+            (_, PackageTransport::Path) => format!("path:{}", package.path),
+        };
+        return Ok(Some((path, origin)));
     }
     Ok(None)
 }
@@ -2633,5 +3613,563 @@ hint = "generated artifact accidentally declared as a resource"
         let overridden = vec!["dist".to_string()];
         assert!(crate::publish::is_pack_excluded("dist", &overridden));
         assert!(!crate::publish::is_pack_excluded("target", &overridden));
+    }
+}
+
+#[cfg(test)]
+mod path_distribution_tests {
+    use super::*;
+
+    fn scratch_root(tag: &str) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir()).expect("temp dir is UTF-8");
+        let dir = root.join(format!(
+            "ctx-path-dist-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(dir.as_std_path()).expect("clear stale scratch dir");
+        }
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir
+    }
+
+    fn trait_doc(id: &str, summary: &str) -> String {
+        format!(
+            r#"id = "{id}"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Demo"
+summary = "{summary}"
+
+[procedure]
+description = "Run one deterministic command."
+
+[[slot]]
+id = "notified"
+schema = "schema:text"
+
+[[procedure.sequence]]
+id = "command"
+title = "Run command"
+kind = "command"
+cmd = "true"
+output = ["slot:notified"]
+"#
+        )
+    }
+
+    fn write_single_trait_package(root: &Utf8Path, id: &str, summary: &str) {
+        std::fs::create_dir_all(root.join("generated").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("package.toml").as_std_path(),
+            format!(
+                "[package]\nid = {id:?}\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/index.toml").as_std_path(),
+            trait_doc(id, summary),
+        )
+        .unwrap();
+    }
+
+    /// A native family leaf's canonical document (P535 fix): unlike
+    /// `trait_doc`, every leaf of a real folded family package shares the
+    /// same `id` and is told apart only by `variant`, never by encoding the
+    /// selector into the id itself.
+    fn family_leaf_trait_doc(id: &str, variant: &str, summary: &str) -> String {
+        format!(
+            r#"id = "{id}"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Demo"
+summary = "{summary}"
+variant = "{variant}"
+"#
+        )
+    }
+
+    fn write_family_package(root: &Utf8Path) {
+        std::fs::create_dir_all(root.join("generated/quick").as_std_path()).unwrap();
+        std::fs::create_dir_all(root.join("generated/default").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("package.toml").as_std_path(),
+            r#"[package]
+id = "family-demo"
+version = "0.1.0"
+name = "Family Demo"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.leaf.default]
+path = "generated/default/index.toml"
+
+[family.leaf.quick]
+path = "generated/quick/index.toml"
+aliases = ["family-demo-quick"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/default/index.toml").as_std_path(),
+            family_leaf_trait_doc("family-demo", "default", "default leaf"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/quick/index.toml").as_std_path(),
+            family_leaf_trait_doc("family-demo", "quick", "quick leaf"),
+        )
+        .unwrap();
+    }
+
+    /// A path package stages, vendors, locks, removes, and re-installs
+    /// transactionally, and ordinary reconciliation is a no-op once
+    /// manifest, lock, and vendor tree all agree.
+    #[test]
+    fn install_path_package_stages_vendors_locks_and_reinstalls() {
+        let scratch = scratch_root("basic");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        let report = install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect("path install should succeed");
+        assert_eq!(report.transport, "path");
+        assert_eq!(report.alias, "demo");
+        assert_eq!(report.path.as_deref(), Some("../producer/demo"));
+        assert_eq!(report.traits.len(), 1);
+        assert_eq!(report.traits[0].id, "demo");
+        assert!(report.integrity.is_none());
+        assert!(report.resolved_version.is_none());
+        assert!(!report.tree_digest.is_empty());
+
+        let vendored = scope
+            .vendor_root()
+            .join("demo")
+            .join("generated/index.toml");
+        assert!(vendored.is_file());
+
+        let lock = scope.read_lock().unwrap().unwrap();
+        let entry = lock.package_entry("demo").unwrap();
+        assert_eq!(entry.transport, PackageTransport::Path);
+        assert_eq!(entry.path, "../producer/demo");
+        assert!(entry.integrity.is_empty());
+        assert!(entry.resolved_version.is_empty());
+
+        let manifest = scope.read_manifest().unwrap();
+        assert_eq!(
+            manifest.packages.get("demo"),
+            Some(&ProjectPackageDependency::path("../producer/demo"))
+        );
+
+        // Ordinary reconciliation is a no-op: manifest, lock, and vendor
+        // already agree.
+        let warnings =
+            reconcile_project_dependencies(&consumer, false, RegistryOptions::default()).unwrap();
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+
+        let removed = remove(&scope, "demo").unwrap();
+        assert_eq!(removed.alias, "demo");
+        assert!(!vendored.is_file());
+
+        install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect("re-install after remove should succeed");
+        assert!(vendored.is_file());
+    }
+
+    /// A `path:` install is refused at the global scope: a global manifest
+    /// has no repository to resolve a relative path against.
+    #[test]
+    fn path_install_is_refused_at_global_scope() {
+        let scratch = scratch_root("global-refused");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+
+        let global_root = scratch.join("global-home");
+        std::fs::create_dir_all(global_root.as_std_path()).unwrap();
+        let scope = DistributionScope::Global(global_root);
+        let error = install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect_err("a global-scope path install must be refused");
+        assert!(
+            error.to_string().contains("project-scoped only"),
+            "expected a project-scoped-only refusal: {error}"
+        );
+    }
+
+    /// Installing a folded native family package records every declared
+    /// leaf as its own trait lock entry.
+    #[test]
+    fn install_path_family_package_records_every_leaf() {
+        let scratch = scratch_root("family");
+        let producer = scratch.join("producer/family-demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_family_package(&producer);
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        let report = install(
+            &scope,
+            "path:../producer/family-demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect("family path install should succeed");
+        assert_eq!(report.traits.len(), 2);
+        assert!(report.traits.iter().all(|t| t.id == "family-demo"));
+
+        let lock = scope.read_lock().unwrap().unwrap();
+        let entry = lock.package_entry("family-demo").unwrap();
+        assert_eq!(entry.traits.len(), 2);
+        assert!(entry.traits.iter().all(|t| t.id == "family-demo"));
+        let default_leaf = entry
+            .traits
+            .iter()
+            .find(|t| t.is_default_variant)
+            .expect("exactly one leaf must be marked as the family default");
+        assert_eq!(default_leaf.variant.as_deref(), Some("default"));
+        let quick_leaf = entry
+            .traits
+            .iter()
+            .find(|t| t.variant.as_deref() == Some("quick"))
+            .expect("quick leaf must be present with its selector recorded");
+        assert!(quick_leaf.aliases.iter().any(|a| a == "family-demo-quick"));
+        assert_ne!(default_leaf.canonical_digest, quick_leaf.canonical_digest);
+
+        // Bare id resolves the default leaf; `family:variant` and the
+        // legacy alias both resolve the quick leaf, from the vendored path
+        // package (P535 fix).
+        let (default_path, _) = resolve_vendored_trait_variant(&scope, "family-demo", None)
+            .unwrap()
+            .expect("bare id must resolve");
+        let (variant_path, _) =
+            resolve_vendored_trait_variant(&scope, "family-demo", Some("quick"))
+                .unwrap()
+                .expect("family:variant must resolve");
+        let (alias_path, _) = resolve_vendored_trait_alias(&scope, "family-demo-quick")
+            .unwrap()
+            .expect("legacy alias must resolve");
+        assert_ne!(default_path, variant_path);
+        assert_eq!(variant_path, alias_path);
+    }
+
+    /// A symlinked source root fails before any project mutation.
+    #[test]
+    #[cfg(unix)]
+    fn stage_local_package_rejects_symlink_source_root() {
+        let scratch = scratch_root("symlink");
+        let real = scratch.join("real");
+        std::fs::create_dir_all(real.as_std_path()).unwrap();
+        let link = scratch.join("link");
+        std::os::unix::fs::symlink(real.as_std_path(), link.as_std_path()).unwrap();
+
+        match stage_local_package(&scratch, "link") {
+            Ok(_) => panic!("a symlinked source root must be refused"),
+            Err(error) => assert!(
+                error.to_string().contains("symlink"),
+                "expected a symlink refusal: {error}"
+            ),
+        }
+    }
+
+    /// Ordinary reconciliation restages a path source only to reproduce the
+    /// locked digest when the vendor tree goes missing; it refuses with an
+    /// explicit-update remedy when the current source no longer matches,
+    /// rather than silently adopting new bytes. `dependency update` is the
+    /// only operation that accepts the change.
+    #[test]
+    fn reconcile_restages_unchanged_source_but_refuses_a_changed_one() {
+        let scratch = scratch_root("propagation");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .unwrap();
+        let vendor_root = scope.vendor_root().join("demo");
+        let locked_digest = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+
+        // Vendor tree lost, source unchanged: ordinary reconciliation
+        // restages and reproduces the exact locked digest.
+        std::fs::remove_dir_all(vendor_root.as_std_path()).unwrap();
+        reconcile_project_dependencies(&consumer, false, RegistryOptions::default()).unwrap();
+        assert!(vendor_root.join("generated/index.toml").is_file());
+        assert_eq!(
+            scope
+                .read_lock()
+                .unwrap()
+                .unwrap()
+                .package_entry("demo")
+                .unwrap()
+                .tree_digest,
+            locked_digest
+        );
+
+        // Producer rebuilds (source bytes change) and the vendor tree is
+        // lost again: ordinary reconciliation must refuse rather than
+        // silently adopting the new bytes.
+        write_single_trait_package(&producer, "demo", "v2");
+        std::fs::remove_dir_all(vendor_root.as_std_path()).unwrap();
+        let error = reconcile_project_dependencies(&consumer, false, RegistryOptions::default())
+            .expect_err("a changed path source must not silently repair the vendor tree");
+        assert!(
+            error.to_string().contains("dependency update"),
+            "expected an explicit-update remedy: {error}"
+        );
+
+        // Explicit update is the sole path that accepts the new bytes.
+        update(&scope, Some("demo"), RegistryOptions::default())
+            .expect("explicit update should accept the changed source");
+        let updated_digest = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+        assert_ne!(updated_digest, locked_digest);
+    }
+
+    /// Repeating `dependency add path:...` under the same alias/source after
+    /// the producer has rebuilt must stay lock-authoritative and leave the
+    /// original manifest/lock/vendor evidence untouched — only an explicit
+    /// `dependency update <alias>` may adopt the changed bytes (P535 review
+    /// blocker: path-readd-bypasses-explicit-update).
+    #[test]
+    fn repeated_add_of_a_locked_path_source_never_adopts_changed_bytes() {
+        let scratch = scratch_root("readd-authoritative");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .unwrap();
+        let locked_digest_a = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+
+        // Producer rebuilds to different bytes; the vendor tree is left
+        // intact (untampered) this time.
+        write_single_trait_package(&producer, "demo", "v2");
+
+        // A repeated `dependency add` under the same alias/path must be a
+        // no-op: manifest, lock, and vendor tree all stay exactly as they
+        // were after the first install.
+        let report = install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect("a repeated add of the same locked path source must succeed as a no-op");
+        assert_eq!(report.tree_digest, locked_digest_a);
+        let lock_after_readd = scope.read_lock().unwrap().unwrap();
+        assert_eq!(
+            lock_after_readd.package_entry("demo").unwrap().tree_digest,
+            locked_digest_a
+        );
+
+        // Explicit update is the only operation that may adopt the rebuild.
+        update(&scope, Some("demo"), RegistryOptions::default())
+            .expect("explicit update should accept the changed source");
+        let updated_digest = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+        assert_ne!(updated_digest, locked_digest_a);
+    }
+
+    /// Repeating `dependency add path:...` when the lock/vendor snapshot is
+    /// already correct but the `[dependencies]` declaration itself has gone
+    /// missing (e.g. hand-edited away) must restore the manifest entry
+    /// rather than reporting success with it still absent, and must not
+    /// restage or adopt bytes the producer has since moved on to (P535
+    /// review blocker: path-readd-skips-missing-manifest-declaration).
+    #[test]
+    fn repeated_add_restores_missing_manifest_declaration_without_adopting_changed_bytes() {
+        let scratch = scratch_root("readd-restores-manifest");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .unwrap();
+        let locked_digest_a = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+
+        // Drop the manifest declaration while keeping the valid lock/vendor
+        // snapshot exactly as installed.
+        let manifest_path = scope.manifest_path("toml");
+        let manifest_text = std::fs::read_to_string(manifest_path.as_std_path()).unwrap();
+        let mut document = manifest_text.parse::<toml_edit::DocumentMut>().unwrap();
+        document["dependencies"]
+            .as_table_like_mut()
+            .unwrap()
+            .remove("demo");
+        std::fs::write(manifest_path.as_std_path(), document.to_string()).unwrap();
+        assert!(
+            !scope.read_manifest().unwrap().packages.contains_key("demo"),
+            "manifest declaration must be gone before the re-add"
+        );
+
+        // Producer rebuilds to different bytes; the vendor tree stays
+        // intact (untampered).
+        write_single_trait_package(&producer, "demo", "v2");
+
+        let report = install(
+            &scope,
+            "path:../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .expect("re-add must restore the manifest declaration, not fail");
+        assert_eq!(
+            report.tree_digest, locked_digest_a,
+            "the repair must not adopt the rebuilt producer bytes"
+        );
+
+        let restored_manifest = scope.read_manifest().unwrap();
+        let restored_entry = restored_manifest
+            .packages
+            .get("demo")
+            .expect("manifest declaration must be restored");
+        assert_eq!(restored_entry.identity(), "path:../producer/demo");
+
+        let lock_after_readd = scope.read_lock().unwrap().unwrap();
+        assert_eq!(
+            lock_after_readd.package_entry("demo").unwrap().tree_digest,
+            locked_digest_a,
+            "lock/vendor evidence must remain the original locked snapshot"
+        );
+    }
+
+    /// `dependency update`/`remove` must accept the exact `path:` spelling
+    /// originally passed to `add`, even when normalization changed what got
+    /// persisted (e.g. `path:./producer/demo` persists as
+    /// `path:producer/demo`). Regression for the P535 round-1 review
+    /// blocker `path-operands-are-not-normalized`: `resolve_installed_operand`
+    /// previously compared the raw operand as text against the normalized
+    /// manifest identity.
+    #[test]
+    fn update_and_remove_accept_the_unnormalized_path_spelling_originally_added() {
+        let scratch = scratch_root("operand-normalization");
+        let producer = scratch.join("producer/demo");
+        std::fs::create_dir_all(producer.as_std_path()).unwrap();
+        write_single_trait_package(&producer, "demo", "v1");
+        let consumer = scratch.join("consumer");
+        std::fs::create_dir_all(consumer.as_std_path()).unwrap();
+
+        let scope = DistributionScope::project(&consumer);
+        install(
+            &scope,
+            "path:./../producer/demo",
+            None,
+            RegistryOptions::default(),
+        )
+        .unwrap();
+        let manifest = scope.read_manifest().unwrap();
+        let entry = manifest.packages.get("demo").expect("alias installed");
+        assert_eq!(
+            entry.identity(),
+            "path:../producer/demo",
+            "the redundant `./` component must be normalized away in the persisted identity"
+        );
+
+        write_single_trait_package(&producer, "demo", "v2");
+
+        // Update using the exact original (unnormalized) operand spelling
+        // must adopt the rebuild rather than reporting no match.
+        let reports = update(
+            &scope,
+            Some("path:./../producer/demo"),
+            RegistryOptions::default(),
+        )
+        .expect("update must resolve the unnormalized path operand");
+        assert_eq!(reports.len(), 1);
+        let updated_digest = scope
+            .read_lock()
+            .unwrap()
+            .unwrap()
+            .package_entry("demo")
+            .unwrap()
+            .tree_digest
+            .clone();
+        assert_ne!(updated_digest, "");
+
+        // Remove using the same unnormalized spelling must also resolve.
+        remove(&scope, "path:./../producer/demo")
+            .expect("remove must resolve the unnormalized path operand");
+        assert!(!scope.read_manifest().unwrap().packages.contains_key("demo"));
+        let _ = updated_digest;
     }
 }

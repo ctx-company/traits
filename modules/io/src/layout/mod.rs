@@ -242,6 +242,30 @@ pub fn legacy_project_manifest_path(repo_root: &Utf8Path, extension: &str) -> Ut
         .join(format!("{LEGACY_PROJECT_MANIFEST_STEM}.{extension}"))
 }
 
+/// Project lock path, paired with [`project_manifest_path`]'s current/legacy
+/// layout (P535): a fresh checkout locks at `.ctx/traits/vendor.lock`
+/// alongside `vendor.toml`; an existing checkout that still has
+/// `.ctx/traits.lock` (P569 predecessor) keeps reading/writing there so it is
+/// not stranded beside a manifest it never migrated.
+pub fn project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    let current = repo_root
+        .join(PROJECT_MANIFEST_ROOT)
+        .join(format!("{PROJECT_MANIFEST_STEM}.lock"));
+    if current.exists() {
+        return current;
+    }
+    let legacy = legacy_project_lock_path(repo_root);
+    if legacy.exists() { legacy } else { current }
+}
+
+/// P569 predecessor location of [`project_lock_path`]. Read when the new path
+/// is absent so an existing checkout is not stranded; never written.
+pub fn legacy_project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    repo_root
+        .join(LEGACY_PROJECT_MANIFEST_ROOT)
+        .join(format!("{LEGACY_PROJECT_MANIFEST_STEM}.lock"))
+}
+
 /// Project-local host-placement manifest path (`.ctx/host-placements.toml`),
 /// the repo-scoped sibling of
 /// [`crate::state::global_host_placements_manifest_path`].

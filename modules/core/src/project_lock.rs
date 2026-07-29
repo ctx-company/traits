@@ -85,23 +85,65 @@ pub struct Metadata {
     pub generated_at: Option<String>,
 }
 
-/// One locked npm package: exact registry evidence plus every trait
-/// discovered inside its (possibly multi-trait) dual-use tarball.
+/// Which transport a locked package was installed through (P535).
+/// `#[default]` is `Npm`, so a pre-P535 lock entry with no `transport` field
+/// at all decodes exactly as it always has, with no unrelated lock churn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PackageTransport {
+    #[default]
+    Npm,
+    /// A project-scoped local `path:` source (P535): no registry, no
+    /// version, no tarball integrity — only an authored relative path and
+    /// the vendored tree's digest evidence.
+    Path,
+}
+
+/// One locked package: exact registry evidence for an npm-transport entry
+/// (P438), or the authored relative path and digest evidence for a
+/// path-transport entry (P535) — plus every trait discovered inside the
+/// (possibly multi-trait) package either way.
+///
+/// The npm-only fields (`package`, `requested`, `resolved_version`,
+/// `integrity`) stay flat top-level `String`s, defaulted to empty and
+/// omitted from output when empty, rather than moving under a nested
+/// `[package.source]` table: this is what lets a pre-P535 npm lock entry
+/// keep decoding byte-identically with `transport` simply absent. A path
+/// entry never populates them — it would otherwise be claiming npm SRI or
+/// registry-resolution evidence it does not have — and instead populates
+/// `path`, left empty (and omitted) for an npm entry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PackageLockEntry {
     /// Project manifest alias / vendor directory name.
     pub alias: String,
-    /// Full npm package identifier, e.g. `@scope/name` or `name`.
+    /// Transport this package was installed through. Omitted from output
+    /// (and defaulted on decode) for the common npm case, so an ordinary
+    /// npm-only project's lock is byte-identical to a pre-P535 lock.
+    #[serde(default, skip_serializing_if = "PackageTransport::is_npm")]
+    pub transport: PackageTransport,
+    /// Full npm package identifier, e.g. `@scope/name` or `name`. Empty for
+    /// a path-transport entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub package: String,
     /// The selector authored in the project manifest at lock time (a caret
     /// range, explicit range, or dist-tag), recorded so a fresh clone can
-    /// tell whether the manifest and lock still agree.
+    /// tell whether the manifest and lock still agree. Empty for a
+    /// path-transport entry, which has no version selector.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub requested: String,
-    /// The exact npm version this lock entry resolved to.
+    /// The exact npm version this lock entry resolved to. Empty for a
+    /// path-transport entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub resolved_version: String,
     /// npm SRI integrity string for the tarball, e.g. `sha512-<base64>`.
+    /// Empty for a path-transport entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub integrity: String,
+    /// The authored relative path (P535), normalized at parse time. Empty
+    /// for an npm-transport entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
     /// Vendor directory path relative to the repo root
     /// (`.ctx/traits/vendor/<alias>`).
     pub vendored_path: String,
@@ -129,6 +171,25 @@ pub struct PackageLockEntry {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+impl PackageTransport {
+    fn is_npm(&self) -> bool {
+        matches!(self, Self::Npm)
+    }
+}
+
+impl PackageLockEntry {
+    /// The unambiguous source identity for this locked entry: the npm
+    /// package identifier, or `"path:<path>"` for a path-transport entry —
+    /// the same shape [`crate::manifest::ProjectPackageDependency::identity`]
+    /// produces from the manifest side, so the two are directly comparable.
+    pub fn identity(&self) -> String {
+        match self.transport {
+            PackageTransport::Npm => self.package.clone(),
+            PackageTransport::Path => format!("path:{}", self.path),
+        }
+    }
 }
 
 /// Locked evidence for a resolved `extends` base (P443): exactly which
@@ -163,11 +224,33 @@ pub struct BaseLockEntry {
 
 /// Per-trait lock evidence for one trait discovered inside a locked npm
 /// package.
+///
+/// A native family package (P530/P531; folded and shared via `path:` since
+/// P535, e.g. `.ctx/traits/packages/implement/`) contributes one entry per
+/// declared leaf, and every leaf shares the same canonical `id` — only
+/// `variant`/`is_default_variant`/`aliases` and each entry's own
+/// `canonical_path` tell them apart. Resolution must therefore never key
+/// purely on `id`: see `ResolvedTraitPath` in `ctx-traits-io`'s
+/// `project_lock` for the lookup that respects this.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TraitLockEntry {
     /// Trait ID from its canonical document.
     pub id: String,
+    /// The native family leaf selector this entry was published from (e.g.
+    /// `"quick"`, `"default"`), or `None` for an ordinary (non-family)
+    /// trait. Omitted from output for the common non-family case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// `true` when `variant` is the family's declared default leaf — the
+    /// entry a bare (variant-less) trait ID reference resolves to.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_default_variant: bool,
+    /// Legacy hyphenated package aliases this leaf publishes (e.g.
+    /// `"implement-quick"`), from the family's `[family.leaf.<selector>]`
+    /// table. Empty for a non-family trait.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     /// Path to the trait's canonical manifest, relative to the vendored
     /// package root. Drives resolution: npm package names need not match
     /// trait IDs, and one package may contain multiple traits.
@@ -179,4 +262,48 @@ pub struct TraitLockEntry {
     pub canonical_digest: String,
     pub model_visible_digest: String,
     pub resource_manifest_digest: String,
+}
+
+#[cfg(test)]
+mod package_lock_entry_tests {
+    use super::*;
+
+    /// A pre-P535 npm lock entry (no `transport` field at all) must keep
+    /// decoding as an npm entry, byte-identically to before.
+    #[test]
+    fn legacy_npm_entry_without_transport_decodes_as_npm() {
+        let toml = r#"alias = "demo"
+package = "@scope/demo"
+requested = "^1.0.0"
+resolved-version = "1.2.0"
+integrity = "sha512-abc"
+vendored-path = ".ctx/traits/vendor/demo"
+tree-digest = "sha256:deadbeef"
+"#;
+        let entry: PackageLockEntry = toml::from_str(toml).unwrap();
+        assert_eq!(entry.transport, PackageTransport::Npm);
+        assert_eq!(entry.identity(), "@scope/demo");
+        assert_eq!(entry.path, "");
+    }
+
+    #[test]
+    fn path_entry_round_trips_without_npm_fields() {
+        let entry = PackageLockEntry {
+            alias: "implement".to_string(),
+            transport: PackageTransport::Path,
+            path: ".ctx/traits/packages/implement".to_string(),
+            vendored_path: ".ctx/traits/vendor/implement".to_string(),
+            tree_digest: "sha256:cafebabe".to_string(),
+            ..Default::default()
+        };
+        let text = toml::to_string_pretty(&entry).unwrap();
+        assert!(
+            !text.contains("integrity") && !text.contains("resolved-version"),
+            "path entry must not fabricate npm SRI/registry evidence: {text}"
+        );
+        let decoded: PackageLockEntry = toml::from_str(&text).unwrap();
+        assert_eq!(decoded.transport, PackageTransport::Path);
+        assert_eq!(decoded.identity(), "path:.ctx/traits/packages/implement");
+        assert_eq!(decoded.path, entry.path);
+    }
 }

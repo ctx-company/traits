@@ -300,6 +300,57 @@ fn operandless_vendor_locks_every_family_leaf() {
     );
 }
 
+/// With only an ordinary `<id>-default` package installed (no `<id>` package
+/// at all), a bare `<id>` reference must stay unresolved rather than
+/// silently falling back to the unrelated `-default` sibling — that legacy
+/// suffix fallback exists only for an *explicit* `<id>:default` reference
+/// (P535 review blocker: bare-id-unintentionally-gains-default-suffix-fallback).
+#[test]
+fn bare_id_does_not_fall_back_to_unrelated_default_suffix_package() {
+    let scratch = ScratchRoot::new("bare-id-no-default-suffix-fallback");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+
+    let ordinary_id = "standalone-default";
+    let init = run_ctx(&["traits", "init", ordinary_id], &proj, &home);
+    assert!(init.status.success(), "init failed: {}", utf8(&init).1);
+    let build = run_ctx(
+        &[
+            "traits",
+            "build",
+            &format!(".ctx/traits/packages/{ordinary_id}/source/index.ts"),
+        ],
+        &proj,
+        &home,
+    );
+    assert!(build.status.success(), "build failed: {}", utf8(&build).1);
+
+    // No `standalone` package exists at all: the bare id must not resolve
+    // to the unrelated `standalone-default` package.
+    let bare = run_ctx(&["traits", "check", "standalone", "--json"], &proj, &home);
+    let (stdout, stderr) = utf8(&bare);
+    assert!(
+        !bare.status.success(),
+        "bare `standalone` unexpectedly resolved via the `-default` suffix fallback\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // The explicit `:default` reference still uses the legacy suffix
+    // fallback, since that behavior predates P535.
+    let explicit = run_ctx(
+        &["traits", "check", "standalone:default", "--json"],
+        &proj,
+        &home,
+    );
+    let (stdout, stderr) = utf8(&explicit);
+    assert!(
+        explicit.status.success(),
+        "expected `standalone:default` to resolve via the legacy `-default` suffix fallback\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
 /// The family-aware package sweep must not turn CDK source into a package
 /// requirement: an ordinary authored package remains visible and checkable
 /// after its canonical output is retained but its source tree is absent.

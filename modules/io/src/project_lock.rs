@@ -1,13 +1,17 @@
 //! Deterministic, symlink-safe reads/writes for the project-level
-//! `.ctx/traits.lock` (P438). See [`ctx_traits_core::project_lock`] for the
-//! evidence model.
+//! `.ctx/traits/vendor.lock` (P438/P535). See
+//! [`ctx_traits_core::project_lock`] for the evidence model, and
+//! [`crate::layout::project_lock_path`] for the current/legacy layout this
+//! module writes through.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ctx_traits_core::project_lock::{PackageLockEntry, ProjectLock};
 
-/// Project lock path under a repo root.
+/// Project lock path under a repo root — the current
+/// `.ctx/traits/vendor.lock`, or the P569-predecessor `.ctx/traits.lock` for
+/// a checkout that has not migrated its manifest.
 pub fn project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
-    repo_root.join(".ctx").join("traits.lock")
+    crate::layout::project_lock_path(repo_root)
 }
 
 /// Read the project lock, if present. Returns `None` when the file does not
@@ -61,12 +65,67 @@ pub fn read_lock_at(
 /// `vendor_root` is always the layout-derived path for `entry.alias`
 /// ([`crate::layout::vendored_dependency_root`]) — never the lock's bare
 /// `vendored-path` string, which is checked for exact agreement but is not
-/// itself used to build a filesystem path. `trait_manifest_paths` maps each
-/// trait ID to its canonical manifest path, validated relative and
-/// traversal-free before being joined under `vendor_root`.
+/// itself used to build a filesystem path. `traits` carries each locked
+/// trait's canonical manifest path (validated relative and traversal-free
+/// before being joined under `vendor_root`) alongside its family
+/// variant/alias identity, in the same order as `entry.traits` — a native
+/// family package's leaves share one `id`, so callers must resolve through
+/// [`ResolvedTraitPath`]'s `for_id`/`for_variant`/`for_alias` rather than a
+/// plain id-keyed map, which would silently collapse them.
 pub struct ResolvedPackageLockPaths {
     pub vendor_root: Utf8PathBuf,
-    pub trait_manifest_paths: std::collections::BTreeMap<String, Utf8PathBuf>,
+    pub traits: Vec<ResolvedTraitPath>,
+}
+
+/// One locked trait's validated canonical manifest path plus the family
+/// identity needed to disambiguate it from sibling leaves that share the
+/// same `id`.
+#[derive(Debug, Clone)]
+pub struct ResolvedTraitPath {
+    pub id: String,
+    pub variant: Option<String>,
+    pub is_default_variant: bool,
+    pub aliases: Vec<String>,
+    pub path: Utf8PathBuf,
+}
+
+impl ResolvedPackageLockPaths {
+    /// Resolve a bare (variant-less) trait ID reference: the single entry
+    /// with this `id` when there is exactly one, or the family's declared
+    /// default leaf when several leaves share it.
+    pub fn path_for_id(&self, id: &str) -> Option<&Utf8PathBuf> {
+        let mut matches = self.traits.iter().filter(|t| t.id == id);
+        let first = matches.next()?;
+        match matches.next() {
+            None => Some(&first.path),
+            Some(second) => std::iter::once(first)
+                .chain(std::iter::once(second))
+                .chain(matches)
+                .find(|t| t.is_default_variant)
+                .map(|t| &t.path),
+        }
+    }
+
+    /// Resolve a `family:variant` reference (`variant == "default"` defers
+    /// to [`Self::path_for_id`], matching a folded family's own `default`
+    /// selector, which need not literally be named `"default"`).
+    pub fn path_for_variant(&self, id: &str, variant: &str) -> Option<&Utf8PathBuf> {
+        if variant == "default" {
+            return self.path_for_id(id);
+        }
+        self.traits
+            .iter()
+            .find(|t| t.id == id && t.variant.as_deref() == Some(variant))
+            .map(|t| &t.path)
+    }
+
+    /// Resolve a legacy hyphenated package alias published by a family leaf.
+    pub fn path_for_alias(&self, alias: &str) -> Option<&Utf8PathBuf> {
+        self.traits
+            .iter()
+            .find(|t| t.aliases.iter().any(|candidate| candidate == alias))
+            .map(|t| &t.path)
+    }
 }
 
 /// Validate and resolve `entry`'s vendor root and every trait's canonical
@@ -101,10 +160,12 @@ pub fn resolve_package_lock_paths_in(
     if entry.vendored_path != expected_vendored_path {
         return Err(forged_lock_error(format!(
             "package {:?} vendored-path {:?} does not match the layout-derived path {expected_vendored_path:?} for alias {:?}",
-            entry.package, entry.vendored_path, entry.alias
+            entry.identity(),
+            entry.vendored_path,
+            entry.alias
         )));
     }
-    let mut trait_manifest_paths = std::collections::BTreeMap::new();
+    let mut traits = Vec::new();
     for trait_entry in &entry.traits {
         let relative = Utf8Path::new(&trait_entry.canonical_path);
         let unsafe_path = trait_entry.canonical_path.is_empty()
@@ -115,14 +176,22 @@ pub fn resolve_package_lock_paths_in(
         if unsafe_path {
             return Err(forged_lock_error(format!(
                 "trait {:?} canonical-path {:?} in package {:?} must be a non-empty relative path without .. traversal",
-                trait_entry.id, trait_entry.canonical_path, entry.package
+                trait_entry.id,
+                trait_entry.canonical_path,
+                entry.identity()
             )));
         }
-        trait_manifest_paths.insert(trait_entry.id.clone(), expected_vendor_root.join(relative));
+        traits.push(ResolvedTraitPath {
+            id: trait_entry.id.clone(),
+            variant: trait_entry.variant.clone(),
+            is_default_variant: trait_entry.is_default_variant,
+            aliases: trait_entry.aliases.clone(),
+            path: expected_vendor_root.join(relative),
+        });
     }
     Ok(ResolvedPackageLockPaths {
         vendor_root: expected_vendor_root.to_path_buf(),
-        trait_manifest_paths,
+        traits,
     })
 }
 

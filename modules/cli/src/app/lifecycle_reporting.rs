@@ -432,6 +432,52 @@ fn handle_trust_approve(
         }
         return Ok(CommandOutput::new(()));
     }
+    // A *vendored* native family package (P535, e.g. a folded `implement`
+    // package installed via `path:`) must also be approved whole, exactly
+    // like the repo-authored case just above: ordinary named-trait
+    // resolution below only ever resolves a bare id to the family's default
+    // leaf, which would silently leave every other variant unreviewed. This
+    // must be checked before trait resolution — never after — so it is never
+    // shadowed by that single-leaf resolution succeeding first.
+    if !operand.contains(':') {
+        let repo_root = match ctx_traits_io::state::discover_invocation_root()? {
+            ctx_traits_io::state::InvocationRoot::Repo(root) => Some(root),
+            ctx_traits_io::state::InvocationRoot::Adhoc(_) => None,
+        };
+        if let Some(resolved) =
+            ctx_traits_io::distribution::resolve_family_package(repo_root.as_deref(), &operand)?
+        {
+            let leaves = resolved.entry.traits.len();
+            let report = ctx_traits_io::distribution::approve_resolved_package(resolved, reason)?;
+            match OutputMode::select(json, false) {
+                OutputMode::Json => print_json_report(&report, "trust approve report")?,
+                OutputMode::Human(mode) => {
+                    let panel = Panel::new(
+                        "ctx",
+                        format!("trust approve {}", report.package),
+                        PanelStatus::Passed("passed".to_string()),
+                    )
+                    .row(PanelRow::toned(
+                        "alias",
+                        report.alias.as_str(),
+                        RowTone::Default,
+                    ))
+                    .row(PanelRow::toned(
+                        "scope",
+                        report.scope.as_str(),
+                        RowTone::Default,
+                    ))
+                    .row(PanelRow::toned(
+                        "leaves approved",
+                        leaves.to_string(),
+                        RowTone::Default,
+                    ));
+                    emit_human(false, &panel, mode, || Ok(()))?;
+                }
+            }
+            return Ok(CommandOutput::new(()));
+        }
+    }
     match resolve_trust_approve_target(&operand)? {
         Some(file) => handle_trust_named_update(
             &file,

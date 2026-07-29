@@ -350,18 +350,27 @@ pub enum TraitsCommand {
     /// the consume path), verifies npm SHA-512 SRI before extraction, and
     /// stages every check (integrity, schema version, optional `ctx.digests`
     /// publisher claim) before touching `.ctx/traits.toml`, `.ctx/traits.lock`,
-    /// or the vendor tree. `git+...` and `path:...` specs are recognized and
-    /// rejected as not yet supported on this surface. Never writes trust
-    /// state: run `ctx traits trust approve <trait>` for each printed
-    /// canonical digest before running an installed trait.
+    /// or the vendor tree. `path:<relative-path>` (P535) is also accepted:
+    /// project-scoped only (refused with `-g`/`--global`), it copies a
+    /// sibling repository's committed trait package through the same safe
+    /// staging/publication transaction and records source/tree/per-trait
+    /// digest evidence instead of npm registry evidence — a source rebuild
+    /// never propagates during ordinary reconciliation, only an explicit
+    /// `ctx traits dependency update <alias>` accepts new source bytes.
+    /// `git+...` specs are recognized and rejected as not yet supported on
+    /// this surface. Never writes trust state: run `ctx traits trust approve
+    /// <trait>` for each printed canonical digest before running an
+    /// installed trait.
     /// Superseded by `ctx traits dependency add`; kept as a hidden alias for
     /// one release (P567).
     #[command(hide = true)]
     Install {
-        /// npm package spec: `name`, `@scope/name`, `name@<range-or-tag>`, etc.
+        /// npm package spec (`name`, `@scope/name`, `name@<range-or-tag>`,
+        /// etc.) or `path:<relative-path>` (P535, project-scoped only).
         spec: String,
 
-        /// Vendor directory / manifest alias. Defaults to the npm basename.
+        /// Vendor directory / manifest alias. Defaults to the npm basename,
+        /// or the path's final named component for `path:`.
         #[arg(long)]
         alias: Option<String>,
 
@@ -382,8 +391,8 @@ pub enum TraitsCommand {
     /// one release (P567).
     #[command(hide = true)]
     Remove {
-        /// npm package name (e.g. `@scope/name`) or manifest alias of the
-        /// installed dependency.
+        /// npm package name (e.g. `@scope/name`), `path:<relative-path>`, or
+        /// manifest alias of the installed dependency.
         package: String,
 
         /// Remove from the per-machine global tier instead of this project.
@@ -395,13 +404,18 @@ pub enum TraitsCommand {
         json: bool,
     },
     /// Re-resolve one (or, with no argument, every) project dependency's
-    /// manifest selector and replace its lock/vendor evidence.
+    /// manifest selector and replace its lock/vendor evidence. For a `path:`
+    /// dependency (P535) this is the only operation that accepts changed
+    /// source bytes: ordinary `dependency install`/sync always reproduces
+    /// the exact locked snapshot and refuses when the current source has
+    /// moved on.
     /// Superseded by `ctx traits dependency update`; kept as a hidden alias for
     /// one release (P567).
     #[command(hide = true)]
     Update {
-        /// npm package name (e.g. `@scope/name`) or manifest alias to
-        /// update. Omitted: update every project dependency.
+        /// npm package name (e.g. `@scope/name`), `path:<relative-path>`, or
+        /// manifest alias to update. Omitted: update every project
+        /// dependency.
         package: Option<String>,
 
         /// Update the per-machine global tier instead of this project.
@@ -422,15 +436,18 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect an npm package's metadata, publisher claims, canonical
-    /// digests, command argv, resource roots, and agent roles without
-    /// modifying the manifest, lock, vendor tree, or trust store. Downloaded
-    /// bytes only ever land in the registry cache.
+    /// Inspect an npm package's or `path:<relative-path>` source's (P535)
+    /// metadata, publisher claims (npm only), canonical digests, command
+    /// argv, resource roots, and agent roles without modifying the
+    /// manifest, lock, vendor tree, or trust store. Downloaded npm bytes
+    /// only ever land in the registry cache; a `path:` source is staged
+    /// into a private temporary copy and never written to the vendor tree.
     /// Superseded by `ctx traits dependency info`; kept as a hidden alias for
     /// one release (P567).
     #[command(hide = true)]
     Info {
-        /// npm package spec: `name`, `@scope/name`, `name@<range-or-tag>`, etc.
+        /// npm package spec (`name`, `@scope/name`, `name@<range-or-tag>`,
+        /// etc.) or `path:<relative-path>` (P535, project-scoped only).
         spec: String,
 
         /// Emit structured JSON.
@@ -2569,15 +2586,24 @@ pub enum DependencyCommand {
     /// the consume path), verifies npm SHA-512 SRI before extraction, and
     /// stages every check (integrity, schema version, optional `ctx.digests`
     /// publisher claim) before touching `.ctx/traits.toml`, `.ctx/traits.lock`,
-    /// or the vendor tree. `git+...` and `path:...` specs are recognized and
-    /// rejected as not yet supported on this surface. Never writes trust
-    /// state: run `ctx traits trust approve <trait>` for each printed
-    /// canonical digest before running an installed trait.
+    /// or the vendor tree. `path:<relative-path>` (P535) is also accepted:
+    /// project-scoped only (refused with `-g`/`--global`), it copies a
+    /// sibling repository's committed trait package through the same safe
+    /// staging/publication transaction and records source/tree/per-trait
+    /// digest evidence instead of npm registry evidence — a source rebuild
+    /// never propagates during ordinary reconciliation, only an explicit
+    /// `ctx traits dependency update <alias>` accepts new source bytes.
+    /// `git+...` specs are recognized and rejected as not yet supported on
+    /// this surface. Never writes trust state: run `ctx traits trust approve
+    /// <trait>` for each printed canonical digest before running an
+    /// installed trait.
     Add {
-        /// npm package spec: `name`, `@scope/name`, `name@<range-or-tag>`, etc.
+        /// npm package spec (`name`, `@scope/name`, `name@<range-or-tag>`,
+        /// etc.) or `path:<relative-path>` (P535, project-scoped only).
         spec: String,
 
-        /// Vendor directory / manifest alias. Defaults to the npm basename.
+        /// Vendor directory / manifest alias. Defaults to the npm basename,
+        /// or the path's final named component for `path:`.
         #[arg(long)]
         alias: Option<String>,
 
@@ -2595,8 +2621,8 @@ pub enum DependencyCommand {
     /// Remove a project-installed npm package: manifest entry, project-lock
     /// entry, and vendor directory.
     Remove {
-        /// npm package name (e.g. `@scope/name`) or manifest alias of the
-        /// installed dependency.
+        /// npm package name (e.g. `@scope/name`), `path:<relative-path>`, or
+        /// manifest alias of the installed dependency.
         package: String,
 
         /// Remove from the per-machine global tier instead of this project.
@@ -2608,10 +2634,15 @@ pub enum DependencyCommand {
         json: bool,
     },
     /// Re-resolve one (or, with no argument, every) project dependency's
-    /// manifest selector and replace its lock/vendor evidence.
+    /// manifest selector and replace its lock/vendor evidence. For a `path:`
+    /// dependency (P535) this is the only operation that accepts changed
+    /// source bytes: ordinary `dependency install`/sync always reproduces
+    /// the exact locked snapshot and refuses when the current source has
+    /// moved on.
     Update {
-        /// npm package name (e.g. `@scope/name`) or manifest alias to
-        /// update. Omitted: update every project dependency.
+        /// npm package name (e.g. `@scope/name`), `path:<relative-path>`, or
+        /// manifest alias to update. Omitted: update every project
+        /// dependency.
         package: Option<String>,
 
         /// Update the per-machine global tier instead of this project.
@@ -2629,12 +2660,15 @@ pub enum DependencyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect an npm package's metadata, publisher claims, canonical
-    /// digests, command argv, resource roots, and agent roles without
-    /// modifying the manifest, lock, vendor tree, or trust store. Downloaded
-    /// bytes only ever land in the registry cache.
+    /// Inspect an npm package's or `path:<relative-path>` source's (P535)
+    /// metadata, publisher claims (npm only), canonical digests, command
+    /// argv, resource roots, and agent roles without modifying the
+    /// manifest, lock, vendor tree, or trust store. Downloaded npm bytes
+    /// only ever land in the registry cache; a `path:` source is staged
+    /// into a private temporary copy and never written to the vendor tree.
     Info {
-        /// npm package spec: `name`, `@scope/name`, `name@<range-or-tag>`, etc.
+        /// npm package spec (`name`, `@scope/name`, `name@<range-or-tag>`,
+        /// etc.) or `path:<relative-path>` (P535, project-scoped only).
         spec: String,
 
         /// Emit structured JSON.

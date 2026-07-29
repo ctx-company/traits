@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use camino::{Utf8Component, Utf8Path};
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -167,6 +168,135 @@ pub fn parse_spec(input: &str) -> Result<PackageSpec, Error> {
         package,
         selector,
         default_alias,
+    })
+}
+
+/// A parsed project-scoped local `path:<relative-path>` install spec (P535).
+///
+/// `relative_path` is the normalized authored relative path (redundant `.`
+/// components dropped, `..` components preserved verbatim so a sibling
+/// repository can be named): never an absolute path, never resolved against
+/// any filesystem root. Resolution against a consuming project's root, and
+/// every filesystem safety check, happens at the IO boundary
+/// ([`ctx_traits_io::distribution`]) — this type only carries the parsed,
+/// committed-manifest-safe text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PathSpec {
+    pub relative_path: String,
+    /// Default vendor alias derived from the path's final named component.
+    pub default_alias: String,
+}
+
+/// The union of transports a project-scoped install spec may name: an npm
+/// registry package, or a local `path:` source (P535). Distinct from
+/// [`PackageSpec`]/[`parse_spec`], which remain npm-only and byte-compatible
+/// with every pre-P535 caller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", tag = "transport")]
+pub enum InstallSpec {
+    Npm(PackageSpec),
+    Path(PathSpec),
+}
+
+/// Parse a project-scoped install spec: `path:<relative-path>` (P535) or any
+/// npm spec `parse_spec` accepts. The one entry point that recognizes
+/// `path:`; `parse_spec` itself keeps refusing it with
+/// [`Error::NotYetSupported`] for every caller that has not opted into local
+/// path installs.
+pub fn parse_install_spec(input: &str) -> Result<InstallSpec, Error> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::EmptySpec);
+    }
+    if let Some(rest) = trimmed.strip_prefix("path:") {
+        return parse_path_spec(rest, trimmed).map(InstallSpec::Path);
+    }
+    parse_spec(trimmed).map(InstallSpec::Npm)
+}
+
+/// Validate and normalize a manifest-authored `path` source value (P535),
+/// applying exactly the same rules as `path:<relative-path>` install specs:
+/// non-empty, relative, `.` dropped, `..` preserved. Shared by the project
+/// manifest's hand-written decoder so an empty or absolute `path` value
+/// cannot enter a committed manifest through a route that bypasses
+/// [`parse_install_spec`].
+pub fn normalize_manifest_path_source(raw: &str) -> Result<String, Error> {
+    parse_path_spec(raw, raw).map(|spec| spec.relative_path)
+}
+
+/// True when `rest` carries a machine-specific absolute or drive-qualified
+/// identity in ANY host's path syntax, not just the syntax of the platform
+/// this binary happens to run on. `camino::Utf8Path::is_absolute` and
+/// `Utf8Component` only recognize the current host's separators and prefix
+/// forms — on Unix, a Windows drive-qualified path (`C:\Users\name\pkg`),
+/// drive-relative path (`C:pkg`), or UNC path (`\\server\share\pkg`) parses
+/// as ordinary relative "normal" components and would otherwise be accepted
+/// and persisted into a committed manifest/lock, giving the same committed
+/// dependency line a different (and machine-specific) meaning depending on
+/// which host authored it.
+fn has_foreign_absolute_marker(rest: &str) -> bool {
+    if rest.contains('\\') {
+        return true;
+    }
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        // Windows drive-qualified (`C:\...`, `C:/...`) or drive-relative
+        // (`C:foo`) form.
+        return true;
+    }
+    false
+}
+
+fn parse_path_spec(rest: &str, full_spec: &str) -> Result<PathSpec, Error> {
+    if rest.trim().is_empty() {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "path: requires a non-empty relative path".to_string(),
+        });
+    }
+    if has_foreign_absolute_marker(rest) {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "path: must be a slash-separated relative path, not an absolute or drive-qualified path"
+                .to_string(),
+        });
+    }
+    let path = Utf8Path::new(rest);
+    if path.is_absolute() {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "path: must be a relative path, not absolute".to_string(),
+        });
+    }
+    let mut normalized: Vec<&str> = Vec::new();
+    for component in path.components() {
+        match component {
+            Utf8Component::Normal(part) => normalized.push(part),
+            Utf8Component::ParentDir => normalized.push(".."),
+            Utf8Component::CurDir => {}
+            Utf8Component::RootDir | Utf8Component::Prefix(_) => {
+                return Err(Error::InvalidSpec {
+                    spec: full_spec.to_string(),
+                    message: "path: must be a relative path, not absolute".to_string(),
+                });
+            }
+        }
+    }
+    if normalized.is_empty() {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "path: requires a non-empty relative path".to_string(),
+        });
+    }
+    let Some(default_alias) = normalized.iter().rev().find(|part| **part != "..") else {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "path: must name a directory, not only parent-directory segments".to_string(),
+        });
+    };
+    Ok(PathSpec {
+        relative_path: normalized.join("/"),
+        default_alias: default_alias.to_string(),
     })
 }
 
@@ -477,5 +607,148 @@ fn resource_root_label(root: &crate::r#trait::resource::ResourceRoot) -> &'stati
     match root {
         crate::r#trait::resource::ResourceRoot::Package => "package",
         crate::r#trait::resource::ResourceRoot::Repo => "repo",
+    }
+}
+
+#[cfg(test)]
+mod install_spec_tests {
+    use super::*;
+
+    #[test]
+    fn npm_specs_still_reject_path_and_git_via_parse_spec() {
+        assert!(matches!(
+            parse_spec("path:../sibling"),
+            Err(Error::NotYetSupported { form: "path", .. })
+        ));
+        assert!(matches!(
+            parse_spec("git+https://example.com/x"),
+            Err(Error::NotYetSupported { form: "git", .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_still_parses_npm_specs_byte_compatibly() {
+        let direct = parse_spec("@scope/name@^1.2.0").unwrap();
+        let InstallSpec::Npm(via_union) = parse_install_spec("@scope/name@^1.2.0").unwrap() else {
+            panic!("expected npm variant");
+        };
+        assert_eq!(direct, via_union);
+    }
+
+    #[test]
+    fn parse_install_spec_decodes_a_relative_path() {
+        let InstallSpec::Path(spec) =
+            parse_install_spec("path:.ctx/traits/packages/implement").unwrap()
+        else {
+            panic!("expected path variant");
+        };
+        assert_eq!(spec.relative_path, ".ctx/traits/packages/implement");
+        assert_eq!(spec.default_alias, "implement");
+    }
+
+    #[test]
+    fn parse_install_spec_normalizes_current_dir_components() {
+        let InstallSpec::Path(spec) = parse_install_spec("path:./packages/agents").unwrap() else {
+            panic!("expected path variant");
+        };
+        assert_eq!(spec.relative_path, "packages/agents");
+        assert_eq!(spec.default_alias, "agents");
+    }
+
+    #[test]
+    fn parse_install_spec_preserves_parent_dir_traversal_for_sibling_repos() {
+        let InstallSpec::Path(spec) =
+            parse_install_spec("path:../ctx-gate/.ctx/traits/packages/refactor").unwrap()
+        else {
+            panic!("expected path variant");
+        };
+        assert_eq!(
+            spec.relative_path,
+            "../ctx-gate/.ctx/traits/packages/refactor"
+        );
+        assert_eq!(spec.default_alias, "refactor");
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_absolute_paths() {
+        assert!(matches!(
+            parse_install_spec("path:/etc/passwd"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_empty_paths() {
+        assert!(matches!(
+            parse_install_spec("path:"),
+            Err(Error::InvalidSpec { .. })
+        ));
+        assert!(matches!(
+            parse_install_spec("path:   "),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_only_parent_dir_segments() {
+        assert!(matches!(
+            parse_install_spec("path:../.."),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_empty_input() {
+        assert!(matches!(parse_install_spec(""), Err(Error::EmptySpec)));
+        assert!(matches!(parse_install_spec("   "), Err(Error::EmptySpec)));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_windows_absolute_paths_on_every_host() {
+        assert!(matches!(
+            parse_install_spec(r"path:C:\dev\sibling\package"),
+            Err(Error::InvalidSpec { .. })
+        ));
+        assert!(matches!(
+            parse_install_spec("path:C:/dev/sibling/package"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_windows_drive_relative_paths_on_every_host() {
+        assert!(matches!(
+            parse_install_spec("path:C:package"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_unc_paths_on_every_host() {
+        assert!(matches!(
+            parse_install_spec(r"path:\\server\share\package"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_rejects_bare_backslash_separators() {
+        assert!(matches!(
+            parse_install_spec(r"path:sibling\package"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_install_spec_still_accepts_slash_separated_paths_with_parent_traversal() {
+        let InstallSpec::Path(spec) =
+            parse_install_spec("path:../sibling-repo/.ctx/traits/packages/implement").unwrap()
+        else {
+            panic!("expected path variant");
+        };
+        assert_eq!(
+            spec.relative_path,
+            "../sibling-repo/.ctx/traits/packages/implement"
+        );
     }
 }
