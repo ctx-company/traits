@@ -1293,6 +1293,9 @@ mod render_v2_shape_tests {
             let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
             let mut roots = vec![root.join("builtins/traits")];
             if let Some(repo_root) = root.parent().and_then(|p| p.parent()) {
+                // P569 moved packages under `packages/`; the pre-move root is
+                // still swept so a checkout that has not migrated is covered.
+                roots.push(repo_root.join(".ctx/traits/packages"));
                 roots.push(repo_root.join(".ctx/traits"));
             }
             let mut paths = Vec::new();

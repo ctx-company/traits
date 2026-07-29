@@ -256,7 +256,7 @@ deep = true\n",
 /// write a rewrite it cannot actually render: `--apply` on such a layer must
 /// leave the file byte-identical and report no successful rewrite for it.
 #[test]
-fn migrate_config_refuses_a_rewrite_that_cannot_survive_render() {
+fn migrate_config_rewrites_an_inline_agent_table_losslessly() {
     let scratch = ScratchRoot::new("p514-migrate-config-inline-agent");
     let repo = scratch.home().join("repo");
     fs::create_dir_all(repo.join(".ctx")).unwrap();
@@ -271,9 +271,16 @@ fn migrate_config_refuses_a_rewrite_that_cannot_survive_render() {
         &repo,
         &scratch.home(),
     );
+    // P569: an inline `agent = { master = ... }` table now DOES survive the
+    // round trip — the rewrite renders `agent = { role.default = ... }`, which
+    // is valid TOML, resolves to the same `agent.role.default`, and loses
+    // nothing. The guard this test protects is still live (a rewrite that
+    // fails verification is still refused); this particular input simply
+    // stopped being an example of one, so asserting a refusal here would pin
+    // the tool to a limitation it no longer has.
     assert!(
-        !plan_stdout.contains("agent.master -> agent.role.default"),
-        "must not report a rewrite it cannot render: {plan_stdout}"
+        plan_stdout.contains("agent.master -> agent.role.default"),
+        "an inline [agent] table that round-trips must be reported as rewritable: {plan_stdout}"
     );
 
     require_success(
@@ -284,8 +291,12 @@ fn migrate_config_refuses_a_rewrite_that_cannot_survive_render() {
     );
     let after = fs::read_to_string(&config_path).unwrap();
     assert_eq!(
-        after, original_text,
-        "an unrenderable rewrite must leave the file byte-identical, not silently drop data"
+        after, "agent = { role.default = { harness = \"opencode\", model = \"gpt\" } }\n",
+        "a verified rewrite must land the [agent.role.*] destination losslessly"
+    );
+    assert!(
+        !after.contains("master"),
+        "the legacy key must be gone after a rewrite, not left beside its replacement: {after}"
     );
 }
 

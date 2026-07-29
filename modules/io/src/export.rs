@@ -298,8 +298,21 @@ pub fn infer_repo_root_from_trait_file(trait_file: &Utf8Path) -> &Utf8Path {
     if let Some(repo_root) = crate::layout::builtin_trait_package_repo_root(trait_root) {
         return repo_root;
     }
-    let Some(traits_dir) = trait_root.parent() else {
+    let Some(parent) = trait_root.parent() else {
         return trait_root;
+    };
+    // P569: packages live at `<repo>/.ctx/traits/packages/<id>`; a checkout
+    // that predates the move still has `<repo>/.ctx/traits/<id>`. Walking a
+    // fixed number of levels silently returned the PACKAGE root as the repo
+    // root on the new layout, which made a default export target resolve
+    // inside the trait's own source directory and get refused.
+    let traits_dir = if parent.file_name() == Some("packages") {
+        match parent.parent() {
+            Some(dir) => dir,
+            None => return trait_root,
+        }
+    } else {
+        parent
     };
     if traits_dir.file_name() != Some("traits") {
         return trait_root;

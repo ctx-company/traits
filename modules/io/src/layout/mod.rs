@@ -353,14 +353,28 @@ pub fn package_manifest_path(package_root: &Utf8Path) -> Utf8PathBuf {
     if legacy.is_file() { legacy } else { current }
 }
 
-/// Lockfile path for a package root, with the same predecessor rule.
+/// Lockfile path for a package root.
+///
+/// An existing lock wins under either name. When none exists yet the lock
+/// FOLLOWS ITS MANIFEST: a package still carrying the pre-P569 `trait.toml`
+/// gets `trait.lock`, so a legacy package is never left half-renamed with a
+/// `package.lock` beside a `trait.toml`. Only a package that has moved to
+/// `package.toml` — or a brand new one — gets `package.lock`.
 pub fn package_lock_path(package_root: &Utf8Path) -> Utf8PathBuf {
     let current = package_root.join(TRAIT_LOCKFILE);
     if current.is_file() {
         return current;
     }
     let legacy = package_root.join(LEGACY_TRAIT_LOCKFILE);
-    if legacy.is_file() { legacy } else { current }
+    if legacy.is_file() {
+        return legacy;
+    }
+    if !package_root.join(PACKAGE_MANIFEST).is_file()
+        && package_root.join(LEGACY_PACKAGE_MANIFEST).is_file()
+    {
+        return legacy;
+    }
+    current
 }
 
 /// Resolve an existing canonical or flat manifest under a package root.
@@ -392,18 +406,27 @@ pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
     // which surfaced as `ctx traits build` refusing every native family with
     // "not under a recognized package's source root" even though `init` had
     // just created the package.
-    let Some(packages_dir) = package_root.parent() else {
+    //
+    // Both shapes are accepted: a checkout that predates the move keeps its
+    // flat `.ctx/traits/<id>` packages working, and dropping that arm made
+    // `package_root_for_manifest` stop recognizing `generated/` on those
+    // packages — which then resolved a package root INTO its own generated
+    // directory and broke lifecycle writes.
+    let Some(parent) = package_root.parent() else {
         return false;
     };
-    if packages_dir.file_name() != Some("packages") {
-        return false;
-    }
-    packages_dir
-        .parent()
-        .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
-        && packages_dir
+    if parent.file_name() == Some("packages") {
+        return parent
             .parent()
-            .and_then(Utf8Path::parent)
+            .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
+            && parent
+                .parent()
+                .and_then(Utf8Path::parent)
+                .is_some_and(|ctx_dir| ctx_dir.file_name() == Some(".ctx"));
+    }
+    parent.file_name() == Some("traits")
+        && parent
+            .parent()
             .is_some_and(|ctx_dir| ctx_dir.file_name() == Some(".ctx"))
 }
 

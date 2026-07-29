@@ -1484,7 +1484,7 @@ fn package_subset_matches(source_root: &Utf8Path, vendored_root: &Utf8Path) -> c
 fn package_subset_files(root: &Utf8Path) -> crate::Result<BTreeMap<Utf8PathBuf, Utf8PathBuf>> {
     let mut files = BTreeMap::new();
     if let Some(manifest) = crate::layout::resolve_package_manifest(root) {
-        files.insert(Utf8PathBuf::from("trait.toml"), manifest);
+        files.insert(Utf8PathBuf::from(crate::layout::PACKAGE_MANIFEST), manifest);
     }
     for dir in ["reference", "resources"] {
         let path = root.join(dir);

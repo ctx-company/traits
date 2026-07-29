@@ -67,39 +67,45 @@ fn extract_package_id_from_path(path: &camino::Utf8Path) -> Option<&str> {
         })
         .collect();
     if !path.is_absolute() {
-        if let [
-            ".ctx",
-            "traits",
-            id,
-            "generated",
-            "trait.toml" | "index.toml",
-        ] = normals.as_slice()
-        {
-            return (!id.is_empty()).then_some(*id);
-        }
-        return None;
+        return package_id_from_normals(&normals);
     }
     let ctx_positions: Vec<usize> = normals
         .iter()
         .enumerate()
         .filter_map(|(index, component)| (*component == ".ctx").then_some(index))
         .collect();
-    if ctx_positions.len() != 1 || ctx_positions[0] + 5 != normals.len() {
+    if ctx_positions.len() != 1 {
         return None;
     }
-    if let Some(
+    let tail = normals.get(ctx_positions[0]..)?;
+    package_id_from_normals(tail)
+}
+
+/// The package id in a canonical-manifest path, under either package root.
+///
+/// P569 moved packages from `.ctx/traits/<id>` to `.ctx/traits/packages/<id>`;
+/// both shapes are accepted so a checkout that predates the move can still be
+/// activated, and both manifest filenames are accepted for the same reason.
+fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
+    let id = match normals {
+        [
+            ".ctx",
+            "traits",
+            "packages",
+            id,
+            "generated",
+            "package.toml" | "trait.toml" | "index.toml",
+        ] => id,
         [
             ".ctx",
             "traits",
             id,
             "generated",
-            "trait.toml" | "index.toml",
-        ],
-    ) = normals.get(ctx_positions[0]..)
-    {
-        return (!id.is_empty()).then_some(*id);
-    }
-    None
+            "package.toml" | "trait.toml" | "index.toml",
+        ] => id,
+        _ => return None,
+    };
+    (!id.is_empty()).then_some(*id)
 }
 
 /// `ctx traits activate`/`deactivate`/`deprecate`: edits the package

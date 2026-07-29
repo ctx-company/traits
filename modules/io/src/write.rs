@@ -116,7 +116,13 @@ fn validate_generated_ignore_path(
             "refusing to ignore canonical trait package source",
         ));
     }
-    for protected in ["trait.toml", "index.toml", "trait.lock"] {
+    for protected in [
+        "package.toml",
+        "package.lock",
+        "trait.toml",
+        "index.toml",
+        "trait.lock",
+    ] {
         if raw.ends_with(protected) {
             return Err(fs_err(
                 generated_path,
@@ -350,7 +356,7 @@ fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
                 "traits",
                 id,
                 "generated",
-                "trait.toml" | "index.toml",
+                "package.toml" | "trait.toml" | "index.toml",
             ] if !id.is_empty() => Some(*id),
             _ => None,
         };
@@ -371,7 +377,7 @@ fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
                 "traits",
                 id,
                 "generated",
-                "trait.toml" | "index.toml",
+                "package.toml" | "trait.toml" | "index.toml",
             ],
         ) if !id.is_empty() => Some(*id),
         _ => None,
@@ -723,7 +729,7 @@ fn validate_package_manifest_shape(path: &Utf8Path) -> crate::Result<()> {
             return Err(fs_err(path, "path contains parent traversal"));
         }
     }
-    if path.file_name() != Some("trait.toml") {
+    if !matches!(path.file_name(), Some("package.toml" | "trait.toml")) {
         return Err(fs_err(
             path,
             "lifecycle edits target a package-root trait.toml only",

@@ -523,11 +523,11 @@ fn setup_fixture(
     require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/{id}/trait.toml")),
+        &repo.join(format!(".ctx/traits/packages/{id}/package.toml")),
         &trait_manifest(id),
     );
     write_file(
-        &repo.join(format!(".ctx/traits/{id}/generated/index.toml")),
+        &repo.join(format!(".ctx/traits/packages/{id}/generated/index.toml")),
         trait_toml,
     );
     write_fixture_ctx_toml(&repo);
@@ -712,7 +712,7 @@ fn continuing_exhaustion_lands_the_commit() {
     let _ = scratch;
 }
 
-/// Fork 4: the real Justfile `_implement-loop` recipe (the same private
+/// Fork 4: the real Justfile `implement` recipe (the same private
 /// recipe `just implement`/`just implement-lean` both call) halts a batch
 /// at the first phase that ends without completing, and never dispatches
 /// the phase after it.
@@ -754,7 +754,7 @@ fn batch_halts_at_the_first_blocked_phase() {
             justfile.to_str().unwrap(),
             "--working-directory",
             repo.to_str().unwrap(),
-            "_implement-loop",
+            "implement-with",
             "implement-fixture-park-batch",
             "P960,P961",
         ],
@@ -768,7 +768,7 @@ fn batch_halts_at_the_first_blocked_phase() {
         .env("CTX_FIXTURE_REVIEWER1_BLOCKER", "fixture-batch-defect");
     let output = command
         .output()
-        .unwrap_or_else(|error| panic!("cannot run just _implement-loop: {error}"));
+        .unwrap_or_else(|error| panic!("cannot run just implement: {error}"));
     let (stdout, stderr) = utf8(&output);
     let combined = format!("{stdout}{stderr}");
 
@@ -778,7 +778,7 @@ fn batch_halts_at_the_first_blocked_phase() {
     assert_eq!(
         output.status.code(),
         Some(EXIT_RUN_NOT_COMPLETED),
-        "`_implement-loop \"P960,P961\"` must exit {EXIT_RUN_NOT_COMPLETED} (EXIT_RUN_NOT_COMPLETED):\n{combined}"
+        "`implement \"P960,P961\"` must exit {EXIT_RUN_NOT_COMPLETED} (EXIT_RUN_NOT_COMPLETED):\n{combined}"
     );
     assert!(
         combined.contains("PARKED"),

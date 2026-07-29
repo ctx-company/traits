@@ -17,7 +17,7 @@ require "option_parser"
 # REPORTED as parked rather than surfacing as a bare non-zero code, and the
 # code is re-raised unchanged so batch callers keep the distinction.
 EXIT_MEANINGS = {
-  3 => "run ended without completing (wall park, blocked, or refusal)",
+  3 => "PARKED — run ended without completing (wall park, blocked, or refusal)",
   4 => "merge parked, branch and worktree intact",
   5 => "merge failed",
 }
@@ -43,10 +43,16 @@ phases.each do |phase|
 
   # stdio is inherited so `--progress tui` keeps the real terminal: capturing
   # it here to inspect output would blank the live view.
+  #
+  # The TUI is only meaningful on a real terminal. Piped or redirected (CI, a
+  # test harness, `just implement ... | tee`), it collapses to a terse summary
+  # and the run's park/blocked detail never reaches the log — so the mode is
+  # chosen from the actual stream, not assumed.
+  progress = STDOUT.tty? ? "tui" : "stream"
   status = begin
     Process.run(
       "ctx",
-      ["traits", "run", trait_id, "--set", "phase=#{phase}", "--worktree", "--merge", "--progress", "tui"],
+      ["traits", "run", trait_id, "--set", "phase=#{phase}", "--worktree", "--merge", "--progress", progress],
       input: Process::Redirect::Inherit,
       output: Process::Redirect::Inherit,
       error: Process::Redirect::Inherit,

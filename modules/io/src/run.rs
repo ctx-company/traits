@@ -1217,7 +1217,7 @@ fn resolve_family_leaf(
     }
     let repo_root = context.repo_root_for_paths();
     let local_package_root = crate::layout::trait_authoring_root_path(repo_root).join(family);
-    let root_manifest = local_package_root.join("trait.toml");
+    let root_manifest = crate::layout::package_manifest_path(&local_package_root);
     let Some(table) = crate::family_manifest::read_family_table(&root_manifest)? else {
         return Ok(None);
     };
@@ -1267,7 +1267,7 @@ fn resolve_family_alias(
             Ok(path) => path,
             Err(_) => continue,
         };
-        let manifest = path.join("trait.toml");
+        let manifest = crate::layout::package_manifest_path(&path);
         let Some(table) = crate::family_manifest::read_family_table(&manifest)? else {
             continue;
         };
@@ -1311,9 +1311,9 @@ pub fn resolve_trait_path(
             let family = original_id.split(':').next().unwrap_or(original_id);
             let context = crate::inventory::InventoryContext::discover()?;
             let repo_root_display = context.repo_root_for_paths();
-            let family_root_manifest = crate::layout::trait_authoring_root_path(repo_root_display)
-                .join(family)
-                .join("trait.toml");
+            let family_root_manifest = crate::layout::package_manifest_path(
+                &crate::layout::trait_authoring_root_path(repo_root_display).join(family),
+            );
             let variants: Vec<String> =
                 match crate::family_manifest::read_family_table(&family_root_manifest)? {
                     // A native family package: list its declared leaves

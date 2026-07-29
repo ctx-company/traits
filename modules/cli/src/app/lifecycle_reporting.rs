@@ -451,7 +451,9 @@ fn family_leaf_files(operand: &str) -> crate::Result<Option<Vec<String>>> {
     let context = ctx_traits_io::inventory::InventoryContext::discover()?;
     let root = ctx_traits_io::layout::trait_authoring_root_path(context.repo_root_for_paths())
         .join(operand);
-    let Some(table) = ctx_traits_io::family_manifest::read_family_table(&root.join("trait.toml"))?
+    let Some(table) = ctx_traits_io::family_manifest::read_family_table(
+        &ctx_traits_io::layout::package_manifest_path(root.as_ref()),
+    )?
     else {
         return Ok(None);
     };

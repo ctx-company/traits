@@ -5,3 +5,8 @@ traits/runtime.toml
 traits/vendor/
 worktrees/
 config.ts
+config.toml
+harness.toml
+runs/
+debug/
+cache/

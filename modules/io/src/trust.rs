@@ -978,7 +978,7 @@ mod tests {
     fn evaluate_approval_guard_refuses_on_lock_canonical_mismatch() {
         let root = scratch_dir("lock-mismatch");
         std::fs::write(
-            root.join("trait.lock").as_std_path(),
+            crate::layout::package_lock_path(root.as_ref()).as_std_path(),
             "[[trait]]\nid = \"example\"\n\n[trait.digests]\ncanonical = \"sha256:locked\"\n",
         )
         .expect("write trait.lock");
@@ -1016,7 +1016,7 @@ mod tests {
     fn evaluate_approval_guard_selects_the_requested_family_variant() {
         let root = scratch_dir("family-lock");
         std::fs::write(
-            root.join("trait.lock").as_std_path(),
+            crate::layout::package_lock_path(root.as_ref()).as_std_path(),
             "[[trait]]\nid = \"example\"\nvariant = \"default\"\n[trait.digests]\ncanonical = \"sha256:default\"\n\n[[trait]]\nid = \"example\"\nvariant = \"quick\"\n[trait.digests]\ncanonical = \"sha256:quick\"\n",
         )
         .expect("write family trait.lock");

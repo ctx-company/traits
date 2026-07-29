@@ -74,7 +74,7 @@ refactor target:
     ctx traits run refactor --worktree --progress tui -- --target={{quote(target)}}
 
 implement phases:
-	@.internal/scripts/implement.cr {{quote(phases)}}
+	@crystal run --link-flags="-fuse-ld=/usr/bin/ld" {{justfile_directory()}}/.internal/scripts/implement.cr -- {{quote(phases)}}
 
 implement-with trait_id phases:
-	@.internal/scripts/implement.cr --trait {{quote(trait_id)}} {{quote(phases)}}
+	@crystal run --link-flags="-fuse-ld=/usr/bin/ld" {{justfile_directory()}}/.internal/scripts/implement.cr -- --trait {{quote(trait_id)}} {{quote(phases)}}

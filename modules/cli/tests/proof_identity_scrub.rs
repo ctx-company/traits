@@ -46,11 +46,6 @@ const ALLOWLIST: &[Allowed] = &[
         reason: "P490 identity-scrub guard's own doc/detection prefixes, not a leak",
     },
     Allowed {
-        file: "scripts/byte_compare.rs",
-        contains: "repository/home/markers/ledgers", // identity-guard-literal
-        reason: "coincidental home-prefix substring inside doc prose, not a path",
-    },
-    Allowed {
         file: "modules/cli/tests/proof_identity_scrub.rs",
         contains: "// identity-guard-literal",
         reason: "the guard's own needle table and allowlist must spell out the literal shapes \

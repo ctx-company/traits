@@ -51,7 +51,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         utf8(&init).1
     );
 
-    let source_path = proj.join(format!(".ctx/traits/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source())
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
 
@@ -59,7 +59,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
         ],
         proj,
         home,
@@ -76,7 +76,7 @@ fn add_family_leaf_dependencies(proj: &std::path::Path) {
         ("default", "family-dep-default"),
         ("quick", "family-dep-quick"),
     ] {
-        let dependency_root = proj.join(format!(".ctx/traits/{alias}"));
+        let dependency_root = proj.join(format!(".ctx/traits/packages/{alias}"));
         fs::create_dir_all(dependency_root.join("generated")).unwrap();
         fs::write(
             dependency_root.join("trait.toml"),
@@ -94,7 +94,7 @@ fn add_family_leaf_dependencies(proj: &std::path::Path) {
         .unwrap();
 
         let leaf_path = proj.join(format!(
-            ".ctx/traits/family-fixture/generated/{variant}/index.toml"
+            ".ctx/traits/packages/family-fixture/generated/{variant}/index.toml"
         ));
         let mut leaf = fs::read_to_string(&leaf_path).unwrap();
         leaf.push_str(&format!(
@@ -207,7 +207,7 @@ fn operandless_vendor_locks_every_family_leaf() {
         vendor.status.success(),
         "operand-less vendor failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let lock_path = proj.join(".ctx/traits/family-fixture/trait.lock");
+    let lock_path = proj.join(".ctx/traits/packages/family-fixture/package.lock");
     assert!(
         lock_path.is_file(),
         "vendor did not create {}\nstdout: {stdout}\nstderr: {stderr}",
@@ -258,7 +258,7 @@ fn operandless_vendor_locks_every_family_leaf() {
         approve.status.success(),
         "bulk trust approval failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let package_manifest = proj.join(".ctx/traits/family-fixture/trait.toml");
+    let package_manifest = proj.join(".ctx/traits/packages/family-fixture/package.toml");
     let package_text = fs::read_to_string(&package_manifest).unwrap();
     fs::write(
         package_manifest,
@@ -314,12 +314,16 @@ fn source_less_canonical_package_remains_valid() {
     let init = run_ctx(&["traits", "init", "source-less"], &proj, &home);
     assert!(init.status.success(), "init failed: {}", utf8(&init).1);
     let build = run_ctx(
-        &["traits", "build", ".ctx/traits/source-less/source/index.ts"],
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/source-less/source/index.ts",
+        ],
         &proj,
         &home,
     );
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
-    fs::remove_dir_all(proj.join(".ctx/traits/source-less/source")).unwrap();
+    fs::remove_dir_all(proj.join(".ctx/traits/packages/source-less/source")).unwrap();
 
     let list = run_ctx(&["traits", "list", "--json"], &proj, &home);
     let (stdout, stderr) = utf8(&list);

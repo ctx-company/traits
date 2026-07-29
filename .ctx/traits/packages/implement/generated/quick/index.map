@@ -15,42 +15,42 @@
     "end": 27
   },
   "port:commit-report": {
-    "file": ".ctx/traits/implement/source/variants/quick/port.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/port.ts",
     "start": 10,
     "end": 10
   },
   "port:phase": {
-    "file": ".ctx/traits/implement/source/variants/quick/port.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/port.ts",
     "start": 4,
     "end": 4
   },
   "prompt:building-produce": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 34,
     "end": 34
   },
   "prompt:building-review": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 43,
     "end": 43
   },
   "prompt:draft-writing": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 26,
     "end": 26
   },
   "prompt:shipping-message": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 88,
     "end": 88
   },
   "resource:execution-plan": {
-    "file": ".ctx/traits/implement/source/variants/quick/resource.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/resource.ts",
     "start": 3,
     "end": 3
   },
   "resource:product-doc": {
-    "file": ".ctx/traits/implement/source/variants/quick/resource.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/resource.ts",
     "start": 11,
     "end": 11
   },
@@ -60,12 +60,12 @@
     "end": 188
   },
   "schema:repo-gates-result": {
-    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 185,
     "end": 185
   },
   "schema:review-verdict": {
-    "file": ".ctx/traits/implement/source/variants/quick/schema.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/schema.ts",
     "start": 4,
     "end": 4
   },
@@ -85,17 +85,17 @@
     "end": 197
   },
   "sequence:building-body/capture-diff": {
-    "file": ".ctx/traits/implement/source/sequence/family.ts",
-    "start": 338,
-    "end": 338
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 343,
+    "end": 343
   },
   "sequence:building-body/repo-gates": {
-    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 329,
     "end": 329
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 119,
     "end": 119
   },
@@ -120,7 +120,7 @@
     "end": 240
   },
   "sequence:procedure/draft-writing": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 23,
     "end": 23
   },
@@ -135,27 +135,27 @@
     "end": 308
   },
   "slot:commit-output": {
-    "file": ".ctx/traits/implement/source/variants/quick/slot.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 16,
     "end": 16
   },
   "slot:draft": {
-    "file": ".ctx/traits/implement/source/variants/quick/slot.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 5,
     "end": 5
   },
   "slot:repo-gates-passed": {
-    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 181,
     "end": 181
   },
   "slot:review-diff": {
-    "file": ".ctx/traits/implement/source/sequence/family.ts",
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 169,
     "end": 169
   },
   "slot:review-verdict": {
-    "file": ".ctx/traits/implement/source/variants/quick/slot.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 21,
     "end": 21
   },
@@ -175,12 +175,12 @@
     "end": 290
   },
   "slot:work-summary": {
-    "file": ".ctx/traits/implement/source/variants/quick/slot.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 10,
     "end": 10
   },
   "trait:implement": {
-    "file": ".ctx/traits/implement/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 95,
     "end": 95
   }

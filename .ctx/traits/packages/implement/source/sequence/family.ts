@@ -331,7 +331,12 @@ export const repoGatesStep = sequence.check("repo-gates", {
     // Runs BEFORE the diff capture: cargo build can legitimately rewrite
     // Cargo.lock, and reviewer evidence must reflect the tree as gated, not
     // a pre-gate snapshot the gate step itself invalidates.
-    argv: ["just", "implement-phase-gates"],
+    //
+    // P569: repointed from the retired `implement-phase-gates` recipe to the
+    // repository's single gate. The argv is carried in this step's own output
+    // record, so whatever this names is what the worker is told to re-run —
+    // there is no second place a gate command can be declared and drift.
+    argv: ["just", "test"],
     output: repoGatesPassed,
 });
 

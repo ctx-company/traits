@@ -669,7 +669,7 @@ output = ["slot:repo-gates-passed"]
 [sequence.building-body.sequence.command]
 argv = [
     "just",
-    "implement-phase-gates",
+    "test",
 ]
 
 [[sequence.building-body.sequence]]

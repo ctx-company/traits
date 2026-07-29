@@ -2220,7 +2220,10 @@ fn cdk_drift_check(
             });
         }
     };
-    let byte_stable = matches!(trait_path.file_name(), Some("trait.toml" | "index.toml"));
+    let byte_stable = matches!(
+        trait_path.file_name(),
+        Some("package.toml" | "trait.toml" | "index.toml")
+    );
     let map_drifted = byte_stable
         && match committed_source_map_drifted(trait_path, &source_map) {
             Ok(drifted) => drifted,

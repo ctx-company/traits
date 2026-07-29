@@ -4811,7 +4811,14 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     dir_flag: None,
                     prompt_via: Some("arg".to_string()),
                     stream: Some(true),
-                    output: Some("pi-json".to_string()),
+                    // `pi-json` was never a real parser id — the registry only knows
+                    // raw-json/claude-json/claude-stream-json/opencode-json — so
+                    // this definition could never validate. It went unnoticed
+                    // because an unconfigured built-in was never materialized
+                    // into the registry and so never validated. `raw-json` is the
+                    // generic decoder and is a placeholder: pi's actual stream
+                    // shape is unverified (no pi binary on any machine here yet).
+                    output: Some("raw-json".to_string()),
                 }),
                 mcp: None,
             },
@@ -4827,10 +4834,18 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
 /// exactly once, at config resolution.
 fn merge_built_in_harness_overrides(harness: &mut BTreeMap<String, HarnessDefinition>) {
     for (id, base) in built_in_harness_definitions() {
-        if let Some(configured) = harness.get(id) {
-            let merged = configured.merged_onto(&base);
-            harness.insert(id.to_string(), merged);
-        }
+        // Merge an override onto the built-in, or MATERIALIZE the built-in
+        // when nothing overrides it. Merging only the configured ids left the
+        // resolved registry holding just what the file named, so once the
+        // conventions moved into the built-ins an empty `[harness]` section
+        // meant every lookup failed with "unknown harness id" — the registry
+        // is the one place that knows a harness exists, so it has to carry
+        // all of them.
+        let resolved = match harness.get(id) {
+            Some(configured) => configured.merged_onto(&base),
+            None => base,
+        };
+        harness.insert(id.to_string(), resolved);
     }
 }
 
