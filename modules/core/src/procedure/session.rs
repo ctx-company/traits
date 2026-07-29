@@ -2492,34 +2492,69 @@ impl CheckEvidence {
 /// far short of the capture limit, because this lands in a rendered frame.
 const CHECK_TAIL_LIMIT: usize = 1_500;
 
-/// The end of a failed command's output: stderr when it said anything,
-/// otherwise stdout.
+/// The end of a failed command's output: stderr first, and stdout appended
+/// when it carries something stderr does not.
+///
+/// Both streams, not stderr-or-stdout: the diagnosis is wherever the failing
+/// tool put it, and they disagree. rustc and clippy explain themselves on
+/// stderr — but `cargo fmt --check` prints its diff to STDOUT, and a launcher
+/// like `just` adds only a one-line "Recipe failed" on stderr. A
+/// stderr-preferred tail carried exactly that stub for a pure formatting
+/// failure, which told the reader a recipe failed and not one character of
+/// why. Stderr keeps first position because when it does explain, its
+/// explanation is the sharper one.
 ///
 /// The tail rather than the head — a build or test run prints its failure last,
 /// under a long prologue of progress lines that carry no diagnosis.
 fn failure_tail(evidence: &CommandExecutionEvidence) -> Option<String> {
-    let (text, truncated) = match evidence.stderr.as_deref() {
-        Some(stderr) if !stderr.trim().is_empty() => (stderr, evidence.stderr_truncated),
-        _ => match evidence.stdout.as_deref() {
-            Some(stdout) if !stdout.trim().is_empty() => (stdout, evidence.stdout_truncated),
-            _ => return None,
-        },
-    };
+    let stderr = evidence
+        .stderr
+        .as_deref()
+        .filter(|text| !text.trim().is_empty());
+    let stdout = evidence
+        .stdout
+        .as_deref()
+        .filter(|text| !text.trim().is_empty());
+    match (stderr, stdout) {
+        (Some(stderr), Some(stdout)) => {
+            // Split the budget: stderr gets first claim on half, stdout the
+            // remainder — a short recipe stub on stderr leaves nearly the
+            // whole budget to the stream that actually explains.
+            let stderr_tail = clipped_tail(stderr, CHECK_TAIL_LIMIT / 2, evidence.stderr_truncated);
+            let remaining = CHECK_TAIL_LIMIT.saturating_sub(stderr_tail.chars().count());
+            let stdout_tail = clipped_tail(stdout, remaining, evidence.stdout_truncated);
+            Some(format!("{stderr_tail}\n--- stdout ---\n{stdout_tail}"))
+        }
+        (Some(stderr), None) => Some(clipped_tail(
+            stderr,
+            CHECK_TAIL_LIMIT,
+            evidence.stderr_truncated,
+        )),
+        (None, Some(stdout)) => Some(clipped_tail(
+            stdout,
+            CHECK_TAIL_LIMIT,
+            evidence.stdout_truncated,
+        )),
+        (None, None) => None,
+    }
+}
+
+/// The last `limit` characters of `text`, marked when anything was clipped —
+/// by this cut or by the capture that produced `text` — so a reader never
+/// mistakes a partial tail for the whole output.
+fn clipped_tail(text: &str, limit: usize, capture_truncated: bool) -> String {
     let trimmed = text.trim_end();
     let characters: Vec<char> = trimmed.chars().collect();
-    if characters.len() <= CHECK_TAIL_LIMIT {
-        // Already-truncated capture stays marked even when it fits here, so a
-        // reader never mistakes a clipped capture for the whole output.
-        return Some(if truncated {
+    if characters.len() <= limit {
+        if capture_truncated {
             format!("[earlier output truncated]\n{trimmed}")
         } else {
             trimmed.to_string()
-        });
+        }
+    } else {
+        let tail: String = characters[characters.len() - limit..].iter().collect();
+        format!("[earlier output truncated]\n{tail}")
     }
-    let tail: String = characters[characters.len() - CHECK_TAIL_LIMIT..]
-        .iter()
-        .collect();
-    Some(format!("[earlier output truncated]\n{tail}"))
 }
 
 fn command_execution_succeeded(
@@ -2961,13 +2996,26 @@ mod check_output_tests {
         );
     }
 
-    /// stderr is where a failure explains itself; stdout is the fallback.
+    /// Both streams travel, stderr first: the diagnosis lives wherever the
+    /// failing tool put it. The motivating case is a formatting gate —
+    /// `cargo fmt --check` explains itself on STDOUT while the launcher adds
+    /// only a one-line recipe stub on stderr; a stderr-only tail carried the
+    /// stub and dropped the diff.
     #[test]
-    fn derived_tail_prefers_stderr_and_falls_back_to_stdout() {
-        let both = CheckEvidence::from_submission(&submission_evidence("noise", "the reason"));
-        assert_eq!(both.tail.as_deref(), Some("the reason"));
+    fn derived_tail_carries_both_streams_stderr_first() {
+        let both = CheckEvidence::from_submission(&submission_evidence(
+            "Diff in modules/io/src/run.rs:530",
+            "error: Recipe `lint` failed on line 51",
+        ));
+        let tail = both.tail.expect("both streams present");
+        let recipe = tail.find("Recipe `lint` failed").expect("stderr present");
+        let diff = tail.find("Diff in modules/io").expect("stdout present");
+        assert!(recipe < diff, "stderr leads, stdout follows: {tail}");
+
         let only_stdout = CheckEvidence::from_submission(&submission_evidence("the reason", ""));
         assert_eq!(only_stdout.tail.as_deref(), Some("the reason"));
+        let only_stderr = CheckEvidence::from_submission(&submission_evidence("", "the reason"));
+        assert_eq!(only_stderr.tail.as_deref(), Some("the reason"));
         let silent = CheckEvidence::from_submission(&submission_evidence("", "   "));
         assert!(
             silent.tail.is_none(),
