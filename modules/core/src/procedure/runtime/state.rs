@@ -122,6 +122,20 @@ pub struct CommandExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+    /// Bounded tail of the command's output, kept so a check's verdict record
+    /// can say WHY it failed and still replay from the ledger alone.
+    ///
+    /// The captured stdout/stderr live on the submission's evidence, which is
+    /// not persisted; without this field a replayed verdict could never
+    /// reproduce a value containing them. Optional and skipped when absent, so
+    /// every ledger written before it existed still decodes and still replays
+    /// — those runs simply carry no tail, which is what they had.
+    #[serde(
+        default,
+        rename = "output-tail",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_tail: Option<String>,
 }
 
 /// Pure schema-validation outcome for a runtime value.

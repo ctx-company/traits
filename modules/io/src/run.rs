@@ -423,6 +423,27 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         );
     }
 
+    // Unrunnable-command pre-flight: a command step's argv lives in the trait,
+    // so no agent can repair one this repository cannot execute. Refuse now
+    // rather than let every round fail identically while the reviewer blames
+    // the work for it.
+    // Resolved here rather than reused from `roots`, which is built later, at
+    // resource resolution. A run outside any repository simply skips the
+    // check — it fails open, like every other rule in this preflight.
+    let preflight_repo_root = crate::repository::discover_repo_root().ok();
+    let unrunnable = match preflight_repo_root.as_deref() {
+        Some(repo_root) => {
+            crate::dispatch_preflight::unrunnable_check_commands(&loaded.trait_ref, repo_root)
+        }
+        None => Vec::new(),
+    };
+    if !unrunnable.is_empty() {
+        return invalid_request(
+            "run.trait",
+            crate::dispatch_preflight::unrunnable_refusal_message(&unrunnable),
+        );
+    }
+
     let prepared_assignments = crate::harness_config::prepare_run_assignments(
         &loaded.trait_ref,
         &loaded.trait_root,
@@ -1973,9 +1994,30 @@ fn advance_command_frames(
             // core re-derives the same value from trusted evidence and
             // compares byte-for-byte, so a second local definition of the
             // shape would silently reject every check.
+            // Built before the value, because the verdict record now carries
+            // the exit code and — on failure — a bounded tail of the output,
+            // all of which come from this evidence.
+            let submission_evidence =
+                ctx_traits_core::procedure::session::CommandExecutionEvidence {
+                    argv: argv.clone(),
+                    output_slot: output_slot.clone(),
+                    executable_digest: executable_digest.clone(),
+                    exit_code: outcome.exit_code,
+                    timed_out: outcome.timed_out,
+                    stdout: (!outcome.stdout.is_empty()).then(|| outcome.stdout.clone()),
+                    stderr: (!outcome.stderr.is_empty()).then(|| outcome.stderr.clone()),
+                    stdout_truncated: outcome.stdout_truncated,
+                    stderr_truncated: outcome.stderr_truncated,
+                };
             produced_slots.insert(
                 output_slot.clone(),
-                ctx_traits_core::procedure::session::check_output_value(verdict, command),
+                ctx_traits_core::procedure::session::check_output_value(
+                    verdict,
+                    command,
+                    &ctx_traits_core::procedure::session::CheckEvidence::from_submission(
+                        &submission_evidence,
+                    ),
+                ),
             );
             let response = ctx_traits_core::procedure::session::submit_run_call(
                 trait_ref,
@@ -2002,19 +2044,7 @@ fn advance_command_frames(
                     produced_slots,
                     signals: std::collections::BTreeMap::new(),
                     warnings,
-                    command_execution: Some(
-                        ctx_traits_core::procedure::session::CommandExecutionEvidence {
-                            argv: argv.clone(),
-                            output_slot,
-                            executable_digest: executable_digest.clone(),
-                            exit_code: outcome.exit_code,
-                            timed_out: outcome.timed_out,
-                            stdout: (!outcome.stdout.is_empty()).then(|| outcome.stdout.clone()),
-                            stderr: (!outcome.stderr.is_empty()).then(|| outcome.stderr.clone()),
-                            stdout_truncated: outcome.stdout_truncated,
-                            stderr_truncated: outcome.stderr_truncated,
-                        },
-                    ),
+                    command_execution: Some(submission_evidence),
                     caller: Some(ctx_traits_core::procedure::session::CallerProvenance {
                         surface: "local-runtime-command".to_string(),
                         caller: "ctx traits trusted local runtime".to_string(),

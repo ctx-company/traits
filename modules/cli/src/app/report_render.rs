@@ -638,8 +638,18 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
             repo_root.join(default_dir)
         }
     };
+    // Export under the variant-qualified name, not the bare trait id. Every
+    // leaf of a native family shares one id — all five `implement` leaves are
+    // `implement` — so a bare-id path made them overwrite each other at
+    // `.agents/skills/implement/SKILL.md`, and the lock then held five
+    // entries for one file with five different digests. At most one could
+    // ever match, so the locked check failed permanently and the family could
+    // not be published. `<id>-<variant>` is the same spelling the family
+    // already declares as each leaf's alias (`implement-quick`, ...), so this
+    // introduces no new naming convention.
+    let export_id = trait_ref.export_id();
     let identity = ctx_traits_io::export::Identity::new(
-        trait_ref.id.clone(),
+        export_id.clone(),
         source_digest.clone(),
         export_format.ownership(render_profile),
     );
@@ -655,7 +665,7 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
     // recorded-digest overwrite check lives in host-install/-update).
     let companion_relative_paths: Vec<camino::Utf8PathBuf> = companions
         .iter()
-        .map(|(relative_path, _)| camino::Utf8Path::new(trait_ref.id.as_str()).join(relative_path))
+        .map(|(relative_path, _)| camino::Utf8Path::new(export_id.as_str()).join(relative_path))
         .collect();
     let companion_requests: Vec<ctx_traits_io::export::control::Companion<'_>> =
         companion_relative_paths

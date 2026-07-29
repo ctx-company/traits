@@ -46,6 +46,17 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
 
     entries.push(ensure_project_manifest(repo_root)?);
     entries.push(ensure_runtime_config(repo_root)?);
+    entries.push(ensure_authoring_manifest(repo_root)?);
+    // `.ctx/.gitignore`, so the machine-local half of `.ctx` — worktrees, runs,
+    // caches, and now `node_modules/` — is ignored from the first commit
+    // rather than after someone notices. Idempotent, and it only ever appends
+    // its own canonical entries.
+    let ignore = crate::gitignore::ensure_nested_gitignore(repo_root)?;
+    entries.push(if ignore.created {
+        InitEntry::Created(ignore.path.to_string())
+    } else {
+        InitEntry::Preserved(ignore.path.to_string())
+    });
 
     if let Some(name) = name {
         entries.extend(ensure_starter_package(repo_root, name)?);
@@ -53,6 +64,52 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
 
     entries.sort_by(|a, b| a.path().cmp(b.path()));
     Ok(InitReport { entries })
+}
+
+/// The npm package version `ctx traits init` pins the authoring packages to.
+///
+/// Pinned, not `latest`: the CLI and the CDK agree on a canonical schema
+/// version, so an `init` that floats would eventually scaffold a package the
+/// installed binary cannot read. **This must move with every published release
+/// of the authoring packages** — there is no gate proving it, and a stale value
+/// here is only discovered by an author whose first build fails.
+const AUTHORING_PACKAGE_VERSION: &str = "0.1.0-alpha.0";
+
+/// Scaffold `.ctx/package.json`, the manifest for authoring-time npm packages.
+///
+/// Trait sources import `@ctx-traits/cdk` by bare specifier, and Node resolves
+/// that by walking up from the importing file: `.ctx/traits/packages/<id>/
+/// source/` → … → `.ctx/` → the repository root. So packages installed here are
+/// found without any resolver configuration, and a project that already has its
+/// own root `node_modules` keeps resolving through the next step up, unchanged.
+///
+/// Private and never published: this manifest exists to hold dependencies, not
+/// to be a package. It is also the reason authoring works in a repository with
+/// no JavaScript project of its own — previously the only advice on offer was
+/// "run pnpm install", which assumed a workspace the author may never have.
+///
+/// Running an installed trait still needs no Node at all: a generated
+/// `index.toml` is self-contained, and nothing here is on the run path.
+fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
+    let path = repo_root.join(".ctx").join("package.json");
+    let content = format!(
+        r#"{{
+  "name": "ctx-traits-authoring",
+  "private": true,
+  "description": "Authoring-time dependencies for this project's ctx.traits packages. Created by `ctx traits init`; not published, and not needed to RUN a trait.",
+  "type": "module",
+  "dependencies": {{
+    "@ctx-traits/cdk": "{AUTHORING_PACKAGE_VERSION}"
+  }}
+}}
+"#
+    );
+    match crate::package_scaffold::create_new_file(&path, "authoring manifest", &content)? {
+        crate::package_scaffold::CreateOutcome::Created => Ok(InitEntry::Created(path.to_string())),
+        crate::package_scaffold::CreateOutcome::AlreadyExists => {
+            Ok(InitEntry::Preserved(path.to_string()))
+        }
+    }
 }
 
 /// P569: scaffold `.ctx/traits/runtime.toml` as a commented map of the
@@ -264,6 +321,10 @@ pub(crate) fn package_manifest_text(trait_id: &str, name: &str) -> crate::Result
         },
         family: None,
         dependencies: Default::default(),
+        // A scaffolded package does not publish yet. `ctx traits dependency
+        // init` is what fills this in, so the author states their own npm
+        // name rather than inheriting a scope they cannot publish to.
+        publish: None,
     };
     Ok(ctx_traits_core::encoding::encode(
         ctx_traits_core::encoding::Encoding::Toml,

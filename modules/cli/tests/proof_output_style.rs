@@ -43,9 +43,15 @@ fn scratch_repo(scratch: &ScratchRoot) -> PathBuf {
     git_init(&repo);
     let gitignore_dir = repo.join(".ctx");
     fs::create_dir_all(&gitignore_dir).unwrap();
+    // Derived from the canonical list, never a copy: this fixture had already
+    // drifted (it was missing `config.ts`), which makes `doctor` report
+    // repo-state housekeeping these assertions were written to exclude.
     fs::write(
         gitignore_dir.join(".gitignore"),
-        "worktrees/\nconfig.toml\nharness.toml\ntraits/vendor/\nruns/\ndebug/\ncache/\n",
+        ctx_traits_io::gitignore::CANONICAL_ENTRIES
+            .iter()
+            .map(|entry| format!("{entry}\n"))
+            .collect::<String>(),
     )
     .unwrap();
     repo

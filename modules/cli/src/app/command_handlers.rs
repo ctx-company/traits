@@ -1954,6 +1954,21 @@ fn merge_dependency_json(
             locked,
             json: json || namespace_json,
         },
+        Cmd::Init {
+            path,
+            name,
+            registry,
+            access,
+            force,
+            json,
+        } => Cmd::Init {
+            path,
+            name,
+            registry,
+            access,
+            force,
+            json: json || namespace_json,
+        },
         Cmd::Add {
             spec,
             alias,
@@ -2026,6 +2041,21 @@ fn handle_dependency(
             global,
             json,
         } => crate::app::distribution::handle_install(&spec, alias.as_deref(), global, json),
+        cli::DependencyCommand::Init {
+            path,
+            name,
+            registry,
+            access,
+            force,
+            json,
+        } => crate::app::distribution::handle_dependency_init(
+            path.as_deref(),
+            name.as_deref(),
+            registry.as_deref(),
+            access.as_deref(),
+            force,
+            json,
+        ),
         cli::DependencyCommand::Remove {
             package,
             global,

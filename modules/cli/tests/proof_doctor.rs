@@ -41,11 +41,16 @@ fn scratch_repo(scratch: &ScratchRoot) -> PathBuf {
     git_init(&repo);
     let gitignore_dir = repo.join(".ctx");
     fs::create_dir_all(&gitignore_dir).unwrap();
-    fs::write(
-        gitignore_dir.join(".gitignore"),
-        "worktrees/\nconfig.toml\nconfig.ts\nharness.toml\ntraits/vendor/\nruns/\ndebug/\ncache/\n",
-    )
-    .unwrap();
+    // Built from the canonical list rather than a copy of it. A hardcoded
+    // duplicate silently becomes incomplete the moment an entry is added —
+    // which is exactly what happened when `node_modules/` joined the list, and
+    // it turned three unrelated source-inspection assertions red with a
+    // repo-state warning they were written to exclude.
+    let complete: String = ctx_traits_io::gitignore::CANONICAL_ENTRIES
+        .iter()
+        .map(|entry| format!("{entry}\n"))
+        .collect();
+    fs::write(gitignore_dir.join(".gitignore"), complete).unwrap();
     repo
 }
 

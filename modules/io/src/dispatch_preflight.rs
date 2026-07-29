@@ -321,3 +321,130 @@ fn standing_wall_in_sessions(
     }
     None
 }
+
+/// A declared command that cannot run in this repository, found before any
+/// budget is spent on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnrunnableCommand {
+    pub sequence_id: String,
+    pub argv: Vec<String>,
+    pub reason: String,
+    pub remedy: String,
+}
+
+/// The deterministic dispatch refusal message for an unrunnable command.
+pub fn unrunnable_refusal_message(found: &[UnrunnableCommand]) -> String {
+    found
+        .iter()
+        .map(|entry| {
+            format!(
+                "sequence {} declares `{}`, which cannot run here: {}. {}",
+                entry.sequence_id,
+                entry.argv.join(" "),
+                entry.reason,
+                entry.remedy
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Refuse at dispatch when a trait declares a command this repository cannot
+/// execute.
+///
+/// A command step's argv lives in the TRAIT, not in the run, so an agent can
+/// never repair one that does not resolve — it simply fails identically every
+/// round while the reviewer, seeing only a false verdict, attributes the
+/// failure to the work. Measured across this machine's ctx-gate ledgers, 45%
+/// of runs exhausted their full round budget and 38% carried a blocker that
+/// repeated three or more rounds; the `just test` recipe missing from a
+/// consuming repository produced a byte-identical failed gate for six straight
+/// rounds. Refusing here costs milliseconds and replaces an entire wasted run
+/// with one actionable sentence.
+///
+/// Deliberately conservative — this refuses only what it can prove:
+///
+/// * A **path-shaped** program (containing a separator) is never refused: it
+///   may legitimately be built by a setup command, or by an earlier step, and
+///   not yet exist when this runs.
+/// * A **bare** program name must resolve on `PATH`.
+/// * `argv-from` commands supply their argv at runtime and are skipped.
+///
+/// `just` is additionally checked for the named recipe, because a launcher
+/// that exists while its subcommand does not is the exact shape that cost
+/// those six rounds, and `just` is this project's launcher. Other launchers
+/// (`npm run`, `make`) would each need their own probe and get none here
+/// rather than a guess.
+pub fn unrunnable_check_commands(
+    trait_ref: &ctx_traits_core::Trait,
+    repo_root: &Utf8Path,
+) -> Vec<UnrunnableCommand> {
+    let mut found = Vec::new();
+    for (sequence_id, sequence) in trait_ref.sequences.iter() {
+        for (index, item) in sequence.sequence.iter().enumerate() {
+            let field_path = format!("sequence.{sequence_id}.sequence[{index}]");
+            let Ok(Some(plan)) =
+                ctx_traits_core::r#trait::procedure::command::plan_for_item(item, &field_path)
+            else {
+                continue;
+            };
+            if plan.argv_from.is_some() {
+                continue;
+            }
+            let Some(program) = plan.argv.first() else {
+                continue;
+            };
+            if program.contains('/') || program.contains('\\') {
+                continue;
+            }
+            if !program_on_path(program) {
+                found.push(UnrunnableCommand {
+                    sequence_id: sequence_id.to_string(),
+                    argv: plan.argv.clone(),
+                    reason: format!("`{program}` is not on PATH"),
+                    remedy: format!("install `{program}`, or point the step at a program this repository has"),
+                });
+                continue;
+            }
+            if program == "just"
+                && let Some(recipe) = plan.argv.get(1)
+                && !recipe.starts_with('-')
+                && !just_recipe_exists(repo_root, recipe)
+            {
+                found.push(UnrunnableCommand {
+                    sequence_id: sequence_id.to_string(),
+                    argv: plan.argv.clone(),
+                    reason: format!("the Justfile has no recipe `{recipe}`"),
+                    remedy: format!(
+                        "add a `{recipe}:` recipe to this repository's Justfile so the step has something to run"
+                    ),
+                });
+            }
+        }
+    }
+    found
+}
+
+/// Whether a bare program name resolves to an executable file on `PATH`.
+fn program_on_path(program: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return true;
+    };
+    std::env::split_paths(&path).any(|dir| {
+        let candidate = dir.join(program);
+        std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file())
+    })
+}
+
+/// Whether `just` recognises `recipe` in `repo_root`. Any failure to ask
+/// (no Justfile, `just` erroring for an unrelated reason) answers `true`, so
+/// this can only ever refuse on a definite negative.
+fn just_recipe_exists(repo_root: &Utf8Path, recipe: &str) -> bool {
+    std::process::Command::new("just")
+        .arg("--show")
+        .arg(recipe)
+        .current_dir(repo_root)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|output| output.status.success())
+}

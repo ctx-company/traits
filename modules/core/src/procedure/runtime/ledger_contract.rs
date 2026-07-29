@@ -1344,7 +1344,11 @@ fn validate_revision_command_evidence(
                 // when a ledger is re-validated, the build gates could not
                 // catch it.
                 let expected =
-                    crate::procedure::session::check_output_value(succeeded, &command);
+                    crate::procedure::session::check_output_value(
+                        succeeded,
+                        &command,
+                        &crate::procedure::session::CheckEvidence::from_ledger(evidence),
+                    );
                 let submitted_verdict = revision
                     .submitted_payload
                     .as_ref()

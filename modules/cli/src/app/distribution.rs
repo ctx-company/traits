@@ -403,6 +403,247 @@ pub(crate) fn handle_info(spec: &str, json: bool) -> crate::Result<CommandOutput
     Ok(CommandOutput::new(()))
 }
 
+/// `ctx traits dependency init`: give a trait package a publishable identity.
+///
+/// Two artifacts, written together because publishing needs both and neither
+/// is derivable from the other: `[publish]` in `package.toml` (ctx's record of
+/// the npm name, registry, and access) and the npm wrapper `package.json`
+/// (npm's own view of the same facts). Without this a package has no name it
+/// can actually publish under — the fallback is `@ctx-traits/<id>`, a scope
+/// only this project owns.
+pub(crate) fn handle_dependency_init(
+    path: Option<&str>,
+    name: Option<&str>,
+    registry: Option<&str>,
+    access: Option<&str>,
+    force: bool,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    let package_root = match path {
+        Some(path) => camino::Utf8PathBuf::from(path),
+        None => current_utf8_dir()?,
+    };
+    let manifest_path = ctx_traits_io::layout::package_manifest_path(&package_root);
+    let Some(manifest) = ctx_traits_io::distribution::read_package_manifest(&package_root)? else {
+        return Err(crate::Error::Command {
+            message: format!(
+                "no trait package at {package_root}: expected a package.toml here (run `ctx traits new` first)"
+            ),
+        });
+    };
+
+    if let Some(access) = access
+        && !matches!(access, "public" | "restricted")
+    {
+        return Err(crate::Error::Command {
+            message: format!("--access must be `public` or `restricted`, not {access}"),
+        });
+    }
+
+    let existing = manifest.publish.as_ref();
+    if !force
+        && let Some(existing) = existing
+        && existing.name.is_some()
+        && name.is_some()
+    {
+        return Err(crate::Error::Command {
+            message: format!(
+                "{manifest_path} already declares [publish] name = {:?}; pass --force to replace it",
+                existing.name.as_deref().unwrap_or_default()
+            ),
+        });
+    }
+
+    let resolved_name = name
+        .map(str::to_string)
+        .or_else(|| existing.and_then(|publish| publish.name.clone()))
+        .unwrap_or_else(|| format!("@ctx-traits/{}", manifest.package.id));
+    if !valid_npm_name(&resolved_name) {
+        return Err(crate::Error::Command {
+            message: format!("not a valid npm package name: {resolved_name}"),
+        });
+    }
+    let resolved_registry = registry
+        .map(str::to_string)
+        .or_else(|| existing.and_then(|publish| publish.registry.clone()));
+    let resolved_access = access
+        .map(str::to_string)
+        .or_else(|| existing.and_then(|publish| publish.access.clone()));
+
+    let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|source| {
+        crate::Error::Command {
+            message: format!("cannot read {manifest_path}: {source}"),
+        }
+    })?;
+    let patched = upsert_publish_table(
+        &manifest_text,
+        &resolved_name,
+        resolved_registry.as_deref(),
+        resolved_access.as_deref(),
+    );
+    // Re-decode before writing, exactly as the status edit does: a text patch
+    // that produces an unparseable manifest must never reach disk.
+    let Some(decoded) =
+        ctx_traits_core::manifest::decode_package_manifest(&patched, manifest_path.as_str())?
+    else {
+        return Err(crate::Error::Command {
+            message: format!("[publish] edit produced an unreadable {manifest_path}; refusing to write"),
+        });
+    };
+    if decoded.publish.as_ref().and_then(|publish| publish.name.as_deref())
+        != Some(resolved_name.as_str())
+    {
+        return Err(crate::Error::Command {
+            message: format!("[publish] edit did not take effect in {manifest_path}; refusing to write"),
+        });
+    }
+    ctx_traits_io::write::write_package_manifest(&manifest_path, &patched)?;
+
+    // The npm wrapper. No `exports`/`main`/`module`: a trait package is read
+    // by ctx through package.toml, never imported as JavaScript. An existing
+    // wrapper keeps every field it already had except name and version.
+    let wrapper_path = package_root.join("package.json");
+    let mut wrapper: serde_json::Value = if wrapper_path.is_file() {
+        serde_json::from_str(&std::fs::read_to_string(&wrapper_path).map_err(|source| {
+            crate::Error::Command {
+                message: format!("cannot read {wrapper_path}: {source}"),
+            }
+        })?)
+        .map_err(|source| crate::Error::Command {
+            message: format!("invalid {wrapper_path}: {source}"),
+        })?
+    } else {
+        serde_json::json!({})
+    };
+    let object = wrapper
+        .as_object_mut()
+        .ok_or_else(|| crate::Error::Command {
+            message: format!("{wrapper_path} must be a JSON object"),
+        })?;
+    object.insert(
+        "name".to_string(),
+        serde_json::Value::String(resolved_name.clone()),
+    );
+    object.insert(
+        "version".to_string(),
+        serde_json::Value::String(manifest.package.version.clone()),
+    );
+    if let Some(description) = manifest.package.description.as_ref() {
+        object
+            .entry("description")
+            .or_insert_with(|| serde_json::Value::String(description.clone()));
+    }
+    let wrapper_text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&wrapper).map_err(|source| crate::Error::Command {
+            message: format!("cannot render {wrapper_path}: {source}"),
+        })?
+    );
+    std::fs::write(&wrapper_path, wrapper_text).map_err(|source| crate::Error::Command {
+        message: format!("cannot write {wrapper_path}: {source}"),
+    })?;
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            print_json_report(
+                &serde_json::json!({
+                    "package-root": package_root.as_str(),
+                    "manifest": manifest_path.as_str(),
+                    "wrapper": wrapper_path.as_str(),
+                    "name": resolved_name,
+                    "version": manifest.package.version,
+                    "registry": resolved_registry,
+                    "access": resolved_access,
+                }),
+                "dependency init report",
+            )?;
+        }
+        OutputMode::Human(mode) => {
+            let mut panel = Panel::new(
+                "ctx",
+                format!("dependency init {resolved_name}"),
+                PanelStatus::Passed("passed".to_string()),
+            )
+            .row(PanelRow::toned("package", package_root.as_str(), RowTone::Default))
+            .row(PanelRow::toned("name", resolved_name.as_str(), RowTone::Default))
+            .row(PanelRow::toned(
+                "version",
+                manifest.package.version.as_str(),
+                RowTone::Default,
+            ));
+            if let Some(registry) = resolved_registry.as_deref() {
+                panel = panel.row(PanelRow::toned("registry", registry, RowTone::Default));
+            }
+            if let Some(access) = resolved_access.as_deref() {
+                panel = panel.row(PanelRow::toned("access", access, RowTone::Default));
+            } else {
+                // npm defaults a NEW scoped package to restricted, so silence
+                // here is the difference between a public package and one
+                // nobody can install.
+                panel = panel.row(PanelRow::toned(
+                    "access",
+                    "unset — npm defaults a new scoped package to restricted",
+                    RowTone::Warn,
+                ));
+            }
+            panel = panel.row(PanelRow::toned(
+                "wrapper",
+                wrapper_path.as_str(),
+                RowTone::Default,
+            ));
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(CommandOutput::new(()))
+}
+
+/// Replace the `[publish]` table, or append one, preserving every other byte
+/// of the manifest — comments, ordering, and the `[family]`/`[dependencies]`
+/// tables an author maintains by hand.
+fn upsert_publish_table(
+    text: &str,
+    name: &str,
+    registry: Option<&str>,
+    access: Option<&str>,
+) -> String {
+    let mut rendered = format!("[publish]\nname = \"{name}\"\n");
+    if let Some(registry) = registry {
+        rendered.push_str(&format!("registry = \"{registry}\"\n"));
+    }
+    if let Some(access) = access {
+        rendered.push_str(&format!("access = \"{access}\"\n"));
+    }
+
+    let mut out = String::with_capacity(text.len() + rendered.len() + 2);
+    let mut lines = text.lines().peekable();
+    let mut replaced = false;
+    while let Some(line) = lines.next() {
+        if line.trim() == "[publish]" {
+            replaced = true;
+            out.push_str(&rendered);
+            // Drop the old table's key/value lines; stop at the next table
+            // header so a following `[dependencies]` survives untouched.
+            while let Some(next) = lines.peek() {
+                if next.trim_start().starts_with('[') {
+                    break;
+                }
+                lines.next();
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !replaced {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+        out.push_str(&rendered);
+    }
+    out
+}
+
 pub(crate) fn handle_publish(
     path: Option<&str>,
     trait_id: Option<&str>,
@@ -448,14 +689,23 @@ pub(crate) fn handle_publish(
         });
     }
     let inspection = ctx_traits_io::distribution::inspect_local_package(&package_root)?;
-    if inspection.packages.len() != 1 {
+    // Count PACKAGES, not canonical traits. A native family is one publishable
+    // package that legitimately contains several canonicals, and since P535
+    // `inspect_local_package` expands it into one entry per leaf — so the old
+    // `packages.len() != 1` guard refused every folded family (`implement`
+    // reported "found 5", `plan` "found 4"), which is exactly the set worth
+    // publishing. Distinct roots is the question the guard was always asking.
+    let distinct_roots: std::collections::BTreeSet<&camino::Utf8Path> = inspection
+        .packages
+        .iter()
+        .map(|package| package.root.as_path())
+        .collect();
+    if distinct_roots.len() != 1 {
         return Err(crate::Error::Command {
-            message: ctx_traits_io::publish::Error::PackageCount(inspection.packages.len())
-                .to_string(),
+            message: ctx_traits_io::publish::Error::PackageCount(distinct_roots.len()).to_string(),
         });
     }
     let trait_package = &inspection.packages[0];
-    let trait_file = &trait_package.manifest_path;
     let manifest = root_manifest
         .as_ref()
         .or(trait_package.package_manifest.as_ref())
@@ -468,27 +718,42 @@ pub(crate) fn handle_publish(
                 .to_string(),
         });
     }
-    let check =
-        crate::app::report_check::build_check_report(&crate::app::report_check::CheckInputs {
-            file: trait_file.as_str(),
-            locked: true,
-            skip_cdk_drift: false,
-            json: false,
-            plain: true,
-            no_animate: true,
-            verbose: false,
-            run_ledger: None,
-            eval_reports: &[],
-        })?;
-    if !check.passed
-        || check
-            .warnings
-            .iter()
-            .any(|warning| warning.code == "cdk-drift-unverified")
-    {
-        return Err(crate::Error::Command {
-            message: "publish requires a passed locked check with verified CDK drift".to_string(),
-        });
+    // Check EVERY canonical in the package, not just the first. A family
+    // publishes as one unit, so a package whose default variant passes while
+    // another leaf is stale would ship exactly the drift this check exists to
+    // catch. Fails on the first bad leaf and names it — "the check failed" is
+    // useless when five canonicals could be the reason.
+    for package in &inspection.packages {
+        let check =
+            crate::app::report_check::build_check_report(&crate::app::report_check::CheckInputs {
+                file: package.manifest_path.as_str(),
+                locked: true,
+                skip_cdk_drift: false,
+                json: false,
+                plain: true,
+                no_animate: true,
+                verbose: false,
+                run_ledger: None,
+                eval_reports: &[],
+            })?;
+        if !check.passed
+            || check
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "cdk-drift-unverified")
+        {
+            let leaf = package
+                .variant
+                .as_deref()
+                .map(|variant| format!(" (variant {variant})"))
+                .unwrap_or_default();
+            return Err(crate::Error::Command {
+                message: format!(
+                    "publish requires a passed locked check with verified CDK drift: {}{leaf} failed",
+                    package.manifest_path
+                ),
+            });
+        }
     }
     let direct_package = trait_package.root == package_root;
     let (npm_name, npm_version) = if !direct_package && package_root.join("package.json").is_file()
@@ -516,6 +781,17 @@ pub(crate) fn handle_publish(
                 message: "package.json is missing version".to_string(),
             })?;
         (name.to_string(), version.to_string())
+    } else if let Some(declared) = manifest.publish.as_ref().and_then(|publish| publish.name.clone())
+    {
+        // Declared `[publish] name` wins over any derived default. Without
+        // this the scope below is imposed on every publisher, and `@ctx-traits`
+        // is a scope nobody but us can publish to.
+        if !valid_npm_name(&declared) {
+            return Err(crate::Error::Command {
+                message: format!("[publish] name is not a valid npm package name: {declared}"),
+            });
+        }
+        (declared, manifest.package.version.clone())
     } else {
         let name = format!("@ctx-traits/{}", manifest.package.id);
         if !valid_npm_name(&name) {
@@ -599,16 +875,36 @@ pub(crate) fn handle_publish(
     Ok(CommandOutput::new(()))
 }
 
+/// Whether `name` is a publishable npm package name, scoped or unscoped.
+///
+/// Previously this stripped only the literal `@ctx-traits/` prefix, so every
+/// other scope failed validation — `@acme/review` was rejected as malformed.
+/// Together with the derived `@ctx-traits/<id>` default that made third-party
+/// publication impossible twice over: the name we invented was one nobody else
+/// could use, and any name they chose instead was refused here.
 fn valid_npm_name(name: &str) -> bool {
-    let bare = name.strip_prefix("@ctx-traits/").unwrap_or(name);
-    !bare.is_empty()
-        && bare.chars().all(|character| {
+    let bare = match name.strip_prefix('@') {
+        Some(scoped) => match scoped.split_once('/') {
+            // A scope must be non-empty and is validated by the same character
+            // rule as the package part.
+            Some((scope, package)) if !scope.is_empty() && valid_npm_segment(scope) => package,
+            _ => return false,
+        },
+        None => name,
+    };
+    valid_npm_segment(bare)
+}
+
+/// One npm name segment: a scope without its `@`, or the package part.
+fn valid_npm_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment.chars().all(|character| {
             character.is_ascii_lowercase()
                 || character.is_ascii_digit()
-                || matches!(character, '-' | '_' | '.' | '/')
+                || matches!(character, '-' | '_' | '.')
         })
-        && !bare.starts_with('.')
-        && !bare.starts_with('_')
+        && !segment.starts_with('.')
+        && !segment.starts_with('_')
 }
 
 /// `ctx traits trust approve <package>`: resolve `operand` against installed

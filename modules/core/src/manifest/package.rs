@@ -30,6 +30,45 @@ pub struct PackageManifest {
     /// `alias = { npm = "@scope/pkg" }`, or `alias = { git = "..." }`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, PackageDependencySpec>,
+
+    /// Where and under what name this package publishes. Absent for a package
+    /// that never publishes, and therefore byte-compatible with every existing
+    /// manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish: Option<PackagePublish>,
+}
+
+/// Publication identity: the npm name, registry, and access this package is
+/// published under.
+///
+/// Without this the name was derived as `@ctx-traits/<id>` — a scope only we
+/// can publish to — so every third-party package was unpublishable by
+/// construction. `id` stays the resolution identity inside ctx; this is the
+/// separate question of what the outside world calls it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PackagePublish {
+    /// npm package name, scope included. Defaults to `@ctx-traits/<id>` only
+    /// because that is this repository's own scope; every other publisher must
+    /// state theirs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Registry URL. Absent means npm's default, or whatever the publishing
+    /// environment already points at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+
+    /// npm `--access`: `public` or `restricted`. Absent leaves it to npm,
+    /// which defaults a NEW scoped package to restricted — the reason a first
+    /// publish silently lands private.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
+
+    /// Paths excluded from the published payload, replacing the built-in
+    /// defaults when stated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
 }
 
 /// The package-level selector map for a native trait family.

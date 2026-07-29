@@ -1692,6 +1692,10 @@ fn submit_run_submission(
             executable_digest: evidence.executable_digest.clone(),
             exit_code: evidence.exit_code,
             timed_out: evidence.timed_out,
+            // Computed here, at the one place submission evidence becomes
+            // ledger evidence, so the submitting runtime and a later replay
+            // read a tail produced by the same function from the same bytes.
+            output_tail: failure_tail(evidence),
         }
     });
     let producer_agent = caller_agent_role(
@@ -2366,7 +2370,7 @@ fn command_evidence_matches_current_frame(
             && submission
                 .produced_slots
                 .get(&command.output_slot)
-                .is_some_and(|value| *value == check_output_value(verdict, command));
+                .is_some_and(|value| *value == check_output_value(verdict, command, &CheckEvidence::from_submission(evidence)));
     }
     if command_execution_succeeded(evidence, command) {
         submission.produced_slots.len() == 1
@@ -2405,6 +2409,7 @@ fn check_verdict(
 pub fn check_output_value(
     verdict: bool,
     command: &crate::procedure::runtime::CommandFrame,
+    evidence: &CheckEvidence,
 ) -> JsonValue {
     let mut value = serde_json::Map::new();
     value.insert("ok".to_string(), JsonValue::Bool(verdict));
@@ -2418,7 +2423,96 @@ pub fn check_output_value(
                 .collect(),
         ),
     );
+    if let Some(exit_code) = evidence.exit_code {
+        value.insert("exit-code".to_string(), JsonValue::from(exit_code));
+    }
+    if evidence.timed_out {
+        value.insert("timed-out".to_string(), JsonValue::Bool(true));
+    }
+    // Only on failure. A passing gate has nothing to diagnose, and every field
+    // here is rendered into a frame a model pays for; a reader who wants the
+    // full capture has the ledger. On failure the reader has no other channel
+    // at all — which is exactly how a missing `just test` recipe produced six
+    // identical rounds whose only evidence was `ok: false`, leaving the
+    // reviewer to invent a cause and blame the worker for a command it never
+    // chose.
+    if !verdict && let Some(tail) = evidence.tail.as_deref() {
+        value.insert("tail".to_string(), JsonValue::String(tail.to_string()));
+    }
     JsonValue::Object(value)
+}
+
+/// The three facts a check's verdict record needs from its execution.
+///
+/// A named type rather than three positional arguments because the two sources
+/// are different structs: a live submission carries captured stdout/stderr and
+/// derives its tail, while a replayed ledger carries the already-derived tail
+/// and no captured output at all. Both must produce a byte-identical record —
+/// that equality is what the acceptance check and the ledger replay both
+/// assert — so they converge here instead of at three call sites that could
+/// drift apart.
+#[derive(Debug, Clone)]
+pub struct CheckEvidence {
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub tail: Option<String>,
+}
+
+impl CheckEvidence {
+    /// From a live submission, deriving the tail from captured output.
+    pub fn from_submission(evidence: &CommandExecutionEvidence) -> Self {
+        Self {
+            exit_code: evidence.exit_code,
+            timed_out: evidence.timed_out,
+            tail: failure_tail(evidence),
+        }
+    }
+
+    /// From persisted ledger evidence, reading the tail recorded when the
+    /// command actually ran.
+    pub fn from_ledger(evidence: &crate::procedure::runtime::CommandExecutionEvidence) -> Self {
+        Self {
+            exit_code: evidence.exit_code,
+            timed_out: evidence.timed_out,
+            tail: evidence.output_tail.clone(),
+        }
+    }
+}
+
+/// How much of a failed check's output travels in its verdict record.
+///
+/// Enough for a missing-recipe line, a compiler error, or a failed assertion;
+/// far short of the capture limit, because this lands in a rendered frame.
+const CHECK_TAIL_LIMIT: usize = 1_500;
+
+/// The end of a failed command's output: stderr when it said anything,
+/// otherwise stdout.
+///
+/// The tail rather than the head — a build or test run prints its failure last,
+/// under a long prologue of progress lines that carry no diagnosis.
+fn failure_tail(evidence: &CommandExecutionEvidence) -> Option<String> {
+    let (text, truncated) = match evidence.stderr.as_deref() {
+        Some(stderr) if !stderr.trim().is_empty() => (stderr, evidence.stderr_truncated),
+        _ => match evidence.stdout.as_deref() {
+            Some(stdout) if !stdout.trim().is_empty() => (stdout, evidence.stdout_truncated),
+            _ => return None,
+        },
+    };
+    let trimmed = text.trim_end();
+    let characters: Vec<char> = trimmed.chars().collect();
+    if characters.len() <= CHECK_TAIL_LIMIT {
+        // Already-truncated capture stays marked even when it fits here, so a
+        // reader never mistakes a clipped capture for the whole output.
+        return Some(if truncated {
+            format!("[earlier output truncated]\n{trimmed}")
+        } else {
+            trimmed.to_string()
+        });
+    }
+    let tail: String = characters[characters.len() - CHECK_TAIL_LIMIT..]
+        .iter()
+        .collect();
+    Some(format!("[earlier output truncated]\n{tail}"))
 }
 
 fn command_execution_succeeded(
@@ -2781,21 +2875,91 @@ mod check_output_tests {
     /// compare. They call one constructor precisely so they cannot drift —
     /// but a drift would reject EVERY check frame in every run, so the shape
     /// is pinned rather than left to that convention alone.
+    fn check_evidence(exit_code: Option<i32>, tail: Option<&str>) -> CheckEvidence {
+        CheckEvidence {
+            exit_code,
+            timed_out: false,
+            tail: tail.map(str::to_string),
+        }
+    }
+
     #[test]
     fn check_output_carries_the_verdict_and_the_argv_that_produced_it() {
         let command = command_frame(&["just", "implement-phase-gates"]);
-        let value = check_output_value(false, &command);
+        let value = check_output_value(false, &command, &check_evidence(Some(1), None));
         assert_eq!(
             value,
             serde_json::json!({
                 "ok": false,
                 "argv": ["just", "implement-phase-gates"],
+                "exit-code": 1,
             }),
             "a failed gate must still name the command that failed"
         );
         assert_eq!(
-            check_output_value(true, &command)["ok"],
+            check_output_value(true, &command, &check_evidence(Some(0), None))["ok"],
             serde_json::json!(true)
+        );
+    }
+
+    /// The tail is what stops a reader inventing a cause for a failed gate,
+    /// and it is pure cost on a passing one.
+    #[test]
+    fn check_output_carries_the_failure_tail_only_on_failure() {
+        let command = command_frame(&["just", "test"]);
+        let evidence = check_evidence(Some(1), Some("error: Justfile does not contain recipe `test`"));
+        let failed = check_output_value(false, &command, &evidence);
+        assert_eq!(
+            failed["tail"],
+            serde_json::json!("error: Justfile does not contain recipe `test`"),
+            "a failed gate must state why it failed"
+        );
+        let passed = check_output_value(true, &command, &evidence);
+        assert!(
+            passed.get("tail").is_none(),
+            "a passing gate has nothing to diagnose and must not spend frame budget on output"
+        );
+    }
+
+    fn submission_evidence(stdout: &str, stderr: &str) -> CommandExecutionEvidence {
+        CommandExecutionEvidence {
+            argv: vec!["just".to_string(), "test".to_string()],
+            output_slot: "slot:gate".to_string(),
+            executable_digest: None,
+            exit_code: Some(1),
+            timed_out: false,
+            stdout: (!stdout.is_empty()).then(|| stdout.to_string()),
+            stderr: (!stderr.is_empty()).then(|| stderr.to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }
+    }
+
+    /// A tail longer than the budget keeps its END — a build prints its
+    /// failure last, under a prologue that carries no diagnosis.
+    #[test]
+    fn derived_tail_keeps_the_end_and_marks_the_clip() {
+        let long = format!("{}FAILURE HERE", "prologue line\n".repeat(400));
+        let derived = CheckEvidence::from_submission(&submission_evidence("", &long));
+        let tail = derived.tail.expect("a failed command with output has a tail");
+        assert!(tail.ends_with("FAILURE HERE"), "the end must survive");
+        assert!(
+            tail.starts_with("[earlier output truncated]"),
+            "a clipped tail must say so rather than look complete"
+        );
+    }
+
+    /// stderr is where a failure explains itself; stdout is the fallback.
+    #[test]
+    fn derived_tail_prefers_stderr_and_falls_back_to_stdout() {
+        let both = CheckEvidence::from_submission(&submission_evidence("noise", "the reason"));
+        assert_eq!(both.tail.as_deref(), Some("the reason"));
+        let only_stdout = CheckEvidence::from_submission(&submission_evidence("the reason", ""));
+        assert_eq!(only_stdout.tail.as_deref(), Some("the reason"));
+        let silent = CheckEvidence::from_submission(&submission_evidence("", "   "));
+        assert!(
+            silent.tail.is_none(),
+            "whitespace-only output is not a diagnosis and must not be carried"
         );
     }
 
@@ -2807,8 +2971,8 @@ mod check_output_tests {
         let declared = command_frame(&["just", "implement-phase-gates"]);
         let claimed = command_frame(&["just", "test"]);
         assert_ne!(
-            check_output_value(true, &declared),
-            check_output_value(true, &claimed),
+            check_output_value(true, &declared, &check_evidence(Some(0), None)),
+            check_output_value(true, &claimed, &check_evidence(Some(0), None)),
             "two different gate commands must not produce the same check record"
         );
     }

@@ -117,10 +117,30 @@ pub fn run_node_module(
     // process's own cwd"; `Command::current_dir` errors on an empty path, so
     // normalize it to `.` rather than skip it.
     if let Some(repo_root) = &request.repo_root {
-        let current_dir = if repo_root.as_str().is_empty() {
+        let base = if repo_root.as_str().is_empty() {
             Utf8Path::new(".")
         } else {
             repo_root.as_path()
+        };
+        // Prefer ctx's own `.ctx/node_modules` when it exists, falling back to
+        // the repository root.
+        //
+        // Node walks UP from the child's cwd, so anchoring inside `.ctx`
+        // reaches `.ctx/node_modules` first and then the repo root anyway —
+        // a project that installed the authoring packages itself keeps
+        // resolving exactly as before, and one that let `ctx traits init`
+        // install them no longer needs a package.json of its own at the root.
+        // Without this, authoring in a repository with no JavaScript project
+        // fails with `Cannot find package '@ctx-traits/cdk'`, and the remedy
+        // the product printed was "run pnpm install" — this repository's own
+        // development setup offered as user-facing advice.
+        let ctx_root = base.join(".ctx");
+        let owned_current_dir;
+        let current_dir = if ctx_root.join("node_modules").is_dir() {
+            owned_current_dir = ctx_root;
+            owned_current_dir.as_path()
+        } else {
+            base
         };
         command.current_dir(current_dir);
     }
@@ -165,7 +185,12 @@ pub fn run_node_module(
             timed_out: false,
             message: if is_unresolved_package_error(stderr, unresolved_package_hint) {
                 format!(
-                    "cannot resolve {unresolved_package_hint} — run pnpm install (or pnpm add -D {unresolved_package_hint})"
+                    // Names a command that works in a repository with no
+                    // JavaScript project of its own, which is the situation
+                    // this error actually describes. The previous text said
+                    // "run pnpm install", which assumes a pnpm workspace the
+                    // author may not have and never will.
+                    "cannot resolve {unresolved_package_hint} — run `ctx traits init` to install the authoring packages into .ctx/node_modules, or add {unresolved_package_hint} to this project yourself"
                 )
             } else if stderr.is_empty() {
                 format!("{label} command exited nonzero")

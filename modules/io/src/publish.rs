@@ -266,16 +266,15 @@ fn read_metadata(
         }
         object.insert("name".to_string(), Value::String(package.to_string()));
         object.insert("version".to_string(), Value::String(version.to_string()));
-        if !object.contains_key("exports")
-            && !object.contains_key("main")
-            && !object.contains_key("module")
-        {
-            return Err(Error::Metadata(
-                "npm wrapper package must declare a runtime entry via exports, main, or module"
-                    .to_string(),
-            )
-            .into());
-        }
+        // No runtime-entry requirement. A trait package's entry point is its
+        // `package.toml` and `generated/` tree, which ctx reads directly — a
+        // consumer never imports it as JavaScript. The old check demanded
+        // `exports`/`main`/`module` because the first package to travel this
+        // path was dual-use TypeScript (`@ctx-traits/agents`); applying it to
+        // every trait package forced authors to declare an entry point that
+        // resolves to nothing, so the manifest asserted something untrue in
+        // order to satisfy a check. A package that DOES ship JavaScript still
+        // declares its own entry, and that declaration is preserved above.
     } else {
         object
             .entry("name")

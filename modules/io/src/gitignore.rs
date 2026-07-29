@@ -33,6 +33,11 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
     "runs/",
     "debug/",
     "cache/",
+    // Authoring-time npm packages installed by `ctx traits init`, resolved by
+    // the CDK build because Node walks up from `.ctx`. Reinstallable from the
+    // manifest beside it, and a committed `node_modules` would be a
+    // spectacular first impression.
+    "node_modules/",
 ];
 
 /// Repository-relative path of the nested ignore file this module owns.

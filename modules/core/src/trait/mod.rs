@@ -419,6 +419,27 @@ pub struct Trait {
 }
 
 impl Trait {
+    /// The name this trait exports under: variant-qualified when it is a
+    /// family leaf, and the plain id otherwise.
+    ///
+    /// Every leaf of a native family shares one `id` — all five `implement`
+    /// leaves are `implement` — so exporting by id alone made them collide on
+    /// a single path, each overwriting the last, and the lock then recorded
+    /// several entries for one file with different digests. At most one could
+    /// match, so the locked check failed permanently.
+    ///
+    /// One definition, used by both the export path and the generated file's
+    /// ownership marker: they must agree, or a re-export reads back a marker
+    /// naming a different owner and refuses. `<id>-<variant>` is the spelling
+    /// the family already declares as each leaf's alias.
+    pub fn export_id(&self) -> Id {
+        match self.variant.as_deref() {
+            Some(variant) => Id::new(format!("{}-{variant}", self.id.as_str()))
+                .unwrap_or_else(|_| self.id.clone()),
+            None => self.id.clone(),
+        }
+    }
+
     /// Validate every taxonomy slug with canonical field paths.
     ///
     /// Returns the first invalid slug's structured diagnostic, or `Ok(())`.

@@ -24,11 +24,10 @@ struct Allowed {
 }
 
 const ALLOWLIST: &[Allowed] = &[
-    Allowed {
-        file: "modules/io/src/publish.rs",
-        contains: "contains_key(\"main\")",
-        reason: "npm package.json runtime-entry field name, not a branch",
-    },
+    // The `modules/io/src/publish.rs` entry for `contains_key("main")` was
+    // removed with the code it covered: publish no longer requires a trait
+    // package to declare an npm runtime entry, because a trait package is read
+    // through `package.toml` and never imported as JavaScript.
     Allowed {
         file: "modules/io/src/worktree.rs",
         contains: "(\"main\".to_string(), DefaultBranchSource::Fallback)",

@@ -2675,6 +2675,42 @@ pub enum DependencyCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Prepare a trait package for publication: declare its npm name,
+    /// registry, and access, and write the npm wrapper beside `package.toml`.
+    ///
+    /// Run this once per package before the first `dependency publish`.
+    /// Without it a package has no publishable identity — the npm name would
+    /// otherwise be derived as `@ctx-traits/<id>`, a scope only this project
+    /// can publish to.
+    Init {
+        /// Trait package directory. Defaults to the current directory.
+        path: Option<String>,
+
+        /// npm package name, scope included (for example `@acme/review`).
+        /// Defaults to the existing `[publish] name`, then to
+        /// `@ctx-traits/<id>`.
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Registry URL to publish to. Omit for npm's default.
+        #[arg(long)]
+        registry: Option<String>,
+
+        /// npm access for a scoped package: `public` or `restricted`. npm
+        /// defaults a NEW scoped package to restricted, which is how a first
+        /// publish silently lands private.
+        #[arg(long)]
+        access: Option<String>,
+
+        /// Overwrite an existing `[publish]` declaration or `package.json`.
+        #[arg(long)]
+        force: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Publish exactly one ready trait package to npm, without changing
     /// source files (`npm publish`).
     ///

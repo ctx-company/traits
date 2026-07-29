@@ -143,9 +143,16 @@ fn doctor_exit_split_findings_vs_could_not_run_vs_migrate_state() {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
     fs::create_dir_all(repo.join(".ctx")).unwrap();
+    // Derived from the canonical list, never a copy of it: an incomplete
+    // duplicate makes `doctor` report repo-state housekeeping these tests were
+    // written to exclude, and here that warning silently flipped a
+    // source-free root from "could not run" to "ran, warnings only".
     fs::write(
         repo.join(".ctx/.gitignore"),
-        "worktrees/\nconfig.toml\nconfig.ts\nharness.toml\ntraits/vendor/\nruns/\ndebug/\ncache/\n",
+        ctx_traits_io::gitignore::CANONICAL_ENTRIES
+            .iter()
+            .map(|entry| format!("{entry}\n"))
+            .collect::<String>(),
     )
     .unwrap();
 

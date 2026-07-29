@@ -276,7 +276,10 @@ pub fn render_skill_export_content(
     }
     out.push_str(
         &Identity::new(
-            trait_ref.id.clone(),
+            // Must match the export path's identity exactly — see
+            // `Trait::export_id`. A marker naming the bare family id under a
+            // variant-qualified path makes every re-export fail ownership.
+            trait_ref.export_id(),
             plan.source_digest.clone(),
             OwnershipKey::Skill,
         )
@@ -313,7 +316,10 @@ pub fn render_stub_export_content(
     }
     out.push_str(
         &Identity::new(
-            trait_ref.id.clone(),
+            // Must match the export path's identity exactly — see
+            // `Trait::export_id`. A marker naming the bare family id under a
+            // variant-qualified path makes every re-export fail ownership.
+            trait_ref.export_id(),
             plan.source_digest.clone(),
             OwnershipKey::Skill,
         )
@@ -691,7 +697,8 @@ pub fn plan_render_with_resource_body_evidence(
         compile_model_view_with_evidence(trait_ref, profile, Some(source_digest), &resource_plan);
 
     let generated_file_marker = Identity::new(
-        trait_ref.id.clone(),
+        // Same identity as the export path (`Trait::export_id`).
+        trait_ref.export_id(),
         Digest::from_unvalidated(source_digest),
         OwnershipKey::RenderProfile(profile),
     )
