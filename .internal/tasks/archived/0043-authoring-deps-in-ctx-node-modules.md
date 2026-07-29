@@ -1,6 +1,24 @@
 # 0043 — Authoring deps must install into `.ctx/`, not the user's repo root
 
-**Status:** ready to implement · **Release blocker** · **Raised:** 2026-07-29
+**Status:** DONE 2026-07-29 · **Raised:** 2026-07-29
+
+**Landed:** the CDK build anchors Node's cwd to `.ctx` when
+`.ctx/node_modules` exists (falling back to the repo root, so this repo and any
+existing user setup resolve unchanged); `ctx traits init` scaffolds
+`.ctx/package.json` (private, pinned `@ctx-traits/cdk`) and `.ctx/.gitignore`
+with `node_modules/` in the canonical entries; the unresolved-package message
+names `ctx traits init` instead of this repo's pnpm setup. Proven in a repo
+with no root `package.json` and no root `node_modules`: `init` → `new` →
+`build` succeeds resolving purely from `.ctx/node_modules`.
+
+**Two deliberate residuals, recorded not hidden:**
+- `init` writes the manifest but does not run the install — offline-safe, and
+  untestable against the registry until 0031's first publish actually lands.
+  The build's failure message carries the remedy. Revisit after first publish.
+- `AUTHORING_PACKAGE_VERSION` in `modules/io/src/init.rs` is a pin nothing
+  gates: it must move with every published release of the authoring packages,
+  and a stale value is discovered by an author whose first build fails. This
+  belongs on the release checklist until a gate exists.
 
 ## What breaks
 

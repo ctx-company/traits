@@ -1,6 +1,6 @@
 # 0041 — Refuse what the run cannot do, instead of blaming the worker for it
 
-**Status:** item 1 LANDED 2026-07-29 · items 2–3 below · **Raised:** 2026-07-29
+**Status:** DONE for v1 — item 1 landed, item 3 applied, item 2 deferred post-release by owner ruling 2026-07-29 · **Raised:** 2026-07-29
 
 ## The failure class
 
@@ -129,6 +129,12 @@ So the cost is honest and unavoidable: **a new field on the loop declaration**,
 which means the canonical model, a schema version, and its migration (0029's
 gate). Worth doing, but it is a model change, not a cheap addition — do not
 start it expecting the latter.
+
+**Owner ruling 2026-07-29: deferred post-release.** The dispatch preflight
+(item 1) and the failure tail (0038 part 1) removed the two causes behind every
+observed multi-round burn; the model change lands calmer after v1, with 0029's
+migration gate in place. When picked up, shape (a) with the hook point below is
+the plan of record.
 
 The hook point is `modules/core/src/procedure/runtime/control_flow.rs:1735`,
 where `next_iteration >= max_iterations` decides exhaustion; a stall check sits

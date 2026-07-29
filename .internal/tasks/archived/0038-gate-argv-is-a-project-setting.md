@@ -1,6 +1,6 @@
 # 0038 — A failing gate must say WHY, and its argv must have an owner
 
-**Status:** part 1 ready to implement · part 2 is DESIGN · **Raised:** 2026-07-29
+**Status:** DONE for v1 — part 1 LANDED 2026-07-29 (verdict record carries exit-code, timed-out, and a failure tail; three call sites converge on one CheckEvidence type; reviewer/worker prompts read the tail); part 2 DEFERRED post-v1 by owner ruling 2026-07-29 · **Raised:** 2026-07-29
 
 ## What happened
 
@@ -64,6 +64,15 @@ not exist is a **misconfigured repository**, not a worker defect, and the
 reviewer must report it as such rather than as a blocker against the work.
 
 ## Part 2 — DESIGN: `config()` in the CDK
+
+**Owner ruling 2026-07-29: deferred post-v1.** v1 ships the convention — the
+gate is `just test`, and the dispatch preflight (0041) refuses at dispatch with
+"add a `test:` recipe" when it is absent. Two facts recorded for the pickup:
+`argvFrom: PortHandle<string[]>` already exists in the CDK, so a configurable
+gate may need no new primitive — but an `argvFrom` gate step is invisible to
+the static preflight, so configurability and dispatch-time refusal are in
+tension and the choice must be made deliberately, with real user feedback
+rather than guessed now.
 
 The gate argv is baked into a package meant to be installed elsewhere. Every
 consuming repo must own a `test` recipe meaning "my gate", or edit and rebuild
