@@ -1,6 +1,6 @@
 # 0025 — Declare a role once as an array instead of `smart-1`/`smart-2`
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** ready to implement · **Raised:** 2026-07-29 · **Pairs with:** 0034 (trait-scoped seats)
 
 Today two reviewer seats mean two near-identical config blocks,
 `[agent.role.smart-1]` and `[agent.role.smart-2]`, differing in nothing but the
@@ -32,3 +32,15 @@ count = 2          # or an array form if seats must differ
 One `[agent.role.<name>]` declaration yields N addressable seats with stable
 ids; a per-seat override is still expressible; `doctor --config` shows the
 expanded seats; existing `smart-1`/`smart-2` declarations keep working.
+
+## Composes with 0034
+
+`count` is just another field, so a trait-scoped table narrows it for free:
+
+```toml
+[agent.role.smart]            count = 2
+[trait.plan.agent.role.smart] count = 1
+```
+
+Expansion therefore has to happen AFTER scope merging, not at parse time, or a
+trait-scoped `count` arrives too late to change anything.
