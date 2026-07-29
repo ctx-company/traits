@@ -1453,6 +1453,7 @@ mod tests {
     /// test's "denied outside the worktree" assertion would be vacuous.
     /// Rooted under this crate's own `target/` (self-contained, writable,
     /// git-ignored) so nothing outside the test's own lifetime is touched.
+    #[cfg(target_os = "macos")]
     fn non_tmp_scratch_root(tag: &str) -> ScratchRoot {
         let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
