@@ -10,3 +10,4 @@ harness.toml
 runs/
 debug/
 cache/
+node_modules/
