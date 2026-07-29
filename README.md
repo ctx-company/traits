@@ -8,16 +8,6 @@ _Turn your skills into shareable modules, that are easily maintained and orchest
 
 ## Installation
 
-### Homebrew
-```sh,
-brew install ctx-company/tap/ctx
-```
-
-### Using curl
-```sh
-curl -fsSL https://ctx.company/install.sh | sh
-```
-
 ### From source
 ```sh
 git clone https://github.com/ctx-company/ctx \
