@@ -1,6 +1,6 @@
 # 0026 — One word: `variant`. Retire `family`/`leaf`.
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** ready to implement · **Raised:** 2026-07-29 · **Do together with:** 0036 (package runtime.toml) · **Grammar:** 0037
 
 The codebase carries three words for two concepts: a package holds `variants`,
 but the manifest calls them `[family.leaf.<selector>]`, and code says `family`,

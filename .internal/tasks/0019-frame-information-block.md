@@ -1,70 +1,133 @@
-# 0019 — `<information>` on both frame envelopes: budget, and prompt-over-description
+# 0019 — Render the frame's declared context: `<information>` with intent and behavior
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** ready to implement · **Raised:** 2026-07-29 · **Rewritten:** 2026-07-29
+**Related:** 0020 (flatten schemas) · 0021 (derive `<response>`) · 0035 (one source per fact)
 
-## What to add
+## The defect this fixes is a lie, not a missing nicety
 
-An `<information>` element on both envelopes, carrying the context a seat needs
-to do its step well — separate from the DATA it operates on.
+Every implement variant declares intent and behavior:
+
+```toml
+[[intent.require]] id = "leanness"
+[[intent.avoid]]   id = "over-engineering"
+[[behavior.tone]]  id = "direct"
+```
+
+`ctx traits explain` reads them. Activation scoring uses them. `compile.rs`
+resolves each id to a directive through `intent_builtin`/`behavior_builtin`, and
+a test (`directive_resolves_for_every_guidance_id_used_by_repo_traits`) asserts
+every id a repo trait uses resolves to one.
+
+**None of it reaches the model.** A live worker frame was dumped and checked:
+zero occurrences of `tone`, `over-engineering`, or `leanness`; no `<intent>` or
+`<behavior>` element; the frame's entire structure is `<input>{<prompt>,<data>}`
+and `<output>{<format>,<schema>,<response>}`.
+
+So the product advertises a behavior contract it does not deliver. That is the
+reason to do this, independent of whether it improves output.
+
+## Target shape
+
+Everything contextual moves into one frame-level `<information>`; `<input>`
+collapses to the operands it actually holds.
 
 ```
+<information>
+  <identity>You are agent:worker. Do only this step's work.</identity>
+  <title>Building Produce</title>
+  <description>Implements the draft and applies reviewer fixes.</description>
+  <prompt>…the step's authored prompt…</prompt>
+
+  <intent>
+    <require leanness>Add only what the requested outcome needs; treat anything beyond that as scope creep.</require>
+    <avoid over-engineering>Avoid speculative generality; build only what the demonstrated need requires.</avoid>
+  </intent>
+
+  <behavior>
+    <tone direct>State conclusions and blockers plainly; do not bury them behind hedging or praise.</tone>
+    <verbosity brief>Keep output compact unless risk explanation needs detail.</verbosity>
+  </behavior>
+</information>
+
 <input>
-  <information>
-    <description>…</description>     ← only when no prompt exists
-    <prompt>…</prompt>               ← wins outright
-  </information>
-  <data>…</data>
+  <data><draft>…</draft><repo-gates-passed>{"ok":false,"argv":["just","test"]}</repo-gates-passed></data>
 </input>
 
 <output>
-  <information>
-    <budget>…</budget>
-    <prompt>…</prompt>               ← or <description>, never both
-  </information>
+  <budget>Your entire response must fit in N bytes.</budget>
   <format>…</format>
   <schema>…</schema>
-  <response>…</response>
+  <response>…derived from the contract; see 0021…</response>
 </output>
 ```
 
-## The precedence rule is doctrine, not a local choice
+Reading order is **who I am and what I am doing → what I operate on → what I
+must return.**
 
-**A prompt supersedes a description outright; never emit both.** Same shape as
-the config merge rule — the more specific value replaces the general one rather
-than appending to it. Write it down once, in the renderer, so it is not
-re-decided per call site.
+- **Id as attribute, directive as content.** The name stays greppable in a
+  captured frame; the meaning is present without a lookup.
+- **The identity line moves inside.** Today it floats above `<input>` as the one
+  piece of framing not in a tag, with the step title welded into the sentence.
+  Splitting identity from title makes both addressable.
+- **`<budget>`** is a calculated, slightly conservative byte figure derived from
+  the SAME constant the runtime enforces (`COMMAND_CAPTURE_LIMIT`). State the
+  number; do not explain the mechanism. A P535 worker frame truncated against
+  that ceiling and was re-dispatched as a fresh conversation, losing the turn —
+  the model had no way to know a ceiling existed.
+- **All seats see all intents** for now. Scoping intents per seat is deliberate
+  later work.
 
-`prompt.text` is not yet available as an OUTPUT field, so the first cut emits
-`<description>` there. The precedence rule goes in now regardless, so adding
-prompts later is additive rather than a rewrite.
+## Delete the hand-written duplicates in the SAME change
 
-## The budget: a number, not an explanation
+The produce prompt currently says:
 
-Emit a **calculated, slightly conservative byte figure** the model can write
-within. Do not explain the mechanism (that reasoning, tool traffic and the JSON
-all share one stream ceiling) — that is true, and it will confuse more than it
-helps.
+> "Prefer the minimal, correct, robust implementation: add no validation,
+> abstraction, or defensive code beyond what the phase requires."
 
-Derive it from `COMMAND_CAPTURE_LIMIT` (327,680 bytes today) minus observed
-overhead, rounded down to something memorable. The number must be honest enough
-that a response inside it does not truncate.
+That is `require leanness` + `avoid over-engineering` written longhand. Once the
+declarations render, that sentence is a second source for one fact — the drift
+0035 exists to prevent. **The declaration wins; the prose goes.**
 
-**Why this exists:** a P535 worker frame truncated mid-response against that
-ceiling and had to be re-dispatched as a fresh conversation, losing the turn.
-The model had no way to know a ceiling existed. The work survived only because
-the files were already written.
+Sweep the other prompts for the same: anything an existing intent or behavior id
+already says belongs in the vocabulary, not in authored prose.
 
 ## Watch
 
-- The figure must come from the SAME constant the runtime enforces. A
-  hand-copied number silently drifts the day the limit changes, and the failure
-  is a truncated frame — exactly what this prevents.
-- `<information>` is context, `<data>` is operands. Do not let slot values leak
-  into `<information>`, or the two envelopes stop meaning anything distinct.
-- Keep it short. This block is paid for on every frame of every run.
+- **Dilution is the real risk.** The authored prompt is extremely specific
+  ("re-run its argv verbatim — that exact command is what decides done-ness").
+  The directives are general dispositions. Specific and general instructions
+  coexisting can AVERAGE rather than add, blunting the tuned guidance. This is
+  the main reason the duplicate deletion above is not optional.
+- **Placement versus effect.** `<behavior>` governs the response but sits ~14 KB
+  before the output contract, with the whole draft between them. If behavior
+  demonstrably fails to land, moving `<behavior>` into `<output>` beside
+  `<budget>` is the first thing to try — a one-line change, not a redesign.
+  Treat placement as tunable, not settled.
+- **The budget figure must derive from the enforced constant.** A hand-copied
+  number drifts silently the day the limit changes, and the symptom is a
+  truncated frame — exactly what this prevents.
+- **`<information>` is context; `<data>` is operands.** Do not let slot values
+  leak upward, or the two stop meaning anything distinct.
+
+## Measure it, and do not overclaim
+
+Cost is ~325 tokens (~7.5% of a measured 4,350-token produce frame): 7 intent
+directives ~195, 4 behavior directives ~130. Cheap against a frame that runs 20+
+minutes.
+
+Its BEHAVIORAL benefit is unmeasured. Nothing in the artifact tells us whether
+it changes what a model does. P503 (adherence evals: prove a trait changes
+behavior) is the instrument for this and is still unlanded; running one phase
+twice, with and without the block, and diffing the verdicts would answer it.
+
+**Land this as "we stopped lying about the contract", not as "we improved the
+prompt."** The first is verifiable today; the second is a claim we cannot yet
+support.
 
 ## Done when
 
-Both envelopes carry `<information>`; a prompt suppresses the description
-wherever both exist; the output block states a byte budget derived from the
-enforced limit; no frame explains the capture mechanism to the model.
+A frame carries one `<information>` with identity, title, description, prompt,
+intent and behavior sourced from the directive registry; `<input>` contains only
+`<data>`; `<output>` states a derived byte budget; every authored prompt
+sentence duplicating a declared id is deleted; the token cost is measured
+against a real frame rather than estimated.

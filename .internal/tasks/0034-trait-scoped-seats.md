@@ -1,6 +1,6 @@
 # 0034 — `[trait.<id>]` seat overrides: one shape, three scopes
 
-**Status:** ready to implement · **Raised:** 2026-07-29 · **Pairs with:** 0025 (role arrays)
+**Status:** ready to implement · **Raised:** 2026-07-29 · **Pairs with:** 0025 (role arrays), 0037 (config/runtime tiers)
 
 ## What exists today
 
@@ -16,9 +16,10 @@ this recipe layers its own override instead of changing the shared default."
 A third scope carrying the SAME `AgentDefaults` shape the other two already do:
 
 ```
-[agent…]                  global
-[repo.<key>.agent…]       this checkout      (exists; machine-tier only)
-[trait.<id>.agent…]       this trait         (new)
+[agent…]                                   global
+[repo.<key>.agent…]                        this checkout   (exists; machine-tier only)
+[trait.<id>.agent…]                        this trait      (new)
+[trait.<id>.variant.<vid>.agent…]          one variant     (new)
 ```
 
 ```toml
@@ -84,3 +85,19 @@ A trait-scoped seat overrides the global one field-wise; `count` narrows per
 trait; trait beats repo scope; `doctor --config` names the winning scope;
 package sidecars still cannot bind seats; the Justfile's `--assign` workarounds
 are gone.
+
+## Qualifier grammar
+
+Qualifier tables are named by their KIND — `trait.<id>`, `variant.<vid>`,
+`repo.<key>` — never by a bare name. A bare `[quick]` table would collide with
+any future top-level key of that name, and reads as a section rather than a
+scope.
+
+The same grammar carries budgets (0037), so `trait.<id>` and `variant.<vid>`
+mean the same thing wherever they appear:
+
+```toml
+[trait.implement.budget]                  frame-seconds = 3600
+[trait.implement.variant.quick.budget]    frame-seconds = 900
+[trait.implement.agent.role.worker]       harness = "opencode"
+```
