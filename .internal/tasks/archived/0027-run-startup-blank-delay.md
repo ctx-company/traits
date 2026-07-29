@@ -1,7 +1,32 @@
 # 0027 — ~10s of blank screen before a run shows anything
 
-**Status:** ready to implement · **Raised:** 2026-07-29 · **Scope fixed by owner
-2026-07-29: paint first, profile later**
+**Status:** DONE 2026-07-29 (both pieces) · **Raised:** 2026-07-29 · **Scope
+fixed by owner 2026-07-29: paint first, profile later**
+
+**Landed.** Piece 1: `ctx run · initialization` prints on stderr the moment the
+Run dispatch is entered — before config resolution, trait load, or worktree
+work — on both the driven and `--no-drive` paths (a handler-local line would
+have missed every ordinary driven run), silent under `--json`. Piece 2:
+measured a real `--worktree` session start at ~24s, then wired the P551
+progress observer through `prepare_worktree` (it was being dropped as `None` —
+the observer and its messages already existed). The full story now narrates on
+one stderr channel:
+
+```
+ctx run · initialization
+ctx run · creating worktree
+ctx run · seeding
+ctx run · warming target
+ctx run · setup: pnpm install --prefer-offline
+ctx run · setup done (1s)
+ctx run · setup: just ts-build
+ctx run · setup done (4s)
+```
+
+Profile result for the record: setup commands ~5s; the remaining ~18s is
+`git worktree add` + seed + warm clone on a 60 GB checkout, each phase
+boundary named before it starts. MCP hosts and `generate`'s internal eval runs
+keep `narrate_progress: false`.
 
 Starting a run leaves the terminal blank for roughly ten seconds before any
 output appears. The work in that window is real (config resolution, trait load,
