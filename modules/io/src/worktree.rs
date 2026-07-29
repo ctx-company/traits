@@ -144,9 +144,9 @@ fn run_git_retrying(
 
 /// Same retry policy as [`run_git_retrying`], but with an explicit timeout
 /// rather than the plumbing default — for the long-running operations
-/// (`rebase`, `rebase --continue`, `worktree add`) whose duration depends on
-/// working-tree size or replay length rather than being a fixed local
-/// plumbing cost.
+/// (`rebase`, `rebase --continue`, `worktree add`, `worktree remove`) whose
+/// duration depends on working-tree size or replay length rather than being a
+/// fixed local plumbing cost.
 fn run_git_retrying_with_timeout(
     dir: &Utf8Path,
     args: &[&str],
@@ -1291,16 +1291,26 @@ pub fn fast_forward_merge(
 }
 
 /// Remove a registered worktree after its branch has landed.
+///
+/// Long-timeout, not plumbing: removal unlinks the entire working tree, and
+/// since P564 gave every worktree its own `target/` that tree carries a full
+/// build directory — measured at ~243k files per worktree in this repository.
+/// The 30s plumbing budget cannot delete that on any real filesystem, so
+/// removal reported `timed out` with no exit code and left the worktree
+/// registered. Duration here scales with working-tree size exactly like
+/// `worktree add` and `rebase`, which is the criterion
+/// [`run_git_retrying_with_timeout`] documents for the long budget.
 pub fn remove_worktree(
     repo_root: &Utf8Path,
     worktree_path: &Utf8Path,
     warnings: &mut RetryWarnings,
 ) -> crate::Result<()> {
-    let output = run_git_retrying(
+    let output = run_git_retrying_with_timeout(
         repo_root,
         &["worktree", "remove", worktree_path.as_str()],
         "worktree-remove",
         warnings,
+        crate::harness_config::resolve_git_long_timeout_ms(repo_root),
     )?;
     if !output.success {
         return Err(git_error("git worktree remove", &output));
