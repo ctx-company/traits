@@ -1,6 +1,6 @@
 # 0042 — Release readiness: what a clean repo must be able to do
 
-**Status:** ordering task — each item links its own work · **Raised:** 2026-07-29
+**Status:** DONE 2026-07-29 — every item landed, ruled, or recorded below · **Raised:** 2026-07-29
 
 The acceptance test for release is one walkthrough in an empty directory:
 
@@ -48,8 +48,10 @@ together (`discovery::trait_packages` and `inventory::repo_authored_candidate`):
 fixing only one makes the id appear as a candidate and then resolve to nothing,
 which is exactly how the source-only rows arose.
 
-Publish landed as **0040** (archived). Vendor is **0013** and is still open —
-until it lands, a family can be published but not vendored into a consumer.
+Publish landed as **0040** (archived). Vendor landed as **0013** (archived):
+a family vendors, resolves, and trust-approves in a clean consumer — the
+staged-package root-resolution bug behind "does not match locked evidence" is
+root-caused and fixed (`has_package_manifest`).
 
 ## B. Templates are on the pre-P569 layout — LANDED 2026-07-29
 
@@ -88,11 +90,11 @@ Five packages, all `0.1.0-alpha.0`, none marked private, no decision recorded:
 @ctx-traits/harness-client  @ctx-traits/rust
 ```
 
-**0031** is the design task and is still `design needed`. It cannot be skipped:
-publishing all five commits us to supporting all five, and `dependency add` in
-the walkthrough resolves against whatever we publish. Its own proposal — cdk and
-config public, agents/harness-client/rust arguably internal — needs a ruling,
-plus the gate that keeps the split from rotting.
+**RULED 2026-07-29: cdk + config public; agents, harness-client, rust
+internal.** The three internal packages carry `"private": true`, so `npm
+publish` mechanically refuses them — that is 0031's anti-rot gate. Verified
+that neither public package imports an internal one (no `@ctx-traits/*` in
+cdk's or config's dependencies), so the split is clean at the import graph too.
 
 ## D. Which repo traits ship
 
@@ -103,12 +105,10 @@ auto-research  deep-research  engineering-standards  guarded-change
 implement      implement-guided  plan  refactor
 ```
 
-That is the publish list until someone says otherwise. Open questions worth
-answering before it becomes a compatibility promise: whether
-`engineering-standards` ships separately or folds into its consumer (the
-standing preference is folding until a second consumer exists), and whether
-`implement-guided` and `implement` are both public or one is a variant of the
-other.
+**Standing answer 2026-07-29: all eight ship** — every one stages clean
+through `publish --dry-run`. The two sub-questions (fold
+`engineering-standards` into its consumer; `implement-guided` vs `implement`)
+stay open as post-v1 shaping, explicitly not release blockers.
 
 Seven built-ins ship inside the binary (`critique-trait`, `explain-trait`,
 `generate-evals`, `generate-trait`, `import-trait`, `refine-trait`,
@@ -116,15 +116,16 @@ Seven built-ins ship inside the binary (`critique-trait`, `explain-trait`,
 
 ## E. Polish, not blocking
 
-- **Trust store noise.** 215 `(digest-only)` entries and 226 orphaned, plus
-  development leftovers still named in it (`check-probe`, `demo-trait`,
-  `hid-trait`). A clean repo starts empty so the walkthrough is unaffected, but
-  `trust list` is currently unreadable, and it is a command we point people at.
-- **CLI surface.** 71 top-level commands, 50 hidden. Six bare verbs (`install`,
-  `remove`, `update`, `outdated`, `info`, `publish`) are pre-P567 aliases now
-  shadowed by the `dependency` group; `inspect` and `generate-evals` both claim
-  the alias `map`. Both are cheap to settle before the surface is public and
-  expensive after.
+- **CLI surface — PRUNED 2026-07-29 (owner ruling).** The six pre-P567 bare
+  verbs are deleted from the enum and dispatch; the `dependency` group is the
+  one spelling. The reported `map` alias collision was a false finding — both
+  are `--source-map` FLAG aliases on different commands, scoped per command,
+  no conflict. Correction recorded so nobody "fixes" it.
+- **Trust-store noise — residual, deliberately unshipped.** 215 digest-only /
+  226 orphaned entries plus dev leftovers (`check-probe`, `demo-trait`,
+  `hid-trait`) on this machine. No prune verb exists (`trust list --stale`
+  only reports). Machine-local and empty in a clean repo, so the walkthrough
+  never sees it; a `trust prune` verb is post-v1 work.
 
 ## Watch
 
@@ -144,3 +145,9 @@ The walkthrough completes in an empty directory: `list` reports every package
 accurately including families, `new` scaffolds a current-layout package that
 builds and checks, the published npm surface is exactly what was decided, and a
 family package installs and runs from the registry with digests matching source.
+
+**Closing status 2026-07-29:** every leg verified except the literal
+registry round-trip, which cannot exist before the first `npm publish` —
+`path:` install stands in for it and exercises the same staging, lock, vendor,
+and approval machinery. The registry leg is the first thing to verify the day
+the packages go up.

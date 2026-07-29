@@ -429,54 +429,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 locked,
                 json,
             }),
-            Some(cli::TraitsCommand::Install {
-                spec,
-                alias,
-                global,
-                json,
-            }) => handle_dependency(cli::DependencyCommand::Add {
-                spec,
-                alias,
-                global,
-                json,
-            }),
-            Some(cli::TraitsCommand::Remove {
-                package,
-                global,
-                json,
-            }) => handle_dependency(cli::DependencyCommand::Remove {
-                package,
-                global,
-                json,
-            }),
-            Some(cli::TraitsCommand::Update {
-                package,
-                global,
-                json,
-            }) => handle_dependency(cli::DependencyCommand::Update {
-                package,
-                global,
-                json,
-            }),
-            Some(cli::TraitsCommand::Outdated { json }) => {
-                handle_dependency(cli::DependencyCommand::Outdated { json })
-            }
-            Some(cli::TraitsCommand::Info { spec, json }) => {
-                handle_dependency(cli::DependencyCommand::Info { spec, json })
-            }
-            Some(cli::TraitsCommand::Publish {
-                path,
-                trait_id,
-                dry_run,
-                provenance,
-                json,
-            }) => handle_dependency(cli::DependencyCommand::Publish {
-                path,
-                trait_id,
-                dry_run,
-                provenance,
-                json,
-            }),
             Some(cli::TraitsCommand::Trust {
                 trait_arg,
                 file,
@@ -820,6 +772,23 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 no_drive,
                 ephemeral,
             }) => {
+                // Say something before the slow part starts.
+                //
+                // Everything from here to the first frame — config resolution,
+                // trait load, trust check, worktree creation, seed copy, warm
+                // clone, setup commands — happens before a session exists, and
+                // the run panel cannot be constructed without one. That left
+                // roughly ten seconds of blank terminal whose only honest
+                // reading was "is this hung?". This makes the wait accounted
+                // for rather than faster, which is the difference between a
+                // slow start and an apparently dead one.
+                //
+                // Placed on the shared dispatch, not inside a handler:
+                // `handle_run` serves only `--no-drive`, so a line there would
+                // miss every ordinary driven run — the case that actually waits.
+                //
+                // stderr, never stdout: `--json` callers parse stdout and a
+                // progress line there would corrupt it.
                 let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
                     camino::Utf8Path::new("."),
                 )?;
