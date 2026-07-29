@@ -762,8 +762,29 @@ pub fn load_dependency_package(
         }
     })?;
     let roots = crate::resource::resolve_resource_roots(root, &trait_ref.resources)?;
+    // Package-owned resources ONLY.
+    //
+    // A `root = "repo"` resource is an input the CONSUMING project supplies —
+    // `.plans/EXECUTION_PLAN.md`, `.docs/PRODUCT.md` — not package content. Its
+    // bytes differ in every repository and are absent in a fresh one, so
+    // digesting it here produced lock evidence that could never be reproduced
+    // anywhere but the producer's own checkout: installing `implement` into
+    // another project vendored correctly, then failed `trust approve` with
+    // "vendored content does not match locked evidence", permanently. A
+    // package's integrity evidence can only cover the bytes the package ships.
+    //
+    // This narrows what the PACKAGE LOCK pins. The owning repository's own
+    // `resource-manifest` drift check still digests every declared resource,
+    // repo-rooted included — there, the repo IS the producer and those files
+    // are legitimately part of what changed.
+    let package_owned: Vec<ctx_traits_core::r#trait::Resource> = trait_ref
+        .resources
+        .iter()
+        .filter(|resource| resource.root == ctx_traits_core::r#trait::ResourceRoot::Package)
+        .cloned()
+        .collect();
     let manifest =
-        crate::resource::digest_resources(&roots, trait_ref.id.as_str(), &trait_ref.resources)?;
+        crate::resource::digest_resources(&roots, trait_ref.id.as_str(), &package_owned)?;
     let file_evidence = file_evidence_from_manifest(&manifest);
     // Full body set: needed so a parent trait's qualified reference to an
     // on-demand package resource can still be materialized, and so

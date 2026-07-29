@@ -1,6 +1,90 @@
 # 0013 — Vendor materializes PACKAGES, not traits
 
-**Status:** ready to implement · **Convention agreed with owner 2026-07-28** · **Raised:** 2026-07-28
+**Status:** DONE 2026-07-29 — P535 shipped the layout; the approval bug is root-caused and fixed · **Convention agreed with owner 2026-07-28** · **Raised:** 2026-07-28
+
+## What actually works now (verified 2026-07-29)
+
+The premise above is largely out of date: P535's local-path installer already
+vendors a family as a package. Verified end to end against a scratch consumer —
+`dependency add path:…/packages/implement` copies the whole package (all five
+`generated/<selector>/index.toml` leaves, `resources/`, `run-config/`,
+`source/`, `package.toml`, `package.lock`) and records five per-leaf entries
+with distinct canonical and resource-manifest digests.
+
+One fix was needed and landed: `is_vendored_package_root`
+(`modules/io/src/layout/mod.rs`). A vendored family leaf at
+`vendor/<alias>/generated/<selector>/index.toml` could not resolve UP to its
+package root, so it found no `package.toml` and reported `status=draft` for a
+package whose manifest says `ready`. Deliberately a **separate** predicate from
+`is_canonical_package_root`, which also gates write/import targets — a vendored
+tree is read-only evidence and must never become a legal place to write.
+
+## The bug that remained — ROOT-CAUSED AND FIXED 2026-07-29
+
+An installed package could be vendored but never `trust approve`d:
+
+```
+vendored content for package "path:…/packages/implement" at project scope
+does not match locked evidence
+```
+
+**Root cause: a package being STAGED for installation lives in a temp
+directory, and every package-root predicate was a path-SHAPE test.**
+`.ctx/traits/packages/<id>`, `.ctx/traits/<id>`, and the built-in trees all
+match on location; a staging path matches none of them. So a family leaf inside
+the staged copy resolved its package root INTO its own `generated/<selector>/`
+directory, found no `resources/` there, and recorded a resource-manifest digest
+over an empty file set. Verification then read the same package from its
+vendored home, resolved the root correctly, found the resources, and disagreed.
+
+Measured, not deduced — the two computations printed side by side:
+
+```
+INSTALL: root=/var/…/ctx-traits-path-stage-…/generated/phase  owned=["review-rubric"] files=[]
+VERIFY:  root=…/vendor/implement                               files=[("review-rubric", …)]
+```
+
+**Fix:** `layout::has_package_manifest` — a package root is where its manifest
+is, not where the path says it should be. Location-independent, so staging,
+vendoring, and any future location resolve alike.
+
+Two things worth recording because they cost time:
+
+- **It was never family-specific.** The earlier narrowing above was wrong: it
+  rested on `engineering-standards` approving cleanly, which was a coincidence
+  of which packages were tested. The real discriminator is a `root = "repo"`
+  resource — any package declaring one hit this, family or not.
+- **The first fix was wrong.** Filtering repo-rooted resources out of the
+  package lock digest (`dependency.rs`) changed both digests and still left them
+  disagreeing. It is kept because the reasoning stands independently — a
+  package's integrity evidence can only cover bytes the package ships, and
+  `.plans/EXECUTION_PLAN.md` is supplied by the consumer — but it was not the
+  bug, and believing it was delayed the measurement that found the real one.
+
+Also landed: `layout::is_vendored_package_root`, so a vendored family leaf
+resolves up to its package root and stops reporting `status=draft` for a
+package whose manifest says `ready`. Deliberately separate from
+`is_canonical_package_root`, which also gates write/import targets — a vendored
+tree is read-only evidence and must never become a legal place to write.
+
+## Verified end to end
+
+A consumer repository that started empty, with five packages vendored by path
+and approved:
+
+```
+implement              leaves approved: 5
+plan                   leaves approved: 4
+refactor               leaves approved: 5
+engineering-standards  passed
+guarded-change         passed
+
+traits: 5 · resolved: 5 · unreadable: 0 · source-only: 0
+```
+
+Full suite green (742 passed, 0 failed).
+
+## Original write-up follows
 
 ## The mistake, named
 

@@ -323,6 +323,8 @@ pub fn package_root_for_manifest(manifest: &Utf8Path) -> Option<&Utf8Path> {
             .and_then(Utf8Path::parent)
             .is_some_and(|root| {
                 is_canonical_package_root(root)
+                    || is_vendored_package_root(root)
+                    || has_package_manifest(root)
                     || is_builtin_trait_package_root(root)
                     || is_builtin_store_package_root(root)
             });
@@ -337,6 +339,8 @@ pub fn package_root_for_manifest(manifest: &Utf8Path) -> Option<&Utf8Path> {
     } else if (generated_manifest || source_entry)
         && manifest_dir.parent().is_some_and(|root| {
             is_canonical_package_root(root)
+                || is_vendored_package_root(root)
+                || has_package_manifest(root)
                 || is_builtin_trait_package_root(root)
                 || is_builtin_store_package_root(root)
         })
@@ -424,6 +428,53 @@ pub fn package_run_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// targets, so they must not become "canonical" for those purposes. Use
 /// [`is_builtin_trait_package_root`] where only root-resolution (read paths)
 /// needs to recognize the built-in tree.
+/// Whether `package_root` is an INSTALLED package at `.ctx/traits/vendor/<alias>`.
+///
+/// Deliberately separate from [`is_canonical_package_root`], which also gates
+/// write and import targets: a vendored tree is read-only evidence and must
+/// never become a legal place to write. This predicate answers only "does a
+/// manifest under here resolve UP to a package root", which vendored packages
+/// need for exactly the same reason authored ones do — their `package.toml`,
+/// lockfile, and `[family]` table live at the root while a family leaf sits at
+/// `generated/<selector>/index.toml`.
+///
+/// Without it a vendored family leaf resolved its package root into its own
+/// `generated/` directory, found no manifest there, and reported
+/// `status=draft` for a package whose manifest says `ready` — which is the
+/// difference between an installed family being runnable and not.
+/// Whether `package_root` holds a package manifest, wherever it lives.
+///
+/// Path-shape predicates ([`is_canonical_package_root`],
+/// [`is_vendored_package_root`], the built-in trees) all answer "is this one of
+/// the locations we know about". A package being STAGED for installation is in
+/// none of them — it is a temporary directory — so a family leaf inside it
+/// resolved its package root into its own `generated/<selector>/` directory,
+/// found no `resources/` there, and recorded a resource-manifest digest over an
+/// empty file set. Verification then read the same package from its vendored
+/// home, found the resources, and disagreed — so an installed package could be
+/// vendored but never approved.
+///
+/// The manifest's presence is the structural fact, independent of location, and
+/// it is what makes staging, vendoring, and future locations all resolve alike.
+pub fn has_package_manifest(package_root: &Utf8Path) -> bool {
+    package_root.join(PACKAGE_MANIFEST).is_file()
+        || package_root.join(LEGACY_PACKAGE_MANIFEST).is_file()
+}
+
+pub fn is_vendored_package_root(package_root: &Utf8Path) -> bool {
+    let Some(parent) = package_root.parent() else {
+        return false;
+    };
+    parent.file_name() == Some("vendor")
+        && parent
+            .parent()
+            .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
+        && parent
+            .parent()
+            .and_then(Utf8Path::parent)
+            .is_some_and(|ctx_dir| ctx_dir.file_name() == Some(".ctx"))
+}
+
 pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
     // Packages live at `.ctx/traits/packages/<id>` since the layout move; the
     // predicate matched `.ctx/traits/<id>` and so stopped recognizing them,
