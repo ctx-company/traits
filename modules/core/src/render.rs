@@ -927,18 +927,18 @@ fn check_extended_render_compatibility(
 
     let mut warnings = Vec::new();
     for entry in &plan.entries {
-        if let Some(ref evidence) = entry.digest_evidence {
-            if evidence.is_binary {
-                warnings.push(ExtendedRenderWarning {
-                    resource_id: entry.resource_id.clone(),
-                    profile,
-                    reason: format!(
-                        "binary resource {:?} cannot be represented by text-only profile {}",
-                        entry.resource_id,
-                        profile.as_str()
-                    ),
-                });
-            }
+        if let Some(ref evidence) = entry.digest_evidence
+            && evidence.is_binary
+        {
+            warnings.push(ExtendedRenderWarning {
+                resource_id: entry.resource_id.clone(),
+                profile,
+                reason: format!(
+                    "binary resource {:?} cannot be represented by text-only profile {}",
+                    entry.resource_id,
+                    profile.as_str()
+                ),
+            });
         }
     }
 

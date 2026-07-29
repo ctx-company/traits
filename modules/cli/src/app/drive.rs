@@ -1530,17 +1530,17 @@ fn drive_loop(
     let mut trace_sequence = 0;
     let mut startup_announced = false;
     let mut reported_model_resolutions = BTreeSet::new();
-    if let Some(plan) = narrator_plan.as_ref() {
-        if let Some(evidence) = plan.model_resolution_evidence.as_deref() {
-            reported_model_resolutions.insert(format!("narrator:{}", plan.harness_id));
-            report.events.push(DriveEvent {
-                event: "model-resolution".to_string(),
-                role: Some("narrator".to_string()),
-                harness: Some(plan.harness_id.clone()),
-                detail: evidence.to_string(),
-                duration_ms: None,
-            });
-        }
+    if let Some(plan) = narrator_plan.as_ref()
+        && let Some(evidence) = plan.model_resolution_evidence.as_deref()
+    {
+        reported_model_resolutions.insert(format!("narrator:{}", plan.harness_id));
+        report.events.push(DriveEvent {
+            event: "model-resolution".to_string(),
+            role: Some("narrator".to_string()),
+            harness: Some(plan.harness_id.clone()),
+            detail: evidence.to_string(),
+            duration_ms: None,
+        });
     }
 
     'frames: loop {
@@ -1672,10 +1672,10 @@ fn drive_loop(
                 // `run_panel.0`, so the guard's drop becomes a no-op for
                 // this exit; every other return in this function leaves
                 // `run_panel.0` untouched and the guard closes as before.
-                if let Some(handoff) = input.panel_handoff.as_ref() {
-                    if let Some(panel) = run_panel.0.take() {
-                        handoff.give(panel);
-                    }
+                if let Some(handoff) = input.panel_handoff.as_ref()
+                    && let Some(panel) = run_panel.0.take()
+                {
+                    handoff.give(panel);
                 }
                 return Ok(report);
             }
@@ -1946,15 +1946,14 @@ fn drive_loop(
             // P480: an MCP transport spawn is wrapped by the same OS-level
             // sandbox as every other worktree spawn — report the same
             // unavailable-OS-layer gap the CLI transport does.
-            if let Some(payloads) = confinement_payloads.as_ref() {
-                if let Some(capability) =
+            if let Some(payloads) = confinement_payloads.as_ref()
+                && let Some(capability) =
                     ctx_traits_io::confinement::spawn_sandbox_unsupported_capability(
                         payloads.sandbox_requested,
                         payloads.spawn_sandbox.as_ref(),
                     )
-                {
-                    push_capability(&mut report, capability);
-                }
+            {
+                push_capability(&mut report, capability);
             }
             if drive_mcp_frame(
                 &input,
@@ -2129,40 +2128,30 @@ fn drive_loop(
         // against its immutable manifest (see `recover_wave_offset`); a
         // session that never used concurrency has no manifest at all, so this
         // is `Absent` (one cheap read) on every frame.
-        if let Some(activation_key) = parallel_wave_activation_key(&outcome.session) {
-            if let Some(offset) = current_wave_offset(&outcome.session) {
-                if let std::collections::btree_map::Entry::Vacant(vacant) =
-                    pending_wave_cache.entry(activation_key)
-                {
-                    if let Ok(ledger_path) = ctx_traits_io::run_session::resolve_session_path(
-                        input.session,
-                        input.session_store,
-                    ) {
-                        match recover_wave_offset(
-                            &ledger_path,
-                            vacant.key(),
-                            offset,
-                            &outcome.session,
-                        ) {
-                            SidecarRecovery::Absent => {}
-                            SidecarRecovery::Terminal(cached_outcome) => {
-                                let mut single = WaveOutcomes::new();
-                                single.insert(offset, cached_outcome);
-                                vacant.insert(single);
-                            }
-                            SidecarRecovery::Indeterminate => {
-                                report.status = "concurrency-recovery-blocked".to_string();
-                                push_capability(
-                                    &mut report,
-                                    ctx_traits_core::response::CapabilityReport::unsupported(
-                                        "runtime.harness-concurrency",
-                                        WaveIneligible::SidecarRecoveryIndeterminate.detail(),
-                                    ),
-                                );
-                                return Ok(report);
-                            }
-                        }
-                    }
+        if let Some(activation_key) = parallel_wave_activation_key(&outcome.session)
+            && let Some(offset) = current_wave_offset(&outcome.session)
+            && let std::collections::btree_map::Entry::Vacant(vacant) =
+                pending_wave_cache.entry(activation_key)
+            && let Ok(ledger_path) =
+                ctx_traits_io::run_session::resolve_session_path(input.session, input.session_store)
+        {
+            match recover_wave_offset(&ledger_path, vacant.key(), offset, &outcome.session) {
+                SidecarRecovery::Absent => {}
+                SidecarRecovery::Terminal(cached_outcome) => {
+                    let mut single = WaveOutcomes::new();
+                    single.insert(offset, cached_outcome);
+                    vacant.insert(single);
+                }
+                SidecarRecovery::Indeterminate => {
+                    report.status = "concurrency-recovery-blocked".to_string();
+                    push_capability(
+                        &mut report,
+                        ctx_traits_core::response::CapabilityReport::unsupported(
+                            "runtime.harness-concurrency",
+                            WaveIneligible::SidecarRecoveryIndeterminate.detail(),
+                        ),
+                    );
+                    return Ok(report);
                 }
             }
         }
@@ -2838,36 +2827,35 @@ fn drive_loop(
                     continue;
                 }
             };
-            if let Some(session_id) = parsed.harness_session_id.as_ref() {
-                if session.mode == ctx_traits_io::harness_config::RunSessionMode::Persistent
-                    && harness_sessions.get(&session_key) != Some(session_id)
+            if let Some(session_id) = parsed.harness_session_id.as_ref()
+                && session.mode == ctx_traits_io::harness_config::RunSessionMode::Persistent
+                && harness_sessions.get(&session_key) != Some(session_id)
+            {
+                harness_sessions.insert(session_key.clone(), session_id.clone());
+                // P516: written only when the value actually changed for
+                // this key, so a steady-state frame (the common case)
+                // writes nothing.
+                let mut sidecar =
+                    ctx_traits_io::run_branch::read_harness_sessions(&harness_sessions_path)
+                        .unwrap_or_default();
+                sidecar.sessions.insert(
+                    session_key.clone(),
+                    ctx_traits_io::run_branch::HarnessSessionEntry {
+                        harness_id: plan.harness_id.clone(),
+                        exec_dir: input.execution_dir.map(|dir| dir.to_string()),
+                        harness_session_id: session_id.clone(),
+                    },
+                );
+                if ctx_traits_io::run_branch::write_harness_sessions(
+                    &harness_sessions_path,
+                    &sidecar,
+                )
+                .is_err()
                 {
-                    harness_sessions.insert(session_key.clone(), session_id.clone());
-                    // P516: written only when the value actually changed for
-                    // this key, so a steady-state frame (the common case)
-                    // writes nothing.
-                    let mut sidecar =
-                        ctx_traits_io::run_branch::read_harness_sessions(&harness_sessions_path)
-                            .unwrap_or_default();
-                    sidecar.sessions.insert(
-                        session_key.clone(),
-                        ctx_traits_io::run_branch::HarnessSessionEntry {
-                            harness_id: plan.harness_id.clone(),
-                            exec_dir: input.execution_dir.map(|dir| dir.to_string()),
-                            harness_session_id: session_id.clone(),
-                        },
-                    );
-                    if ctx_traits_io::run_branch::write_harness_sessions(
-                        &harness_sessions_path,
-                        &sidecar,
-                    )
-                    .is_err()
-                    {
-                        report.warnings.push(format!(
-                            "could not persist harness session {session_id} for {session_key} \
+                    report.warnings.push(format!(
+                        "could not persist harness session {session_id} for {session_key} \
                              to {harness_sessions_path}; a resume will start cold"
-                        ));
-                    }
+                    ));
                 }
             }
             // `observed_keys` only records failed object candidates. A complete
@@ -2913,39 +2901,35 @@ fn drive_loop(
                 // `rejected_submissions_before`'s doc above. Mark those two
                 // outcomes distinctly so an audit reader never mistakes a
                 // routed rejection of a cached outcome for a normal apply.
-                if let Some((wave_key, offset)) = cached_wave_identity.as_ref() {
-                    if let Ok(ledger_path) = ctx_traits_io::run_session::resolve_session_path(
+                if let Some((wave_key, offset)) = cached_wave_identity.as_ref()
+                    && let Ok(ledger_path) = ctx_traits_io::run_session::resolve_session_path(
                         input.session,
                         input.session_store,
-                    ) {
-                        let sidecar_path = ctx_traits_io::run_branch::sidecar_path(
-                            &ledger_path,
-                            wave_key,
-                            *offset,
-                        );
-                        let content_was_rejected =
-                            response.response.session.rejected_submissions.len()
-                                > rejected_submissions_before;
-                        let _ = if content_was_rejected {
-                            ctx_traits_io::run_branch::mark_rejected_attempt(&sidecar_path)
-                        } else {
-                            ctx_traits_io::run_branch::mark_applied(&sidecar_path)
-                        };
-                        // P402 (`p402-proof-absent-and-tests-misplaced`):
-                        // this cached wave unit's parent-ledger write has
-                        // just durably succeeded and its sidecar is now
-                        // terminal (`applied`/`rejected-attempt`), while any
-                        // remaining sibling(s) still in `pending_wave_cache`
-                        // for this same `wave_key` are still only
-                        // `completed`/`terminal-failure` — unapplied. A
-                        // no-op outside the concurrency-proof fixtures; see
-                        // `test_only_checkpoint`.
-                        if pending_wave_cache
-                            .get(wave_key)
-                            .is_some_and(|remaining| !remaining.is_empty())
-                        {
-                            test_only_checkpoint(TESTHOOK_CHECKPOINT_ONE_APPLIED);
-                        }
+                    )
+                {
+                    let sidecar_path =
+                        ctx_traits_io::run_branch::sidecar_path(&ledger_path, wave_key, *offset);
+                    let content_was_rejected = response.response.session.rejected_submissions.len()
+                        > rejected_submissions_before;
+                    let _ = if content_was_rejected {
+                        ctx_traits_io::run_branch::mark_rejected_attempt(&sidecar_path)
+                    } else {
+                        ctx_traits_io::run_branch::mark_applied(&sidecar_path)
+                    };
+                    // P402 (`p402-proof-absent-and-tests-misplaced`):
+                    // this cached wave unit's parent-ledger write has
+                    // just durably succeeded and its sidecar is now
+                    // terminal (`applied`/`rejected-attempt`), while any
+                    // remaining sibling(s) still in `pending_wave_cache`
+                    // for this same `wave_key` are still only
+                    // `completed`/`terminal-failure` — unapplied. A
+                    // no-op outside the concurrency-proof fixtures; see
+                    // `test_only_checkpoint`.
+                    if pending_wave_cache
+                        .get(wave_key)
+                        .is_some_and(|remaining| !remaining.is_empty())
+                    {
+                        test_only_checkpoint(TESTHOOK_CHECKPOINT_ONE_APPLIED);
                     }
                 }
                 if let Err(error) = write_harness_decision(&HarnessDecision {
@@ -3039,15 +3023,15 @@ fn drive_loop(
             // here must not fail the correction retry itself. Only meaningful
             // on the first attempt, when this frame actually consumed a cached
             // wave outcome (`cached_wave_identity`).
-            if let Some((wave_key, offset)) = cached_wave_identity.as_ref() {
-                if let Ok(ledger_path) = ctx_traits_io::run_session::resolve_session_path(
+            if let Some((wave_key, offset)) = cached_wave_identity.as_ref()
+                && let Ok(ledger_path) = ctx_traits_io::run_session::resolve_session_path(
                     input.session,
                     input.session_store,
-                ) {
-                    let sidecar_path =
-                        ctx_traits_io::run_branch::sidecar_path(&ledger_path, wave_key, *offset);
-                    let _ = ctx_traits_io::run_branch::mark_rejected_attempt(&sidecar_path);
-                }
+                )
+            {
+                let sidecar_path =
+                    ctx_traits_io::run_branch::sidecar_path(&ledger_path, wave_key, *offset);
+                let _ = ctx_traits_io::run_branch::mark_rejected_attempt(&sidecar_path);
             }
             refresh_existing_run_panel(run_panel.0.as_ref(), &response.response.session);
             // P464: `persist_session` distinguishes a persisted content
@@ -3988,14 +3972,14 @@ fn assignment_for_role(
         return Ok(persisted_assignment_plan(session, role, structural_seat)
             .inspect(|plan| profile.ensure_builtin_registered(&plan.harness_id)));
     };
-    if profile.used_builtin_fallback(role) {
-        if let Some(persisted) = persisted_assignment_plan(session, role, structural_seat) {
-            if persisted.harness_id != live.harness_id {
-                profile.discard_builtin_selection(&live.harness_id, role);
-            }
-            profile.ensure_builtin_registered(&persisted.harness_id);
-            return Ok(Some(persisted));
+    if profile.used_builtin_fallback(role)
+        && let Some(persisted) = persisted_assignment_plan(session, role, structural_seat)
+    {
+        if persisted.harness_id != live.harness_id {
+            profile.discard_builtin_selection(&live.harness_id, role);
         }
+        profile.ensure_builtin_registered(&persisted.harness_id);
+        return Ok(Some(persisted));
     }
     Ok(Some(live))
 }
@@ -6177,107 +6161,107 @@ fn run_cli_harness_with_warm_fallback(
     trace_warned: &mut bool,
     run: CliHarnessRun<'_>,
 ) -> crate::Result<ctx_traits_io::harness::HarnessRunOutcome> {
-    if let Some(warm_argv) = run.warm_argv.clone() {
-        if !warm_disabled.contains(run.session_key) {
-            let mut warm_failure = None;
-            if warm_sessions
-                .get_mut(run.session_key)
-                .is_some_and(|session| !session.is_alive())
-            {
-                warm_sessions.remove(run.session_key);
-                if !record_counted_warm_failure(
-                    report,
-                    warm_respawn_used,
-                    warm_disabled,
-                    CountedWarmFailure {
-                        session_key: run.session_key,
-                        role: run.role,
-                        harness_id: run.harness_id,
-                        reason: "warm exited between turns".to_string(),
-                        duration_ms: None,
-                    },
-                ) {
-                    return run_cold_cli_harness(report, trace_sequence, trace_warned, &run);
+    if let Some(warm_argv) = run.warm_argv.clone()
+        && !warm_disabled.contains(run.session_key)
+    {
+        let mut warm_failure = None;
+        if warm_sessions
+            .get_mut(run.session_key)
+            .is_some_and(|session| !session.is_alive())
+        {
+            warm_sessions.remove(run.session_key);
+            if !record_counted_warm_failure(
+                report,
+                warm_respawn_used,
+                warm_disabled,
+                CountedWarmFailure {
+                    session_key: run.session_key,
+                    role: run.role,
+                    harness_id: run.harness_id,
+                    reason: "warm exited between turns".to_string(),
+                    duration_ms: None,
+                },
+            ) {
+                return run_cold_cli_harness(report, trace_sequence, trace_warned, &run);
+            }
+        }
+        if !warm_sessions.contains_key(run.session_key) {
+            match ctx_traits_io::harness::HarnessSession::spawn(
+                warm_argv.clone(),
+                run.env_overlay.clone(),
+                run.env_remove.clone(),
+                run.exec_dir.map(camino::Utf8Path::to_path_buf),
+                run.sandbox.clone(),
+            ) {
+                Ok(session) => {
+                    warm_sessions.insert(run.session_key.to_string(), session);
+                }
+                Err(err) => {
+                    warm_failure = Some((format!("warm spawn failed: {err}"), None));
                 }
             }
-            if !warm_sessions.contains_key(run.session_key) {
-                match ctx_traits_io::harness::HarnessSession::spawn(
-                    warm_argv.clone(),
-                    run.env_overlay.clone(),
-                    run.env_remove.clone(),
-                    run.exec_dir.map(camino::Utf8Path::to_path_buf),
-                    run.sandbox.clone(),
-                ) {
-                    Ok(session) => {
-                        warm_sessions.insert(run.session_key.to_string(), session);
-                    }
-                    Err(err) => {
-                        warm_failure = Some((format!("warm spawn failed: {err}"), None));
-                    }
-                }
-            }
-            if warm_failure.is_none() {
-                if let Some(session) = warm_sessions.get_mut(run.session_key) {
-                    let (trace, stdout_observer, counter) = begin_harness_trace(
-                        report,
-                        trace_sequence,
-                        trace_warned,
-                        &run,
-                        "warm",
-                        &warm_argv,
-                    );
-                    match session.prompt(ctx_traits_io::harness::HarnessSessionPrompt {
-                        prompt: run.prompt.clone(),
-                        timeout_ms: run.timeout_ms,
-                        idle_timeout_ms: run.idle_timeout_ms,
-                        capture_limit: run.capture_limit,
-                        stream: run.stream,
-                        stdout_observer,
-                        tick_observer: run.tick_observer.clone(),
-                    }) {
-                        Ok(outcome) => {
-                            finish_harness_trace(report, trace_warned, trace, &counter, &outcome);
-                            match warm_outcome_failure(&outcome) {
-                                None => return Ok(outcome),
-                                Some(WarmOutcomeFailure::ImmediateFallback { reason }) => {
-                                    warm_failure = Some((reason, Some(outcome.duration_ms)));
-                                }
-                                Some(WarmOutcomeFailure::Counted { reason }) => {
-                                    warm_sessions.remove(run.session_key);
-                                    record_counted_warm_failure(
-                                        report,
-                                        warm_respawn_used,
-                                        warm_disabled,
-                                        CountedWarmFailure {
-                                            session_key: run.session_key,
-                                            role: run.role,
-                                            harness_id: run.harness_id,
-                                            reason,
-                                            duration_ms: Some(outcome.duration_ms),
-                                        },
-                                    );
-                                    return Ok(outcome);
-                                }
-                            }
+        }
+        if warm_failure.is_none()
+            && let Some(session) = warm_sessions.get_mut(run.session_key)
+        {
+            let (trace, stdout_observer, counter) = begin_harness_trace(
+                report,
+                trace_sequence,
+                trace_warned,
+                &run,
+                "warm",
+                &warm_argv,
+            );
+            match session.prompt(ctx_traits_io::harness::HarnessSessionPrompt {
+                prompt: run.prompt.clone(),
+                timeout_ms: run.timeout_ms,
+                idle_timeout_ms: run.idle_timeout_ms,
+                capture_limit: run.capture_limit,
+                stream: run.stream,
+                stdout_observer,
+                tick_observer: run.tick_observer.clone(),
+            }) {
+                Ok(outcome) => {
+                    finish_harness_trace(report, trace_warned, trace, &counter, &outcome);
+                    match warm_outcome_failure(&outcome) {
+                        None => return Ok(outcome),
+                        Some(WarmOutcomeFailure::ImmediateFallback { reason }) => {
+                            warm_failure = Some((reason, Some(outcome.duration_ms)));
                         }
-                        Err(err) => {
-                            fail_harness_trace(report, trace_warned, trace, &counter, &err);
-                            warm_failure = Some((format!("warm prompt failed: {err}"), None));
+                        Some(WarmOutcomeFailure::Counted { reason }) => {
+                            warm_sessions.remove(run.session_key);
+                            record_counted_warm_failure(
+                                report,
+                                warm_respawn_used,
+                                warm_disabled,
+                                CountedWarmFailure {
+                                    session_key: run.session_key,
+                                    role: run.role,
+                                    harness_id: run.harness_id,
+                                    reason,
+                                    duration_ms: Some(outcome.duration_ms),
+                                },
+                            );
+                            return Ok(outcome);
                         }
                     }
                 }
+                Err(err) => {
+                    fail_harness_trace(report, trace_warned, trace, &counter, &err);
+                    warm_failure = Some((format!("warm prompt failed: {err}"), None));
+                }
             }
-            if let Some((reason, duration_ms)) = warm_failure {
-                warm_sessions.remove(run.session_key);
-                warm_disabled.insert(run.session_key.to_string());
-                report.events.push(DriveEvent {
-                    event: "harness-warm-fallback".to_string(),
-                    role: Some(run.role.to_string()),
-                    harness: Some(run.harness_id.to_string()),
-                    detail: reason,
-                    duration_ms,
-                });
-            }
+        }
+        if let Some((reason, duration_ms)) = warm_failure {
+            warm_sessions.remove(run.session_key);
+            warm_disabled.insert(run.session_key.to_string());
+            report.events.push(DriveEvent {
+                event: "harness-warm-fallback".to_string(),
+                role: Some(run.role.to_string()),
+                harness: Some(run.harness_id.to_string()),
+                detail: reason,
+                duration_ms,
+            });
         }
     }
     run_cold_cli_harness(report, trace_sequence, trace_warned, &run)
@@ -6621,14 +6605,14 @@ fn mcp_harness_argv(
             argv.push(flag.clone());
             argv.push(model.clone());
         }
-        if !mcp_has_reasoning {
-            if let (Some(flag), Some(effort)) = (
+        if !mcp_has_reasoning
+            && let (Some(flag), Some(effort)) = (
                 cli.reasoning_effort_flag.as_ref(),
                 plan.reasoning_effort.as_ref(),
-            ) {
-                argv.push(flag.clone());
-                argv.push(effort.clone());
-            }
+            )
+        {
+            argv.push(flag.clone());
+            argv.push(effort.clone());
         }
     }
     if let Some(mcp) = mcp {
@@ -6837,16 +6821,16 @@ fn drive_mcp_frame(
             exec_dir: input.execution_dir.map(camino::Utf8Path::to_path_buf),
             sandbox: current.sandbox.clone(),
         })?;
-        if live_output.is_none() {
-            if let Some(output_id) = cli.and_then(|cli| cli.output.as_deref()) {
-                emit_output_progress(
-                    input.progress,
-                    output_id,
-                    &run.stdout,
-                    current.role,
-                    &plan.harness_id,
-                );
-            }
+        if live_output.is_none()
+            && let Some(output_id) = cli.and_then(|cli| cli.output.as_deref())
+        {
+            emit_output_progress(
+                input.progress,
+                output_id,
+                &run.stdout,
+                current.role,
+                &plan.harness_id,
+            );
         }
         report.events.push(DriveEvent {
             event: "mcp-harness-run".to_string(),

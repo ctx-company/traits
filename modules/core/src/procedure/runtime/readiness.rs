@@ -480,8 +480,8 @@ impl DeclarationWalk<'_> {
         owning_sequence_id: Option<&str>,
     ) {
         for (index, item) in body.iter().enumerate() {
-            if is_executable_item(item) {
-                if let Some(role) = item
+            if is_executable_item(item)
+                && let Some(role) = item
                     .agent
                     .as_deref()
                     .and_then(|agent_ref| Reference::parse(agent_ref).ok())
@@ -503,7 +503,6 @@ impl DeclarationWalk<'_> {
                         }
                     }
                 }
-            }
             let seq_refs: Vec<&str> = match item.effective_kind() {
                 SequenceKind::Sequence | SequenceKind::Loop | SequenceKind::ForEach => {
                     item.sequence.as_deref().into_iter().collect()

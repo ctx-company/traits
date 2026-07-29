@@ -344,11 +344,10 @@ fn collect_runtime_produced_refs_from_items(
                 })
                 .map(ToString::to_string),
         );
-        if item.effective_kind() == SequenceKind::ForEach {
-            if let Some(item_slot) = item.item.as_ref() {
+        if item.effective_kind() == SequenceKind::ForEach
+            && let Some(item_slot) = item.item.as_ref() {
                 produced.insert(item_slot.clone());
             }
-        }
         for sequence_id in [
             local_sequence_id(item.sequence.as_deref()),
             local_sequence_id(item.otherwise.as_deref()),

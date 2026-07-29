@@ -712,15 +712,15 @@ fn collect_policy_summary(traits: &[Trait]) -> PolicySummary {
     let mut policies = Vec::new();
     for t in traits {
         if let Some(ref comp) = t.composition {
-            if let Some(ref s) = comp.merge_strategy {
-                if !strategies.contains(s) {
-                    strategies.push(s.clone());
-                }
+            if let Some(ref s) = comp.merge_strategy
+                && !strategies.contains(s)
+            {
+                strategies.push(s.clone());
             }
-            if let Some(ref p) = comp.conflict_policy {
-                if !policies.contains(p) {
-                    policies.push(p.clone());
-                }
+            if let Some(ref p) = comp.conflict_policy
+                && !policies.contains(p)
+            {
+                policies.push(p.clone());
             }
         }
     }
@@ -837,15 +837,15 @@ fn detect_scalar_behavior_conflicts(traits: &[Trait], conflicts: &mut Vec<Confli
     ] {
         let mut participants = Vec::new();
         for (i, t) in traits.iter().enumerate() {
-            if let Some(ref behavior) = t.behavior {
-                if let Some(value) = extract_scalar_behavior(field_name, behavior) {
-                    participants.push(ConflictParticipant {
-                        source_index: i,
-                        trait_id: t.id.as_str().to_string(),
-                        field_path: format!("behavior.{field_name}"),
-                        value: Some(value),
-                    });
-                }
+            if let Some(ref behavior) = t.behavior
+                && let Some(value) = extract_scalar_behavior(field_name, behavior)
+            {
+                participants.push(ConflictParticipant {
+                    source_index: i,
+                    trait_id: t.id.as_str().to_string(),
+                    field_path: format!("behavior.{field_name}"),
+                    value: Some(value),
+                });
             }
         }
         if participants.len() > 1 {

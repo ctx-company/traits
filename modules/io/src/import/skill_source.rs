@@ -303,10 +303,10 @@ pub fn discover_doctor_sources(root: &Utf8Path) -> crate::Result<DoctorDiscovery
                 continue;
             }
             if file_type.is_dir() {
-                if let Some(name) = entry_path.file_name() {
-                    if DOCTOR_SKIPPED_DIR_NAMES.contains(&name) {
-                        continue;
-                    }
+                if let Some(name) = entry_path.file_name()
+                    && DOCTOR_SKIPPED_DIR_NAMES.contains(&name)
+                {
+                    continue;
                 }
                 stack.push(entry_path);
                 continue;

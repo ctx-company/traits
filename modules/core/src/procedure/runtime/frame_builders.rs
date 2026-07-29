@@ -354,11 +354,10 @@ fn control_item_for_sequence<'a>(
                 .and_then(|reference| Reference::parse(reference).ok())
                 .is_some_and(|parsed| parsed.id() == sequence_id)
     };
-    if let Some(proc) = trait_ref.procedure.as_ref() {
-        if let Some(item) = proc.sequence.iter().find(|item| matches(item)) {
+    if let Some(proc) = trait_ref.procedure.as_ref()
+        && let Some(item) = proc.sequence.iter().find(|item| matches(item)) {
             return Some(item);
         }
-    }
     trait_ref
         .sequences
         .iter()
@@ -945,11 +944,10 @@ fn accepted_value<'a>(state: &'a State, ref_text: &str) -> Option<&'a Value> {
         return Some(value);
     }
     for frame in state.control_stack.iter().rev() {
-        if frame.kind == ControlKind::Parallel {
-            if let Some(value) = frame.parallel_buffer.accepted_slot_values.iter().find(matches) {
+        if frame.kind == ControlKind::Parallel
+            && let Some(value) = frame.parallel_buffer.accepted_slot_values.iter().find(matches) {
                 return Some(value);
             }
-        }
     }
     state.accepted_slot_values.iter().find(matches)
 }

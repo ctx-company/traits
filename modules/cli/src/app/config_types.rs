@@ -240,15 +240,14 @@ fn render_interface(name: &str, schema: &serde_json::Map<String, Value>) -> crat
     // A record-shaped def (`additionalProperties: { ... }`, no fixed
     // `properties`) renders as a type alias to `Record<string, T>` instead
     // of an interface.
-    if !schema.contains_key("properties") {
-        if let Some(additional) = schema.get("additionalProperties") {
-            if additional.is_object() {
-                let value_ty = ts_type(additional)?;
-                return Ok(format!(
-                    "export type {name} = Record<string, {value_ty}>;\n"
-                ));
-            }
-        }
+    if !schema.contains_key("properties")
+        && let Some(additional) = schema.get("additionalProperties")
+        && additional.is_object()
+    {
+        let value_ty = ts_type(additional)?;
+        return Ok(format!(
+            "export type {name} = Record<string, {value_ty}>;\n"
+        ));
     }
     let properties = schema
         .get("properties")
@@ -306,11 +305,11 @@ fn ts_type(schema: &Value) -> crate::Result<String> {
     if let Some(values) = object.get("enum").and_then(Value::as_array) {
         return Ok(string_literal_union(values));
     }
-    if let Some(additional) = object.get("additionalProperties") {
-        if additional.is_object() {
-            let value_ty = ts_type(additional)?;
-            return Ok(format!("Record<string, {value_ty}>"));
-        }
+    if let Some(additional) = object.get("additionalProperties")
+        && additional.is_object()
+    {
+        let value_ty = ts_type(additional)?;
+        return Ok(format!("Record<string, {value_ty}>"));
     }
     if object.contains_key("properties") {
         return render_inline_object(object);

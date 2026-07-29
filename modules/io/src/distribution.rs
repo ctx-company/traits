@@ -385,21 +385,21 @@ pub struct ResolvedRegistryBase {
 /// dependency. Env-on-top matches `ConfigLayer::Environment` sitting above
 /// `Repo` everywhere else in this crate.
 pub fn resolve_registry_base_with_source(start_dir: &Utf8Path) -> ResolvedRegistryBase {
-    if let Ok(base) = std::env::var("CTX_TRAITS_REGISTRY_BASE") {
-        if !base.is_empty() {
-            return ResolvedRegistryBase {
-                base,
-                source: RegistryBaseSource::EnvOverride,
-            };
-        }
+    if let Ok(base) = std::env::var("CTX_TRAITS_REGISTRY_BASE")
+        && !base.is_empty()
+    {
+        return ResolvedRegistryBase {
+            base,
+            source: RegistryBaseSource::EnvOverride,
+        };
     }
-    if let Some(base) = crate::harness_config::resolve_registry_base(start_dir) {
-        if !base.is_empty() {
-            return ResolvedRegistryBase {
-                base,
-                source: RegistryBaseSource::Config,
-            };
-        }
+    if let Some(base) = crate::harness_config::resolve_registry_base(start_dir)
+        && !base.is_empty()
+    {
+        return ResolvedRegistryBase {
+            base,
+            source: RegistryBaseSource::Config,
+        };
     }
     ResolvedRegistryBase {
         base: crate::registry::DEFAULT_REGISTRY_BASE.to_string(),
@@ -758,10 +758,10 @@ fn install_path_internal(
 /// names, aliases) pass through untouched — npm identity comparison never
 /// needed normalization and must not gain any.
 fn normalize_operand_identity(operand: &str) -> String {
-    if operand.starts_with("path:") {
-        if let Ok(InstallSpec::Path(spec)) = core_distribution::parse_install_spec(operand) {
-            return format!("path:{}", spec.relative_path);
-        }
+    if operand.starts_with("path:")
+        && let Ok(InstallSpec::Path(spec)) = core_distribution::parse_install_spec(operand)
+    {
+        return format!("path:{}", spec.relative_path);
     }
     operand.to_string()
 }
@@ -930,15 +930,16 @@ pub fn update(
     registry: RegistryOptions<'_>,
 ) -> crate::Result<Vec<InstallReport>> {
     let manifest = scope.read_manifest()?;
-    if operand.is_none() {
-        if let Some(extends) = manifest.extends.clone() {
-            // `extends` is project-scoped only (P443 SCOPE explicitly
-            // excludes global-tier inheritance): refuse before any
-            // registry fetch, lock write, or vendor mutation rather than
-            // silently resolving and persisting base evidence into the
-            // global tier.
-            if !matches!(scope, DistributionScope::Project(_)) {
-                return Err(crate::environment::Error::Filesystem {
+    if operand.is_none()
+        && let Some(extends) = manifest.extends.clone()
+    {
+        // `extends` is project-scoped only (P443 SCOPE explicitly
+        // excludes global-tier inheritance): refuse before any
+        // registry fetch, lock write, or vendor mutation rather than
+        // silently resolving and persisting base evidence into the
+        // global tier.
+        if !matches!(scope, DistributionScope::Project(_)) {
+            return Err(crate::environment::Error::Filesystem {
                     path: scope.manifest_path("toml").to_string(),
                     source: std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -946,13 +947,12 @@ pub fn update(
                     ),
                 }
                 .into());
-            }
-            // Explicit update with no operand is the one moment this
-            // project may re-resolve its `extends` selector (P443): ordinary
-            // sync always replays the exact locked base version, so a newer
-            // compatible base only ever moves here.
-            return update_base_and_inherited(scope, &manifest, &extends, registry);
         }
+        // Explicit update with no operand is the one moment this
+        // project may re-resolve its `extends` selector (P443): ordinary
+        // sync always replays the exact locked base version, so a newer
+        // compatible base only ever moves here.
+        return update_base_and_inherited(scope, &manifest, &extends, registry);
     }
     let selected_alias = operand
         .map(|operand| resolve_installed_operand(&manifest, operand))
@@ -960,10 +960,10 @@ pub fn update(
         .map(str::to_string);
     let mut reports = Vec::new();
     for (entry_alias, dependency) in &manifest.packages {
-        if let Some(alias) = &selected_alias {
-            if alias != entry_alias {
-                continue;
-            }
+        if let Some(alias) = &selected_alias
+            && alias != entry_alias
+        {
+            continue;
         }
         let report =
             install_for_update(scope, &dependency.spec_input(), Some(entry_alias), registry)?;
@@ -1265,15 +1265,15 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
     for discovered_package in discovered {
         let package_manifest = read_package_manifest(&discovered_package.absolute_root)?;
         let relative_root_label = discovered_package.relative_root.as_str().trim_matches('/');
-        if let Some(manifest) = &package_manifest {
-            if let Some(family_packages) = family_leaf_local_packages(
+        if let Some(manifest) = &package_manifest
+            && let Some(family_packages) = family_leaf_local_packages(
                 &discovered_package.absolute_root,
                 relative_root_label,
                 manifest,
-            )? {
-                packages.extend(family_packages);
-                continue;
-            }
+            )?
+        {
+            packages.extend(family_packages);
+            continue;
         }
         let Some(manifest_path) = canonical_manifest(
             &discovered_package.absolute_root,
@@ -1301,29 +1301,28 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
             aliases: Vec::new(),
         });
     }
-    if packages.is_empty() {
-        if let Some(package_manifest) = read_package_manifest(root)? {
-            if let Some(family_packages) =
-                family_leaf_local_packages(root, "self", &package_manifest)?
-            {
-                packages.extend(family_packages);
-            } else if let Some(manifest_path) = canonical_manifest(root, true) {
-                let loaded = crate::dependency::load_dependency_package(
-                    "self",
-                    Some(package_manifest.package.id.as_str()),
-                    Some(package_manifest.package.version.as_str()),
-                    &manifest_path,
-                )?;
-                packages.push(LocalTraitPackage {
-                    root: root.to_path_buf(),
-                    manifest_path,
-                    package_manifest: Some(package_manifest),
-                    loaded,
-                    variant: None,
-                    is_default_variant: false,
-                    aliases: Vec::new(),
-                });
-            }
+    if packages.is_empty()
+        && let Some(package_manifest) = read_package_manifest(root)?
+    {
+        if let Some(family_packages) = family_leaf_local_packages(root, "self", &package_manifest)?
+        {
+            packages.extend(family_packages);
+        } else if let Some(manifest_path) = canonical_manifest(root, true) {
+            let loaded = crate::dependency::load_dependency_package(
+                "self",
+                Some(package_manifest.package.id.as_str()),
+                Some(package_manifest.package.version.as_str()),
+                &manifest_path,
+            )?;
+            packages.push(LocalTraitPackage {
+                root: root.to_path_buf(),
+                manifest_path,
+                package_manifest: Some(package_manifest),
+                loaded,
+                variant: None,
+                is_default_variant: false,
+                aliases: Vec::new(),
+            });
         }
     }
     packages.sort_by(|left, right| left.root.cmp(&right.root));
@@ -1973,14 +1972,12 @@ fn remove_stale_inherited_package(scope: &DistributionScope, alias: &str) -> cra
     assert_no_symlink_ancestors(&vendor_root, scope.boundary())?;
     let vendor_backup = backup_path(&vendor_root, "prune");
     let had_vendor = vendor_root.exists();
-    if had_vendor {
-        if let Err(source) = std::fs::rename(&vendor_root, &vendor_backup) {
-            return Err(crate::environment::Error::Filesystem {
-                path: vendor_root.to_string(),
-                source,
-            }
-            .into());
+    if had_vendor && let Err(source) = std::fs::rename(&vendor_root, &vendor_backup) {
+        return Err(crate::environment::Error::Filesystem {
+            path: vendor_root.to_string(),
+            source,
         }
+        .into());
     }
     if let Err(err) = atomic_write(&lock_path, &lock_text) {
         let mut notes = Vec::new();
@@ -2148,14 +2145,15 @@ fn publish_staged_package(
     assert_no_symlink_ancestors(&lock_path, scope.boundary())?;
     let lock_snapshot = FileSnapshot::capture(&lock_path)?;
     let mut lock = scope.read_lock()?.unwrap_or_default();
-    if let Some(existing) = lock.package_entry(alias) {
-        if existing.identity() != identity_key && !ownership.allow_transition {
-            return Err(alias_collision_error(
-                alias,
-                &existing.identity(),
-                &identity_key,
-            ));
-        }
+    if let Some(existing) = lock.package_entry(alias)
+        && existing.identity() != identity_key
+        && !ownership.allow_transition
+    {
+        return Err(alias_collision_error(
+            alias,
+            &existing.identity(),
+            &identity_key,
+        ));
     }
     let vendored_path = scope.vendored_path_string(alias);
     let tree_digest = crate::registry::compute_tree_digest(&staged.staging_root)?;
@@ -2241,15 +2239,15 @@ fn publish_staged_package(
     // have mutated a live file, so its own failure — like every commit step
     // after it — must restore the snapshot and remove the now-orphaned
     // staging tree rather than leaving either behind.
-    if let DistributionScope::Project(repo_root) = scope {
-        if let Err(err) = crate::gitignore::ensure_nested_gitignore(repo_root) {
-            let mut notes = Vec::new();
-            if let Some(snapshot) = &gitignore_snapshot {
-                notes.extend(snapshot.restore());
-            }
-            let _ = std::fs::remove_dir_all(&vendor_staging);
-            return Err(with_notes(err, notes));
+    if let DistributionScope::Project(repo_root) = scope
+        && let Err(err) = crate::gitignore::ensure_nested_gitignore(repo_root)
+    {
+        let mut notes = Vec::new();
+        if let Some(snapshot) = &gitignore_snapshot {
+            notes.extend(snapshot.restore());
         }
+        let _ = std::fs::remove_dir_all(&vendor_staging);
+        return Err(with_notes(err, notes));
     }
 
     // Everything is prepared and validated. Commit: vendor swap, then lock,
@@ -2257,22 +2255,20 @@ fn publish_staged_package(
     // later step fails.
     let vendor_backup = backup_path(&vendor_root, "prior");
     let had_existing_vendor = vendor_root.exists();
-    if had_existing_vendor {
-        if let Err(source) = std::fs::rename(&vendor_root, &vendor_backup) {
-            let mut notes = Vec::new();
-            if let Some(snapshot) = &gitignore_snapshot {
-                notes.extend(snapshot.restore());
-            }
-            let _ = std::fs::remove_dir_all(&vendor_staging);
-            return Err(with_notes(
-                crate::environment::Error::Filesystem {
-                    path: vendor_root.to_string(),
-                    source,
-                }
-                .into(),
-                notes,
-            ));
+    if had_existing_vendor && let Err(source) = std::fs::rename(&vendor_root, &vendor_backup) {
+        let mut notes = Vec::new();
+        if let Some(snapshot) = &gitignore_snapshot {
+            notes.extend(snapshot.restore());
         }
+        let _ = std::fs::remove_dir_all(&vendor_staging);
+        return Err(with_notes(
+            crate::environment::Error::Filesystem {
+                path: vendor_root.to_string(),
+                source,
+            }
+            .into(),
+            notes,
+        ));
     }
     if let Err(source) = std::fs::rename(&vendor_staging, &vendor_root) {
         let mut notes = Vec::new();
@@ -2305,20 +2301,20 @@ fn publish_staged_package(
         ));
         return Err(with_notes(err, notes));
     }
-    if let Some((_, manifest_text)) = &manifest_write {
-        if let Err(err) = atomic_write(&manifest_path, manifest_text) {
-            let mut notes = Vec::new();
-            notes.extend(lock_snapshot.restore());
-            if let Some(snapshot) = &gitignore_snapshot {
-                notes.extend(snapshot.restore());
-            }
-            notes.extend(rollback_vendor_swap(
-                &vendor_root,
-                &vendor_backup,
-                had_existing_vendor,
-            ));
-            return Err(with_notes(err, notes));
+    if let Some((_, manifest_text)) = &manifest_write
+        && let Err(err) = atomic_write(&manifest_path, manifest_text)
+    {
+        let mut notes = Vec::new();
+        notes.extend(lock_snapshot.restore());
+        if let Some(snapshot) = &gitignore_snapshot {
+            notes.extend(snapshot.restore());
         }
+        notes.extend(rollback_vendor_swap(
+            &vendor_root,
+            &vendor_backup,
+            had_existing_vendor,
+        ));
+        return Err(with_notes(err, notes));
     }
 
     // For a real mutation (install/update, not a sync repair that merely
@@ -2424,17 +2420,15 @@ fn rollback_vendor_swap(
     had_existing: bool,
 ) -> Vec<String> {
     let mut notes = Vec::new();
-    if let Err(source) = std::fs::remove_dir_all(vendor_root) {
-        if source.kind() != std::io::ErrorKind::NotFound {
-            notes.push(format!("could not remove {vendor_root}: {source}"));
-        }
+    if let Err(source) = std::fs::remove_dir_all(vendor_root)
+        && source.kind() != std::io::ErrorKind::NotFound
+    {
+        notes.push(format!("could not remove {vendor_root}: {source}"));
     }
-    if had_existing {
-        if let Err(source) = std::fs::rename(vendor_backup, vendor_root) {
-            notes.push(format!(
-                "could not restore vendor backup {vendor_backup} to {vendor_root}: {source}"
-            ));
-        }
+    if had_existing && let Err(source) = std::fs::rename(vendor_backup, vendor_root) {
+        notes.push(format!(
+            "could not restore vendor backup {vendor_backup} to {vendor_root}: {source}"
+        ));
     }
     notes
 }

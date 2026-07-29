@@ -295,13 +295,13 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
     // Port schema fields must be strings.
     if let Some(ports) = value.get("port").and_then(|v| v.as_array()) {
         for (i, port) in ports.iter().enumerate() {
-            if let Some(schema) = port.get("schema") {
-                if !schema.is_string() {
-                    return Err(invalid_field(
-                        format!("port[{i}].schema"),
-                        format!("schema must be a string, got {}", json_type_name(schema)),
-                    ));
-                }
+            if let Some(schema) = port.get("schema")
+                && !schema.is_string()
+            {
+                return Err(invalid_field(
+                    format!("port[{i}].schema"),
+                    format!("schema must be a string, got {}", json_type_name(schema)),
+                ));
             }
         }
     }
@@ -309,13 +309,13 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
     // Slot schema fields must be strings.
     if let Some(slots) = value.get("slot").and_then(|v| v.as_array()) {
         for (i, slot) in slots.iter().enumerate() {
-            if let Some(schema) = slot.get("schema") {
-                if !schema.is_string() {
-                    return Err(invalid_field(
-                        format!("slot[{i}].schema"),
-                        format!("schema must be a string, got {}", json_type_name(schema)),
-                    ));
-                }
+            if let Some(schema) = slot.get("schema")
+                && !schema.is_string()
+            {
+                return Err(invalid_field(
+                    format!("slot[{i}].schema"),
+                    format!("schema must be a string, got {}", json_type_name(schema)),
+                ));
             }
         }
     }
@@ -325,16 +325,16 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
         for (i, schema) in schemas.iter().enumerate() {
             if let Some(fields) = schema.get("fields").and_then(|f| f.as_object()) {
                 for (field_id, field_val) in fields {
-                    if let Some(field_schema) = field_val.get("schema") {
-                        if !field_schema.is_string() {
-                            return Err(invalid_field(
-                                format!("schema[{i}].fields.{field_id}.schema"),
-                                format!(
-                                    "schema must be a string, got {}",
-                                    json_type_name(field_schema)
-                                ),
-                            ));
-                        }
+                    if let Some(field_schema) = field_val.get("schema")
+                        && !field_schema.is_string()
+                    {
+                        return Err(invalid_field(
+                            format!("schema[{i}].fields.{field_id}.schema"),
+                            format!(
+                                "schema must be a string, got {}",
+                                json_type_name(field_schema)
+                            ),
+                        ));
                     }
                 }
             }
@@ -344,29 +344,29 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
     // Resource fields must have correct types for narrow diagnostics.
     if let Some(resources) = value.get("resource").and_then(|v| v.as_array()) {
         for (i, resource) in resources.iter().enumerate() {
-            if let Some(path) = resource.get("path") {
-                if !path.is_string() {
-                    return Err(invalid_field(
-                        format!("resource[{i}].path"),
-                        format!("path must be a string, got {}", json_type_name(path)),
-                    ));
-                }
+            if let Some(path) = resource.get("path")
+                && !path.is_string()
+            {
+                return Err(invalid_field(
+                    format!("resource[{i}].path"),
+                    format!("path must be a string, got {}", json_type_name(path)),
+                ));
             }
-            if let Some(hint) = resource.get("hint") {
-                if !hint.is_string() {
-                    return Err(invalid_field(
-                        format!("resource[{i}].hint"),
-                        format!("hint must be a string, got {}", json_type_name(hint)),
-                    ));
-                }
+            if let Some(hint) = resource.get("hint")
+                && !hint.is_string()
+            {
+                return Err(invalid_field(
+                    format!("resource[{i}].hint"),
+                    format!("hint must be a string, got {}", json_type_name(hint)),
+                ));
             }
-            if let Some(trigger) = resource.get("trigger") {
-                if !trigger.is_string() {
-                    return Err(invalid_field(
-                        format!("resource[{i}].trigger"),
-                        format!("trigger must be a string, got {}", json_type_name(trigger)),
-                    ));
-                }
+            if let Some(trigger) = resource.get("trigger")
+                && !trigger.is_string()
+            {
+                return Err(invalid_field(
+                    format!("resource[{i}].trigger"),
+                    format!("trigger must be a string, got {}", json_type_name(trigger)),
+                ));
             }
         }
     }
@@ -449,13 +449,13 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
                     _ => {}
                 }
 
-                if let Some(reason) = rule_obj.get("reason") {
-                    if !reason.is_string() {
-                        return Err(invalid_field(
-                            format!("{base}.reason"),
-                            format!("reason must be a string, got {}", json_type_name(reason)),
-                        ));
-                    }
+                if let Some(reason) = rule_obj.get("reason")
+                    && !reason.is_string()
+                {
+                    return Err(invalid_field(
+                        format!("{base}.reason"),
+                        format!("reason must be a string, got {}", json_type_name(reason)),
+                    ));
                 }
 
                 for field in [
@@ -481,16 +481,16 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
                     "weight",
                 )?;
 
-                if let Some(load_level) = rule_obj.get("load-level") {
-                    if !load_level.is_string() {
-                        return Err(invalid_field(
-                            format!("{base}.load-level"),
-                            format!(
-                                "load-level must be a string, got {}",
-                                json_type_name(load_level)
-                            ),
-                        ));
-                    }
+                if let Some(load_level) = rule_obj.get("load-level")
+                    && !load_level.is_string()
+                {
+                    return Err(invalid_field(
+                        format!("{base}.load-level"),
+                        format!(
+                            "load-level must be a string, got {}",
+                            json_type_name(load_level)
+                        ),
+                    ));
                 }
 
                 if rule_obj.contains_key("exclusions") {
@@ -532,15 +532,15 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
             validate_required_string(obj, &base, "id")?;
             validate_required_string(obj, &base, "variant")?;
 
-            if let Some(v) = obj.get("variant").and_then(|v| v.as_str()) {
-                if crate::r#trait::ScenarioVariant::parse(v).is_none() {
-                    return Err(invalid_field(
-                        format!("{base}.variant"),
-                        format!(
-                            "unknown scenario variant {v:?} (expected positive, negative, or edge)"
-                        ),
-                    ));
-                }
+            if let Some(v) = obj.get("variant").and_then(|v| v.as_str())
+                && crate::r#trait::ScenarioVariant::parse(v).is_none()
+            {
+                return Err(invalid_field(
+                    format!("{base}.variant"),
+                    format!(
+                        "unknown scenario variant {v:?} (expected positive, negative, or edge)"
+                    ),
+                ));
             }
 
             validate_optional_string(obj, &base, "input")?;
@@ -577,15 +577,15 @@ fn validate_preflight(value: &serde_json::Value) -> crate::Result<()> {
             validate_required_string(obj, &base, "id")?;
             validate_required_string(obj, &base, "variant")?;
 
-            if let Some(v) = obj.get("variant").and_then(|v| v.as_str()) {
-                if crate::r#trait::EvalVariant::parse(v).is_none() {
-                    return Err(invalid_field(
-                        format!("{base}.variant"),
-                        format!(
-                            "unknown eval variant {v:?} (expected documentation, lint, golden-render, behavioral, or runtime)"
-                        ),
-                    ));
-                }
+            if let Some(v) = obj.get("variant").and_then(|v| v.as_str())
+                && crate::r#trait::EvalVariant::parse(v).is_none()
+            {
+                return Err(invalid_field(
+                    format!("{base}.variant"),
+                    format!(
+                        "unknown eval variant {v:?} (expected documentation, lint, golden-render, behavioral, or runtime)"
+                    ),
+                ));
             }
 
             validate_optional_string(obj, &base, "input")?;

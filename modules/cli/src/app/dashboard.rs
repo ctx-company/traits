@@ -934,16 +934,16 @@ impl State {
             }) {
                 self.session_preview = None;
             }
-            if let Some(preview) = &snapshot.session_preview {
-                if session_preview_matches_current(self, &preview.session_id) {
-                    follow_session_preview(
-                        state_pane_scroll_rows(self, PANE_SESSIONS_PROGRESS),
-                        self.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
-                        self.session_preview_follow,
-                        preview.lines.len(),
-                    );
-                    self.session_preview = Some(preview.clone());
-                }
+            if let Some(preview) = &snapshot.session_preview
+                && session_preview_matches_current(self, &preview.session_id)
+            {
+                follow_session_preview(
+                    state_pane_scroll_rows(self, PANE_SESSIONS_PROGRESS),
+                    self.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
+                    self.session_preview_follow,
+                    preview.lines.len(),
+                );
+                self.session_preview = Some(preview.clone());
             }
         }
     }
@@ -960,7 +960,7 @@ impl State {
         // regardless of scope, so the cadence is wall-clock-uniform whether
         // or not `all_repos` is toggled mid-session.
         self.reload_ticks = self.reload_ticks.wrapping_add(1);
-        let full_sweep = self.reload_ticks % FULL_SWEEP_EVERY_TICKS == 0;
+        let full_sweep = self.reload_ticks.is_multiple_of(FULL_SWEEP_EVERY_TICKS);
         let indexed_ids = ctx_traits_io::run_liveness::indexed_session_ids(
             &ctx_traits_io::run_control::runtime_root(),
         );
@@ -1453,35 +1453,35 @@ fn sessions_from_inventory_tagged(
         };
         // A slower full sweep discovers pre-index drivers and publishes the
         // same pointer evidence ordinary machine-wide reporting consumes.
-        if live && matches!(probe_budget, ProbeBudget::Sweep) {
-            if let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
+        if live
+            && matches!(probe_budget, ProbeBudget::Sweep)
+            && let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } =
                 &row.status
-            {
-                let facts = ctx_traits_io::run_liveness::LiveRunFacts {
-                    session_id: row.session_id.clone(),
-                    run_id: session.run_id.as_str().to_string(),
-                    repo_key: repo_key.unwrap_or_default().to_string(),
-                    repo_path: repo_path.unwrap_or_default().to_string(),
-                    ledger_path: row.ledger_path.clone(),
-                    worktree_path: session
-                        .provenance
-                        .worktree
-                        .as_ref()
-                        .and_then(|worktree| worktree.path.clone()),
-                    branch: session
-                        .provenance
-                        .worktree
-                        .as_ref()
-                        .map(|worktree| worktree.branch.clone()),
-                    log_path: None,
-                };
-                let _ = ctx_traits_io::run_liveness::upsert_row(
-                    &ctx_traits_io::run_control::runtime_root(),
-                    &facts,
-                    holder_pid,
-                    session.provenance.started_at_epoch.unwrap_or(0),
-                );
-            }
+        {
+            let facts = ctx_traits_io::run_liveness::LiveRunFacts {
+                session_id: row.session_id.clone(),
+                run_id: session.run_id.as_str().to_string(),
+                repo_key: repo_key.unwrap_or_default().to_string(),
+                repo_path: repo_path.unwrap_or_default().to_string(),
+                ledger_path: row.ledger_path.clone(),
+                worktree_path: session
+                    .provenance
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.path.clone()),
+                branch: session
+                    .provenance
+                    .worktree
+                    .as_ref()
+                    .map(|worktree| worktree.branch.clone()),
+                log_path: None,
+            };
+            let _ = ctx_traits_io::run_liveness::upsert_row(
+                &ctx_traits_io::run_control::runtime_root(),
+                &facts,
+                holder_pid,
+                session.provenance.started_at_epoch.unwrap_or(0),
+            );
         }
         let (state_text, phase, elapsed_text, tokens_text, run_id, class, status, outcome) =
             match &row.status {
@@ -2018,10 +2018,10 @@ fn handle_key(
             open_trust_modal(state, ctx_traits_io::trust::TrustState::Blocked);
         }
         KeyCode::Char(' ') if state.screen == Screen::Trust => {
-            if let Some(row) = selected_trust(state) {
-                if let Some(id) = row.trait_id.clone() {
-                    state.trust_marks.toggle(id);
-                }
+            if let Some(row) = selected_trust(state)
+                && let Some(id) = row.trait_id.clone()
+            {
+                state.trust_marks.toggle(id);
             }
         }
         KeyCode::Char('A') if state.screen == Screen::Trust => {
@@ -2297,10 +2297,9 @@ fn refresh_attached_session(state: &mut State) {
                 .sessions
                 .get(idx)
                 .map(|row| session_group(row.class, row.status.as_ref(), row.outcome.as_ref()))
+                && state.collapsed_groups.remove(&group)
             {
-                if state.collapsed_groups.remove(&group) {
-                    rebuild_visible_sessions(state);
-                }
+                rebuild_visible_sessions(state);
             }
             if let Some(visible_idx) = state.sessions_visible.iter().position(
                 |row| matches!(row, VisibleRow::Session(session_idx) if *session_idx == idx),
@@ -3102,12 +3101,11 @@ fn refresh_merge_preview_for_selection(state: &mut State) {
         .merge_preview
         .as_ref()
         .is_some_and(|preview| preview.session_id == row.session_id);
-    if same_selection {
-        if let Some(preview) = &state.merge_preview {
-            if preview.cache_key == cache_key {
-                return;
-            }
-        }
+    if same_selection
+        && let Some(preview) = &state.merge_preview
+        && preview.cache_key == cache_key
+    {
+        return;
     }
     state.merge_preview = Some(build_merge_preview(row, cache_key));
 }
@@ -3270,18 +3268,18 @@ fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
     );
     lines.push(stage_line);
 
-    if let Some(explanation) = &facts.explanation {
-        if facts.class == MergeClass::Parked || facts.class == MergeClass::Failed {
-            lines.push(tui::Line::blank());
-            let mut why_line = tui::Line::blank();
-            why_line.push("why: ", tui::Tone::Muted);
-            why_line.push(explanation.sentence.clone(), tui::Tone::Fail);
-            lines.push(why_line);
-            let mut next_line = tui::Line::blank();
-            next_line.push("next: ", tui::Tone::Muted);
-            next_line.push(explanation.next_action.clone(), tui::Tone::Default);
-            lines.push(next_line);
-        }
+    if let Some(explanation) = &facts.explanation
+        && (facts.class == MergeClass::Parked || facts.class == MergeClass::Failed)
+    {
+        lines.push(tui::Line::blank());
+        let mut why_line = tui::Line::blank();
+        why_line.push("why: ", tui::Tone::Muted);
+        why_line.push(explanation.sentence.clone(), tui::Tone::Fail);
+        lines.push(why_line);
+        let mut next_line = tui::Line::blank();
+        next_line.push("next: ", tui::Tone::Muted);
+        next_line.push(explanation.next_action.clone(), tui::Tone::Default);
+        lines.push(next_line);
     }
 
     if !facts.gate_rows.is_empty() {

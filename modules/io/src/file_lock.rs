@@ -70,10 +70,10 @@ pub fn lock_exclusive_blocking(file: &std::fs::File) -> io::Result<()> {
 /// miss as fatal). Creates parent directories as needed so callers don't have
 /// to pre-create the `.branches` tree before the first lease attempt.
 pub fn try_acquire_conductor_lease(path: &Utf8Path) -> io::Result<Option<std::fs::File>> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
     }
     let file = open_lock_file_no_follow(path)?;
     if try_lock_exclusive(&file)? {

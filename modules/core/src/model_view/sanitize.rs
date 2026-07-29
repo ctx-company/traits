@@ -262,26 +262,24 @@ fn replace_base64_blobs(
             continue;
         }
 
-        if let Some(start) = run_start {
-            if run_len > 80 {
+        if let Some(start) = run_start
+            && run_len > 80 {
                 output.push_str(&value[last..start]);
                 output.push_str("[base64-blob-removed]");
                 count += 1;
                 last = index;
             }
-        }
         run_start = None;
         run_len = 0;
     }
 
-    if let Some(start) = run_start {
-        if run_len > 80 {
+    if let Some(start) = run_start
+        && run_len > 80 {
             output.push_str(&value[last..start]);
             output.push_str("[base64-blob-removed]");
             count += 1;
             last = value.len();
         }
-    }
 
     if count > 0 {
         record_normalization(

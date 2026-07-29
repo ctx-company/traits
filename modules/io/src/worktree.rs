@@ -487,15 +487,14 @@ pub fn resolve_default_branch(
         "resolve-default-branch-origin-head",
         warnings,
     )?;
-    if symref.success {
-        if let Some(branch) = symref
+    if symref.success
+        && let Some(branch) = symref
             .stdout
             .trim()
             .strip_prefix("refs/remotes/origin/")
             .filter(|branch| !branch.is_empty())
-        {
-            return Ok((branch.to_string(), DefaultBranchSource::OriginHead));
-        }
+    {
+        return Ok((branch.to_string(), DefaultBranchSource::OriginHead));
     }
     let init_default = run_git_retrying(
         repo_root,
@@ -787,10 +786,10 @@ pub fn conflict_marker_regions(
         let line_number = index + 1;
         if line.starts_with("<<<<<<<") && current_start.is_none() {
             current_start = Some(line_number);
-        } else if line.starts_with(">>>>>>>") {
-            if let Some(start) = current_start.take() {
-                regions.push((start, line_number));
-            }
+        } else if line.starts_with(">>>>>>>")
+            && let Some(start) = current_start.take()
+        {
+            regions.push((start, line_number));
         }
     }
     Ok(regions)
@@ -2040,10 +2039,10 @@ fn create_new_worktree(
     let baseline_root = seed_baseline_root(path, warnings)?;
     let ancestor_root = baseline_root.join(SEED_BASELINE_ANCESTOR_SUBDIR);
     let seeds = contents.seeds;
-    if !seeds.is_empty() {
-        if let Some(progress) = setup_plan.progress {
-            progress("seeding");
-        }
+    if !seeds.is_empty()
+        && let Some(progress) = setup_plan.progress
+    {
+        progress("seeding");
     }
     let mut seed_snapshots = Vec::with_capacity(seeds.len());
     for seed in seeds {

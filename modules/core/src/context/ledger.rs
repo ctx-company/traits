@@ -200,11 +200,11 @@ impl Ledger {
                 }
             }
 
-            if let Some(expected) = expected_host_key {
-                if entry.host_key.as_deref() != Some(expected) {
-                    entry.stale = true;
-                    entry.stale_reason = Some(StaleReason::MissingHostKey);
-                }
+            if let Some(expected) = expected_host_key
+                && entry.host_key.as_deref() != Some(expected)
+            {
+                entry.stale = true;
+                entry.stale_reason = Some(StaleReason::MissingHostKey);
             }
         }
     }

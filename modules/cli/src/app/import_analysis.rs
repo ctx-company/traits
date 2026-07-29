@@ -403,21 +403,20 @@ pub(crate) fn augment_draft_with_skill_format_sections(
         }
     }
 
-    if let Some(body) = section_body(markdown, "Procedure Steps") {
-        if !body.contains("No deterministic procedure is declared")
-            && !object.contains_key("procedure")
-        {
-            let sequence = procedure_steps_from_skill_section(body);
-            if !sequence.is_empty() {
-                object.insert(
-                    "procedure".to_string(),
-                    serde_json::json!({
-                        "description": "Imported procedure reconstructed from ctx.traits skill export.",
-                        "sequence": sequence,
-                    }),
-                );
-                warnings.push("skill-format import reconstructed procedure kind".to_string());
-            }
+    if let Some(body) = section_body(markdown, "Procedure Steps")
+        && !body.contains("No deterministic procedure is declared")
+        && !object.contains_key("procedure")
+    {
+        let sequence = procedure_steps_from_skill_section(body);
+        if !sequence.is_empty() {
+            object.insert(
+                "procedure".to_string(),
+                serde_json::json!({
+                    "description": "Imported procedure reconstructed from ctx.traits skill export.",
+                    "sequence": sequence,
+                }),
+            );
+            warnings.push("skill-format import reconstructed procedure kind".to_string());
         }
     }
 

@@ -1463,18 +1463,16 @@ fn resolve_current_frame_target(
     }
 
     for candidate in target_variants("port", target) {
-        if let Ok(parsed) = Reference::parse(&candidate) {
-            if parsed.kind() == Kind::Port && !parsed.is_qualified() {
-                if let Some(port) = trait_ref.ports.iter().find(|port| {
-                    port.id == parsed.id() && matches!(port.direction, PortDirection::Output)
-                }) {
-                    if let Some(value_slot) = port.value.as_ref() {
-                        if requested.iter().any(|slot_ref| slot_ref == value_slot) {
-                            candidates.push(value_slot.clone());
-                        }
-                    }
-                }
-            }
+        if let Ok(parsed) = Reference::parse(&candidate)
+            && parsed.kind() == Kind::Port
+            && !parsed.is_qualified()
+            && let Some(port) = trait_ref.ports.iter().find(|port| {
+                port.id == parsed.id() && matches!(port.direction, PortDirection::Output)
+            })
+            && let Some(value_slot) = port.value.as_ref()
+            && requested.iter().any(|slot_ref| slot_ref == value_slot)
+        {
+            candidates.push(value_slot.clone());
         }
     }
 
@@ -2206,27 +2204,24 @@ fn preflight_call_rejection(
         ));
         non_persisting_rejection = true;
     }
-    if !trusted_command_execution {
-        if let NextSequenceFrameResult::Frame(frame) = &frame_result {
-            if frame.command.is_none() {
-                if let Some(assigned_agent) = frame.assigned_agent.as_ref() {
-                    if caller_agent.as_deref() != Some(assigned_agent.role.as_str()) {
-                        let supplied = caller_agent
-                            .as_ref()
-                            .map(|role| format!("agent:{role}"))
-                            .unwrap_or_else(|| "none".to_string());
-                        report.rejected_outputs.push(rejected_envelope(
+    if !trusted_command_execution
+        && let NextSequenceFrameResult::Frame(frame) = &frame_result
+        && frame.command.is_none()
+        && let Some(assigned_agent) = frame.assigned_agent.as_ref()
+        && caller_agent.as_deref() != Some(assigned_agent.role.as_str())
+    {
+        let supplied = caller_agent
+            .as_ref()
+            .map(|role| format!("agent:{role}"))
+            .unwrap_or_else(|| "none".to_string());
+        report.rejected_outputs.push(rejected_envelope(
                             report.sequence_index,
                             &format!(
                                 "current frame is assigned to {}; caller agent was {supplied}; submit as --agent {}. This is cooperative routing, not an authentication or security boundary",
                                 assigned_agent.ref_text, assigned_agent.role
                             ),
                         ));
-                        non_persisting_rejection = true;
-                    }
-                }
-            }
-        }
+        non_persisting_rejection = true;
     }
     let has_current_frame = session.next_frame.is_some()
         || session.current_source_index.is_some()

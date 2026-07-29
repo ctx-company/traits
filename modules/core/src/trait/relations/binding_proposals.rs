@@ -41,11 +41,10 @@ fn produce_binding_proposals_filtered(
         if !matches!(c_port.direction, crate::r#trait::PortDirection::Input) {
             continue;
         }
-        if let Some(filter) = target_port_filter {
-            if c_port.id != filter {
+        if let Some(filter) = target_port_filter
+            && c_port.id != filter {
                 continue;
             }
-        }
         for p_port in &provider.ports {
             if !matches!(p_port.direction, crate::r#trait::PortDirection::Output) {
                 continue;

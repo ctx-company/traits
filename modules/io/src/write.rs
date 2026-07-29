@@ -421,10 +421,10 @@ fn reject_symlink_ancestors(path: &Utf8Path) -> crate::Result<()> {
 }
 
 fn reject_symlink_leaf(path: &Utf8Path) -> crate::Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err(fs_err(path, "target leaf is a symlink"));
-        }
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && metadata.file_type().is_symlink()
+    {
+        return Err(fs_err(path, "target leaf is a symlink"));
     }
     Ok(())
 }
@@ -688,10 +688,10 @@ pub fn write_package_manifest(path: &Utf8Path, content: &str) -> crate::Result<(
 
     reject_symlink_ancestors(path)?;
 
-    if let Some(ref prev) = existing {
-        if prev == content {
-            return Ok(());
-        }
+    if let Some(ref prev) = existing
+        && prev == content
+    {
+        return Ok(());
     }
 
     reject_symlink_ancestors(path)?;

@@ -13,9 +13,12 @@ jobs:
     steps:
       # Install tools & packages
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
-        with:
-          components: rustfmt, clippy
+      # No version pinned here on purpose: rust-toolchain.toml is the single
+      # source of truth, and `rustup show` installs exactly the channel and
+      # components it names. Naming a version here too is how CI came to run
+      # 1.85.0 against a workspace that needs let-chains.
+      - name: Install Rust (from rust-toolchain.toml)
+        run: rustup show
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.1

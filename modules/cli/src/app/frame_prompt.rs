@@ -1324,10 +1324,10 @@ fn declared_json_schema(
             "additionalProperties": false,
             "properties": Value::Object(properties),
         });
-        if !required.is_empty() {
-            if let Some(map) = object.as_object_mut() {
-                map.insert("required".to_string(), Value::Array(required));
-            }
+        if !required.is_empty()
+            && let Some(map) = object.as_object_mut()
+        {
+            map.insert("required".to_string(), Value::Array(required));
         }
         object
     } else if let Some(allowed) = &declared.allowed {
@@ -1336,11 +1336,11 @@ fn declared_json_schema(
         // Resource-backed or otherwise opaque declarations stay unconstrained.
         serde_json::json!({})
     };
-    if let Some(description) = &declared.description {
-        if let Some(map) = root.as_object_mut() {
-            map.entry("description".to_string())
-                .or_insert_with(|| Value::String(description.clone()));
-        }
+    if let Some(description) = &declared.description
+        && let Some(map) = root.as_object_mut()
+    {
+        map.entry("description".to_string())
+            .or_insert_with(|| Value::String(description.clone()));
     }
     root
 }

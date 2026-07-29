@@ -425,12 +425,12 @@ pub(crate) fn classify_prompt(text: &str) -> Result<PromptClassification, String
         };
     }
 
-    if let Some((prefix, _rest)) = text.split_once(':') {
-        if Kind::parse(prefix).is_some() {
-            return Err(format!(
-                "sequence item prompt starts with ref-kind prefix {prefix:?} but is not a valid typed ref"
-            ));
-        }
+    if let Some((prefix, _rest)) = text.split_once(':')
+        && Kind::parse(prefix).is_some()
+    {
+        return Err(format!(
+            "sequence item prompt starts with ref-kind prefix {prefix:?} but is not a valid typed ref"
+        ));
     }
 
     Ok(PromptClassification::Inline)

@@ -163,11 +163,11 @@ pub(crate) fn append_session_resume(
     cli: &HarnessCliConvention,
     session_id: Option<&String>,
 ) {
-    if let Some(session_id) = session_id {
-        if let Some(flag) = cli.session_flag.as_ref().or(cli.resume_flag.as_ref()) {
-            argv.push(flag.clone());
-            argv.push(session_id.clone());
-        }
+    if let Some(session_id) = session_id
+        && let Some(flag) = cli.session_flag.as_ref().or(cli.resume_flag.as_ref())
+    {
+        argv.push(flag.clone());
+        argv.push(session_id.clone());
     }
 }
 

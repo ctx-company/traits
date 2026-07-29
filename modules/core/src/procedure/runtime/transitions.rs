@@ -481,8 +481,8 @@ pub fn apply_step_output(
     };
     report.sequence_index = ready.sequence_index;
 
-    if let Some(sequence_index) = envelope.sequence_index {
-        if sequence_index != ready.sequence_index {
+    if let Some(sequence_index) = envelope.sequence_index
+        && sequence_index != ready.sequence_index {
             reject_envelope(
                 &mut report,
                 ready.sequence_index,
@@ -492,16 +492,14 @@ pub fn apply_step_output(
                 ),
             );
         }
-    }
-    if let Some(ref item_id) = envelope.item_id {
-        if ready.item.id.as_deref() != Some(item_id.as_str()) {
+    if let Some(ref item_id) = envelope.item_id
+        && ready.item.id.as_deref() != Some(item_id.as_str()) {
             reject_envelope(
                 &mut report,
                 ready.sequence_index,
                 format!("step output item-id {item_id:?} does not match current item"),
             );
         }
-    }
     if !report.rejected_outputs.is_empty() {
         return reject_step_output(trait_ref, state, ready.sequence_index, report);
     }

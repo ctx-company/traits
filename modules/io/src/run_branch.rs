@@ -217,13 +217,13 @@ fn write_json_sidecar<T: serde::Serialize>(
     label: &str,
 ) -> crate::Result<()> {
     crate::run_session::reject_symlink_ancestors(path)?;
-    if let Some(parent) = path.parent() {
-        if !parent.as_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| crate::environment::Error::Filesystem {
-                path: parent.to_string(),
-                source: e,
-            })?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| crate::environment::Error::Filesystem {
+            path: parent.to_string(),
+            source: e,
+        })?;
     }
     crate::run_session::reject_symlink_ancestors(path)?;
     crate::run_session::reject_symlink_leaf(path)?;

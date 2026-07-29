@@ -439,15 +439,13 @@ pub(crate) fn handle_publish(
         target.clone()
     };
     let root_manifest = ctx_traits_io::distribution::read_package_manifest(&package_root)?;
-    if let Some(manifest) = &root_manifest {
-        if manifest.package.status != ctx_traits_core::manifest::PackageStatus::Ready {
-            return Err(crate::Error::Command {
-                message: ctx_traits_io::publish::Error::NotReady(
-                    manifest.package.status.to_string(),
-                )
+    if let Some(manifest) = &root_manifest
+        && manifest.package.status != ctx_traits_core::manifest::PackageStatus::Ready
+    {
+        return Err(crate::Error::Command {
+            message: ctx_traits_io::publish::Error::NotReady(manifest.package.status.to_string())
                 .to_string(),
-            });
-        }
+        });
     }
     let inspection = ctx_traits_io::distribution::inspect_local_package(&package_root)?;
     if inspection.packages.len() != 1 {

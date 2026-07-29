@@ -393,12 +393,10 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     if let Some(query_selection) = selected_query
         .as_ref()
         .and_then(|selection| selection.query.as_ref())
-    {
-        if let Some(value) =
+        && let Some(value) =
             ctx_traits_core::run_info::query_text_initial_value(&loaded.trait_ref, query_selection)
-        {
-            initial_values.push(value);
-        }
+    {
+        initial_values.push(value);
     }
 
     // Standing-wall pre-flight (P414): before any assignment, worktree, or
@@ -416,16 +414,13 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         &loaded.trait_ref,
         &loaded.trait_root,
         phase_value,
-    )? {
-        if let Some(standing) = crate::dispatch_preflight::find_standing_wall(
-            &wall_id,
-            phase_value.unwrap_or_default(),
-        )? {
-            return invalid_request(
-                "run.phase",
-                crate::dispatch_preflight::refusal_message(&standing),
-            );
-        }
+    )? && let Some(standing) =
+        crate::dispatch_preflight::find_standing_wall(&wall_id, phase_value.unwrap_or_default())?
+    {
+        return invalid_request(
+            "run.phase",
+            crate::dispatch_preflight::refusal_message(&standing),
+        );
     }
 
     let prepared_assignments = crate::harness_config::prepare_run_assignments(
@@ -1668,21 +1663,21 @@ fn verify_loaded_trait_matches_session(
             ),
         );
     }
-    if let Some(expected) = session.source_digest.as_deref() {
-        if loaded.source_digest != expected {
-            return invalid_request(
-                &format!("{field_prefix}.source-digest"),
-                "stale run-session source: loaded source digest does not match session ledger",
-            );
-        }
+    if let Some(expected) = session.source_digest.as_deref()
+        && loaded.source_digest != expected
+    {
+        return invalid_request(
+            &format!("{field_prefix}.source-digest"),
+            "stale run-session source: loaded source digest does not match session ledger",
+        );
     }
-    if let Some(expected) = session.canonical_digest.as_deref() {
-        if loaded.canonical_digest != expected {
-            return invalid_request(
-                &format!("{field_prefix}.canonical-digest"),
-                "stale run-session source: loaded canonical digest does not match session ledger",
-            );
-        }
+    if let Some(expected) = session.canonical_digest.as_deref()
+        && loaded.canonical_digest != expected
+    {
+        return invalid_request(
+            &format!("{field_prefix}.canonical-digest"),
+            "stale run-session source: loaded canonical digest does not match session ledger",
+        );
     }
     Ok(())
 }
@@ -2028,10 +2023,10 @@ fn advance_command_frames(
                     }),
                 },
             )?;
-            if response.persist_session {
-                if let Some(path) = persist_path {
-                    crate::run_session::write_run_session(path, &response.session)?;
-                }
+            if response.persist_session
+                && let Some(path) = persist_path
+            {
+                crate::run_session::write_run_session(path, &response.session)?;
             }
             session = response.session;
             continue;
@@ -2124,10 +2119,10 @@ fn advance_command_frames(
                     }),
                 },
             )?;
-            if response.persist_session {
-                if let Some(path) = persist_path {
-                    crate::run_session::write_run_session(path, &response.session)?;
-                }
+            if response.persist_session
+                && let Some(path) = persist_path
+            {
+                crate::run_session::write_run_session(path, &response.session)?;
             }
             if matches!(
                 response.response_kind,
@@ -2235,10 +2230,10 @@ fn advance_command_frames(
         )?;
         // Persist each accepted command step immediately so a later failing
         // step cannot roll back this one.
-        if response.persist_session {
-            if let Some(path) = persist_path {
-                crate::run_session::write_run_session(path, &response.session)?;
-            }
+        if response.persist_session
+            && let Some(path) = persist_path
+        {
+            crate::run_session::write_run_session(path, &response.session)?;
         }
         session = response.session;
     }

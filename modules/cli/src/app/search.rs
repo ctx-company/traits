@@ -46,10 +46,10 @@ pub(crate) fn handle_search(
                 );
                 let mut entry_targets: Vec<String> =
                     entry.target.iter().map(|s| s.to_string()).collect();
-                if entry_targets.is_empty() {
-                    if let Some(proj) = &manifest.project {
-                        entry_targets = proj.default_target.iter().map(|s| s.to_string()).collect();
-                    }
+                if entry_targets.is_empty()
+                    && let Some(proj) = &manifest.project
+                {
+                    entry_targets = proj.default_target.iter().map(|s| s.to_string()).collect();
                 }
                 entry_targets.sort();
                 entry_targets.dedup();

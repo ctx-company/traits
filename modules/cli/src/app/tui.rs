@@ -187,12 +187,11 @@ impl LiveLine {
     /// the soft timeout, after which the raw thinking is revealed dimmed until
     /// the narrator returns.
     pub(crate) fn current_display(&self) -> LiveDisplay {
-        if let Some(since) = self.pending_since {
-            if since.elapsed() >= NARRATION_SOFT_TIMEOUT {
-                if let Some(raw) = &self.passthrough {
-                    return LiveDisplay::dim(raw.clone());
-                }
-            }
+        if let Some(since) = self.pending_since
+            && since.elapsed() >= NARRATION_SOFT_TIMEOUT
+            && let Some(raw) = &self.passthrough
+        {
+            return LiveDisplay::dim(raw.clone());
         }
         match &self.narration {
             Some(narration) => LiveDisplay {

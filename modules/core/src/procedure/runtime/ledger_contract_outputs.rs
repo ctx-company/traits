@@ -713,8 +713,8 @@ fn hard_input_refs_for_item(
             Err(_) => refs.push(ref_text.to_string()),
         }
     }
-    if item.effective_kind() == SequenceKind::ForEach {
-        if let Some(over) = item.over.as_deref() {
+    if item.effective_kind() == SequenceKind::ForEach
+        && let Some(over) = item.over.as_deref() {
             if Reference::parse(over)
                 .is_ok_and(|parsed| parsed.kind() == Kind::Slot && !parsed.is_qualified())
             {
@@ -723,7 +723,6 @@ fn hard_input_refs_for_item(
                 refs.push(over.to_string());
             }
         }
-    }
     refs.sort();
     refs.dedup();
     hard_slots.sort();

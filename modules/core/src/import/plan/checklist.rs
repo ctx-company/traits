@@ -203,12 +203,11 @@ fn reconcile_checklist_items(
                 }
             }
         }
-        if let Some((idx, score)) = best {
-            if score > runner_up_score {
+        if let Some((idx, score)) = best
+            && score > runner_up_score {
                 chosen[ridx] = Some(idx);
                 unmatched[idx] = None;
             }
-        }
     }
 
     // Phase 3: seed a fresh id for anything still unmatched.
@@ -421,9 +420,9 @@ fn extract_checklist_spans(markdown: &str) -> Option<RawChecklistExtraction> {
             continue;
         }
 
-        if indent_of(raw_line) == 0 {
-            if let Some((text, true)) = bullet_text(trimmed) {
-                if !text.is_empty() {
+        if indent_of(raw_line) == 0
+            && let Some((text, true)) = bullet_text(trimmed)
+                && !text.is_empty() {
                     let start = i;
                     let (run_items, end) = scan_bare_task_list_run(&lines, i);
                     removed.push((start, end));
@@ -431,8 +430,6 @@ fn extract_checklist_spans(markdown: &str) -> Option<RawChecklistExtraction> {
                     i = end;
                     continue;
                 }
-            }
-        }
 
         i += 1;
     }
@@ -505,8 +502,8 @@ fn scan_checklist_heading_section(
         }
 
         if indent_of(raw_line) == 0 {
-            if let Some((text, _)) = bullet_text(trimmed) {
-                if !text.is_empty() {
+            if let Some((text, _)) = bullet_text(trimmed)
+                && !text.is_empty() {
                     if let Some(range) = current_range.take() {
                         item_ranges.push(range);
                     }
@@ -518,7 +515,6 @@ fn scan_checklist_heading_section(
                     j += 1;
                     continue;
                 }
-            }
             // Top-level non-bullet prose: not part of any item, and left
             // untouched by the caller's removal list.
             if let Some(range) = current_range.take() {

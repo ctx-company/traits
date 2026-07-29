@@ -7,11 +7,10 @@ fn collect_prompt_required_inputs(prompt: &crate::r#trait::Prompt) -> Vec<String
     if let Some(text) = prompt.text.as_deref() {
         let (interps, _) = scan_interpolations(text);
         for interp in &interps {
-            if let Ok(r) = Reference::parse(&interp.ref_text) {
-                if PROMPT_REQUIRED_INPUT_KINDS.contains(&r.kind()) {
+            if let Ok(r) = Reference::parse(&interp.ref_text)
+                && PROMPT_REQUIRED_INPUT_KINDS.contains(&r.kind()) {
                     required.push(interp.ref_text.clone());
                 }
-            }
         }
     }
     if let Some(source) = prompt.source.as_deref() {
@@ -88,11 +87,10 @@ pub(crate) fn validate_sequence_item_prompt_contract(
         Ok(PromptClassification::Inline) => {
             let (interps, _) = scan_interpolations(&item.prompt);
             for interp in &interps {
-                if let Ok(r) = Reference::parse(&interp.ref_text) {
-                    if PROMPT_REQUIRED_INPUT_KINDS.contains(&r.kind()) {
+                if let Ok(r) = Reference::parse(&interp.ref_text)
+                    && PROMPT_REQUIRED_INPUT_KINDS.contains(&r.kind()) {
                         require_unconditional_input(&interp.ref_text)?;
                     }
-                }
             }
             Ok(())
         }

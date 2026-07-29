@@ -1588,11 +1588,11 @@ fn build_archive_bytes(entries: &[(Utf8PathBuf, Vec<u8>)]) -> Result<Vec<u8>, Er
 /// creating its parent directory if needed. The archive contains host
 /// artifacts only, never the placement manifest or audit journal.
 fn publish_archive_bytes(archive_path: &Utf8Path, bytes: &[u8]) -> Result<(), Error> {
-    if let Some(parent) = archive_path.parent() {
-        if !parent.as_str().is_empty() {
-            crate::path_safety::create_dir_all_no_symlinks(parent, "archive output directory")
-                .map_err(Error::from)?;
-        }
+    if let Some(parent) = archive_path.parent()
+        && !parent.as_str().is_empty()
+    {
+        crate::path_safety::create_dir_all_no_symlinks(parent, "archive output directory")
+            .map_err(Error::from)?;
     }
     crate::write::write_bytes_atomically(archive_path, bytes).map_err(Error::from)
 }

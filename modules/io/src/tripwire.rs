@@ -272,11 +272,11 @@ fn status_records(main_root: &Utf8Path) -> crate::Result<Vec<(String, String)>> 
         push_if_in_scope(&mut records, xy, path);
         // A rename/copy record's second half (the original path) arrives as
         // its own NUL-terminated token with no `XY` prefix.
-        if xy.contains('R') || xy.contains('C') {
-            if let Some(orig) = tokens.get(index) {
-                push_if_in_scope(&mut records, xy, orig);
-                index += 1;
-            }
+        if (xy.contains('R') || xy.contains('C'))
+            && let Some(orig) = tokens.get(index)
+        {
+            push_if_in_scope(&mut records, xy, orig);
+            index += 1;
         }
     }
     Ok(records)

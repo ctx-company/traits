@@ -733,18 +733,17 @@ fn collect_qualified_refs_from_value(
                 .strip_prefix('[')
                 .and_then(|inner| inner.strip_suffix(']'))
                 .unwrap_or(text);
-            if let Ok(parsed) = ctx_traits_core::reference::Reference::parse(ref_text) {
-                if let ctx_traits_core::reference::Path::Qualified { namespace, id, .. } =
+            if let Ok(parsed) = ctx_traits_core::reference::Reference::parse(ref_text)
+                && let ctx_traits_core::reference::Path::Qualified { namespace, id, .. } =
                     parsed.ref_path()
-                {
-                    refs.push(QualifiedRefUse {
-                        field: field.to_string(),
-                        ref_text: ref_text.to_string(),
-                        kind: parsed.kind(),
-                        alias: namespace.to_string(),
-                        id: id.to_string(),
-                    });
-                }
+            {
+                refs.push(QualifiedRefUse {
+                    field: field.to_string(),
+                    ref_text: ref_text.to_string(),
+                    kind: parsed.kind(),
+                    alias: namespace.to_string(),
+                    id: id.to_string(),
+                });
             }
         }
         serde_json::Value::Array(items) => {
@@ -1727,36 +1726,35 @@ fn collect_sequence_control_warnings(
                 message: "until and stop-if use the same guard; runtime will stop with guard-conflict if it matches".to_string(),
             });
         }
-        if let (Some(max_iterations), Some(until)) = (item.max_iterations, item.until.as_ref()) {
-            if guard_iteration_unsatisfiable(
+        if let (Some(max_iterations), Some(until)) = (item.max_iterations, item.until.as_ref())
+            && guard_iteration_unsatisfiable(
                 trait_ref,
                 until,
                 max_iterations,
                 &mut std::collections::BTreeSet::new(),
-            ) {
-                warnings.push(ctx_traits_core::check::CheckWarning {
+            )
+        {
+            warnings.push(ctx_traits_core::check::CheckWarning {
                     section: Section::Sequence,
                     code: "sequence-control.guard-unsatisfiable".to_string(),
                     field: Some(format!("{field}.until")),
                     message: "iteration guards are zero-based; this guard cannot match before max-iterations is exhausted".to_string(),
                 });
-            }
         }
         if let (Some(max_iterations), Some(stop_if)) = (item.max_iterations, item.stop_if.as_ref())
-        {
-            if guard_iteration_unsatisfiable(
+            && guard_iteration_unsatisfiable(
                 trait_ref,
                 stop_if,
                 max_iterations,
                 &mut std::collections::BTreeSet::new(),
-            ) {
-                warnings.push(ctx_traits_core::check::CheckWarning {
+            )
+        {
+            warnings.push(ctx_traits_core::check::CheckWarning {
                     section: Section::Sequence,
                     code: "sequence-control.guard-unsatisfiable".to_string(),
                     field: Some(format!("{field}.stop-if")),
                     message: "iteration guards are zero-based; this guard cannot match before max-iterations is exhausted".to_string(),
                 });
-            }
         }
     }
 }
@@ -2839,14 +2837,14 @@ fn build_grouped_gates(report: &ctx_traits_core::check::CheckReport, locked: boo
         let mut blocking = Vec::new();
         let mut advisories = Vec::new();
 
-        if section.name == "validation" {
-            if let Some(error) = report.validation_error.as_deref() {
-                blocking.push(Issue {
-                    text: error.to_string(),
-                    marker: "(error)",
-                    tone: Tone::Fail,
-                });
-            }
+        if section.name == "validation"
+            && let Some(error) = report.validation_error.as_deref()
+        {
+            blocking.push(Issue {
+                text: error.to_string(),
+                marker: "(error)",
+                tone: Tone::Fail,
+            });
         }
         if section.name == Section::HiddenContentAudit.as_str() {
             for finding in &report.audit_findings {

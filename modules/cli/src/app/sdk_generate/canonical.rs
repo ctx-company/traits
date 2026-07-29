@@ -142,11 +142,11 @@ fn map_schema(
             .collect::<crate::Result<Vec<_>>>()?;
         return Ok(dedupe_join(mapped));
     }
-    if let Some(additional) = obj.get("additionalProperties") {
-        if let Some(value_schema) = additional.as_object() {
-            let value_ty = map_schema(&Value::Object(value_schema.clone()), defs, marked)?;
-            return Ok(format!("Readonly<Record<string, {value_ty}>>"));
-        }
+    if let Some(additional) = obj.get("additionalProperties")
+        && let Some(value_schema) = additional.as_object()
+    {
+        let value_ty = map_schema(&Value::Object(value_schema.clone()), defs, marked)?;
+        return Ok(format!("Readonly<Record<string, {value_ty}>>"));
     }
     if obj.contains_key("properties") || obj.get("type").and_then(Value::as_str) == Some("object") {
         return render_object_body(obj, defs, marked, &[]);
@@ -260,10 +260,10 @@ fn map_property(
                 }
             })
     });
-    if let Some(target) = bare_ref {
-        if let Some(item_ty) = marked.get(target) {
-            return Ok(format!("{item_ty} | readonly {item_ty}[]"));
-        }
+    if let Some(target) = bare_ref
+        && let Some(item_ty) = marked.get(target)
+    {
+        return Ok(format!("{item_ty} | readonly {item_ty}[]"));
     }
     map_schema(schema, defs, marked)
 }

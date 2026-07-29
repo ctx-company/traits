@@ -276,14 +276,14 @@ fn validate_port_default(default: &PortDefault, base: &str) -> crate::Result<()>
             .into());
         }
     }
-    if let Some(capture) = command.capture.as_deref() {
-        if capture != "stdout" {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{base}.default.command.capture"),
-                message: "only capture = \"stdout\" is supported for input defaults".to_string(),
-            }
-            .into());
+    if let Some(capture) = command.capture.as_deref()
+        && capture != "stdout"
+    {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.default.command.capture"),
+            message: "only capture = \"stdout\" is supported for input defaults".to_string(),
         }
+        .into());
     }
     Ok(())
 }

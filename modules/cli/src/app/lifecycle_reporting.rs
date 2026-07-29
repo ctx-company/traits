@@ -1020,10 +1020,10 @@ fn handle_trust_list(stale: bool, json: bool) -> crate::Result<CommandOutput<()>
                     row.digest,
                     freshness
                 );
-                if let Some(current_digest) = &row.current_digest {
-                    if current_digest != &row.digest {
-                        value.push_str(&format!(" current-digest={current_digest}"));
-                    }
+                if let Some(current_digest) = &row.current_digest
+                    && current_digest != &row.digest
+                {
+                    value.push_str(&format!(" current-digest={current_digest}"));
                 }
                 if let Some(reason) = row.reason.as_deref() {
                     value.push_str(&format!(" reason={reason}"));
@@ -1843,11 +1843,9 @@ fn styled_list_row_line(row: &ListRow, indent: &str, show_variant: bool) -> crat
             line.push(status.clone(), Tone::Default);
             line.push(" trust=", Tone::Muted);
             line.push(trust.clone(), Tone::Default);
-            if show_variant {
-                if let Some(variant) = variant {
-                    line.push(" variant=", Tone::Muted);
-                    line.push(variant.clone(), Tone::Default);
-                }
+            if show_variant && let Some(variant) = variant {
+                line.push(" variant=", Tone::Muted);
+                line.push(variant.clone(), Tone::Default);
             }
             line.push(" path=", Tone::Muted);
             line.push(path.clone(), Tone::Default);

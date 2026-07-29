@@ -650,15 +650,15 @@ pub(crate) fn handle_diff(
         )?);
     }
 
-    if from_lock {
-        if let Some(import_layer) = package_local_import_source_layer(
+    if from_lock
+        && let Some(import_layer) = package_local_import_source_layer(
             trait_root,
             &trait_id,
             canonical_digest.as_str(),
             &current_canonical_json,
-        )? {
-            entries.push(import_layer.diff_entry());
-        }
+        )?
+    {
+        entries.push(import_layer.diff_entry());
     }
 
     let report = ctx_traits_core::diff::DiffReport { trait_id, entries };

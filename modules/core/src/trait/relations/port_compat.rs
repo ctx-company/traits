@@ -294,14 +294,13 @@ fn compare_port_fields(
                     }
                 }
             }
-        } else if let Some(p_field) = provider_fields.get(field_id) {
-            if c_field.schema == p_field.schema {
+        } else if let Some(p_field) = provider_fields.get(field_id)
+            && c_field.schema == p_field.schema {
                 field_mapping.push(FieldMapping {
                     consumer_field: field_id.clone(),
                     provider_field: field_id.clone(),
                 });
             }
-        }
     }
 
     if !missing.is_empty() || !incompatible.is_empty() {

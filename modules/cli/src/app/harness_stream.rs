@@ -1058,12 +1058,11 @@ fn narrator_stdout_text(stdout: &str, output_id: Option<&str>) -> Option<String>
     // Prefer a final `result` string — claude stream-json ends with one, and it is
     // the whole answer rather than a streamed partial-message fragment.
     for value in values.iter().rev() {
-        if value.get("type").and_then(Value::as_str) == Some("result") {
-            if let Some(result) = value.get("result").and_then(Value::as_str) {
-                if !result.trim().is_empty() {
-                    return Some(result.to_string());
-                }
-            }
+        if value.get("type").and_then(Value::as_str) == Some("result")
+            && let Some(result) = value.get("result").and_then(Value::as_str)
+            && !result.trim().is_empty()
+        {
+            return Some(result.to_string());
         }
     }
     // Otherwise reconstruct the answer by JOINING the streamed text pieces; a lone
@@ -1207,10 +1206,10 @@ fn session_id_from(value: &Value) -> Option<String> {
         }
     }
     for value in object.values() {
-        if let Value::Object(_) | Value::Array(_) = value {
-            if let Some(session_id) = session_id_from_nested(value) {
-                return Some(session_id);
-            }
+        if let Value::Object(_) | Value::Array(_) = value
+            && let Some(session_id) = session_id_from_nested(value)
+        {
+            return Some(session_id);
         }
     }
     None
@@ -1309,10 +1308,10 @@ fn collect_kind_texts(value: &Value, allowed_kinds: &[&str], texts: &mut Vec<Str
                 // collision with `FALLBACK_PROSE_KINDS`: a `text`/`text_delta`
                 // object never carries a `thinking` key.
                 for key in ["text", "content", "delta", "thinking"] {
-                    if let Some(text) = object.get(key).and_then(Value::as_str) {
-                        if !text.trim().is_empty() {
-                            texts.push(text.to_string());
-                        }
+                    if let Some(text) = object.get(key).and_then(Value::as_str)
+                        && !text.trim().is_empty()
+                    {
+                        texts.push(text.to_string());
                     }
                 }
             }
@@ -1343,12 +1342,11 @@ fn collect_kind_texts(value: &Value, allowed_kinds: &[&str], texts: &mut Vec<Str
 fn tool_activity_texts(value: &Value, texts: &mut Vec<String>) {
     match value {
         Value::Object(object) => {
-            if object.get("type").and_then(Value::as_str) == Some("tool_use") {
-                if let Some(text) =
+            if object.get("type").and_then(Value::as_str) == Some("tool_use")
+                && let Some(text) =
                     claude_tool_use_text(object).or_else(|| opencode_tool_use_text(object))
-                {
-                    texts.push(text);
-                }
+            {
+                texts.push(text);
             }
             for value in object.values() {
                 tool_activity_texts(value, texts);
@@ -1422,10 +1420,10 @@ fn collect_thinking_token_estimates(value: &Value, out: &mut Vec<u64>) {
                 .or_else(|| object.get("kind"))
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if THINKING_TEXT_KINDS.contains(&kind) {
-                if let Some(estimate) = object.get("estimated_tokens").and_then(Value::as_u64) {
-                    out.push(estimate);
-                }
+            if THINKING_TEXT_KINDS.contains(&kind)
+                && let Some(estimate) = object.get("estimated_tokens").and_then(Value::as_u64)
+            {
+                out.push(estimate);
             }
             for value in object.values() {
                 collect_thinking_token_estimates(value, out);
@@ -1470,10 +1468,10 @@ pub(crate) fn find_nested_object<T>(
                 return Some(result);
             }
             for key in NESTED_OBJECT_WRAPPER_KEYS {
-                if let Some(nested) = object.get(*key) {
-                    if let Some(result) = find_nested_object(nested, matcher, on_text_value) {
-                        return Some(result);
-                    }
+                if let Some(nested) = object.get(*key)
+                    && let Some(result) = find_nested_object(nested, matcher, on_text_value)
+                {
+                    return Some(result);
                 }
             }
             None
@@ -1537,10 +1535,10 @@ pub(crate) fn balanced_json_objects(text: &str) -> Vec<String> {
             }
             '}' => {
                 depth -= 1;
-                if depth == 0 {
-                    if let Some(start) = start.take() {
-                        result.push(text[start..=index].to_string());
-                    }
+                if depth == 0
+                    && let Some(start) = start.take()
+                {
+                    result.push(text[start..=index].to_string());
                 }
             }
             _ => {}

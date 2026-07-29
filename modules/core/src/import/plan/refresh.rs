@@ -242,15 +242,14 @@ fn report_value_change(
     field_changes: &mut Vec<String>,
     mapping_diff: &mut Vec<MappingDiffEntry>,
 ) {
-    if key == "resource" {
-        if let (Some(old_arr), Some(new_arr)) = (old.as_array(), new.as_array()) {
+    if key == "resource"
+        && let (Some(old_arr), Some(new_arr)) = (old.as_array(), new.as_array()) {
             diff_resource_array(old_arr, new_arr, field_changes, mapping_diff);
             return;
         }
-    }
 
-    if let (Some(old_arr), Some(new_arr)) = (old.as_array(), new.as_array()) {
-        if key == "prompt" || key == "port" || key == "schema" {
+    if let (Some(old_arr), Some(new_arr)) = (old.as_array(), new.as_array())
+        && (key == "prompt" || key == "port" || key == "schema") {
             let old_ids: std::collections::BTreeSet<String> = old_arr
                 .iter()
                 .filter_map(|v| {
@@ -292,7 +291,6 @@ fn report_value_change(
             }
             return;
         }
-    }
 
     let old_summary = summarize_json_value(old);
     let new_summary = summarize_json_value(new);

@@ -180,13 +180,7 @@ impl TraitSourceRaw {
                 }
                 .into());
             }
-            let package_path = path.and_then(|path| {
-                if path.trim().is_empty() {
-                    None
-                } else {
-                    Some(path)
-                }
-            });
+            let package_path = path.filter(|path| !path.trim().is_empty());
             return Ok(TraitSource::Npm {
                 package,
                 package_path,
@@ -219,13 +213,7 @@ impl TraitSourceRaw {
                     .into());
                 }
 
-                let package_path = package_path.and_then(|path| {
-                    if path.trim().is_empty() {
-                        None
-                    } else {
-                        Some(path)
-                    }
-                });
+                let package_path = package_path.filter(|path| !path.trim().is_empty());
 
                 Ok(TraitSource::Git {
                     url,

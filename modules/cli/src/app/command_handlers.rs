@@ -1794,10 +1794,10 @@ pub(crate) fn discover_indexed_trait_inventory(
             if filter.exclude_stale && record.stale {
                 reasons.push("index-stale-filtered".to_string());
             }
-            if let Some(id) = &filter.trait_id {
-                if record.trait_id != *id {
-                    reasons.push("index-trait-id-filtered".to_string());
-                }
+            if let Some(id) = &filter.trait_id
+                && record.trait_id != *id
+            {
+                reasons.push("index-trait-id-filtered".to_string());
             }
             if reasons.is_empty() {
                 reasons.push("index-filtered".to_string());

@@ -629,13 +629,11 @@ pub fn merge_opencode_config_content(
         .pointer("/permission/edit")
         .filter(|value| value.is_string())
         .cloned()
-    {
-        if let Some(edit) = ours
+        && let Some(edit) = ours
             .pointer_mut("/permission/edit")
             .and_then(serde_json::Value::as_object_mut)
-        {
-            edit.insert("*".to_string(), default);
-        }
+    {
+        edit.insert("*".to_string(), default);
     }
     deep_merge(&mut merged, &ours);
     Ok(merged.to_string())

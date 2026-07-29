@@ -168,10 +168,10 @@ pub fn summary_is_fresh(ledger_path: &Utf8Path) -> bool {
 /// otherwise the ledger itself, projected. Two `stat`s in the fast path, no
 /// digest, no parse of the ledger's frame history.
 pub fn read_summary_or_ledger(ledger_path: &Utf8Path) -> crate::Result<RunSummary> {
-    if summary_is_fresh(ledger_path) {
-        if let Some(summary) = read_summary(ledger_path) {
-            return Ok(summary);
-        }
+    if summary_is_fresh(ledger_path)
+        && let Some(summary) = read_summary(ledger_path)
+    {
+        return Ok(summary);
     }
     let session = crate::run_session::read_run_session(ledger_path)?;
     Ok(RunSummary::from_session(&session))

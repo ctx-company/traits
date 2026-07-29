@@ -607,13 +607,13 @@ fn builtin_assignments(
     // role: `resolve_runtime_assignments` above already inserted any
     // `--assign` override into `resolved.assignments`, so `--assign` still
     // wins over the profile.
-    if let Some(profile) = run_profile {
-        if let Some(profile_assignment) = profile.assign.get(role) {
-            resolved
-                .assignments
-                .entry(role.to_string())
-                .or_insert_with(|| profile_assignment.clone().into_profile_assignment());
-        }
+    if let Some(profile) = run_profile
+        && let Some(profile_assignment) = profile.assign.get(role)
+    {
+        resolved
+            .assignments
+            .entry(role.to_string())
+            .or_insert_with(|| profile_assignment.clone().into_profile_assignment());
     }
     // Layer every configured seat of the role (role/tier defaults <
     // `.ctx/config.toml` role table/list < profile < `--assign`) without

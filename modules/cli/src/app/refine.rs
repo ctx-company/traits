@@ -179,29 +179,27 @@ pub(crate) fn handle_refine(input: RefineInputs<'_>) -> crate::Result<CommandOut
     };
     candidate = ctx_traits_core::assist::with_context_evidence(candidate, evidence);
 
-    if let Some(ref cand_id) = candidate.candidate_trait_id {
-        if cand_id != &source_trait_id {
-            candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
-            candidate.warnings.push(format!(
-                "candidate trait ID {cand_id} does not match source trait ID {source_trait_id}"
-            ));
-            print_assist_candidate(&candidate, json)?;
-            return Err(crate::Error::Command {
-                message: format!(
-                    "refine failed: candidate trait ID {cand_id} does not match source trait ID {source_trait_id}"
-                ),
-            });
-        }
+    if let Some(ref cand_id) = candidate.candidate_trait_id
+        && cand_id != &source_trait_id
+    {
+        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+        candidate.warnings.push(format!(
+            "candidate trait ID {cand_id} does not match source trait ID {source_trait_id}"
+        ));
+        print_assist_candidate(&candidate, json)?;
+        return Err(crate::Error::Command {
+            message: format!(
+                "refine failed: candidate trait ID {cand_id} does not match source trait ID {source_trait_id}"
+            ),
+        });
     }
 
-    if check {
-        if let Some(target_path) = target_path.as_deref() {
-            candidate = apply_assist_check_drift(
-                candidate,
-                target_path,
-                evaluation.normalized_output_text.as_deref(),
-            );
-        }
+    if check && let Some(target_path) = target_path.as_deref() {
+        candidate = apply_assist_check_drift(
+            candidate,
+            target_path,
+            evaluation.normalized_output_text.as_deref(),
+        );
     }
 
     let final_candidate = if candidate.gate_summary.all_passed()

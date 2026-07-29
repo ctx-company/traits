@@ -522,12 +522,11 @@ impl RunPanel {
         state.session = session.clone();
         let display = state.live.current_display();
         let mut narration = narration_for(&state.session, display.clone());
-        if display.finished {
-            if let (Some(current), Some(previous)) =
+        if display.finished
+            && let (Some(current), Some(previous)) =
                 (narration.as_mut(), state.view.narration.as_ref())
-            {
-                current.label.clone_from(&previous.label);
-            }
+        {
+            current.label.clone_from(&previous.label);
         }
         rebuild_view(&mut state, narration);
         render_locked(&mut state);
@@ -2441,25 +2440,23 @@ fn step_from_item(
     let harness = harness_for_seat(rows, item.structural_seat);
     let mut inputs = port_slugs(item.input_refs.iter().map(ToString::to_string), accepted);
     let mut outputs = port_slugs(item.output_refs.iter().map(ToString::to_string), accepted);
-    if active {
-        if let Some(frame) = session.next_frame.as_deref() {
-            extend_port_slugs(
-                &mut inputs,
-                frame
-                    .available_inputs
-                    .iter()
-                    .map(|input| input.ref_text.clone()),
-                accepted,
-            );
-            extend_port_slugs(
-                &mut outputs,
-                frame
-                    .requested_outputs
-                    .iter()
-                    .map(|output| output.slot_ref.to_string()),
-                accepted,
-            );
-        }
+    if active && let Some(frame) = session.next_frame.as_deref() {
+        extend_port_slugs(
+            &mut inputs,
+            frame
+                .available_inputs
+                .iter()
+                .map(|input| input.ref_text.clone()),
+            accepted,
+        );
+        extend_port_slugs(
+            &mut outputs,
+            frame
+                .requested_outputs
+                .iter()
+                .map(|output| output.slot_ref.to_string()),
+            accepted,
+        );
     }
     let item_id = item.item_id.as_deref().unwrap_or("");
     let loop_key = is_loop_kind(&item.kind).then(|| loop_container_key(&location.position_path));
@@ -2546,10 +2543,10 @@ fn role_for_item(
 ) -> String {
     // Only the exactly-current item wears the dispatched agent; ancestors keep
     // their own column so a loop header never impersonates its running child.
-    if activity == Activity::Current {
-        if let Some(agent) = &session.current_agent {
-            return agent.role.clone();
-        }
+    if activity == Activity::Current
+        && let Some(agent) = &session.current_agent
+    {
+        return agent.role.clone();
     }
     item.agent_ref
         .as_ref()

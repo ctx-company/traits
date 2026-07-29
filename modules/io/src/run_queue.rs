@@ -290,21 +290,21 @@ fn verify_cached_trait_matches_session(
             ),
         ));
     }
-    if let Some(expected) = session.source_digest.as_deref() {
-        if loaded.source_digest != expected {
-            return Err(run_next_source_error(
-                "run-next.source-digest",
-                "stale run-session source: loaded source digest does not match session ledger",
-            ));
-        }
+    if let Some(expected) = session.source_digest.as_deref()
+        && loaded.source_digest != expected
+    {
+        return Err(run_next_source_error(
+            "run-next.source-digest",
+            "stale run-session source: loaded source digest does not match session ledger",
+        ));
     }
-    if let Some(expected) = session.canonical_digest.as_deref() {
-        if loaded.canonical_digest != expected {
-            return Err(run_next_source_error(
-                "run-next.canonical-digest",
-                "stale run-session source: loaded canonical digest does not match session ledger",
-            ));
-        }
+    if let Some(expected) = session.canonical_digest.as_deref()
+        && loaded.canonical_digest != expected
+    {
+        return Err(run_next_source_error(
+            "run-next.canonical-digest",
+            "stale run-session source: loaded canonical digest does not match session ledger",
+        ));
     }
     Ok(())
 }

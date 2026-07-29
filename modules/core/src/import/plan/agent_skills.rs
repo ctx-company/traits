@@ -132,15 +132,14 @@ pub fn plan_agent_skills_import(
             reason: "frontmatter id is not a valid canonical trait id; deterministic fallback id was used".to_string(),
         });
     }
-    if let Some(version) = parsed.frontmatter.get("version") {
-        if crate::r#trait::SemanticVersion::new(version.clone()).is_err() {
+    if let Some(version) = parsed.frontmatter.get("version")
+        && crate::r#trait::SemanticVersion::new(version.clone()).is_err() {
             report.unsupported_fields.push(UnsupportedField {
                 source_field: "frontmatter.version".to_string(),
                 value: version.clone(),
                 reason: "frontmatter version does not satisfy canonical version validation; deterministic import default was used".to_string(),
             });
         }
-    }
     report.frontmatter = parsed.frontmatter_evidence;
     report.conversion_warnings = sanitized_warnings;
     if !report.conversion_warnings.is_empty() {
@@ -308,11 +307,10 @@ fn parse_agent_skill_markdown(markdown: &str) -> ParsedAgentSkill {
                     if !matches!(
                         key_text.as_str(),
                         "id" | "name" | "description" | "summary" | "version" | "tag" | "tags"
-                    ) {
-                        if let Some(evidence) = &mut frontmatter_evidence {
+                    )
+                        && let Some(evidence) = &mut frontmatter_evidence {
                             evidence.unsupported_keys.push(key_text);
                         }
-                    }
                 }
             }
             Ok(other) => unsupported_fields.push(UnsupportedField {

@@ -652,12 +652,12 @@ impl HarnessSession {
                 let _ = self.child.kill();
                 break;
             }
-            if let Some(idle_timeout) = idle_timeout {
-                if last_output.elapsed() >= idle_timeout {
-                    idle_timed_out = true;
-                    let _ = self.child.kill();
-                    break;
-                }
+            if let Some(idle_timeout) = idle_timeout
+                && last_output.elapsed() >= idle_timeout
+            {
+                idle_timed_out = true;
+                let _ = self.child.kill();
+                break;
             }
             if let Some(observer) = request.tick_observer.as_ref() {
                 observer();

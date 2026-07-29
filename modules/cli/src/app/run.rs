@@ -1015,10 +1015,10 @@ fn compact_line_to_row(index: usize, line: &str) -> crate::app::presentation::Pa
     if let Some(receipt) = trimmed.strip_prefix("receipt: ") {
         return PanelRow::toned("receipt", receipt, RowTone::Default);
     }
-    if let Some((number, rest)) = trimmed.split_once(". ") {
-        if number.chars().all(|ch| ch.is_ascii_digit()) {
-            return PanelRow::toned(number, rest, RowTone::Default);
-        }
+    if let Some((number, rest)) = trimmed.split_once(". ")
+        && number.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return PanelRow::toned(number, rest, RowTone::Default);
     }
     PanelRow::toned("detail", trimmed, RowTone::Default)
 }

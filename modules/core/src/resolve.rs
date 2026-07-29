@@ -559,14 +559,13 @@ fn build_relation_evidence(
 
     let mut unresolved_targets = Vec::new();
     for edge in &rel.edges {
-        if let Some(target_ref) = &edge.target_ref {
-            if let Ok(parsed) = crate::reference::Reference::parse(target_ref) {
-                if parsed.kind() == crate::reference::Kind::Trait {
-                    let target_id = parsed.id();
-                    if !known_ids.contains(target_id) {
-                        unresolved_targets.push(target_ref.to_string());
-                    }
-                }
+        if let Some(target_ref) = &edge.target_ref
+            && let Ok(parsed) = crate::reference::Reference::parse(target_ref)
+            && parsed.kind() == crate::reference::Kind::Trait
+        {
+            let target_id = parsed.id();
+            if !known_ids.contains(target_id) {
+                unresolved_targets.push(target_ref.to_string());
             }
         }
     }

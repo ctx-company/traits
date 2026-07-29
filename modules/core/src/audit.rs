@@ -699,29 +699,29 @@ fn scan_deceptive_links(
     let mut search_from = 0;
     while let Some(rel_start) = line[search_from..].find('[') {
         let start = search_from + rel_start;
-        if let Some(mid) = line[start..].find("](") {
-            if let Some(end) = line[start + mid + 2..].find(')') {
-                let display = &line[start + 1..start + mid];
-                // Skip cross-bracket matches: display must not contain `[`.
-                if !display.contains('[') && display.starts_with("http") {
-                    let url = &line[start + mid + 2..start + mid + 2 + end];
-                    if url.starts_with("http") && display != url {
-                        add_finding_with_offset(
-                            findings,
-                            FindingInput {
-                                severity: Severity::Critical,
-                                code: Code::DeceptiveLink,
-                                trait_id,
-                                path,
-                                line: line_no,
-                                byte_offset: Some(byte_start + start),
-                                message: format!(
-                                    "deceptive link at line {line_no}: display {display:?} does not match URL {url:?}"
-                                ),
-                                remediation: "fix the link so display text matches the target URL",
-                            },
-                        );
-                    }
+        if let Some(mid) = line[start..].find("](")
+            && let Some(end) = line[start + mid + 2..].find(')')
+        {
+            let display = &line[start + 1..start + mid];
+            // Skip cross-bracket matches: display must not contain `[`.
+            if !display.contains('[') && display.starts_with("http") {
+                let url = &line[start + mid + 2..start + mid + 2 + end];
+                if url.starts_with("http") && display != url {
+                    add_finding_with_offset(
+                        findings,
+                        FindingInput {
+                            severity: Severity::Critical,
+                            code: Code::DeceptiveLink,
+                            trait_id,
+                            path,
+                            line: line_no,
+                            byte_offset: Some(byte_start + start),
+                            message: format!(
+                                "deceptive link at line {line_no}: display {display:?} does not match URL {url:?}"
+                            ),
+                            remediation: "fix the link so display text matches the target URL",
+                        },
+                    );
                 }
             }
         }

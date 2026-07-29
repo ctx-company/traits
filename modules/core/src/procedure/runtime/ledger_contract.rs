@@ -173,8 +173,8 @@ fn validate_control_state(
         {
             diagnostics.push(format!("failure route {:?} is missing its signal emission", route.source_step_id));
         }
-        if let Some(source) = source {
-            if route.position_path.first().is_none_or(|segment| {
+        if let Some(source) = source
+            && route.position_path.first().is_none_or(|segment| {
                 segment.kind != "procedure"
                     || segment.id != source.item.id
                     || segment.index != source.run_index
@@ -186,7 +186,6 @@ fn validate_control_state(
                     route.source_step_id
                 ));
             }
-        }
     }
     for status in &ledger.sequence_statuses {
         if status.position_path.is_empty() && status.status == SequenceStatusKind::Routed
@@ -2226,13 +2225,12 @@ fn validate_guard_evaluations_contract(ledger: &State, diagnostics: &mut Vec<Str
                 "guard-evaluations[{index}] reason must not be empty"
             ));
         }
-        if let Some(scope) = evaluation.scope.as_ref() {
-            if scope.loop_id.trim().is_empty() {
+        if let Some(scope) = evaluation.scope.as_ref()
+            && scope.loop_id.trim().is_empty() {
                 diagnostics.push(format!(
                     "guard-evaluations[{index}] scope loop-id must not be empty"
                 ));
             }
-        }
         if let Some(evidence) = evaluation.comparison_evidence.as_ref() {
             validate_comparison_guard_evidence(
                 ledger,
@@ -2265,15 +2263,14 @@ fn validate_guard_evaluations_contract(ledger: &State, diagnostics: &mut Vec<Str
     }
     if let Some(stop_reason) = ledger.stop_reason.as_ref() {
         validate_stop_reason_contract(ledger, stop_reason, diagnostics);
-        if let Some(last_check) = stop_reason.last_check {
-            if last_check >= ledger.guard_evaluations.len() {
+        if let Some(last_check) = stop_reason.last_check
+            && last_check >= ledger.guard_evaluations.len() {
                 diagnostics.push(format!(
                     "stop-reason last-check {} exceeds guard-evaluations length {}",
                     last_check,
                     ledger.guard_evaluations.len()
                 ));
             }
-        }
     }
 }
 

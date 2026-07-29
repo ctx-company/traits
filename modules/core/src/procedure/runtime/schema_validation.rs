@@ -601,8 +601,8 @@ pub(crate) fn validate_value_schema(
                 ),
             });
         }
-        if let Some(allowed) = schema.allowed.as_ref() {
-            if !allowed.iter().any(|allowed_value| allowed_value == value) {
+        if let Some(allowed) = schema.allowed.as_ref()
+            && !allowed.iter().any(|allowed_value| allowed_value == value) {
                 return Ok(SchemaValidation {
                     ref_text: ref_text.to_string(),
                     schema_ref: Some(Reference::parse(schema_ref)?),
@@ -612,7 +612,6 @@ pub(crate) fn validate_value_schema(
                     ),
                 });
             }
-        }
         return Ok(SchemaValidation {
             ref_text: ref_text.to_string(),
             schema_ref: Some(Reference::parse(schema_ref)?),
@@ -659,8 +658,8 @@ pub(crate) fn validate_value_schema(
                     SchemaStatus::Unsupported => unsupported = true,
                     SchemaStatus::Accepted => {}
                 }
-                if let Some(allowed) = field.allowed.as_ref() {
-                    if !allowed
+                if let Some(allowed) = field.allowed.as_ref()
+                    && !allowed
                         .iter()
                         .any(|allowed_value| allowed_value == field_value)
                     {
@@ -673,7 +672,6 @@ pub(crate) fn validate_value_schema(
                             ),
                         });
                     }
-                }
             }
             None if field.required => {
                 return Ok(SchemaValidation {

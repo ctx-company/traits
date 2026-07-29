@@ -1856,15 +1856,15 @@ fn resolve_runtime_assignments_impl(
     // declared named build caches into `worktree.build_cache` (P428).
     let worktree = runtime_config.worktree;
 
-    if let Some(trait_root) = trait_root {
-        if let Some(sidecar) = load_selected_trait_run_config(trait_ref, trait_root)? {
-            // The package sidecar remains a compatibility fallback. Project
-            // `[run]` values are nearer and therefore win over it.
-            let configured = budget.clone();
-            let mut sidecar_budget = sidecar.budget;
-            overlay_budget(&mut sidecar_budget, &configured);
-            budget = sidecar_budget;
-        }
+    if let Some(trait_root) = trait_root
+        && let Some(sidecar) = load_selected_trait_run_config(trait_ref, trait_root)?
+    {
+        // The package sidecar remains a compatibility fallback. Project
+        // `[run]` values are nearer and therefore win over it.
+        let configured = budget.clone();
+        let mut sidecar_budget = sidecar.budget;
+        overlay_budget(&mut sidecar_budget, &configured);
+        budget = sidecar_budget;
     }
 
     // P451: fold the declared variant/repo qualifier tables into one
@@ -2047,15 +2047,14 @@ fn fold_role(
     let mut current = defaults.role.get(role).cloned();
     let mut qualifier = None;
 
-    if let Some(variant) = scope.variant.as_deref() {
-        if let Some(level) = defaults
+    if let Some(variant) = scope.variant.as_deref()
+        && let Some(level) = defaults
             .variant
             .get(variant)
             .and_then(|value| value.role.get(role))
-        {
-            current = Some(combine_role_level(current, level, defaults, role));
-            qualifier = Some(format!("variant:{variant}"));
-        }
+    {
+        current = Some(combine_role_level(current, level, defaults, role));
+        qualifier = Some(format!("variant:{variant}"));
     }
     if let Some(repo_override) = repo_override {
         let repo_key = scope.repo_key.as_deref().unwrap_or_default();
@@ -2063,16 +2062,15 @@ fn fold_role(
             current = Some(combine_role_level(current, level, defaults, role));
             qualifier = Some(format!("repo:{repo_key}"));
         }
-        if let Some(variant) = scope.variant.as_deref() {
-            if let Some(level) = repo_override
+        if let Some(variant) = scope.variant.as_deref()
+            && let Some(level) = repo_override
                 .agent
                 .variant
                 .get(variant)
                 .and_then(|value| value.role.get(role))
-            {
-                current = Some(combine_role_level(current, level, defaults, role));
-                qualifier = Some(format!("repo:{repo_key}+variant:{variant}"));
-            }
+        {
+            current = Some(combine_role_level(current, level, defaults, role));
+            qualifier = Some(format!("repo:{repo_key}+variant:{variant}"));
         }
     }
     (current, qualifier)
@@ -2098,17 +2096,17 @@ fn flatten_agent_defaults(
     }
 
     let mut role_names: BTreeSet<String> = defaults.role.keys().cloned().collect();
-    if let Some(variant) = scope.variant.as_deref() {
-        if let Some(value) = defaults.variant.get(variant) {
-            role_names.extend(value.role.keys().cloned());
-        }
+    if let Some(variant) = scope.variant.as_deref()
+        && let Some(value) = defaults.variant.get(variant)
+    {
+        role_names.extend(value.role.keys().cloned());
     }
     if let Some(repo_override) = repo_override {
         role_names.extend(repo_override.agent.role.keys().cloned());
-        if let Some(variant) = scope.variant.as_deref() {
-            if let Some(value) = repo_override.agent.variant.get(variant) {
-                role_names.extend(value.role.keys().cloned());
-            }
+        if let Some(variant) = scope.variant.as_deref()
+            && let Some(value) = repo_override.agent.variant.get(variant)
+        {
+            role_names.extend(value.role.keys().cloned());
         }
     }
 
@@ -2584,10 +2582,10 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     merge_built_in_harness_overrides(&mut runtime.harness);
     let foreign_config =
         foreign_config_path()?.filter(|path| !documents.iter().any(|(_, p, _)| p == path));
-    if let Some(max_in_flight) = runtime.run.as_ref().and_then(|run| run.max_in_flight) {
-        if max_in_flight == 0 {
-            return Err(config_error("run.max-in-flight", "must be at least 1"));
-        }
+    if let Some(max_in_flight) = runtime.run.as_ref().and_then(|run| run.max_in_flight)
+        && max_in_flight == 0
+    {
+        return Err(config_error("run.max-in-flight", "must be at least 1"));
     }
     if let Some(run) = runtime.run.as_ref() {
         validate_build_cache(&run.build_cache)?;
@@ -3550,29 +3548,28 @@ pub struct AssignmentOverrides {
 /// seat selector, since a bare role id (`validate_bare_id`) never contains
 /// `.` itself.
 fn parse_assign_target(key: &str) -> crate::Result<(String, Option<u32>)> {
-    if let Some((role_part, seat_part)) = key.rsplit_once('.') {
-        if !seat_part.is_empty() && seat_part.bytes().all(|b| b.is_ascii_digit()) {
-            let role = normalize_role(role_part, "run.assign.role")?;
-            let seat: u32 = seat_part
-                .parse()
-                .map_err(|_| ())
-                .and_then(|seat: u32| if seat == 0 { Err(()) } else { Ok(seat) })
-                .map_err(|()| {
-                    config_error(
-                        format!("run.assign.{key}"),
-                        format!("seat selector {seat_part:?} must be an integer >= 1"),
-                    )
-                })?;
-            if is_standing_seat(&role) {
-                return invalid_config(
+    if let Some((role_part, seat_part)) = key.rsplit_once('.')
+        && !seat_part.is_empty()
+        && seat_part.bytes().all(|b| b.is_ascii_digit())
+    {
+        let role = normalize_role(role_part, "run.assign.role")?;
+        let seat: u32 = seat_part
+            .parse()
+            .map_err(|_| ())
+            .and_then(|seat: u32| if seat == 0 { Err(()) } else { Ok(seat) })
+            .map_err(|()| {
+                config_error(
                     format!("run.assign.{key}"),
-                    format!(
-                        "role {role:?} is a standing agent and does not support seat selectors"
-                    ),
-                );
-            }
-            return Ok((role, Some(seat)));
+                    format!("seat selector {seat_part:?} must be an integer >= 1"),
+                )
+            })?;
+        if is_standing_seat(&role) {
+            return invalid_config(
+                format!("run.assign.{key}"),
+                format!("role {role:?} is a standing agent and does not support seat selectors"),
+            );
         }
+        return Ok((role, Some(seat)));
     }
     Ok((normalize_role(key, "run.assign.role")?, None))
 }

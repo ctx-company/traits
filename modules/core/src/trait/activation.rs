@@ -306,10 +306,10 @@ pub fn explain(
 ) -> ExplainReport {
     let mut candidates = Vec::new();
     for (t, (status, trust)) in traits.iter().zip(lifecycle.iter()) {
-        if let Some(filter) = &request.trait_id {
-            if t.id.as_str() != filter {
-                continue;
-            }
+        if let Some(filter) = &request.trait_id
+            && t.id.as_str() != filter
+        {
+            continue;
         }
         candidates.push(score(t, &request, *status, *trust));
     }
@@ -829,14 +829,14 @@ fn lifecycle_status_gates(trait_id: &str, status: &PackageStatus) -> Vec<Gate> {
 
 /// Validate activation declarations independently of runtime activation.
 pub fn validate(activation: &Declaration) -> crate::Result<()> {
-    if let Some(min_score) = activation.min_score {
-        if min_score < 0 {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: "activation.min-score".to_string(),
-                message: "must be zero or greater".to_string(),
-            }
-            .into());
+    if let Some(min_score) = activation.min_score
+        && min_score < 0
+    {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: "activation.min-score".to_string(),
+            message: "must be zero or greater".to_string(),
         }
+        .into());
     }
 
     let mut seen_ids = BTreeSet::new();
@@ -896,14 +896,14 @@ fn validate_rule(rule: &Rule, index: usize, seen_ids: &mut BTreeSet<String>) -> 
     )?;
     validate_predicates(&rule.exclude_keyword, &format!("{base}.exclude-keyword"))?;
 
-    if let Some(weight) = rule.weight {
-        if weight <= 0 {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{base}.weight"),
-                message: "must be greater than zero".to_string(),
-            }
-            .into());
+    if let Some(weight) = rule.weight
+        && weight <= 0
+    {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.weight"),
+            message: "must be greater than zero".to_string(),
         }
+        .into());
     }
 
     if let Some(load_level) = &rule.load_level {

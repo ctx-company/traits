@@ -67,10 +67,9 @@ fn resolve_schema_ref<'a>(
     schemas: &'a std::collections::BTreeMap<&str, &crate::r#trait::schema::Schema>,
 ) -> Option<&'a crate::r#trait::schema::Schema> {
     let inner = unwrap_list(ref_text);
-    if let Ok(parsed) = Reference::parse(inner) {
-        if !parsed.is_qualified() {
+    if let Ok(parsed) = Reference::parse(inner)
+        && !parsed.is_qualified() {
             return schemas.get(parsed.id()).copied();
         }
-    }
     None
 }

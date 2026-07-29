@@ -36,9 +36,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
-        with:
-          targets: ${{ matrix.target }}
+      # Same single source of truth as ci.yml: the channel comes from
+      # rust-toolchain.toml, and only the per-matrix target is added here.
+      - name: Install Rust (from rust-toolchain.toml)
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
       - name: Resolve version
         id: version
         shell: bash

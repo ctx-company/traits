@@ -133,16 +133,15 @@ impl InventoryContext {
             });
         }
 
-        if ctx_traits_core::builtin_trait_packages::package(id).is_some() {
-            if let Some(path) =
+        if ctx_traits_core::builtin_trait_packages::package(id).is_some()
+            && let Some(path) =
                 crate::builtin_store::resolve_builtin_manifest_path(self.invocation.path(), id)?
-            {
-                candidates.push(Candidate {
-                    tier: Tier::BuiltIn,
-                    path,
-                    origin: "built-in".to_string(),
-                });
-            }
+        {
+            candidates.push(Candidate {
+                tier: Tier::BuiltIn,
+                path,
+                origin: "built-in".to_string(),
+            });
         }
 
         if candidates.is_empty() {

@@ -372,13 +372,13 @@ pub fn try_acquire(
     let session_id = facts.session_id.as_str();
     let run_id = facts.run_id.as_str();
     let lock_path = driver_lock_path(ledger_path);
-    if let Some(parent) = lock_path.parent() {
-        if !parent.as_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| crate::environment::Error::Filesystem {
-                path: parent.to_string(),
-                source: e,
-            })?;
-        }
+    if let Some(parent) = lock_path.parent()
+        && !parent.as_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| crate::environment::Error::Filesystem {
+            path: parent.to_string(),
+            source: e,
+        })?;
     }
     let mut file = crate::file_lock::open_lock_file_no_follow(&lock_path).map_err(|e| {
         crate::environment::Error::Filesystem {
@@ -439,15 +439,15 @@ pub fn try_acquire_maintenance(
     ledger_path: &Utf8Path,
 ) -> crate::Result<Option<MaintenanceLockGuard>> {
     let lock_path = driver_lock_path(ledger_path);
-    if let Some(parent) = lock_path.parent() {
-        if !parent.as_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|source| {
-                crate::environment::Error::Filesystem {
-                    path: parent.to_string(),
-                    source,
-                }
-            })?;
-        }
+    if let Some(parent) = lock_path.parent()
+        && !parent.as_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|source| {
+            crate::environment::Error::Filesystem {
+                path: parent.to_string(),
+                source,
+            }
+        })?;
     }
     let file = crate::file_lock::open_lock_file_no_follow(&lock_path).map_err(|source| {
         crate::environment::Error::Filesystem {

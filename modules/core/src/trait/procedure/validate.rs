@@ -230,15 +230,14 @@ fn validate_named_sequences(
             }
             .into());
         }
-        if let Some(description) = sequence.description.as_deref() {
-            if description.trim().is_empty() {
+        if let Some(description) = sequence.description.as_deref()
+            && description.trim().is_empty() {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.description"),
                     message: "must not be empty".to_string(),
                 }
                 .into());
             }
-        }
         let mut seen_ids = BTreeSet::new();
         for (index, item) in sequence.sequence.iter().enumerate() {
             let item_base = format!("{base}.sequence[{index}]");
@@ -572,12 +571,11 @@ fn validate_parallel_join(
                 }
                 WriteOperation::Merge => {}
                 WriteOperation::SetField(field) => {
-                    if let Some(destination_schema) = destination_schema.as_deref() {
-                        if let Some(fields) = object_schema_fields(trait_ref, destination_schema) {
-                            if let Some(field_schema) =
+                    if let Some(destination_schema) = destination_schema.as_deref()
+                        && let Some(fields) = object_schema_fields(trait_ref, destination_schema)
+                            && let Some(field_schema) =
                                 fields.get(field).map(|declared| declared.schema.clone())
-                            {
-                                if Some(field_schema) != source_schema {
+                                && Some(field_schema) != source_schema {
                                     return Err(crate::manifest::Error::InvalidField {
                                         field_path: format!("{join_base}.source"),
                                         message: format!(
@@ -586,9 +584,6 @@ fn validate_parallel_join(
                                     }
                                     .into());
                                 }
-                            }
-                        }
-                    }
                 }
                 _ => {}
             }
@@ -905,13 +900,11 @@ fn collect_item_effects(
             writes.insert(projection.destination.clone());
         }
     }
-    if item.effective_kind() == SequenceKind::ForEach {
-        if let Some(over) = item.over.as_deref() {
-            if is_local_slot_ref(over) {
+    if item.effective_kind() == SequenceKind::ForEach
+        && let Some(over) = item.over.as_deref()
+            && is_local_slot_ref(over) {
                 reads.insert(over.to_string());
             }
-        }
-    }
     for guard in [
         item.when.as_ref(),
         item.until.as_ref(),
@@ -931,13 +924,11 @@ fn collect_item_effects(
             writes.insert(output.to_string());
         }
     }
-    if item.effective_kind() == SequenceKind::ForEach {
-        if let Some(item_slot) = item.item.as_deref() {
-            if is_local_slot_ref(item_slot) {
+    if item.effective_kind() == SequenceKind::ForEach
+        && let Some(item_slot) = item.item.as_deref()
+            && is_local_slot_ref(item_slot) {
                 writes.insert(item_slot.to_string());
             }
-        }
-    }
     match item.effective_kind() {
         SequenceKind::Sequence | SequenceKind::Loop | SequenceKind::ForEach => {
             collect_sequence_ref_effects(trait_ref, item.sequence.as_deref(), reads, writes, stack);
@@ -2002,8 +1993,8 @@ fn validate_project_item(
     }
 
     for (index, projection) in item.projection.iter().enumerate() {
-        if let Some(source_ref) = projection.source.as_slot_ref() {
-            if destinations.contains(source_ref) {
+        if let Some(source_ref) = projection.source.as_slot_ref()
+            && destinations.contains(source_ref) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.projection[{index}].source"),
                     message: "project source must not be written by the same project step"
@@ -2011,7 +2002,6 @@ fn validate_project_item(
                 }
                 .into());
             }
-        }
     }
 
     if item.input.iter().any(SequenceInput::is_optional) {
@@ -2198,28 +2188,25 @@ fn find_checklist_verdict_output_in_items(
                 ));
             }
         }
-        if let Some(nested) = local_sequence_id(item.sequence.as_deref()) {
-            if let Some(found) =
+        if let Some(nested) = local_sequence_id(item.sequence.as_deref())
+            && let Some(found) =
                 find_checklist_verdict_output_in_sequence(trait_ref, &nested, stack)
             {
                 return Some(found);
             }
-        }
-        if let Some(nested) = local_sequence_id(item.otherwise.as_deref()) {
-            if let Some(found) =
+        if let Some(nested) = local_sequence_id(item.otherwise.as_deref())
+            && let Some(found) =
                 find_checklist_verdict_output_in_sequence(trait_ref, &nested, stack)
             {
                 return Some(found);
             }
-        }
         for branch_ref in item.branches.iter() {
-            if let Some(nested) = local_sequence_id(Some(branch_ref)) {
-                if let Some(found) =
+            if let Some(nested) = local_sequence_id(Some(branch_ref))
+                && let Some(found) =
                     find_checklist_verdict_output_in_sequence(trait_ref, &nested, stack)
                 {
                     return Some(found);
                 }
-            }
         }
     }
     None
@@ -2523,8 +2510,8 @@ fn validate_output_predicates_read_refs(
             Ok(())
         }
         GuardExpr::Predicate(predicate) => {
-            if let Some(output) = predicate.output.as_deref() {
-                if !declared.contains(output) {
+            if let Some(output) = predicate.output.as_deref()
+                && !declared.contains(output) {
                     return Err(crate::manifest::Error::InvalidField {
                         field_path: format!("{field_path}.output"),
                         message: format!(
@@ -2533,7 +2520,6 @@ fn validate_output_predicates_read_refs(
                     }
                     .into());
                 }
-            }
             if let Some(not) = predicate.not.as_deref() {
                 validate_output_predicates_read_refs(not, declared, &format!("{field_path}.not"))?;
             }
@@ -3153,9 +3139,9 @@ fn validate_produced_before_read_in_items<'a>(
                 return Err(error.into());
             }
         }
-        if item.effective_kind() == SequenceKind::ForEach {
-            if let Some(over) = item.over.as_deref() {
-                if !produced.contains(over) {
+        if item.effective_kind() == SequenceKind::ForEach
+            && let Some(over) = item.over.as_deref()
+                && !produced.contains(over) {
                     return Err(crate::manifest::Error::InvalidField {
                         field_path: format!("{base}.over"),
                         message: format!(
@@ -3163,18 +3149,15 @@ fn validate_produced_before_read_in_items<'a>(
                         ),
                     }.into());
                 }
-            }
-        }
-        if item.effective_kind() == SequenceKind::Branch {
-            if let Some(when) = item.when.as_ref() {
+        if item.effective_kind() == SequenceKind::Branch
+            && let Some(when) = item.when.as_ref() {
                 validate_guard_slots_produced(trait_ref, when, produced, &reader, first_producers)?;
             }
-        }
         if matches!(
             item.effective_kind(),
             SequenceKind::Sequence | SequenceKind::Loop | SequenceKind::ForEach
-        ) {
-            if let Some(sequence_id) = local_sequence_id(item.sequence.as_deref()) {
+        )
+            && let Some(sequence_id) = local_sequence_id(item.sequence.as_deref()) {
                 // The for-each item is a runtime-bound local value for its body,
                 // not an output that escapes to subsequent procedure items.
                 let mut body_produced = produced.clone();
@@ -3200,7 +3183,6 @@ fn validate_produced_before_read_in_items<'a>(
                     *produced = body_outputs;
                 }
             }
-        }
         if item.effective_kind() == SequenceKind::Branch {
             let then_outputs = match local_sequence_id(item.sequence.as_deref()) {
                 Some(sequence_id) => validate_produced_before_read_in_sequence(

@@ -171,10 +171,10 @@ pub fn filter_index_records<'a>(
 }
 
 fn record_passes_filter(r: &IndexedTrait, filter: &Filter) -> bool {
-    if let Some(id) = &filter.trait_id {
-        if r.trait_id != *id {
-            return false;
-        }
+    if let Some(id) = &filter.trait_id
+        && r.trait_id != *id
+    {
+        return false;
     }
 
     if !filter.statuses.is_empty() && !filter.statuses.contains(&r.status) {

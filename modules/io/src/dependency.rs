@@ -521,10 +521,9 @@ fn collect_qualified_dependency_resource_ids(
             }
             if let ctx_traits_core::reference::Path::Qualified { namespace, id, .. } =
                 reference.ref_path()
+                && namespace == alias
             {
-                if namespace == alias {
-                    ids.insert(id.to_string());
-                }
+                ids.insert(id.to_string());
             }
         }
         serde_json::Value::Array(items) => {
@@ -731,24 +730,24 @@ pub fn load_dependency_package(
     for warning in &decode_warnings {
         package_warnings.push(format!("dependency:{alias} {warning}"));
     }
-    if let Some(expected_id) = expected_id {
-        if trait_ref.id.as_str() != expected_id {
-            return invalid_input(
-                manifest_path,
-                format!(
-                    "dependency {alias:?} expected trait id {expected_id:?}, found {:?}",
-                    trait_ref.id.as_str()
-                ),
-            );
-        }
+    if let Some(expected_id) = expected_id
+        && trait_ref.id.as_str() != expected_id
+    {
+        return invalid_input(
+            manifest_path,
+            format!(
+                "dependency {alias:?} expected trait id {expected_id:?}, found {:?}",
+                trait_ref.id.as_str()
+            ),
+        );
     }
-    if let Some(requested_version) = requested_version {
-        if trait_ref.version.as_str() != requested_version {
-            package_warnings.push(format!(
+    if let Some(requested_version) = requested_version
+        && trait_ref.version.as_str() != requested_version
+    {
+        package_warnings.push(format!(
                 "dependency:{alias} requested version {requested_version} resolved {}; explicit sync records the resolved digest/version, locked verification reports drift",
                 trait_ref.version.as_str()
             ));
-        }
     }
     if !trait_ref.dependencies.is_empty() {
         package_warnings.push(nested_dependency_warning(

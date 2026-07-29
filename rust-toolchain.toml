@@ -1,0 +1,24 @@
+# Single source of truth for the Rust toolchain. Local shells, CI, and the
+# release build all resolve the same compiler from this file, so "works on my
+# machine" and "works in CI" stop being separable claims.
+#
+# Pinned exactly rather than tracking `stable`: a moving compiler is a moving
+# gate, which is the one thing this repository is least willing to ship.
+#
+# The floor is set by let-chains (`if let … && let …`), stabilised in 1.88 and
+# used at 25 sites across the workspace. Both workflows previously pinned
+# 1.85.0 through `dtolnay/rust-toolchain@1.85.0` and failed every build with
+# `error[E0658]: 'let' expressions in this position are unstable` — CI could
+# never have passed, on any commit, since the first let-chain landed.
+#
+# Stable, not nightly: the workspace declares no `#![feature(...)]` gate. This
+# is the newest stable at the time of pinning; `cargo check --workspace
+# --all-targets`, `cargo fmt --check`, and `cargo clippy --workspace
+# --all-targets --all-features -- -D warnings` were all verified clean on it
+# before the pin was written. Re-run those three when bumping — a newer
+# compiler ships newer clippy lints, and `-D warnings` turns any of them into a
+# red gate.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

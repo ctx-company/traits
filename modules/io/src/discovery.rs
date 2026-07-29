@@ -214,10 +214,10 @@ fn trait_package_dir_names(traits_root: &Utf8Path) -> Result<Vec<String>, crate:
                 path: traits_root.to_string(),
                 source: e,
             })?;
-        if file_type.is_dir() {
-            if let Some(name) = entry.file_name().to_str() {
-                dir_names.push(name.to_string());
-            }
+        if file_type.is_dir()
+            && let Some(name) = entry.file_name().to_str()
+        {
+            dir_names.push(name.to_string());
         }
     }
 

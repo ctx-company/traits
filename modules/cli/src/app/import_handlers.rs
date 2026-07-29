@@ -520,12 +520,12 @@ fn write_complete_import_package(
 
     if let Err(e) = ctx_traits_io::write::rename_dir(&stage_dir, package_root) {
         let mut notes = Vec::new();
-        if backup_created {
-            if let Err(restore_err) = ctx_traits_io::write::rename_dir(&backup_dir, package_root) {
-                notes.push(format!(
+        if backup_created
+            && let Err(restore_err) = ctx_traits_io::write::rename_dir(&backup_dir, package_root)
+        {
+            notes.push(format!(
                     "package's original bytes are still in backup directory {backup_dir}, restore failed: {restore_err}"
                 ));
-            }
         }
         let _ = remove_dir_if_exists(&stage_dir);
         return Err(if notes.is_empty() {
@@ -793,14 +793,14 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                 package_root,
             )?;
 
-            if let Some(ref cand_id) = c.candidate_trait_id {
-                if cand_id != &trait_id {
-                    c.status = ctx_traits_core::assist::CandidateStatus::Blocked;
-                    c.warnings.push(format!(
-                        "candidate trait ID {cand_id} does not match import trait ID {}",
-                        trait_id
-                    ));
-                }
+            if let Some(ref cand_id) = c.candidate_trait_id
+                && cand_id != &trait_id
+            {
+                c.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+                c.warnings.push(format!(
+                    "candidate trait ID {cand_id} does not match import trait ID {}",
+                    trait_id
+                ));
             }
             if let Some(text) = evaluation.normalized_output_text.as_deref() {
                 let trait_digest = ctx_traits_core::digest::Digest::source(text);

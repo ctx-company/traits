@@ -639,15 +639,13 @@ pub fn resource_template_candidate_ids(
         }
     }
     for (_, prompt) in trait_ref.prompts.iter() {
-        if let Some(source) = prompt.source.as_deref() {
-            if let Ok(parsed) = ctx_traits_core::reference::Reference::parse(source) {
-                if parsed.kind() == ctx_traits_core::reference::Kind::Resource
-                    && !parsed.is_qualified()
-                    && resource_ids.contains(parsed.id())
-                {
-                    candidates.insert(parsed.id().to_string());
-                }
-            }
+        if let Some(source) = prompt.source.as_deref()
+            && let Ok(parsed) = ctx_traits_core::reference::Reference::parse(source)
+            && parsed.kind() == ctx_traits_core::reference::Kind::Resource
+            && !parsed.is_qualified()
+            && resource_ids.contains(parsed.id())
+        {
+            candidates.insert(parsed.id().to_string());
         }
     }
 
@@ -659,14 +657,13 @@ pub fn resource_template_candidate_ids(
                 continue;
             }
             for ref_text in resource.input.iter() {
-                if let Ok(parsed) = ctx_traits_core::reference::Reference::parse(ref_text) {
-                    if parsed.kind() == ctx_traits_core::reference::Kind::Resource
-                        && !parsed.is_qualified()
-                        && resource_ids.contains(parsed.id())
-                        && candidates.insert(parsed.id().to_string())
-                    {
-                        changed = true;
-                    }
+                if let Ok(parsed) = ctx_traits_core::reference::Reference::parse(ref_text)
+                    && parsed.kind() == ctx_traits_core::reference::Kind::Resource
+                    && !parsed.is_qualified()
+                    && resource_ids.contains(parsed.id())
+                    && candidates.insert(parsed.id().to_string())
+                {
+                    changed = true;
                 }
             }
         }

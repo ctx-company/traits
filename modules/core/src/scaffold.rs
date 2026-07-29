@@ -84,14 +84,14 @@ impl TraitScaffold {
                 }
                 .into());
             }
-            if let Some(anchor) = declaration.anchor.as_ref() {
-                if anchor.start == 0 || anchor.end < anchor.start {
-                    return Err(crate::manifest::Error::InvalidField {
-                        field_path: format!("trait-scaffold.declarations[{index}].anchor"),
-                        message: "must contain a valid one-based inclusive line range".to_string(),
-                    }
-                    .into());
+            if let Some(anchor) = declaration.anchor.as_ref()
+                && (anchor.start == 0 || anchor.end < anchor.start)
+            {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("trait-scaffold.declarations[{index}].anchor"),
+                    message: "must contain a valid one-based inclusive line range".to_string(),
                 }
+                .into());
             }
         }
         Ok(())

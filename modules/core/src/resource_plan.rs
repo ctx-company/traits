@@ -733,23 +733,24 @@ fn collect_procedure_input_candidates(
     for (seq_idx, item) in proc.sequence.iter().enumerate() {
         for input in item.input.iter() {
             let ref_text = input.ref_text();
-            if let Ok(parsed) = Reference::parse(ref_text) {
-                if parsed.kind() == Kind::Resource && !parsed.is_qualified() {
-                    let id = parsed.id().to_string();
-                    let reason = match input.guard() {
-                        Some(guard) => InclusionReason::ConditionalInput {
-                            sequence_index: seq_idx,
-                            guard: guard.clone(),
-                        },
-                        None => InclusionReason::ProcedureInput {
-                            sequence_index: seq_idx,
-                        },
-                    };
-                    candidates
-                        .entry(id)
-                        .or_default()
-                        .push(CandidateReason::new(reason, 2, seq_idx));
-                }
+            if let Ok(parsed) = Reference::parse(ref_text)
+                && parsed.kind() == Kind::Resource
+                && !parsed.is_qualified()
+            {
+                let id = parsed.id().to_string();
+                let reason = match input.guard() {
+                    Some(guard) => InclusionReason::ConditionalInput {
+                        sequence_index: seq_idx,
+                        guard: guard.clone(),
+                    },
+                    None => InclusionReason::ProcedureInput {
+                        sequence_index: seq_idx,
+                    },
+                };
+                candidates
+                    .entry(id)
+                    .or_default()
+                    .push(CandidateReason::new(reason, 2, seq_idx));
             }
         }
     }
@@ -1024,17 +1025,17 @@ pub fn check_render_compatibility(plan: &Plan, profile: RenderProfile) -> Vec<Re
     let mut warnings = Vec::new();
 
     for entry in &plan.entries {
-        if let Some(ref evidence) = entry.digest_evidence {
-            if evidence.is_binary {
-                warnings.push(RenderWarning {
-                    resource_id: entry.resource_id.clone(),
-                    profile,
-                    reason: format!(
-                        "binary resource {:?} cannot be represented by text-only profile {:?}",
-                        entry.resource_id, profile
-                    ),
-                });
-            }
+        if let Some(ref evidence) = entry.digest_evidence
+            && evidence.is_binary
+        {
+            warnings.push(RenderWarning {
+                resource_id: entry.resource_id.clone(),
+                profile,
+                reason: format!(
+                    "binary resource {:?} cannot be represented by text-only profile {:?}",
+                    entry.resource_id, profile
+                ),
+            });
         }
     }
 

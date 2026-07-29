@@ -272,20 +272,20 @@ pub(crate) fn assert_no_symlink_ancestors(
     path: &Utf8Path,
     repo_root: &Utf8Path,
 ) -> crate::Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err(symlink_ancestor_error(path));
-        }
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && metadata.file_type().is_symlink()
+    {
+        return Err(symlink_ancestor_error(path));
     }
     let mut current = path.parent();
     while let Some(dir) = current {
         if dir == repo_root || dir.as_str().is_empty() {
             break;
         }
-        if let Ok(metadata) = std::fs::symlink_metadata(dir) {
-            if metadata.file_type().is_symlink() {
-                return Err(symlink_ancestor_error(dir));
-            }
+        if let Ok(metadata) = std::fs::symlink_metadata(dir)
+            && metadata.file_type().is_symlink()
+        {
+            return Err(symlink_ancestor_error(dir));
         }
         current = dir.parent();
     }
