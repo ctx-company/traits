@@ -17,4 +17,4 @@ resource-manifest = "sha256:a9281be164eb8fdedcc1a6208285c48d25de94daa08dce86acf2
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/engineering-standards/SKILL.md"
-digest = "sha256:3c1f1622ba9d414c9955e84fc65c732d4d0f0903056f2d0b0d87abe489f85ea2"
+digest = "sha256:3d41d56ceef544f28ff70d5e5760714203a7c63d05a2355b7ac77184ed616af4"

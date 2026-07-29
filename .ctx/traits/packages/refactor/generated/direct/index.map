@@ -1,71 +1,71 @@
 {
   "agent:smart-1": {
-    "file": ".ctx/traits/refactor/source/variants/direct/agent.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/agent.ts",
     "start": 3,
     "end": 3
   },
   "agent:worker": {
-    "file": ".ctx/traits/refactor/source/variants/direct/agent.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/agent.ts",
     "start": 8,
     "end": 8
   },
   "port:work-report": {
-    "file": ".ctx/traits/refactor/source/variants/direct/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/data.ts",
     "start": 16,
     "end": 16
   },
   "prompt:checklist": {
-    "file": ".ctx/traits/refactor/source/variants/direct/sequence/checklist.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/sequence/checklist.ts",
     "start": 9,
     "end": 9
   },
   "prompt:implement": {
-    "file": ".ctx/traits/refactor/source/variants/direct/sequence/implementation.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/sequence/implementation.ts",
     "start": 9,
     "end": 9
   },
   "schema:annotation": {
-    "file": ".ctx/traits/refactor/source/variants/direct/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/schema.ts",
     "start": 16,
     "end": 16
   },
   "schema:annotations-doc": {
-    "file": ".ctx/traits/refactor/source/variants/direct/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/schema.ts",
     "start": 36,
     "end": 36
   },
   "schema:line-point": {
-    "file": ".ctx/traits/refactor/source/variants/direct/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/schema.ts",
     "start": 3,
     "end": 3
   },
   "sequence:procedure/annotate": {
-    "file": ".ctx/traits/refactor/source/variants/direct/sequence/annotation.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/sequence/annotation.ts",
     "start": 5,
     "end": 5
   },
   "sequence:procedure/checklist": {
-    "file": ".ctx/traits/refactor/source/variants/direct/sequence/checklist.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/sequence/checklist.ts",
     "start": 6,
     "end": 6
   },
   "sequence:procedure/implement": {
-    "file": ".ctx/traits/refactor/source/variants/direct/sequence/implementation.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/sequence/implementation.ts",
     "start": 6,
     "end": 6
   },
   "slot:annotations": {
-    "file": ".ctx/traits/refactor/source/variants/direct/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/data.ts",
     "start": 5,
     "end": 5
   },
   "slot:checklist": {
-    "file": ".ctx/traits/refactor/source/variants/direct/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/data.ts",
     "start": 11,
     "end": 11
   },
   "trait:refactor": {
-    "file": ".ctx/traits/refactor/source/variants/direct/index.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/direct/index.ts",
     "start": 8,
     "end": 8
   }

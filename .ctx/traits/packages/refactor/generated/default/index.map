@@ -20,62 +20,62 @@
     "end": 27
   },
   "port:commit-report": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 44,
     "end": 44
   },
   "port:target": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 3,
     "end": 3
   },
   "prompt:apply-fixes": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 27,
     "end": 27
   },
   "prompt:design": {
-    "file": ".ctx/traits/refactor/source/sequence/design.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/design.ts",
     "start": 8,
     "end": 8
   },
   "prompt:frame": {
-    "file": ".ctx/traits/refactor/source/sequence/survey.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/survey.ts",
     "start": 21,
     "end": 21
   },
   "prompt:implement": {
-    "file": ".ctx/traits/refactor/source/sequence/design.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/design.ts",
     "start": 19,
     "end": 19
   },
   "prompt:review-1": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 10,
     "end": 10
   },
   "prompt:review-2": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 10,
     "end": 10
   },
   "prompt:summarization": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 8,
     "end": 8
   },
   "prompt:survey": {
-    "file": ".ctx/traits/refactor/source/sequence/survey.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/survey.ts",
     "start": 8,
     "end": 8
   },
   "resource:architecture-dialect": {
-    "file": ".ctx/traits/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/standards.ts",
     "start": 3,
     "end": 3
   },
   "resource:smell-catalog": {
-    "file": ".ctx/traits/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/standards.ts",
     "start": 10,
     "end": 10
   },
@@ -85,137 +85,137 @@
     "end": 188
   },
   "schema:review-verdict-default": {
-    "file": ".ctx/traits/refactor/source/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/schema.ts",
     "start": 6,
     "end": 6
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then": {
-    "file": ".ctx/traits/refactor/source/variants/default.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
     "start": 38,
     "end": 38
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 19,
     "end": 19
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-stage": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 18,
     "end": 18
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/summarization": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 6,
     "end": 6
   },
   "sequence:procedure/check-git-status": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 23,
     "end": 23
   },
   "sequence:procedure/design": {
-    "file": ".ctx/traits/refactor/source/sequence/design.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/design.ts",
     "start": 6,
     "end": 6
   },
   "sequence:procedure/frame": {
-    "file": ".ctx/traits/refactor/source/sequence/survey.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/survey.ts",
     "start": 19,
     "end": 19
   },
   "sequence:procedure/implement": {
-    "file": ".ctx/traits/refactor/source/sequence/design.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/design.ts",
     "start": 17,
     "end": 17
   },
   "sequence:procedure/maybe-commit": {
-    "file": ".ctx/traits/refactor/source/sequence/commit.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
     "start": 24,
     "end": 24
   },
   "sequence:procedure/refinement-loop": {
-    "file": ".ctx/traits/refactor/source/variants/default.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
     "start": 48,
     "end": 48
   },
   "sequence:procedure/survey": {
-    "file": ".ctx/traits/refactor/source/sequence/survey.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/survey.ts",
     "start": 6,
     "end": 6
   },
   "sequence:refine-refactor": {
-    "file": ".ctx/traits/refactor/source/variants/default.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
     "start": 50,
     "end": 50
   },
   "sequence:refine-refactor/apply-fixes": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 25,
     "end": 25
   },
   "sequence:refine-refactor/review-1": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 8,
     "end": 8
   },
   "sequence:refine-refactor/review-2": {
-    "file": ".ctx/traits/refactor/source/sequence/refinement.ts",
+    "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
     "start": 8,
     "end": 8
   },
   "slot:agreed-design": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 20,
     "end": 20
   },
   "slot:commit-message": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 29,
     "end": 29
   },
   "slot:commit-output": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 34,
     "end": 34
   },
   "slot:git-status": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 38,
     "end": 38
   },
   "slot:refactor-frame": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 15,
     "end": 15
   },
   "slot:review-verdict-1": {
-    "file": ".ctx/traits/refactor/source/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/schema.ts",
     "start": 33,
     "end": 33
   },
   "slot:review-verdict-2": {
-    "file": ".ctx/traits/refactor/source/schema.ts",
+    "file": ".ctx/traits/packages/refactor/source/schema.ts",
     "start": 33,
     "end": 33
   },
   "slot:stage-output": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 33,
     "end": 33
   },
   "slot:survey": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 9,
     "end": 9
   },
   "slot:work-summary": {
-    "file": ".ctx/traits/refactor/source/data.ts",
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 24,
     "end": 24
   },
   "trait:refactor": {
-    "file": ".ctx/traits/refactor/source/variants/default.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
     "start": 19,
     "end": 19
   }

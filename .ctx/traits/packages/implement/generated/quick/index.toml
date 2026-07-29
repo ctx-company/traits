@@ -177,10 +177,22 @@ schema = "[schema:text]"
 required = true
 description = "The exact argv the gate ran. This is the command that decides done-ness — re-run THIS, not a command named anywhere else."
 
+[schema.fields.exit-code]
+schema = "schema:number"
+description = "The gate command's exit status. Absent when the command never produced one, which itself means it could not be executed."
+
 [schema.fields.ok]
 schema = "schema:boolean"
 required = true
 description = "True when the gate command exited successfully."
+
+[schema.fields.tail]
+schema = "schema:text"
+description = "The end of the failed gate's output — stderr when it said anything, otherwise stdout. Present ONLY when ok is false. This is the reason the gate failed: read it before attributing the failure to anything else, and never infer a cause the tail does not state."
+
+[schema.fields.timed-out]
+schema = "schema:boolean"
+description = "Present and true only when the gate was killed by its own timeout rather than exiting. A timed-out gate proves nothing about the work."
 
 [[schema]]
 id = "review-verdict"
@@ -232,7 +244,7 @@ summary = "Commit-message role."
 text = """
 Implement {port:phase} following the draft {slot:draft}.
     No reviewer verdict attached means this is round 1: implement the draft in full. A verdict IS attached on every later round: fix every BLOCKER it names. A blocker you have seen before means your last fix treated the symptom — make the structural change it asks for instead of widening the previous patch.
-    A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports.
+    A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports. Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
     Run this phase's own Definition-of-Done gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns."""
 input = [

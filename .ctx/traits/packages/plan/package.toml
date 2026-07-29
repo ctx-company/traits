@@ -25,3 +25,7 @@ aliases = ["plan-quick"]
 [family.leaf.complex]
 path = "generated/complex/index.toml"
 aliases = ["plan-complex"]
+
+[publish]
+name = "@ctx-traits/plan"
+access = "public"

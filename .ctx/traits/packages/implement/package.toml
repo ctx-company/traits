@@ -28,3 +28,7 @@ aliases = ["implement-strict"]
 [family.leaf.phase]
 path = "generated/phase/index.toml"
 aliases = ["implement-phase"]
+
+[publish]
+name = "@ctx-traits/implement"
+access = "public"

@@ -15,6 +15,11 @@ canonical = "sha256:fa0cbb0a85eb36613c7e531919433a40769d6e32c824b85792a8e14fc722
 model-visible = "sha256:ea307a14baf6a63a8cb56b831f86818fc9c28f3c506155f34de595dd3a14e525"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/refactor-default/SKILL.md"
+digest = "sha256:ca5ba9d975d2fe51c54dd5d1eb9ee037c5750527dabd5801451f0371fde95551"
+
 [[trait]]
 id = "refactor"
 variant = "direct"
@@ -26,6 +31,11 @@ source = "sha256:c5a2de943b5568857bfaa2d4ee9a01f68ffb3a34080f466b77f363e1a730afc
 canonical = "sha256:130778f693cb29c275983505841c644a7341abae5f21fdb0d03ebe90c714df00"
 model-visible = "sha256:febace8181920e7d6f14748d643dd05ce5d7418bb19fa248036b5036fa12e01b"
 resource-manifest = "sha256:d44252c6cf774f41cb7c7b1bd6a190ee1ea26702ef46cfa328fa0d8887fa4f51"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/refactor-direct/SKILL.md"
+digest = "sha256:f475494b19ed36ef5d4d2334071481a61833d41d51ed908fd9409b2b93c3012d"
 
 [[trait]]
 id = "refactor"
@@ -39,6 +49,11 @@ canonical = "sha256:559217a419a9a5be6bcd60ccf096c28233249162c346fce8ee1d2d97c251
 model-visible = "sha256:3be485a08949fb09c1e84c77ecd9b9c312f31b88eeb9504b9d6a60cc3c46b260"
 resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
 
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/refactor-quick/SKILL.md"
+digest = "sha256:0d5bb1912b8dfbe6ec4a339baa110eda2b62d192b267ed72ea73962c4ec0583a"
+
 [[trait]]
 id = "refactor"
 variant = "smart"
@@ -51,6 +66,11 @@ canonical = "sha256:20bd94ec99af07709a1b5a9ddb465de8ea6c9d26cf0ea7595147e99a1462
 model-visible = "sha256:153ca082f26b6797a94d1e8f8d8cd619d599bc0835bdff8656825b53e6d1c886"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/refactor-smart/SKILL.md"
+digest = "sha256:ea944b857b7c2bf05815f645f7fcd5f316cbba097aa21935d205c248f6e0c7db"
+
 [[trait]]
 id = "refactor"
 variant = "strict"
@@ -62,3 +82,8 @@ source = "sha256:8a64b67c729b78a422c06141f62bdf36f9b9d05adb3cb0269c32f906b855ea3
 canonical = "sha256:c45a1f18e42b9069466fd8266193c5d5db7a0006dbe79ab8a7a528d63e38ee2b"
 model-visible = "sha256:ce18c2c7caa6095a3bf8705d6877eb14ce5d46891ac2540349040c6de681e484"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/refactor-strict/SKILL.md"
+digest = "sha256:321378d866ad7f400d4b90df0f3a8fa6b9890398d299f8027e788935d5eba45b"

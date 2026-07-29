@@ -13,3 +13,8 @@ source = "sha256:0ffec5bb4729908843c4927e7375ae4225cd21a049e52d54d3cd62b0da12563
 canonical = "sha256:1867ca6a4e94f02b3df5a32f6c404d279c394015716f4977fff833aaaa3d28c9"
 model-visible = "sha256:faec6612ee4c4411f8fd77883f9f1b96f87b3b96af9ac1ce351f0faf4a1fa262"
 resource-manifest = "sha256:e71c53162c005e5944a8674f0973ce4796da23d1c68f922cbf485428e81c5c40"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/deep-research/SKILL.md"
+digest = "sha256:af36a89b7805e92de5da3429032de3a9b30ee07ce90614b5371a1c7a28884f73"

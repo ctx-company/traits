@@ -3,3 +3,7 @@ id = "implement-guided"
 version = "0.1.0"
 name = "Implement Guided"
 status = "ready"
+
+[publish]
+name = "@ctx-traits/implement-guided"
+access = "public"

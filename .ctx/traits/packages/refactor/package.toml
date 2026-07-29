@@ -30,3 +30,7 @@ aliases = ["refactor-smart"]
 [family.leaf.strict]
 path = "generated/strict/index.toml"
 aliases = ["refactor-strict"]
+
+[publish]
+name = "@ctx-traits/refactor"
+access = "public"

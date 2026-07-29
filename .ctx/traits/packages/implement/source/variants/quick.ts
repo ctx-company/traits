@@ -34,7 +34,7 @@ const draftStep = sequence.prompt("draft-writing", {
 const quickProduceText = prompt.template(
     `Implement {phase} following the draft {draft}.
     No reviewer verdict attached means this is round 1: implement the draft in full. A verdict IS attached on every later round: fix every BLOCKER it names. A blocker you have seen before means your last fix treated the symptom — make the structural change it asks for instead of widening the previous patch.
-    A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports.
+    A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports. Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
     Run this phase's own Definition-of-Done gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns.`,
     { phase: port.phase, draft: slot.draft },

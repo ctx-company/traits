@@ -6,3 +6,7 @@ status = "ready"
 
 [dependencies]
 engineering-standards = { version = "0.1.0", path = "../engineering-standards" }
+
+[publish]
+name = "@ctx-traits/guarded-change"
+access = "public"

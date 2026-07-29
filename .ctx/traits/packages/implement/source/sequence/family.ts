@@ -190,6 +190,21 @@ export const repoGatesPassed = slot({
             description:
                 "The exact argv the gate ran. This is the command that decides done-ness — re-run THIS, not a command named anywhere else.",
         }),
+        "exit-code": schema.field(schema.number(), {
+            required: false,
+            description:
+                "The gate command's exit status. Absent when the command never produced one, which itself means it could not be executed.",
+        }),
+        "timed-out": schema.field(schema.boolean(), {
+            required: false,
+            description:
+                "Present and true only when the gate was killed by its own timeout rather than exiting. A timed-out gate proves nothing about the work.",
+        }),
+        tail: schema.field(schema.text(), {
+            required: false,
+            description:
+                "The end of the failed gate's output — stderr when it said anything, otherwise stdout. Present ONLY when ok is false. This is the reason the gate failed: read it before attributing the failure to anything else, and never infer a cause the tail does not state.",
+        }),
     }),
 });
 
@@ -395,7 +410,7 @@ export function buildProducePrompt(
             extraFixInstruction ? ` ${extraFixInstruction}` : ""
         }
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
-            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports
+            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
             Respect the phase contract {phaseBrief} and the house rules in {productBrief} (core purity, no new deps, no new #[allow], byte-stability where the plan demands it).
             Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the phase requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
             You owe 100% of the draft's agent-doable pile. For each owner-only item in the draft's SCOPE SPLIT, produce the named substitute evidence (run the tests, dry runs, or static checks it names) — an owner-only classification is never license to skip work a shell can do. If you hit a wall the draft did not classify, flag it in your work summary as a proposed owner-item (item, reason class, why no in-run effort suffices, the substitute evidence you produced) and expect reviewers to challenge it.
@@ -439,7 +454,7 @@ export function reviewSeat(
         extraOutputs: [leftovers],
         text: prompt.template(
             `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {phase} against the draft {draft}. Current work summary: {workSummary}.
-            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct.
+            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
             Verify any house-rule citation directly against {ruleAuthority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds.${
                 deviationReport
                     ? " Recorded deviations: {deviationReport}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the draft verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER."
