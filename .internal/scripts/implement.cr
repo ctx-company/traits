@@ -1,16 +1,4 @@
 #!/usr/bin/env crystal
-#
-# Drive `ctx traits run` over a comma-separated list of phases, one dedicated
-# `--worktree` each, landed automatically before the next phase starts.
-#
-#   just implement "P209, Group 47"
-#   .internal/scripts/implement.cr --trait implement:smart "P209"
-#
-# The loop lives here rather than in a Justfile recipe because it is control
-# flow — argument splitting, typed exit classification, a completed-so-far
-# tally — and recipe bodies are a poor home for control flow that has to stay
-# readable.
-
 require "option_parser"
 
 # The CLI's own exit contract, not this script's. A parked phase must be
