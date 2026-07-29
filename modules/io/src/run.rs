@@ -546,7 +546,9 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 Some(crate::harness_config::resolve_git_long_timeout_ms(
                     Utf8Path::new("."),
                 )),
-                request.narrate_progress.then_some(&narrate as &dyn Fn(&str)),
+                request
+                    .narrate_progress
+                    .then_some(&narrate as &dyn Fn(&str)),
             )?;
             worktree_retry_warnings = prepared.retry_warnings;
             let prepared_path = prepared.path.to_string();

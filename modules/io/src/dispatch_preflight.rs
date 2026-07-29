@@ -402,7 +402,9 @@ pub fn unrunnable_check_commands(
                     sequence_id: sequence_id.to_string(),
                     argv: plan.argv.clone(),
                     reason: format!("`{program}` is not on PATH"),
-                    remedy: format!("install `{program}`, or point the step at a program this repository has"),
+                    remedy: format!(
+                        "install `{program}`, or point the step at a program this repository has"
+                    ),
                 });
                 continue;
             }

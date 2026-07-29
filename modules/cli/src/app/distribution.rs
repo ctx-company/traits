@@ -470,11 +470,10 @@ pub(crate) fn handle_dependency_init(
         .map(str::to_string)
         .or_else(|| existing.and_then(|publish| publish.access.clone()));
 
-    let manifest_text = std::fs::read_to_string(&manifest_path).map_err(|source| {
-        crate::Error::Command {
+    let manifest_text =
+        std::fs::read_to_string(&manifest_path).map_err(|source| crate::Error::Command {
             message: format!("cannot read {manifest_path}: {source}"),
-        }
-    })?;
+        })?;
     let patched = upsert_publish_table(
         &manifest_text,
         &resolved_name,
@@ -487,14 +486,21 @@ pub(crate) fn handle_dependency_init(
         ctx_traits_core::manifest::decode_package_manifest(&patched, manifest_path.as_str())?
     else {
         return Err(crate::Error::Command {
-            message: format!("[publish] edit produced an unreadable {manifest_path}; refusing to write"),
+            message: format!(
+                "[publish] edit produced an unreadable {manifest_path}; refusing to write"
+            ),
         });
     };
-    if decoded.publish.as_ref().and_then(|publish| publish.name.as_deref())
+    if decoded
+        .publish
+        .as_ref()
+        .and_then(|publish| publish.name.as_deref())
         != Some(resolved_name.as_str())
     {
         return Err(crate::Error::Command {
-            message: format!("[publish] edit did not take effect in {manifest_path}; refusing to write"),
+            message: format!(
+                "[publish] edit did not take effect in {manifest_path}; refusing to write"
+            ),
         });
     }
     ctx_traits_io::write::write_package_manifest(&manifest_path, &patched)?;
@@ -564,8 +570,16 @@ pub(crate) fn handle_dependency_init(
                 format!("dependency init {resolved_name}"),
                 PanelStatus::Passed("passed".to_string()),
             )
-            .row(PanelRow::toned("package", package_root.as_str(), RowTone::Default))
-            .row(PanelRow::toned("name", resolved_name.as_str(), RowTone::Default))
+            .row(PanelRow::toned(
+                "package",
+                package_root.as_str(),
+                RowTone::Default,
+            ))
+            .row(PanelRow::toned(
+                "name",
+                resolved_name.as_str(),
+                RowTone::Default,
+            ))
             .row(PanelRow::toned(
                 "version",
                 manifest.package.version.as_str(),
@@ -781,7 +795,10 @@ pub(crate) fn handle_publish(
                 message: "package.json is missing version".to_string(),
             })?;
         (name.to_string(), version.to_string())
-    } else if let Some(declared) = manifest.publish.as_ref().and_then(|publish| publish.name.clone())
+    } else if let Some(declared) = manifest
+        .publish
+        .as_ref()
+        .and_then(|publish| publish.name.clone())
     {
         // Declared `[publish] name` wins over any derived default. Without
         // this the scope below is imposed on every publisher, and `@ctx-traits`

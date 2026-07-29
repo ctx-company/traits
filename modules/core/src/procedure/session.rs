@@ -2370,7 +2370,14 @@ fn command_evidence_matches_current_frame(
             && submission
                 .produced_slots
                 .get(&command.output_slot)
-                .is_some_and(|value| *value == check_output_value(verdict, command, &CheckEvidence::from_submission(evidence)));
+                .is_some_and(|value| {
+                    *value
+                        == check_output_value(
+                            verdict,
+                            command,
+                            &CheckEvidence::from_submission(evidence),
+                        )
+                });
     }
     if command_execution_succeeded(evidence, command) {
         submission.produced_slots.len() == 1
@@ -2907,7 +2914,10 @@ mod check_output_tests {
     #[test]
     fn check_output_carries_the_failure_tail_only_on_failure() {
         let command = command_frame(&["just", "test"]);
-        let evidence = check_evidence(Some(1), Some("error: Justfile does not contain recipe `test`"));
+        let evidence = check_evidence(
+            Some(1),
+            Some("error: Justfile does not contain recipe `test`"),
+        );
         let failed = check_output_value(false, &command, &evidence);
         assert_eq!(
             failed["tail"],
@@ -2941,7 +2951,9 @@ mod check_output_tests {
     fn derived_tail_keeps_the_end_and_marks_the_clip() {
         let long = format!("{}FAILURE HERE", "prologue line\n".repeat(400));
         let derived = CheckEvidence::from_submission(&submission_evidence("", &long));
-        let tail = derived.tail.expect("a failed command with output has a tail");
+        let tail = derived
+            .tail
+            .expect("a failed command with output has a tail");
         assert!(tail.ends_with("FAILURE HERE"), "the end must survive");
         assert!(
             tail.starts_with("[earlier output truncated]"),
