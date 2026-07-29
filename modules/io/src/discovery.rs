@@ -181,10 +181,50 @@ pub fn trait_packages(repo_root: &Utf8Path) -> Result<Vec<TraitPackage>, crate::
                 trait_id: name,
                 trait_path,
             });
+            continue;
+        }
+        // A native family has no canonical at `generated/index.toml` — every
+        // leaf lives at `generated/<selector>/index.toml` instead. Without
+        // this, discovery skipped the family entirely, so it produced no
+        // candidate id, resolved to no row, and `ctx traits list` fell through
+        // to reporting `implement`, `plan`, and `refactor` as `source-only`:
+        // the three most useful packages in the repository, described as
+        // unbuilt, by the first command anyone runs.
+        //
+        // The DEFAULT leaf represents the package at its bare id, which is the
+        // same leaf a bare-id run resolves to — so `list` and `run` agree
+        // about what `implement` means.
+        if let Some(default_leaf) = family_default_manifest(repo_root, &name)? {
+            packages.push(TraitPackage {
+                trait_id: name,
+                trait_path: default_leaf,
+            });
         }
     }
 
     Ok(packages)
+}
+
+/// The generated manifest of `package`'s default family leaf, or `None` when
+/// the package declares no `[family]` table or its default leaf is missing.
+///
+/// Never an error: a package that is simply not a family, or a family whose
+/// declared default has not been built, is a discovery miss rather than a
+/// failure — `list` still has an honest row to show for it.
+pub(crate) fn family_default_manifest(
+    repo_root: &Utf8Path,
+    package: &str,
+) -> Result<Option<Utf8PathBuf>, crate::Error> {
+    let package_root = crate::layout::resolved_package_root(repo_root).join(package);
+    let manifest_path = crate::layout::package_manifest_path(&package_root);
+    let Some(family) = crate::family_manifest::read_family_table(&manifest_path)? else {
+        return Ok(None);
+    };
+    let Some(leaf) = family.leaves.get(&family.default) else {
+        return Ok(None);
+    };
+    let leaf_path = package_root.join(&leaf.relative_path);
+    Ok(leaf_path.is_file().then_some(leaf_path))
 }
 
 fn trait_package_dir_names(traits_root: &Utf8Path) -> Result<Vec<String>, crate::Error> {

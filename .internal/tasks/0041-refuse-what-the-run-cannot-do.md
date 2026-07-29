@@ -114,9 +114,27 @@ for six rounds. It would NOT have caught the repeats seen in
 `run-56d1b1346536`, where the same blocker id came back with reworded prose
 each round, so the digest moved every time.
 
-**Recommend (a), and note that (b) is nearly free and catches a real case (a)
-does not — they compose.** Ship (b) first if something must ship now: a stuck
-gate is the more common failure and the one with zero design cost.
+**Correction after reading the loop code (2026-07-29): (b) has no useful
+vocabulary-free form, so (a) is the only real option.**
+
+"Park when a designated slot's digest is unchanged" still has to be told WHICH
+slot — which is a declaration, which is (a) with a smaller field. The only
+genuinely declaration-free version is "park when *every* slot written this
+iteration is byte-identical to the last two", and that is too strict to fire:
+in `run-56d1b1346536` the work summary and verdict changed every round while
+the blocker did not, so the full set never repeated. It would not have caught
+the case it exists for.
+
+So the cost is honest and unavoidable: **a new field on the loop declaration**,
+which means the canonical model, a schema version, and its migration (0029's
+gate). Worth doing, but it is a model change, not a cheap addition — do not
+start it expecting the latter.
+
+The hook point is `modules/core/src/procedure/runtime/control_flow.rs:1735`,
+where `next_iteration >= max_iterations` decides exhaustion; a stall check sits
+immediately before it and stops with its own reason rather than
+`STOP_MAX_ITERATIONS_EXHAUSTED`, so a parked-for-stall run is distinguishable
+from one that merely ran out.
 
 Threshold either way: three consecutive rounds. Two is normal — a fix that
 misses once is ordinary. Three is the loop telling you the reviewer and the

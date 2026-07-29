@@ -39,12 +39,33 @@ traits *run* correctly — `implement:quick` resolves and has driven every run
 today — but the first command a new user types reports the flagship package as
 unusable.
 
-**Work:** the list/inventory fix is unowned and belongs here. Publish is
-**0040**. Vendor is **0013**. They are one cause and should land together;
-fixing publish while `list` still says source-only ships a product that
-contradicts itself.
+**LANDED 2026-07-29 — list and publish. Vendor (0013) remains.**
 
-## B. Templates are on the pre-P569 layout
+`list` now reports `traits: 8 · resolved: 8 · source-only: 0`, with each family
+resolving through its DEFAULT leaf — the same leaf a bare-id run resolves to, so
+`list` and `run` agree about what `implement` means. Two sites had to change
+together (`discovery::trait_packages` and `inventory::repo_authored_candidate`):
+fixing only one makes the id appear as a candidate and then resolve to nothing,
+which is exactly how the source-only rows arose.
+
+Publish landed as **0040** (archived). Vendor is **0013** and is still open —
+until it lands, a family can be published but not vendored into a consumer.
+
+## B. Templates are on the pre-P569 layout — LANDED 2026-07-29
+
+All five templates renamed to `package.toml`/`package.lock`, and both places
+`modules/core/build.rs` names the path updated (the read, and the path baked
+into the generated `include_str!`). These were **not** cosmetic leftovers:
+`build.rs` reads each template's manifest and panics if it is missing, so they
+were load-bearing files on the retired layout.
+
+`generated/` stays — `package_build_paths` deliberately routes template
+packages there so a template can be built in place.
+
+Verified by scaffolding from all five templates in a clean repository: each
+builds and emits current-layout files.
+
+The original finding follows.
 
 All five built-in templates (`code-review`, `implement-phase`, `pr-description`,
 `research-summarize`, `test-writer`) ship `trait.toml` and `trait.lock`. P569

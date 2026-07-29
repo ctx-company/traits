@@ -433,12 +433,19 @@ fn compare_locked_exports(
 ) -> crate::Result<ctx_traits_core::check::DriftSummary> {
     use ctx_traits_core::check::{DriftLayer, DriftSummary};
 
+    // No exports is the normal state, not drift.
+    //
+    // A trait is complete without ever having been exported: `SKILL.md` is
+    // produced only by `ctx traits export`, is a generated host placement, and
+    // is gitignored. Treating its absence as drift made a trait depend on a
+    // skill being present — it blocked `check --locked`, and through it
+    // `publish`, until every package had been exported, which is backwards.
     if exports.is_empty() {
         return Ok(DriftSummary {
             layer: DriftLayer::Export,
-            expected: "locked export evidence".to_string(),
-            actual: None,
-            summary: "missing locked export evidence".to_string(),
+            expected: "no locked exports".to_string(),
+            actual: Some("no locked exports".to_string()),
+            summary: "no exports recorded; a trait never requires one".to_string(),
             unsupported: false,
         });
     }
@@ -453,10 +460,13 @@ fn compare_locked_exports(
                 export.digest,
                 actual.as_str()
             )),
-            None => mismatches.push(format!(
-                "{} missing export file {}",
-                export.target, export.path
-            )),
+            // Recorded but not on disk: the export simply has not been
+            // materialized here — a fresh clone of a repository whose exports
+            // are gitignored is the ordinary case. Nothing to compare, and
+            // nothing wrong. Only an export that EXISTS and disagrees with its
+            // locked digest is drift, which is the edit this check exists to
+            // catch.
+            None => {}
         }
     }
 

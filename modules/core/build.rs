@@ -199,9 +199,9 @@ const BUILTIN_TEMPLATE_IDS: &[&str] = &[
 
 const BUILTIN_TEMPLATES_DIR: &str = "builtins/templates";
 
-/// Embed each template's authoring inputs (`trait.toml`, every `source/**/*.ts`
-/// file) as UTF-8 static strings. Only authoring files are embedded — no
-/// `generated/` or `trait.lock`, since `ctx traits new` always rebuilds and
+/// Embed each template's authoring inputs (`package.toml`, every
+/// `source/**/*.ts` file) as UTF-8 static strings. Only authoring files are
+/// embedded — no `generated/` or `package.lock`, since `ctx traits new` always rebuilds and
 /// re-locks a freshly instantiated package rather than trusting a stale
 /// committed artifact. Feature-gated identically to
 /// [`generate_builtin_trait_packages`] so templates ship in native CLI
@@ -227,7 +227,7 @@ fn generate_builtin_templates(out_dir: &str) {
     let mut generated = String::from("pub static BUILTIN_TEMPLATES: &[BuiltinTemplate] = &[\n");
     for id in BUILTIN_TEMPLATE_IDS {
         let package_dir = Path::new(BUILTIN_TEMPLATES_DIR).join(id);
-        let manifest_abs = package_dir.join("trait.toml");
+        let manifest_abs = package_dir.join("package.toml");
         let source_abs = package_dir.join("source/index.ts");
         println!("cargo:rerun-if-changed={}", manifest_abs.display());
         println!("cargo:rerun-if-changed={}", source_abs.display());
@@ -274,7 +274,7 @@ fn generate_builtin_templates(out_dir: &str) {
         extra_files_literal.push(']');
 
         generated.push_str(&format!(
-            "    BuiltinTemplate {{ id: {id:?}, trait_toml: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{BUILTIN_TEMPLATES_DIR}/{id}/trait.toml\")), source_ts: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{BUILTIN_TEMPLATES_DIR}/{id}/source/index.ts\")), extra_source_files: {extra_files_literal} }},\n"
+            "    BuiltinTemplate {{ id: {id:?}, trait_toml: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{BUILTIN_TEMPLATES_DIR}/{id}/package.toml\")), source_ts: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{BUILTIN_TEMPLATES_DIR}/{id}/source/index.ts\")), extra_source_files: {extra_files_literal} }},\n"
         ));
     }
     generated.push_str("];\n");

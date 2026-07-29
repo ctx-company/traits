@@ -198,8 +198,12 @@ impl InventoryContext {
 fn repo_authored_candidate(repo_root: &Utf8Path, id: &str) -> crate::Result<Option<Utf8PathBuf>> {
     let path = crate::layout::trait_manifest_path(repo_root, id)?;
     if path.is_file() {
-        Ok(Some(path))
-    } else {
-        Ok(None)
+        return Ok(Some(path));
     }
+    // A native family has no canonical at the package root; its default leaf
+    // is what the bare id resolves to. Discovery makes the same substitution
+    // (`discovery::trait_packages`) — both have to, or the id appears as a
+    // candidate here and then resolves to nothing, which is precisely how
+    // `implement`, `plan`, and `refactor` came to be listed as `source-only`.
+    crate::discovery::family_default_manifest(repo_root, id)
 }
