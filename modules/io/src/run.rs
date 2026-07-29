@@ -98,6 +98,13 @@ pub struct StartRequest<'a> {
     /// them as visible in-progress steps before running them. Non-conductor
     /// callers keep the synchronous drain.
     pub defer_commands: bool,
+    /// Narrate init phase boundaries (worktree creation, seeding, warm clone,
+    /// setup commands) to stderr while they run. The work between invocation
+    /// and the first frame takes tens of seconds on a big repository and no
+    /// panel can exist yet — a session does not — so without this the terminal
+    /// is blank and "slow" is indistinguishable from "hung". CLI-owned:
+    /// `--json` callers and MCP hosts leave it false and stay silent.
+    pub narrate_progress: bool,
     /// User strictness override: every loop stops the run blocked when its
     /// exit condition never matched, regardless of its declared
     /// `on-exhausted` policy or signals — a continuing loop's declared
@@ -516,6 +523,13 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 &prepared_assignments.worktree,
                 Some(planned_worktree_path.as_path()),
             )?;
+            // The P551 observer already narrates every phase inside
+            // worktree preparation ("creating worktree", "seeding", the warm
+            // clone, each setup command); it was simply dropped here as
+            // `None`, which is how a 25-second init produced one line of
+            // output. Same stderr channel as the CLI's own
+            // "ctx run · initialization" line, so the story reads as one.
+            let narrate = |phase: &str| eprintln!("ctx run · {phase}");
             let prepared = crate::worktree::prepare_worktree(
                 &id,
                 crate::worktree::WorktreeContents {
@@ -532,6 +546,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 Some(crate::harness_config::resolve_git_long_timeout_ms(
                     Utf8Path::new("."),
                 )),
+                request.narrate_progress.then_some(&narrate as &dyn Fn(&str)),
             )?;
             worktree_retry_warnings = prepared.retry_warnings;
             let prepared_path = prepared.path.to_string();

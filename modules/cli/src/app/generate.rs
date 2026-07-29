@@ -520,6 +520,8 @@ pub(crate) fn run_builtin_trait(
         trait_arg_evidence: "ctx traits built-in meta-trait runner inputs",
         worktree: None,
         merge_rung: None,
+        // generate's eval runs are internal machinery, not a waiting human.
+        narrate_progress: false,
     })?;
     let session = outcome
         .session_path

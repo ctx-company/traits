@@ -295,6 +295,10 @@ fn start_run_session(
             provider_warnings: Vec::new(),
             harness_probes: Vec::new(),
             caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            // Both the driven and --no-drive paths come through here; a
+            // machine reader (--json) gets silence, a human gets the init
+            // phases named while they run.
+            narrate_progress: !json,
             state_source: "ctx traits run",
             trait_arg_evidence: "ctx traits run trait args",
             worktree: input.worktree,

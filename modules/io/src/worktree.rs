@@ -241,6 +241,7 @@ pub fn prepare_worktree(
     setup_timeout_ms: Option<u64>,
     setup_capture_bytes: Option<u64>,
     worktree_add_timeout_ms: Option<u64>,
+    progress: Option<&dyn Fn(&str)>,
 ) -> crate::Result<PreparedWorktree> {
     let (repo_root, path, branch) = resolve_worktree_location(id)?;
     let mut warnings = RetryWarnings::new();
@@ -265,7 +266,7 @@ pub fn prepare_worktree(
                 capture_limit: setup_capture_bytes
                     .map_or(DEFAULT_SETUP_CAPTURE_BYTES, |bytes| bytes as usize),
             },
-            progress: None,
+            progress,
         },
         worktree_add_timeout_ms.unwrap_or(crate::git_process::LONG_TIMEOUT_MS),
         &mut warnings,
