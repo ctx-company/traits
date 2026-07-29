@@ -8,3 +8,8 @@ packages/harness-client/dist/
 
 .configs/plugins/opencode/dist/
 .configs/plugins/pi/dist/
+
+# Generated host exports (`ctx traits export`). Regenerated from the canonical
+# trait on demand and re-derivable from it, so the tree is a build artifact,
+# not source — and publish stages it from the package, not from here.
+.agents/
