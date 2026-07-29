@@ -1,6 +1,26 @@
 # 0031 — Split internal from public packages; ship only what is needed
 
-**Status:** design needed · **Raised:** 2026-07-29
+**Status:** DONE 2026-07-29 — ruled and enforced · **Raised:** 2026-07-29
+
+**Owner ruling 2026-07-29: `@ctx-traits/cdk` and `@ctx-traits/config` are
+public; `@ctx-traits/agents`, `@ctx-traits/harness-client`, and
+`@ctx-traits/rust` are internal.**
+
+Enforcement is mechanical, not conventional: the three internal packages carry
+`"private": true`, which makes `npm publish` refuse them outright. The import
+graph was verified clean — neither public package depends on any
+`@ctx-traits/*` package — so a public package cannot leak an internal one
+today; if a public package ever grows such an import, npm's own resolution
+fails at install time because the internal package does not exist on the
+registry. Trait packages (implement, plan, …) publish under `@ctx-traits`
+regardless — this ruling covers only the five npm workspace packages.
+
+One consequence worth naming: `implement`'s authoring SOURCE imports
+`@ctx-traits/agents`, so rebuilding the family from source outside this
+repository is not possible with agents internal. Consumers of the built
+packages (vendored or from the registry) are unaffected — they read
+`generated/`, never the source. If source-rebuilding ever becomes a product
+promise, agents goes public then, deliberately.
 
 Decide, per package, whether it is PUBLIC (consumed by users of ctx.traits) or
 INTERNAL (ours), and make the generated/published artifacts match. Today the
