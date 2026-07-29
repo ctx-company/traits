@@ -130,7 +130,7 @@ description = "One blocking defect: stable identity, location, root cause, the i
 [schema.fields.done-when]
 schema = "schema:text"
 required = true
-description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed."
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed."
 
 [schema.fields.id]
 schema = "schema:text"
@@ -144,12 +144,12 @@ description = "id of the prior-round blocker this restates; present when the pri
 [schema.fields.required-fix]
 schema = "schema:text"
 required = true
-description = "The shape of an acceptable fix: the invariant it must establish and what to replace or delete — never just the cited call sites."
+description = """The fix as STEPS to take, always — you are the smarter model here, and this field exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). State the approach you expect: what to do, in what order, and what you expect to see before you are satisfied. High-level is fine; a destination alone is not. "Replace the separate paths with one renderer" is a destination — the steps name what to create and what it owns, what must cease to exist or shrink to a delegate, and which call sites to route. Evidence from a four-round stall: every fix stated as an operation ("invoke X after Y holds the lock") cleared in one round, while the same destination-shaped fix was re-raised three times as the worker complied with its letter through ever-smaller extractions."""
 
 [schema.fields.root-cause]
 schema = "schema:text"
 required = true
-description = "Why the code is wrong — the missing or broken invariant, not just where it shows."
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows — and how deep the wrong goes: a slip at the cited line, a missing invariant, or a structure the code must converge to. The depth tells the worker how big a change you expect; omitting it is how a structural demand gets answered with a point-patch."
 
 [schema.fields.rule-quote]
 schema = "schema:text"

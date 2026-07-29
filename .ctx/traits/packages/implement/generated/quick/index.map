@@ -71,18 +71,18 @@
   },
   "sequence:building-body": {
     "file": "packages/agents/src/process.ts",
-    "start": 205,
-    "end": 205
+    "start": 215,
+    "end": 215
   },
   "sequence:building-body/building-produce": {
     "file": "packages/agents/src/process.ts",
-    "start": 190,
-    "end": 190
+    "start": 200,
+    "end": 200
   },
   "sequence:building-body/building-review": {
     "file": "packages/agents/src/process.ts",
-    "start": 197,
-    "end": 197
+    "start": 207,
+    "end": 207
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -101,23 +101,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 333,
-    "end": 333
+    "start": 343,
+    "end": 343
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 316,
-    "end": 316
+    "start": 326,
+    "end": 326
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 327,
-    "end": 327
+    "start": 337,
+    "end": 337
   },
   "sequence:procedure/building": {
     "file": "packages/agents/src/process.ts",
-    "start": 240,
-    "end": 240
+    "start": 250,
+    "end": 250
   },
   "sequence:procedure/draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
@@ -126,13 +126,13 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 341,
-    "end": 341
+    "start": 351,
+    "end": 351
   },
   "sequence:procedure/shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 308,
-    "end": 308
+    "start": 318,
+    "end": 318
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
@@ -161,18 +161,18 @@
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 297,
-    "end": 297
+    "start": 307,
+    "end": 307
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 304,
-    "end": 304
+    "start": 314,
+    "end": 314
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 290,
-    "end": 290
+    "start": 300,
+    "end": 300
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",

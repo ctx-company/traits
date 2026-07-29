@@ -86,7 +86,7 @@ const RULE_CITATION_VERIFICATION =
 const BLOCKER_DEFINITION_CORE =
   `A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up`;
 const BLOCKER_REPORT_FORMAT =
-  `                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed.`;
+  `                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.`;
 const STATUS_ADVISORY_SPLIT =
   `                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.`;
 
@@ -199,14 +199,16 @@ export const blockerSchema: SchemaHandle = schema.object(
       description: "The defect and the concrete failure it causes.",
     }),
     "root-cause": schema.field(schema.text(), {
-      description: "Why the code is wrong — the missing or broken invariant, not just where it shows.",
+      description:
+        "Why the code is wrong — the missing or broken invariant, not just where it shows — and how deep the wrong goes: a slip at the cited line, a missing invariant, or a structure the code must converge to. The depth tells the worker how big a change you expect; omitting it is how a structural demand gets answered with a point-patch.",
     }),
     "required-fix": schema.field(schema.text(), {
       description:
-        "The shape of an acceptable fix: the invariant it must establish and what to replace or delete — never just the cited call sites.",
+        "The fix as STEPS to take, always — you are the smarter model here, and this field exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). State the approach you expect: what to do, in what order, and what you expect to see before you are satisfied. High-level is fine; a destination alone is not. \"Replace the separate paths with one renderer\" is a destination — the steps name what to create and what it owns, what must cease to exist or shrink to a delegate, and which call sites to route. Evidence from a four-round stall: every fix stated as an operation (\"invoke X after Y holds the lock\") cleared in one round, while the same destination-shaped fix was re-raised three times as the worker complied with its letter through ever-smaller extractions.",
     }),
     "done-when": schema.field(schema.text(), {
-      description: "A falsifiable check the reviewer will apply next round to declare this blocker fixed.",
+      description:
+        "A falsifiable check the reviewer will apply next round to declare this blocker fixed. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed.",
     }),
     "recurrence-of": schema.field(schema.text(), {
       required: false,

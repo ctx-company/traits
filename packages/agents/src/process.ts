@@ -58,6 +58,16 @@ export type GuardedProductionRole = {
  */
 export type GuardedProductionProduceRole = GuardedProductionRole & {
   readonly optionalInputs?: readonly SlotHandle[];
+  /**
+   * Extra slots the produce step also writes each round, alongside its main
+   * output — mirroring the review seat's `extraOutputs`. Motivating case:
+   * typed blocker dispositions. The dispositions CONTRACT lived for a while
+   * as prose in the work-summary hint ("ends with a Blocker dispositions
+   * section…") and a live run ignored it in five consecutive summaries,
+   * which silently degraded the reviewer's recurrence-verification protocol
+   * that keys on it. A schema-required output cannot be skipped.
+   */
+  readonly extraOutputs?: readonly SlotHandle[];
 };
 
 /**
@@ -190,7 +200,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
   const produceStep = sequence.prompt(`${id}-produce`, {
     agent: produce.agent,
     text: produce.text,
-    output: produces,
+    output: produce.extraOutputs ? [produces as SlotHandle, ...produce.extraOutputs] : produces,
     input: [...verdicts, ...(produce.optionalInputs ?? [])].map((slotToHide) => input.optional(slotToHide)),
   });
   const reviewSteps = seats.map((seat, index) =>
