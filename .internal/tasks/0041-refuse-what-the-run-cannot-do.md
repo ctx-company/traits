@@ -1,6 +1,6 @@
 # 0041 — Refuse what the run cannot do, instead of blaming the worker for it
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** item 1 LANDED 2026-07-29 · items 2–3 below · **Raised:** 2026-07-29
 
 ## The failure class
 
@@ -45,7 +45,22 @@ Measured across this machine's 55 ctx-gate sessions:
 
 ## What to build
 
-### 1. Preflight commands at dispatch
+### 1. Preflight commands at dispatch — LANDED
+
+Implemented in `modules/io/src/dispatch_preflight.rs`
+(`unrunnable_check_commands`, `unrunnable_refusal_message`), called from
+`modules/io/src/run.rs` immediately after the standing-wall preflight. Verified
+in a scratch repository with no `test` recipe:
+
+```
+invalid manifest at run.trait: sequence building-body declares `just test`,
+which cannot run here: the Justfile has no recipe `test`. add a `test:` recipe
+to this repository's Justfile so the step has something to run
+```
+
+and verified to pass once the recipe exists. Full suite green (739 passed).
+
+The original specification follows, as the record of what was built:
 
 `modules/io/src/dispatch_preflight.rs` already exists and already refuses runs
 before a session, worktree, or first frame (P414 standing walls). Its call site
@@ -70,25 +85,63 @@ them the same way if they ever host a check step.
 The refusal must name the sequence, the argv, the reason, and the remedy —
 "add a `test:` recipe to this repository's Justfile" is the whole point.
 
-### 2. Automatic within-run repeat detection
+### 2. Automatic within-run repeat detection — RESCOPED, and here is why
 
-A blocker id repeating unchanged across rounds means the last fix did not move
-it. That is a wall, and it should park with a diagnosis rather than spend the
-remaining budget. The storage and the concept already exist (`wall-id`, park
-reports, `dispatch_preflight::find_standing_wall`); what is missing is that it
-**fires by itself** instead of waiting for a prose label.
+The obvious version of this is not achievable as first written, and the reason
+is worth stating before someone tries it.
 
-Threshold: three consecutive rounds carrying the same blocker id. Two is normal
-— a fix that misses once is ordinary. Three is the loop telling you the
-reviewer and the worker disagree about what the fix even is.
+"A blocker id repeating three rounds should park" requires whatever enforces it
+to understand `blockers[].id`. **The runtime has no such vocabulary and must
+not gain one.** It advances loops over slots and guards; `blockers`, `status`,
+and `advisory` are one trait's schema, invented in `implement`'s own TypeScript.
+Teaching `guards.rs` to parse them would make the generic loop engine depend on
+one trait's output shape — the same category error as hard-coding `just test`
+into a package meant to be installed elsewhere, which is what this whole task
+exists to correct.
 
-### 3. Phase validation must be runnable where the phase runs
+Two achievable shapes, and the choice is a real one:
+
+**(a) The trait declares its own repeat identity.** One optional field on the
+loop: which slot carries findings, and the path within it that identifies one
+(`blockers[].id`). The runtime compares that projection across iterations and
+parks after N. Keeps the vocabulary in the trait, where it belongs; costs a
+small typed addition to the loop declaration and the canonical model.
+
+**(b) Byte-identical stall detection.** Fully generic — park when a designated
+slot's digest is unchanged for N iterations, no schema knowledge at all. Cheap,
+and it would have caught the ctx-gate gate slot, whose digest was byte-identical
+for six rounds. It would NOT have caught the repeats seen in
+`run-56d1b1346536`, where the same blocker id came back with reworded prose
+each round, so the digest moved every time.
+
+**Recommend (a), and note that (b) is nearly free and catches a real case (a)
+does not — they compose.** Ship (b) first if something must ship now: a stuck
+gate is the more common failure and the one with zero design cost.
+
+Threshold either way: three consecutive rounds. Two is normal — a fix that
+misses once is ordinary. Three is the loop telling you the reviewer and the
+worker disagree about what the fix even is.
+
+### 3. Phase validation must be runnable where the phase runs — APPLIED
 
 An authoring rule, not code: a phase's declared Validation sequence must be
 executable in the environment the phase actually runs in. `demo-bootstrap` in a
 worktree fails this, and no amount of worker effort fixes it.
 
-**Do not resolve that case by seeding `.env`.** ctx-gate's own Justfile unsets
+Applied to both ctx-gate phases on 2026-07-29: `just demo-bootstrap` removed
+from both Validation blocks, DEMO-CRITICAL-4's scenario required to be
+self-contained from the canonical fixture, and DEMO-CRITICAL-5's real
+Slack/browser/tunnel proof moved into an explicit *Owner acceptance* section
+marked not-a-blocker. Both phases also state that the repository gate is
+`just test`, that it runs no test target, and that a gate result is not evidence
+of prohibited work — the misreading that cost six rounds.
+
+Nothing enforces this rule mechanically, and item 1's preflight does not reach
+it: a phase's Validation list is prose in a plan document, not a declared
+command. That gap is the reason this class recurs, and closing it means giving
+phases typed validation — a much larger change, deliberately not chartered here.
+
+**Do not resolve the `.env` case by seeding it.** ctx-gate's own Justfile unsets
 six secrets by name after sourcing it, including the Slack bot token and the
 ngrok authtoken; handing those to an agent breaks the same rule as "credentials
 must never reach argv" (0003).
@@ -113,7 +166,9 @@ must never reach argv" (0003).
 
 ## Done when
 
-A trait declaring a command this repository cannot execute is refused at
-dispatch with a message naming the remedy; a blocker repeating three rounds
-parks with a diagnosis instead of exhausting the budget; and no phase ships a
-Validation sequence its own run environment cannot execute.
+1. **Done.** A trait declaring a command this repository cannot execute is
+   refused at dispatch with a message naming the remedy.
+2. A loop that stops converging parks with a diagnosis instead of exhausting its
+   budget — by (b) at minimum, by (a) if the typed declaration is chartered.
+3. **Applied to ctx-gate.** No phase ships a Validation sequence its own run
+   environment cannot execute. Mechanically unenforced; see the note above.
