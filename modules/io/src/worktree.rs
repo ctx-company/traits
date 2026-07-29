@@ -233,16 +233,36 @@ pub fn derive_worktree_id(session_id: &str) -> String {
 /// collision this capability exists to close. Only a standalone `drive`
 /// resuming its own prior run should reuse an existing worktree; use
 /// [`resume_or_prepare_worktree`] for that caller.
+/// Everything about HOW a worktree is prepared, as distinct from WHAT goes in
+/// it ([`WorktreeContents`]): the setup commands, their environment and
+/// budgets, the git timeout, and the optional phase narrator. One struct
+/// rather than six trailing parameters — the list had grown past clippy's
+/// argument bound, and the alternative (an `#[allow]`) is the exact
+/// house-rule violation this repository's own reviewer blocks.
+pub struct PrepareOptions<'a> {
+    pub setup: &'a [Vec<String>],
+    pub setup_env: &'a BTreeMap<String, String>,
+    pub setup_timeout_ms: Option<u64>,
+    pub setup_capture_bytes: Option<u64>,
+    pub worktree_add_timeout_ms: Option<u64>,
+    /// Phase-boundary narrator (P551): called with a short message as each
+    /// preparation phase starts. `None` runs silently.
+    pub progress: Option<&'a dyn Fn(&str)>,
+}
+
 pub fn prepare_worktree(
     id: &str,
     contents: WorktreeContents<'_>,
-    setup: &[Vec<String>],
-    setup_env: &BTreeMap<String, String>,
-    setup_timeout_ms: Option<u64>,
-    setup_capture_bytes: Option<u64>,
-    worktree_add_timeout_ms: Option<u64>,
-    progress: Option<&dyn Fn(&str)>,
+    options: PrepareOptions<'_>,
 ) -> crate::Result<PreparedWorktree> {
+    let PrepareOptions {
+        setup,
+        setup_env,
+        setup_timeout_ms,
+        setup_capture_bytes,
+        worktree_add_timeout_ms,
+        progress,
+    } = options;
     let (repo_root, path, branch) = resolve_worktree_location(id)?;
     let mut warnings = RetryWarnings::new();
     if let Some(existing_branch) = existing_worktree_branch(&repo_root, &path, &mut warnings)? {

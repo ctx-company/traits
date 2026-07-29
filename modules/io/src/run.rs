@@ -536,19 +536,21 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                     seeds: &prepared_assignments.worktree.seed,
                     warm: &prepared_assignments.worktree.warm,
                 },
-                &prepared_assignments.worktree.setup,
-                &worktree_env,
-                prepared_assignments
-                    .worktree
-                    .setup_seconds
-                    .map(|s| s * 1000),
-                prepared_assignments.worktree.setup_capture_bytes,
-                Some(crate::harness_config::resolve_git_long_timeout_ms(
-                    Utf8Path::new("."),
-                )),
-                request
-                    .narrate_progress
-                    .then_some(&narrate as &dyn Fn(&str)),
+                crate::worktree::PrepareOptions {
+                    setup: &prepared_assignments.worktree.setup,
+                    setup_env: &worktree_env,
+                    setup_timeout_ms: prepared_assignments
+                        .worktree
+                        .setup_seconds
+                        .map(|s| s * 1000),
+                    setup_capture_bytes: prepared_assignments.worktree.setup_capture_bytes,
+                    worktree_add_timeout_ms: Some(
+                        crate::harness_config::resolve_git_long_timeout_ms(Utf8Path::new(".")),
+                    ),
+                    progress: request
+                        .narrate_progress
+                        .then_some(&narrate as &dyn Fn(&str)),
+                },
             )?;
             worktree_retry_warnings = prepared.retry_warnings;
             let prepared_path = prepared.path.to_string();
