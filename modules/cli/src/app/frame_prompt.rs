@@ -9,7 +9,24 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-const MAX_INLINE_VALUE_BYTES: usize = 16 * 1024;
+/// Ceiling for one inlined input VALUE, matching the whole-prompt-body class
+/// below rather than a stricter one.
+///
+/// This was 16 KiB, set when every slot value was a summary or a verdict of a
+/// few paragraphs. The 2026-07-30 circulation redesign made the verdict a
+/// cumulative step ledger, and the first live run under it deadlocked here:
+/// a six-blocker verdict serialized to 16,434 bytes — 50 over — so the frame
+/// dropped the ENTIRE value ("no per-step blocker list to execute against",
+/// the worker reported, correctly making no blind edits). Since the ledger
+/// only grows and the reviewer's self-read passes through the same gate,
+/// every later round wasted identically: a hard loop deadlock from a limit
+/// two documents were never told about.
+///
+/// One value can never exceed the whole body's own configurable ceiling
+/// anyway (`[run] inline-prompt-bytes`, default 128 KiB) — that check, plus
+/// the model's context, is the real budget authority. A tighter per-value
+/// constant adds only the failure mode above.
+const MAX_INLINE_VALUE_BYTES: usize = 128 * 1024;
 /// Inherited by every resolved-frame-prompt caller when `[run]
 /// inline-prompt-bytes` is absent (P489).
 pub(crate) const DEFAULT_MAX_INLINE_PROMPT_BYTES: u64 = 128 * 1024;
