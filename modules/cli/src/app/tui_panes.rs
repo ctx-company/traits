@@ -142,6 +142,19 @@ impl PaneLayoutResult {
             .find(|(pane_id, _)| *pane_id == id)
             .map(|(_, rect)| *rect)
     }
+
+    /// Overwrites (or inserts) `id`'s own rect — for a caller merging a
+    /// sub-renderer's own resolved geometry (e.g. `render_pane_body`'s
+    /// bounded-progress split) into a cached whole-screen layout that a
+    /// different tree produced for every other pane, so cached rects for
+    /// `id` never drift from what was actually drawn.
+    pub(crate) fn set(&mut self, id: PaneId, rect: Rect) {
+        if let Some(existing) = self.rects.iter_mut().find(|(pane_id, _)| *pane_id == id) {
+            existing.1 = rect;
+        } else {
+            self.rects.push((id, rect));
+        }
+    }
 }
 
 /// Draws a bordered pane with `title` in the border's top-left, styled per

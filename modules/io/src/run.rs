@@ -653,6 +653,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 out_of_tree_mutations: Vec::new(),
                 started_at_epoch: Some(crate::run_liveness::epoch_secs()),
                 trust_approval,
+                session_title: None,
             },
         },
     )?;

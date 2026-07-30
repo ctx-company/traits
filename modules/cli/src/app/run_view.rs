@@ -142,9 +142,10 @@ struct RunPanelState {
     current_stream: VecDeque<StreamRow>,
     view: RunView,
     scrolls: PaneScrolls,
-    tree_follow: bool,
+    progress_follow: bool,
+    journey_follow: bool,
     history_follow: bool,
-    stream_follow: bool,
+    current_follow: bool,
     focus: FocusRing,
     /// Keys drained by the existing input pump. They are replayed inside the
     /// draw pass after the current tree and inner pane rectangles are known.
@@ -166,6 +167,11 @@ struct RunPanelState {
     /// re-derived from `trait_ref`/`plan`/`session`, which know nothing
     /// about a merge span).
     merge_rows: Vec<MergeRowView>,
+    /// P552 one-time narrator session title, set once by
+    /// [`RunPanel::set_title`] after a successful title dispatch — `None`
+    /// (a blank title row) before success and permanently for a
+    /// missing-narrator/failed/killed attempt. Never a placeholder.
+    title: Option<String>,
 }
 
 /// One row of the CURRENT step's verbatim message/thinking stream.
@@ -184,9 +190,55 @@ enum StreamRowKind {
 }
 
 const PROGRESS_PANE: PaneId = "progress";
+const JOURNEY_PANE: PaneId = "journey";
 const HISTORY_PANE: PaneId = "history";
 const CURRENT_PANE: PaneId = "current";
 const CURRENT_MIN_OUTER_ROWS: u16 = 8;
+/// P552: below this width every populated pane stacks vertically instead of
+/// the 2x2 (or narrower 2-pane) grid — unchanged from the pre-P552 threshold;
+/// re-evaluated against the extra journey pane/borders and confirmed still
+/// wide enough for a 60/40 two-column split to stay usable.
+const NARROW_WIDTH_THRESHOLD: u16 = 109;
+
+/// P552: the (up to) four panes a run's presentation contract can show,
+/// identified once so [`pane_tree`], [`render_pane_body`], and every caller
+/// agree on the same ids — a live run's four leaves, dashboard preview's
+/// progress/journey pair, and dashboard attach's four leaves each supply
+/// their own set of ids here (dashboard's ids differ from the live ones so
+/// its existing focus ring, which also holds the sessions list, is
+/// unaffected by this module's own reconciliation).
+pub(crate) struct PaneIds {
+    pub(crate) progress: PaneId,
+    pub(crate) journey: PaneId,
+    pub(crate) history: PaneId,
+    pub(crate) current: PaneId,
+}
+
+pub(crate) const LIVE_PANE_IDS: PaneIds = PaneIds {
+    progress: PROGRESS_PANE,
+    journey: JOURNEY_PANE,
+    history: HISTORY_PANE,
+    current: CURRENT_PANE,
+};
+
+/// P552: which lines/events populate each of the (up to) four panes this
+/// module can render — entirely source-driven, with no separate live/
+/// preview/attached mode flag anywhere in this module. A live run and a
+/// dashboard attach supply all four; a dashboard preview supplies only
+/// `progress`/`journey`; a legacy session with no activity sidecar omits
+/// `history`/`current` rather than fabricating them.
+pub(crate) struct PaneData<'a> {
+    pub(crate) progress: Option<&'a [tui::Line]>,
+    pub(crate) journey: Option<&'a [tui::Line]>,
+    pub(crate) history: Option<&'a [EventRow]>,
+    pub(crate) current: Option<&'a [EventRow]>,
+    /// P552: the title row this pane set's own body sits under — [`PaneTitleRow::None`]
+    /// for a dashboard preview, [`PaneTitleRow::Reserved`] for a live run or
+    /// a dashboard attach, so [`render_pane_body`] gives every surface
+    /// identical title behavior rather than each caller reserving/rendering
+    /// its own row.
+    pub(crate) title: PaneTitleRow<'a>,
+}
 
 const CURRENT_STREAM_CAP: usize = 400;
 
@@ -245,9 +297,6 @@ enum MergeRowState {
 
 #[derive(Debug, Clone)]
 struct RunHeader {
-    run_id: String,
-    session_id: String,
-    trait_name: String,
     input: String,
     harnesses: String,
     done: usize,
@@ -371,8 +420,15 @@ impl RunPanel {
         let active_key = active_key(&session);
         let now = Instant::now();
         let active_started = active_key.as_ref().map(|key| (key.clone(), now));
+        // A resumed drive whose title already resolved in an earlier
+        // invocation shows it immediately — never re-dispatched, per
+        // `SessionTitleState`'s "resolved title is read-only" contract.
+        let title = session
+            .provenance
+            .session_title
+            .as_ref()
+            .and_then(|state| state.title.clone());
         let view = run_view(
-            &trait_name,
             &trait_ref,
             &plan,
             &session,
@@ -413,9 +469,10 @@ impl RunPanel {
             current_stream: VecDeque::new(),
             view,
             scrolls: PaneScrolls::new(),
-            tree_follow: true,
+            progress_follow: true,
+            journey_follow: true,
             history_follow: true,
-            stream_follow: true,
+            current_follow: true,
             // The step list is what a watcher reads first, so it holds focus by
             // default; tab cycles to the activity panes.
             focus: FocusRing::new(vec![PROGRESS_PANE]),
@@ -423,6 +480,7 @@ impl RunPanel {
             modal: None,
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
+            title,
         }));
         let panel = Self {
             state: Arc::clone(&state),
@@ -505,7 +563,7 @@ impl RunPanel {
                 // summary or the facts fallback, never its raw thinking ticks.
                 state.current_stream.clear();
                 state.scrolls.reset(CURRENT_PANE);
-                state.stream_follow = true;
+                state.current_follow = true;
             }
             // The accepted final step clears the active key. Keep its finished
             // narration through the terminal repaint instead of replacing it
@@ -710,6 +768,18 @@ impl RunPanel {
         render_locked(&mut state);
     }
 
+    /// P552: record the one successful narrator session-title result and
+    /// repaint the title row above the panes. Never called for a
+    /// missing-narrator/failed/killed attempt — that path leaves the row
+    /// permanently blank instead of calling this with a placeholder.
+    pub(crate) fn set_title(&self, title: String) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.title = Some(title);
+        render_locked(&mut state);
+    }
+
     fn render(&self) {
         let Ok(mut state) = self.state.lock() else {
             return;
@@ -788,7 +858,6 @@ fn mark_timer_painted(state: &mut RunPanelState) {
 
 fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
     state.view = run_view(
-        &state.trait_name,
         &state.trait_ref,
         &state.plan,
         &state.session,
@@ -886,15 +955,31 @@ fn render_locked(state: &mut RunPanelState) {
     let input_generation = state.input_generation.load(Ordering::Acquire);
     state.repaint.apply_resize();
     poll_and_apply_keys(state);
-    let (tree_lines, active_row) = render_tree_lines_with_active_row(&state.view);
-    let history_lines = story_history_lines(&state.view);
-    let stream_lines = story_stream_lines(state);
+    let progress_lines = progress_lines(&state.view);
+    let (journey_lines, active_row) = journey_lines_with_active_row(&state.view);
+    let history_rows = story_history_lines(&state.view);
+    let mut current_rows = story_stream_lines(state);
+    // P552: the trailing in-flight line is not a special overlay outside the
+    // event model — it folds into the same `current_rows` set the recorded
+    // stream uses, so `render_pane_body` formats every CURRENT row (recorded
+    // or in-flight) through the one `event_row_line` contract.
+    if let Some(overlay) = stream_overlay_line(state) {
+        current_rows.push(overlay);
+    }
+    let title_line = state.title.as_ref().map(|title| {
+        title_row_line(
+            title,
+            &state.trait_name,
+            state.session.provenance.started_at_epoch,
+        )
+    });
     let RunPanelState {
         repaint,
         scrolls,
-        tree_follow,
+        progress_follow,
+        journey_follow,
         history_follow,
-        stream_follow,
+        current_follow,
         focus,
         pending_keys,
         modal,
@@ -904,85 +989,204 @@ fn render_locked(state: &mut RunPanelState) {
     let _ = repaint.draw(|frame| {
         render_live_panes(
             frame,
-            LivePaneFrame {
-                tree_lines: &tree_lines,
+            LiveFrame {
+                title_line: title_line.as_ref(),
+                progress_lines: &progress_lines,
+                journey_lines: &journey_lines,
                 active_row,
-                history_lines: &history_lines,
-                stream_lines: &stream_lines,
+                history_rows: &history_rows,
+                current_rows: &current_rows,
                 scrolls,
-                tree_follow,
+                progress_follow,
+                journey_follow,
                 history_follow,
-                stream_follow,
+                current_follow,
                 focus,
                 pending_keys,
                 modal,
             },
         );
     });
-    state.last_tree_lines = tree_lines;
+    state.last_tree_lines = journey_lines;
     state
         .handled_generation
         .fetch_max(input_generation, Ordering::Release);
 }
 
-fn live_pane_tree(area: Rect, history_rows: usize) -> PaneTree {
+/// P552 title row: `<bold title> · <trait name> · Started at <HH:MM:SS>`,
+/// the clock read from `started_at_epoch` (UTC — the ledger stamps wall-clock
+/// epoch seconds only, never a timezone). Blank (an empty line, occupying its
+/// reserved row without content) is rendered by the caller simply never
+/// calling this — there is no placeholder variant.
+pub(crate) fn title_row_line(
+    title: &str,
+    trait_name: &str,
+    started_at_epoch: Option<u64>,
+) -> tui::Line {
+    let mut line = tui::Line::blank();
+    line.push(title.to_string(), tui::Tone::Bold);
+    line.push(" \u{b7} ", tui::Tone::Muted);
+    line.push(trait_name.to_string(), tui::Tone::Default);
+    if let Some(epoch) = started_at_epoch {
+        line.push(" \u{b7} ", tui::Tone::Muted);
+        line.push(
+            format!("Started at {}", epoch_clock_utc(epoch)),
+            tui::Tone::Muted,
+        );
+    }
+    line
+}
+
+/// Pure `HH:MM:SS` decomposition of a UNIX epoch, UTC (no calendar handling
+/// needed — only the seconds-of-day remainder). No `chrono`/`time` dependency
+/// exists in this workspace for a single clock string.
+fn epoch_clock_utc(epoch: u64) -> String {
+    let seconds_of_day = epoch % 86_400;
+    let hours = seconds_of_day / 3_600;
+    let minutes = (seconds_of_day % 3_600) / 60;
+    let seconds = seconds_of_day % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+/// P552: builds a [`PaneTree`] with a leaf for exactly the panes `data`
+/// supplies content for — no live/preview/attached mode flag anywhere in
+/// this function. Full data (all four `Some`) produces the bounded-progress
+/// 2x2 grid; preview data (`history`/`current` both `None`) naturally
+/// collapses to the progress/journey left stack alone; a narrow terminal
+/// stacks every populated pane instead, without omitting any of them.
+/// `ids.progress`/`ids.journey` must not both be `None` in `data` — every
+/// caller has at least a progress or a journey source.
+pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneTree {
     let progress = || PaneTree::Leaf {
-        id: PROGRESS_PANE,
+        id: ids.progress,
         title: "progress".to_string(),
     };
+    let journey = || PaneTree::Leaf {
+        id: ids.journey,
+        title: "journey".to_string(),
+    };
+    let history = || PaneTree::Leaf {
+        id: ids.history,
+        title: "history".to_string(),
+    };
     let current = || PaneTree::Leaf {
-        id: CURRENT_PANE,
+        id: ids.current,
         title: "current activity".to_string(),
     };
-    if area.width < 109 {
+    let has_progress = data.progress.is_some();
+    let has_journey = data.journey.is_some();
+    let has_history = data.history.is_some();
+    let has_current = data.current.is_some();
+    debug_assert!(
+        has_progress || has_journey,
+        "pane_tree requires at least a progress or journey source"
+    );
+
+    if area.width < NARROW_WIDTH_THRESHOLD {
+        let mut children = Vec::new();
+        if has_progress {
+            children.push((Constraint::Min(3), progress()));
+        }
+        if has_journey {
+            children.push((Constraint::Min(3), journey()));
+        }
+        if has_history {
+            children.push((Constraint::Min(3), history()));
+        }
+        if has_current {
+            children.push((Constraint::Min(CURRENT_MIN_OUTER_ROWS), current()));
+        }
         return PaneTree::Split {
             dir: Direction::Vertical,
-            children: vec![
-                (Constraint::Min(0), progress()),
-                (Constraint::Min(CURRENT_MIN_OUTER_ROWS), current()),
-            ],
+            children,
         };
     }
-    let story = if history_rows > 0 && area.height > CURRENT_MIN_OUTER_ROWS {
+
+    let left = match (has_progress, has_journey) {
+        (true, true) => {
+            // P552: progress is bounded to its own handful of standing-fact
+            // rows so journey — the pane with unbounded content — receives
+            // the rest of the left column's height.
+            let progress_rows = data.progress.map_or(0, <[_]>::len);
+            let progress_outer = u16::try_from(progress_rows)
+                .unwrap_or(u16::MAX)
+                .saturating_add(2);
+            PaneTree::Split {
+                dir: Direction::Vertical,
+                children: vec![
+                    (Constraint::Length(progress_outer), progress()),
+                    (Constraint::Min(3), journey()),
+                ],
+            }
+        }
+        (true, false) => progress(),
+        (false, true) => journey(),
+        (false, false) => PaneTree::Split {
+            dir: Direction::Vertical,
+            children: Vec::new(),
+        },
+    };
+
+    let right = if has_history && has_current && area.height > CURRENT_MIN_OUTER_ROWS {
+        let history_rows = data.history.map_or(0, <[_]>::len);
         let history_cap = area.height.saturating_sub(CURRENT_MIN_OUTER_ROWS) / 2;
         let history_height = u16::try_from(history_rows)
             .unwrap_or(u16::MAX)
             .saturating_add(2)
             .min(history_cap);
-        PaneTree::Split {
+        Some(PaneTree::Split {
             dir: Direction::Vertical,
             children: vec![
-                (
-                    Constraint::Max(history_height),
-                    PaneTree::Leaf {
-                        id: HISTORY_PANE,
-                        title: "history".to_string(),
-                    },
-                ),
+                (Constraint::Max(history_height), history()),
                 (Constraint::Min(CURRENT_MIN_OUTER_ROWS), current()),
             ],
-        }
+        })
+    } else if has_current {
+        Some(current())
+    } else if has_history {
+        Some(history())
     } else {
-        current()
+        None
     };
-    PaneTree::Split {
-        dir: Direction::Horizontal,
-        children: vec![
-            (Constraint::Percentage(60), progress()),
-            (Constraint::Percentage(40), story),
-        ],
+
+    match right {
+        Some(right) => PaneTree::Split {
+            dir: Direction::Horizontal,
+            children: vec![
+                (Constraint::Percentage(60), left),
+                (Constraint::Percentage(40), right),
+            ],
+        },
+        None => left,
     }
 }
 
-struct LivePaneFrame<'a> {
-    tree_lines: &'a [tui::Line],
+struct LiveFrame<'a> {
+    /// `None` before the P552 title dispatch succeeds (or for a
+    /// permanently title-less run) — the reserved row is left blank rather
+    /// than filled with a placeholder.
+    title_line: Option<&'a tui::Line>,
+    /// The PROGRESS pane's bounded standing facts — [`progress_lines`].
+    progress_lines: &'a [tui::Line],
+    /// The JOURNEY pane's full content — [`journey_lines_with_active_row`].
+    journey_lines: &'a [tui::Line],
     active_row: Option<usize>,
-    history_lines: &'a [tui::Line],
-    stream_lines: &'a [tui::Line],
+    /// Untruncated history/current-activity events — [`event_row_line`]
+    /// truncates each to a single physical row only once this pane's inner
+    /// width is known, inside [`render_pane_body`] itself.
+    history_rows: &'a [EventRow],
+    /// The CURRENT pane's full row set — the recorded stream plus, when
+    /// live, the trailing in-flight overlay already folded in by the
+    /// caller (see [`RunPanel`]'s render path) so this module's shared
+    /// [`render_pane_body`] treats every CURRENT row through the one
+    /// `EventRow`/[`event_row_line`] contract, with no separate overlay
+    /// case.
+    current_rows: &'a [EventRow],
     scrolls: &'a mut PaneScrolls,
-    tree_follow: &'a mut bool,
+    progress_follow: &'a mut bool,
+    journey_follow: &'a mut bool,
     history_follow: &'a mut bool,
-    stream_follow: &'a mut bool,
+    current_follow: &'a mut bool,
     focus: &'a mut FocusRing,
     pending_keys: &'a mut Vec<KeyEvent>,
     modal: Option<&'a tui_kit::Modal>,
@@ -1000,16 +1204,29 @@ fn drawable_pane_ids(tree: &PaneTree, layout: &PaneLayoutResult) -> Vec<PaneId> 
         .collect()
 }
 
-fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LivePaneFrame<'_>) {
-    let LivePaneFrame {
-        tree_lines,
+/// The live run surface's own footer chrome, wrapping the shared
+/// [`render_pane_body`] for its title row + four-pane body — the live run
+/// has no standing-facts `progress` source separate from `tree_lines` today
+/// (its header still folds progress-facts and journey rows into one
+/// `tree_lines` vector; splitting that fully into its own `PaneData::progress`
+/// source is tracked separately), so this wrapper hands the tree's own
+/// content to the `journey` pane and leaves `progress` populated from the
+/// same standing facts computed by [`progress_lines`]. Title reservation and
+/// rendering live in [`render_pane_body`] itself (via `PaneData::title`), so
+/// this wrapper only carves out the footer row.
+fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
+    let LiveFrame {
+        title_line,
+        progress_lines,
+        journey_lines,
         active_row,
-        history_lines,
-        stream_lines,
+        history_rows,
+        current_rows,
         scrolls,
-        tree_follow,
+        progress_follow,
+        journey_follow,
         history_follow,
-        stream_follow,
+        current_follow,
         focus,
         pending_keys,
         modal,
@@ -1017,7 +1234,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LivePaneFrame<'_>) {
     let full_area = frame.area();
     let regions = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .constraints([Constraint::Min(4), Constraint::Length(1)])
         .split(full_area);
     frame.render_widget(
         tui_kit::keymap_footer(
@@ -1026,38 +1243,191 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LivePaneFrame<'_>) {
         ),
         regions[1],
     );
-    let history_source = history_lines
-        .iter()
-        .map(tui_ratatui::render_line)
-        .collect::<Vec<_>>();
-    let history_width = regions[0]
-        .width
-        .saturating_mul(40)
-        .saturating_div(100)
-        .saturating_sub(2);
-    let history_row_count = tui_panes::wrapped_lines(&history_source, history_width).len();
-    let tree = live_pane_tree(regions[0], history_row_count);
-    let layout = tree.resolve(regions[0]);
-    focus.reconcile(drawable_pane_ids(&tree, &layout), CURRENT_PANE);
-    let progress_outer = layout.rect(PROGRESS_PANE).expect("progress pane");
-    let current_outer = layout.rect(CURRENT_PANE).expect("current pane");
-    let history_outer = layout.rect(HISTORY_PANE);
-    let progress_inner = tui_panes::pane_inner(progress_outer);
-    let current_inner = tui_panes::pane_inner(current_outer);
+    let data = PaneData {
+        progress: Some(progress_lines),
+        journey: Some(journey_lines),
+        history: Some(history_rows),
+        current: Some(current_rows),
+        title: PaneTitleRow::Reserved(title_line),
+    };
+    render_pane_body(
+        frame,
+        regions[0],
+        &LIVE_PANE_IDS,
+        &data,
+        active_row,
+        Some(CURRENT_PANE),
+        PaneRenderState {
+            scrolls,
+            follow: PaneFollow {
+                progress: progress_follow,
+                journey: journey_follow,
+                history: history_follow,
+                current: current_follow,
+            },
+            focus,
+            pending_keys,
+            key_target: None,
+        },
+    );
+    if let Some(modal) = modal {
+        tui_kit::render_modal(frame, full_area, modal);
+    }
+}
+
+/// P552: which of the (up to) four panes' user-driven scroll state should
+/// stay pinned to its own tail/anchor whenever new content lands — a live
+/// run and a dashboard attach each own their own four bools; a caller with
+/// fewer sources than four (a dashboard preview) still owns all four, since
+/// [`render_pane_body`] only ever reads the bool for a pane `data` actually
+/// populates.
+pub(crate) struct PaneFollow<'a> {
+    pub(crate) progress: &'a mut bool,
+    pub(crate) journey: &'a mut bool,
+    pub(crate) history: &'a mut bool,
+    pub(crate) current: &'a mut bool,
+}
+
+/// The mutable state [`render_pane_body`] reads and updates on every call —
+/// grouped into one struct (rather than four separate parameters) so the
+/// shared renderer's own signature stays under clippy's argument-count
+/// lint without suppressing it.
+pub(crate) struct PaneRenderState<'a> {
+    pub(crate) scrolls: &'a mut PaneScrolls,
+    pub(crate) follow: PaneFollow<'a>,
+    pub(crate) focus: &'a mut FocusRing,
+    pub(crate) pending_keys: &'a mut Vec<KeyEvent>,
+    /// P552 review `live-run-pane-contract-absent`: the pane a drained
+    /// scroll key addresses instead of `focus.current()`, when `Some` — see
+    /// [`render_pane_body`]'s own doc for why the ordinary (list-visible)
+    /// SESSIONS preview needs this. `None` for a live run or a dashboard
+    /// attach, whose `focus` is reconciled to the very tree being drawn.
+    pub(crate) key_target: Option<PaneId>,
+}
+
+/// P552's title row, owned by [`render_pane_body`] itself so a live run and
+/// a dashboard attach receive identical title behavior — a dashboard
+/// preview supplies [`PaneTitleRow::None`] (no row consumed at all, per the
+/// implementation draft's out-of-scope: dashboard previews never carry a
+/// title), while a live run and an attach both supply [`PaneTitleRow::Reserved`],
+/// which consumes its one row whether or not a title has resolved yet
+/// (`None` renders blank — there is no placeholder variant, per
+/// [`title_row_line`]).
+pub(crate) enum PaneTitleRow<'a> {
+    None,
+    Reserved(Option<&'a tui::Line>),
+}
+
+fn title_row_area(area: Rect) -> Rect {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area)[0]
+}
+
+/// The pane body area after [`PaneTitleRow`]'s own row (if any) is carved
+/// off `area` — the single source of truth both [`render_pane_body`]'s own
+/// paint pass and a caller's cached pane-layout resolution (e.g. dashboard
+/// attach's `state.last_pane_layout`) must agree on, so generic scroll/focus
+/// handling never reads rects that are off by the title row.
+pub(crate) fn pane_body_area(area: Rect, title: &PaneTitleRow<'_>) -> Rect {
+    match title {
+        PaneTitleRow::None => area,
+        PaneTitleRow::Reserved(_) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area)[1],
+    }
+}
+
+/// P552's one shared pane renderer: resolves `data`'s populated panes into a
+/// [`PaneTree`] via [`pane_tree`], reconciles focus, formats every
+/// history/current-activity row through [`event_row_line`], and renders
+/// border-only content directly into [`tui_panes::pane_inner`] — the sole
+/// renderer for a live run's body, dashboard preview's progress/journey
+/// pair, and dashboard attach's full four-pane body. `reconcile_default`
+/// is `Some` only when `focus` is scoped to exactly this pane set (a live
+/// run, or a dashboard attach with its session list hidden); a dashboard
+/// preview, whose `focus` also spans the sessions list, passes `None` so
+/// this call never steals focus away from a pane outside this tree.
+///
+/// P552 review `live-run-pane-contract-absent`: `state.key_target`, when
+/// `Some`, is the pane a drained scroll key addresses instead of
+/// `focus.current()` — the ordinary (list-visible) SESSIONS preview queues
+/// PageUp/PageDown into `pending_keys` while `focus` itself stays on the
+/// sessions list (so the list's own selection and visibility never move),
+/// and needs those keys to reach the journey pane anyway. A live run or a
+/// dashboard attach, whose `focus` is reconciled to this very tree, pass
+/// `None` and keep routing by `focus.current()` as before.
+pub(crate) fn render_pane_body(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    ids: &PaneIds,
+    data: &PaneData<'_>,
+    journey_active_row: Option<usize>,
+    reconcile_default: Option<PaneId>,
+    state: PaneRenderState<'_>,
+) {
+    if let PaneTitleRow::Reserved(Some(title_line)) = &data.title {
+        let title_area = title_row_area(area);
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(vec![tui_ratatui::render_line(title_line)]),
+            title_area,
+        );
+    }
+    let area = pane_body_area(area, &data.title);
+    let PaneRenderState {
+        scrolls,
+        follow,
+        focus,
+        pending_keys,
+        key_target,
+    } = state;
+    let PaneFollow {
+        progress: progress_follow,
+        journey: journey_follow,
+        history: history_follow,
+        current: current_follow,
+    } = follow;
+    let tree = pane_tree(ids, area, data);
+    let layout = tree.resolve(area);
+    if let Some(default) = reconcile_default {
+        focus.reconcile(drawable_pane_ids(&tree, &layout), default);
+    }
+    let progress_outer = data.progress.and(layout.rect(ids.progress));
+    let journey_outer = data.journey.and(layout.rect(ids.journey));
+    let history_outer = data.history.and(layout.rect(ids.history));
+    let current_outer = data.current.and(layout.rect(ids.current));
+    let progress_inner = progress_outer.map(tui_panes::pane_inner);
+    let journey_inner = journey_outer.map(tui_panes::pane_inner);
     let history_inner = history_outer.map(tui_panes::pane_inner);
-    let progress = tree_lines
-        .iter()
-        .map(tui_ratatui::render_line)
-        .collect::<Vec<_>>();
-    let history =
-        tui_panes::wrapped_lines(&history_source, history_inner.map_or(0, |rect| rect.width));
-    let stream = tui_panes::wrapped_lines(
-        &stream_lines
+    let current_inner = current_outer.map(tui_panes::pane_inner);
+
+    let progress = data.progress.map(|lines| {
+        lines
             .iter()
             .map(tui_ratatui::render_line)
-            .collect::<Vec<_>>(),
-        current_inner.width,
-    );
+            .collect::<Vec<_>>()
+    });
+    let journey = data.journey.map(|lines| {
+        lines
+            .iter()
+            .map(tui_ratatui::render_line)
+            .collect::<Vec<_>>()
+    });
+    let history = data.history.map(|rows| {
+        event_row_lines(rows, history_inner.map_or(0, |rect| rect.width))
+            .iter()
+            .map(tui_ratatui::render_line)
+            .collect::<Vec<_>>()
+    });
+    let current = data.current.map(|rows| {
+        event_row_lines(rows, current_inner.map_or(0, |rect| rect.width))
+            .iter()
+            .map(tui_ratatui::render_line)
+            .collect::<Vec<_>>()
+    });
+
     for key in pending_keys.drain(..) {
         if let Some(step) = tui_panes::tab_cycle_key(&key) {
             match step {
@@ -1069,99 +1439,105 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LivePaneFrame<'_>) {
         let Some(delta) = tui_kit::scroll_key(&key) else {
             continue;
         };
-        let Some(id) = focus.current() else {
+        let Some(id) = key_target.or_else(|| focus.current()) else {
             continue;
         };
-        match id {
-            PROGRESS_PANE => {
-                let scroll = scrolls.get_mut(id);
-                scroll.set_len(progress.len());
-                apply_scroll_and_derive_follow(
-                    scroll,
-                    tree_follow,
-                    delta,
-                    progress_inner.height as usize,
-                );
-            }
-            HISTORY_PANE => {
-                let scroll = scrolls.get_mut(id);
-                scroll.set_len(history.len());
-                apply_scroll_and_derive_follow(
-                    scroll,
-                    history_follow,
-                    delta,
-                    history_inner.map_or(0, |rect| rect.height as usize),
-                );
-            }
-            CURRENT_PANE => {
-                let scroll = scrolls.get_mut(id);
-                scroll.set_len(stream.len());
-                apply_scroll_and_derive_follow(
-                    scroll,
-                    stream_follow,
-                    delta,
-                    current_inner.height as usize,
-                );
-            }
-            _ => continue,
+        if id == ids.progress
+            && let (Some(progress), Some(inner)) = (&progress, progress_inner)
+        {
+            let scroll = scrolls.get_mut(id);
+            scroll.set_len(progress.len());
+            apply_scroll_and_derive_follow(scroll, progress_follow, delta, inner.height as usize);
+        } else if id == ids.journey
+            && let (Some(journey), Some(inner)) = (&journey, journey_inner)
+        {
+            let scroll = scrolls.get_mut(id);
+            scroll.set_len(journey.len());
+            apply_scroll_and_derive_follow(scroll, journey_follow, delta, inner.height as usize);
+        } else if id == ids.history
+            && let (Some(history), Some(inner)) = (&history, history_inner)
+        {
+            let scroll = scrolls.get_mut(id);
+            scroll.set_len(history.len());
+            apply_scroll_and_derive_follow(scroll, history_follow, delta, inner.height as usize);
+        } else if id == ids.current
+            && let (Some(current), Some(inner)) = (&current, current_inner)
+        {
+            let scroll = scrolls.get_mut(id);
+            scroll.set_len(current.len());
+            apply_scroll_and_derive_follow(scroll, current_follow, delta, inner.height as usize);
         }
     }
-    tui_panes::render_pane(
-        frame,
-        progress_outer,
-        tree.title(PROGRESS_PANE).expect("progress title"),
-        focus.is_focused(PROGRESS_PANE),
-    );
-    tui_panes::render_pane(
-        frame,
-        current_outer,
-        tree.title(CURRENT_PANE).expect("current title"),
-        focus.is_focused(CURRENT_PANE),
-    );
+
+    if let Some(outer) = progress_outer {
+        tui_panes::render_pane(
+            frame,
+            outer,
+            tree.title(ids.progress).expect("progress title"),
+            focus.is_focused(ids.progress),
+        );
+    }
+    if let Some(outer) = journey_outer {
+        tui_panes::render_pane(
+            frame,
+            outer,
+            tree.title(ids.journey).expect("journey title"),
+            focus.is_focused(ids.journey),
+        );
+    }
     if let Some(outer) = history_outer {
         tui_panes::render_pane(
             frame,
             outer,
-            tree.title(HISTORY_PANE).expect("history title"),
-            focus.is_focused(HISTORY_PANE),
+            tree.title(ids.history).expect("history title"),
+            focus.is_focused(ids.history),
         );
     }
-    follow_progress(
-        scrolls.get_mut(PROGRESS_PANE),
-        *tree_follow,
-        active_row,
-        progress.len(),
-        progress_inner.height as usize,
-    );
-    follow_tail(
-        scrolls.get_mut(HISTORY_PANE),
-        *history_follow,
-        history.len(),
-        history_inner.map_or(0, |rect| rect.height as usize),
-    );
-    follow_tail(
-        scrolls.get_mut(CURRENT_PANE),
-        *stream_follow,
-        stream.len(),
-        current_inner.height as usize,
-    );
-    tui_panes::render_wrapped_lines_pane(
-        frame,
-        progress_inner,
-        &progress,
-        scrolls.get_mut(PROGRESS_PANE),
-    );
-    if let Some(inner) = history_inner {
-        tui_panes::render_wrapped_lines_pane(frame, inner, &history, scrolls.get_mut(HISTORY_PANE));
+    if let Some(outer) = current_outer {
+        tui_panes::render_pane(
+            frame,
+            outer,
+            tree.title(ids.current).expect("current title"),
+            focus.is_focused(ids.current),
+        );
     }
-    tui_panes::render_wrapped_lines_pane(
-        frame,
-        current_inner,
-        &stream,
-        scrolls.get_mut(CURRENT_PANE),
-    );
-    if let Some(modal) = modal {
-        tui_kit::render_modal(frame, full_area, modal);
+
+    if let (Some(progress), Some(inner)) = (&progress, progress_inner) {
+        follow_tail(
+            scrolls.get_mut(ids.progress),
+            *progress_follow,
+            progress.len(),
+            inner.height as usize,
+        );
+        tui_panes::render_wrapped_lines_pane(frame, inner, progress, scrolls.get_mut(ids.progress));
+    }
+    if let (Some(journey), Some(inner)) = (&journey, journey_inner) {
+        follow_progress(
+            scrolls.get_mut(ids.journey),
+            *journey_follow,
+            journey_active_row,
+            journey.len(),
+            inner.height as usize,
+        );
+        tui_panes::render_wrapped_lines_pane(frame, inner, journey, scrolls.get_mut(ids.journey));
+    }
+    if let (Some(history), Some(inner)) = (&history, history_inner) {
+        follow_tail(
+            scrolls.get_mut(ids.history),
+            *history_follow,
+            history.len(),
+            inner.height as usize,
+        );
+        tui_panes::render_wrapped_lines_pane(frame, inner, history, scrolls.get_mut(ids.history));
+    }
+    if let (Some(current), Some(inner)) = (&current, current_inner) {
+        follow_tail(
+            scrolls.get_mut(ids.current),
+            *current_follow,
+            current.len(),
+            inner.height as usize,
+        );
+        tui_panes::render_wrapped_lines_pane(frame, inner, current, scrolls.get_mut(ids.current));
     }
 }
 
@@ -1201,12 +1577,39 @@ fn align_scroll_start(scroll: &mut tui_kit::ViewportScroll, desired_start: usize
     scroll.apply(delta, rows);
 }
 
-/// The story column's compressed history: one line per completed step, plan
-/// order, `HH:MM:SS <label>: <summary>` when a P455 summary landed, otherwise
-/// the truthful facts fallback `HH:MM:SS <label> · elapsed · tokens` — never a
-/// placeholder. `HH:MM:SS` is when the row itself was stamped (the summary's own
-/// landing time, or the step's own elapsed for the fallback).
-fn story_history_lines(view: &RunView) -> Vec<tui::Line> {
+/// One logical history/current-activity event, built independent of any
+/// terminal width — [`event_row_line`] is the only place that turns one of
+/// these into a width-truncated physical row, so this type carries the raw
+/// (untruncated, uncleaned) tail text plus the tone to render it in.
+/// `pub(crate)` (with a constructor rather than public fields) so a
+/// dashboard-attach projection outside this module can build rows from a
+/// persisted activity sidecar through the exact same type this module's own
+/// live rows use — never a second event shape.
+#[derive(Clone)]
+pub(crate) struct EventRow {
+    at: Duration,
+    tail: String,
+    tone: tui::Tone,
+}
+
+impl EventRow {
+    pub(crate) fn new(at: Duration, tail: String, tone: tui::Tone) -> Self {
+        Self { at, tail, tone }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tail(&self) -> &str {
+        &self.tail
+    }
+}
+
+/// The story column's compressed history: one event per completed step,
+/// plan order — `<label>: <summary>` when a P455 summary landed, otherwise
+/// the truthful facts fallback `<label> · elapsed · tokens` — never a
+/// placeholder. `at` is when the row itself was stamped (the summary's own
+/// landing time, or the step's own elapsed for the fallback). Render through
+/// [`event_row_line`] for the fixed P552 `HH:MM:SS  ·  ` prefix.
+fn story_history_lines(view: &RunView) -> Vec<EventRow> {
     view.steps
         .iter()
         .filter(|step| step.state == StepState::Done)
@@ -1214,61 +1617,109 @@ fn story_history_lines(view: &RunView) -> Vec<tui::Line> {
         .collect()
 }
 
-fn story_row_line(step: &RunStep) -> tui::Line {
-    let mut line = tui::Line::blank();
+fn story_row_line(step: &RunStep) -> EventRow {
     let at = step.summary_at.or(step.elapsed).unwrap_or_default();
-    line.push(tui::elapsed_text(at), tui::Tone::Muted);
-    line.push(" ", tui::Tone::Muted);
-    match &step.summary {
-        Some(summary) => {
-            line.push(step.label.clone(), tui::Tone::Bold);
-            line.push(": ", tui::Tone::Muted);
-            line.push(tui::clean_live_text(summary), tui::Tone::Default);
-        }
+    let (tail, tone) = match &step.summary {
+        Some(summary) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
         None => {
-            line.push(step.label.clone(), tui::Tone::Default);
+            let mut tail = step.label.clone();
             if let Some(elapsed) = step.elapsed {
-                line.push(" \u{b7} ", tui::Tone::Muted);
-                line.push(tui::elapsed_text(elapsed), tui::Tone::Muted);
+                tail.push_str(" \u{b7} ");
+                tail.push_str(&tui::elapsed_text(elapsed));
             }
             if let Some(tokens) = step.output_tokens {
-                line.push(" \u{b7} ", tui::Tone::Muted);
-                line.push(tui::token_text(tokens), tui::Tone::Muted);
+                tail.push_str(" \u{b7} ");
+                tail.push_str(&tui::token_text(tokens));
             }
+            (tail, tui::Tone::Muted)
         }
-    }
+    };
+    EventRow { at, tail, tone }
+}
+
+/// P552 shared one-row event formatter for history and current-activity
+/// panes: a fixed `HH:MM:SS  ·  ` prefix (never truncated — a terminal
+/// narrower than the prefix itself is left to clip it, per the P552
+/// contract) followed by a cleaned tail, truncated by display width only in
+/// whatever budget remains after the prefix. Each call produces exactly one
+/// physical row; callers must not pass the result through
+/// `tui_panes::wrapped_lines`.
+const EVENT_PREFIX_SEP: &str = "  \u{b7}  ";
+
+fn event_row_line(row: &EventRow, width: u16) -> tui::Line {
+    let prefix = format!("{}{EVENT_PREFIX_SEP}", tui::elapsed_text(row.at));
+    let prefix_width = tui::display_width(&prefix);
+    let mut line = tui::Line::blank();
+    line.push(prefix, tui::Tone::Muted);
+    let tail = tui::clean_live_text(&row.tail);
+    let budget = (width as usize).saturating_sub(prefix_width);
+    line.push(tui::truncate_display_width_end(&tail, budget), row.tone);
     line
 }
 
-/// The CURRENT step's verbatim stream: every recorded row (narrations in
-/// narrated mode, drained model-text deltas in passthrough mode) plus the
-/// in-flight tail row — suppressed when its text duplicates the last
-/// recorded row, so a just-landed narration is never shown twice.
-fn story_stream_lines(state: &RunPanelState) -> Vec<tui::Line> {
-    let mut lines = Vec::with_capacity(state.current_stream.len() + 1);
-    let mut last_text: Option<&str> = None;
-    for row in &state.current_stream {
-        lines.push(stream_row_line(row));
-        last_text = Some(row.text.as_str());
-    }
-    if let Some(narration) = display_narration(&state.view)
-        && last_text != Some(narration.text.as_str())
-    {
-        lines.push(narration_line(narration));
-    }
-    lines
+/// Renders a full set of [`EventRow`]s to physical rows at `width` — one row
+/// per event, per [`event_row_line`].
+fn event_row_lines(rows: &[EventRow], width: u16) -> Vec<tui::Line> {
+    rows.iter().map(|row| event_row_line(row, width)).collect()
 }
 
-fn stream_row_line(row: &StreamRow) -> tui::Line {
-    let mut line = tui::Line::blank();
-    line.push(tui::elapsed_text(row.at), tui::Tone::Muted);
-    line.push("  ", tui::Tone::Muted);
+/// The CURRENT step's verbatim recorded stream — narrations in narrated
+/// mode, drained model-text deltas in passthrough mode — each rendered
+/// through [`event_row_line`], the same P552 one-row formatter
+/// [`story_history_lines`] uses. The trailing in-flight tail line (still
+/// updating, not yet a discrete timestamped event) is handled separately by
+/// [`stream_overlay_line`], since it needs its own [`narration_line`]
+/// rendering and dedup check.
+fn story_stream_lines(state: &RunPanelState) -> Vec<EventRow> {
+    state.current_stream.iter().map(stream_row_line).collect()
+}
+
+/// The CURRENT pane's trailing in-flight event, appended after the recorded
+/// stream rows — `None` when there is no live narration or when its text
+/// duplicates the last recorded row (so a just-landed narration is never
+/// shown twice). Formatted through [`event_row_line`] like every other
+/// history/current event, per the P552 one-formatter contract — the
+/// in-flight line is not a special overlay outside that model.
+fn stream_overlay_line(state: &RunPanelState) -> Option<EventRow> {
+    let narration = display_narration(&state.view)?;
+    let last_text = state.current_stream.back().map(|row| row.text.as_str());
+    let at = Instant::now().duration_since(state.run_started);
+    overlay_event_row(narration, last_text, at)
+}
+
+/// Pure fold of a live [`RunNarration`] into the CURRENT pane's trailing
+/// [`EventRow`], split out of [`stream_overlay_line`] so it is testable
+/// without a full `RunPanelState`. `None` when the narration text duplicates
+/// the last recorded stream row.
+fn overlay_event_row(
+    narration: &RunNarration,
+    last_recorded_text: Option<&str>,
+    at: Duration,
+) -> Option<EventRow> {
+    if last_recorded_text == Some(narration.text.as_str()) {
+        return None;
+    }
+    let tail = format!("{}: {}", narration.label, narration.text);
+    let tone = if narration.finished {
+        tui::Tone::Pass
+    } else if narration.muted {
+        tui::Tone::Muted
+    } else {
+        tui::Tone::Default
+    };
+    Some(EventRow { at, tail, tone })
+}
+
+fn stream_row_line(row: &StreamRow) -> EventRow {
     let tone = match row.kind {
         StreamRowKind::Narration => tui::Tone::Default,
         StreamRowKind::ModelText => tui::Tone::Muted,
     };
-    line.push(tui::clean_live_text(&row.text), tone);
-    line
+    EventRow {
+        at: row.at,
+        tail: row.text.clone(),
+        tone,
+    }
 }
 
 fn update_live_display(state: &mut RunPanelState, display: tui::LiveDisplay) {
@@ -1288,7 +1739,6 @@ fn narration_for(
 }
 
 fn run_view(
-    trait_name: &str,
     trait_ref: &ctx_traits_core::Trait,
     plan: &ctx_traits_core::procedure::run::Plan,
     session: &ctx_traits_core::procedure::session::Session,
@@ -1420,9 +1870,6 @@ fn run_view(
         .count();
     let total = steps.iter().filter(|step| step.counts_progress).count();
     let header = RunHeader {
-        run_id: session.run_id.as_str().to_string(),
-        session_id: session.session_id.as_str().to_string(),
-        trait_name: trait_name.to_string(),
         input: input_text(session),
         harnesses: harness_summary(&harness_by_role),
         done,
@@ -1468,28 +1915,39 @@ fn run_view(
     }
 }
 
-/// P470: the tree (left) column's full, always-scrolled content — no line
+/// P552: the PROGRESS pane's own bounded standing facts — input, harness,
+/// and one combined progress/status/current-step/elapsed/work-token/
+/// narrator-token line (or, once completed, the equivalent completed-summary
+/// line) — never the step journey itself, which lives in
+/// [`journey_lines_with_active_row`]. Kept intentionally small so the
+/// [`pane_tree`] geometry can bound this pane's height and hand the rest of
+/// the left column to journey.
+fn progress_lines(view: &RunView) -> Vec<tui::Line> {
+    let mut lines = Vec::new();
+    render_header(&mut lines, &view.header);
+    lines
+}
+
+/// P470: the journey (left) column's full, always-scrolled content — no line
 /// cap, no compact-viewport degrade. Every step's mark/ports/facts renders in
 /// full; the live narration itself moved to the story column's CURRENT
 /// stream (see [`story_stream_lines`]) and is no longer inlined per-step.
-/// Convenience wrapper over [`render_tree_lines_with_active_row`] for callers
+/// Convenience wrapper over [`journey_lines_with_active_row`] for callers
 /// that don't need the active row (e.g. [`render_ledger_run_view`], whose
 /// ledger-only view never has an active step to anchor on).
-fn render_tree_lines(view: &RunView) -> Vec<tui::Line> {
-    render_tree_lines_with_active_row(view).0
+fn journey_lines(view: &RunView) -> Vec<tui::Line> {
+    journey_lines_with_active_row(view).0
 }
 
-/// Same output as [`render_tree_lines`], plus the rendered row index of the
+/// Same output as [`journey_lines`], plus the rendered row index of the
 /// ACTIVE step's [`render_step_summary`] line — the one true source of that
 /// mapping, since this is the only place that knows how many rows each step
 /// group emits. Follow-mode anchoring must derive from this row index, never
 /// from `view.steps`' own item index (a different coordinate space: each
 /// step group is 3 rows, `render_step_summary` + two `render_port_line`
 /// calls, under a multi-row header the caller must not hand-count either).
-fn render_tree_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<usize>) {
+fn journey_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<usize>) {
     let mut lines = Vec::new();
-    render_header(&mut lines, &view.header);
-    lines.push(tui::Line::blank());
     muted_line(&mut lines, "journey");
     let target_step = active_step_index(view);
     let mut active_row = None;
@@ -1514,6 +1972,11 @@ fn render_tree_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<
         }
     }
     if view.header.completed {
+        lines.push(tui::Line::blank());
+        let mut line = tui::Line::blank();
+        line.push("digest-stamped ", tui::Tone::Muted);
+        line.push(view.header.state_digest.clone(), tui::Tone::Default);
+        lines.push(line);
         lines.push(tui::Line::blank());
         render_outputs_box(&mut lines, &view.outputs);
     }
@@ -1608,11 +2071,58 @@ fn render_merge_row(lines: &mut Vec<tui::Line>, row: &MergeRowView) {
 /// persisted counters under a synthetic key that intentionally matches no
 /// real step (so per-step token display correctly stays absent, while the
 /// header total — the only thing the ledger can support — still renders).
+/// P552: [`render_ledger_run_view`]'s return — the ledger's own pane
+/// projection, consumed by both dashboard preview (progress/journey only)
+/// and dashboard attach (all four) through the shared [`PaneData`]/
+/// [`render_pane_body`] renderer, never a second flat-line reconstruction.
+pub(crate) struct LedgerPaneProjection {
+    pub(crate) progress: Vec<tui::Line>,
+    pub(crate) journey: Vec<tui::Line>,
+    pub(crate) history: Vec<EventRow>,
+    pub(crate) current: Vec<EventRow>,
+    /// `true` only when `ledger_path` has an activity sidecar at all (a
+    /// legacy session, or one that never dispatched through the CLI's
+    /// non-wave path, has none) — the caller's SOLE authority for whether to
+    /// present the history/current panes at all. Deliberately independent of
+    /// `history`/`current`'s own contents: a current-only sidecar (no
+    /// completed step yet) is still available and must not be mistaken for
+    /// "no source" just because `history` happens to be empty.
+    pub(crate) activity_available: bool,
+    /// A human-readable reason to show alongside the panes: `Some` when the
+    /// sidecar is absent (`activity_available` is `false`) OR present but the
+    /// tolerant reader had to skip unparseable lines (P521) — never fatal,
+    /// never fabricated content, just an honest degradation notice.
+    pub(crate) activity_degraded: Option<String>,
+    /// The resolved trait's own name and the ledger's `started_at_epoch`,
+    /// carried alongside the persisted P552 session title so a dashboard
+    /// attach can render the exact `<bold title> · <trait name> · Started
+    /// at <HH:MM:SS>` row a live run shows, via [`title_row_line`].
+    pub(crate) trait_name: String,
+    pub(crate) started_at_epoch: Option<u64>,
+}
+
+/// P469: reconstructs the exact `progress_lines`/`journey_lines` output from
+/// a resolved trait/plan plus a session read straight off its ledger, for
+/// the SESSIONS dashboard's preview/attach panes — a different process from
+/// the driver, so it cannot reuse [`RunPanel`]'s live in-process aggregates.
+/// `PresentationState`'s per-step `active_started`/`finished_durations`/
+/// `loop_*` maps stay empty (a ledger alone carries no per-step live
+/// timing); `step_summaries`/`step_summary_at` are instead populated from
+/// `ledger_path`'s P521 activity sidecar (via [`super::story::load_activity`])
+/// when one exists, so a reconstructed journey pane's per-step summaries and
+/// the history pane's per-event rows agree with what a live run would have
+/// shown — never a second summary source. The header's own elapsed derives
+/// from `session.ledger.elapsed_seconds` instead of a live `Instant`, and its
+/// aggregate token line is populated from `session.last_drive_outcome`'s
+/// persisted counters under a synthetic key that intentionally matches no
+/// real step (so per-step token display correctly stays absent, while the
+/// header total — the only thing the ledger can support — still renders).
 pub(crate) fn render_ledger_run_view(
     trait_ref: &ctx_traits_core::Trait,
     plan: &ctx_traits_core::procedure::run::Plan,
     session: &ctx_traits_core::procedure::session::Session,
-) -> Vec<tui::Line> {
+    ledger_path: &camino::Utf8Path,
+) -> LedgerPaneProjection {
     let elapsed = Duration::from_secs(session.ledger.elapsed_seconds);
     let run_started = Instant::now()
         .checked_sub(elapsed)
@@ -1628,8 +2138,13 @@ pub(crate) fn render_ledger_run_view(
     let narrator_tokens = token_usage
         .and_then(|usage| usage.narrator_tokens)
         .unwrap_or(0);
+    let started_at_epoch = session.provenance.started_at_epoch;
+    let activity = super::story::load_activity(ledger_path);
+    let (step_summaries, step_summary_at) = activity
+        .as_ref()
+        .map(|activity| sidecar_step_summary_maps(activity, started_at_epoch))
+        .unwrap_or_default();
     let view = run_view(
-        trait_ref.name.as_str(),
         trait_ref,
         plan,
         session,
@@ -1640,13 +2155,207 @@ pub(crate) fn render_ledger_run_view(
             output_tokens: &output_tokens,
             loop_elapsed: &BTreeMap::new(),
             loop_output_tokens: &BTreeMap::new(),
-            step_summaries: &BTreeMap::new(),
-            step_summary_at: &BTreeMap::new(),
+            step_summaries: &step_summaries,
+            step_summary_at: &step_summary_at,
             narrator_tokens,
             run_started,
         },
     );
-    render_tree_lines(&view)
+    // P552 review `dashboard-attach-contract-absent`: history/current are
+    // supplied ONLY when this ledger actually has a P521 activity sidecar —
+    // never derived from the ledger's own step states as a fallback, or a
+    // legacy session's `activity_available: false` would still show a
+    // populated history pane its own presence contradicts.
+    let history = activity
+        .as_ref()
+        .map(|_| story_history_lines(&view))
+        .unwrap_or_default();
+    let (current, activity_degraded) = current_and_degraded(&activity, started_at_epoch);
+    LedgerPaneProjection {
+        progress: progress_lines(&view),
+        journey: journey_lines(&view),
+        history,
+        current,
+        activity_available: activity.is_some(),
+        activity_degraded,
+        trait_name: trait_ref.name.as_str().to_string(),
+        started_at_epoch,
+    }
+}
+
+/// The sidecar-only slice of [`LedgerPaneProjection`]: `current`/`history`
+/// and the `activity_available`/`activity_degraded` authority, sourced
+/// purely from [`super::story::load_activity`] — no [`ctx_traits_core::Trait`]
+/// or [`ctx_traits_core::procedure::run::Plan`] involved. `history` here is
+/// the honest `<key>: <text>` sidecar-only rendering ([`sidecar_history_lines`]),
+/// not the richer plan-labeled [`story_history_lines`] rendering the full
+/// [`render_ledger_run_view`] path produces when a plan IS resolved — the two
+/// never disagree about WHICH steps completed, only about the label spelling.
+/// Shared by the full [`render_ledger_run_view`] reconstruction's
+/// trait-resolution-failure fallback and by [`load_sidecar_activity_summary`],
+/// the dashboard-only entry point an unchanged-digest refresh calls without
+/// re-resolving (or re-attempting to resolve) the trait/plan (P552 review
+/// `dashboard-attach-contract-absent`: digest equality alone must be enough
+/// to pick this path, so it has to carry everything the sidecar can supply,
+/// not just `current`).
+pub(crate) struct SidecarActivitySummary {
+    pub(crate) history: Vec<EventRow>,
+    pub(crate) current: Vec<EventRow>,
+    pub(crate) activity_available: bool,
+    pub(crate) activity_degraded: Option<String>,
+}
+
+/// P552 review `dashboard-attach-contract-absent`: sidecar existence is an
+/// independent persisted fact from whether `ledger_path`'s pinned trait can
+/// still be resolved — this is the ONE place both a trait-reconstruction
+/// failure and the unchanged-digest dashboard refresh read it from, so
+/// neither loses history/current availability just because trait loading
+/// failed or was skipped as an optimization.
+pub(crate) fn load_sidecar_activity_summary(
+    ledger_path: &camino::Utf8Path,
+    started_at_epoch: Option<u64>,
+) -> SidecarActivitySummary {
+    let activity = super::story::load_activity(ledger_path);
+    let (current, activity_degraded) = current_and_degraded(&activity, started_at_epoch);
+    let history = activity
+        .as_ref()
+        .map(|activity| sidecar_history_lines(activity, started_at_epoch))
+        .unwrap_or_default();
+    SidecarActivitySummary {
+        history,
+        current,
+        activity_available: activity.is_some(),
+        activity_degraded,
+    }
+}
+
+/// Sidecar-only history rows (P552 review `dashboard-attach-contract-absent`):
+/// one row per persisted step summary, `<key>: <text>` in landing order —
+/// honest about using the sidecar's own step KEY rather than a resolved
+/// plan's human step LABEL, since this path by construction never has a
+/// resolved plan to ask. Never mixed with [`story_row_line`]'s
+/// summary-or-facts-fallback shape: a step with no narrator summary simply
+/// has no sidecar entry and so contributes no row here (the plan-labeled
+/// [`story_history_lines`] path is what shows the elapsed/tokens fallback,
+/// once a plan resolves).
+fn sidecar_history_lines(
+    activity: &ctx_traits_core::procedure::story::ActivityInput,
+    started_at_epoch: Option<u64>,
+) -> Vec<EventRow> {
+    let mut entries: Vec<_> = activity.step_summaries.iter().collect();
+    entries.sort_by_key(|entry| entry.at_epoch_ms);
+    entries
+        .into_iter()
+        .map(|entry| {
+            EventRow::new(
+                epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
+                format!("{}: {}", entry.key, entry.text),
+                tui::Tone::Default,
+            )
+        })
+        .collect()
+}
+
+fn current_and_degraded(
+    activity: &Option<ctx_traits_core::procedure::story::ActivityInput>,
+    started_at_epoch: Option<u64>,
+) -> (Vec<EventRow>, Option<String>) {
+    let current = activity
+        .as_ref()
+        .map(|activity| latest_frame_event_rows(activity, started_at_epoch))
+        .unwrap_or_default();
+    let degraded = match activity {
+        None => Some("no activity was recorded for this run".to_string()),
+        Some(activity) if activity.skipped_lines > 0 => Some(format!(
+            "activity partially recorded for this run ({} unparseable line(s) skipped)",
+            activity.skipped_lines
+        )),
+        Some(_) => None,
+    };
+    (current, degraded)
+}
+
+fn epoch_ms_to_duration(started_at_epoch: Option<u64>, at_epoch_ms: u64) -> Duration {
+    let started_ms = started_at_epoch.map_or(0, |epoch| epoch.saturating_mul(1000));
+    Duration::from_millis(at_epoch_ms.saturating_sub(started_ms))
+}
+
+/// P552: the ledger reconstruction's `step_summaries`/`step_summary_at`
+/// source — the same P455 per-step summaries a live run's `RunPanel` folds
+/// in directly, here read back from the P521 activity sidecar so a
+/// reconstructed journey pane's step rows and history pane rows agree.
+fn sidecar_step_summary_maps(
+    activity: &ctx_traits_core::procedure::story::ActivityInput,
+    started_at_epoch: Option<u64>,
+) -> (BTreeMap<String, String>, BTreeMap<String, Duration>) {
+    let mut summaries = BTreeMap::new();
+    let mut at = BTreeMap::new();
+    for entry in &activity.step_summaries {
+        summaries.insert(entry.key.clone(), entry.text.clone());
+        at.insert(
+            entry.key.clone(),
+            epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
+        );
+    }
+    (summaries, at)
+}
+
+/// P552 attached CURRENT-activity source (item 8 of the implementation
+/// draft): the most recently observed frame's own events, in order — not
+/// every event ever recorded, and never a debug-trace tail.
+fn latest_frame_event_rows(
+    activity: &ctx_traits_core::procedure::story::ActivityInput,
+    started_at_epoch: Option<u64>,
+) -> Vec<EventRow> {
+    let Some(latest_frame_id) = activity
+        .events
+        .last()
+        .map(|event| event.event.frame_id.clone())
+    else {
+        return Vec::new();
+    };
+    activity
+        .events
+        .iter()
+        .filter(|event| event.event.frame_id == latest_frame_id)
+        .map(|event| {
+            EventRow::new(
+                epoch_ms_to_duration(started_at_epoch, event.at_epoch_ms),
+                activity_event_tail(&event.event),
+                activity_event_tone(&event.event.kind),
+            )
+        })
+        .collect()
+}
+
+fn activity_event_tail(event: &ActivityEvent) -> String {
+    event
+        .text
+        .clone()
+        .or_else(|| event.tool.clone())
+        .unwrap_or_else(|| activity_kind_label(&event.kind).to_string())
+}
+
+fn activity_kind_label(kind: &ActivityKind) -> &'static str {
+    match kind {
+        ActivityKind::Dispatching => "dispatching",
+        ActivityKind::Thinking => "thinking",
+        ActivityKind::RunningTool => "running tool",
+        ActivityKind::StreamingOutput => "streaming output",
+        ActivityKind::ValidatingOutput => "validating output",
+        ActivityKind::Retrying => "retrying",
+        ActivityKind::Stalled => "stalled",
+        ActivityKind::Compacting => "compacting",
+        ActivityKind::NoActivityReported => "no activity reported",
+    }
+}
+
+fn activity_event_tone(kind: &ActivityKind) -> tui::Tone {
+    match kind {
+        ActivityKind::ValidatingOutput => tui::Tone::Pass,
+        ActivityKind::Stalled => tui::Tone::Fail,
+        _ => tui::Tone::Default,
+    }
 }
 
 fn completed_narration(view: &RunView) -> Option<&RunNarration> {
@@ -1696,19 +2405,12 @@ fn active_step_index(view: &RunView) -> Option<usize> {
         })
 }
 
+/// P552: the PROGRESS pane's own standing facts only — `run`/`trait`/
+/// `session` identity now lives in the P552 title row (trait name, start
+/// clock) and the dashboard's own session identity column, not here; the
+/// completion digest stamp moved to [`journey_lines_with_active_row`] as a
+/// terminal-outputs fact.
 fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
-    let mut line = tui::Line::blank();
-    line.push("run ", tui::Tone::Muted);
-    line.push(header.run_id.clone(), tui::Tone::Default);
-    line.push(" · trait ", tui::Tone::Muted);
-    line.push(header.trait_name.clone(), tui::Tone::Default);
-    lines.push(line);
-
-    let mut line = tui::Line::blank();
-    line.push("session ", tui::Tone::Muted);
-    line.push(header.session_id.clone(), tui::Tone::Default);
-    lines.push(line);
-
     let mut line = tui::Line::blank();
     line.push("input ", tui::Tone::Muted);
     line.push(header.input.clone(), tui::Tone::Default);
@@ -1764,13 +2466,6 @@ fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
                 tui::Tone::Default,
             );
         }
-        lines.push(line);
-
-        // The session id already sits in the header; only the digest stamp is
-        // completion-specific.
-        let mut line = tui::Line::blank();
-        line.push("digest-stamped ", tui::Tone::Muted);
-        line.push(header.state_digest.clone(), tui::Tone::Default);
         lines.push(line);
     } else {
         let mut line = tui::Line::blank();
@@ -2778,6 +3473,18 @@ fn accepted_refs(session: &ctx_traits_core::procedure::session::Session) -> BTre
         .collect()
 }
 
+/// P552: the trait name and accepted-input text a session-title prompt is
+/// built from, independent of a live `RunPanel` — the drive-side title
+/// dispatch (which must also run for panel-less surfaces such as a
+/// dashboard-spawned `--progress none` drive) derives its prompt context
+/// through this function rather than requiring a panel to exist first.
+pub(crate) fn title_prompt_context_for(
+    trait_name: &str,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> (String, String) {
+    (trait_name.to_string(), input_text(session))
+}
+
 fn input_text(session: &ctx_traits_core::procedure::session::Session) -> String {
     let inputs: Vec<String> = session
         .accepted_port_values
@@ -3124,9 +3831,6 @@ mod tests {
     fn view_with(steps: Vec<RunStep>) -> RunView {
         RunView {
             header: RunHeader {
-                run_id: "run-1".to_string(),
-                session_id: "sess-1".to_string(),
-                trait_name: "demo".to_string(),
                 input: "not provided".to_string(),
                 harnesses: "unassigned".to_string(),
                 done: 0,
@@ -3170,15 +3874,13 @@ mod tests {
     #[test]
     fn story_row_line_prefers_summary_over_facts_fallback() {
         let with_summary = story_row_line(&step("a", StepState::Done, Some("did the thing")));
-        let texts: Vec<&str> = with_summary.segments().map(|(text, _)| text).collect();
-        assert_eq!(texts[0], "00:00:07");
-        assert!(texts.contains(&"did the thing"));
+        assert_eq!(with_summary.at, Duration::from_secs(7));
+        assert!(with_summary.tail.contains("did the thing"));
 
         let without_summary = story_row_line(&step("b", StepState::Done, None));
-        let texts: Vec<&str> = without_summary.segments().map(|(text, _)| text).collect();
-        assert_eq!(texts[0], "00:00:05");
-        assert!(texts.iter().any(|text| text.contains('5'))); // elapsed
-        assert!(texts.iter().any(|text| text.contains("tok"))); // tokens
+        assert_eq!(without_summary.at, Duration::from_secs(5));
+        assert!(without_summary.tail.contains('5')); // elapsed
+        assert!(without_summary.tail.contains("tok")); // tokens
     }
 
     #[test]
@@ -3193,18 +3895,110 @@ mod tests {
             kind: StreamRowKind::ModelText,
             text: "raw delta".to_string(),
         });
-        let narration_tone = narration.segments().last().map(|(_, tone)| tone);
-        let model_tone = model_text.segments().last().map(|(_, tone)| tone);
-        assert_eq!(
-            narration.segments().next().map(|(text, _)| text),
-            Some("00:00:03")
-        );
-        assert_eq!(
-            model_text.segments().next().map(|(text, _)| text),
-            Some("00:00:03")
-        );
-        assert_eq!(narration_tone, Some(tui::Tone::Default));
-        assert_eq!(model_tone, Some(tui::Tone::Muted));
+        assert_eq!(narration.at, Duration::from_secs(3));
+        assert_eq!(model_text.at, Duration::from_secs(3));
+        assert_eq!(narration.tone, tui::Tone::Default);
+        assert_eq!(model_text.tone, tui::Tone::Muted);
+    }
+
+    // P552: every history/current-activity row shares one formatter
+    // (`event_row_line`) that reserves the fixed `HH:MM:SS  ·  ` prefix and
+    // truncates only the tail, by display width, so wide/combining Unicode
+    // never desyncs the truncation point from a plain byte/char count.
+    #[test]
+    fn event_row_line_truncates_only_the_tail_by_display_width() {
+        let row = EventRow {
+            at: Duration::from_secs(5),
+            tail: "a".repeat(50),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 20);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:00:05  \u{b7}  "));
+        assert!(rendered.ends_with("..."));
+        assert!(tui::display_width(&rendered) <= 20);
+    }
+
+    #[test]
+    fn event_row_line_wide_unicode_tail_truncates_by_display_width_not_char_count() {
+        // Each "文" is 2 display columns; a char-count truncation would
+        // overflow the requested width, a display-width one will not.
+        let row = EventRow {
+            at: Duration::from_secs(1),
+            tail: "文".repeat(30),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 25);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(tui::display_width(&rendered) <= 25);
+        assert!(rendered.ends_with("..."));
+    }
+
+    #[test]
+    fn event_row_line_leaves_a_short_tail_unmarked() {
+        let row = EventRow {
+            at: Duration::from_secs(9),
+            tail: "short".to_string(),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 80);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:00:09  \u{b7}  short"));
+        assert!(!rendered.ends_with("..."));
+    }
+
+    // P552: the CURRENT pane's in-flight line is not a special overlay
+    // outside the event model — it folds into an `EventRow` using the
+    // current run-relative timestamp, so it renders through the exact same
+    // `event_row_line` prefix/truncation contract as every recorded event.
+    #[test]
+    fn overlay_event_row_uses_the_shared_event_contract() {
+        let narration = RunNarration {
+            label: "narrator".to_string(),
+            text: "文".repeat(30),
+            muted: false,
+            finished: false,
+        };
+        let row = overlay_event_row(&narration, None, Duration::from_secs(65))
+            .expect("narration text differs from last recorded row");
+        assert_eq!(row.at, Duration::from_secs(65));
+        assert!(row.tail.starts_with("narrator: "));
+        let line = event_row_line(&row, 25);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:01:05  \u{b7}  "));
+        assert!(tui::display_width(&rendered) <= 25);
+        assert!(rendered.ends_with("..."));
+    }
+
+    #[test]
+    fn overlay_event_row_suppresses_a_duplicate_of_the_last_recorded_row() {
+        let narration = RunNarration {
+            label: "narrator".to_string(),
+            text: "same text".to_string(),
+            muted: false,
+            finished: true,
+        };
+        assert!(overlay_event_row(&narration, Some("same text"), Duration::from_secs(1)).is_none());
+    }
+
+    // P552: each logical history/current-activity input becomes exactly one
+    // physical row — no `wrapped_lines` pass may re-split it.
+    #[test]
+    fn event_row_lines_produces_exactly_one_row_per_input() {
+        let rows = vec![
+            EventRow {
+                at: Duration::from_secs(1),
+                tail: "one".to_string(),
+                tone: tui::Tone::Default,
+            },
+            EventRow {
+                at: Duration::from_secs(2),
+                tail: "x".repeat(200),
+                tone: tui::Tone::Default,
+            },
+        ];
+        let lines = event_row_lines(&rows, 30);
+        assert_eq!(lines.len(), rows.len());
     }
 
     // P470 blocker `tree-follow-anchor-unit-mismatch`: the follow anchor
@@ -3223,7 +4017,7 @@ mod tests {
             active_step,
             step("d", StepState::Pending, None),
         ]);
-        let (lines, active_row) = render_tree_lines_with_active_row(&view);
+        let (lines, active_row) = journey_lines_with_active_row(&view);
         let active_row = active_row.expect("an active step must yield a row anchor");
         // The active step's own `view.steps` index is 2; its row can never
         // be that small once a header, a blank line, a "journey" label, and
@@ -3245,40 +4039,166 @@ mod tests {
 
     #[test]
     fn render_tree_lines_with_active_row_is_none_when_no_step_is_selectable() {
-        let (_, active_row) = render_tree_lines_with_active_row(&view_with(Vec::new()));
+        let (_, active_row) = journey_lines_with_active_row(&view_with(Vec::new()));
         assert_eq!(active_row, None);
     }
 
-    #[test]
-    fn narrow_live_tree_omits_history_and_reconciles_focus_to_current() {
-        let tree = live_pane_tree(Rect::new(0, 0, 80, 24), 10);
-        assert_eq!(tree.leaf_ids(), vec![PROGRESS_PANE, CURRENT_PANE]);
-        let mut focus = FocusRing::new(vec![HISTORY_PANE]);
-        focus.reconcile(tree.leaf_ids(), CURRENT_PANE);
-        assert_eq!(focus.current(), Some(CURRENT_PANE));
+    fn sample_lines(n: usize) -> Vec<tui::Line> {
+        (0..n)
+            .map(|index| {
+                let mut line = tui::Line::blank();
+                line.push(format!("line{index}"), tui::Tone::Default);
+                line
+            })
+            .collect()
     }
 
+    fn sample_event_rows(n: usize) -> Vec<EventRow> {
+        (0..n)
+            .map(|index| {
+                EventRow::new(
+                    Duration::from_secs(index as u64),
+                    format!("event{index}"),
+                    tui::Tone::Default,
+                )
+            })
+            .collect()
+    }
+
+    // P552: a narrow terminal stacks every populated pane instead of
+    // dropping any of them — the pre-P552 `live_pane_tree` silently omitted
+    // `history` at narrow widths (reviewer blocker `live-run-pane-contract-
+    // absent`); this proves the replacement never does.
     #[test]
-    fn wide_story_caps_history_and_preserves_current_content_floor() {
+    fn narrow_full_data_stacks_every_pane_without_omission() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(5);
+        let history = sample_event_rows(10);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+        );
+    }
+
+    // Normal-width full data: the bounded-progress 2x2 grid — progress is
+    // bounded to its own content height, journey receives the rest of the
+    // left column, history is capped, current keeps its content floor.
+    #[test]
+    fn wide_full_data_produces_bounded_progress_2x2_grid() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
         let area = Rect::new(0, 0, 120, 24);
-        let tree = live_pane_tree(area, 100);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+        );
         let layout = tree.resolve(area);
-        let history = layout.rect(HISTORY_PANE).expect("history");
-        let current = layout.rect(CURRENT_PANE).expect("current");
-        assert!(history.height <= (area.height - CURRENT_MIN_OUTER_ROWS) / 2);
-        assert!(current.height >= CURRENT_MIN_OUTER_ROWS);
-        assert!(tui_panes::pane_inner(current).height >= 6);
+        let progress_rect = layout.rect(PROGRESS_PANE).expect("progress");
+        let journey_rect = layout.rect(JOURNEY_PANE).expect("journey");
+        let history_rect = layout.rect(HISTORY_PANE).expect("history");
+        let current_rect = layout.rect(CURRENT_PANE).expect("current");
+        assert_eq!(progress_rect.height, 5, "3 content rows + 2 borders");
+        assert!(
+            journey_rect.height > progress_rect.height,
+            "journey must receive the rest of the left column"
+        );
+        assert!(history_rect.height <= (area.height - CURRENT_MIN_OUTER_ROWS) / 2);
+        assert!(current_rect.height >= CURRENT_MIN_OUTER_ROWS);
+        assert!(tui_panes::pane_inner(current_rect).height >= 6);
+        assert_eq!(progress_rect.x, journey_rect.x, "left column shares an x");
+        assert_eq!(history_rect.x, current_rect.x, "right column shares an x");
+        assert!(
+            history_rect.x > progress_rect.x,
+            "right column is to the right"
+        );
+    }
+
+    // Dashboard preview supplies only progress/journey — this must produce
+    // exactly those two leaves, never four.
+    #[test]
+    fn preview_data_produces_exactly_progress_and_journey() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(5);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: None,
+            current: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(tree.leaf_ids(), vec![PROGRESS_PANE, JOURNEY_PANE]);
+    }
+
+    // Source-driven omission (a legacy session with no activity sidecar):
+    // only the missing pane is dropped, and focus reconciliation never
+    // lands on an undrawn pane.
+    #[test]
+    fn source_omission_drops_only_the_missing_pane_leaving_focus_valid() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(5);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: None,
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, CURRENT_PANE]
+        );
+        let layout = tree.resolve(area);
+        let ids = drawable_pane_ids(&tree, &layout);
+        let mut focus = FocusRing::new(vec![HISTORY_PANE]);
+        focus.reconcile(ids.clone(), CURRENT_PANE);
+        assert!(focus.current().is_some_and(|id| ids.contains(&id)));
     }
 
     #[test]
     fn focus_ring_contains_only_drawable_panes_at_small_sizes() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
         for area in [
             Rect::new(0, 0, 80, 6),
             Rect::new(0, 0, 80, 7),
             Rect::new(0, 0, 120, 6),
             Rect::new(0, 0, 120, 7),
         ] {
-            let tree = live_pane_tree(area, 100);
+            let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
             let layout = tree.resolve(area);
             let ids = drawable_pane_ids(&tree, &layout);
             let mut focus = FocusRing::new(vec![CURRENT_PANE]);
@@ -3287,17 +4207,6 @@ mod tests {
                 assert!(ids.contains(&focus.current().expect("drawable focus")));
                 focus.next();
             }
-        }
-
-        let area = Rect::new(0, 0, 120, 24);
-        let tree = live_pane_tree(area, 100);
-        let layout = tree.resolve(area);
-        let ids = drawable_pane_ids(&tree, &layout);
-        assert_eq!(ids, vec![PROGRESS_PANE, HISTORY_PANE, CURRENT_PANE]);
-        let mut focus = FocusRing::new(ids.clone());
-        for expected in ids.iter().cycle().take(ids.len() * 2) {
-            assert_eq!(focus.current(), Some(*expected));
-            focus.next();
         }
     }
 
@@ -3316,12 +4225,17 @@ mod tests {
         assert_eq!(scrolls.get(CURRENT_PANE).window(10), 3..13);
     }
 
+    // P552: proves scroll-key routing against JOURNEY (whose 20-line
+    // fixture genuinely overflows its viewport) rather than PROGRESS —
+    // PROGRESS's own outer height is bounded to exactly its content's size
+    // (see `pane_tree`), so it can never leave "at bottom" no matter what
+    // scroll key targets it, and is not a meaningful fixture for a
+    // follow-release assertion.
     #[test]
     fn focus_keys_apply_before_the_same_frame_and_route_following_scroll() {
         use crossterm::event::{KeyCode, KeyModifiers};
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
-        use ratatui::style::Modifier;
 
         let tree_lines = (0..20)
             .map(|index| {
@@ -3330,12 +4244,17 @@ mod tests {
                 line
             })
             .collect::<Vec<_>>();
+        let progress_sample_lines = sample_lines(3);
         let mut scrolls = PaneScrolls::new();
-        let mut tree_follow = true;
+        let mut progress_follow = true;
+        let mut journey_follow = true;
         let mut history_follow = true;
-        let mut stream_follow = true;
+        let mut current_follow = true;
         let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+        // CURRENT -> (Tab) -> PROGRESS -> (Tab) -> JOURNEY -> (Down) scrolls
+        // JOURNEY, in the leaf order [PROGRESS, JOURNEY, HISTORY, CURRENT].
         let mut keys = vec![
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
         ];
@@ -3344,15 +4263,46 @@ mod tests {
             .draw(|frame| {
                 render_live_panes(
                     frame,
-                    LivePaneFrame {
-                        tree_lines: &tree_lines,
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &progress_sample_lines,
+                        journey_lines: &tree_lines,
                         active_row: Some(0),
-                        history_lines: &[],
-                        stream_lines: &[],
+                        history_rows: &[],
+                        current_rows: &[],
                         scrolls: &mut scrolls,
-                        tree_follow: &mut tree_follow,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
                         history_follow: &mut history_follow,
-                        stream_follow: &mut stream_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                    },
+                );
+            })
+            .expect("draw");
+        assert_eq!(focus.current(), Some(JOURNEY_PANE));
+        assert!(!journey_follow);
+        assert_eq!(scrolls.get(JOURNEY_PANE).window(10).start, 1);
+
+        let mut keys = vec![KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)];
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &progress_sample_lines,
+                        journey_lines: &tree_lines,
+                        active_row: Some(0),
+                        history_rows: &[],
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
@@ -3361,71 +4311,6 @@ mod tests {
             })
             .expect("draw");
         assert_eq!(focus.current(), Some(PROGRESS_PANE));
-        assert!(!tree_follow);
-        assert_eq!(scrolls.get(PROGRESS_PANE).window(10).start, 1);
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .cell((1, 0))
-                .expect("progress title cell")
-                .style()
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .cell((73, 0))
-                .expect("current title cell")
-                .style()
-                .add_modifier
-                .contains(Modifier::DIM)
-        );
-
-        let mut keys = vec![KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)];
-        terminal
-            .draw(|frame| {
-                render_live_panes(
-                    frame,
-                    LivePaneFrame {
-                        tree_lines: &tree_lines,
-                        active_row: Some(0),
-                        history_lines: &[],
-                        stream_lines: &[],
-                        scrolls: &mut scrolls,
-                        tree_follow: &mut tree_follow,
-                        history_follow: &mut history_follow,
-                        stream_follow: &mut stream_follow,
-                        focus: &mut focus,
-                        pending_keys: &mut keys,
-                        modal: None,
-                    },
-                );
-            })
-            .expect("draw");
-        assert_eq!(focus.current(), Some(CURRENT_PANE));
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .cell((1, 0))
-                .expect("progress title cell")
-                .style()
-                .add_modifier
-                .contains(Modifier::DIM)
-        );
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .cell((73, 0))
-                .expect("current title cell")
-                .style()
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
     }
 
     #[test]
@@ -3433,28 +4318,40 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let mut line = tui::Line::blank();
-        line.push("unique current activity", tui::Tone::Default);
+        let overlay = EventRow {
+            at: Duration::from_secs(0),
+            tail: "unique current activity".to_string(),
+            tone: tui::Tone::Default,
+        };
         let mut scrolls = PaneScrolls::new();
-        let mut tree_follow = true;
+        let mut progress_follow = true;
+        let mut journey_follow = true;
         let mut history_follow = true;
-        let mut stream_follow = true;
+        let mut current_follow = true;
         let mut focus = FocusRing::new(vec![CURRENT_PANE]);
         let mut keys = Vec::new();
-        let mut terminal = Terminal::new(TestBackend::new(80, 6)).expect("test terminal");
+        // P552: narrow now stacks all four panes (never omitting any),
+        // so this terminal must be tall enough for all four Min-bounded
+        // constraints (3+3+3+`CURRENT_MIN_OUTER_ROWS`) plus the title/
+        // footer rows — a 6-row terminal (the pre-P552 two-pane fixture)
+        // could no longer fit even the four panes' own minimums.
+        let mut terminal = Terminal::new(TestBackend::new(80, 22)).expect("test terminal");
         terminal
             .draw(|frame| {
                 render_live_panes(
                     frame,
-                    LivePaneFrame {
-                        tree_lines: &[],
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &[],
+                        journey_lines: &[],
                         active_row: None,
-                        history_lines: &[],
-                        stream_lines: &[line],
+                        history_rows: &[],
+                        current_rows: std::slice::from_ref(&overlay),
                         scrolls: &mut scrolls,
-                        tree_follow: &mut tree_follow,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
                         history_follow: &mut history_follow,
-                        stream_follow: &mut stream_follow,
+                        current_follow: &mut current_follow,
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
@@ -3470,6 +4367,99 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(rendered.contains("unique current"));
+    }
+
+    /// P552: the entire title row is blank before a title exists — no
+    /// placeholder text — and, once present, the title span renders bold
+    /// with the trait name and start clock following it.
+    #[test]
+    fn title_row_is_blank_before_success_and_bold_after() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+
+        let mut scrolls = PaneScrolls::new();
+        let mut progress_follow = true;
+        let mut journey_follow = true;
+        let mut history_follow = true;
+        let mut current_follow = true;
+        let mut focus = FocusRing::new(vec![PROGRESS_PANE]);
+        let mut keys = Vec::new();
+        let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        active_row: None,
+                        history_rows: &[],
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let blank_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert_eq!(blank_row.trim(), "");
+
+        let title_line = title_row_line("Refactor the merge story", "implement-phase", Some(3_723));
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: Some(&title_line),
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        active_row: None,
+                        history_rows: &[],
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let rendered_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert!(rendered_row.contains("Refactor the merge story"));
+        assert!(rendered_row.contains("implement-phase"));
+        assert!(rendered_row.contains("Started at 01:02:03"));
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((0, 0))
+                .expect("title cell")
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn epoch_clock_utc_wraps_seconds_of_day() {
+        assert_eq!(epoch_clock_utc(3_723), "01:02:03");
+        assert_eq!(epoch_clock_utc(86_400), "00:00:00");
     }
 
     // P470 blocker `down-key-forces-follow-jump`: stepping up releases

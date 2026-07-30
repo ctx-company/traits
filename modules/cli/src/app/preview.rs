@@ -118,6 +118,7 @@ fn preview_session(
             out_of_tree_mutations: Vec::new(),
             started_at_epoch: None,
             trust_approval: None,
+            session_title: None,
         },
         ledger: state.clone(),
         state_digest: ctx_traits_core::digest::Digest::source(trait_ref.id.as_str()),

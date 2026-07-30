@@ -766,12 +766,14 @@ fn merger_narrator_or_passthrough(
         .and_then(|mut profile| {
             crate::app::drive::cold_narrator_config_for_merge(
                 &mut profile,
-                run_id,
-                session_id,
-                &std::collections::BTreeMap::new(),
-                None,
-                None,
-                &Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                crate::app::drive::ColdNarratorContext {
+                    run_id,
+                    session_id,
+                    env_overlay: &std::collections::BTreeMap::new(),
+                    confinement_payloads: None,
+                    exec_dir: None,
+                    trace_sequence: &Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                },
             )
         });
     let Some(config) = config else {

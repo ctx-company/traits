@@ -104,7 +104,11 @@ pub(crate) struct NarratorTokenSnapshot {
 }
 
 impl NarratorTokenTracker {
-    fn begin_call(&self) {
+    /// `pub(crate)` (not just module-private) so the P552 one-time
+    /// session-title dispatch — which runs from `drive.rs`, outside the
+    /// per-frame narrator worker this reservation pattern was written for —
+    /// can fold its own observed tokens into the same drive-wide total.
+    pub(crate) fn begin_call(&self) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -116,7 +120,7 @@ impl NarratorTokenTracker {
     /// the final `finish` delta, already summed by the caller's
     /// [`ctx_traits_io::harness::AttemptTokenAccumulator`] — never just the
     /// last chunk's increment, so a call is never undercounted.
-    fn end_call(&self, delta: u64) {
+    pub(crate) fn end_call(&self, delta: u64) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -1035,11 +1039,34 @@ Elapsed: {}\n\
     )
 }
 
-/// Shared by both the live present-continuous prompt and the P455 past-tense
-/// completed-step prompt — tense-neutral so neither call's own instructions
-/// are contradicted by the system channel.
+/// Shared by the live present-continuous prompt, the P455 past-tense
+/// completed-step prompt, and the P552 one-time session-title prompt — kept
+/// tense/form-neutral so none of those callers' own instructions are
+/// contradicted by the system channel.
 pub(crate) fn narrator_system_prompt() -> &'static str {
-    "You compact agent activity for terminal presentation only. Return exactly one short status line in the tense the request specifies, no markdown, no JSON, no quotes, and no trailing punctuation. Never submit ctx.traits outputs or call tools."
+    "You compact agent activity for terminal presentation only. Return exactly one short status line or title in the tense or form the request specifies, no markdown, no JSON, no quotes, and no trailing punctuation. Never submit ctx.traits outputs or call tools."
+}
+
+/// P552 one-time session-title prompt: a short noun-phrase title for the
+/// whole run, built only from the trait name and the run's own accepted
+/// input text — never a slot value, and never the narrator's thinking
+/// window, since this call happens once, before any step output exists to
+/// summarize.
+pub(crate) fn session_title_prompt(trait_name: &str, input_text: &str) -> String {
+    let input_line = if input_text.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Input: {input_text}\n")
+    };
+    format!(
+        "Give this run a short title, as a noun phrase describing the task.\n\
+Rules:\n\
+- Return only the title.\n\
+- Keep it under 60 characters.\n\
+- No quotes, bullets, markdown, or trailing punctuation.\n\
+Trait: {trait_name}\n\
+{input_line}"
+    )
 }
 
 fn narrator_stdout_text(stdout: &str, output_id: Option<&str>) -> Option<String> {
@@ -1551,7 +1578,7 @@ pub(crate) fn balanced_json_objects(text: &str) -> Vec<String> {
 mod tests {
     use super::{
         IngestOutcome, NarrationWindows, NarratorConfig, NarratorTraceContext, TokenProgress,
-        collect_thinking_texts, ingest_chunk, narrate_cold,
+        collect_thinking_texts, ingest_chunk, narrate_cold, session_title_prompt,
     };
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -1567,6 +1594,20 @@ mod tests {
             chunk.as_bytes(),
         );
         (window, fallback_window, outcome)
+    }
+
+    #[test]
+    fn session_title_prompt_carries_trait_and_input_never_a_thinking_window() {
+        let prompt = session_title_prompt("implement-phase", "phase P552");
+        assert!(prompt.contains("Trait: implement-phase"));
+        assert!(prompt.contains("Input: phase P552"));
+        assert!(prompt.contains("Return only the title."));
+    }
+
+    #[test]
+    fn session_title_prompt_omits_the_input_line_when_input_is_blank() {
+        let prompt = session_title_prompt("implement-phase", "   ");
+        assert!(!prompt.contains("Input:"));
     }
 
     /// P496 key fix: `collect_thinking_texts` reads the `"thinking"` payload

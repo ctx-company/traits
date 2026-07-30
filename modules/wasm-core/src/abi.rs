@@ -599,6 +599,7 @@ pub fn run_start_json(input: &str) -> String {
                     out_of_tree_mutations: Vec::new(),
                     started_at_epoch: None,
                     trust_approval: request.trust_approval,
+                    session_title: None,
                 },
             },
         )?;

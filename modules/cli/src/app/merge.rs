@@ -4445,6 +4445,7 @@ mod tests {
                 out_of_tree_mutations: Vec::new(),
                 started_at_epoch: None,
                 trust_approval: None,
+                session_title: None,
             },
             ledger: ctx_traits_core::procedure::runtime::State {
                 run_id: ctx_traits_core::procedure::run::Id::new(run_id.to_string())

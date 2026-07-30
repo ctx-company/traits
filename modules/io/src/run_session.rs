@@ -362,6 +362,45 @@ pub fn append_out_of_tree_mutation(
     Ok(session)
 }
 
+/// Claim the one permitted P552 narrator session-title attempt for a session,
+/// marking it attempted before any dispatch happens so a killed process or a
+/// resumed drive can never retry. Returns `Ok(true)` when this call performed
+/// the claim (the caller must proceed to dispatch the bounded title request);
+/// `Ok(false)` when a title attempt was already recorded — resolved or
+/// permanently failed — and the caller must not dispatch at all.
+pub fn claim_session_title_attempt(path: &Utf8Path) -> crate::Result<bool> {
+    let mut session = read_run_session(path)?;
+    if session
+        .provenance
+        .session_title
+        .as_ref()
+        .is_some_and(|state| state.attempted)
+    {
+        return Ok(false);
+    }
+    session.provenance.session_title =
+        Some(ctx_traits_core::procedure::session::SessionTitleState {
+            attempted: true,
+            title: None,
+        });
+    write_run_session(path, &session)?;
+    Ok(true)
+}
+
+/// Persist a successful P552 session-title result after a claimed attempt
+/// ([`claim_session_title_attempt`]). A failed/killed attempt is never
+/// recorded here — the claim above already marked `attempted` permanently, so
+/// title-less remains this session's terminal state.
+pub fn record_session_title(path: &Utf8Path, title: String) -> crate::Result<()> {
+    let mut session = read_run_session(path)?;
+    session.provenance.session_title =
+        Some(ctx_traits_core::procedure::session::SessionTitleState {
+            attempted: true,
+            title: Some(title),
+        });
+    write_run_session(path, &session)
+}
+
 /// Clear the P460 automatic-landing merge intent on a session's provenance
 /// (`ctx traits drive --no-merge`, applied only once this invocation holds
 /// the per-session driver lock). The initial intent is set once, as part of
@@ -728,6 +767,187 @@ pub(crate) fn reject_symlink_ancestors(path: &Utf8Path) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod session_title_tests {
+    use super::*;
+    use ctx_traits_core::digest::Digest;
+    use ctx_traits_core::procedure::runtime::FinalState;
+
+    /// Minimal-but-valid [`ctx_traits_core::procedure::session::Session`] —
+    /// same shape as `ctx traits merge`'s own `write_test_session` helper,
+    /// duplicated here rather than shared since the two crates' test modules
+    /// cannot see each other's `#[cfg(test)]` items.
+    fn write_test_session(path: &Utf8Path, run_id: &str) {
+        let session = ctx_traits_core::procedure::session::Session {
+            schema_version: "1".to_string(),
+            session_id: ctx_traits_core::procedure::session::SessionId::new(format!(
+                "session-{run_id}"
+            ))
+            .expect("session id"),
+            run_id: ctx_traits_core::procedure::run::Id::new(run_id.to_string()).expect("run id"),
+            trait_id: "test-trait".to_string(),
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            current_source_index: None,
+            current_sequence_item_id: None,
+            current_sequence_title: None,
+            current_agent: None,
+            status: ctx_traits_core::procedure::session::Status::AwaitingInput,
+            warnings: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_submissions: Vec::new(),
+            unresolved_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            stop_reason: None,
+            final_output_summary: Vec::new(),
+            next_frame: None,
+            last_validation_report: None,
+            completion: None,
+            last_drive_outcome: None,
+            provenance: ctx_traits_core::procedure::session::Provenance {
+                started_by: ctx_traits_core::procedure::session::CallerProvenance {
+                    surface: "test".to_string(),
+                    caller: "run-session-test".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                state_source: "test".to_string(),
+                agent_assignments: None,
+                harness_probes: Vec::new(),
+                warnings: Vec::new(),
+                trait_source: None,
+                query_selection: None,
+                worktree: None,
+                merge_frames: Vec::new(),
+                merge_intent: None,
+                out_of_tree_mutations: Vec::new(),
+                started_at_epoch: None,
+                trust_approval: None,
+                session_title: None,
+            },
+            ledger: ctx_traits_core::procedure::runtime::State {
+                run_id: ctx_traits_core::procedure::run::Id::new(run_id.to_string())
+                    .expect("run id"),
+                trait_id: "test-trait".to_string(),
+                strict_loops: false,
+                source_digest: None,
+                canonical_digest: None,
+                current_run_index: 0,
+                sequence_statuses: Vec::new(),
+                accepted_port_values: Vec::new(),
+                accepted_slot_values: Vec::new(),
+                accepted_output_port_values: Vec::new(),
+                slot_revisions: Vec::new(),
+                resource_evidence: Vec::new(),
+                emitted_signals: Vec::new(),
+                rejected_attempts: Vec::new(),
+                provider_capability_reports: Vec::new(),
+                output_ports: Vec::new(),
+                active_path: Vec::new(),
+                control_stack: Vec::new(),
+                branch_decisions: Vec::new(),
+                conditional_input_decisions: Vec::new(),
+                ask_decisions: Vec::new(),
+                failure_routes: Vec::new(),
+                guard_evaluations: Vec::new(),
+                parallel_panel_records: Vec::new(),
+                stop_reason: None,
+                elapsed_seconds: 0,
+                final_state: FinalState::Running,
+            },
+            state_digest: Digest::source("test"),
+        };
+        write_run_session(path, &session).expect("write session");
+    }
+
+    fn scratch_session_path(name: &str) -> Utf8PathBuf {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!(
+                "ctx-run-session-title-test-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir.join("ledger.json")
+    }
+
+    #[test]
+    fn old_ledger_with_no_session_title_field_deserializes_to_none() {
+        let path = scratch_session_path("old-ledger");
+        write_test_session(&path, "old-ledger-run");
+        let text = std::fs::read_to_string(path.as_std_path()).expect("read ledger");
+        assert!(
+            !text.contains("session-title") && !text.contains("session_title"),
+            "an unattempted title must not be serialized at all"
+        );
+        let session = read_run_session(&path).expect("read session back");
+        assert!(session.provenance.session_title.is_none());
+    }
+
+    #[test]
+    fn first_claim_succeeds_and_marks_attempted_with_no_title() {
+        let path = scratch_session_path("first-claim");
+        write_test_session(&path, "first-claim-run");
+        let claimed = claim_session_title_attempt(&path).expect("claim");
+        assert!(claimed);
+        let session = read_run_session(&path).expect("read session back");
+        let state = session.provenance.session_title.expect("attempt recorded");
+        assert!(state.attempted);
+        assert!(state.title.is_none());
+    }
+
+    #[test]
+    fn repeated_or_resumed_claim_never_dispatches_twice() {
+        let path = scratch_session_path("repeat-claim");
+        write_test_session(&path, "repeat-claim-run");
+        assert!(claim_session_title_attempt(&path).expect("first claim"));
+        // A resumed drive re-reads the ledger and calls claim again; it must
+        // observe the earlier attempt and refuse to claim a second time,
+        // regardless of whether that first attempt ever resolved a title.
+        assert!(!claim_session_title_attempt(&path).expect("second claim"));
+    }
+
+    #[test]
+    fn successful_result_persists_and_survives_reconstruction() {
+        let path = scratch_session_path("success");
+        write_test_session(&path, "success-run");
+        assert!(claim_session_title_attempt(&path).expect("claim"));
+        record_session_title(&path, "Refactor the merge story".to_string()).expect("record");
+        let session = read_run_session(&path).expect("read session back");
+        let state = session.provenance.session_title.expect("title state");
+        assert!(state.attempted);
+        assert_eq!(state.title.as_deref(), Some("Refactor the merge story"));
+        // A later claim attempt (e.g. a stray resume) must still refuse,
+        // since a resolved title is read-only from here on.
+        assert!(!claim_session_title_attempt(&path).expect("claim after success"));
+    }
+
+    #[test]
+    fn missing_or_failed_narrator_leaves_permanent_title_less_state() {
+        let path = scratch_session_path("no-narrator");
+        write_test_session(&path, "no-narrator-run");
+        // Simulates "claim, dispatch, dispatch failed/no narrator": the
+        // caller claims the attempt but never calls `record_session_title`.
+        assert!(claim_session_title_attempt(&path).expect("claim"));
+        let session = read_run_session(&path).expect("read session back");
+        let state = session.provenance.session_title.expect("attempt recorded");
+        assert!(state.attempted);
+        assert!(state.title.is_none());
+        // Never retried on a later resume.
+        assert!(!claim_session_title_attempt(&path).expect("no retry"));
+    }
 }
 
 #[cfg(test)]

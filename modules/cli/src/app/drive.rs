@@ -986,6 +986,19 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     let activity = ActivityRecorder::default();
     activity
         .attach_sink(ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger_path));
+    // P552: the one permitted session-title attempt, claimed and dispatched
+    // here — after the first pane paint and worktree preparation, under the
+    // just-acquired driver lock, and strictly before `drive_loop` starts
+    // writing frames — so a detached narrator thread never races a frame's
+    // whole-ledger write, and a resumed drive never dispatches a second call.
+    maybe_dispatch_session_title(
+        &input,
+        run_panel.0.as_ref(),
+        &session_for_lock,
+        &ledger_path,
+        &narrator_tokens,
+        &mut profile,
+    );
     let mut report = drive_loop(
         input,
         drive_started,
@@ -3572,6 +3585,88 @@ fn create_run_panel(
     .map_err(|source| crate::Error::Command {
         message: format!("start ratatui run pane: {source}"),
     })
+}
+
+/// P552: claim and dispatch the one permitted narrator session-title call for
+/// this drive. This runs for every driven session regardless of `--progress`
+/// mode — including a dashboard-spawned `--progress none` drive, which has no
+/// `RunPanel` to derive a prompt from or to repaint — so the prompt context
+/// and narrator resolution are both independent of `run_panel`; the panel
+/// (when one exists) is only refreshed after a successful result. A no-op for
+/// a session whose title was already claimed (resolved or permanently failed)
+/// by an earlier invocation, and for a repository with no resolvable narrator
+/// seat — each of those degrades to a permanently blank title row, never a
+/// placeholder. Dispatches synchronously (bounded by the narrator's own
+/// timeout) rather than on a detached thread, so its `record_session_title`
+/// write can never race a frame's whole-ledger write from `drive_loop`, which
+/// starts only after this call returns.
+fn maybe_dispatch_session_title(
+    input: &DriveInputs<'_>,
+    run_panel: Option<&run_view::RunPanel>,
+    session: &ctx_traits_core::procedure::session::Session,
+    ledger_path: &camino::Utf8Path,
+    narrator_tokens: &harness_stream::NarratorTokenTracker,
+    profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+) {
+    let claimed = ctx_traits_io::run_session::claim_session_title_attempt(ledger_path)
+        .inspect_err(|err| {
+            eprintln!("session title claim failed; leaving the title row blank: {err}");
+        })
+        .unwrap_or(false);
+    if !claimed {
+        return;
+    }
+    let Ok(loaded) = ctx_traits_io::run::load_trait_for_session(input.file, None, session, "drive")
+    else {
+        return;
+    };
+    let (trait_name, input_text) =
+        run_view::title_prompt_context_for(loaded.trait_ref.name.as_str(), session);
+    // Reuses `profile` — the exact authoritative, trait-variant-aware
+    // resolution `resolve_drive_profile` produced for this driven session
+    // (via `resolve_trait_runtime_assignments`) and that `drive_loop` uses
+    // for ordinary frame narration — so a repository/trait-qualified
+    // narrator seat is honored for the title call exactly as it would be
+    // for a driven frame, rather than falling back to the unqualified
+    // machine-default seat a second, independent resolution would produce.
+    let Ok((worktree_env, confinement_payloads)) =
+        resolve_effective_worktree_env(input.execution_dir, profile)
+    else {
+        return;
+    };
+    let Some(config) = cold_narrator_config_for_session_title(
+        profile,
+        ColdNarratorContext {
+            run_id: session.run_id.as_str(),
+            session_id: session.session_id.as_str(),
+            env_overlay: &worktree_env,
+            confinement_payloads: confinement_payloads.as_ref(),
+            exec_dir: input.execution_dir,
+            trace_sequence: &Arc::new(AtomicU64::new(0)),
+        },
+    ) else {
+        // No resolvable narrator seat: the claim above already marked this
+        // session permanently title-less, matching the missing-narrator
+        // outcome documented on `SessionTitleState`.
+        return;
+    };
+    let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
+    narrator_tokens.begin_call();
+    let (result, call_total) = harness_stream::dispatch_narration(&config, prompt);
+    narrator_tokens.end_call(call_total);
+    if call_total > 0
+        && let Some(panel) = run_panel
+    {
+        panel.add_narrator_tokens(call_total);
+    }
+    let Ok(title) = result else {
+        return;
+    };
+    if ctx_traits_io::run_session::record_session_title(ledger_path, title.clone()).is_ok()
+        && let Some(panel) = run_panel
+    {
+        panel.set_title(title);
+    }
 }
 
 fn refresh_existing_run_panel(
@@ -7437,23 +7532,35 @@ fn narrator_config(
     }
 }
 
-/// P549: resolve a cold (never persistent-session) [`harness_stream::NarratorConfig`]
-/// for the automatic merge span, reusing the exact same harness/argv/prompt-
-/// delivery/confinement resolution [`narrator_config`] uses for a driven
-/// frame's narrator. `warm` is always `None` here — unlike a driven frame,
-/// the merger's own harness call is a one-shot dispatch, so its narrator
-/// never needs a persistent conversation regardless of the resolved role's
-/// `session-mode`. `None` means "no narrator seat configured" — the caller's
-/// live surface then falls back to passthrough, matching the seat doctrine
-/// ("absent narrator table means passthrough").
-pub(crate) fn cold_narrator_config_for_merge(
+/// The context a cold (never persistent-session) one-shot narrator dispatch
+/// needs, grouped into one struct so [`cold_narrator_config`]'s own
+/// signature stays under clippy's argument-count lint without suppressing
+/// it — shared by [`cold_narrator_config_for_merge`] and
+/// [`cold_narrator_config_for_session_title`], which differ only in the
+/// `task_label`/trace `item_id` they dispatch under.
+pub(crate) struct ColdNarratorContext<'a> {
+    pub(crate) run_id: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) env_overlay: &'a BTreeMap<String, String>,
+    pub(crate) confinement_payloads: Option<&'a ctx_traits_io::confinement::ConfinementPayloads>,
+    pub(crate) exec_dir: Option<&'a camino::Utf8Path>,
+    pub(crate) trace_sequence: &'a Arc<AtomicU64>,
+}
+
+/// Resolve a cold [`harness_stream::NarratorConfig`], reusing the exact same
+/// harness/argv/prompt-delivery/confinement resolution [`narrator_config`]
+/// uses for a driven frame's narrator. `warm` is always `None` here — unlike
+/// a driven frame, a cold dispatch's own harness call is a one-shot, so its
+/// narrator never needs a persistent conversation regardless of the resolved
+/// role's `session-mode`. `None` means "no narrator seat configured" — the
+/// caller then degrades (passthrough for merge, a permanently blank title
+/// row for session-title), matching the seat doctrine ("absent narrator
+/// table means passthrough").
+fn cold_narrator_config(
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
-    run_id: &str,
-    session_id: &str,
-    env_overlay: &BTreeMap<String, String>,
-    confinement_payloads: Option<&ctx_traits_io::confinement::ConfinementPayloads>,
-    exec_dir: Option<&camino::Utf8Path>,
-    trace_sequence: &Arc<AtomicU64>,
+    ctx: ColdNarratorContext<'_>,
+    task_label: &str,
+    trace_item_id: Option<String>,
 ) -> Option<harness_stream::NarratorConfig> {
     let assignment = profile.resolved_narrator_assignment().ok().flatten()?;
     let plan = plan_from_assignment(assignment, None, None);
@@ -7470,13 +7577,16 @@ pub(crate) fn cold_narrator_config_for_merge(
         return None;
     }
     let cli = harness.cli.as_ref()?;
-    let spawn_sandbox = confinement_payloads.and_then(|payloads| payloads.spawn_sandbox.clone());
-    let confinement_trace = confinement_payloads
+    let spawn_sandbox = ctx
+        .confinement_payloads
+        .and_then(|payloads| payloads.spawn_sandbox.clone());
+    let confinement_trace = ctx
+        .confinement_payloads
         .and_then(|payloads| {
             ctx_traits_io::confinement::confinement_trace_payload(payloads, harness.kind())
         })
         .cloned();
-    let exec_dir_owned = exec_dir.map(camino::Utf8Path::to_path_buf);
+    let exec_dir_owned = ctx.exec_dir.map(camino::Utf8Path::to_path_buf);
     let prompt_delivery = if cli.prompt_via.as_deref() == Some("stdin") {
         ctx_traits_io::harness::PromptDelivery::Stdin
     } else {
@@ -7488,27 +7598,56 @@ pub(crate) fn cold_narrator_config_for_merge(
             cli,
             &plan,
             exec_dir_owned.as_deref(),
-            confinement_payloads,
+            ctx.confinement_payloads,
         ),
-        env_overlay: env_overlay.clone(),
+        env_overlay: ctx.env_overlay.clone(),
         env_remove: agent_dispatch::harness_env_remove(harness),
         warm: None,
         prompt_delivery,
         output_id: cli.output.clone(),
-        task_label: "merge".to_string(),
+        task_label: task_label.to_string(),
         timeout_ms: narrator_timeout_ms(profile),
         exec_dir: exec_dir_owned,
         confinement: confinement_trace,
         sandbox: spawn_sandbox,
         trace: Some(harness_stream::NarratorTraceContext {
-            run_id: run_id.to_string(),
-            session_id: session_id.to_string(),
-            item_id: None,
-            frame_title: "merge".to_string(),
+            run_id: ctx.run_id.to_string(),
+            session_id: ctx.session_id.to_string(),
+            item_id: trace_item_id,
+            frame_title: task_label.to_string(),
             harness_id: plan.harness_id.clone(),
-            sequence: Arc::clone(trace_sequence),
+            sequence: Arc::clone(ctx.trace_sequence),
         }),
     })
+}
+
+/// P549: resolve a cold narrator config for the automatic merge span. See
+/// [`cold_narrator_config`].
+pub(crate) fn cold_narrator_config_for_merge(
+    profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    ctx: ColdNarratorContext<'_>,
+) -> Option<harness_stream::NarratorConfig> {
+    cold_narrator_config(profile, ctx, "merge", None)
+}
+
+/// P552: resolve a cold, one-shot narrator config for the session-title
+/// dispatch. Unlike [`resolve_offline_narrator_config`] (the P521
+/// assisted-story path this used to reuse), the caller passes this drive's
+/// own resolved profile, worktree environment overlay, and confinement
+/// payloads, so a worktree-confined or CLI-override-assigned narrator seat is
+/// honored for the title call exactly as it would be for ordinary live
+/// narration — the title call is simply independent of `--progress` mode.
+/// See [`cold_narrator_config`].
+pub(crate) fn cold_narrator_config_for_session_title(
+    profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    ctx: ColdNarratorContext<'_>,
+) -> Option<harness_stream::NarratorConfig> {
+    cold_narrator_config(
+        profile,
+        ctx,
+        "session-title",
+        Some("session-title".to_string()),
+    )
 }
 
 /// Search a harness output value for an object satisfying every requested

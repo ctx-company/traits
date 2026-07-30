@@ -292,6 +292,26 @@ pub struct Provenance {
     /// pin and never reopen the mutable machine trust store.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust_approval: Option<TrustApprovalProvenance>,
+    /// P552 one-time narrator session title. `None` means "not yet
+    /// requested" (including every ledger written before this field
+    /// existed); once `Some`, `attempted` is permanently `true` and a
+    /// resumed drive must not dispatch a second title call regardless of
+    /// whether `title` itself resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_title: Option<SessionTitleState>,
+}
+
+/// See [`Provenance::session_title`]. `attempted` is set the moment the one
+/// permitted title call is claimed, before dispatch — so a missing narrator,
+/// a failed call, or a killed process leaves `title: None` but `attempted:
+/// true`, and is never retried.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct SessionTitleState {
+    pub attempted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -3392,6 +3412,7 @@ output = ["slot:final"]
                 out_of_tree_mutations: Vec::new(),
                 started_at_epoch: None,
                 trust_approval: None,
+                session_title: None,
             },
         };
         start_run_session(
@@ -3890,5 +3911,56 @@ equals = "revise"
             DriveOutcomeKind::Killed
         );
         assert_eq!(DriveOutcomeKind::Killed.as_str(), "killed");
+    }
+
+    #[test]
+    fn provenance_json_missing_session_title_deserializes_to_none() {
+        let provenance: Provenance = serde_json::from_str(
+            r#"{"started-by":{"surface":"test","caller":"c"},"state-source":"s"}"#,
+        )
+        .expect("old-shaped provenance JSON still deserializes");
+        assert!(provenance.session_title.is_none());
+    }
+
+    #[test]
+    fn resolved_session_title_round_trips_through_json() {
+        let provenance = Provenance {
+            started_by: CallerProvenance {
+                surface: "test".to_string(),
+                caller: "c".to_string(),
+                agent: None,
+                harness: None,
+            },
+            state_source: "s".to_string(),
+            agent_assignments: None,
+            harness_probes: Vec::new(),
+            warnings: Vec::new(),
+            trait_source: None,
+            query_selection: None,
+            worktree: None,
+            merge_frames: Vec::new(),
+            merge_intent: None,
+            out_of_tree_mutations: Vec::new(),
+            started_at_epoch: None,
+            trust_approval: None,
+            session_title: Some(SessionTitleState {
+                attempted: true,
+                title: Some("Refactor the merge story".to_string()),
+            }),
+        };
+        let text = serde_json::to_string(&provenance).expect("serialize");
+        let round_tripped: Provenance = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(round_tripped.session_title, provenance.session_title);
+    }
+
+    #[test]
+    fn permanently_failed_session_title_is_attempted_with_no_title() {
+        let provenance: Provenance = serde_json::from_str(
+            r#"{"started-by":{"surface":"test","caller":"c"},"state-source":"s","session-title":{"attempted":true}}"#,
+        )
+        .expect("attempted-with-no-title JSON deserializes");
+        let state = provenance.session_title.expect("state present");
+        assert!(state.attempted);
+        assert!(state.title.is_none());
     }
 }
