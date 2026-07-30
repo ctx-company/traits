@@ -81,8 +81,13 @@
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 188,
-    "end": 188
+    "start": 213,
+    "end": 213
+  },
+  "schema:blocker-step": {
+    "file": "packages/agents/src/index.ts",
+    "start": 193,
+    "end": 193
   },
   "schema:review-verdict-default": {
     "file": ".ctx/traits/packages/refactor/source/schema.ts",

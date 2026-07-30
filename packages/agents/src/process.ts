@@ -58,16 +58,6 @@ export type GuardedProductionRole = {
  */
 export type GuardedProductionProduceRole = GuardedProductionRole & {
   readonly optionalInputs?: readonly SlotHandle[];
-  /**
-   * Extra slots the produce step also writes each round, alongside its main
-   * output — mirroring the review seat's `extraOutputs`. Motivating case:
-   * typed blocker dispositions. The dispositions CONTRACT lived for a while
-   * as prose in the work-summary hint ("ends with a Blocker dispositions
-   * section…") and a live run ignored it in five consecutive summaries,
-   * which silently degraded the reviewer's recurrence-verification protocol
-   * that keys on it. A schema-required output cannot be skipped.
-   */
-  readonly extraOutputs?: readonly SlotHandle[];
 };
 
 /**
@@ -197,18 +187,32 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
         description: `Reviewer verdict for the "${id}" produce-review round.`,
       })
   );
+  // The produce step reads its own output slot from the previous round
+  // (`input.optional` — absent in round 1, exactly like the verdicts). This
+  // is the worker's cross-round memory: without it, every round's worker
+  // reconstructed "what has been done so far" by re-auditing the working
+  // tree against the draft, which consumed the frame and produced the
+  // observed one-small-step-per-round throughput. The reviewer's verdict
+  // gets the same self-read below for the same reason: a reviewer that
+  // never sees its own prior findings re-derives them from the tree each
+  // round, mutating step lists and silently dropping completed work.
   const produceStep = sequence.prompt(`${id}-produce`, {
     agent: produce.agent,
     text: produce.text,
-    output: produce.extraOutputs ? [produces as SlotHandle, ...produce.extraOutputs] : produces,
-    input: [...verdicts, ...(produce.optionalInputs ?? [])].map((slotToHide) => input.optional(slotToHide)),
+    output: produces,
+    input: [
+      ...verdicts,
+      // `produces` may be one slot or a list; every one is a self-read.
+      ...((Array.isArray(produces) ? produces : [produces]) as readonly SlotHandle[]),
+      ...(produce.optionalInputs ?? []),
+    ].map((slotToHide) => input.optional(slotToHide)),
   });
   const reviewSteps = seats.map((seat, index) =>
     sequence.prompt(`${id}-review${suffix(index)}`, {
       agent: seat.agent,
       text: seat.text,
       output: seat.extraOutputs ? [verdicts[index], ...seat.extraOutputs] : verdicts[index],
-      ...(seat.extraInputs === undefined ? {} : { input: [...seat.extraInputs] }),
+      input: [input.optional(verdicts[index]), ...(seat.extraInputs ?? [])],
     })
   );
   const sealed = carry === undefined ? undefined : slot.boolean(`${id}-sealed`);

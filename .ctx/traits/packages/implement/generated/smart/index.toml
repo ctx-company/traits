@@ -133,8 +133,8 @@ hint = "Scope, files to touch, approach, reuse/abstraction opportunities, valida
 [[slot]]
 id = "work-summary"
 schema = "schema:text"
-description = "Worker's report of the implemented state; replaced in full each produce round."
-hint = "What changed (files), how it was validated, and open concerns. Revised after every produce round; once a verdict has been attached, ends with a Blocker dispositions section — one entry per blocker id: the done-when quoted verbatim, what changed, where, and how that done-when was verified (or the out-of-scope justification)."
+description = "Worker's cumulative account of the implemented state, extended each produce round — the worker's cross-round memory."
+hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round, append: what changed (files), how it was validated, open concerns, and per-blocker progress against the verdict's step list (which step, what changed, evidence). Compact rounds older than the attached verdict to a line each so the document stays bounded."
 
 [[slot]]
 id = "leftovers"
@@ -241,6 +241,24 @@ required = true
 description = "approved when no blocker remains; revise when at least one blocker remains."
 
 [[schema]]
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
+
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
 id = "blocker"
 description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
 
@@ -261,7 +279,7 @@ description = "id of the prior-round blocker this restates; present when the pri
 [schema.fields.required-fix]
 schema = "schema:text"
 required = true
-description = """The fix as STEPS to take, always — you are the smarter model here, and this field exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). State the approach you expect: what to do, in what order, and what you expect to see before you are satisfied. High-level is fine; a destination alone is not. "Replace the separate paths with one renderer" is a destination — the steps name what to create and what it owns, what must cease to exist or shrink to a delegate, and which call sites to route. Evidence from a four-round stall: every fix stated as an operation ("invoke X after Y holds the lock") cleared in one round, while the same destination-shaped fix was re-raised three times as the worker complied with its letter through ever-smaller extractions."""
+description = "One or two sentences of intent: the invariant an acceptable fix establishes and why. The operational content — what to do, in what order — lives in `steps`, which is the field the worker executes and the field you maintain across rounds."
 
 [schema.fields.root-cause]
 schema = "schema:text"
@@ -275,6 +293,11 @@ description = "The exact authoritative line(s) the cited rule quotes, verified a
 [schema.fields.rule-source]
 schema = "schema:text"
 description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.steps]
+schema = "[schema:blocker-step]"
+required = true
+description = """The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination ("replace the separate paths with one renderer") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text — flipping status to done only where you verified the evidence with your own tools, and appending genuinely new findings as new steps at the end. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end."""
 
 [schema.fields.what]
 schema = "schema:text"
@@ -544,7 +567,7 @@ Review the produced work for {port:phase} against the draft {slot:draft}. Curren
             Verify any house-rule citation directly against {resource:rule-authority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Smart authority: when the plan and the observed work genuinely contradict, resolve the contradiction ONLY by producing a typed amendment record — the change, the contradiction it resolves, the rationale, and its provenance — which then becomes the binding contract going forward; an unrecorded departure is still a plan-fidelity gap, not an amendment. Amending fidelity never amends correctness: a genuine defect remains a BLOCKER under REVIEW_VERDICT_DOCTRINE no matter how the plan was amended.
             Treat a work summary that reports an unresolved cross-reviewer amendment conflict as a BLOCKER in your verdict: the conflict stays open until both reviewers reconcile it in a later round, and status must not be approved while it remains.
-            If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.
+            Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the phase contract {slot:phase-brief} and house rules {slot:product-brief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
                     Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {slot:product-brief} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
                     Judge the work SOLELY against this phase's stated scope and Definition of Done. A phase is complete when its own DoD holds — even if the overall project does not yet build or pass whole-project gates, which belong to later phases. Do not invent acceptance criteria the phase does not state, and do not fail the work for deliverables or gates scoped to a different phase.
@@ -579,7 +602,7 @@ Independently review the produced work for {port:phase} against the draft {slot:
             Verify any house-rule citation directly against {resource:rule-authority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Smart authority: when the plan and the observed work genuinely contradict, resolve the contradiction ONLY by producing a typed amendment record — the change, the contradiction it resolves, the rationale, and its provenance — which then becomes the binding contract going forward; an unrecorded departure is still a plan-fidelity gap, not an amendment. Amending fidelity never amends correctness: a genuine defect remains a BLOCKER under REVIEW_VERDICT_DOCTRINE no matter how the plan was amended.
             Treat a work summary that reports an unresolved cross-reviewer amendment conflict as a BLOCKER in your verdict: the conflict stays open until both reviewers reconcile it in a later round, and status must not be approved while it remains.
-            If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.
+            Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the phase contract {slot:phase-brief} and house rules {slot:product-brief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
                     Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {slot:product-brief} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
                     Judge the work SOLELY against this phase's stated scope and Definition of Done. A phase is complete when its own DoD holds — even if the overall project does not yet build or pass whole-project gates, which belong to later phases. Do not invent acceptance criteria the phase does not state, and do not fail the work for deliverables or gates scoped to a different phase.
@@ -715,6 +738,7 @@ input = [
     "slot:product-brief",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:work-summary", optional = true },
     { slot = "slot:leftovers", optional = true },
     { slot = "slot:repo-gates-passed", optional = true },
 ]
@@ -764,6 +788,7 @@ input = [
     "resource:rule-authority",
     "slot:phase-brief",
     "slot:product-brief",
+    { slot = "slot:review-verdict-1", optional = true },
 ]
 output = [
     "slot:review-verdict-1",
@@ -785,6 +810,7 @@ input = [
     "slot:phase-brief",
     "slot:product-brief",
     "slot:leftovers",
+    { slot = "slot:review-verdict-2", optional = true },
 ]
 output = [
     "slot:review-verdict-2",
@@ -919,6 +945,7 @@ input = [
     "slot:phase-brief",
     "slot:product-brief",
     { slot = "slot:planning-verdict", optional = true },
+    { slot = "slot:draft", optional = true },
 ]
 output = ["slot:draft"]
 
@@ -932,6 +959,7 @@ input = [
     "port:phase",
     "slot:phase-brief",
     "slot:product-brief",
+    { slot = "slot:planning-verdict", optional = true },
 ]
 output = ["slot:planning-verdict"]
 

@@ -101,8 +101,13 @@
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 188,
-    "end": 188
+    "start": 213,
+    "end": 213
+  },
+  "schema:blocker-step": {
+    "file": "packages/agents/src/index.ts",
+    "start": 193,
+    "end": 193
   },
   "schema:correctness-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -126,13 +131,13 @@
   },
   "schema:leftover": {
     "file": "packages/agents/src/index.ts",
-    "start": 344,
-    "end": 344
+    "start": 373,
+    "end": 373
   },
   "schema:owner-item": {
     "file": "packages/agents/src/index.ts",
-    "start": 297,
-    "end": 297
+    "start": 326,
+    "end": 326
   },
   "schema:product-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -171,33 +176,33 @@
   },
   "sequence:building-body": {
     "file": "packages/agents/src/process.ts",
-    "start": 215,
-    "end": 215
+    "start": 219,
+    "end": 219
   },
   "sequence:building-body/building-produce": {
     "file": "packages/agents/src/process.ts",
-    "start": 200,
-    "end": 200
+    "start": 199,
+    "end": 199
   },
   "sequence:building-body/building-review-1": {
     "file": "packages/agents/src/process.ts",
-    "start": 207,
-    "end": 207
+    "start": 211,
+    "end": 211
   },
   "sequence:building-body/building-review-2": {
     "file": "packages/agents/src/process.ts",
-    "start": 207,
-    "end": 207
+    "start": 211,
+    "end": 211
   },
   "sequence:building-body/building-seal": {
     "file": "packages/agents/src/process.ts",
-    "start": 227,
-    "end": 227
+    "start": 231,
+    "end": 231
   },
   "sequence:building-body/building-unseal": {
     "file": "packages/agents/src/process.ts",
-    "start": 220,
-    "end": 220
+    "start": 224,
+    "end": 224
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -231,18 +236,18 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 343,
-    "end": 343
+    "start": 347,
+    "end": 347
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 326,
-    "end": 326
+    "start": 330,
+    "end": 330
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 337,
-    "end": 337
+    "start": 341,
+    "end": 341
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -256,23 +261,23 @@
   },
   "sequence:planning-body": {
     "file": "packages/agents/src/process.ts",
-    "start": 215,
-    "end": 215
+    "start": 219,
+    "end": 219
   },
   "sequence:planning-body/planning-produce": {
     "file": "packages/agents/src/process.ts",
-    "start": 200,
-    "end": 200
+    "start": 199,
+    "end": 199
   },
   "sequence:planning-body/planning-review": {
     "file": "packages/agents/src/process.ts",
-    "start": 207,
-    "end": 207
+    "start": 211,
+    "end": 211
   },
   "sequence:procedure/building": {
     "file": "packages/agents/src/process.ts",
-    "start": 250,
-    "end": 250
+    "start": 254,
+    "end": 254
   },
   "sequence:procedure/phase-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -281,8 +286,8 @@
   },
   "sequence:procedure/planning": {
     "file": "packages/agents/src/process.ts",
-    "start": 250,
-    "end": 250
+    "start": 254,
+    "end": 254
   },
   "sequence:procedure/product-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -291,13 +296,13 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 351,
-    "end": 351
+    "start": 355,
+    "end": 355
   },
   "sequence:procedure/shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 318,
-    "end": 318
+    "start": 322,
+    "end": 322
   },
   "signal:recurring-blocker-unresolved": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -306,8 +311,8 @@
   },
   "slot:building-sealed": {
     "file": "packages/agents/src/process.ts",
-    "start": 214,
-    "end": 214
+    "start": 218,
+    "end": 218
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -336,8 +341,8 @@
   },
   "slot:planning-verdict": {
     "file": "packages/agents/src/process.ts",
-    "start": 194,
-    "end": 194
+    "start": 184,
+    "end": 184
   },
   "slot:product-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -366,18 +371,18 @@
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 307,
-    "end": 307
+    "start": 311,
+    "end": 311
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 314,
-    "end": 314
+    "start": 318,
+    "end": 318
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 300,
-    "end": 300
+    "start": 304,
+    "end": 304
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",

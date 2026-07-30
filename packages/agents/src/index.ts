@@ -78,7 +78,7 @@ export const SCOPE_SPLIT_DOCTRINE =
  * instead of splicing these directly into a `prompt.template`.
  */
 const RECURRENCE_VERIFICATION =
-  `If the work summary ends with a Blocker dispositions section, those ids are the blockers raised last pass: verify each disposition's quoted done-when directly with your tools FIRST; a blocker whose done-when still fails returns with recurrence-of set to its id — never silently rewritten as a new blocker.`;
+  `Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.`;
 const PHASE_CONTRACT_CONSULTATION =
   `                    Consult the phase contract {phaseBrief} and house rules {productBrief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.`;
 const RULE_CITATION_VERIFICATION =
@@ -185,6 +185,31 @@ export const STRICT_VARIANT_DOCTRINE = VARIANT_PRECEDENCE_PREFIX
  * location, root cause, the invariant an acceptable fix must establish, and the falsifiable
  * check that clears it.
  */
+/**
+ * One operational step of a blocker's fix, with its verification state.
+ * The step list is the loop's cross-round progress ledger: text is frozen
+ * once written, status is what moves, evidence is what justifies the move.
+ */
+export const blockerStepSchema: SchemaHandle = schema.object(
+  "blocker-step",
+  {
+    step: schema.field(schema.text(), {
+      description:
+        "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds.",
+    }),
+    status: schema.field(schema.text(), {
+      description:
+        "\"open\" or \"done\". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone.",
+    }),
+    evidence: schema.field(schema.text(), {
+      required: false,
+      description:
+        "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open.",
+    }),
+  },
+  { description: "One step of a blocker's required fix, with verified progress state." },
+);
+
 export const blockerSchema: SchemaHandle = schema.object(
   "blocker",
   {
@@ -204,7 +229,11 @@ export const blockerSchema: SchemaHandle = schema.object(
     }),
     "required-fix": schema.field(schema.text(), {
       description:
-        "The fix as STEPS to take, always — you are the smarter model here, and this field exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). State the approach you expect: what to do, in what order, and what you expect to see before you are satisfied. High-level is fine; a destination alone is not. \"Replace the separate paths with one renderer\" is a destination — the steps name what to create and what it owns, what must cease to exist or shrink to a delegate, and which call sites to route. Evidence from a four-round stall: every fix stated as an operation (\"invoke X after Y holds the lock\") cleared in one round, while the same destination-shaped fix was re-raised three times as the worker complied with its letter through ever-smaller extractions.",
+        "One or two sentences of intent: the invariant an acceptable fix establishes and why. The operational content — what to do, in what order — lives in `steps`, which is the field the worker executes and the field you maintain across rounds.",
+    }),
+    steps: schema.field(schema.list(blockerStepSchema), {
+      description:
+        "The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination (\"replace the separate paths with one renderer\") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text — flipping status to done only where you verified the evidence with your own tools, and appending genuinely new findings as new steps at the end. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end.",
     }),
     "done-when": schema.field(schema.text(), {
       description:

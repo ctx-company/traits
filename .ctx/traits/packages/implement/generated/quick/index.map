@@ -41,8 +41,8 @@
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 88,
-    "end": 88
+    "start": 89,
+    "end": 89
   },
   "resource:execution-plan": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/resource.ts",
@@ -56,8 +56,13 @@
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 188,
-    "end": 188
+    "start": 213,
+    "end": 213
+  },
+  "schema:blocker-step": {
+    "file": "packages/agents/src/index.ts",
+    "start": 193,
+    "end": 193
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -71,18 +76,18 @@
   },
   "sequence:building-body": {
     "file": "packages/agents/src/process.ts",
-    "start": 215,
-    "end": 215
+    "start": 219,
+    "end": 219
   },
   "sequence:building-body/building-produce": {
     "file": "packages/agents/src/process.ts",
-    "start": 200,
-    "end": 200
+    "start": 199,
+    "end": 199
   },
   "sequence:building-body/building-review": {
     "file": "packages/agents/src/process.ts",
-    "start": 207,
-    "end": 207
+    "start": 211,
+    "end": 211
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -96,28 +101,28 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 119,
-    "end": 119
+    "start": 120,
+    "end": 120
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 343,
-    "end": 343
+    "start": 347,
+    "end": 347
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 326,
-    "end": 326
+    "start": 330,
+    "end": 330
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 337,
-    "end": 337
+    "start": 341,
+    "end": 341
   },
   "sequence:procedure/building": {
     "file": "packages/agents/src/process.ts",
-    "start": 250,
-    "end": 250
+    "start": 254,
+    "end": 254
   },
   "sequence:procedure/draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
@@ -126,13 +131,13 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 351,
-    "end": 351
+    "start": 355,
+    "end": 355
   },
   "sequence:procedure/shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 318,
-    "end": 318
+    "start": 322,
+    "end": 322
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
@@ -161,18 +166,18 @@
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 307,
-    "end": 307
+    "start": 311,
+    "end": 311
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 314,
-    "end": 314
+    "start": 318,
+    "end": 318
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 300,
-    "end": 300
+    "start": 304,
+    "end": 304
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
@@ -181,7 +186,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 95,
-    "end": 95
+    "start": 96,
+    "end": 96
   }
 }

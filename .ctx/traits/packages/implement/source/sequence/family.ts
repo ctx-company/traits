@@ -133,8 +133,8 @@ export const draft = slot.text({
 export const workSummary = slot.text({
     id: "work-summary",
     description:
-        "Worker's report of the implemented state; replaced in full each produce round.",
-    hint: "What changed (files), how it was validated, and open concerns. Revised after every produce round; once a verdict has been attached, ends with a Blocker dispositions section — one entry per blocker id: the done-when quoted verbatim, what changed, where, and how that done-when was verified (or the out-of-scope justification).",
+        "Worker's cumulative account of the implemented state, extended each produce round — the worker's cross-round memory.",
+    hint: "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round, append: what changed (files), how it was validated, open concerns, and per-blocker progress against the verdict's step list (which step, what changed, evidence). Compact rounds older than the attached verdict to a line each so the document stays bounded.",
 });
 export const leftovers = slot({
     id: "leftovers",
