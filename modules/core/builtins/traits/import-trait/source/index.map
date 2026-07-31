@@ -6,8 +6,8 @@
   },
   "port:candidate": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 30,
+    "end": 30
   },
   "port:scaffold": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
@@ -36,27 +36,22 @@
   },
   "prompt:import": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 34,
-    "end": 34
+    "start": 23,
+    "end": 23
   },
   "schema:trait-draft": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 15,
-    "end": 15
+    "start": 20,
+    "end": 20
   },
   "sequence:procedure/import": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 30,
-    "end": 30
-  },
-  "slot:candidate": {
-    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 13,
-    "end": 13
+    "start": 23,
+    "end": 23
   },
   "trait:import-trait": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 20,
-    "end": 20
+    "start": 32,
+    "end": 32
   }
 }

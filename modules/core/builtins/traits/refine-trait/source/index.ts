@@ -1,4 +1,4 @@
-import { agent, dependency, port, procedure, prompt, ref, schema, sequence, slot, trait } from "@ctx-traits/cdk";
+import { agent, dependency, input, output, port, procedure, ref, schema, sequence, trait } from "@ctx-traits/cdk";
 
 const refiner = agent("refiner", {
     description: "Produces source-anchored trait refinement scaffolds.",
@@ -11,12 +11,24 @@ const sourcePath = port.input.text({ id: "source-path", description: "Filesystem
 const changeRequest = port.input.text({ id: "change-request", description: "Requested refinement." });
 const sourceAnchor = schema.object("source-anchor", { file: schema.text(), start: schema.number(), end: schema.number() }, { description: "A one-based inclusive source location." });
 const refinePatch = schema.object("refine-patch", { change: schema.text(), anchor: sourceAnchor }, { description: "One requested source-anchored refinement." });
-const scaffold = slot({
-    id: "refinement",
-    schema: schema.object("refine-scaffold", { "source-trait-id": schema.text(), "source-digest": schema.text(), "proposed-trait": schema.any(), patches: schema.array(refinePatch) }, { description: "A source-anchored refinement proposal." }),
-    description: "Typed refinement scaffold for validation and candidate evaluation.",
+const agentTraitsSchema = ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" });
+const designRubric = ref.resource({ id: "design-rubric", dependency: "trait-spec" });
+
+// A schema-typed instruction-output: the return-format instruction folds
+// into the step's compiled prompt, and its slot (auto-declared at the
+// step's own id, "refine") backs the output port below.
+const refinementOutput = output.of(
+    schema.object("refine-scaffold", { "source-trait-id": schema.text(), "source-digest": schema.text(), "proposed-trait": schema.any(), patches: schema.array(refinePatch) }, { description: "A source-anchored refinement proposal." }),
+)`Ground the result in ${agentTraitsSchema} and ${designRubric}. Return exactly one structured refine scaffold with anchored patches.`;
+
+const refineStep = sequence.prompt("refine", {
+    title: "Refine trait",
+    agent: refiner,
+    input: input.text`Refine ${source} at ${sourcePath} for ${changeRequest}. Preserve source identity, use ${sourceDigest} as source evidence, and anchor every patch to real one-based inclusive lines in ${sourcePath}.`,
+    output: refinementOutput,
 });
-const output = port.output.of({ id: "refinement", schema: ref.schema("refine-scaffold"), description: "Refinement scaffold.", value: scaffold });
+
+const refinementPort = port.output.of({ id: "refinement", schema: ref.schema("refine-scaffold"), description: "Refinement scaffold.", value: refinementOutput });
 
 export default trait("refine-trait", {
     version: "0.1.0",
@@ -28,13 +40,7 @@ export default trait("refine-trait", {
     procedure: procedure({
         description: "Propose one refinement scaffold whose trait identity remains equal to the source identity.",
         input: [source, sourceDigest, sourcePath, changeRequest],
-        output,
-        sequence: sequence.prompt("refine", {
-            title: "Refine trait",
-            agent: refiner,
-            input: [source, sourceDigest, sourcePath, changeRequest, ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" }), ref.resource({ id: "design-rubric", dependency: "trait-spec" })],
-            text: prompt.text`Refine ${source} at ${sourcePath} for ${changeRequest}. Preserve source identity, use ${sourceDigest} as source evidence, and anchor every patch to real one-based inclusive lines in ${sourcePath}. Ground the result in ${ref.resource({ id: "agent-traits-schema", dependency: "trait-spec" })} and ${ref.resource({ id: "design-rubric", dependency: "trait-spec" })}. Return exactly one structured refine scaffold with anchored patches.`,
-            output: scaffold,
-        }),
+        output: refinementPort,
+        sequence: refineStep,
     }),
 });

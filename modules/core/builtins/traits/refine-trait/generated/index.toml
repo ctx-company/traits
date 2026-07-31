@@ -48,12 +48,12 @@ id = "refinement"
 direction = "output"
 schema = "schema:refine-scaffold"
 description = "Refinement scaffold."
-value = "slot:refinement"
+value = "slot:refine"
 
 [[slot]]
-id = "refinement"
+id = "refine"
 schema = "schema:refine-scaffold"
-description = "Typed refinement scaffold for validation and candidate evaluation."
+description = "Runtime slot refine."
 
 [[schema]]
 id = "source-anchor"
@@ -109,16 +109,21 @@ description = "Produces source-anchored trait refinement scaffolds."
 summary = "Trait refinement agent."
 
 [prompt.refine]
-text = "Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}. Ground the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured refine scaffold with anchored patches."
+text = """
+Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
+
+Ground the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured refine scaffold with anchored patches.
+
+Return JSON matching schema:refine-scaffold, with no surrounding commentary."""
 input = [
     "port:source",
-    "port:source-digest",
     "port:source-path",
     "port:change-request",
+    "port:source-digest",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:refinement"]
+output = ["slot:refine"]
 
 [procedure]
 description = "Propose one refinement scaffold whose trait identity remains equal to the source identity."
@@ -137,10 +142,10 @@ agent = "agent:refiner"
 prompt = "prompt:refine"
 input = [
     "port:source",
-    "port:source-digest",
     "port:source-path",
     "port:change-request",
+    "port:source-digest",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:refinement"]
+output = ["slot:refine"]

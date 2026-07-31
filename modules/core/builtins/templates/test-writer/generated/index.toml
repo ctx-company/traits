@@ -27,12 +27,12 @@ id = "plan"
 direction = "output"
 schema = "schema:test-plan"
 description = "Structured proposed test plan."
-value = "slot:plan"
+value = "slot:write-plan"
 
 [[slot]]
-id = "plan"
+id = "write-plan"
 schema = "schema:test-plan"
-description = "The proposed test plan for the target code."
+description = "Runtime slot write-plan."
 
 [[schema]]
 id = "proposed-test-case"
@@ -68,12 +68,17 @@ description = "Proposes a structured test plan for a piece of code against state
 summary = "Test plan writer."
 
 [prompt.write-plan]
-text = "Propose a test plan for {port:target-code} against the requirements {port:requirements}. Return exactly one structured plan: one case per behavior worth testing (name, setup, and the assertion it makes), plus a list of any requirements the proposed cases don't cover. Do not write the actual test code — describe the cases."
+text = """
+Propose a test plan for {port:target-code} against the requirements {port:requirements}.
+
+Return exactly one structured plan: one case per behavior worth testing (name, setup, and the assertion it makes), plus a list of any requirements the proposed cases don't cover. Do not write the actual test code — describe the cases.
+
+Return JSON matching schema:test-plan, with no surrounding commentary."""
 input = [
     "port:target-code",
     "port:requirements",
 ]
-output = ["slot:plan"]
+output = ["slot:write-plan"]
 
 [procedure]
 description = "Propose a test plan for the target code against the stated requirements."
@@ -92,4 +97,4 @@ input = [
     "port:target-code",
     "port:requirements",
 ]
-output = ["slot:plan"]
+output = ["slot:write-plan"]

@@ -36,12 +36,12 @@ id = "candidate"
 direction = "output"
 schema = "schema:trait-draft"
 description = "Generated trait candidate."
-value = "slot:candidate"
+value = "slot:generate"
 
 [[slot]]
-id = "candidate"
+id = "generate"
 schema = "schema:trait-draft"
-description = "Structured trait draft emitted for candidate validation."
+description = "Runtime slot generate."
 
 [[schema]]
 id = "trait-draft"
@@ -57,14 +57,19 @@ description = "Produces one complete trait draft from a concise authoring goal."
 summary = "Trait draft generator."
 
 [prompt.generate]
-text = "Create exactly one complete canonical trait draft for {port:name} from {port:brief}. Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return structured output only."
+text = """
+Create exactly one complete canonical trait draft for {port:name} from {port:brief}.
+
+Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return structured output only.
+
+Return JSON matching schema:trait-draft, with no surrounding commentary."""
 input = [
     "port:name",
     "port:brief",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:candidate"]
+output = ["slot:generate"]
 
 [procedure]
 description = "Produce one structured trait draft; deterministic candidate gates verify it downstream."
@@ -85,4 +90,4 @@ input = [
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:candidate"]
+output = ["slot:generate"]

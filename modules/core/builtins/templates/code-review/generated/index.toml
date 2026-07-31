@@ -32,7 +32,7 @@ value = "slot:review"
 [[slot]]
 id = "review"
 schema = "schema:code-review-scaffold"
-description = "The reviewer's structured verdict and findings."
+description = "Runtime slot review."
 
 [[schema]]
 id = "severity"
@@ -86,7 +86,12 @@ description = "Reviews a diff for correctness, risk, and scope, and reports find
 summary = "Diff reviewer."
 
 [prompt.review]
-text = "Review {port:diff} with a focus on {port:focus}. Return exactly one structured review: a verdict of pass, needs-changes, or fail, and one finding per issue you find, each naming its file, a severity of blocker or advisory, and a concise summary. Do not rewrite the diff; report only."
+text = """
+Review {port:diff} with a focus on {port:focus}.
+
+Return exactly one structured review: a verdict of pass, needs-changes, or fail, and one finding per issue you find, each naming its file, a severity of blocker or advisory, and a concise summary. Do not rewrite the diff; report only.
+
+Return JSON matching schema:code-review-scaffold, with no surrounding commentary."""
 input = [
     "port:diff",
     "port:focus",

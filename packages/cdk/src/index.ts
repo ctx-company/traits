@@ -127,6 +127,7 @@ export type {
   FieldRef,
   GuardHandle,
   Handle,
+  InstructionOutputHandle,
   ObjectFieldRefs,
   OptionalSlotRead,
   OutputSinkHandle,
@@ -163,6 +164,8 @@ export {
   toDraftJsonWithSourceMap,
 } from "./normalize.js";
 export type { Draftable, DraftOf, Mutable, SynthPlan } from "./normalize.js";
+export { output } from "./output.js";
+export type { OutputFunction } from "./output.js";
 export { port } from "./port.js";
 export type { PortDefaultCommand, PortDirectionHelpers, PortFields, PortFunction } from "./port.js";
 export { checklist, dependency, procedure, resource, rubric, rule, signal } from "./procedure.js";

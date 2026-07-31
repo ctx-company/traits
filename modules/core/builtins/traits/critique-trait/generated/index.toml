@@ -48,12 +48,12 @@ id = "review"
 direction = "output"
 schema = "schema:review-scaffold"
 description = "Advisory critique scaffold."
-value = "slot:review"
+value = "slot:critique"
 
 [[slot]]
-id = "review"
+id = "critique"
 schema = "schema:review-scaffold"
-description = "Typed advisory design critique for candidate validation."
+description = "Runtime slot critique."
 
 [[schema]]
 id = "source-anchor"
@@ -113,16 +113,21 @@ description = "Reports source-backed advisory trait design findings."
 summary = "Trait design reviewer."
 
 [prompt.critique]
-text = "Critique {port:source} at {port:source-path}. Return exactly one structured review scaffold using {port:source-digest}. Findings are advisory, not proof or enforcement. Use only these rules: unbounded-loop, unattributed-output, missing-review-before-final, over-abstraction, stringly-reference, weak-schema, over-broad-trust. Every finding must name a canonical construct reference and copy its anchor exactly from {port:source-map}; do not guess, repair, or infer anchors. Ground the critique in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}."
+text = """
+Critique {port:source} at {port:source-path}.
+
+Return exactly one structured review scaffold using {port:source-digest}. Findings are advisory, not proof or enforcement. Use only these rules: unbounded-loop, unattributed-output, missing-review-before-final, over-abstraction, stringly-reference, weak-schema, over-broad-trust. Every finding must name a canonical construct reference and copy its anchor exactly from {port:source-map}; do not guess, repair, or infer anchors. Ground the critique in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}.
+
+Return JSON matching schema:review-scaffold, with no surrounding commentary."""
 input = [
     "port:source",
-    "port:source-digest",
     "port:source-path",
+    "port:source-digest",
     "port:source-map",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:review"]
+output = ["slot:critique"]
 
 [procedure]
 description = "Report advisory design findings without modifying the reviewed trait."
@@ -141,10 +146,10 @@ agent = "agent:critic"
 prompt = "prompt:critique"
 input = [
     "port:source",
-    "port:source-digest",
     "port:source-path",
+    "port:source-digest",
     "port:source-map",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:review"]
+output = ["slot:critique"]

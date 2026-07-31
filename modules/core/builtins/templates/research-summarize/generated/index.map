@@ -16,32 +16,27 @@
   },
   "port:summary": {
     "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 44,
-    "end": 44
+    "start": 52,
+    "end": 52
   },
   "prompt:summarize": {
     "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 63,
-    "end": 63
+    "start": 45,
+    "end": 45
   },
   "schema:research-summary": {
     "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 34,
+    "end": 34
   },
   "sequence:procedure/summarize": {
     "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 60,
-    "end": 60
-  },
-  "slot:summary": {
-    "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 45,
+    "end": 45
   },
   "trait:research-summarize": {
     "file": "modules/core/builtins/templates/research-summarize/source/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 59,
+    "end": 59
   }
 }

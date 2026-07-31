@@ -48,12 +48,12 @@ id = "eval-synthesis"
 direction = "output"
 schema = "schema:eval-synthesis-scaffold"
 description = "Eval synthesis scaffold."
-value = "slot:eval-synthesis"
+value = "slot:generate-evals"
 
 [[slot]]
-id = "eval-synthesis"
+id = "generate-evals"
 schema = "schema:eval-synthesis-scaffold"
-description = "Untrusted generated scenarios and deferred eval declarations."
+description = "Runtime slot generate-evals."
 
 [[schema]]
 id = "scenario"
@@ -122,16 +122,21 @@ description = "Proposes deferred eval declarations."
 summary = "Eval synthesis author."
 
 [prompt.generate-evals]
-text = "Read {port:source} and its I/O contract {port:io-contract}. Return exactly one eval-synthesis scaffold for {port:source-trait-id} using {port:source-digest}. Propose positive, negative, and edge scenarios where justified. Scenarios are specifications, not evidence. Every eval must use only behavioral or runtime, link scenarios through canonical singular scenario (a scalar or array), and use only render:, fixture:, trait:, or report: input/output refs. Behavioral and runtime executors are deferred; do not claim they ran. Ground proposals in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}."
+text = """
+Read {port:source} and its I/O contract {port:io-contract}.
+
+Return exactly one eval-synthesis scaffold for {port:source-trait-id} using {port:source-digest}. Propose positive, negative, and edge scenarios where justified. Scenarios are specifications, not evidence. Every eval must use only behavioral or runtime, link scenarios through canonical singular scenario (a scalar or array), and use only render:, fixture:, trait:, or report: input/output refs. Behavioral and runtime executors are deferred; do not claim they ran. Ground proposals in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}.
+
+Return JSON matching schema:eval-synthesis-scaffold, with no surrounding commentary."""
 input = [
     "port:source",
+    "port:io-contract",
     "port:source-trait-id",
     "port:source-digest",
-    "port:io-contract",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:eval-synthesis"]
+output = ["slot:generate-evals"]
 
 [procedure]
 description = "Generate untrusted declarations; the CLI merges and checks the complete candidate trait."
@@ -150,10 +155,10 @@ agent = "agent:generator"
 prompt = "prompt:generate-evals"
 input = [
     "port:source",
+    "port:io-contract",
     "port:source-trait-id",
     "port:source-digest",
-    "port:io-contract",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:eval-synthesis"]
+output = ["slot:generate-evals"]

@@ -17,6 +17,7 @@ import type {
 } from "./generated.js";
 import type {
   AgentHandle,
+  InstructionOutputHandle,
   OutputSinkHandle,
   PortHandle,
   PromptHandle,
@@ -30,7 +31,10 @@ import type {
 } from "./handles.js";
 import type { CommandTemplateValue, OptionalSlotInputValue } from "./input.js";
 import {
+  attachInstructionOutput,
   attachMeta,
+  instructionOutputContent,
+  isInstructionOutputHandle,
   metaOf,
   outputSinkDeclaration,
   recordDiagnostic,
@@ -50,6 +54,7 @@ import {
   validateSlug,
 } from "./normalize.js";
 import type { Mutable } from "./normalize.js";
+import { OUTPUT_RENDER_V1 } from "./output.js";
 import { prompt } from "./prompt.js";
 import { refText } from "./ref.js";
 import { schema } from "./schema.js";
@@ -79,7 +84,8 @@ export type SequenceOutputValue<Value = unknown> =
   | PortHandle<Value>
   | SlotHandle<Value>
   | SchemaHandle<Value>
-  | OutputSinkHandle<Value>;
+  | OutputSinkHandle<Value>
+  | InstructionOutputHandle<Value>;
 export type ArgvItem = string | SlotHandle | PortHandle | ResourceHandle;
 type SignalOutputValue = string | RefHandle<"signal"> | {
   readonly signal: string | RefHandle<"signal">;
@@ -105,21 +111,43 @@ interface SequenceCommonFields {
   readonly emits?: SignalOutputValue | readonly SignalOutputValue[];
   readonly onFailure?: FailureTargetValue;
 }
-type PromptSequenceFields = SequenceCommonFields & {
+type PromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly kind?: "prompt";
   readonly prompt: PromptHandle | PromptTemplate;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
+  /** @deprecated Declare the prompt body via `input.text` in the `input:` field, or the `text:` field — this legacy list stays honored and merges before `include:`. */
+  readonly input?: SequenceInputValue | readonly SequenceInputValue[];
   readonly text?: never;
   readonly cmd?: never;
   readonly argv?: never;
   readonly sequence?: never;
 };
-type TextPromptSequenceFields = SequenceCommonFields & {
+type TextPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly kind?: "prompt";
+  /** @deprecated Use the `input:` field with `input.text` instead. */
   readonly text: PromptTemplate;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
+  /** @deprecated Declare non-interpolated dependencies via `include:` — this legacy list stays honored and merges before it. */
+  readonly input?: SequenceInputValue | readonly SequenceInputValue[];
+  readonly prompt?: never;
+  readonly cmd?: never;
+  readonly argv?: never;
+  readonly sequence?: never;
+};
+/**
+ * The preferred prompt-step shape: `input:` carries the compiled prompt body
+ * itself (an `input.text`/`prompt.text` tagged-template value), and
+ * non-interpolated dependencies live in `include:` — mirroring the
+ * `input.command`/`include:` command-step surface.
+ */
+type InputPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
+  readonly kind?: "prompt";
+  readonly input: PromptTemplate;
+  /** See {@link CommandSequenceFields.include}. */
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
+  readonly text?: never;
   readonly prompt?: never;
   readonly cmd?: never;
   readonly argv?: never;
@@ -127,20 +155,32 @@ type TextPromptSequenceFields = SequenceCommonFields & {
 };
 /** A human-owned prompt. The required signal guard decides whether the frame
  * is exposed; its one local slot output is supplied through `session frame set`. */
-type AskSequenceFields = Omit<SequenceCommonFields, "agent" | "format" | "emits" | "onFailure"> & {
-  readonly kind: "ask";
-  readonly prompt: PromptHandle | PromptTemplate;
-  readonly when: RefHandle<"signal">;
-  readonly output: SlotHandle;
-  readonly agent?: never;
-  readonly text?: never;
-  readonly cmd?: never;
-  readonly argv?: never;
-  readonly sequence?: never;
-  readonly format?: never;
-  readonly emits?: never;
-  readonly onFailure?: never;
-};
+type AskSequenceFields =
+  & Omit<SequenceCommonFields, "agent" | "format" | "emits" | "onFailure" | "input">
+  & {
+    readonly kind: "ask";
+    readonly when: RefHandle<"signal">;
+    readonly output: SlotHandle;
+    readonly agent?: never;
+    readonly text?: never;
+    readonly cmd?: never;
+    readonly argv?: never;
+    readonly sequence?: never;
+    readonly format?: never;
+    readonly emits?: never;
+    readonly onFailure?: never;
+  }
+  & (
+    | {
+      readonly prompt: PromptHandle | PromptTemplate;
+      /** @deprecated Declare the prompt body via `input.text` in the `input:` field instead. */
+      readonly input?: SequenceInputValue | readonly SequenceInputValue[];
+    }
+    | {
+      readonly input: PromptTemplate;
+      readonly prompt?: never;
+    }
+  );
 type CommandSequenceFields =
   & Omit<SequenceCommonFields, "input">
   & {
@@ -431,6 +471,7 @@ export type GateBranchFields =
 export type SequenceFields =
   | PromptSequenceFields
   | TextPromptSequenceFields
+  | InputPromptSequenceFields
   | AskSequenceFields
   | CommandSequenceFields
   | CheckSequenceFields
@@ -497,6 +538,12 @@ export interface SequenceFunction {
    * ```
    */
   prompt<Input, Output = unknown>(
+    fields: Omit<InputPromptSequenceFields, "input" | "output"> & {
+      readonly input: PromptTemplate<Input>;
+      readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+    },
+  ): SequenceHandle<Input, Output>;
+  prompt<Input, Output = unknown>(
     fields: Omit<PromptSequenceFields, "prompt" | "input" | "output"> & {
       readonly prompt: PromptTemplate<Input>;
       readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
@@ -510,8 +557,11 @@ export interface SequenceFunction {
       readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
     },
   ): SequenceHandle<Input, Output>;
-  prompt(id: string, fields: Omit<PromptSequenceFields | TextPromptSequenceFields, "id" | "kind">): SequenceHandle;
-  prompt(fields: PromptSequenceFields | TextPromptSequenceFields): SequenceHandle;
+  prompt(
+    id: string,
+    fields: Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind">,
+  ): SequenceHandle;
+  prompt(fields: PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields): SequenceHandle;
   /**
    * Declares a shell-command sequence step: runs `cmd` (parsed as a plain
    * argv split, no shell), an explicit `argv`, or `argvFrom`, a list-valued
@@ -703,6 +753,12 @@ export interface SequenceFunction {
 }
 
 function sequencePrompt<Input, Output = unknown>(
+  fields: Omit<InputPromptSequenceFields, "input" | "output"> & {
+    readonly input: PromptTemplate<Input>;
+    readonly output?: SequenceOutputValue<Output> | readonly SequenceOutputValue<Output>[];
+  },
+): SequenceHandle<Input, Output>;
+function sequencePrompt<Input, Output = unknown>(
   fields: Omit<PromptSequenceFields, "prompt" | "input" | "output"> & {
     readonly prompt: PromptTemplate<Input>;
     readonly input?: SequenceInputValue<Input> | readonly SequenceInputValue<Input>[];
@@ -718,12 +774,14 @@ function sequencePrompt<Input, Output = unknown>(
 ): SequenceHandle<Input, Output>;
 function sequencePrompt(
   id: string,
-  fields: Omit<PromptSequenceFields | TextPromptSequenceFields, "id" | "kind">,
+  fields: Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind">,
 ): SequenceHandle;
-function sequencePrompt(fields: PromptSequenceFields | TextPromptSequenceFields): SequenceHandle;
 function sequencePrompt(
-  idOrFields: string | PromptSequenceFields | TextPromptSequenceFields,
-  maybeFields?: Omit<PromptSequenceFields | TextPromptSequenceFields, "id" | "kind">,
+  fields: PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields,
+): SequenceHandle;
+function sequencePrompt(
+  idOrFields: string | PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields,
+  maybeFields?: Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind">,
 ): SequenceHandle {
   return sequenceOf(
     typeof idOrFields === "string"
@@ -911,7 +969,7 @@ export const sequence: SequenceFunction = {
   ): SequenceHandle & { readonly pass: SlotHandle<boolean>; } =>
     withHiddenField(sequenceOf({ ...fields, id, kind: "check" } as CheckSequenceFields), "pass", fields.output),
   ask: (id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle =>
-    sequenceOf({ ...fields, id, kind: "ask" }),
+    sequenceOf({ ...fields, id, kind: "ask" } as AskSequenceFields),
   gate: sequenceGate,
   project: (id: string, fields: Omit<ProjectSequenceFields, "id" | "kind">): SequenceHandle =>
     sequenceOf({ ...fields, id, kind: "project" }),
@@ -1000,7 +1058,11 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   if (rawFields.text !== undefined && rawFields.prompt !== undefined) {
     throw new Error(`procedure.sequence ${fields.id}: expected either text or prompt, not both`);
   }
-  const prompt = fields.text ?? fields.prompt;
+  const promptInputTemplate = isPromptTemplateValue(rawFields.input) ? (rawFields.input as PromptTemplate) : undefined;
+  if (promptInputTemplate !== undefined && (fields.text !== undefined || fields.prompt !== undefined)) {
+    throw new Error(`procedure.sequence ${fields.id}: expected only one of input, text, or prompt`);
+  }
+  const prompt = fields.text ?? fields.prompt ?? promptInputTemplate;
   const commandTemplate = isCommandTemplateValue(rawFields.input) ? rawFields.input : undefined;
   const command = fields.cmd !== undefined || fields.argv !== undefined || rawFields.argvFrom !== undefined
     || commandTemplate !== undefined;
@@ -1066,15 +1128,22 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   }
   const project = isSequenceKind(fields, kind, "project") ? fields : undefined;
   const projections = project === undefined ? undefined : normalizeProjectProjections(project);
+  const instructionOutputRender = attachInstructionOutputs(fields.id, kind, fields.output);
+  const promptWithInstructionOutputs = instructionOutputRender === undefined
+    ? prompt
+    : mergePromptInstructionOutputs(prompt, instructionOutputRender);
   const output = projections === undefined ? outputList(fields.output) : projections.map((entry) => entry.output);
   const outputRefs = projections === undefined
     ? outputRefList(fields.output)
     : projections.map((entry) => entry.destination);
   const promptDeps = kind === "prompt" || kind === "ask"
-    ? mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"])
+    ? mergeCommandDeps(
+      promptInputTemplate === undefined ? fields.input : undefined,
+      rawFields.include as SequenceFields["input"],
+    )
     : undefined;
   const input = kind === "prompt" || kind === "ask"
-    ? promptInput(promptDeps, prompt)
+    ? promptInput(promptDeps, promptWithInstructionOutputs)
     : isSequenceKind(fields, kind, "command")
     ? commandInput(
       commandDeps,
@@ -1100,7 +1169,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   const implicitPrompt = kind === "prompt" || kind === "ask"
     ? promptDeclaration(
       fields,
-      prompt,
+      promptWithInstructionOutputs,
       input?.filter((item) => !isOptionalInputItem(item)).map(inputItemRefText),
       outputRefs.filter((ref) => ref.startsWith("slot:")),
     )
@@ -1142,7 +1211,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],
     emits: emits(fields.emits, outputRefs),
   };
-  if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(prompt, fields.id);
+  if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(promptWithInstructionOutputs, fields.id);
   if (kind === "ask") {
     canonical.when = refText((fields as AskSequenceFields).when, `sequence.${fields.id}.when`);
   }
@@ -1575,6 +1644,101 @@ function promptInput(value: SequenceFields["input"], prompt: unknown): Normalize
 }
 function isCommandTemplateValue(value: unknown): value is CommandTemplateValue {
   return typeof value === "object" && value !== null && (value as { kind?: unknown; }).kind === "cdk-command-template";
+}
+/** True for an `input.text`/`prompt.text` tagged-template value — the prompt-step `input:` carrier. */
+function isPromptTemplateValue(value: unknown): value is PromptTemplate {
+  return metaOf(value)?.kind === "template";
+}
+/**
+ * Auto-attaches every `output.text`/`output.of(...)` instruction-output
+ * listed in a step's `output:` to a slot (id: the step id, then
+ * `<step-id>-2`... for later ones on the same step), erroring if the
+ * auto-assigned id collides with a hand-declared slot in the same list.
+ * Returns the rendered instruction/return-format text (plus any refs the
+ * instruction text itself interpolated) to append onto the step's prompt
+ * body, or `undefined` if the step declares no instruction-outputs.
+ */
+function attachInstructionOutputs(
+  stepId: string,
+  kind: SequenceFields["kind"],
+  outputValue: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
+): { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[]; } | undefined {
+  if (outputValue === undefined) return undefined;
+  const items = Array.isArray(outputValue) ? outputValue : [outputValue];
+  const instructionOutputs = items.filter((item) => isInstructionOutputHandle(item));
+  if (instructionOutputs.length === 0) return undefined;
+  if (kind !== "prompt" && kind !== "ask") {
+    throw new Error(`procedure.sequence ${stepId}: output.text/output.of is valid only on prompt/ask steps`);
+  }
+  const usedIds = new Set(
+    items
+      .filter((item) => !isInstructionOutputHandle(item))
+      .map((item) => outputText(item, `sequence.${stepId}.output`))
+      .filter((ref) => ref.startsWith("slot:"))
+      .map((ref) => ref.slice("slot:".length)),
+  );
+  let text = "";
+  const refs: string[] = [];
+  const optionalRefs: string[] = [];
+  let counter = 1;
+  for (const handle of instructionOutputs) {
+    const autoId = counter === 1 ? stepId : `${stepId}-${counter}`;
+    counter += 1;
+    if (usedIds.has(autoId)) {
+      throw new Error(
+        `procedure.sequence ${stepId}: output.text/output.of auto-declared slot ${autoId} collides with the `
+          + `hand-declared slot ${autoId} in the same output: list — rename the hand-declared slot`,
+      );
+    }
+    usedIds.add(autoId);
+    const content = instructionOutputContent(handle);
+    if (content === undefined) {
+      throw new Error(`procedure.sequence ${stepId}: expected an output.text/output.of value in output:`);
+    }
+    const slotDeclaration = compact({
+      id: autoId,
+      schema: content.schemaRef ?? "schema:text",
+      description: `Runtime slot ${autoId}.`,
+    });
+    attachInstructionOutput(handle, `slot:${autoId}`, slotDeclaration);
+    text += (text === "" ? "" : "\n\n")
+      + (content.schemaRef === undefined
+        ? OUTPUT_RENDER_V1.text(content.text)
+        : OUTPUT_RENDER_V1.of(content.text, content.schemaRef));
+    refs.push(...(content.refs ?? []));
+    optionalRefs.push(...(content.optionalRefs ?? []));
+  }
+  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) };
+}
+/**
+ * Appends an instruction-output render block onto the attaching step's
+ * prompt body: the merged text/refs a template-kind `prompt`/`input`/`text`
+ * value carries. A named `prompt(...)` reference (not a template) cannot
+ * absorb the render — its text lives in a separately declared prompt object
+ * this step does not own.
+ */
+function mergePromptInstructionOutputs(
+  promptValue: unknown,
+  render: { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[]; },
+): PromptTemplate {
+  const meta = metaOf(promptValue);
+  if (meta?.kind !== "template") {
+    throw new Error(
+      "output.text/output.of: the attaching step's prompt body must be an input.text/prompt.text value, "
+        + "not a named prompt(...) reference",
+    );
+  }
+  const baseText = typeof (promptValue as unknown as { readonly text?: unknown; }).text === "string"
+    ? (promptValue as unknown as { readonly text: string; }).text
+    : "";
+  const text = `${baseText}\n\n${render.text}`;
+  return withMeta({ text }, {
+    kind: "template",
+    refs: uniqueInOrder([...(meta.refs ?? []), ...render.refs]),
+    optionalRefs: uniqueInOrder([...(meta.optionalRefs ?? []), ...render.optionalRefs]),
+    declaration: { text },
+    ...(meta.declarations === undefined ? {} : { declarations: meta.declarations }),
+  }) as PromptTemplate;
 }
 /**
  * Merges a legacy `input:` dependency list (P447-era command/check surface)

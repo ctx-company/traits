@@ -6,8 +6,8 @@
   },
   "port:eval-synthesis": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 15,
-    "end": 15
+    "start": 27,
+    "end": 27
   },
   "port:io-contract": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
@@ -31,8 +31,8 @@
   },
   "prompt:generate-evals": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 20,
+    "end": 20
   },
   "schema:eval-proposal": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
@@ -41,8 +41,8 @@
   },
   "schema:eval-synthesis-scaffold": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 12,
-    "end": 12
+    "start": 17,
+    "end": 17
   },
   "schema:scenario": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
@@ -51,17 +51,12 @@
   },
   "sequence:procedure/generate-evals": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 28,
-    "end": 28
-  },
-  "slot:eval-synthesis": {
-    "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 10,
-    "end": 10
+    "start": 20,
+    "end": 20
   },
   "trait:generate-evals": {
     "file": "modules/core/builtins/traits/generate-evals/source/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 29,
+    "end": 29
   }
 }

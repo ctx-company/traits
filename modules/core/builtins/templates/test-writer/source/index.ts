@@ -6,7 +6,7 @@
 // (each proposed test case is its own small object), which is the shape
 // most "propose N things, each with a few fields" traits want.
 
-import { agent, port, procedure, prompt, ref, schema, sequence, slot, trait } from "@ctx-traits/cdk";
+import { agent, input, output, port, procedure, ref, schema, sequence, trait } from "@ctx-traits/cdk";
 
 const testWriter = agent("test-writer", {
     description: "Proposes a structured test plan for a piece of code against stated requirements.",
@@ -31,9 +31,11 @@ const testCase = schema.object(
     { description: "One proposed test case: what it sets up and what it asserts." },
 );
 
-const plan = slot({
-    id: "plan",
-    schema: schema.object(
+// A schema-typed instruction-output: the return-format instruction folds
+// into the step's compiled prompt, and its slot (auto-declared at the
+// step's own id, "write-plan") backs the output port below.
+const planOutput = output.of(
+    schema.object(
         "test-plan",
         {
             cases: schema.array(testCase),
@@ -41,14 +43,20 @@ const plan = slot({
         },
         { description: "A structured test plan: proposed cases plus any requirements the plan can't cover." },
     ),
-    description: "The proposed test plan for the target code.",
+)`Return exactly one structured plan: one case per behavior worth testing (name, setup, and the assertion it makes), plus a list of any requirements the proposed cases don't cover. Do not write the actual test code — describe the cases.`;
+
+const writePlanStep = sequence.prompt("write-plan", {
+    title: "Write the test plan",
+    agent: testWriter,
+    input: input.text`Propose a test plan for ${targetCode} against the requirements ${requirements}.`,
+    output: planOutput,
 });
 
-const output = port.output.of({
+const planPort = port.output.of({
     id: "plan",
     schema: ref.schema("test-plan"),
     description: "Structured proposed test plan.",
-    value: plan,
+    value: planOutput,
 });
 
 export default trait("test-writer", {
@@ -60,13 +68,7 @@ export default trait("test-writer", {
     procedure: procedure({
         description: "Propose a test plan for the target code against the stated requirements.",
         input: [targetCode, requirements],
-        output,
-        sequence: sequence.prompt("write-plan", {
-            title: "Write the test plan",
-            agent: testWriter,
-            text: prompt.text`Propose a test plan for ${targetCode} against the requirements ${requirements}. Return exactly one structured plan: one case per behavior worth testing (name, setup, and the assertion it makes), plus a list of any requirements the proposed cases don't cover. Do not write the actual test code — describe the cases.`,
-            output: plan,
-            input: [targetCode, requirements],
-        }),
+        output: planPort,
+        sequence: writePlanStep,
     }),
 });

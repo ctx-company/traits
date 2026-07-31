@@ -1,6 +1,7 @@
 import type { JsonObject, RefKind } from "./generated.js";
 import type {
   Handle,
+  InstructionOutputHandle,
   PortHandle,
   PromptHandle,
   PromptTemplate,
@@ -8,16 +9,8 @@ import type {
   ResourceHandle,
   SlotHandle,
 } from "./handles.js";
-import { metaOf, recordDiagnostic, withDeclaration, withMeta } from "./meta.js";
-import {
-  collectMany,
-  compact,
-  normalizeRefList,
-  REF_TOKEN_PATTERN,
-  unique,
-  uniqueInOrder,
-  validateSlug,
-} from "./normalize.js";
+import { metaOf, withDeclaration, withMeta } from "./meta.js";
+import { collectMany, compact, normalizeRefList, unique, validateSlug } from "./normalize.js";
 
 export interface PromptFields {
   readonly id: string;
@@ -29,139 +22,13 @@ export interface PromptFields {
 }
 
 /** Values that can be interpolated into a prompt and therefore become prompt inputs. */
-export type PromptInterpolation<Value = unknown> = PortHandle<Value> | SlotHandle<Value> | ResourceHandle<Value>;
+export type PromptInterpolation<Value = unknown> =
+  | PortHandle<Value>
+  | SlotHandle<Value>
+  | ResourceHandle<Value>
+  | InstructionOutputHandle<Value>;
 type HandleValue<Value> = Value extends Handle<RefKind, infer Result> ? Result : never;
 type PromptInputs<Values extends readonly PromptInterpolation[]> = HandleValue<Values[number]>;
-type TemplateName<Name extends string> = Name extends `${infer First}${infer Rest}` ? First extends
-    | "A"
-    | "B"
-    | "C"
-    | "D"
-    | "E"
-    | "F"
-    | "G"
-    | "H"
-    | "I"
-    | "J"
-    | "K"
-    | "L"
-    | "M"
-    | "N"
-    | "O"
-    | "P"
-    | "Q"
-    | "R"
-    | "S"
-    | "T"
-    | "U"
-    | "V"
-    | "W"
-    | "X"
-    | "Y"
-    | "Z"
-    | "a"
-    | "b"
-    | "c"
-    | "d"
-    | "e"
-    | "f"
-    | "g"
-    | "h"
-    | "i"
-    | "j"
-    | "k"
-    | "l"
-    | "m"
-    | "n"
-    | "o"
-    | "p"
-    | "q"
-    | "r"
-    | "s"
-    | "t"
-    | "u"
-    | "v"
-    | "w"
-    | "x"
-    | "y"
-    | "z"
-    | "_"
-    | "$" ? Rest extends "" ? Name
-    : Rest extends `${infer Character}${infer Tail}` ? Character extends
-        | "A"
-        | "B"
-        | "C"
-        | "D"
-        | "E"
-        | "F"
-        | "G"
-        | "H"
-        | "I"
-        | "J"
-        | "K"
-        | "L"
-        | "M"
-        | "N"
-        | "O"
-        | "P"
-        | "Q"
-        | "R"
-        | "S"
-        | "T"
-        | "U"
-        | "V"
-        | "W"
-        | "X"
-        | "Y"
-        | "Z"
-        | "a"
-        | "b"
-        | "c"
-        | "d"
-        | "e"
-        | "f"
-        | "g"
-        | "h"
-        | "i"
-        | "j"
-        | "k"
-        | "l"
-        | "m"
-        | "n"
-        | "o"
-        | "p"
-        | "q"
-        | "r"
-        | "s"
-        | "t"
-        | "u"
-        | "v"
-        | "w"
-        | "x"
-        | "y"
-        | "z"
-        | "_"
-        | "$"
-        | "0"
-        | "1"
-        | "2"
-        | "3"
-        | "4"
-        | "5"
-        | "6"
-        | "7"
-        | "8"
-        | "9" ? TemplateName<`${First}${Tail}`> extends never ? never : Name
-      : never
-    : never
-  : never
-  : never;
-type TemplateNames<Source extends string> = Source extends `${string}{${infer Name}}${infer Rest}`
-  ? TemplateName<Name> | TemplateNames<Rest>
-  : never;
-type TemplateParams<Source extends string> = { readonly [Name in TemplateNames<Source>]: PromptInterpolation; };
-type ExactTemplateParams<Source extends string, Params extends TemplateParams<Source>> =
-  Exclude<keyof Params, TemplateNames<Source>> extends never ? Params : never;
 
 export interface PromptFunction {
   <Input, Output = unknown>(
@@ -212,36 +79,6 @@ export interface PromptFunction {
       readonly input?: readonly unknown[];
     },
   ): PromptTemplate<Input>;
-  /**
-   * Builds a `PromptTemplate` from a `{name}`-placeholder source string (or
-   * resource) plus a params map binding each placeholder to a typed handle.
-   *
-   * A tagged-template `prompt.text` interpolation site is positional and
-   * anonymous; `prompt.template` names each placeholder instead, which is
-   * the shape long, multi-paragraph prompt bodies need — the same handle can
-   * appear in the text multiple times under one name, and every declared
-   * `{name}` in the source must be bound (an unused param, or a placeholder
-   * with no matching param, is a build-time error).
-   *
-   * @example
-   * ```ts
-   * const phase = port.input.text({ id: "phase" });
-   * const draft = slot.text("draft");
-   * const workSummary = slot.text("work-summary");
-   * prompt.template(
-   *   "Review the implemented work for {phase} against the draft {draft}. Current work summary: {workSummary}.",
-   *   { phase, draft, workSummary },
-   * );
-   * ```
-   */
-  template<const Source extends string, const Params extends TemplateParams<Source>>(
-    source: Source,
-    params: ExactTemplateParams<Source, Params>,
-  ): PromptTemplate<HandleValue<Params[keyof Params]>>;
-  template<Params extends Record<string, PromptInterpolation>>(
-    source: PromptTemplate | ResourceHandle,
-    params: Params,
-  ): PromptTemplate<HandleValue<Params[keyof Params]>>;
 }
 
 /**
@@ -251,12 +88,12 @@ export interface PromptFunction {
  *
  * A hand-written prompt body is an opaque string — the runtime cannot tell
  * which slots or ports it actually reads, so it can neither validate nor
- * inject them correctly. Building the text with `prompt.text`/
- * `prompt.template` (or passing one to `sequence.prompt`'s `text` field
- * directly, which is the common path — declaring a standalone named
- * `prompt(...)` is only needed when the same prompt is reused across steps)
- * means every interpolation is a typed reference, and a stale reference to a
- * renamed slot fails at `tsc`.
+ * inject them correctly. Building the text with `prompt.text`/`input.text`
+ * (or passing one to `sequence.prompt`'s `input:` field directly, which is
+ * the common path — declaring a standalone named `prompt(...)` is only
+ * needed when the same prompt is reused across steps) means every
+ * interpolation is a typed reference, and a stale reference to a renamed
+ * slot fails at `tsc`.
  *
  * @param fields Prompt declaration fields.
  * @example
@@ -286,8 +123,8 @@ function promptFn(idOrFields: string | PromptFields, text?: string, fields?: Jso
     : promptOf(idOrFields);
 }
 
-// `text`/`template` stay generic interface members compared against plain
-// (non-generic) implementations here — the same `Object.assign`
+// `text` stays a generic interface member compared against a plain
+// (non-generic) implementation here — the same `Object.assign`
 // generic-merge limitation `port.ts`/`slot.ts` document — so the namespace
 // as a whole still binds through one cast; `promptFn` itself (the part that
 // used to read `args[n]`) is now a real checked overloaded function.
@@ -296,10 +133,6 @@ export const prompt = Object.assign(
   {
     text: (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate =>
       promptTemplate(strings, values),
-    template: (
-      source: string | PromptTemplate | ResourceHandle,
-      params: Record<string, PromptInterpolation>,
-    ): PromptTemplate => promptNamedTemplate(source, params),
     resource: (
       value: ResourceHandle | RefHandle | {
         readonly resource: ResourceHandle | RefHandle | string;
@@ -308,99 +141,6 @@ export const prompt = Object.assign(
     ): PromptTemplate => promptResource(value),
   },
 ) as PromptFunction;
-function promptNamedTemplate(
-  source: string | PromptTemplate | ResourceHandle,
-  params: Record<string, PromptInterpolation>,
-): PromptTemplate {
-  recordDiagnostic(
-    "cdk-prompt-template",
-    "prompt.template",
-    "prompt.template(...) is deprecated; use prompt.text`...` or a named prompt declaration",
-  );
-  const sourceText = typeof source === "string" ? source : source.text;
-  if (typeof sourceText === "string") {
-    const { text, refs, optionalRefs } = rewriteNamedTemplate(sourceText, params);
-    return withMeta({ text }, {
-      kind: "template",
-      refs,
-      optionalRefs,
-      declaration: { text },
-      declarations: collectMany([source, ...Object.values(params)]),
-    });
-  }
-
-  const sourceRef = promptSourceValue(source, "prompt.template.source");
-  if (typeof sourceRef !== "string") {
-    throw new Error("prompt.template: prompt templates must contain text");
-  }
-  const declarations = collectMany([source, ...Object.values(params)]);
-  const resourceId = sourceRef.slice("resource:".length);
-  const resourceDeclaration = declarations.resource?.find((declaration) => declaration.id === resourceId);
-  const content = resourceDeclaration?.content;
-  if (typeof content === "string") {
-    const rewritten = rewriteNamedTemplate(content, params);
-    return withMeta({ source: sourceRef, input: rewritten.refs }, {
-      kind: "template",
-      refs: unique([sourceRef, ...rewritten.refs]),
-      declaration: { source: sourceRef },
-      declarations: {
-        ...declarations,
-        resource: declarations.resource?.map((declaration) =>
-          declaration.id === resourceId
-            ? { ...declaration, content: rewritten.text, input: rewritten.refs }
-            : declaration
-        ) ?? [],
-      },
-    });
-  }
-  const refs = Object.values(params).map((value, index) =>
-    requirePromptRef(value, `prompt.template parameter ${index}`)
-  );
-  return withMeta({ source: sourceRef, input: refs }, {
-    kind: "template",
-    refs: unique([sourceRef, ...refs]),
-    declaration: { source: sourceRef },
-    declarations: {
-      ...declarations,
-      resource: declarations.resource?.map((declaration) =>
-        declaration.id === resourceId ? { ...declaration, input: refs } : declaration
-      ) ?? [],
-    },
-  });
-}
-
-function rewriteNamedTemplate(
-  source: string,
-  params: Record<string, PromptInterpolation>,
-): { text: string; refs: string[]; optionalRefs: string[]; } {
-  const refs: string[] = [];
-  const optionalRefs: string[] = [];
-  const text = source.replace(/\{([^{}]+)\}/g, (token, name: string) => {
-    if (REF_TOKEN_PATTERN.test(name)) {
-      refs.push(name);
-      return token;
-    }
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
-      return token;
-    }
-    const value = params[name];
-    if (value === undefined) throw new Error(`prompt.template: missing parameter ${JSON.stringify(name)}`);
-    const resolved = resolvePromptRef(value, `prompt.template parameter ${JSON.stringify(name)}`);
-    refs.push(resolved.ref);
-    if (resolved.optional) optionalRefs.push(resolved.ref);
-    return `{${resolved.ref}}`;
-  });
-  for (const key of Object.keys(params)) {
-    if (!new RegExp(`\\{${escapeRegExp(key)}\\}`).test(source)) {
-      throw new Error(`prompt.template: unused parameter ${JSON.stringify(key)}`);
-    }
-  }
-  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function promptOf(fields: PromptFields): PromptHandle {
   validateSlug(fields.id, "prompt.id");
@@ -424,7 +164,16 @@ function promptOf(fields: PromptFields): PromptHandle {
   return withDeclaration("prompt", `prompt:${fields.id}`, declaration, {}, { declarations, refs });
 }
 
-function promptTemplate(strings: TemplateStringsArray, values: readonly PromptInterpolation[]): PromptTemplate {
+/**
+ * Builds a `PromptTemplate` from a tagged template literal — the shared
+ * builder behind `prompt.text` and `input.text` (input.ts re-exports this
+ * under that name rather than duplicating it, to avoid an import cycle:
+ * `input.ts` otherwise imports only `handles.ts`/`normalize.ts`/`ref.ts`).
+ */
+export function promptTemplate(
+  strings: TemplateStringsArray,
+  values: readonly PromptInterpolation[],
+): PromptTemplate {
   let text = strings[0] ?? "";
   const refs: string[] = [];
   for (let index = 0; index < values.length; index += 1) {
@@ -465,6 +214,24 @@ function resolvePromptRef(
     if (inner?.[0] === undefined) throw new Error(`${fieldPath}: expected a slot reference`);
     if (!inner[0].startsWith("slot:")) throw new Error(`${fieldPath}: optional() applies to slot refs only`);
     return { ref: inner[0], optional: true };
+  }
+  // An `output.text`/`output.of(...)` instruction-output resolves eagerly
+  // too, but its ref isn't known until the step that lists it in `output:`
+  // attaches it (`meta.ts`'s `attachInstructionOutput` mutates the SAME meta
+  // object in place) — so interpolating one here only works once its
+  // producing step has already been authored (the natural order: produce,
+  // then consume). Interpolating an instruction-output before it's ever
+  // attached is exactly the "never attached" authoring bug the task calls
+  // out — surfaced here, at the point of interpolation, rather than
+  // deferred to a separate collection pass.
+  if (metaOf(value)?.kind === "instruction-output") {
+    const ref = metaOf(value)?.ref;
+    if (typeof ref !== "string") {
+      throw new Error(
+        `${fieldPath}: output.text/output.of value interpolated before the step that lists it in output: was authored`,
+      );
+    }
+    return { ref, optional: false };
   }
   const normalized = normalizeRefList(value);
   if (normalized?.[0] === undefined) throw new Error(`${fieldPath}: expected a reference`);

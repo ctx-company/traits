@@ -9,6 +9,7 @@ import {
   isTraitFamilyHandle,
   operation,
   oracle,
+  output,
   planner,
   port,
   procedure,
@@ -27,6 +28,7 @@ import {
   steps,
   table,
   toDraftJson,
+  toDraftJsonWithSourceMap,
   trait,
   variant,
   worker,
@@ -689,6 +691,148 @@ describe("input.command", () => {
 
   it("rejects an empty template", () => {
     expect(() => input.command``).toThrow(/argv must not be empty/);
+  });
+});
+
+describe("input.text / output.text / output.of (0045)", () => {
+  it("accepts a PromptTemplate as a prompt step's input: field, same as text:", () => {
+    const diff = slot.text("io-diff");
+    const step = sequence.prompt("io-review", { input: input.text`Review ${diff}.` });
+    const draft = toDraftJson(
+      trait({
+        id: "io-input-text",
+        name: "IO Input Text",
+        description: "input.text fixture.",
+        procedure: procedure({ description: "Review.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: unknown; }; readonly prompt?: unknown; };
+
+    expect(draft.procedure?.sequence).toEqual([
+      { id: "io-review", title: "Io Review", prompt: "prompt:io-review", input: ["slot:io-diff"] },
+    ]);
+    expect(draft.prompt).toEqual({
+      "io-review": { input: ["slot:io-diff"], text: "Review {slot:io-diff}." },
+    });
+  });
+
+  it("output.text auto-declares a schema:text slot at the step id and renders a return-format instruction", () => {
+    const step = sequence.prompt("io-summarize", {
+      input: input.text`Summarize the work so far.`,
+      output: output.text`Write a one-paragraph work summary.`,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-output-text",
+        name: "IO Output Text",
+        description: "output.text fixture.",
+        procedure: procedure({ description: "Summarize.", sequence: [step] }),
+      }),
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; };
+      readonly prompt?: Record<string, { readonly text?: string; }>;
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string; }[];
+    };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-summarize"] });
+    expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-summarize", schema: "schema:text" }));
+    expect(draft.prompt?.["io-summarize"]?.text).toBe(
+      "Summarize the work so far.\n\nWrite a one-paragraph work summary."
+        + "\n\nReturn plain text only, with no surrounding commentary.",
+    );
+  });
+
+  it("output.of auto-declares a schema-typed slot and names the schema in the rendered instruction", () => {
+    const verdictSchema = schema.text();
+    const step = sequence.prompt("io-verdict", {
+      input: input.text`Review the change.`,
+      output: output.of(verdictSchema)`Your verdict, citing every finding.`,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-output-of",
+        name: "IO Output Of",
+        description: "output.of fixture.",
+        procedure: procedure({ description: "Verdict.", sequence: [step] }),
+      }),
+    ) as {
+      readonly prompt?: Record<string, { readonly text?: string; }>;
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string; }[];
+    };
+
+    expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-verdict", schema: "schema:text" }));
+    expect(draft.prompt?.["io-verdict"]?.text).toBe(
+      "Review the change.\n\nYour verdict, citing every finding.\n\nReturn JSON matching schema:text, with no surrounding commentary.",
+    );
+  });
+
+  it("a second anonymous output on the same step takes the <step-id>-2 auto id", () => {
+    const step = sequence.prompt("io-multi", {
+      input: input.text`Do the work.`,
+      output: [output.text`Summary one.`, output.text`Summary two.`],
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-output-multi",
+        name: "IO Output Multi",
+        description: "multi-output fixture.",
+        procedure: procedure({ description: "Multi.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-multi", "slot:io-multi-2"] });
+  });
+
+  it("an interpolated instruction-output resolves to the attaching step's slot once authored produce-then-consume", () => {
+    const summary = output.text`A one-paragraph summary.`;
+    const producer = sequence.prompt("io-produce", {
+      input: input.text`Summarize the diff.`,
+      output: summary,
+    });
+    const consumer = sequence.prompt("io-consume", {
+      input: input.text`Given ${summary}, write a title.`,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "io-consume-fixture",
+        name: "IO Consume Fixture",
+        description: "consume fixture.",
+        procedure: procedure({ description: "Both.", sequence: [producer, consumer] }),
+      }),
+    ) as { readonly prompt?: Record<string, { readonly input?: readonly string[]; }>; };
+
+    expect(draft.prompt?.["io-consume"]?.input).toEqual(["slot:io-produce"]);
+  });
+
+  it("interpolating an instruction-output before its producing step is authored fails", () => {
+    const summary = output.text`A one-paragraph summary.`;
+    expect(() => input.text`Given ${summary}, write a title.`).toThrow(/before the step/);
+  });
+
+  it("collision between an auto-declared and hand-declared slot of the same id cites both names", () => {
+    const clashing = slot.text("io-clash");
+    expect(() =>
+      sequence.prompt("io-clash", {
+        input: input.text`Do the work.`,
+        output: [clashing, output.text`Summary.`],
+      })
+    ).toThrow(/io-clash/);
+  });
+
+  it("warns when an explicit input: entry duplicates a ref already interpolated into the template", () => {
+    const diff = slot.text("io-dup-diff");
+    const step = sequence.prompt("io-dup", { input: input.text`Review ${diff}.`, include: [diff] });
+    const { diagnostics: warnings } = toDraftJsonWithSourceMap(
+      trait({
+        id: "io-duplicate-ref",
+        name: "IO Duplicate Ref",
+        description: "duplicate-ref fixture.",
+        procedure: procedure({ description: "Review.", sequence: [step] }),
+      }),
+    );
+
+    expect(warnings).toContainEqual(
+      expect.objectContaining({ code: "cdk-duplicate-input", fieldPath: "sequence.input" }),
+    );
   });
 });
 

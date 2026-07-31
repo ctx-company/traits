@@ -22,7 +22,7 @@ id = "verdict"
 direction = "output"
 schema = "schema:implementation-verdict"
 description = "The reviewer's final verdict on the implemented work."
-value = "slot:verdict"
+value = "slot:review"
 
 [[slot]]
 id = "draft"
@@ -35,9 +35,9 @@ schema = "schema:text"
 description = "What the worker changed and how it was validated."
 
 [[slot]]
-id = "verdict"
+id = "review"
 schema = "schema:implementation-verdict"
-description = "The reviewer's structured verdict for the implemented work."
+description = "Runtime slot review."
 
 [[schema]]
 id = "decision"
@@ -88,13 +88,18 @@ input = [
 output = ["slot:work-summary"]
 
 [prompt.review]
-text = "Review the implemented work for {port:task} against the draft {slot:draft}. The reported work summary is {slot:work-summary}. Return a verdict of approved or revise, with notes explaining the verdict."
+text = """
+Review the implemented work for {port:task} against the draft {slot:draft}. The reported work summary is {slot:work-summary}.
+
+Return a verdict of approved or revise, with notes explaining the verdict.
+
+Return JSON matching schema:implementation-verdict, with no surrounding commentary."""
 input = [
     "port:task",
     "slot:draft",
     "slot:work-summary",
 ]
-output = ["slot:verdict"]
+output = ["slot:review"]
 
 [procedure]
 description = "Plan, implement, and review one task end to end."
@@ -130,4 +135,4 @@ input = [
     "slot:draft",
     "slot:work-summary",
 ]
-output = ["slot:verdict"]
+output = ["slot:review"]

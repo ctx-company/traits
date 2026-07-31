@@ -54,12 +54,12 @@ id = "candidate"
 direction = "output"
 schema = "schema:trait-draft"
 description = "Imported trait candidate."
-value = "slot:candidate"
+value = "slot:import"
 
 [[slot]]
-id = "candidate"
+id = "import"
 schema = "schema:trait-draft"
-description = "Structured trait draft emitted for candidate validation."
+description = "Runtime slot import."
 
 [[schema]]
 id = "trait-draft"
@@ -75,17 +75,22 @@ description = "Enriches a deterministic import scaffold with source-grounded tra
 summary = "Trait import enrichment agent."
 
 [prompt.import]
-text = "Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make. Conform to {port:target-schema}, grounding the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured trait draft."
+text = """
+Treat {port:scaffold} as the authoritative baseline for trait {port:trait-id}, imported from a {port:source-profile} source. Preserve trait identity and import provenance exactly as given in {port:scaffold}. Enrich only intent, behavior, metadata, and descriptions that {port:source} actually supports; never invent claims the source does not make.
+
+Conform to {port:target-schema}, grounding the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured trait draft.
+
+Return JSON matching schema:trait-draft, with no surrounding commentary."""
 input = [
     "port:scaffold",
-    "port:source",
-    "port:source-profile",
     "port:trait-id",
+    "port:source-profile",
+    "port:source",
     "port:target-schema",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:candidate"]
+output = ["slot:import"]
 
 [procedure]
 description = "Produce one structured trait draft grounded in the deterministic scaffold and raw source; deterministic candidate gates verify it downstream."
@@ -105,11 +110,11 @@ agent = "agent:generator"
 prompt = "prompt:import"
 input = [
     "port:scaffold",
-    "port:source",
-    "port:source-profile",
     "port:trait-id",
+    "port:source-profile",
+    "port:source",
     "port:target-schema",
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:candidate"]
+output = ["slot:import"]

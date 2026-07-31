@@ -117,6 +117,15 @@ export type TraitHandle = Handle<"trait">;
 export type TraitFamilyHandle = CdkHandle<"trait-family">;
 export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input>;
 export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"output-sink", Value>;
+/**
+ * An `output.text`/`output.of(schema)` instruction-output: carries the
+ * compiled instruction text (and, for `.of`, the schema ref) until the step
+ * that lists it in `output:` auto-declares its backing slot and resolves
+ * this handle's ref to it. Accepted anywhere a `SlotHandle` is (a sequence
+ * step's `output:`, and — once attached — a later step's interpolated
+ * `input.text`/`prompt.text`).
+ */
+export type InstructionOutputHandle<Value = unknown> = CdkHandle<"instruction-output", Value>;
 /** A typed reference to a declared `[[session]]`, returned by `session(id, opts)`. */
 export type SessionHandle = Handle<"session">;
 /** A typed reference to a declared `[[signal]]`, returned by `signal(fields)`. */

@@ -78,7 +78,7 @@ export type DeclKind = "agent" | "condition" | "port" | "prompt" | "resource" | 
 
 export interface Meta {
   // dprint-ignore: sdk-generate validates this literal union from the source text.
-  readonly kind?: DeclKind | "trait" | "procedure" | "sequence-step" | "sequence-linear" | "template" | "schema-field" | "guard" | "ref" | "behavior" | "output-sink";
+  readonly kind?: DeclKind | "trait" | "procedure" | "sequence-step" | "sequence-linear" | "template" | "schema-field" | "guard" | "ref" | "behavior" | "output-sink" | "instruction-output";
   readonly ref?: string;
   readonly declaration?: MetaDeclaration;
   readonly declarations?: Partial<Record<DeclKind, readonly JsonObject[]>>;
@@ -96,6 +96,21 @@ export interface Meta {
   readonly defaultOutputPaths?: readonly (readonly (string | number)[])[];
   readonly source?: SourceAnchor;
   readonly sourceMap?: SourceMap;
+  /**
+   * `output.text`/`output.of(schema)`'s own compiled instruction body
+   * (`kind: "instruction-output"` only) — the text plus, for `.of`, the
+   * schema ref, rendered into the attaching step's prompt via
+   * `output.ts`'s `OUTPUT_RENDER_V1`. Immutable once built; `ref` (above)
+   * is what mutates at attach time.
+   */
+  readonly instructionOutput?: {
+    readonly text: string;
+    readonly schemaRef?: string;
+    /** Refs the instruction text itself interpolated (e.g. `output.text`Summarize ${diff}.`` ),
+     * so the attaching step's implicit prompt inherits them as ordinary inputs. */
+    readonly refs?: readonly string[];
+    readonly optionalRefs?: readonly string[];
+  };
   readonly inlineBranchArms?: {
     readonly trueArm?: readonly SequenceHandle[];
     readonly falseArm?: readonly SequenceHandle[];
@@ -198,6 +213,52 @@ export function metaOf(value: unknown): Meta | undefined {
 export function outputSinkDeclaration(value: unknown): CanonicalDeclarationByKind["output-sink"] | undefined {
   const meta = metaOf(value);
   return meta?.kind === "output-sink" ? meta.declaration as CanonicalDeclarationByKind["output-sink"] : undefined;
+}
+
+/**
+ * Resolves an `output.text`/`output.of(...)` instruction-output handle to
+ * its attaching step's auto-declared slot: sets `ref` and folds the slot's
+ * own declaration into `declarations.slot`, mutating the handle's OWN meta
+ * object in place (not copying it) so any interpolation of the same bound
+ * const anywhere else in the trait source — before or after this call, in
+ * authoring order — reads the same resolved value the next time it's read.
+ * `sequence.ts`'s `output:` normalization calls this exactly once per
+ * instruction-output handle; a second call throws (an instruction-output can
+ * back only one slot).
+ */
+export function attachInstructionOutput(value: unknown, slotRef: string, slotDeclaration: JsonObject): void {
+  const meta = metaOf(value) as (Meta & { ref?: string; }) | undefined;
+  if (meta?.kind !== "instruction-output") {
+    throw new Error("attachInstructionOutput: expected an output.text/output.of instruction-output handle");
+  }
+  if (meta.ref !== undefined) {
+    throw new Error(
+      `output.text/output.of: already attached to ${meta.ref} — cannot also attach it to ${slotRef}`,
+    );
+  }
+  (meta as { ref?: string; }).ref = slotRef;
+  (meta as { declarations?: Partial<Record<DeclKind, readonly JsonObject[]>>; }).declarations = {
+    ...meta.declarations,
+    slot: [...(meta.declarations?.slot ?? []), slotDeclaration],
+  };
+}
+
+/** Narrows to an `output.text`/`output.of(...)` instruction-output handle. */
+export function isInstructionOutputHandle(value: unknown): boolean {
+  return metaOf(value)?.kind === "instruction-output";
+}
+
+/** The compiled instruction text (+ optional schema ref) an instruction-output handle carries, or `undefined` if it isn't one. */
+export function instructionOutputContent(
+  value: unknown,
+): {
+  readonly text: string;
+  readonly schemaRef?: string;
+  readonly refs?: readonly string[];
+  readonly optionalRefs?: readonly string[];
+} | undefined {
+  const meta = metaOf(value);
+  return meta?.kind === "instruction-output" ? meta.instructionOutput : undefined;
 }
 
 /**

@@ -42,12 +42,12 @@ id = "explanation"
 direction = "output"
 schema = "schema:trait-narration"
 description = "Generated advisory trait explanation."
-value = "slot:explanation"
+value = "slot:explain-trait"
 
 [[slot]]
-id = "explanation"
+id = "explain-trait"
 schema = "schema:trait-narration"
-description = "Generated advisory narration, bound to one trait identity and canonical digest."
+description = "Runtime slot explain-trait."
 
 [[schema]]
 id = "trait-narration"
@@ -70,14 +70,19 @@ description = "Writes a plain-language advisory narration of a canonical trait."
 summary = "Trait explanation narrator."
 
 [prompt.explain-trait]
-text = "Explain canonical trait {port:source-trait-id} at {port:canonical-digest} in plain language using only {port:canonical-trait}. Return exactly one trait-narration object repeating source-trait-id and canonical-digest verbatim with a non-empty explanation. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the canonical data does not establish. Use {resource:trait-spec/agent-traits-schema} only to understand the canonical structure."
+text = """
+Explain canonical trait {port:source-trait-id} at {port:canonical-digest} in plain language using only {port:canonical-trait}.
+
+Return exactly one trait-narration object repeating source-trait-id and canonical-digest verbatim with a non-empty explanation. This is generated advisory text, not authority, a check receipt, or a substitute for the canonical trait. Do not claim runtime behavior or validation that the canonical data does not establish. Use {resource:trait-spec/agent-traits-schema} only to understand the canonical structure.
+
+Return JSON matching schema:trait-narration, with no surrounding commentary."""
 input = [
     "port:source-trait-id",
     "port:canonical-digest",
     "port:canonical-trait",
     "resource:trait-spec/agent-traits-schema",
 ]
-output = ["slot:explanation"]
+output = ["slot:explain-trait"]
 
 [procedure]
 description = "Generate one untrusted plain-language narration bound to the supplied canonical trait identity and digest."
@@ -99,4 +104,4 @@ input = [
     "port:canonical-trait",
     "resource:trait-spec/agent-traits-schema",
 ]
-output = ["slot:explanation"]
+output = ["slot:explain-trait"]

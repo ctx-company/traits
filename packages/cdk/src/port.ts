@@ -1,5 +1,5 @@
 import type { JsonObject } from "./generated.js";
-import type { PortHandle, SlotHandle } from "./handles.js";
+import type { InstructionOutputHandle, PortHandle, SlotHandle } from "./handles.js";
 import type { CdkObject } from "./meta.js";
 import { metaOf, withDeclaration } from "./meta.js";
 import { collectMany, compact, mutableScalarArray, validateSlug } from "./normalize.js";
@@ -18,7 +18,12 @@ export interface PortFields {
   readonly direction: "input" | "output";
   readonly schema: SchemaValue;
   readonly description?: string;
-  readonly value?: SlotHandle;
+  /**
+   * An `output.text`/`output.of(...)` instruction-output value must already
+   * be attached to a step's `output:` (and thus resolved to a slot ref)
+   * before this port declaration runs — author the producing step first.
+   */
+  readonly value?: SlotHandle | InstructionOutputHandle;
   readonly optional?: boolean;
   readonly title?: string;
   readonly format?: string | readonly string[];

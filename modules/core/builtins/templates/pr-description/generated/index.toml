@@ -27,12 +27,12 @@ id = "description"
 direction = "output"
 schema = "schema:pr-description"
 description = "Structured pull-request description."
-value = "slot:description"
+value = "slot:write-description"
 
 [[slot]]
-id = "description"
+id = "write-description"
 schema = "schema:pr-description"
-description = "The written pull-request description."
+description = "Runtime slot write-description."
 
 [[schema]]
 id = "pr-risk"
@@ -69,12 +69,17 @@ description = "Writes a pull-request description from a diff and its context."
 summary = "PR description writer."
 
 [prompt.write-description]
-text = "Write a pull-request description for {port:diff}, given the context {port:context}. Return exactly one structured description: a short title, a summary of what changed and why, testing notes describing how the change was or should be validated, and a risk level of low, medium, or high."
+text = """
+Write a pull-request description for {port:diff}, given the context {port:context}.
+
+Return exactly one structured description: a short title, a summary of what changed and why, testing notes describing how the change was or should be validated, and a risk level of low, medium, or high.
+
+Return JSON matching schema:pr-description, with no surrounding commentary."""
 input = [
     "port:diff",
     "port:context",
 ]
-output = ["slot:description"]
+output = ["slot:write-description"]
 
 [procedure]
 description = "Write a structured pull-request description from a diff and its context."
@@ -93,4 +98,4 @@ input = [
     "port:diff",
     "port:context",
 ]
-output = ["slot:description"]
+output = ["slot:write-description"]

@@ -40,12 +40,23 @@
 // so `index.ts` itself only imports and composes. See
 // `packages/cdk/README.md`'s "Package layout" section for the full doctrine.
 
-import { procedure, trait } from "@ctx-traits/cdk";
+import { port as cdkPort, procedure, ref, trait } from "@ctx-traits/cdk";
 
 import { port } from "./data.ts";
 import draft from "./sequence/draft.ts";
 import implement from "./sequence/implementation.ts";
-import review from "./sequence/review.ts";
+import review, { verdict } from "./sequence/review.ts";
+
+// The output port: bound directly to the review step's `output.of(...)`
+// instruction-output, so the port, the auto-declared slot, and the schema
+// all trace back to that one declaration instead of a separately
+// hand-declared slot.
+const output = cdkPort.output.of({
+    id: "verdict",
+    schema: ref.schema("implementation-verdict"),
+    description: "The reviewer's final verdict on the implemented work.",
+    value: verdict,
+});
 
 export default trait("implement-phase", {
     version: "0.1.0",
@@ -55,7 +66,7 @@ export default trait("implement-phase", {
     procedure: procedure({
         description: "Plan, implement, and review one task end to end.",
         input: port.task,
-        output: port.output,
+        output,
         // Three chained prompt steps. Each step's `output` slot becomes the
         // next step's `input`, so the model sees exactly the prior step's
         // structured/text result, never the whole conversation.

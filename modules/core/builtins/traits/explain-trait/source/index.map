@@ -16,8 +16,8 @@
   },
   "port:explanation": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 15,
-    "end": 15
+    "start": 26,
+    "end": 26
   },
   "port:source-trait-id": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
@@ -26,27 +26,22 @@
   },
   "prompt:explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 19,
+    "end": 19
   },
   "schema:trait-narration": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 12,
-    "end": 12
+    "start": 16,
+    "end": 16
   },
   "sequence:procedure/explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 27,
-    "end": 27
-  },
-  "slot:explanation": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 10,
-    "end": 10
+    "start": 19,
+    "end": 19
   },
   "trait:explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 28,
+    "end": 28
   }
 }

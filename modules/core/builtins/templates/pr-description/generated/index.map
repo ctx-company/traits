@@ -11,8 +11,8 @@
   },
   "port:description": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 37,
-    "end": 37
+    "start": 45,
+    "end": 45
   },
   "port:diff": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
@@ -21,32 +21,27 @@
   },
   "prompt:write-description": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 56,
-    "end": 56
+    "start": 38,
+    "end": 38
   },
   "schema:pr-description": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 26,
+    "end": 26
   },
   "schema:pr-risk": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 32,
+    "end": 32
   },
   "sequence:procedure/write-description": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 53,
-    "end": 53
-  },
-  "slot:description": {
-    "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 22,
-    "end": 22
+    "start": 38,
+    "end": 38
   },
   "trait:pr-description": {
     "file": "modules/core/builtins/templates/pr-description/source/index.ts",
-    "start": 44,
-    "end": 44
+    "start": 52,
+    "end": 52
   }
 }

@@ -1,5 +1,7 @@
-import type { PortHandle, ResourceHandle, SlotHandle } from "./handles.js";
+import type { PortHandle, PromptTemplate, ResourceHandle, SlotHandle } from "./handles.js";
 import { tokenizeShellLiteral } from "./normalize.js";
+import type { PromptInterpolation } from "./prompt.js";
+import { promptTemplate } from "./prompt.js";
 import { refText } from "./ref.js";
 import type { ArgvItem } from "./sequence.js";
 
@@ -60,6 +62,21 @@ export interface InputFunction {
     strings: TemplateStringsArray,
     ...values: readonly CommandInterpolation[]
   ): CommandTemplateValue;
+
+  /**
+   * Builds a prompt-step `input:` body from a tagged template literal — the
+   * preferred carrier for a prompt/ask step's compiled prompt text, replacing
+   * the legacy `text:`/`prompt:` fields. Returns the same `PromptTemplate`
+   * value `prompt.text` returns (this is a re-export of that shared builder,
+   * under the `input` namespace, so the prompt-step `input:` position and
+   * `prompt.text` agree on one value shape); non-interpolated dependencies
+   * are declared separately through `include:`.
+   * @example `sequence.prompt("review", { agent: reviewer, input: input.text`Review ${diff} with a focus on ${focus}.`, output: review })`
+   */
+  text<const Values extends readonly PromptInterpolation[]>(
+    strings: TemplateStringsArray,
+    ...values: Values
+  ): PromptTemplate;
 }
 
 export function optionalSlot<Value>(slot: SlotHandle<Value>): OptionalSlotInputValue<Value> {
@@ -110,4 +127,6 @@ function commandTemplate(
 export const input: InputFunction = {
   optional: optionalSlot,
   command: commandTemplate,
-};
+  text: (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate =>
+    promptTemplate(strings, values),
+} as InputFunction;

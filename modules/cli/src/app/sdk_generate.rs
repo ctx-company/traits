@@ -19,6 +19,7 @@ const CDK_STRUCTURAL_KINDS: &[&str] = &[
     "ref",
     "behavior",
     "output-sink",
+    "instruction-output",
 ];
 
 struct Builtin {

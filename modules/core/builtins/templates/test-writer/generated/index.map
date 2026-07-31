@@ -6,8 +6,8 @@
   },
   "port:plan": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 47,
-    "end": 47
+    "start": 55,
+    "end": 55
   },
   "port:requirements": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
@@ -21,8 +21,8 @@
   },
   "prompt:write-plan": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 67,
-    "end": 67
+    "start": 48,
+    "end": 48
   },
   "schema:proposed-test-case": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
@@ -31,22 +31,17 @@
   },
   "schema:test-plan": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 36,
-    "end": 36
+    "start": 38,
+    "end": 38
   },
   "sequence:procedure/write-plan": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 64,
-    "end": 64
-  },
-  "slot:plan": {
-    "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 34,
-    "end": 34
+    "start": 48,
+    "end": 48
   },
   "trait:test-writer": {
     "file": "modules/core/builtins/templates/test-writer/source/index.ts",
-    "start": 54,
-    "end": 54
+    "start": 62,
+    "end": 62
   }
 }

@@ -24,10 +24,10 @@ Source: https://github.com/ctx-company/ctx-traits (`packages/cdk`).
 ```ts
 import {
   agent,
+  input,
   method,
   port,
   procedure,
-  prompt,
   sequence,
   slot,
   toDraftJson,
@@ -62,22 +62,19 @@ const prRiskTriage = trait({
       sequence.prompt({
         id: "summarize-code-diff",
         agent: worker,
-        input: codeDiff,
-        prompt: prompt.text`Summarize what changed in ${codeDiff}.`,
+        input: input.text`Summarize what changed in ${codeDiff}.`,
         output: changeSummary,
       }),
       sequence.prompt({
         id: "find-risks-in-code-diff",
         agent: reviewer,
-        input: [codeDiff, changeSummary],
-        prompt: prompt.text`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
+        input: input.text`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
         output: riskNotes,
       }),
       sequence.prompt({
         id: "write-pr-comment",
         agent: worker,
-        input: [changeSummary, riskNotes],
-        prompt: prompt.text`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
+        input: input.text`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
         output: reviewComment,
       }),
     ],
@@ -98,9 +95,35 @@ Useful helpers:
 - `slot.text(...)`, `slot.boolean(...)`, `slot.number(...)`, `slot.any(...)`, and `slot.of(...)` declare procedure slots.
 - `port.input.text(...)`, `port.output.text(...)`, `port.input.of(...)`, `port.output.of(...)`, and `port(...)` declare trait boundary ports.
 - `prompt.text\`...${typedRef}...\`` preserves typed interpolation refs for synth diagnostics.
-- `prompt.template("Use {request} and {context}.", { request, context })` rewrites named placeholders to canonical typed refs and infers prompt inputs. `prompt.text` remains the positional tagged-template form.
+- `input.text\`...${typedRef}...\`` is the preferred prompt/ask step `input:` carrier — the same tagged-template builder as `prompt.text`, under the `input` namespace so it reads naturally at the step's `input:` field: `sequence.prompt("review", { agent, input: input.text\`Review ${diff}.\`, output })`. Every `${ref}` interpolated into the template is auto-derived as the step's input; non-interpolated dependencies (a resource read only by doctrine text, say) go in `include:` instead of a hand-written `input:` list.
+- `input.command\`cmd ${arg}\`` is the equivalent tagged-template carrier for a command/check step's `input:` — see `sequence.command`/`sequence.check` below.
+- `output.text\`...\`` and `output.of(schemaRef)\`...\`` build an instruction-output: pass one (or a list) as a prompt/ask step's `output:` and it auto-declares a backing slot (id: the step id, then `<step-id>-2`, `<step-id>-3`... for later ones on the same step — colliding with a hand-declared slot of the same id is a build error naming both), and appends the instruction text plus a versioned return-format instruction onto the step's compiled prompt. `output.of` names the schema in that instruction and types the slot; `output.text` declares a plain-text slot. Bind a `const` to the returned handle to interpolate it into a later step's `input.text` (`${producedHandle}`) or a port's `value:` — but only once the producing step has been authored: interpolating an instruction-output before its step exists is a build error.
+
+  Before (hand-declared slot, hand-written return-format prose, redundant `input:` list):
+
+  ```ts
+  const review = slot({ id: "review", schema: reviewSchema, description: "..." });
+  sequence.prompt("review", {
+    agent: reviewer,
+    input: [diff, focus],
+    text: prompt.text`Review ${diff} with a focus on ${focus}. Return exactly one structured review...`,
+    output: review,
+  });
+  ```
+
+  After (`output.of` owns the slot, the schema ref, and the return-format instruction):
+
+  ```ts
+  const reviewOutput = output.of(reviewSchema)`Your verdict, citing every finding.`;
+  sequence.prompt("review", {
+    agent: reviewer,
+    input: input.text`Review ${diff} with a focus on ${focus}.`,
+    output: reviewOutput,
+  });
+  ```
 - `resource.file("guide", { path: "resources/guide.md" })` declares a file-backed resource; `resource.inline("checklist", "## Checklist\n")` declares canonical inline content. `checklist(...)` and `rubric(...)` produce deterministic inline Markdown.
 - `sequence.prompt(...)` and `sequence.command(...)` lower to canonical procedure sequence items.
+- `include:` declares a prompt/ask/command/check step's non-interpolated dependencies (a resource the step's doctrine references only by prose, not by `${ref}`) — the CDK warns when an explicit `input:`/`include:` entry duplicates a ref already interpolated into the step's template.
 - `input.optional(slotHandle)` marks a sequence-item slot input as optional: it never blocks production, recovery routing, or dry-plan readiness, is omitted from the frame entirely while no accepted value exists, and appears through the normal available-input path once one does. Write it alongside inferred prompt refs, e.g. `input: input.optional(priorVerdict)`. It cannot satisfy required prompt interpolation, an explicit prompt contract, or command argv interpolation, since those need a value unconditionally.
 - `toDraftJson(...)` emits stable draft JSON; `synth(...)` returns a delegation plan and does not spawn a subprocess.
 - `ctx traits build .ctx/traits/<id>/source/index.ts` executes the module at the CLI/IO boundary, then calls pure synth. Commit the CDK source, generated tree (`generated/index.toml` and `generated/index.map`), and `trait.lock` evidence under `.ctx/traits/<id>/`; its canonical runtime output is `generated/index.toml`. `ctx traits check` fails on proven stale CDK output, warns when the local runtime is unavailable, and supports `--skip-cdk-drift` for hermetic checks.
