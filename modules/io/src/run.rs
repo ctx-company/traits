@@ -2454,8 +2454,17 @@ fn declared_resource_evidence(
                 digest: entry.digest.clone(),
                 byte_size: entry.byte_size,
                 is_binary: entry.is_binary,
-                available: entry.digest.is_some() && !entry.missing_file && !entry.symlink_detected,
-                reason: if entry.digest.is_some() {
+                // A directory resource (the task-board shape, 2026-07-31) has
+                // no file digest by construction and is still a presentable
+                // on-demand input: agents open its files with their own tools.
+                available: (entry.digest.is_some()
+                    && !entry.missing_file
+                    && !entry.symlink_detected)
+                    || entry.is_directory,
+                reason: if entry.is_directory {
+                    "resource is a directory; agents read its files with their own tools"
+                        .to_string()
+                } else if entry.digest.is_some() {
                     "resource digest available".to_string()
                 } else if entry.symlink_detected {
                     "resource path contains symlink".to_string()
@@ -2681,6 +2690,7 @@ fn runtime_resource_evidence_from_manifest(
     let mut missing_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut symlinks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut special_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut directories: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for warning in &manifest.warnings {
         match warning {
@@ -2692,6 +2702,9 @@ fn runtime_resource_evidence_from_manifest(
             }
             ResourceReadWarning::SpecialFile { resource_id, .. } => {
                 special_files.insert(resource_id.clone());
+            }
+            ResourceReadWarning::Directory { resource_id, .. } => {
+                directories.insert(resource_id.clone());
             }
             ResourceReadWarning::BinaryContent { .. } => {}
         }
@@ -2710,6 +2723,9 @@ fn runtime_resource_evidence_from_manifest(
     for id in &special_files {
         all_ids.insert(id.as_str());
     }
+    for id in &directories {
+        all_ids.insert(id.as_str());
+    }
 
     all_ids
         .iter()
@@ -2722,6 +2738,7 @@ fn runtime_resource_evidence_from_manifest(
                 fd.map(|d| d.is_binary).unwrap_or(false),
                 missing_files.contains(rid),
                 symlinks.contains(rid),
+                directories.contains(rid),
             )
         })
         .collect()

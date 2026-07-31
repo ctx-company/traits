@@ -379,7 +379,8 @@ fn resolved_input_section(
                     .map(|hint| format!(" hint=\"{hint}\""))
                     .unwrap_or_default();
                 match resolved.status {
-                    ctx_traits_io::resource::PresentationStatus::Available => {
+                    ctx_traits_io::resource::PresentationStatus::Available
+                    | ctx_traits_io::resource::PresentationStatus::Directory => {
                         section
                             .push_str(&format!("    <{id} path=\"{}\"{hint} />\n", resolved.path));
                     }

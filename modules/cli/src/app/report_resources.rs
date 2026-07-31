@@ -208,6 +208,9 @@ pub(crate) fn resource_read_warning_strings(
             ResourceReadWarning::SpecialFile { resource_id, path } => {
                 format!("special-file:{resource_id}:{path}")
             }
+            ResourceReadWarning::Directory { resource_id, path } => {
+                format!("directory:{resource_id}:{path}")
+            }
             ResourceReadWarning::BinaryContent {
                 resource_id,
                 path,

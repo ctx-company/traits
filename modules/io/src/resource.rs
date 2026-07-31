@@ -125,6 +125,10 @@ pub enum ResourceReadWarning {
     MissingFile { resource_id: String, path: String },
     /// The path exists but is not a regular file.
     SpecialFile { resource_id: String, path: String },
+    /// The path exists and is a directory — a legitimate shape for an
+    /// on-demand resource served as an openable path (agents list it and
+    /// read files inside it with their own tools), never inline content.
+    Directory { resource_id: String, path: String },
     /// The file content appears to be binary (null bytes detected).
     BinaryContent {
         resource_id: String,
@@ -204,24 +208,29 @@ pub struct ResourceManifestDigest {
 
 /// Whether a resource's presentation path is safe to open.
 ///
-/// `Available` is the only status where the returned path may be handed to a
-/// caller as an openable file reference. `Missing`, `Symlink`, and
-/// `SpecialFile` carry the same lexically-safe path (for logging/diagnostics)
-/// but that path must never be presented as something to open: a symlink at
-/// the leaf or an intermediate component would be followed by the OS the
-/// moment it is opened, defeating the no-follow containment check that
-/// rejected it here, and a directory/FIFO/device is not something an agent
-/// can safely read as file content.
+/// `Available` and `Directory` are the only statuses where the returned path
+/// may be handed to a caller as an openable reference — a regular file to
+/// read, or a directory to list and read within (the task-board shape;
+/// 2026-07-31). `Missing`, `Symlink`, and `SpecialFile` carry the same
+/// lexically-safe path (for logging/diagnostics) but that path must never be
+/// presented as something to open: a symlink at the leaf or an intermediate
+/// component would be followed by the OS the moment it is opened, defeating
+/// the no-follow containment check that rejected it here, and a FIFO/device
+/// is not something an agent can safely read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresentationStatus {
     /// Every path component exists, none is a symlink, and the leaf is a
     /// regular file.
     Available,
+    /// Every path component exists, none is a symlink, and the leaf is a
+    /// directory: presentable as an openable directory path, never readable
+    /// as file content itself.
+    Directory,
     /// The declared resource path does not exist.
     Missing,
     /// A symlink was detected at the leaf or an intermediate component.
     Symlink,
-    /// The leaf exists but is not a regular file (directory, FIFO, device).
+    /// The leaf exists but is not a regular file or directory (FIFO, device).
     SpecialFile,
 }
 
@@ -366,6 +375,7 @@ fn protection_unavailable_reason(status: PresentationStatus) -> String {
         PresentationStatus::Missing => "declared resource file does not exist".to_string(),
         PresentationStatus::Symlink => "a symlink was detected and rejected".to_string(),
         PresentationStatus::SpecialFile => "the path is not a regular file".to_string(),
+        PresentationStatus::Directory => "the path is a directory, not a file".to_string(),
         PresentationStatus::Available => "declared resource file is unavailable".to_string(),
     }
 }
@@ -539,7 +549,11 @@ fn read_text_resource_inner(
     let Some(read_path) = resolved.available_path else {
         let skipped = match resolved.status() {
             PresentationStatus::Symlink => ResourceTextSkipReason::Symlink,
-            PresentationStatus::SpecialFile => ResourceTextSkipReason::SpecialFile,
+            // A directory has no text body to audit; skip it exactly like
+            // any other non-regular-file leaf.
+            PresentationStatus::SpecialFile | PresentationStatus::Directory => {
+                ResourceTextSkipReason::SpecialFile
+            }
             PresentationStatus::Missing | PresentationStatus::Available => {
                 ResourceTextSkipReason::Missing
             }
@@ -1011,6 +1025,7 @@ struct ResolvedResourceFile {
     available_path: Option<Utf8PathBuf>,
     is_symlink: bool,
     is_special_file: bool,
+    is_directory: bool,
 }
 
 impl ResolvedResourceFile {
@@ -1019,6 +1034,8 @@ impl ResolvedResourceFile {
             PresentationStatus::Available
         } else if self.is_symlink {
             PresentationStatus::Symlink
+        } else if self.is_directory {
+            PresentationStatus::Directory
         } else if self.is_special_file {
             PresentationStatus::SpecialFile
         } else {
@@ -1080,6 +1097,7 @@ fn resolve_resource_file(
             available_path: None,
             is_symlink,
             is_special_file: false,
+            is_directory: false,
         });
     };
 
@@ -1095,6 +1113,20 @@ fn resolve_resource_file(
                     available_path: None,
                     is_symlink: true,
                     is_special_file: false,
+                    is_directory: false,
+                });
+            }
+            if meta.file_type().is_dir() {
+                warnings.push(ResourceReadWarning::Directory {
+                    resource_id: resource.id.clone(),
+                    path: declared_path.to_string(),
+                });
+                return Ok(ResolvedResourceFile {
+                    nominal_path: nominal,
+                    available_path: None,
+                    is_symlink: false,
+                    is_special_file: false,
+                    is_directory: true,
                 });
             }
             if !meta.file_type().is_file() {
@@ -1107,6 +1139,7 @@ fn resolve_resource_file(
                     available_path: None,
                     is_symlink: false,
                     is_special_file: true,
+                    is_directory: false,
                 });
             }
         }
@@ -1120,6 +1153,7 @@ fn resolve_resource_file(
                 available_path: None,
                 is_symlink: false,
                 is_special_file: false,
+                is_directory: false,
             });
         }
         Err(e) => {
@@ -1136,6 +1170,7 @@ fn resolve_resource_file(
         available_path: Some(candidate),
         is_symlink: false,
         is_special_file: false,
+        is_directory: false,
     })
 }
 

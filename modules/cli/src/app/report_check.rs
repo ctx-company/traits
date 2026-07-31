@@ -1868,6 +1868,13 @@ fn check_resource_read_warning(
             Some(format!("resource.{resource_id}.path")),
             format!("resource {resource_id} path is not a regular file at {path}"),
         ),
+        ResourceReadWarning::Directory { resource_id, path } => (
+            "resource-directory".to_string(),
+            Some(format!("resource.{resource_id}.path")),
+            format!(
+                "resource {resource_id} path is a directory at {path}; agents read its files on demand"
+            ),
+        ),
         ResourceReadWarning::BinaryContent {
             resource_id,
             path,

@@ -73,16 +73,12 @@ pub fn explicit_wall_id(
         return Ok(None);
     };
     let roots = crate::resource::resolve_resource_roots(trait_root, &trait_ref.resources)?;
-    // The board is a DIRECTORY, and `presentation_path`'s regular-file
-    // contract reports a directory as SpecialFile — its nominal path is
-    // still the validated, root-contained location to list. The chosen task
-    // FILE then goes through `presentation_path` itself, so the actual read
-    // gets the full containment/symlink/regular-file validation chain.
+    // The board must be a DIRECTORY — its presented path is the validated,
+    // root-contained location to list. The chosen task FILE then goes
+    // through `presentation_path` itself, so the actual read gets the full
+    // containment/symlink/regular-file validation chain.
     let presented_board = crate::resource::presentation_path(&roots, resource, relative_path)?;
-    if matches!(
-        presented_board.status,
-        crate::resource::PresentationStatus::Missing | crate::resource::PresentationStatus::Symlink
-    ) {
+    if presented_board.status != crate::resource::PresentationStatus::Directory {
         return Ok(None);
     }
     let Some(file_name) = task_file_name_in_board(&presented_board.path, task_value) else {

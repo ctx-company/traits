@@ -478,7 +478,11 @@ fn map_presentation_status(
         crate::resource::PresentationStatus::Available => DependencyResourceAvailability::Available,
         crate::resource::PresentationStatus::Missing => DependencyResourceAvailability::Missing,
         crate::resource::PresentationStatus::Symlink => DependencyResourceAvailability::Symlink,
-        crate::resource::PresentationStatus::SpecialFile => {
+        // Dependency-vendored resources are always files; a directory here
+        // stays unavailable (the directory-shaped task board is a repo-root
+        // resource declared directly, never vendored through a dependency).
+        crate::resource::PresentationStatus::SpecialFile
+        | crate::resource::PresentationStatus::Directory => {
             DependencyResourceAvailability::SpecialFile
         }
     }
@@ -846,6 +850,7 @@ pub fn file_evidence_from_manifest(
                 Some(&file.digest),
                 file.byte_size,
                 file.is_binary,
+                false,
                 false,
                 false,
             )
@@ -1719,6 +1724,9 @@ fn resource_read_warning_strings(warnings: &[crate::resource::ResourceReadWarnin
             }
             crate::resource::ResourceReadWarning::SpecialFile { resource_id, path } => {
                 format!("special-file:{resource_id}:{path}")
+            }
+            crate::resource::ResourceReadWarning::Directory { resource_id, path } => {
+                format!("directory:{resource_id}:{path}")
             }
             crate::resource::ResourceReadWarning::BinaryContent {
                 resource_id,

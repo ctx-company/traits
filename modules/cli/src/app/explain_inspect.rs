@@ -1147,6 +1147,7 @@ pub(crate) fn build_file_evidence_from_io(
     let mut missing_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut symlinks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut special_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut directories: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for warning in &manifest.warnings {
         match warning {
@@ -1158,6 +1159,9 @@ pub(crate) fn build_file_evidence_from_io(
             }
             ResourceReadWarning::SpecialFile { resource_id, .. } => {
                 special_files.insert(resource_id.clone());
+            }
+            ResourceReadWarning::Directory { resource_id, .. } => {
+                directories.insert(resource_id.clone());
             }
             ResourceReadWarning::BinaryContent { .. } => {}
         }
@@ -1177,6 +1181,9 @@ pub(crate) fn build_file_evidence_from_io(
     for id in &special_files {
         all_ids.insert(id.as_str());
     }
+    for id in &directories {
+        all_ids.insert(id.as_str());
+    }
 
     all_ids
         .iter()
@@ -1189,6 +1196,7 @@ pub(crate) fn build_file_evidence_from_io(
                 fd.map(|d| d.is_binary).unwrap_or(false),
                 missing_files.contains(rid),
                 symlinks.contains(rid),
+                directories.contains(rid),
             )
         })
         .collect()
@@ -1935,6 +1943,9 @@ fn emit_plain_resource_read_warnings(
             ResourceReadWarning::SpecialFile { resource_id, path } => {
                 w(format!("  special-file: {resource_id} (path={path})"))?;
             }
+            ResourceReadWarning::Directory { resource_id, path } => {
+                w(format!("  directory: {resource_id} (path={path})"))?;
+            }
             ResourceReadWarning::BinaryContent {
                 resource_id,
                 path,
@@ -1976,6 +1987,9 @@ fn styled_resource_read_warnings_lines(
             }
             ResourceReadWarning::SpecialFile { resource_id, path } => {
                 ("special-file", resource_id, path.clone(), None)
+            }
+            ResourceReadWarning::Directory { resource_id, path } => {
+                ("directory", resource_id, path.clone(), None)
             }
             ResourceReadWarning::BinaryContent {
                 resource_id,

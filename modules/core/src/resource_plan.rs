@@ -50,6 +50,11 @@ pub struct FileEvidence {
     /// Whether IO detected a symlink on the path.
     #[serde(default)]
     pub symlink_detected: bool,
+    /// Whether IO reported the path as a directory — a presentable
+    /// on-demand resource root whose files agents read with their own
+    /// tools, never digestable file content itself (2026-07-31 task board).
+    #[serde(default)]
+    pub is_directory: bool,
 }
 
 /// Typed-ref evidence scanned from a text resource body by the IO layer.
@@ -1081,6 +1086,7 @@ pub fn file_evidence_from_io(
     is_binary: bool,
     missing_file: bool,
     symlink_detected: bool,
+    is_directory: bool,
 ) -> FileEvidence {
     FileEvidence {
         resource_id: resource_id.to_string(),
@@ -1089,5 +1095,6 @@ pub fn file_evidence_from_io(
         is_binary,
         missing_file,
         symlink_detected,
+        is_directory,
     }
 }
