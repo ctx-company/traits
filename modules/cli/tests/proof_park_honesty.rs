@@ -36,9 +36,9 @@
 //! `support`'s one controlled environment (`env_clear`, `HOME`/`XDG_*`
 //! rooted at this test's own scratch `home`): a proof's outcome must never
 //! depend on the invoking machine's ambient `~/.gitconfig`/
-//! `core.excludesFile`, which is exactly what silently decided whether
-//! `.docs/`/`.plans/` landed in the fixture repo's first commit on a
-//! machine whose personal global gitignore happens to exclude them.
+//! `core.excludesFile`, which once silently decided whether fixture board
+//! files landed in the fixture repo's first commit on a machine whose
+//! personal global gitignore happens to exclude them.
 
 use std::fs;
 use std::path::Path;
@@ -253,8 +253,8 @@ description = "Fixture scribe."
 summary = "Commit-message role."
 
 [prompt.implement]
-text = "Implement {port:phase}."
-input = ["port:phase"]
+text = "Implement {port:task}."
+input = ["port:task"]
 output = ["slot:work-summary"]
 
 [prompt.summarization]
@@ -311,16 +311,16 @@ name = "Park Honesty Fixture"
 summary = "P461 park-honesty proof fixture: a single-review loop whose on-exhausted policy is the fixture's own axis."
 
 [[resource]]
-id = "execution-plan"
-path = ".plans/EXECUTION_PLAN.md"
+id = "task-board"
+path = ".internal/tasks"
 root = "repo"
 trigger = "on-demand"
 
 [[port]]
-id = "phase"
+id = "task"
 direction = "input"
 schema = "schema:text"
-description = "Phase or group, exactly as named in .plans/EXECUTION_PLAN.md."
+description = "Task to implement, named by its file in .internal/tasks/."
 
 [[port]]
 id = "park-report"
@@ -372,8 +372,8 @@ summary = "Reviewer role."
 {WORKER_SCRIBE_AGENTS_AND_COMMIT_TAIL}
 
 [prompt.review]
-text = "Review {{port:phase}}: {{slot:work-summary}}."
-input = ["port:phase", "slot:work-summary"]
+text = "Review {{port:task}}: {{slot:work-summary}}."
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict"]
 
 [[sequence.park-report-record-then.sequence]]
@@ -396,7 +396,7 @@ id = "review"
 title = "Review work"
 agent = "agent:smart-1"
 prompt = "prompt:review"
-input = ["port:phase", "slot:work-summary"]
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict"]
 
 [[sequence.review-loop.sequence]]
@@ -424,7 +424,7 @@ equals = "revise"
 
 [procedure]
 description = "Implement, review in a bounded loop, then commit when the tree is dirty."
-input = ["port:phase"]
+input = ["port:task"]
 output = ["port:park-report"]
 
 [[procedure.sequence]]
@@ -432,7 +432,7 @@ id = "implement"
 title = "Implement"
 agent = "agent:worker"
 prompt = "prompt:implement"
-input = ["port:phase"]
+input = ["port:task"]
 output = ["slot:work-summary"]
 
 [[procedure.sequence]]
@@ -477,12 +477,11 @@ fn trait_manifest(id: &str) -> String {
 
 /// Fresh scratch repo carrying one fixture trait (`id`, rendered as
 /// `trait_toml` by the caller — [`fixture_trait_toml`] or
-/// [`dual_review_trait_toml`]), a `.plans/EXECUTION_PLAN.md` naming every
-/// `(phase, wall)` pair, and a `.docs/PRODUCT.md` stub — reviewed and ready
-/// to drive. `.docs/`/`.plans/` are committed here, under the controlled
-/// environment (never the invoking machine's own `~/.gitconfig`), so
-/// whether they land in the fixture's tracked set never depends on ambient
-/// developer config.
+/// [`dual_review_trait_toml`]), and one `.internal/tasks/<task>.md` file per
+/// `(task, wall)` pair — reviewed and ready to drive. The board is committed
+/// here, under the controlled environment (never the invoking machine's own
+/// `~/.gitconfig`), so whether it lands in the fixture's tracked set never
+/// depends on ambient developer config.
 fn setup_fixture(
     label: &str,
     id: &str,
@@ -503,21 +502,16 @@ fn setup_fixture(
         &repo.join(".gitignore"),
         "/.ctx/runs/*.json\n/.ctx/worktrees/\n/.ctx/debug/\n",
     );
-    let mut plan = String::from("# Execution Plan\n\n## Group 1\n\n");
-    for (phase, wall) in phases {
-        plan.push_str(&format!(
-            "- [ ] **{phase}** Park-honesty fixture phase\n  Why: fixture.\n  Approach: fixture.\n  Done-when: fixture gates pass.\n  Deps: none\n"
-        ));
+    for (task, wall) in phases {
+        let mut body = format!(
+            "# {task} — Park-honesty fixture task\n\n**Status:** ready to implement\n\nWhy: fixture.\nApproach: fixture.\n"
+        );
         if let Some(wall) = wall {
-            plan.push_str(&format!("  **Wall:** {wall}\n"));
+            body.push_str(&format!("\n**Wall:** {wall}\n"));
         }
-        plan.push('\n');
+        body.push_str("\n## Done when\n\nFixture gates pass.\n");
+        write_file(&repo.join(format!(".internal/tasks/{task}.md")), &body);
     }
-    write_file(&repo.join(".plans/EXECUTION_PLAN.md"), &plan);
-    write_file(
-        &repo.join(".docs/PRODUCT.md"),
-        "# Product\n\n## Validation Gates\n- fixture gate\n",
-    );
     commit_all(&repo, &home, "initial commit");
 
     require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
@@ -584,7 +578,7 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "run",
             "implement-fixture-park-blocked",
             "--set",
-            "phase=P900",
+            "task=P900",
             "--out",
             ledger_path.to_str().unwrap(),
             "--max-frames",
@@ -631,7 +625,7 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "run",
             "implement-fixture-park-blocked",
             "--set",
-            "phase=P901",
+            "task=P901",
             "--no-drive",
             "--json",
         ],
@@ -677,7 +671,7 @@ fn continuing_exhaustion_lands_the_commit() {
             "run",
             "implement-fixture-park-continue",
             "--set",
-            "phase=P950",
+            "task=P950",
             "--out",
             ledger_path.to_str().unwrap(),
             "--max-frames",
@@ -822,16 +816,16 @@ name = "Park Honesty Dual-Review Fixture"
 summary = "P461 park-honesty proof fixture: two independent reviewers append/clear the same park-report slot every round."
 
 [[resource]]
-id = "execution-plan"
-path = ".plans/EXECUTION_PLAN.md"
+id = "task-board"
+path = ".internal/tasks"
 root = "repo"
 trigger = "on-demand"
 
 [[port]]
-id = "phase"
+id = "task"
 direction = "input"
 schema = "schema:text"
-description = "Phase or group, exactly as named in .plans/EXECUTION_PLAN.md."
+description = "Task to implement, named by its file in .internal/tasks/."
 
 [[port]]
 id = "park-report"
@@ -892,13 +886,13 @@ summary = "Reviewer role."
 {WORKER_SCRIBE_AGENTS_AND_COMMIT_TAIL}
 
 [prompt.review-1]
-text = "Review (verdict 1) {{port:phase}}: {{slot:work-summary}}."
-input = ["port:phase", "slot:work-summary"]
+text = "Review (verdict 1) {{port:task}}: {{slot:work-summary}}."
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict-1"]
 
 [prompt.review-2]
-text = "Review (verdict 2) {{port:phase}}: {{slot:work-summary}}."
-input = ["port:phase", "slot:work-summary"]
+text = "Review (verdict 2) {{port:task}}: {{slot:work-summary}}."
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict-2"]
 
 [[sequence.park-report-record-1-then.sequence]]
@@ -936,7 +930,7 @@ id = "review-1"
 title = "Review work (verdict 1)"
 agent = "agent:smart-1"
 prompt = "prompt:review-1"
-input = ["port:phase", "slot:work-summary"]
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict-1"]
 
 [[sequence.review-loop-dual.sequence]]
@@ -944,7 +938,7 @@ id = "review-2"
 title = "Review work (verdict 2)"
 agent = "agent:smart-2"
 prompt = "prompt:review-2"
-input = ["port:phase", "slot:work-summary"]
+input = ["port:task", "slot:work-summary"]
 output = ["slot:review-verdict-2"]
 
 [[sequence.review-loop-dual.sequence]]
@@ -983,7 +977,7 @@ equals = "revise"
 
 [procedure]
 description = "Implement, review with two independent reviewers in a bounded loop, then commit when the tree is dirty."
-input = ["port:phase"]
+input = ["port:task"]
 output = ["port:park-report"]
 
 [[procedure.sequence]]
@@ -991,7 +985,7 @@ id = "implement"
 title = "Implement"
 agent = "agent:worker"
 prompt = "prompt:implement"
-input = ["port:phase"]
+input = ["port:task"]
 output = ["slot:work-summary"]
 
 [[procedure.sequence]]
@@ -1052,7 +1046,7 @@ fn drive_dual_review_phase(
             "run",
             trait_id,
             "--set",
-            &format!("phase={phase}"),
+            &format!("task={phase}"),
             "--out",
             ledger_path.to_str().unwrap(),
             "--max-frames",

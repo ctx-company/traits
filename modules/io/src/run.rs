@@ -388,7 +388,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     }
 
     // Trait-argument parsing happens before assignment preparation so
-    // `port:phase` is available downstream.
+    // `port:task` is available downstream.
     let mut initial_values = request.input_values;
     if request.query.is_none() {
         initial_values.extend(ctx_traits_core::run_info::parse_trait_arguments(
@@ -407,25 +407,25 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     }
 
     // Standing-wall pre-flight (P414): before any assignment, worktree, or
-    // session exists, refuse to dispatch an `implement-*` phase whose own
-    // execution-plan section carries an explicit `**Wall:**` label matching a
-    // BLOCKED run's typed park report already standing in this repository's
-    // ledgers. Reads `port:phase` from the values parsed above.
-    let owned_phase_value = crate::run_session::phase_value_from_pairs(
+    // session exists, refuse to dispatch an `implement-*` task whose own
+    // task file carries an explicit `**Wall:**` label matching a BLOCKED
+    // run's typed park report already standing in this repository's
+    // ledgers. Reads `port:task` from the values parsed above.
+    let owned_task_value = crate::run_session::task_value_from_pairs(
         initial_values
             .iter()
             .map(|value| (value.ref_text.as_str(), &value.value)),
     );
-    let phase_value = owned_phase_value.as_deref();
+    let task_value = owned_task_value.as_deref();
     if let Some(wall_id) = crate::dispatch_preflight::explicit_wall_id(
         &loaded.trait_ref,
         &loaded.trait_root,
-        phase_value,
+        task_value,
     )? && let Some(standing) =
-        crate::dispatch_preflight::find_standing_wall(&wall_id, phase_value.unwrap_or_default())?
+        crate::dispatch_preflight::find_standing_wall(&wall_id, task_value.unwrap_or_default())?
     {
         return invalid_request(
-            "run.phase",
+            "run.task",
             crate::dispatch_preflight::refusal_message(&standing),
         );
     }

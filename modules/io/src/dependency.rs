@@ -765,7 +765,7 @@ pub fn load_dependency_package(
     // Package-owned resources ONLY.
     //
     // A `root = "repo"` resource is an input the CONSUMING project supplies —
-    // `.plans/EXECUTION_PLAN.md`, `.docs/PRODUCT.md` — not package content. Its
+    // the `.internal/tasks` board, for one — not package content. Its
     // bytes differ in every repository and are absent in a fresh one, so
     // digesting it here produced lock evidence that could never be reproduced
     // anywhere but the producer's own checkout: installing `implement` into

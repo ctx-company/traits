@@ -31,7 +31,7 @@ export function workerRole(id: string, description: string): AgentHandle {
  * Declares the shared scribe role: writes the commit message for a completed run.
  * @param id Agent identifier.
  * @param taskDescription What the scribe writes the message from, without the trailing git-tail clause.
- * @example `scribeRole("scribe", "Writes the commit message for the completed phase from the execution plan")`
+ * @example `scribeRole("scribe", "Writes the commit message for the completed task from the task contract")`
  */
 export function scribeRole(id: string, taskDescription: string): AgentHandle {
   return agent.planner(id, {
@@ -55,7 +55,7 @@ export function reviewerRole(id: string, description: string, summary?: string):
  * Declares the shared clerk role: extracts and distills context so later steps never re-read source files.
  * @param id Agent identifier.
  * @param description Trait-specific description of what this clerk extracts.
- * @example `clerkRole("clerk", "Fast extraction model: copies the phase section out of the execution plan verbatim.")`
+ * @example `clerkRole("clerk", "Fast extraction model: copies the task file out of the task board verbatim.")`
  */
 export function clerkRole(id: string, description: string): AgentHandle {
   return agent.searcher(id, { description, summary: "Context-extraction role." });
@@ -68,63 +68,73 @@ export function clerkRole(id: string, description: string): AgentHandle {
  * to splice into any draft-step `prompt.template` source via `${SCOPE_SPLIT_DOCTRINE}`.
  */
 export const SCOPE_SPLIT_DOCTRINE =
-  `Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the phase into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the plan reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.`;
+  `Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the task into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the task reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.`;
 
 /**
- * Private paragraphs shared verbatim by `REVIEW_VERDICT_DOCTRINE` and `INTEGRITY_DOCTRINE` so the
- * two reviewer contracts cannot silently diverge: recurrence verification, phase/house-rule
- * consultation, rule-citation verification, the BLOCKER definition core, the typed blocker-report
- * format, and the status/advisory split. Not exported — compose the two public doctrines below
- * instead of splicing these directly into a `prompt.template`.
+ * Private paragraphs composed into the public doctrines below. `RECURRENCE_VERIFICATION`,
+ * `BLOCKER_REPORT_FORMAT`, and `STATUS_ADVISORY_SPLIT` are shared verbatim by every doctrine so
+ * the reviewer contracts cannot silently diverge on them. The consultation and blocker-definition
+ * paragraphs exist in two deliberate versions: the `PHASE_`/plain forms keep the generic
+ * `{phaseBrief}`/`{productBrief}` contract for families that bind their own authorities (refactor
+ * binds its agreed design and architecture dialect); the `TASK_` forms are the implement-family
+ * versions, where the task file from the task board is the sole contract and no separate
+ * rule-authority document exists (PRODUCT.md retired 2026-07-31). Not exported — compose the
+ * public doctrines below instead of splicing these directly into a `prompt.template`.
  */
 const RECURRENCE_VERIFICATION =
   `Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.`;
 const PHASE_CONTRACT_CONSULTATION =
   `                    Consult the phase contract {phaseBrief} and house rules {productBrief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.`;
+const TASK_CONTRACT_CONSULTATION =
+  `                    Consult the task contract {taskBrief} and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the task's own Done-when if the summary does not prove they ran.`;
 const RULE_CITATION_VERIFICATION =
   `                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {productBrief} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).`;
 const BLOCKER_DEFINITION_CORE =
   `A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up`;
+const TASK_BLOCKER_DEFINITION_CORE =
+  `A BLOCKER makes the work genuinely unmergeable: a correctness bug, a gate the task's own Done-when requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up`;
 const BLOCKER_REPORT_FORMAT =
   `                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.`;
 const STATUS_ADVISORY_SPLIT =
   `                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.`;
 
 /**
- * Shared blocker-reporting and escalation doctrine for a typed multi-reviewer refinement loop:
- * how to judge severity, report a blocker, and record owner-triage escalation. Pure static text
- * (no port/slot refs) — safe to splice into any `prompt.template` review-step source via
- * `${REVIEW_VERDICT_DOCTRINE}`, next to the review's own phase-specific opening line and
- * `{phaseBrief}`/`{productBrief}` placeholders. Composed from the private paragraphs above plus
- * this doctrine's own SCOPE SPLIT, owner-items, cross-phase-seam, and escalation machinery.
+ * Shared blocker-reporting and escalation doctrine for the implement-family typed multi-reviewer
+ * refinement loop: how to judge severity, report a blocker, and record owner-triage escalation.
+ * The task file in `.internal/tasks/` is the sole contract — there is no separate rule-authority
+ * document. Pure static text (no port/slot refs) — safe to splice into any `prompt.template`
+ * review-step source via `${REVIEW_VERDICT_DOCTRINE}`, next to the review's own task-specific
+ * opening line and `{taskBrief}` placeholder. Composed from the private paragraphs above plus
+ * this doctrine's own SCOPE SPLIT, owner-items, cross-task-seam, and escalation machinery.
  */
 export const REVIEW_VERDICT_DOCTRINE = `${RECURRENCE_VERIFICATION}
-${PHASE_CONTRACT_CONSULTATION}
-${RULE_CITATION_VERIFICATION}
-                    Judge the work SOLELY against this phase's stated scope and Definition of Done. A phase is complete when its own DoD holds — even if the overall project does not yet build or pass whole-project gates, which belong to later phases. Do not invent acceptance criteria the phase does not state, and do not fail the work for deliverables or gates scoped to a different phase.
-                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. ${BLOCKER_DEFINITION_CORE}, or gates that belong to later phases — is ADVISORY.
+${TASK_CONTRACT_CONSULTATION}
+                    Judge the work SOLELY against this task's stated scope and Done-when. A task is complete when its own Done-when holds — even if the overall project does not yet build or pass whole-project gates, which belong to later tasks. Do not invent acceptance criteria the task does not state, and do not fail the work for deliverables or gates scoped to a different task.
+                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. ${TASK_BLOCKER_DEFINITION_CORE}, or gates that belong to later tasks — is ADVISORY.
 ${BLOCKER_REPORT_FORMAT}
-                    The phase contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS phase is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-phase seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) is assigned by the execution plan to a DIFFERENT phase, SEARCH the execution-plan resource, confirm that phase, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning phase by id in the remaining field. Neither exception ever converts an implementable item of this phase's own checklist. Block on a seam when it fails unsafely or no other phase owns it.
-                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the phase's own DoD holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
-                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the phase contract is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite phase named in Deps has not landed in this tree, the group is marked SUPERSEDED or CANCELLED, or a contradiction poisons the entire phase leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
-                    Wall citation: when the phase contract carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the phase contract carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
+                    The task contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS task is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-task seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) belongs to a DIFFERENT task on the task board, SEARCH the task-board resource, confirm that task file, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning task by its file name in the remaining field. Neither exception ever converts an implementable item of this task's own checklist. Block on a seam when it fails unsafely or no other task owns it.
+                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the task's own Done-when holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
+                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the task file is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite task it names has not landed in this tree, the task is marked superseded or cancelled (or has been moved to the board's archived/ directory), or a contradiction poisons the entire task leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
+                    Wall citation: when the task file carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the task file carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
 ${STATUS_ADVISORY_SPLIT}`;
 
 /**
- * Lean, family-compatible integrity fragment: the unconditional part of `REVIEW_VERDICT_DOCTRINE`
- * that applies to any typed review verdict — recurrence verification, house-rule citation
- * verification, the BLOCKER definition (correctness, house-rule, required-gate, over-build,
+ * Lean, family-compatible integrity fragment for families that bind their OWN authorities to the
+ * generic `{phaseBrief}`/`{productBrief}` placeholders (refactor binds its agreed design and
+ * architecture dialect): recurrence verification, rule-citation verification against the bound
+ * authority, the BLOCKER definition (correctness, house-rule, required-gate, over-build,
  * duplication), the typed blocker-report format, and the status/advisory split. Deliberately
- * drops that doctrine's SCOPE SPLIT, owner-items, cross-phase-seam, and escalation machinery
- * (implement-phase-specific fields no other verdict schema exposes) and its "loop is advisory"
- * exhaustion framing (wrong for a family that blocks on exhaustion, e.g. refactor's strict variant).
- * Pure static text (no port/slot/family refs) — safe to splice into any `prompt.template` review-step
- * source via `${INTEGRITY_DOCTRINE}`, next to the review's own phase-specific opening line and
+ * drops `REVIEW_VERDICT_DOCTRINE`'s SCOPE SPLIT, owner-items, cross-task-seam, and escalation
+ * machinery (implement-family-specific fields no other verdict schema exposes) and its "loop is
+ * advisory" exhaustion framing (wrong for a family that blocks on exhaustion, e.g. refactor's
+ * strict variant). Since the 2026-07-31 task-board migration this doctrine also DIVERGES from
+ * `REVIEW_VERDICT_DOCTRINE` by design: implement retired its rule-authority document, so only
+ * this fragment still carries `RULE_CITATION_VERIFICATION` and the `{productBrief}` binding.
+ * Pure static text (no port/slot/family refs) — safe to splice into any `prompt.template`
+ * review-step source via `${INTEGRITY_DOCTRINE}`, next to the review's own opening line and
  * `{phaseBrief}`/`{productBrief}` placeholders. When a `VARIANT_DOCTRINE` fragment references
  * `REVIEW_VERDICT_DOCTRINE`, that means this composed `INTEGRITY_DOCTRINE` baseline wherever a
- * family (e.g. refactor) splices `INTEGRITY_DOCTRINE` instead of the implement-phase doctrine —
- * the two share every paragraph the fragment's rule actually depends on. Composed from the
- * private paragraphs above; carries no paragraph not already in `REVIEW_VERDICT_DOCTRINE`.
+ * family (e.g. refactor) splices `INTEGRITY_DOCTRINE` instead of the implement-family doctrine.
  */
 export const INTEGRITY_DOCTRINE = `${RECURRENCE_VERIFICATION}
 ${PHASE_CONTRACT_CONSULTATION}
@@ -174,7 +184,7 @@ const VARIANT_PRECEDENCE_PREFIX =
 export const QUICK_VARIANT_DOCTRINE = VARIANT_PRECEDENCE_PREFIX
   + `Quick authority: forgive a plan-fidelity gap ONLY when you record the reason it was reasonable to diverge; a genuine correctness defect is never forgivable regardless of reason, and remains a BLOCKER exactly as REVIEW_VERDICT_DOCTRINE requires. Forgiveness excuses missing or altered plan steps that changed nothing an observer could break; it never excuses a bug, a house-rule violation, or un-abstracted duplication.`;
 export const DEFAULT_VARIANT_DOCTRINE = VARIANT_PRECEDENCE_PREFIX
-  + `Default authority: enforce all and only the phase's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.`;
+  + `Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.`;
 export const SMART_VARIANT_DOCTRINE = VARIANT_PRECEDENCE_PREFIX
   + `Smart authority: when the plan and the observed work genuinely contradict, resolve the contradiction ONLY by producing a typed amendment record — the change, the contradiction it resolves, the rationale, and its provenance — which then becomes the binding contract going forward; an unrecorded departure is still a plan-fidelity gap, not an amendment. Amending fidelity never amends correctness: a genuine defect remains a BLOCKER under REVIEW_VERDICT_DOCTRINE no matter how the plan was amended.`;
 export const STRICT_VARIANT_DOCTRINE = VARIANT_PRECEDENCE_PREFIX
@@ -410,7 +420,7 @@ export const reviewVerdictSchema: SchemaHandle = schema.object(
     }),
     blockers: schema.field(schema.list(blockerSchema), {
       description:
-        "The blocking defects that must be fixed before merge: correctness bugs, house-rule violations (core purity, a new dependency, a new #[allow], required byte-stability broken), failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the phase), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
     }),
     advisory: schema.field(schema.text(), {
       required: false,
@@ -419,7 +429,7 @@ export const reviewVerdictSchema: SchemaHandle = schema.object(
     }),
     escalation: schema.field(schema.enum(["none", "needs-owner"] as const), {
       description:
-        "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the phase contract is a placeholder or lacks a falsifiable Done-when; a prerequisite phase named in Deps has not landed in this tree; the group is marked SUPERSEDED or CANCELLED; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the phase's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise.",
+        "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise.",
     }),
     "escalation-reason": schema.field(schema.text(), {
       description:
@@ -427,17 +437,17 @@ export const reviewVerdictSchema: SchemaHandle = schema.object(
     }),
     "wall-id": schema.field(schema.text(), {
       description:
-        "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the phase contract, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
     }),
     remaining: schema.field(schema.text(), {
       required: false,
       description:
-        "Cross-phase seam citations ONLY: counterpart work the execution plan assigns to a DIFFERENT phase, each citing that phase's id. Never in-phase scope — an unimplemented item of THIS phase's checklist is a blocker, and unimplemented in-phase scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-phase seam exists.",
+        "Cross-task seam citations ONLY: counterpart work belonging to a DIFFERENT task on the task board, each citing that task's file name. Never in-task scope — an unimplemented item of THIS task's checklist is a blocker, and unimplemented in-task scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-task seam exists.",
     }),
     "owner-items": schema.field(schema.list(ownerItemSchema), {
       required: false,
       description:
-        "Checklist items of THIS phase that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable.",
+        "Checklist items of THIS task that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable.",
     }),
   },
   {
@@ -459,8 +469,8 @@ export const reviewVerdictSchema: SchemaHandle = schema.object(
  * appends the verdict slot's own accepted value onto it UNCHANGED, in full,
  * via one deterministic `project` step guarded on `status == "revise"` —
  * never a second, model-authored classification, so a park report can never
- * disagree with the verdict it comes from. Which phase a park belongs to is
- * `port:phase`, already recorded once, structurally, in every session's own
+ * disagree with the verdict it comes from. Which task a park belongs to is
+ * `port:task`, already recorded once, structurally, in every session's own
  * accepted port values — a dispatch-time preflight reads it directly rather
  * than trusting a second, potentially-divergent copy inside the verdict.
  */

@@ -458,29 +458,29 @@ pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
     write_run_session(path, &loaded)
 }
 
-/// The single owner of the `port:phase` ref literal (P472): finds it among
-/// `(ref, value)` pairs and returns its string value, if any. Generic over
-/// the pair source rather than one container type because the two real
-/// callers hold structurally-identical-but-distinct types — a session's
+/// The single owner of the `port:task` ref literal (P472; `port:phase`
+/// until the 2026-07-31 task-board migration): finds it among `(ref,
+/// value)` pairs and returns its string value, if any. Generic over the
+/// pair source rather than one container type because the two real callers
+/// hold structurally-identical-but-distinct types — a session's
 /// `accepted_port_values: Vec<procedure::session::Value>` and a dispatch's
 /// pre-session `initial_values: Vec<procedure::runtime::StepSlotOutput>` —
 /// so the literal, not a container type, is the thing kept singular.
-pub fn phase_value_from_pairs<'a>(
+pub fn task_value_from_pairs<'a>(
     pairs: impl Iterator<Item = (&'a str, &'a serde_json::Value)>,
 ) -> Option<String> {
     pairs
         .into_iter()
-        .find(|(ref_text, _)| *ref_text == "port:phase")
+        .find(|(ref_text, _)| *ref_text == "port:task")
         .and_then(|(_, value)| value.as_str())
         .map(str::to_string)
 }
 
-/// The `port:phase` value accepted by a session, if any (P472; previously
-/// duplicated as a private `session_phase_value` in `dispatch_preflight.rs`
-/// and inlined again in `run.rs` — both now delegate to
-/// [`phase_value_from_pairs`]).
-pub fn session_phase(session: &ctx_traits_core::procedure::session::Session) -> Option<String> {
-    phase_value_from_pairs(
+/// The `port:task` value accepted by a session, if any (P472; previously
+/// duplicated as a private helper in `dispatch_preflight.rs` and inlined
+/// again in `run.rs` — both now delegate to [`task_value_from_pairs`]).
+pub fn session_task(session: &ctx_traits_core::procedure::session::Session) -> Option<String> {
+    task_value_from_pairs(
         session
             .accepted_port_values
             .iter()

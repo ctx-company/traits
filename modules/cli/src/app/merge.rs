@@ -4576,11 +4576,11 @@ mod tests {
     /// as `generated_matching_respects_path_separator_boundaries`.
     #[test]
     fn seed_root_containment_respects_path_separator_boundaries() {
-        let roots = vec![".plans".to_string()];
-        assert!(path_is_under_seed_root(".plans", &roots));
-        assert!(path_is_under_seed_root(".plans/P463.md", &roots));
-        assert!(!path_is_under_seed_root(".plans-extra/x", &roots));
-        assert!(!path_is_under_seed_root(".doc", &roots));
+        let roots = vec![".notes".to_string()];
+        assert!(path_is_under_seed_root(".notes", &roots));
+        assert!(path_is_under_seed_root(".notes/P463.md", &roots));
+        assert!(!path_is_under_seed_root(".notes-extra/x", &roots));
+        assert!(!path_is_under_seed_root(".note", &roots));
     }
 
     /// P463 item A: `deep_hunk_id`'s generalized signature is deterministic

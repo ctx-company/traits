@@ -1872,7 +1872,7 @@ fn merges_from_inventory(
             class,
             stage,
             headline,
-            phase: ctx_traits_io::run_session::session_phase(&session),
+            phase: ctx_traits_io::run_session::session_task(&session),
             trait_id: session.trait_id.clone(),
             last_frame: last_terminal_frame.cloned(),
             worktree: session.provenance.worktree.clone(),
@@ -3497,9 +3497,7 @@ fn merge_produced(worktree_path: &camino::Utf8Path, branch: Option<&str>) -> Opt
     if changed.is_empty() {
         return Some(MergeProduced::Nothing);
     }
-    let docs_only = changed.iter().all(|path| {
-        path.starts_with(".docs/") || path.starts_with(".plans/") || path.ends_with(".md")
-    });
+    let docs_only = changed.iter().all(|path| path.ends_with(".md"));
     if docs_only {
         return Some(MergeProduced::DocsOnly {
             files: changed.len(),

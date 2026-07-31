@@ -76,7 +76,7 @@ impl RunSummary {
                     .map(|outcome| &outcome.outcome),
                 false,
             )),
-            phase: crate::run_session::session_phase(session),
+            phase: crate::run_session::session_task(session),
             started_at_epoch: session.provenance.started_at_epoch,
             exit_code: session
                 .last_drive_outcome
