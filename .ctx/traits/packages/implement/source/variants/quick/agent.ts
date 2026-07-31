@@ -6,6 +6,6 @@ const smart = reviewerRole(
     "Drafting and reviewer role.",
 );
 const worker = workerRole("worker", "Implements the draft and applies reviewer fixes.");
-const scribe = scribeRole("scribe", "Writes the commit message for the completed phase from the execution plan");
+const scribe = scribeRole("scribe", "Writes the commit message for the completed task from the task contract");
 
 export const agent = { smart, worker, scribe };

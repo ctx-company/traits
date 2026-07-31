@@ -10,7 +10,7 @@ export const reviewVerdict = schema.object(
         }),
         blockers: schema.field(schema.list(blockerSchema), {
             description:
-                "The blocking defects that must be fixed before merge: correctness bugs, house-rule violations (core purity, a new dependency, a new #[allow], required byte-stability broken), failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the phase), OR un-abstracted duplication. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
+                "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
         }),
         advisory: schema.field(schema.text(), {
             required: false,
@@ -24,7 +24,7 @@ export const reviewVerdict = schema.object(
         }),
         "wall-id": schema.field(schema.text(), {
             description:
-                "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the phase's execution-plan section, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
+                "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
         }),
     },
     {

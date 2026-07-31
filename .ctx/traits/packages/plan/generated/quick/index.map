@@ -14,7 +14,7 @@
     "start": 4,
     "end": 4
   },
-  "port:written-file": {
+  "port:written-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 16,
     "end": 16
@@ -39,15 +39,15 @@
     "start": 5,
     "end": 5
   },
-  "slot:execution-plan": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 10,
-    "end": 10
-  },
   "slot:result": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 15,
     "end": 15
+  },
+  "slot:task-files": {
+    "file": ".ctx/traits/packages/plan/source/data.ts",
+    "start": 10,
+    "end": 10
   },
   "trait:plan": {
     "file": ".ctx/traits/packages/plan/source/variants/quick.ts",

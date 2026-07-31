@@ -1,10 +1,10 @@
 import type { AgentHandle, PortHandle, SlotHandle } from "@ctx-traits/cdk";
 import { prompt, sequence } from "@ctx-traits/cdk";
-import { PLAN_FORMAT_DOCTRINE } from "../resources/plan-format";
+import { TASK_FORMAT_DOCTRINE } from "../resources/task-format.ts";
 
-export function refineTaskStep(agent: AgentHandle, taskInput: PortHandle, productContract: SlotHandle) {
+export function refineTaskStep(agent: AgentHandle, taskInput: PortHandle, grounding: SlotHandle) {
     return sequence.prompt("refine-task", {
-        title: "Ground & refine the task into product contract",
+        title: "Ground & refine the task in the codebase",
         agent,
         text: prompt.text`
             Task is described as: ${taskInput}, ground it in the codebase & refine it.
@@ -13,29 +13,32 @@ export function refineTaskStep(agent: AgentHandle, taskInput: PortHandle, produc
                 - the build/test/lint commands (the repo's validation gates, with exact invocations)
                 - architectural invariants and requirements
                 - dependencies or rules that need to be respected
-            Produce product contract:
+            Produce the grounding notes:
                 - short project/context overview,
-                - house rules and invariants an implementer and reviewer must honor,
+                - rules and invariants an implementer and reviewer must honor,
                 - validation gates (exact commands)
                 - constraints specific to this task.
-            This is the rules-and-context document later steps hold the work to, not the step-by-step plan.
+            This is the context the task files carry, not the step-by-step plan.
             Do not implement anything.`,
         input: taskInput,
-        output: productContract,
+        output: grounding,
     });
 }
 
-export function splitPlanStep(agent: AgentHandle, taskInput: PortHandle, productContract: SlotHandle, executionPlan: SlotHandle) {
+export function splitTasksStep(agent: AgentHandle, taskInput: PortHandle, grounding: SlotHandle, taskFiles: SlotHandle) {
     return sequence.prompt("split", {
-        title: "Split the task into implementation phases",
+        title: "Split the work into task files",
         agent,
-        text: prompt.text`
-            Plan format doctrine: ${PLAN_FORMAT_DOCTRINE}
-            Product contract: ${productContract}
-            Break the refined task into small, ordered implementation phases.
-            Ground each phase in the codebase specifics from the contract.
+        text: prompt.template(
+            `Task format doctrine: ${TASK_FORMAT_DOCTRINE}
+            The work, as described: {task}
+            Grounding notes: {grounding}
+            Break the refined work into small, ordered task files.
+            Fold the grounding each task needs — its files, gates, invariants, constraints — into that task's own body and Watch section, so every file stands alone.
             Do not implement anything.`,
-        input: [taskInput, productContract],
-        output: executionPlan,
+            { task: taskInput, grounding },
+        ),
+        input: [taskInput, grounding],
+        output: taskFiles,
     });
 }

@@ -1,17 +1,9 @@
 import { resource } from "@ctx-traits/cdk";
 
-export const executionPlan = resource({
-    id: "execution-plan",
-    path: ".plans/EXECUTION_PLAN.md",
+export const taskBoard = resource({
+    id: "task-board",
+    path: ".internal/tasks",
     root: "repo",
-    hint: "Repo-root path for the execution plan; agents read that file with their own tools and never inline it.",
-    trigger: "on-demand",
-});
-
-export const productDocument = resource({
-    id: "product-doc",
-    path: ".docs/PRODUCT.md",
-    root: "repo",
-    hint: "Repo-root path for the product contract: ADVISORY context, and the only document standing rules may be cited from — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a rule. The phase contract outranks it wherever they conflict. Agents read this file with their own tools and never inline it.",
+    hint: "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them.",
     trigger: "on-demand",
 });

@@ -24,7 +24,7 @@
     "start": 29,
     "end": 29
   },
-  "prompt:refine": {
+  "prompt:refine-task": {
     "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
     "start": 9,
     "end": 9
@@ -36,20 +36,20 @@
   },
   "prompt:split": {
     "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 23,
-    "end": 23
+    "start": 32,
+    "end": 32
   },
   "prompt:write": {
     "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 20,
-    "end": 20
+    "start": 7,
+    "end": 7
   },
   "sequence:procedure/critique": {
     "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
     "start": 27,
     "end": 27
   },
-  "sequence:procedure/refine": {
+  "sequence:procedure/refine-task": {
     "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
     "start": 6,
     "end": 6
@@ -61,25 +61,20 @@
   },
   "sequence:procedure/split": {
     "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 20,
-    "end": 20
+    "start": 29,
+    "end": 29
   },
   "sequence:procedure/write": {
     "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 18,
-    "end": 18
+    "start": 5,
+    "end": 5
   },
   "slot:critique": {
     "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
     "start": 13,
     "end": 13
   },
-  "slot:execution-plan": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 10,
-    "end": 10
-  },
-  "slot:product-context": {
+  "slot:grounding": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 5,
     "end": 5
@@ -88,6 +83,11 @@
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 15,
     "end": 15
+  },
+  "slot:task-files": {
+    "file": ".ctx/traits/packages/plan/source/data.ts",
+    "start": 10,
+    "end": 10
   },
   "trait:plan": {
     "file": ".ctx/traits/packages/plan/source/variants/complex.ts",

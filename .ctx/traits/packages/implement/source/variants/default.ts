@@ -3,17 +3,15 @@ import { Intent, Method, procedure, variant, Tone, Verbosity } from "@ctx-traits
 import {
     clerk,
     commitReport,
-    declareExecutionPlan,
-    declareRuleAuthority,
+    declareTaskBoard,
     familyProcedure,
     leftoversPort,
     ownerItemSchema,
     parkReportPort,
-    phase,
-    ruleSchema,
     scribe,
     smart1Role,
     smart2Role,
+    task,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -22,8 +20,7 @@ import {
 const smart1 = smart1Role("Strong model: drafts the implementation plan, and reviews the work in the refinement loop.");
 const smart2 = smart2Role("Independent strong review model: reviews the implemented work each refinement pass, separately from smart-1.");
 
-const executionPlan = declareExecutionPlan();
-const ruleAuthority = declareRuleAuthority();
+const taskBoard = declareTaskBoard();
 
 const verdictSchema = verdictSchemaFor("default");
 const verdict1 = verdictSlot("review-verdict-1", "smart-1", verdictSchema);
@@ -32,7 +29,7 @@ const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 export default variant({
     name: "Implement (Default)",
     summary:
-        "Surveyed dogfood implementation procedure: extract the phase and product context, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
+        "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
     behavior: {
         tone: [Tone.direct, Tone.technical],
@@ -43,7 +40,7 @@ export default variant({
         require: [
             Intent.focus.correctness,
             { id: "robustness", summary: "Prefer changes that remain correct under ordinary failure and boundary conditions." },
-            { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the phase contract." },
+            { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the task contract." },
             { id: "elegance", summary: "Favor clear, cohesive designs over clever or incidental complexity." },
             Intent.require.leanness,
             Intent.require.reuseOverReimplement,
@@ -60,12 +57,12 @@ export default variant({
             Intent.avoid.rubberStampReview,
         ],
     },
-    schema: [blockerSchema, ownerItemSchema, ruleSchema],
-    resource: [executionPlan, ruleAuthority],
+    schema: [blockerSchema, ownerItemSchema],
+    resource: [taskBoard],
     procedure: procedure({
         description:
-            "Implement one execution-plan phase end to end: extract context, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
-        input: phase,
+            "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
+        input: task,
         output: [commitReport, leftoversPort, parkReportPort],
         sequence: familyProcedure({
             clerk,
@@ -73,8 +70,7 @@ export default variant({
             smart2,
             worker,
             scribe,
-            executionPlan,
-            ruleAuthority,
+            taskBoard,
             variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
             verdict1,
             verdict2,

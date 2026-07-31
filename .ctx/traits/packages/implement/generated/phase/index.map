@@ -26,93 +26,83 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 211,
-    "end": 211
+    "start": 165,
+    "end": 165
   },
   "port:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 228,
-    "end": 228
+    "start": 182,
+    "end": 182
   },
   "port:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 142,
-    "end": 142
+    "start": 135,
+    "end": 135
   },
-  "port:phase": {
+  "port:task": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 53,
     "end": 53
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 407,
-    "end": 407
+    "start": 347,
+    "end": 347
   },
   "prompt:building-review-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 455,
-    "end": 455
+    "start": 394,
+    "end": 394
   },
   "prompt:building-review-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 455,
-    "end": 455
-  },
-  "prompt:phase-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 281,
-    "end": 281
+    "start": 394,
+    "end": 394
   },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 305,
-    "end": 305
+    "start": 245,
+    "end": 245
   },
   "prompt:planning-review": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 335,
-    "end": 335
-  },
-  "prompt:product-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 294,
-    "end": 294
+    "start": 275,
+    "end": 275
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 547,
-    "end": 547
+    "start": 483,
+    "end": 483
   },
-  "resource:execution-plan": {
+  "prompt:task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 69,
-    "end": 69
+    "start": 235,
+    "end": 235
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 42,
-    "end": 42
+    "start": 38,
+    "end": 38
   },
-  "resource:rule-authority": {
+  "resource:task-board": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 80,
-    "end": 80
+    "start": 67,
+    "end": 67
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 213,
-    "end": 213
+    "start": 223,
+    "end": 223
   },
   "schema:blocker-step": {
     "file": "packages/agents/src/index.ts",
-    "start": 193,
-    "end": 193
+    "start": 203,
+    "end": 203
   },
   "schema:correctness-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 65,
-    "end": 65
+    "start": 61,
+    "end": 61
   },
   "schema:decision": {
     "file": "packages/agents/src/process.ts",
@@ -121,48 +111,33 @@
   },
   "schema:gates-ran-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 65,
-    "end": 65
-  },
-  "schema:house-rules-findings": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 65,
-    "end": 65
+    "start": 61,
+    "end": 61
   },
   "schema:leftover": {
     "file": "packages/agents/src/index.ts",
-    "start": 373,
-    "end": 373
+    "start": 383,
+    "end": 383
   },
   "schema:owner-item": {
     "file": "packages/agents/src/index.ts",
-    "start": 326,
-    "end": 326
-  },
-  "schema:product-brief": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 110,
-    "end": 110
-  },
-  "schema:product-rule": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 95,
-    "end": 95
+    "start": 336,
+    "end": 336
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 185,
-    "end": 185
+    "start": 139,
+    "end": 139
   },
   "schema:review-finding": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 49,
-    "end": 49
+    "start": 45,
+    "end": 45
   },
   "schema:review-verdict-default": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 266,
-    "end": 266
+    "start": 220,
+    "end": 220
   },
   "schema:reviewer-verdict": {
     "file": "packages/agents/src/process.ts",
@@ -171,8 +146,8 @@
   },
   "schema:scope-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 65,
-    "end": 65
+    "start": 61,
+    "end": 61
   },
   "sequence:building-body": {
     "file": "packages/agents/src/process.ts",
@@ -206,33 +181,33 @@
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 358,
-    "end": 358
+    "start": 298,
+    "end": 298
   },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 524,
-    "end": 524
+    "start": 460,
+    "end": 460
   },
   "sequence:building-body/park-report-record-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 529,
-    "end": 529
+    "start": 465,
+    "end": 465
   },
   "sequence:building-body/park-report-record-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 529,
-    "end": 529
+    "start": 465,
+    "end": 465
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 344,
-    "end": 344
+    "start": 284,
+    "end": 284
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 188,
-    "end": 188
+    "start": 181,
+    "end": 181
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -251,13 +226,13 @@
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 532,
-    "end": 532
+    "start": 468,
+    "end": 468
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then/park-report-append-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 532,
-    "end": 532
+    "start": 468,
+    "end": 468
   },
   "sequence:planning-body": {
     "file": "packages/agents/src/process.ts",
@@ -279,20 +254,10 @@
     "start": 254,
     "end": 254
   },
-  "sequence:procedure/phase-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 278,
-    "end": 278
-  },
   "sequence:procedure/planning": {
     "file": "packages/agents/src/process.ts",
     "start": 254,
     "end": 254
-  },
-  "sequence:procedure/product-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 291,
-    "end": 291
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -304,10 +269,15 @@
     "start": 322,
     "end": 322
   },
+  "sequence:procedure/task-extraction": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 232,
+    "end": 232
+  },
   "signal:recurring-blocker-unresolved": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 106,
-    "end": 106
+    "start": 99,
+    "end": 99
   },
   "slot:building-sealed": {
     "file": "packages/agents/src/process.ts",
@@ -316,58 +286,48 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 165,
-    "end": 165
+    "start": 119,
+    "end": 119
   },
   "slot:draft": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
+    "start": 82,
+    "end": 82
   },
   "slot:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 139,
-    "end": 139
+    "start": 93,
+    "end": 93
   },
   "slot:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 136,
-    "end": 136
-  },
-  "slot:phase-brief": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 89,
-    "end": 89
+    "start": 129,
+    "end": 129
   },
   "slot:planning-verdict": {
     "file": "packages/agents/src/process.ts",
     "start": 184,
     "end": 184
   },
-  "slot:product-brief": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 108,
-    "end": 108
-  },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 181,
-    "end": 181
+    "start": 135,
+    "end": 135
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 169,
-    "end": 169
+    "start": 123,
+    "end": 123
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 270,
-    "end": 270
+    "start": 224,
+    "end": 224
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 270,
-    "end": 270
+    "start": 224,
+    "end": 224
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
@@ -384,14 +344,19 @@
     "start": 304,
     "end": 304
   },
+  "slot:task-brief": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 76,
+    "end": 76
+  },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 133,
-    "end": 133
+    "start": 87,
+    "end": 87
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 152,
-    "end": 152
+    "start": 145,
+    "end": 145
   }
 }

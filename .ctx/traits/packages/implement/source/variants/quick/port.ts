@@ -1,10 +1,10 @@
 import { port } from "@ctx-traits/cdk";
 import { commitOutput } from "./slot.ts";
 
-export const phase = port.input.text({
-    id: "phase",
+export const task = port.input.text({
+    id: "task",
     description:
-        'Phase or group to implement, exactly as named in .plans/EXECUTION_PLAN.md (e.g. "P196-fix" or "Group 43").',
+        'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
 });
 
 export const commitReport = port.output.text({

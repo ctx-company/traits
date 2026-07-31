@@ -1,24 +1,21 @@
 // Dogfood entry point for the implement family: a thin package-identity
-// wrapper over implement-default's shared procedure (P363). The Justfile's
-// `implement` recipe stays pinned to this trait id; `implement:default`
-// resolves to the sibling `implement-default` package. Never add a second
-// copy of the extraction/draft/implement/refinement-loop/commit sequence
-// here — that machinery lives once in implement-default/source/shared.ts.
+// wrapper over the shared family procedure (P363), plus the review rubric
+// and the recurrence breaker. Never add a second copy of the
+// extraction/draft/implement/refinement-loop/commit sequence here — that
+// machinery lives once in ../sequence/family.ts.
 import { blockerSchema, DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import { condition, Intent, Method, port, procedure, resource, schema, signal, slot, variant, Tone, Verbosity } from "@ctx-traits/cdk";
 import {
     clerk,
     commitReport,
-    declareExecutionPlan,
-    declareRuleAuthority,
+    declareTaskBoard,
     familyProcedure,
     leftoversPort,
     ownerItemSchema,
-    phase,
-    ruleSchema,
     scribe,
     smart1Role,
     smart2Role,
+    task,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -27,13 +24,12 @@ import {
 const smart1 = smart1Role("Strong model: drafts the implementation plan, and reviews the work in the refinement loop.");
 const smart2 = smart2Role("Independent strong review model: reviews the implemented work each refinement pass, separately from smart-1.");
 
-// Repo-root resources are declared directly here (via the shared factory),
-// not referenced through a trait dependency on implement-default: see
-// implement-smart/source/index.ts for why a dependency-vendored root="repo"
-// resource loses the on-demand hidden-content audit exemption a package's
-// own direct declaration gets.
-const executionPlan = declareExecutionPlan();
-const ruleAuthority = declareRuleAuthority();
+// The repo-root task-board resource is declared directly here (via the
+// shared factory), not referenced through a trait dependency: see
+// variants/smart.ts for why a dependency-vendored root="repo" resource
+// loses the on-demand hidden-content audit exemption a package's own
+// direct declaration gets.
+const taskBoard = declareTaskBoard();
 
 // implement-phase-only: the richer review rubric (P276) is this package's
 // own on-demand resource, threaded optionally into the shared review
@@ -42,7 +38,7 @@ const ruleAuthority = declareRuleAuthority();
 const reviewRubric = resource({
     id: "review-rubric",
     path: "resources/review-rubric.md",
-    hint: "The four required review dimensions (scope, correctness, house-rules, gates-ran), their evidence expectations, and the blocker/status relationship; agents read this file with their own tools.",
+    hint: "The three required review dimensions (scope, correctness, gates-ran), their evidence expectations, and the blocker/status relationship; agents read this file with their own tools.",
     trigger: "on-demand",
 });
 
@@ -80,16 +76,13 @@ const RECURRENCE_BREAKER_ROUNDS = 2;
 
 const verdictSchema = verdictSchemaFor("default", {
     scope: schema.field(dimensionFindingsSchema("scope-findings", "scope"), {
-        description: "Scope-dimension findings: does the diff implement exactly what the phase contract asks, source-anchored.",
+        description: "Scope-dimension findings: does the diff implement exactly what the task contract asks, source-anchored.",
     }),
     correctness: schema.field(dimensionFindingsSchema("correctness-findings", "correctness"), {
         description: "Correctness-dimension findings: is the implemented behavior actually right, source-anchored.",
     }),
-    "house-rules": schema.field(dimensionFindingsSchema("house-rules-findings", "house-rules"), {
-        description: "House-rules-dimension findings: does the work hold to every standing PRODUCT.md rule that applies, source-anchored.",
-    }),
     "gates-ran": schema.field(dimensionFindingsSchema("gates-ran-findings", "gates-ran"), {
-        description: "Gates-ran-dimension findings: which of this phase's Definition-of-Done gates actually ran, and their result, source-anchored.",
+        description: "Gates-ran-dimension findings: which of this task's Done-when gates actually ran, and their result, source-anchored.",
     }),
     "recurrence-rounds": schema.field(schema.integer(), {
         description:
@@ -143,7 +136,7 @@ const parkReportPort = port.output.of(schema.list(verdictSchema), {
     id: "park-report",
     title: "Park Report",
     description:
-        "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling phase that explicitly cites the same wall-id while this stands unforced.",
+        "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling task that explicitly cites the same wall-id while this stands unforced.",
     optional: true,
     value: parkReport,
     format: ["structured", "table"],
@@ -152,7 +145,7 @@ const parkReportPort = port.output.of(schema.list(verdictSchema), {
 export default variant({
     name: "Implement Phase",
     summary:
-        "Dogfood implementation procedure: extract the phase and product context, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
+        "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
     metadata: {
         tag: ["dogfood", "implementation", "review", "multi-agent"],
     },
@@ -165,7 +158,7 @@ export default variant({
         require: [
             Intent.focus.correctness,
             { id: "robustness", summary: "Prefer changes that remain correct under ordinary failure and boundary conditions." },
-            { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the phase contract." },
+            { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the task contract." },
             { id: "elegance", summary: "Favor clear, cohesive designs over clever or incidental complexity." },
             Intent.require.leanness,
             Intent.require.reuseOverReimplement,
@@ -182,13 +175,13 @@ export default variant({
             Intent.avoid.rubberStampReview,
         ],
     },
-    schema: [blockerSchema, ownerItemSchema, ruleSchema],
-    resource: [executionPlan, ruleAuthority, reviewRubric],
+    schema: [blockerSchema, ownerItemSchema],
+    resource: [taskBoard, reviewRubric],
     signal: [recurringBlockerUnresolved],
     procedure: procedure({
         description:
-            "Implement one execution-plan phase end to end: extract context, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
-        input: phase,
+            "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
+        input: task,
         output: [commitReport, leftoversPort, parkReportPort],
         sequence: familyProcedure({
             clerk,
@@ -196,8 +189,7 @@ export default variant({
             smart2,
             worker,
             scribe,
-            executionPlan,
-            ruleAuthority,
+            taskBoard,
             variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
             verdict1,
             verdict2,

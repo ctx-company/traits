@@ -1,8 +1,8 @@
 id = "plan"
 schema-version = "0.3"
-version = "0.3.0"
+version = "0.4.0"
 name = "Plan (Direct)"
-summary = "Format a described task into one well-formed house-format plan group with wording kept near-verbatim, then append it to .plans/EXECUTION_PLAN.md — no refinement, no invention, the fastest path to just implement."
+summary = "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement."
 variant = "direct"
 
 [metadata]
@@ -44,71 +44,72 @@ schema = "schema:text"
 description = "The task you describe, in your own words — rough is fine."
 
 [[port]]
-id = "written-file"
+id = "written-files"
 direction = "output"
 schema = "schema:text"
-description = "Path of the file written (.plans/EXECUTION_PLAN.md)."
+description = "Paths of the task files written under .internal/tasks/."
 value = "slot:result"
 
 [[slot]]
-id = "execution-plan"
+id = "task-files"
 schema = "schema:text"
-description = "The phased plan for .plans/EXECUTION_PLAN.md — a group of small dependency-ordered phases."
-hint = "One '## Group ...' with phases as '- [ ] **P1** — title' bullets; each phase ~10-15 min of agent work, with a Markdown checklist and a Definition of Done."
+description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
+hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
 
 [[slot]]
 id = "result"
 schema = "schema:text"
-description = "Confirmation of the file written (path)."
+description = "Confirmation of the task files written (paths)."
 
 [[agent]]
 id = "smart-1"
-description = "Formats the task text into one well-formed plan group, near-verbatim."
+description = "Formats the task text into one well-formed task file, near-verbatim."
 summary = "Format role."
 
 [[agent]]
 id = "scribe"
-description = "Writes the execution plan to .plans/EXECUTION_PLAN.md."
+description = "Writes the task file to .internal/tasks/."
 summary = "Write role."
 
 [prompt.format]
 text = """
-Format the task below into exactly one well-formed execution-plan group for .plans/EXECUTION_PLAN.md.
+Format the task below into exactly one well-formed task file for .internal/tasks/.
                     Task as described: {port:task}
                     Keep the task's own wording near-verbatim. Do NOT refine, invent, or add requirements the task does not state; do not read the codebase or ground it in anything beyond the task text itself.
-                    Format as a single Markdown group: a "## Group: <short task name>" heading with a one-paragraph preamble, then each phase as a checklist bullet "- [ ] **P1** — <title>" followed by an indented body with a short description, a "Checklist" as a Markdown checkbox list (each item "- [ ] step"), a "Definition of Done" (the observable condition proving the phase is complete), and "Deps". Size every phase to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a phase would be larger, split it further. Order phases so each depends only on earlier ones.
+                    
+    Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>" heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:** ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any prerequisite task explicitly in the body.
                     Do not implement anything."""
 input = ["port:task"]
-output = ["slot:execution-plan"]
+output = ["slot:task-files"]
 
 [prompt.write]
 text = """
 
-                    Write the execution plan group below to .plans/EXECUTION_PLAN.md, at the repo root.
-                    Execution plan group: {slot:execution-plan}
-                    Create the .plans directory if missing. Keep the group faithful — do not add or drop material.
-                    Do NOT overwrite existing content: if the file already exists, APPEND the group as a new group at the end. If the file does not exist, create it with this content. Do not write .docs/PRODUCT.md.
-                    Return one line naming the path you wrote."""
-input = ["slot:execution-plan"]
+                    Write each task below to .internal/tasks/ at the repo root, one file per task.
+                    Tasks: {slot:task-files}
+                    Create the directory if missing. List the directory first and continue its numbering: name each new file NNNN-<kebab-slug>.md, where NNNN is the next free zero-padded number after the highest one already present (count archived/ too), and stamp that number into the task's own heading in place of its placeholder. Fill the Raised date from today's date.
+                    Never overwrite or renumber an existing file. Keep each task's content faithful — do not add or drop material.
+                    Return one line per file naming the path you wrote."""
+input = ["slot:task-files"]
 output = ["slot:result"]
 
 [procedure]
-description = "Format the described task into one well-formed house-format plan group with wording kept near-verbatim, then append it to .plans/EXECUTION_PLAN.md."
+description = "Format the described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/."
 input = ["port:task"]
-output = ["port:written-file"]
+output = ["port:written-files"]
 
 [[procedure.sequence]]
 id = "format"
-title = "Format into a plan group (smart-1)"
+title = "Format into a task file (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:format"
 input = ["port:task"]
-output = ["slot:execution-plan"]
+output = ["slot:task-files"]
 
 [[procedure.sequence]]
 id = "write"
-title = "Write EXECUTION_PLAN.md (scribe)"
+title = "Write the task files (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:write"
-input = ["slot:execution-plan"]
+input = ["slot:task-files"]
 output = ["slot:result"]

@@ -1,8 +1,8 @@
 id = "plan"
 schema-version = "0.3"
-version = "0.3.0"
+version = "0.4.0"
 name = "Plan (Complex)"
-summary = "Turn a described task into a codebase-grounded product contract and a phased execution plan, then independently critique and revise both once before writing .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md."
+summary = "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/."
 variant = "complex"
 
 [metadata]
@@ -48,137 +48,141 @@ description = "The task you describe, in your own words — rough is fine."
 id = "written-files"
 direction = "output"
 schema = "schema:text"
-description = "Paths of the files written (.docs/PRODUCT.md and .plans/EXECUTION_PLAN.md)."
+description = "Paths of the task files written under .internal/tasks/."
 value = "slot:result"
 
 [[slot]]
-id = "product-context"
+id = "grounding"
 schema = "schema:text"
-description = "The product contract for .docs/PRODUCT.md — project overview, conventions, validation gates, invariants, and the house rules this work must respect."
-hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact commands), architectural invariants, dependency/unsafe-code/stability rules, and constraints an implementer and reviewer must honor."
+description = "Codebase grounding for the described work: the concrete files and modules it touches, the repo's validation gates (exact commands), and the invariants, rules, and constraints the task files must honor."
+hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan."
 
 [[slot]]
-id = "execution-plan"
+id = "task-files"
 schema = "schema:text"
-description = "The phased plan for .plans/EXECUTION_PLAN.md — a group of small dependency-ordered phases."
-hint = "One '## Group ...' with phases as '- [ ] **P1** — title' bullets; each phase ~10-15 min of agent work, with a Markdown checklist and a Definition of Done."
+description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
+hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
 
 [[slot]]
 id = "result"
 schema = "schema:text"
-description = "Confirmation of the files written (paths)."
+description = "Confirmation of the task files written (paths)."
 
 [[slot]]
 id = "critique"
 schema = "schema:text"
-description = "Independent critique of the product contract and execution plan: sizing, DoD verifiability, dependency order, and omitted rules/gates."
+description = "Independent critique of the grounding notes and task files: sizing, Done-when verifiability, dependency order, and omitted rules/gates."
 
 [[agent]]
 id = "smart-1"
-description = "Strong model: refines the task, grounds it in the codebase, derives the product contract, splits it into phases, and critiques both artifacts."
+description = "Strong model: refines the task, grounds it in the codebase, splits it into task files, and critiques both artifacts."
 summary = "Refinement + grounding + critique role."
 
 [[agent]]
 id = "scribe"
-description = "Applies the critique to the contract and plan, then writes both to .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md."
+description = "Applies the critique to the task files, then writes them to .internal/tasks/."
 summary = "Revise-and-write role."
 
 [prompt.critique]
 text = """
 
-                    Independently critique the product contract {slot:product-context} and the execution plan {slot:execution-plan}, as if reviewing someone else's work.
-                    Check every phase for: roughly 10-15 minute sizing (flag anything larger or vaguer); an observable, verifiable Definition of Done; dependency ordering (each phase depends only on earlier ones); and any house rule or validation gate from the contract that a phase omits or contradicts.
-                    Return the concrete list of defects to fix, each naming the phase or contract section and the specific change needed. If nothing needs fixing, say so explicitly."""
+                    Independently critique the grounding notes {slot:grounding} and the task files {slot:task-files}, as if reviewing someone else's work.
+                    Check every task for: roughly 10-15 minute sizing (flag anything larger or vaguer); an observable, verifiable Done when; dependency ordering (each task depends only on earlier ones); standalone completeness (the grounding a task needs is folded into its own body); and any rule or validation gate from the grounding that a task omits or contradicts.
+                    Return the concrete list of defects to fix, each naming the task or grounding section and the specific change needed. If nothing needs fixing, say so explicitly."""
 input = [
-    "slot:product-context",
-    "slot:execution-plan",
+    "slot:grounding",
+    "slot:task-files",
 ]
 output = ["slot:critique"]
 
-[prompt.refine]
+[prompt.refine-task]
 text = """
 
-                    Refine the task below and ground it in THIS codebase, then derive the product contract for it.
-                    Task as described: {port:task}
-                    Read the relevant parts of the repository with your tools: identify the concrete files, modules, and patterns the task touches; the build/test/lint commands (the repo's validation gates, with exact invocations); architectural invariants; and any dependency, unsafe-code, or stability rules the work must respect.
-                    Produce the PRODUCT CONTRACT — the content for .docs/PRODUCT.md: a short project/context overview, the house rules and invariants an implementer and reviewer must honor, the validation gates (exact commands), and the constraints specific to this task. This is the rules-and-context document later steps hold the work to; it is NOT the step-by-step plan. Do not implement anything."""
+            Task is described as: {port:task}, ground it in the codebase & refine it.
+            Read the relevant parts of the repository with your tools:
+                - identify the concrete files, modules, and patterns the task touches
+                - the build/test/lint commands (the repo's validation gates, with exact invocations)
+                - architectural invariants and requirements
+                - dependencies or rules that need to be respected
+            Produce the grounding notes:
+                - short project/context overview,
+                - rules and invariants an implementer and reviewer must honor,
+                - validation gates (exact commands)
+                - constraints specific to this task.
+            This is the context the task files carry, not the step-by-step plan.
+            Do not implement anything."""
 input = ["port:task"]
-output = ["slot:product-context"]
+output = ["slot:grounding"]
 
 [prompt.revise]
 text = """
 
-                    Apply the critique {slot:critique} to the product contract {slot:product-context} and the execution plan {slot:execution-plan}, in one bounded pass — do not expand scope beyond what the critique names.
-                    Return the full revised product contract and the full revised execution plan, each replacing the artifact it corresponds to."""
+                    Apply the critique {slot:critique} to the task files {slot:task-files}, in one bounded pass — do not expand scope beyond what the critique names.
+                    Return the full revised set of task files, replacing the prior set."""
 input = [
     "slot:critique",
-    "slot:product-context",
-    "slot:execution-plan",
+    "slot:task-files",
 ]
-output = [
-    "slot:product-context",
-    "slot:execution-plan",
-]
+output = ["slot:task-files"]
 
 [prompt.split]
 text = """
-Break the refined task into small, ordered implementation phases for .plans/EXECUTION_PLAN.md.
-                    Product contract: {slot:product-context}
-                    Format as a single Markdown group: a "## Group: <short task name>" heading with a one-paragraph preamble, then each phase as a checklist bullet "- [ ] **P1** — <title>" followed by an indented body with a short description, a "Checklist" as a Markdown checkbox list (each item "- [ ] step"), a "Definition of Done" (the observable condition proving the phase is complete), and "Deps". Size every phase to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a phase would be larger, split it further. Order phases so each depends only on earlier ones.
-                    Ground each phase in the codebase specifics from the contract. Do not implement anything."""
+Task format doctrine: 
+    Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>" heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:** ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any prerequisite task explicitly in the body.
+            The work, as described: {port:task}
+            Grounding notes: {slot:grounding}
+            Break the refined work into small, ordered task files.
+            Fold the grounding each task needs — its files, gates, invariants, constraints — into that task's own body and Watch section, so every file stands alone.
+            Do not implement anything."""
 input = [
     "port:task",
-    "slot:product-context",
+    "slot:grounding",
 ]
-output = ["slot:execution-plan"]
+output = ["slot:task-files"]
 
 [prompt.write]
 text = """
 
-                    Write the two files implement-phase needs, at the repo root.
-                    Product contract (for .docs/PRODUCT.md): {slot:product-context}
-                    Execution plan group (for .plans/EXECUTION_PLAN.md): {slot:execution-plan}
-                    Create the .docs and .plans directories if missing. Write the product contract to .docs/PRODUCT.md and the plan group to .plans/EXECUTION_PLAN.md, keeping each faithful — do not add or drop material.
-                    Do NOT overwrite existing content: if a file already exists, APPEND (add the plan as a new group at the end of .plans/EXECUTION_PLAN.md; add the contract as a clearly-headed new section in .docs/PRODUCT.md). If a file does not exist, create it with that content.
-                    Return one line naming both paths you wrote."""
-input = [
-    "slot:product-context",
-    "slot:execution-plan",
-]
+                    Write each task below to .internal/tasks/ at the repo root, one file per task.
+                    Tasks: {slot:task-files}
+                    Create the directory if missing. List the directory first and continue its numbering: name each new file NNNN-<kebab-slug>.md, where NNNN is the next free zero-padded number after the highest one already present (count archived/ too), and stamp that number into the task's own heading in place of its placeholder. Fill the Raised date from today's date.
+                    Never overwrite or renumber an existing file. Keep each task's content faithful — do not add or drop material.
+                    Return one line per file naming the path you wrote."""
+input = ["slot:task-files"]
 output = ["slot:result"]
 
 [procedure]
-description = "Refine the described task against the codebase into a product contract, split it into small phases, independently critique both artifacts, apply one bounded revise pass, and write both .docs/PRODUCT.md and .plans/EXECUTION_PLAN.md so implement-phase can run."
+description = "Refine the described task against the codebase, split it into small task files, independently critique them, apply one bounded revise pass, and write them to .internal/tasks/ so the implement family can run."
 input = ["port:task"]
 output = ["port:written-files"]
 
 [[procedure.sequence]]
-id = "refine"
-title = "Refine + derive the product contract (smart-1)"
+id = "refine-task"
+title = "Ground & refine the task in the codebase"
 agent = "agent:smart-1"
-prompt = "prompt:refine"
+prompt = "prompt:refine-task"
 input = ["port:task"]
-output = ["slot:product-context"]
+output = ["slot:grounding"]
 
 [[procedure.sequence]]
 id = "split"
-title = "Split into phases (smart-1)"
+title = "Split the work into task files"
 agent = "agent:smart-1"
 prompt = "prompt:split"
 input = [
     "port:task",
-    "slot:product-context",
+    "slot:grounding",
 ]
-output = ["slot:execution-plan"]
+output = ["slot:task-files"]
 
 [[procedure.sequence]]
 id = "critique"
-title = "Critique the contract and plan (smart-1)"
+title = "Critique the task files (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:critique"
 input = [
-    "slot:product-context",
-    "slot:execution-plan",
+    "slot:grounding",
+    "slot:task-files",
 ]
 output = ["slot:critique"]
 
@@ -189,21 +193,14 @@ agent = "agent:scribe"
 prompt = "prompt:revise"
 input = [
     "slot:critique",
-    "slot:product-context",
-    "slot:execution-plan",
+    "slot:task-files",
 ]
-output = [
-    "slot:product-context",
-    "slot:execution-plan",
-]
+output = ["slot:task-files"]
 
 [[procedure.sequence]]
 id = "write"
-title = "Write PRODUCT.md + EXECUTION_PLAN.md (scribe)"
+title = "Write the task files (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:write"
-input = [
-    "slot:product-context",
-    "slot:execution-plan",
-]
+input = ["slot:task-files"]
 output = ["slot:result"]

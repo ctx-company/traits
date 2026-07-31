@@ -6,13 +6,13 @@ generated-at = "not-recorded"
 [[trait]]
 id = "plan"
 variant = "complex"
-requested-version = "0.3.0"
-resolved-version = "0.3.0"
+requested-version = "0.4.0"
+resolved-version = "0.4.0"
 
 [trait.digests]
-source = "sha256:2a906a8ebcafb1002f5bcc448564b3d46ed1e56bcebdc295222179e660f8a7e7"
-canonical = "sha256:bfcb38c7211fae7d5cd2ca8bee37fe1665c94256aab906d501d6050ce9714c32"
-model-visible = "sha256:d7dd11fdcdbf53a0da6e234f7d99c42de1964c33f14e4a93a2a57413ecfb4d7c"
+source = "sha256:53cca9b95b6d37825e7ffa2e603e1fb07d26229f2a5b295ff91f1c89e45c9709"
+canonical = "sha256:03a93779d205b6e746d6d3fe26af6d84bea2910af1c71350dbb4208ea9b6f233"
+model-visible = "sha256:3443c39931335c71392d7ef0540d1ea7ac1c2a1e9f3822c0fba7146d57e735af"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -23,13 +23,13 @@ digest = "sha256:28a5355526a0696686250ab0639480f814a818ec42ea4e94eabfa584311a326
 [[trait]]
 id = "plan"
 variant = "default"
-requested-version = "0.3.0"
-resolved-version = "0.3.0"
+requested-version = "0.4.0"
+resolved-version = "0.4.0"
 
 [trait.digests]
-source = "sha256:11a627e8e377e64012d94e4ef793ea7cb10e75af677ed9d1a09d2c3cfef38a56"
-canonical = "sha256:3cd5d49c26f5d0245e924b5faaeca59d65d139af0bb54a392dee7589475fd2ef"
-model-visible = "sha256:9989056d5d3055b8f8b0f8fabc7b7becb3b276d7a81a6e03304db118e67a4d14"
+source = "sha256:7b8d8a4288c521b7c984eb53a8b13a50ce6f54aae33c76e879f58c6a450aa4d9"
+canonical = "sha256:7e6abd6f8e0c999f30dd40c2d06fd8f0c41d903b4bd0c65dd2dbb0a361a61946"
+model-visible = "sha256:547ec023e046511ae761d5c94b2335870a663de73d3daf9b5bb6e8af76d91abb"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -40,13 +40,13 @@ digest = "sha256:a45ed6201682e7f06b8f145f32527fa238a0b4879557d2267129c95cb25f472
 [[trait]]
 id = "plan"
 variant = "direct"
-requested-version = "0.3.0"
-resolved-version = "0.3.0"
+requested-version = "0.4.0"
+resolved-version = "0.4.0"
 
 [trait.digests]
-source = "sha256:501b9104ab5da9529643146379f97922367cbb9022f9817545b4241f3d0cadc2"
-canonical = "sha256:472cb4cb70962f8edab215ab291c13e5d2d4f9b8efc416420a702d777ba79eda"
-model-visible = "sha256:165f17a783b030bb246b82962c2fc578b16823aa46a786b1e5a912ba0c953e6e"
+source = "sha256:62fc38de3c87096b49f465052bd31001124721d02e7cfd63572e7c09a0a9a6a6"
+canonical = "sha256:143704ae765e03f1ad1e7d6591e3e7f6303767dc7eb79fc272555d54180407e3"
+model-visible = "sha256:a2ebf2f7bf5f90c7e9495120ab2b932ddac5138e48c82315d147acaf4fbea3f8"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]
@@ -57,13 +57,13 @@ digest = "sha256:00ee8ac77b9fb4e0299ad944cf7d2a74a2f8b370bafde1b83713748453cc701
 [[trait]]
 id = "plan"
 variant = "quick"
-requested-version = "0.3.0"
-resolved-version = "0.3.0"
+requested-version = "0.4.0"
+resolved-version = "0.4.0"
 
 [trait.digests]
-source = "sha256:a01a094bdb2e3afb3f5fcc5e6d7824c1de856dac01abc7b02cdac3316a4de123"
-canonical = "sha256:2df8fde3ba720edce69b1a6a86adb1e928a56e601340b1cb36d91b07b3a06b60"
-model-visible = "sha256:77495d3ac12db561c6bd5547a97fa880592d55bc7bea4d7bad6d2f4a697c45dc"
+source = "sha256:a950068c3d764899a2dcea4957ee09d958ce0b7573e2ca6cae8cc5a5d6256d72"
+canonical = "sha256:6d0c22aed3ec838753a227c62acbb39f4437946bf80b86cb32062caea9269243"
+model-visible = "sha256:d08dd0845d6384eded03c947a9653ec8d53307c3c0dd9d586c9051b003f28c51"
 resource-manifest = "sha256:4515968ae8c73714738d7084f9673ee0aa32ddfb290a68d459dc4f57da7e776b"
 
 [[trait.export]]

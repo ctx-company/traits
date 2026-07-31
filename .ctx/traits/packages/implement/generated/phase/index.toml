@@ -1,8 +1,8 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.19.0"
+version = "0.20.0"
 name = "Implement Phase"
-summary = "Dogfood implementation procedure: extract the phase and product context, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit."
+summary = "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit."
 variant = "phase"
 
 [metadata]
@@ -22,7 +22,7 @@ summary = "Prefer changes that remain correct under ordinary failure and boundar
 
 [[intent.require]]
 id = "pragmatism"
-summary = "Choose the smallest practical change that satisfies the phase contract."
+summary = "Choose the smallest practical change that satisfies the task contract."
 
 [[intent.require]]
 id = "elegance"
@@ -74,10 +74,10 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "phase"
+id = "task"
 direction = "input"
 schema = "schema:text"
-description = 'Phase or group to implement, exactly as named in .plans/EXECUTION_PLAN.md (e.g. "P196-fix" or "Group 43").'
+description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
 
 [[port]]
 id = "commit-report"
@@ -105,7 +105,7 @@ id = "park-report"
 direction = "output"
 schema = "[schema:review-verdict-default]"
 optional = true
-description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling phase that explicitly cites the same wall-id while this stands unforced."
+description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling task that explicitly cites the same wall-id while this stands unforced."
 title = "Park Report"
 format = [
     "structured",
@@ -114,20 +114,15 @@ format = [
 value = "slot:park-report"
 
 [[slot]]
-id = "phase-brief"
+id = "task-brief"
 schema = "schema:text"
-description = "The phase's execution-plan section, copied exactly as written — the scope contract every later step works from instead of the plan file."
-hint = "Verbatim copy: group heading + preamble + the phase bullet(s) with Why/Where/Approach/Watch/Done-when/Deps. No paraphrasing."
-
-[[slot]]
-id = "product-brief"
-schema = "schema:product-brief"
-description = "Distilled product-contract rules relevant to this phase, each with an exact source citation and quote from PRODUCT.md; later steps read this instead of the file."
+description = "The task file's contents, copied exactly as written — the scope contract every later step works from instead of the board."
+hint = "Verbatim copy of the whole task file: title, status line, body, Watch, and Done when. No paraphrasing."
 
 [[slot]]
 id = "draft"
 schema = "schema:text"
-description = "The implementation draft for the phase — the contract the produce-first build loop implements."
+description = "The implementation draft for the task — the contract the produce-first build loop implements."
 hint = "Scope, files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
 
 [[slot]]
@@ -155,7 +150,7 @@ hint = "git diff --stat output, excluding runtime state. No patch bodies: a dele
 [[slot]]
 id = "repo-gates-passed"
 schema = "schema:repo-gates-result"
-description = "This round's repository gate result: whether the phase-mandated gate chain passed, and the exact command that decided it."
+description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
 
 [[slot]]
 id = "review-verdict-1"
@@ -199,23 +194,16 @@ schema = "schema:text"
 description = "Verbatim output of the git-add staging command."
 
 [[resource]]
-id = "execution-plan"
-path = ".plans/EXECUTION_PLAN.md"
+id = "task-board"
+path = ".internal/tasks"
 root = "repo"
-hint = "Repo-root path for the execution plan; agents read that file with their own tools and never inline it."
-trigger = "on-demand"
-
-[[resource]]
-id = "rule-authority"
-path = ".docs/PRODUCT.md"
-root = "repo"
-hint = "Repo-root path for the product contract: ADVISORY context, and the only document standing rules may be cited from — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a rule. The phase contract outranks it wherever they conflict. Agents read this file with their own tools and never inline it."
+hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
 
 [[resource]]
 id = "review-rubric"
 path = "resources/review-rubric.md"
-hint = "The four required review dimensions (scope, correctness, house-rules, gates-ran), their evidence expectations, and the blocker/status relationship; agents read this file with their own tools."
+hint = "The three required review dimensions (scope, correctness, gates-ran), their evidence expectations, and the blocker/status relationship; agents read this file with their own tools."
 trigger = "on-demand"
 
 [[schema]]
@@ -378,38 +366,6 @@ required = true
 description = "The follow-on work item, stated concretely in exactly one sentence."
 
 [[schema]]
-id = "product-rule"
-description = "One standing product rule, sourced from PRODUCT.md and carrying its exact citation."
-
-[schema.fields.quote]
-schema = "schema:text"
-required = true
-description = "The exact authoritative line(s) from the source, verbatim — not paraphrased."
-
-[schema.fields.rule]
-schema = "schema:text"
-required = true
-description = "The standing rule's substance, in the implementer's terms."
-
-[schema.fields.source]
-schema = "schema:text"
-required = true
-description = 'Repo-relative path and section/heading/line for this rule in PRODUCT.md (e.g. ".docs/PRODUCT.md — ## Validation Gates").'
-
-[[schema]]
-id = "product-brief"
-description = "Distilled, source-verified product contract for this phase."
-
-[schema.fields.context]
-schema = "schema:text"
-description = "Non-normative explanatory context worth keeping in mind (e.g. background, rationale). Never binding and never a substitute for a sourced rule."
-
-[schema.fields.rules]
-schema = "[schema:product-rule]"
-required = true
-description = "Every standing house rule relevant to this phase, each with a source path/section and exact quote. A claim without both is not a rule and must be omitted, not invented."
-
-[[schema]]
 id = "repo-gates-result"
 
 [schema.fields.argv]
@@ -482,20 +438,6 @@ required = true
 description = "Any further correctness findings beyond the mandatory first one."
 
 [[schema]]
-id = "house-rules-findings"
-description = "house-rules-dimension findings, with at least one finding required."
-
-[schema.fields.first]
-schema = "schema:review-finding"
-required = true
-description = "The mandatory first house-rules finding."
-
-[schema.fields.rest]
-schema = "[schema:review-finding]"
-required = true
-description = "Any further house-rules findings beyond the mandatory first one."
-
-[[schema]]
 id = "gates-ran-findings"
 description = "gates-ran-dimension findings, with at least one finding required."
 
@@ -519,7 +461,7 @@ description = "Non-blocking notes: subjective style, naming, taste, optional imp
 [schema.fields.blockers]
 schema = "[schema:blocker]"
 required = true
-description = "The blocking defects that must be fixed before merge: correctness bugs, house-rule violations (core purity, a new dependency, a new #[allow], required byte-stability broken), failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the phase), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
 
 [schema.fields.correctness]
 schema = "schema:correctness-findings"
@@ -529,7 +471,7 @@ description = "Correctness-dimension findings: is the implemented behavior actua
 [schema.fields.escalation]
 schema = "schema:text"
 required = true
-description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the phase contract is a placeholder or lacks a falsifiable Done-when; a prerequisite phase named in Deps has not landed in this tree; the group is marked SUPERSEDED or CANCELLED; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the phase's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
+description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
 allowed = [
     "none",
     "needs-owner",
@@ -543,16 +485,11 @@ description = "One plain sentence: WHY the flagged blocker set is outside this r
 [schema.fields.gates-ran]
 schema = "schema:gates-ran-findings"
 required = true
-description = "Gates-ran-dimension findings: which of this phase's Definition-of-Done gates actually ran, and their result, source-anchored."
-
-[schema.fields.house-rules]
-schema = "schema:house-rules-findings"
-required = true
-description = "House-rules-dimension findings: does the work hold to every standing PRODUCT.md rule that applies, source-anchored."
+description = "Gates-ran-dimension findings: which of this task's Done-when gates actually ran, and their result, source-anchored."
 
 [schema.fields.owner-items]
 schema = "[schema:owner-item]"
-description = "Checklist items of THIS phase that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable."
+description = "Checklist items of THIS task that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable."
 
 [schema.fields.recurrence-rounds]
 schema = "schema:integer"
@@ -561,12 +498,12 @@ description = "The number of consecutive rounds the longest-standing still-open 
 
 [schema.fields.remaining]
 schema = "schema:text"
-description = "Cross-phase seam citations ONLY: counterpart work the execution plan assigns to a DIFFERENT phase, each citing that phase's id. Never in-phase scope — an unimplemented item of THIS phase's checklist is a blocker, and unimplemented in-phase scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-phase seam exists."
+description = "Cross-task seam citations ONLY: counterpart work belonging to a DIFFERENT task on the task board, each citing that task's file name. Never in-task scope — an unimplemented item of THIS task's checklist is a blocker, and unimplemented in-task scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-task seam exists."
 
 [schema.fields.scope]
 schema = "schema:scope-findings"
 required = true
-description = "Scope-dimension findings: does the diff implement exactly what the phase contract asks, source-anchored."
+description = "Scope-dimension findings: does the diff implement exactly what the task contract asks, source-anchored."
 
 [schema.fields.status]
 schema = "schema:text"
@@ -580,7 +517,7 @@ allowed = [
 [schema.fields.wall-id]
 schema = "schema:text"
 required = true
-description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the phase contract, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
+description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
 [[signal]]
 id = "recurring-blocker-unresolved"
@@ -593,12 +530,12 @@ summary = "Implementation role."
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message for the completed phase from the execution plan; git staging and committing run as command steps."
+description = "Writes the commit message for the completed task from the task contract; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
 id = "clerk"
-description = "Fast extraction model: copies the phase section out of the execution plan verbatim and distills the product contract, so no later step re-reads those files."
+description = "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board."
 summary = "Context-extraction role."
 
 [[agent]]
@@ -613,56 +550,51 @@ summary = "Second-reviewer role."
 
 [prompt.building-produce]
 text = """
-Produce the work for {port:phase} against the draft {slot:draft}.
-            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this phase's stated scope and Definition of Done — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later phase is out of scope, note it as a follow-up and do not expand this phase to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the phase contract.
+Produce the work for {port:task} against the draft {slot:draft}.
+            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract.
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
             A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
-            Respect the phase contract {slot:phase-brief} and the house rules in {slot:product-brief} (core purity, no new deps, no new #[allow], byte-stability where the plan demands it).
-            Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the phase requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
+            Respect the task contract {slot:task-brief}.
+            Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the task requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
             You owe 100% of the draft's agent-doable pile. For each owner-only item in the draft's SCOPE SPLIT, produce the named substitute evidence (run the tests, dry runs, or static checks it names) — an owner-only classification is never license to skip work a shell can do. If you hit a wall the draft did not classify, flag it in your work summary as a proposed owner-item (item, reason class, why no in-run effort suffices, the substitute evidence you produced) and expect reviewers to challenge it.
-            Never edit files under .plans/ except this run's own phase entry, and even there touch only its checklist mark, its dispositions, and its board line — never another phase's text, a group preamble, or the plan tail.
-            Run the gates named in this phase's own Definition of Done before reporting — not whole-project gates that later phases will satisfy.
+            Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.
+            Run the gates named in this task's own Done-when before reporting — not whole-project gates that later tasks will satisfy.
             Propose leftovers explicitly: end the work summary with a "Leftovers proposed:" section listing any legitimate follow-on work (what — one sentence —, reason — needs-unlanded or needs-human —, needs, evidence it does not block this result standing alone, done-when), or state explicitly that none exist. Reviewers adjudicate these, not you.
             Return the full updated work summary: what changed (files), what was reused or abstracted, how it was validated, substitute evidence per owner-only item, open concerns, a "Leftovers proposed" section, and — once a verdict has ever been attached — a "Blocker dispositions" section listing every blocker id from that verdict with its done-when quoted verbatim, what changed, where, and how it was verified (or the out-of-scope justification); for a blocker with recurrence-of set, open its disposition with one paragraph stating the structural design you implemented.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
 ]
 output = ["slot:work-summary"]
 
 [prompt.building-review-1]
 text = """
-Review the produced work for {port:phase} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
-            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
-            Verify any house-rule citation directly against {resource:rule-authority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, house-rules, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
-            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the phase's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
+Review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
+            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
+            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
             Report "recurrence-rounds": the number of consecutive rounds the longest-standing still-open blocker has now been raised (1 for a first-raised blocker, 0 when blockers is empty) — the same comparison that sets a blocker's recurrence-of. The loop terminates early, before the iteration budget, once either reviewer reports a still-revise verdict with recurrence-rounds >= 2.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
-                    Consult the phase contract {slot:phase-brief} and house rules {slot:product-brief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
-                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {slot:product-brief} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
-                    Judge the work SOLELY against this phase's stated scope and Definition of Done. A phase is complete when its own DoD holds — even if the overall project does not yet build or pass whole-project gates, which belong to later phases. Do not invent acceptance criteria the phase does not state, and do not fail the work for deliverables or gates scoped to a different phase.
-                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up, or gates that belong to later phases — is ADVISORY.
+                    Consult the task contract {slot:task-brief} and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the task's own Done-when if the summary does not prove they ran.
+                    Judge the work SOLELY against this task's stated scope and Done-when. A task is complete when its own Done-when holds — even if the overall project does not yet build or pass whole-project gates, which belong to later tasks. Do not invent acceptance criteria the task does not state, and do not fail the work for deliverables or gates scoped to a different task.
+                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. A BLOCKER makes the work genuinely unmergeable: a correctness bug, a gate the task's own Done-when requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up, or gates that belong to later tasks — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
-                    The phase contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS phase is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-phase seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) is assigned by the execution plan to a DIFFERENT phase, SEARCH the execution-plan resource, confirm that phase, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning phase by id in the remaining field. Neither exception ever converts an implementable item of this phase's own checklist. Block on a seam when it fails unsafely or no other phase owns it.
-                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the phase's own DoD holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
-                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the phase contract is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite phase named in Deps has not landed in this tree, the group is marked SUPERSEDED or CANCELLED, or a contradiction poisons the entire phase leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
-                    Wall citation: when the phase contract carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the phase contract carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
+                    The task contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS task is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-task seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) belongs to a DIFFERENT task on the task board, SEARCH the task-board resource, confirm that task file, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning task by its file name in the remaining field. Neither exception ever converts an implementable item of this task's own checklist. Block on a seam when it fails unsafely or no other task owns it.
+                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the task's own Done-when holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
+                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the task file is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite task it names has not landed in this tree, the task is marked superseded or cancelled (or has been moved to the board's archived/ directory), or a contradiction poisons the entire task leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
+                    Wall citation: when the task file carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the task file carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.
                                 The worker proposes leftovers explicitly in its work summary — including an explicit empty list when none exist; a leftover is never something you invent on the worker's behalf. Each proposal's "what" is exactly one sentence. Adjudicate every proposal with two questions, in order: first, could a competent engineer have done this work inside THIS task? If yes, it is not a leftover — it is unfinished scope, and you raise it as a BLOCKER instead. Second, does the shipped result stand alone without it? If the result does not stand alone — a caller is left broken, a contract is left half-honored, a claim is left unverified — approval is withheld until the gap closes. Only a proposal that survives both questions enters slot:leftovers, reproduced with its full typed fields (what, reason, needs, evidence, done-when). Leftovers do not change the approval verdict or become blockers. Exit is separate: an empty carried list may exit immediately; a non-empty carried list cannot exit before the configured minimum round; and every carried entry must name a prerequisite in needs, so an entry with empty needs prevents exit. Return the leftovers list as a required typed output alongside your verdict; an empty list is a valid, signed claim that none exist — never omit the field.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:rule-authority",
     "resource:review-rubric",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
 ]
 output = [
     "slot:review-verdict-1",
@@ -671,35 +603,31 @@ output = [
 
 [prompt.building-review-2]
 text = """
-Independently review the produced work for {port:phase} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
-            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
-            Verify any house-rule citation directly against {resource:rule-authority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, house-rules, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
-            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the phase's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
+Independently review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
+            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
+            PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
             Report "recurrence-rounds": the number of consecutive rounds the longest-standing still-open blocker has now been raised (1 for a first-raised blocker, 0 when blockers is empty) — the same comparison that sets a blocker's recurrence-of. The loop terminates early, before the iteration budget, once either reviewer reports a still-revise verdict with recurrence-rounds >= 2.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
-                    Consult the phase contract {slot:phase-brief} and house rules {slot:product-brief}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
-                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {slot:product-brief} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
-                    Judge the work SOLELY against this phase's stated scope and Definition of Done. A phase is complete when its own DoD holds — even if the overall project does not yet build or pass whole-project gates, which belong to later phases. Do not invent acceptance criteria the phase does not state, and do not fail the work for deliverables or gates scoped to a different phase.
-                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up, or gates that belong to later phases — is ADVISORY.
+                    Consult the task contract {slot:task-brief} and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the task's own Done-when if the summary does not prove they ran.
+                    Judge the work SOLELY against this task's stated scope and Done-when. A task is complete when its own Done-when holds — even if the overall project does not yet build or pass whole-project gates, which belong to later tasks. Do not invent acceptance criteria the task does not state, and do not fail the work for deliverables or gates scoped to a different task.
+                    Hold the work to correctness, robustness, pragmatism, elegance, leanness, and reuse. A BLOCKER makes the work genuinely unmergeable: a correctness bug, a gate the task's own Done-when requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up, or gates that belong to later tasks — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
-                    The phase contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS phase is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-phase seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) is assigned by the execution plan to a DIFFERENT phase, SEARCH the execution-plan resource, confirm that phase, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning phase by id in the remaining field. Neither exception ever converts an implementable item of this phase's own checklist. Block on a seam when it fails unsafely or no other phase owns it.
-                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the phase's own DoD holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
-                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the phase contract is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite phase named in Deps has not landed in this tree, the group is marked SUPERSEDED or CANCELLED, or a contradiction poisons the entire phase leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
-                    Wall citation: when the phase contract carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the phase contract carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
+                    The task contract is the standard you measure against, split by the draft's SCOPE SPLIT: withhold approval while any agent-doable checklist item or Done-when of THIS task is unimplemented or unverifiable in the working tree, or while an owner-only item lacks the substitute evidence its class allows. Verify each item yourself with your tools; every unimplemented or partially implemented agent-doable item is a BLOCKER (one typed entry naming the item), not a note. Audit the split itself with one test: if a competent engineer with this repository and a shell — but no screen, no payment authority, and no owner authority — could complete and verify the item, it is agent-doable no matter what the draft claims: PROMOTE it and raise the blocker. You may promote owner-only to agent-doable; you may NEVER demote an item the draft classified doable. When the work summary claims a NEW wall discovered mid-run, apply the same test with heightened suspicion and accept it only with a named reason class and substitute evidence you verified. Record every accepted owner-only item in the owner-items field (item, class, reason, the substitute evidence you verified, close-out); an owner-item never justifies skipping doable work, and an owner-item whose substitute evidence is missing or unverified is a BLOCKER, not an owner-item. Cross-task seams are the other exception: when a missing counterpart (the other side of a wire contract, the consumer of a new API, the native half of a typed bridge) belongs to a DIFFERENT task on the task board, SEARCH the task-board resource, confirm that task file, and judge the seam by failure-safety — if the intermediate state fails SAFELY (a typed or clearly-handled error, no data corruption, no silent wrong behavior), the seam is not a defect: cite the owning task by its file name in the remaining field. Neither exception ever converts an implementable item of this task's own checklist. Block on a seam when it fails unsafely or no other task owns it.
+                    The loop is bounded, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; a revise verdict NEVER lands a commit — if the loop uses its full budget with blockers still open, the run PARKS instead: no commit is created, and your final verdict plus a typed park report become the durable, honest record of what is still wrong (P414). That makes your verdict a park report, not an advisory note on a landed commit: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the task's own Done-when holds; withhold approval when it does not, knowing the work parks and your objections travel with it as the park report.
+                    Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the task file is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite task it names has not landed in this tree, the task is marked superseded or cancelled (or has been moved to the board's archived/ directory), or a contradiction poisons the entire task leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation flags a park for owner triage; it never lands a commit early or on its own, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded on the park report. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
+                    Wall citation: when the task file carries an explicit "**Wall:** <id>" label, copy that id verbatim into wall-id whenever you set status to revise — this is the ONLY way a park can ever refuse a sibling run citing the same wall; an id you infer from prose similarity, or a blocker you judge related without that literal label, must never populate wall-id. Leave wall-id as an empty string when the task file carries no such label, even if escalation is needs-owner — never a placeholder or inferred value.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.
             The first reviewer's leftovers this same round: {slot:leftovers}. Independently reapply both questions to every entry: keeping one co-signs it into your own output leftovers list, rejecting one requires a BLOCKER instead — never silently drop or silently keep an entry.
                                 The worker proposes leftovers explicitly in its work summary — including an explicit empty list when none exist; a leftover is never something you invent on the worker's behalf. Each proposal's "what" is exactly one sentence. Adjudicate every proposal with two questions, in order: first, could a competent engineer have done this work inside THIS task? If yes, it is not a leftover — it is unfinished scope, and you raise it as a BLOCKER instead. Second, does the shipped result stand alone without it? If the result does not stand alone — a caller is left broken, a contract is left half-honored, a claim is left unverified — approval is withheld until the gap closes. Only a proposal that survives both questions enters slot:leftovers, reproduced with its full typed fields (what, reason, needs, evidence, done-when). Leftovers do not change the approval verdict or become blockers. Exit is separate: an empty carried list may exit immediately; a non-empty carried list cannot exit before the configured minimum round; and every carried entry must name a prerequisite in needs, so an entry with empty needs prevents exit. Return the leftovers list as a required typed output alongside your verdict; an empty list is a valid, signed claim that none exist — never omit the field.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:rule-authority",
     "resource:review-rubric",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
     "slot:leftovers",
 ]
 output = [
@@ -707,77 +635,61 @@ output = [
     "slot:leftovers",
 ]
 
-[prompt.phase-extraction]
-text = """
-
-            Copy the {port:phase} section out of the execution plan EXACTLY as written.
-            Open the plan file named in {resource:execution-plan} with your tools. Phases appear as "- [ ] **P123**" (or "- [x]") checklist bullets under "## Group ..." headings; a group request (e.g. "Group 46") means that heading's whole section, a single phase (e.g. "P206") means that bullet with its full indented body (Why/Where/Approach/Watch/Done-when/Deps and any notes) plus the group heading and preamble paragraphs above it for context.
-            Return only the copied text, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the file, so anything you drop is lost."""
-input = [
-    "port:phase",
-    "resource:execution-plan",
-]
-output = ["slot:phase-brief"]
-
 [prompt.planning-produce]
 text = """
-Create an implementation draft for {port:phase}.
-            Work from the phase contract {slot:phase-brief} — a verbatim copy of the execution-plan section, your scope contract — and the product rules {slot:product-brief}. Do not re-read the plan or product files.
-            FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a group marked "detail pending"), its group is not marked SUPERSEDED or CANCELLED, every prerequisite its Deps names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
-            Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the phase into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the plan reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.
-            After the SCOPE SPLIT, the draft must cover: scope (exactly what the phase asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
-            Favor the leanest correct approach: the minimal, robust, elegant change that satisfies the phase — no speculative generality, no gold-plating, no defensive armor for states that cannot occur. Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
+Create an implementation draft for {port:task}.
+            Work from the task contract {slot:task-brief} — a verbatim copy of the task file, your scope contract. Do not re-read the board.
+            FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a file marked "detail pending"), it is not marked superseded or cancelled, every prerequisite task it names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
+            Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the task into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the task reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.
+            After the SCOPE SPLIT, the draft must cover: scope (exactly what the task asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
+            Favor the leanest correct approach: the minimal, robust, elegant change that satisfies the task — no speculative generality, no gold-plating, no defensive armor for states that cannot occur. Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:phase",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "port:task",
+    "slot:task-brief",
 ]
 output = ["slot:draft"]
 
 [prompt.planning-review]
 text = """
-Review the implementation draft {slot:draft} for {port:phase} against the phase contract {slot:phase-brief} and product rules {slot:product-brief}.
-            A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the phase, proposes an approach that cannot satisfy the phase contract, is missing a required SCOPE SPLIT classification, or scopes in work the phase does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
+Review the implementation draft {slot:draft} for {port:task} against the task contract {slot:task-brief}.
+            A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the task, proposes an approach that cannot satisfy the task contract, is missing a required SCOPE SPLIT classification, or scopes in work the task does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
             Return the typed verdict (status: approved when no blocker remains, revise otherwise; blockers: the list that justifies revise).
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
     "slot:draft",
-    "port:phase",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "port:task",
+    "slot:task-brief",
 ]
 output = ["slot:planning-verdict"]
 
-[prompt.product-extraction]
-text = """
-
-            Distill the product contract for {port:phase}.
-            Read ONLY the rule-authority doc named in {resource:rule-authority} with your tools — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a standing rule; if the phase or plan references other documentation, treat it as non-binding context only, never a rule. AUTHORITY ORDER: the PHASE CONTRACT is the sole binding authority for this run; every distilled rule is ADVISORY beneath it. Where a rule conflicts with the phase contract, still record it — but mark it superseded-by-phase in its own text, so reviewers see the conflict was seen and know the contract wins.
-            Using the phase contract {slot:phase-brief}, extract every standing rule the implementer and reviewers of this phase need (house rules such as core purity, dependency policy, #[allow] policy, byte-stability; the repo validation gates; any product sections the phase touches). For each rule, record its exact repo-relative path + section/heading in "source" and its exact authoritative line(s) verbatim in "quote". A claim you cannot cite with both a source and an exact quote is not a rule — omit it rather than invent an authority.
-            Put any phase-relevant explanatory material that is not itself a sourced rule (background, rationale) in the separate non-normative "context" field. Later steps read ONLY your structured output, never the file — anything missing here is invisible downstream."""
-input = [
-    "port:phase",
-    "resource:rule-authority",
-    "slot:phase-brief",
-]
-output = ["slot:product-brief"]
-
 [prompt.shipping-message]
 text = """
-The build loop for {port:phase} has ended in dual approval and the work is being committed. The final reviewer verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} — the sole authority on what was implemented (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
-            Write a concise commit message for the completed work based only on the phase contract {slot:phase-brief} and those verdicts: a short subject line naming the phase, then a one-paragraph summary of what the verdicts certify implemented — never work belonging to other phases.
+The build loop for {port:task} has ended in dual approval and the work is being committed. The final reviewer verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} — the sole authority on what was implemented (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
+            Write a concise commit message for the completed work based only on the task contract {slot:task-brief} and those verdicts: a short subject line naming the task, then a one-paragraph summary of what the verdicts certify implemented — never work belonging to other tasks.
             Return exactly that message as your output; the runtime injects it into the git commit step.
             Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.
-            Do NOT record phase status anywhere. The .plans directory is gitignored, so a worktree run's edit to the execution plan is discarded with the worktree and never reaches the repository — writing it would only make a reviewer believe status was recorded when it was not. The board is the authoritative status surface and the owner maintains it (P486, 2026-07-27).
-            Compose the tail of the commit message from the verdicts, including only the sections the verdicts actually support — never write a "none" placeholder for a section with no entries. If a verdict carries owner-items, add "Owner items:" quoting each entry (item, reason class, close-out command or decision). If a verdict carries remaining (cross-phase seam citations only), add "Cross-phase seams:" quoting it verbatim. The final adjudicated leftovers are attached as context: when non-empty, add a "Leftovers:" section reproducing every entry's typed fields (what, reason, needs, evidence, done-when) verbatim — never paraphrased, never invented; omit the section entirely when the list is empty. A non-empty leftovers list never affects approval or is written as if it were a blocker."""
+            Do NOT record task status anywhere. Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.
+            Compose the tail of the commit message from the verdicts, including only the sections the verdicts actually support — never write a "none" placeholder for a section with no entries. If a verdict carries owner-items, add "Owner items:" quoting each entry (item, reason class, close-out command or decision). If a verdict carries remaining (cross-task seam citations only), add "Cross-task seams:" quoting it verbatim. The final adjudicated leftovers are attached as context: when non-empty, add a "Leftovers:" section reproducing every entry's typed fields (what, reason, needs, evidence, done-when) verbatim — never paraphrased, never invented; omit the section entirely when the list is empty. A non-empty leftovers list never affects approval or is written as if it were a blocker."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:review-verdict-1",
     "slot:review-verdict-2",
-    "slot:phase-brief",
+    "slot:task-brief",
 ]
 output = ["slot:shipping-message"]
+
+[prompt.task-extraction]
+text = """
+
+            Copy the task file for {port:task} EXACTLY as written.
+            Open the task-board directory named in {resource:task-board} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
+            Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost."""
+input = [
+    "port:task",
+    "resource:task-board",
+]
+output = ["slot:task-brief"]
 
 [[sequence.building-body.sequence]]
 id = "building-unseal"
@@ -797,10 +709,9 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
     { slot = "slot:work-summary", optional = true },
@@ -842,15 +753,13 @@ title = "Building Review 1"
 agent = "agent:smart-1"
 prompt = "prompt:building-review-1"
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:rule-authority",
     "resource:review-rubric",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
     { slot = "slot:review-verdict-1", optional = true },
 ]
 output = [
@@ -864,15 +773,13 @@ title = "Building Review 2"
 agent = "agent:smart-2"
 prompt = "prompt:building-review-2"
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:rule-authority",
     "resource:review-rubric",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "slot:task-brief",
     "slot:leftovers",
     { slot = "slot:review-verdict-2", optional = true },
 ]
@@ -933,10 +840,10 @@ title = "Write the commit message (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:shipping-message"
 input = [
-    "port:phase",
+    "port:task",
     "slot:review-verdict-1",
     "slot:review-verdict-2",
-    "slot:phase-brief",
+    "slot:task-brief",
 ]
 output = ["slot:shipping-message"]
 
@@ -1004,9 +911,8 @@ title = "Planning Produce"
 agent = "agent:smart-1"
 prompt = "prompt:planning-produce"
 input = [
-    "port:phase",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "port:task",
+    "slot:task-brief",
     { slot = "slot:planning-verdict", optional = true },
     { slot = "slot:draft", optional = true },
 ]
@@ -1019,16 +925,15 @@ agent = "agent:smart-2"
 prompt = "prompt:planning-review"
 input = [
     "slot:draft",
-    "port:phase",
-    "slot:phase-brief",
-    "slot:product-brief",
+    "port:task",
+    "slot:task-brief",
     { slot = "slot:planning-verdict", optional = true },
 ]
 output = ["slot:planning-verdict"]
 
 [procedure]
-description = "Implement one execution-plan phase end to end: extract context, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation."
-input = ["port:phase"]
+description = "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation."
+input = ["port:task"]
 output = [
     "port:commit-report",
     "port:leftovers",
@@ -1036,27 +941,15 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "phase-extraction"
-title = "Copy the phase contract (clerk)"
+id = "task-extraction"
+title = "Copy the task contract (clerk)"
 agent = "agent:clerk"
-prompt = "prompt:phase-extraction"
+prompt = "prompt:task-extraction"
 input = [
-    "port:phase",
-    "resource:execution-plan",
+    "port:task",
+    "resource:task-board",
 ]
-output = ["slot:phase-brief"]
-
-[[procedure.sequence]]
-id = "product-extraction"
-title = "Distill the product rules (clerk)"
-agent = "agent:clerk"
-prompt = "prompt:product-extraction"
-input = [
-    "port:phase",
-    "resource:rule-authority",
-    "slot:phase-brief",
-]
-output = ["slot:product-brief"]
+output = ["slot:task-brief"]
 
 [[procedure.sequence]]
 id = "planning"

@@ -1,7 +1,7 @@
 #!/usr/bin/env crystal
 require "option_parser"
 
-# The CLI's own exit contract, not this script's. A parked phase must be
+# The CLI's own exit contract, not this script's. A parked task must be
 # REPORTED as parked rather than surfacing as a bare non-zero code, and the
 # code is re-raised unchanged so batch callers keep the distinction.
 EXIT_MEANINGS = {
@@ -11,23 +11,23 @@ EXIT_MEANINGS = {
 }
 
 trait_id = "implement:quick"
-phases = [] of String
+tasks = [] of String
 
 OptionParser.parse do |parser|
-  parser.banner = %(usage: implement.cr [--trait <id>] "<phase>[, <phase>...]")
+  parser.banner = %(usage: implement.cr [--trait <id>] "<task>[, <task>...]")
   parser.on("-t ID", "--trait=ID", "Trait or family:variant to run (default: #{trait_id})") { |id| trait_id = id }
   parser.on("-h", "--help", "Show this help") { puts parser; exit 0 }
   parser.unknown_args do |rest|
-    phases = rest.join(' ').split(',').map(&.strip).reject(&.empty?)
+    tasks = rest.join(' ').split(',').map(&.strip).reject(&.empty?)
   end
 end
 
-abort %(no phases given — see --help), 2 if phases.empty?
+abort %(no tasks given — see --help), 2 if tasks.empty?
 
 completed = [] of String
 
-phases.each do |phase|
-  puts "=== implement: #{phase} ==="
+tasks.each do |task|
+  puts "=== implement: #{task} ==="
 
   # stdio is inherited so `--progress tui` keeps the real terminal: capturing
   # it here to inspect output would blank the live view.
@@ -40,7 +40,7 @@ phases.each do |phase|
   status = begin
     Process.run(
       "ctx",
-      ["traits", "run", trait_id, "--set", "phase=#{phase}", "--worktree", "--merge", "--progress", progress],
+      ["traits", "run", trait_id, "--set", "task=#{task}", "--worktree", "--merge", "--progress", progress],
       input: Process::Redirect::Inherit,
       output: Process::Redirect::Inherit,
       error: Process::Redirect::Inherit,
@@ -50,15 +50,15 @@ phases.each do |phase|
   end
 
   if status.success?
-    completed << phase
+    completed << task
     next
   end
 
   code = status.exit_code
   reason = EXIT_MEANINGS.fetch(code, "ctx traits run exited #{code}")
-  puts "=== STOPPED at #{phase}: #{reason} (exit #{code}) ==="
+  puts "=== STOPPED at #{task}: #{reason} (exit #{code}) ==="
   puts "=== completed before stop: #{completed.empty? ? "none" : completed.join(", ")} ==="
   exit code
 end
 
-puts "=== all phases completed: #{completed.join(", ")} ==="
+puts "=== all tasks completed: #{completed.join(", ")} ==="

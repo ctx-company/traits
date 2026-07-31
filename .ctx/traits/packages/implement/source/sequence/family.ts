@@ -28,11 +28,11 @@ import type {
 } from "@ctx-traits/cdk";
 import { condition, operation, port, prompt, resource, schema, sequence, slot } from "@ctx-traits/cdk";
 
-// P450 S3: every worker/scribe prompt that writes `.plans/` is narrowed to
-// the run's own phase entry — never other phases' text, group preambles, or
-// the plan tail.
-export const PLAN_WRITE_SCOPE_RIDER =
-    `Never edit files under .plans/ except this run's own phase entry, and even there touch only its checklist mark, its dispositions, and its board line — never another phase's text, a group preamble, or the plan tail.`;
+// P450 S3, repointed at the task board (2026-07-31): the board is the
+// owner's status surface (P486) — a run never writes it at all. Progress
+// lives in the work summary and the commit message.
+export const TASK_WRITE_SCOPE_RIDER =
+    `Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.`;
 // P450 S4 (P427): the model-side half of the one-turn-discipline fix.
 export const ONE_TURN_DISCIPLINE =
     `End this turn with the structured output and nothing else — no prose status line after the payload.`;
@@ -44,90 +44,44 @@ export function smart2Role(description: string): AgentHandle {
     return reviewerRole("smart-2", description, "Second-reviewer role.");
 }
 export const worker = workerRole("worker", "Implements the draft and applies reviewer fixes.");
-export const scribe = scribeRole("scribe", "Writes the commit message for the completed phase from the execution plan");
+export const scribe = scribeRole("scribe", "Writes the commit message for the completed task from the task contract");
 export const clerk = clerkRole(
     "clerk",
-    "Fast extraction model: copies the phase section out of the execution plan verbatim and distills the product contract, so no later step re-reads those files.",
+    "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board.",
 );
 
-export const phase = port.input.text({
-    id: "phase",
+export const task = port.input.text({
+    id: "task",
     description:
-        'Phase or group to implement, exactly as named in .plans/EXECUTION_PLAN.md (e.g. "P196-fix" or "Group 43").',
+        'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
 });
 
 /**
- * Declares the execution-plan resource for the package that OWNS it
- * (implement-default only). smart/strict never call this — they reach the
- * same resource via `ref.resource({ id: "execution-plan", dependency:
- * "implement-default" })` in their own index.ts, since re-declaring a
- * `resource(...)` (as opposed to referencing one) in a dependent package
- * re-triggers a full dependency-scoped hidden-content audit of the file
- * instead of reusing the owning package's already-audited declaration.
+ * Declares the task-board resource: the repo-root directory holding one
+ * markdown file per task. Each package instantiates its own declaration via
+ * this factory (never a trait `dependency` ref — a dependency-vendored
+ * root="repo" resource loses the on-demand audit exemption a package's own
+ * direct declaration gets), keeping the declaration itself single-sourced.
  */
-export function declareExecutionPlan(): ResourceHandle {
+export function declareTaskBoard(): ResourceHandle {
     return resource({
-        id: "execution-plan",
-        path: ".plans/EXECUTION_PLAN.md",
+        id: "task-board",
+        path: ".internal/tasks",
         root: "repo",
-        hint: "Repo-root path for the execution plan; agents read that file with their own tools and never inline it.",
+        hint: "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them.",
         trigger: "on-demand",
     });
 }
 
-/** Declares the rule-authority resource for the owning package; see {@link declareExecutionPlan}. */
-export function declareRuleAuthority(): ResourceHandle {
-    return resource({
-        id: "rule-authority",
-        path: ".docs/PRODUCT.md",
-        root: "repo",
-        hint: "Repo-root path for the product contract: ADVISORY context, and the only document standing rules may be cited from — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a rule. The phase contract outranks it wherever they conflict. Agents read this file with their own tools and never inline it.",
-        trigger: "on-demand",
-    });
-}
-
-export const phaseBrief = slot.text({
-    id: "phase-brief",
+export const taskBrief = slot.text({
+    id: "task-brief",
     description:
-        "The phase's execution-plan section, copied exactly as written — the scope contract every later step works from instead of the plan file.",
-    hint: "Verbatim copy: group heading + preamble + the phase bullet(s) with Why/Where/Approach/Watch/Done-when/Deps. No paraphrasing.",
-});
-export const ruleSchema: SchemaHandle = schema.object(
-    "product-rule",
-    {
-        rule: schema.field(schema.text(), { description: "The standing rule's substance, in the implementer's terms." }),
-        source: schema.field(schema.text(), {
-            description: 'Repo-relative path and section/heading/line for this rule in PRODUCT.md (e.g. ".docs/PRODUCT.md — ## Validation Gates").',
-        }),
-        quote: schema.field(schema.text(), {
-            description: "The exact authoritative line(s) from the source, verbatim — not paraphrased.",
-        }),
-    },
-    { description: "One standing product rule, sourced from PRODUCT.md and carrying its exact citation." },
-);
-export const productBrief = slot({
-    id: "product-brief",
-    schema: schema.object(
-        "product-brief",
-        {
-            rules: schema.field(schema.list(ruleSchema), {
-                description:
-                    "Every standing house rule relevant to this phase, each with a source path/section and exact quote. A claim without both is not a rule and must be omitted, not invented.",
-            }),
-            context: schema.field(schema.text(), {
-                required: false,
-                description:
-                    "Non-normative explanatory context worth keeping in mind (e.g. background, rationale). Never binding and never a substitute for a sourced rule.",
-            }),
-        },
-        { description: "Distilled, source-verified product contract for this phase." },
-    ),
-    description:
-        "Distilled product-contract rules relevant to this phase, each with an exact source citation and quote from PRODUCT.md; later steps read this instead of the file.",
+        "The task file's contents, copied exactly as written — the scope contract every later step works from instead of the board.",
+    hint: "Verbatim copy of the whole task file: title, status line, body, Watch, and Done when. No paraphrasing.",
 });
 export const draft = slot.text({
     id: "draft",
-    description: "The implementation draft for the phase — the contract the produce-first build loop implements.",
+    description: "The implementation draft for the task — the contract the produce-first build loop implements.",
     hint: "Scope, files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation.",
 });
 export const workSummary = slot.text({
@@ -181,7 +135,7 @@ export const reviewDiff = slot.text({
 export const repoGatesPassed = slot({
     id: "repo-gates-passed",
     description:
-        "This round's repository gate result: whether the phase-mandated gate chain passed, and the exact command that decided it.",
+        "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it.",
     schema: schema.object("repo-gates-result", {
         ok: schema.field(schema.boolean(), {
             description: "True when the gate command exited successfully.",
@@ -248,7 +202,7 @@ export const parkReportPort = port.output.of(schema.list(reviewVerdictSchema), {
     id: "park-report",
     title: "Park Report",
     description:
-        "Typed park record for an unapproved run (P414): one entry per reviewed verdict that was still revise in the final round, each with the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the build loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling phase that explicitly cites the same wall-id while this stands unforced.",
+        "Typed park record for an unapproved run (P414): one entry per reviewed verdict that was still revise in the final round, each with the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the build loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling task that explicitly cites the same wall-id while this stands unforced.",
     optional: true,
     value: parkReport,
     format: ["structured", "table"],
@@ -274,43 +228,29 @@ export function verdictSlot(id: string, reviewerLabel: string, schemaHandle: Sch
     });
 }
 
-export function phaseExtractionStep(agent: AgentHandle, executionPlan: ResourceHandle) {
-    return sequence.prompt("phase-extraction", {
-        title: "Copy the phase contract (clerk)",
+export function taskExtractionStep(agent: AgentHandle, taskBoard: ResourceHandle) {
+    return sequence.prompt("task-extraction", {
+        title: "Copy the task contract (clerk)",
         agent,
         text: prompt.text`
-            Copy the ${phase} section out of the execution plan EXACTLY as written.
-            Open the plan file named in ${executionPlan} with your tools. Phases appear as "- [ ] **P123**" (or "- [x]") checklist bullets under "## Group ..." headings; a group request (e.g. "Group 46") means that heading's whole section, a single phase (e.g. "P206") means that bullet with its full indented body (Why/Where/Approach/Watch/Done-when/Deps and any notes) plus the group heading and preamble paragraphs above it for context.
-            Return only the copied text, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the file, so anything you drop is lost.`,
-        output: phaseBrief,
-        input: [phase, executionPlan],
-    });
-}
-
-export function productExtractionStep(agent: AgentHandle, ruleAuthority: ResourceHandle) {
-    return sequence.prompt("product-extraction", {
-        title: "Distill the product rules (clerk)",
-        agent,
-        text: prompt.text`
-            Distill the product contract for ${phase}.
-            Read ONLY the rule-authority doc named in ${ruleAuthority} with your tools — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a standing rule; if the phase or plan references other documentation, treat it as non-binding context only, never a rule. AUTHORITY ORDER: the PHASE CONTRACT is the sole binding authority for this run; every distilled rule is ADVISORY beneath it. Where a rule conflicts with the phase contract, still record it — but mark it superseded-by-phase in its own text, so reviewers see the conflict was seen and know the contract wins.
-            Using the phase contract ${phaseBrief}, extract every standing rule the implementer and reviewers of this phase need (house rules such as core purity, dependency policy, #[allow] policy, byte-stability; the repo validation gates; any product sections the phase touches). For each rule, record its exact repo-relative path + section/heading in "source" and its exact authoritative line(s) verbatim in "quote". A claim you cannot cite with both a source and an exact quote is not a rule — omit it rather than invent an authority.
-            Put any phase-relevant explanatory material that is not itself a sourced rule (background, rationale) in the separate non-normative "context" field. Later steps read ONLY your structured output, never the file — anything missing here is invisible downstream.`,
-        output: productBrief,
-        input: [phase, ruleAuthority, phaseBrief],
+            Copy the task file for ${task} EXACTLY as written.
+            Open the task-board directory named in ${taskBoard} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
+            Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost.`,
+        output: taskBrief,
+        input: [task, taskBoard],
     });
 }
 
 export function buildDraftPromptText(): PromptTemplate {
     return prompt.template(
-        `Create an implementation draft for {phase}.
-            Work from the phase contract {phaseBrief} — a verbatim copy of the execution-plan section, your scope contract — and the product rules {productBrief}. Do not re-read the plan or product files.
-            FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a group marked "detail pending"), its group is not marked SUPERSEDED or CANCELLED, every prerequisite its Deps names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
+        `Create an implementation draft for {task}.
+            Work from the task contract {taskBrief} — a verbatim copy of the task file, your scope contract. Do not re-read the board.
+            FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a file marked "detail pending"), it is not marked superseded or cancelled, every prerequisite task it names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
             ${SCOPE_SPLIT_DOCTRINE}
-            After the SCOPE SPLIT, the draft must cover: scope (exactly what the phase asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
-            Favor the leanest correct approach: the minimal, robust, elegant change that satisfies the phase — no speculative generality, no gold-plating, no defensive armor for states that cannot occur. Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
+            After the SCOPE SPLIT, the draft must cover: scope (exactly what the task asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
+            Favor the leanest correct approach: the minimal, robust, elegant change that satisfies the task — no speculative generality, no gold-plating, no defensive armor for states that cannot occur. Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
             ${ONE_TURN_DISCIPLINE}`,
-        { phase, phaseBrief, productBrief },
+        { task, taskBrief },
     );
 }
 
@@ -320,7 +260,7 @@ export function draftStep(agent: AgentHandle) {
         agent,
         text: buildDraftPromptText(),
         output: draft,
-        input: [phase, phaseBrief, productBrief],
+        input: [task, taskBrief],
     });
 }
 
@@ -333,11 +273,11 @@ export function draftStep(agent: AgentHandle) {
  */
 export function buildPlanReviewText(): PromptTemplate {
     return prompt.template(
-        `Review the implementation draft {draft} for {phase} against the phase contract {phaseBrief} and product rules {productBrief}.
-            A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the phase, proposes an approach that cannot satisfy the phase contract, is missing a required SCOPE SPLIT classification, or scopes in work the phase does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
+        `Review the implementation draft {draft} for {task} against the task contract {taskBrief}.
+            A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the task, proposes an approach that cannot satisfy the task contract, is missing a required SCOPE SPLIT classification, or scopes in work the task does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
             Return the typed verdict (status: approved when no blocker remains, revise otherwise; blockers: the list that justifies revise).
             ${ONE_TURN_DISCIPLINE}`,
-        { draft, phase, phaseBrief, productBrief },
+        { draft, task, taskBrief },
     );
 }
 
@@ -397,7 +337,7 @@ const DEFAULT_PRODUCE_RETURN_CONTRACT =
  * rule) — never a reason to fork the whole prompt. `opts.returnContract`
  * overrides the final return-contract line for a variant whose produce
  * step returns more than `work-summary` (e.g. smart's `draft` +
- * `work-summary`); every other paragraph, including the plan-write rider
+ * `work-summary`); every other paragraph, including the task-board rider
  * and one-turn discipline, is shared verbatim by every caller.
  */
 export function buildProducePrompt(
@@ -405,21 +345,21 @@ export function buildProducePrompt(
 ): PromptTemplate {
     const { extraFixInstruction, returnContract } = opts;
     return prompt.template(
-        `Produce the work for {phase} against the draft {draft}.
-            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this phase's stated scope and Definition of Done — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later phase is out of scope, note it as a follow-up and do not expand this phase to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the phase contract.${
+        `Produce the work for {task} against the draft {draft}.
+            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract.${
             extraFixInstruction ? ` ${extraFixInstruction}` : ""
         }
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
             A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
-            Respect the phase contract {phaseBrief} and the house rules in {productBrief} (core purity, no new deps, no new #[allow], byte-stability where the plan demands it).
-            Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the phase requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
+            Respect the task contract {taskBrief}.
+            Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the task requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
             You owe 100% of the draft's agent-doable pile. For each owner-only item in the draft's SCOPE SPLIT, produce the named substitute evidence (run the tests, dry runs, or static checks it names) — an owner-only classification is never license to skip work a shell can do. If you hit a wall the draft did not classify, flag it in your work summary as a proposed owner-item (item, reason class, why no in-run effort suffices, the substitute evidence you produced) and expect reviewers to challenge it.
-            ${PLAN_WRITE_SCOPE_RIDER}
-            Run the gates named in this phase's own Definition of Done before reporting — not whole-project gates that later phases will satisfy.
+            ${TASK_WRITE_SCOPE_RIDER}
+            Run the gates named in this task's own Done-when before reporting — not whole-project gates that later tasks will satisfy.
             Propose leftovers explicitly: end the work summary with a "Leftovers proposed:" section listing any legitimate follow-on work (what — one sentence —, reason — needs-unlanded or needs-human —, needs, evidence it does not block this result standing alone, done-when), or state explicitly that none exist. Reviewers adjudicate these, not you.
             ${returnContract ?? DEFAULT_PRODUCE_RETURN_CONTRACT}
             ${ONE_TURN_DISCIPLINE}`,
-        { phase, draft, phaseBrief, productBrief },
+        { task, draft, taskBrief },
     );
 }
 
@@ -443,7 +383,6 @@ export function reviewSeat(
     agent: AgentHandle,
     reviewerNumber: 1 | 2,
     variantDoctrine: string,
-    ruleAuthority: ResourceHandle,
     verdictSlotHandle: SlotHandle,
     opts: { deviationReport?: SlotHandle; extraInstruction?: string; reviewRubric?: ResourceHandle } = {},
 ): GuardedProductionReviewSeat {
@@ -453,15 +392,14 @@ export function reviewSeat(
         verdictSlot: verdictSlotHandle,
         extraOutputs: [leftovers],
         text: prompt.template(
-            `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {phase} against the draft {draft}. Current work summary: {workSummary}.
-            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
-            Verify any house-rule citation directly against {ruleAuthority} — the only document a rule may be cited from. AUTHORITY ORDER: the phase contract outranks it; a product-doc statement that conflicts with this phase's contract is NEVER a blocker (the phase exists to change the doc) — require only that the work summary names the sections now stale. Rules marked superseded-by-phase in the brief are context, not grounds.${
+            `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {task} against the draft {draft}. Current work summary: {workSummary}.
+            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.${
                 deviationReport
                     ? " Recorded deviations: {deviationReport}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the draft verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER."
                     : ""
             }${
                 reviewRubric
-                    ? " Score the work against the review rubric {reviewRubric}: report scope, correctness, house-rules, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only."
+                    ? " Score the work against the review rubric {reviewRubric}: report scope, correctness, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only."
                     : ""
             }
             ${variantDoctrine}${extraInstruction ? `\n            ${extraInstruction}` : ""}
@@ -473,12 +411,10 @@ ${
             }            ${LEFTOVER_DOCTRINE}
             ${ONE_TURN_DISCIPLINE}`,
             {
-                phase,
+                task,
                 draft,
                 workSummary,
-                phaseBrief,
-                productBrief,
-                ruleAuthority,
+                taskBrief,
                 reviewDiff,
                 repoGatesPassed,
                 ...(deviationReport ? { deviationReport } : {}),
@@ -540,23 +476,23 @@ export function deriveParkReportStep(
 
 /**
  * The family scribe prompt (P450 S3): writes the commit message from the
- * final verdict(s) and marks this run's own phase entry — never any other
- * phase, a group preamble, or the plan tail (the narrowed rider).
+ * final verdict(s). It never writes the task board — the board is the
+ * owner's status surface (P486).
  */
 export function buildScribeText(verdict1: SlotHandle, verdict2: SlotHandle): PromptTemplate {
     return prompt.template(
-        `The build loop for {phase} has ended in dual approval and the work is being committed. The final reviewer verdicts are {verdict1} and {verdict2} — the sole authority on what was implemented (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
-            Write a concise commit message for the completed work based only on the phase contract {phaseBrief} and those verdicts: a short subject line naming the phase, then a one-paragraph summary of what the verdicts certify implemented — never work belonging to other phases.
+        `The build loop for {task} has ended in dual approval and the work is being committed. The final reviewer verdicts are {verdict1} and {verdict2} — the sole authority on what was implemented (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
+            Write a concise commit message for the completed work based only on the task contract {taskBrief} and those verdicts: a short subject line naming the task, then a one-paragraph summary of what the verdicts certify implemented — never work belonging to other tasks.
             Return exactly that message as your output; the runtime injects it into the git commit step.
             Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.
-            Do NOT record phase status anywhere. The .plans directory is gitignored, so a worktree run's edit to the execution plan is discarded with the worktree and never reaches the repository — writing it would only make a reviewer believe status was recorded when it was not. The board is the authoritative status surface and the owner maintains it (P486, 2026-07-27).
-            Compose the tail of the commit message from the verdicts, including only the sections the verdicts actually support — never write a "none" placeholder for a section with no entries. If a verdict carries owner-items, add "Owner items:" quoting each entry (item, reason class, close-out command or decision). If a verdict carries remaining (cross-phase seam citations only), add "Cross-phase seams:" quoting it verbatim. The final adjudicated leftovers are attached as context: when non-empty, add a "Leftovers:" section reproducing every entry's typed fields (what, reason, needs, evidence, done-when) verbatim — never paraphrased, never invented; omit the section entirely when the list is empty. A non-empty leftovers list never affects approval or is written as if it were a blocker.`,
-        { phase, phaseBrief, verdict1, verdict2 },
+            Do NOT record task status anywhere. ${TASK_WRITE_SCOPE_RIDER}
+            Compose the tail of the commit message from the verdicts, including only the sections the verdicts actually support — never write a "none" placeholder for a section with no entries. If a verdict carries owner-items, add "Owner items:" quoting each entry (item, reason class, close-out command or decision). If a verdict carries remaining (cross-task seam citations only), add "Cross-task seams:" quoting it verbatim. The final adjudicated leftovers are attached as context: when non-empty, add a "Leftovers:" section reproducing every entry's typed fields (what, reason, needs, evidence, done-when) verbatim — never paraphrased, never invented; omit the section entirely when the list is empty. A non-empty leftovers list never affects approval or is written as if it were a blocker.`,
+        { task, taskBrief, verdict1, verdict2 },
     );
 }
 
 /**
- * The complete family procedure (P450): phase/product extraction, a cheap
+ * The complete family procedure (P450): task extraction, a cheap
  * reviewed planning composite, a produce-first doubly-reviewed build
  * composite, and the commit tail — built entirely from the
  * `guardedProduction`/`commitTail` kit in `@ctx-traits/agents`.
@@ -572,8 +508,7 @@ export function familyProcedure(opts: {
     smart2: AgentHandle;
     worker: AgentHandle;
     scribe: AgentHandle;
-    executionPlan: ResourceHandle;
-    ruleAuthority: ResourceHandle;
+    taskBoard: ResourceHandle;
     variantDoctrine: string;
     verdict1: SlotHandle;
     verdict2: SlotHandle;
@@ -591,8 +526,7 @@ export function familyProcedure(opts: {
         smart2,
         worker,
         scribe,
-        executionPlan,
-        ruleAuthority,
+        taskBoard,
         variantDoctrine,
         verdict1,
         verdict2,
@@ -624,8 +558,8 @@ export function familyProcedure(opts: {
             optionalInputs: [leftovers, repoGatesPassed],
         },
         review: [
-            reviewSeat(smart1, 1, variantDoctrine, ruleAuthority, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction }),
-            reviewSeat(smart2, 2, variantDoctrine, ruleAuthority, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction }),
+            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction }),
+            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction }),
         ],
         evidence: [repoGatesStep, captureDiffStep],
         afterReview: deriveParkReportStep([verdict1, verdict2], { parkReportSlot }),
@@ -639,8 +573,7 @@ export function familyProcedure(opts: {
     });
 
     return [
-        phaseExtractionStep(clerk, executionPlan),
-        productExtractionStep(clerk, ruleAuthority),
+        taskExtractionStep(clerk, taskBoard),
         planning,
         building,
         ...commitTail({

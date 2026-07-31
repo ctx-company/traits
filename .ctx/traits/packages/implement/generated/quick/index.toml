@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.19.0"
+version = "0.20.0"
 name = "Implement (Quick)"
 summary = "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit."
 variant = "quick"
@@ -47,10 +47,10 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "phase"
+id = "task"
 direction = "input"
 schema = "schema:text"
-description = 'Phase or group to implement, exactly as named in .plans/EXECUTION_PLAN.md (e.g. "P196-fix" or "Group 43").'
+description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
 
 [[port]]
 id = "commit-report"
@@ -69,13 +69,13 @@ hint = "git diff --stat output, excluding runtime state. No patch bodies: a dele
 [[slot]]
 id = "repo-gates-passed"
 schema = "schema:repo-gates-result"
-description = "This round's repository gate result: whether the phase-mandated gate chain passed, and the exact command that decided it."
+description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
 
 [[slot]]
 id = "draft"
 schema = "schema:text"
-description = "smart-1's implementation draft for the phase — the contract the worker implements."
-hint = "Scope (restated from the plan), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
+description = "smart-1's implementation draft for the task — the contract the worker implements."
+hint = "Scope (restated from the task file), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
 
 [[slot]]
 id = "work-summary"
@@ -110,17 +110,10 @@ schema = "schema:text"
 description = "Verbatim output of the git-add staging command."
 
 [[resource]]
-id = "execution-plan"
-path = ".plans/EXECUTION_PLAN.md"
+id = "task-board"
+path = ".internal/tasks"
 root = "repo"
-hint = "Repo-root path for the execution plan; agents read that file with their own tools and never inline it."
-trigger = "on-demand"
-
-[[resource]]
-id = "product-doc"
-path = ".docs/PRODUCT.md"
-root = "repo"
-hint = "Repo-root path for the product contract: ADVISORY context, and the only document standing rules may be cited from — no other .docs file (archive/, research/, BLOG_*, LAUNCH_*, or any other) may create a rule. The phase contract outranks it wherever they conflict. Agents read this file with their own tools and never inline it."
+hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
 
 [[schema]]
@@ -228,7 +221,7 @@ description = "Non-blocking notes: subjective style, naming, taste, optional imp
 [schema.fields.blockers]
 schema = "[schema:blocker]"
 required = true
-description = "The blocking defects that must be fixed before merge: correctness bugs, house-rule violations (core purity, a new dependency, a new #[allow], required byte-stability broken), failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the phase), OR un-abstracted duplication. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
 
 [schema.fields.forgiveness-reason]
 schema = "schema:text"
@@ -246,7 +239,7 @@ allowed = [
 [schema.fields.wall-id]
 schema = "schema:text"
 required = true
-description = """Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the phase's execution-plan section, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure."""
+description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
 [[agent]]
 id = "smart-1"
@@ -260,51 +253,47 @@ summary = "Implementation role."
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message for the completed phase from the execution plan; git staging and committing run as command steps."
+description = "Writes the commit message for the completed task from the task contract; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [prompt.building-produce]
 text = """
-Implement {port:phase} following the draft {slot:draft}.
+Implement {port:task} following the draft {slot:draft}.
     No reviewer verdict attached means this is round 1: implement the draft in full. On every later round a verdict IS attached, and it redefines your task: execute its blockers' open steps, in order, largest first. The verdict was written against the exact working tree you are in — nothing has changed since — so if it says something is missing, it is missing NOW; re-auditing the tree against the draft re-does, worse, the review that produced the verdict, and spends your round on nothing. Your own work summary from the previous round is also attached: it is your memory of what prior rounds did — trust it plus the verdict's step statuses instead of re-verifying the tree. Before claiming any step was already satisfied, run the check its blocker's done-when names and cite its passing output as evidence; extend the summary with per-step progress as you go.
     A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports. Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
-    Run this phase's own Definition-of-Done gates before reporting.
+    Run this task's own Done-when gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
 ]
 output = ["slot:work-summary"]
 
 [prompt.building-review]
 text = """
-Review the work for {port:phase} against the draft {slot:draft}. Work summary: {slot:work-summary}.
+Review the work for {port:task} against the draft {slot:draft}. Work summary: {slot:work-summary}.
     {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index, not the change. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's gate verdict; false is grounds for a blocker on its own.
-    A BLOCKER is a correctness bug, a failing gate this phase's Definition of Done requires, a house-rule violation the phase does not itself supersede, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
-    Cite house rules only from {resource:product-doc}, read with your tools. The phase contract outranks it: a product-doc statement the phase contradicts is never a blocker — require only that the work summary names the sections now stale.
+    A BLOCKER is a correctness bug, a failing gate this task's Done-when requires, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
     Your own verdict from last round is attached when one exists: this round's verdict EXTENDS it. Carry every open blocker's id and steps forward VERBATIM — same order, same wording; verify each open step with your own tools and flip its status to done only on evidence you confirmed, recording that evidence on the step. Append genuinely new findings as new steps at the end or as new blockers; set recurrence-of on every carried blocker; drop a blocker only when every step is done, and name the drop in the advisory. Never renumber, reword, or re-derive a carried step — a vanished or rewritten step erases the worker's progress and moves the target, which is how loops stall.
     Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it."""
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:product-doc",
 ]
 output = ["slot:review-verdict"]
 
 [prompt.draft-writing]
 text = """
 
-        Create an implementation draft for {port:phase} from its section in the execution plan {resource:execution-plan}. Read that section and the house rules in {resource:product-doc} with your tools.
-        The phase contract is the sole binding authority; the product doc is advisory context. Where they conflict, the phase wins — note which product-doc sections the change makes stale.
+        Create an implementation draft for {port:task} from its file on the task board {resource:task-board}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Take the leanest correct approach. Reuse what exists rather than re-implementing beside it. Reference files by path. Do not implement anything."""
 input = [
-    "port:phase",
-    "resource:execution-plan",
-    "resource:product-doc",
+    "port:task",
+    "resource:task-board",
 ]
 output = ["slot:draft"]
 
@@ -325,7 +314,7 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     { slot = "slot:review-verdict", optional = true },
     { slot = "slot:work-summary", optional = true },
@@ -366,12 +355,11 @@ title = "Building Review"
 agent = "agent:smart-1"
 prompt = "prompt:building-review"
 input = [
-    "port:phase",
+    "port:task",
     "slot:draft",
     "slot:work-summary",
     "slot:review-diff",
     "slot:repo-gates-passed",
-    "resource:product-doc",
     { slot = "slot:review-verdict", optional = true },
 ]
 output = ["slot:review-verdict"]
@@ -416,8 +404,8 @@ argv = [
 ]
 
 [procedure]
-description = "Implement one execution-plan phase: draft it from the plan, implement it, and repeat worker-then-review until the reviewer approves — then commit."
-input = ["port:phase"]
+description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
+input = ["port:task"]
 output = ["port:commit-report"]
 
 [[procedure.sequence]]
@@ -426,9 +414,8 @@ title = "Draft the work"
 agent = "agent:smart-1"
 prompt = "prompt:draft-writing"
 input = [
-    "port:phase",
-    "resource:execution-plan",
-    "resource:product-doc",
+    "port:task",
+    "resource:task-board",
 ]
 output = ["slot:draft"]
 

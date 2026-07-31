@@ -4,8 +4,8 @@ import { reviewVerdict } from "./schema.ts";
 
 export const draft = slot.text({
     id: "draft",
-    description: "smart-1's implementation draft for the phase — the contract the worker implements.",
-    hint: "Scope (restated from the plan), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation.",
+    description: "smart-1's implementation draft for the task — the contract the worker implements.",
+    hint: "Scope (restated from the task file), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation.",
 });
 export const workSummary = slot.text({
     id: "work-summary",
