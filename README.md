@@ -10,7 +10,7 @@ _Turn your skills into shareable modules, that are easily maintained and orchest
 
 ### From source
 ```sh
-git clone https://github.com/ctx-company/ctx \
+git clone https://github.com/ctx-company/traits \
     && cd ctx \
     && just install
 ```
