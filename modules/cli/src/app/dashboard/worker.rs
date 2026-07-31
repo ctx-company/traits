@@ -7,9 +7,11 @@ use super::{
     refresh_attached_view,
 };
 
+pub(super) type RefreshResult = Result<Arc<DashboardSnapshot>, String>;
+
 pub(super) struct Handle {
     commands: mpsc::Sender<Command>,
-    snapshots: mpsc::Receiver<Arc<DashboardSnapshot>>,
+    snapshots: mpsc::Receiver<RefreshResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
 }
 
@@ -76,18 +78,30 @@ impl Handle {
         });
     }
 
-    pub(super) fn latest_snapshot(&self) -> Option<Arc<DashboardSnapshot>> {
-        let mut newest = None;
-        while let Ok(snapshot) = self.snapshots.try_recv() {
-            newest = Some(snapshot);
+    pub(super) fn refresh_results(&self) -> Vec<RefreshResult> {
+        let mut latest_snapshot = None;
+        let mut trailing_error = None;
+        while let Ok(result) = self.snapshots.try_recv() {
+            match result {
+                Ok(snapshot) => {
+                    latest_snapshot = Some(snapshot);
+                    // A newer complete snapshot recovers from older errors.
+                    trailing_error = None;
+                }
+                Err(error) => trailing_error = Some(error),
+            }
         }
-        newest
+        latest_snapshot
+            .into_iter()
+            .map(Ok)
+            .chain(trailing_error.into_iter().map(Err))
+            .collect()
     }
 }
 
 fn run(
     commands: mpsc::Receiver<Command>,
-    snapshots: mpsc::Sender<Arc<DashboardSnapshot>>,
+    snapshots: mpsc::Sender<RefreshResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
     let mut state = State::new_without_worker();
@@ -116,30 +130,32 @@ fn run(
         };
         state.all_repos = all_repos;
         state.screen = screen;
-        state.reload_sync();
-        match preview {
-            Some(request)
-                if state.session_preview.as_ref().is_some_and(|view| {
-                    view.session_id == request.session_id && view.ledger_path == request.ledger_path
-                }) =>
-            {
-                if let Some(view) = &mut state.session_preview {
-                    refresh_attached_view(view);
+        let result: RefreshResult = (|| -> crate::Result<Arc<DashboardSnapshot>> {
+            state.reload_sync()?;
+            match preview {
+                Some(request)
+                    if state.session_preview.as_ref().is_some_and(|view| {
+                        view.session_id == request.session_id
+                            && view.ledger_path == request.ledger_path
+                    }) =>
+                {
+                    if let Some(view) = &mut state.session_preview {
+                        refresh_attached_view(view);
+                    }
                 }
+                Some(request) => {
+                    state.session_preview = Some(build_attached_view(
+                        &request.session_id,
+                        &request.ledger_path,
+                        &request.run_id,
+                    ));
+                }
+                None => state.session_preview = None,
             }
-            Some(request) => {
-                state.session_preview = Some(build_attached_view(
-                    &request.session_id,
-                    &request.ledger_path,
-                    &request.run_id,
-                ));
-            }
-            None => state.session_preview = None,
-        }
-        if snapshots
-            .send(Arc::new(DashboardSnapshot::from_state(&state)))
-            .is_err()
-        {
+            Ok(Arc::new(DashboardSnapshot::from_state(&state)))
+        })()
+        .map_err(|error| error.to_string());
+        if snapshots.send(result).is_err() {
             return;
         }
         for request in pending_explanations {

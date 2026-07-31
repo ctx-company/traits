@@ -4131,6 +4131,10 @@ mod tests {
             history_rect.x > progress_rect.x,
             "right column is to the right"
         );
+        assert_eq!(journey_rect.y + journey_rect.height, area.y + area.height);
+        assert_eq!(current_rect.y + current_rect.height, area.y + area.height);
+        assert_eq!(journey_rect.x + journey_rect.width, history_rect.x);
+        assert_eq!(current_rect.x + current_rect.width, area.x + area.width);
     }
 
     // Dashboard preview supplies only progress/journey — this must produce
@@ -4149,6 +4153,37 @@ mod tests {
         let area = Rect::new(0, 0, 120, 24);
         let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
         assert_eq!(tree.leaf_ids(), vec![PROGRESS_PANE, JOURNEY_PANE]);
+    }
+
+    #[test]
+    fn narrow_full_data_tiles_the_supplied_area_to_its_edges() {
+        let progress = sample_lines(3);
+        let journey = sample_lines(5);
+        let history = sample_event_rows(10);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+        let panes = [PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+            .map(|id| layout.rect(id).expect("all supplied panes resolve"));
+        assert!(
+            panes
+                .iter()
+                .all(|rect| rect.x + rect.width == area.x + area.width)
+        );
+        assert_eq!(panes[0].y, area.y);
+        assert_eq!(panes[3].y + panes[3].height, area.y + area.height);
+        assert!(
+            panes
+                .windows(2)
+                .all(|pair| pair[0].y + pair[0].height == pair[1].y)
+        );
     }
 
     // Source-driven omission (a legacy session with no activity sidecar):

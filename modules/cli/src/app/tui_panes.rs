@@ -548,6 +548,22 @@ mod tests {
     }
 
     #[test]
+    fn screen_regions_cover_the_full_frame_at_wide_and_narrow_widths() {
+        for area in [area(160, 40), area(40, 12)] {
+            let [tabs, body, footer] = screen_regions(area);
+            assert_eq!(tabs.x, area.x);
+            assert_eq!(body.x, area.x);
+            assert_eq!(footer.x, area.x);
+            assert_eq!(tabs.width, area.width);
+            assert_eq!(body.width, area.width);
+            assert_eq!(footer.width, area.width);
+            assert_eq!(tabs.y + tabs.height, body.y);
+            assert_eq!(body.y + body.height, footer.y);
+            assert_eq!(footer.y + footer.height, area.y + area.height);
+        }
+    }
+
+    #[test]
     fn nested_split_resolves() {
         let tree = PaneTree::Split {
             dir: Direction::Horizontal,

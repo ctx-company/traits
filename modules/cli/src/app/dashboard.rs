@@ -764,7 +764,13 @@ struct State {
     /// the SESSIONS border title only above [`RELOAD_WARN_THRESHOLD`].
     reload_duration: Option<Duration>,
     worker: Option<worker::Handle>,
+    /// True after the renderer has accepted one complete worker snapshot.
+    /// Refreshes after that point retain the existing view while work runs.
+    has_snapshot: bool,
     loading: bool,
+    /// The most recent refresh failure. It remains visible until a later
+    /// complete snapshot arrives, without replacing the prior snapshot.
+    refresh_error: Option<String>,
     /// P550 `S`-key story view: set while the SESSIONS row's story is open,
     /// rendered by `draw_screen` as a single full-area lines pane in place of
     /// the screen's tree. Read-only and never advances a run — a keypress
@@ -868,7 +874,9 @@ impl State {
             reload_ticks: 0,
             reload_duration: None,
             worker: None,
+            has_snapshot: false,
             loading: false,
+            refresh_error: None,
             story_view: None,
             pending_keys: Vec::new(),
         }
@@ -999,9 +1007,32 @@ impl State {
                 ));
             }
         }
-        let Some(snapshot) = worker.latest_snapshot() else {
-            return;
-        };
+        self.apply_refresh_results(worker.refresh_results());
+    }
+
+    fn apply_refresh_results(&mut self, results: impl IntoIterator<Item = worker::RefreshResult>) {
+        let mut latest_snapshot = None;
+        let mut trailing_error = None;
+        for result in results {
+            match result {
+                Ok(snapshot) => {
+                    latest_snapshot = Some(snapshot);
+                    // A newer complete snapshot recovers from older errors.
+                    trailing_error = None;
+                }
+                Err(error) => trailing_error = Some(error),
+            }
+        }
+        if let Some(snapshot) = latest_snapshot {
+            self.apply_snapshot(&snapshot);
+        }
+        if let Some(error) = trailing_error {
+            self.loading = false;
+            self.refresh_error = Some(error);
+        }
+    }
+
+    fn apply_snapshot(&mut self, snapshot: &DashboardSnapshot) {
         self.sessions = snapshot.sessions.clone();
         self.traits = snapshot.traits.clone();
         self.merges = snapshot.merges.clone();
@@ -1009,6 +1040,8 @@ impl State {
         self.run_sightings = snapshot.run_sightings.clone();
         self.reload_duration = snapshot.reload_duration;
         self.loading = false;
+        self.has_snapshot = true;
+        self.refresh_error = None;
         rebuild_visible_sessions(self);
         rebuild_visible_trust(self);
         let trust_ids: Vec<String> = self
@@ -1072,7 +1105,7 @@ impl State {
 
     /// Worker-only inventory refresh. It is intentionally separate from
     /// [`State::reload`], whose render-side contract is channel-only.
-    fn reload_sync(&mut self) {
+    fn reload_sync(&mut self) -> crate::Result<()> {
         let reload_started = std::time::Instant::now();
         // Bound this tick's driver-lock probes to the local
         // liveness index's own rows (typically a handful), except on a
@@ -1098,8 +1131,7 @@ impl State {
         if self.all_repos {
             let machine_wide = ctx_traits_io::run_session::machine_wide_run_inventory_cached(
                 &mut self.inventory_cache,
-            )
-            .unwrap_or_default();
+            )?;
             let mut sessions = Vec::new();
             let mut merges = Vec::new();
             for entry in machine_wide {
@@ -1133,21 +1165,19 @@ impl State {
             // above, so this is typically all cache hits.
             let sighting_inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
                 &mut self.inventory_cache,
-            )
-            .unwrap_or_default();
+            )?;
             self.run_sightings = run_sighting_rows(&sighting_inventory);
         } else {
             let inventory = ctx_traits_io::run_session::current_repo_run_inventory_cached(
                 &mut self.inventory_cache,
-            )
-            .unwrap_or_default();
+            )?;
             self.run_sightings = run_sighting_rows(&inventory);
             self.sessions = sessions_from_inventory_tagged(&inventory, None, None, &probe_budget);
             self.merges = merges_from_inventory(inventory, None);
         }
         rebuild_visible_sessions(self);
         if matches!(self.screen, Screen::Traits | Screen::Trust) {
-            let (traits, trust) = load_traits_and_trust().unwrap_or_default();
+            let (traits, trust) = load_traits_and_trust()?;
             self.traits = traits;
             self.trust = trust;
         }
@@ -1175,6 +1205,7 @@ impl State {
         // shows nothing and a future regression has a permanent, honest
         // signal to page off of.
         self.reload_duration = Some(reload_started.elapsed());
+        Ok(())
     }
 }
 
@@ -5728,14 +5759,16 @@ fn footer_line(state: &State) -> Paragraph<'static> {
                 .err()
                 .map(|message| explanation_task_text(message, started.elapsed()))
         });
-    let task = if state.loading {
-        Some("loading...")
+    let task = if state.loading && !state.has_snapshot {
+        Some("loading...".to_string())
+    } else if let Some(error) = state.refresh_error.as_deref() {
+        Some(format!("stale: {error}"))
     } else if let Some(task) = generated_task.as_deref() {
-        Some(task)
+        Some(task.to_string())
     } else {
-        state.message.as_deref()
+        state.message.clone()
     };
-    tui_kit::keymap_footer(hint, task)
+    tui_kit::keymap_footer(hint, task.as_deref())
 }
 
 fn explanation_task_text(message: &str, elapsed: Duration) -> String {
@@ -5788,6 +5821,92 @@ mod tests {
             explanation_task_text("working...", Duration::from_secs(60)),
             "working... 00:01:00"
         );
+    }
+
+    #[test]
+    fn footer_shows_loading_only_before_the_first_snapshot() {
+        let mut state = State::new_without_worker();
+        state.loading = true;
+        assert!(format!("{:?}", footer_line(&state)).contains("loading..."));
+
+        state.has_snapshot = true;
+        assert!(!format!("{:?}", footer_line(&state)).contains("loading..."));
+    }
+
+    #[test]
+    fn failed_refresh_preserves_snapshot_and_marks_it_stale_until_recovery() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("retained", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        let snapshot = DashboardSnapshot::from_state(&state);
+        state.apply_snapshot(&snapshot);
+        state.loading = true;
+
+        state.loading = false;
+        state.refresh_error = Some("inventory unavailable".to_string());
+        assert_eq!(state.sessions[0].session_id, "retained");
+        assert!(format!("{:?}", footer_line(&state)).contains("stale: inventory unavailable"));
+
+        state.apply_snapshot(&snapshot);
+        assert!(state.refresh_error.is_none());
+        assert!(!format!("{:?}", footer_line(&state)).contains("stale:"));
+    }
+
+    #[test]
+    fn queued_success_before_failure_retains_success_and_marks_stale() {
+        let mut state = State::new_without_worker();
+        state.loading = true;
+
+        let mut refreshed = State::new_without_worker();
+        refreshed.sessions = vec![row_with_id("newest", SessionClass::Live)];
+        rebuild_visible_sessions(&mut refreshed);
+        let snapshot = DashboardSnapshot::from_state(&refreshed);
+
+        state.apply_refresh_results([
+            Ok(std::sync::Arc::new(snapshot)),
+            Err("inventory unavailable".to_string()),
+        ]);
+
+        assert_eq!(state.sessions[0].session_id, "newest");
+        assert!(state.has_snapshot);
+        assert!(!state.loading);
+        assert!(format!("{:?}", footer_line(&state)).contains("stale: inventory unavailable"));
+    }
+
+    #[test]
+    fn queued_obsolete_success_does_not_clamp_selection_before_latest_snapshot() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("initial-a", SessionClass::Live),
+            row_with_id("initial-b", SessionClass::Live),
+            row_with_id("initial-c", SessionClass::Live),
+            row_with_id("initial-d", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(3);
+
+        let mut obsolete = State::new_without_worker();
+        obsolete.sessions = vec![row_with_id("obsolete", SessionClass::Live)];
+        rebuild_visible_sessions(&mut obsolete);
+
+        let mut latest = State::new_without_worker();
+        latest.sessions = vec![
+            row_with_id("latest-a", SessionClass::Live),
+            row_with_id("latest-b", SessionClass::Live),
+            row_with_id("latest-c", SessionClass::Live),
+            row_with_id("latest-d", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut latest);
+
+        state.apply_refresh_results([
+            Ok(std::sync::Arc::new(DashboardSnapshot::from_state(
+                &obsolete,
+            ))),
+            Ok(std::sync::Arc::new(DashboardSnapshot::from_state(&latest))),
+        ]);
+
+        assert_eq!(state.list_sessions.selected(), 3);
+        assert_eq!(state.sessions[0].session_id, "latest-a");
     }
 
     fn attached_view_for(id: &str) -> AttachedView {

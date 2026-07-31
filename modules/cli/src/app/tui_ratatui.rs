@@ -7,7 +7,7 @@
 //! styling) until P423 retires it.
 
 use std::io::Stderr;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once, mpsc};
 use std::time::{Duration, Instant};
 
@@ -72,26 +72,21 @@ impl PaneScreen {
     }
 }
 
-/// Floor for the inline viewport's row budget — small terminals still get a
-/// usable pane rather than being squeezed to nothing.
-const INLINE_HEIGHT_FLOOR: u16 = 6;
 const INLINE_RESIZE_INTERVAL: Duration = Duration::from_millis(50);
 
-/// The inline pane's row budget. Ratatui 0.29 cannot resize an existing
-/// `Viewport::Inline`, so P543 rebuilds only the terminal on a size change.
-/// Two constraints, and which one wins depends on the terminal's own size:
-/// on a terminal comfortably taller than [`INLINE_HEIGHT_FLOOR`], one row is
-/// reserved so the pane never overwrites the line the shell prompt will
-/// return to. On a terminal AT or BELOW the floor, the floor's need for a
-/// minimally usable pane wins instead — the prompt row is not reserved — but
-/// the result is still capped at `terminal_rows`, so the pane never claims
-/// more rows than actually exist.
+/// The inline pane owns the terminal's complete row budget. Ratatui 0.29
+/// cannot resize an existing `Viewport::Inline`, so a size change rebuilds
+/// only the terminal while the caller retains its presentation state.
 fn inline_viewport_height(terminal_rows: u16) -> u16 {
-    if terminal_rows <= 1 {
-        return terminal_rows;
-    }
-    let leave_one = terminal_rows - 1;
-    leave_one.max(INLINE_HEIGHT_FLOOR).min(terminal_rows)
+    terminal_rows
+}
+
+fn pack_terminal_size(columns: u16, rows: u16) -> u32 {
+    u32::from(columns) << 16 | u32::from(rows)
+}
+
+fn unpack_terminal_size(size: u32) -> (u16, u16) {
+    ((size >> 16) as u16, size as u16)
 }
 
 fn inline_terminal(rows: u16) -> std::io::Result<Terminal<CrosstermBackend<Stderr>>> {
@@ -176,9 +171,9 @@ pub(crate) enum CtrlCPolicy {
 struct PumpControl {
     stop: AtomicBool,
     paused: AtomicBool,
-    /// Latest terminal row count observed by the input pump. A single atomic
+    /// Latest terminal dimensions observed by the input pump. A single atomic
     /// coalesces drag-resize bursts; the render tick consumes it once.
-    resize_rows: AtomicU16,
+    resize_size: AtomicU32,
     input_generation: Arc<AtomicU64>,
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync + 'static>>>,
     ctrl_c_policy: CtrlCPolicy,
@@ -204,10 +199,10 @@ pub(crate) struct RatatuiPane {
     /// before this pump that meant no key handling at all.
     keys: mpsc::Receiver<crossterm::event::KeyEvent>,
     pump: Arc<PumpControl>,
-    /// The row budget used to construct the current inline terminal. Keeping
-    /// it on the pane makes duplicate resize events no-ops without recreating
-    /// any run-panel presentation state.
-    inline_height: Option<u16>,
+    /// The dimensions used to construct the current inline terminal. Keeping
+    /// them on the pane makes duplicate resize events no-ops without
+    /// recreating any run-panel presentation state.
+    inline_size: Option<(u16, u16)>,
     last_inline_resize: Instant,
 }
 
@@ -233,7 +228,7 @@ impl RatatuiPane {
     fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self> {
         install_panic_hook();
         enable_raw_mode()?;
-        let mut inline_height = None;
+        let mut inline_size = None;
         let terminal = match screen {
             PaneScreen::Alt => {
                 if let Err(err) = execute!(std::io::stderr(), EnterAlternateScreen) {
@@ -254,14 +249,13 @@ impl RatatuiPane {
                 }
             }
             PaneScreen::Inline => {
-                let rows = match crossterm::terminal::size() {
-                    Ok((_, rows)) => rows,
+                let (columns, rows) = match crossterm::terminal::size() {
+                    Ok(size) => size,
                     Err(err) => {
                         let _ = disable_raw_mode();
                         return Err(err);
                     }
                 };
-                let height = inline_viewport_height(rows);
                 let terminal = match inline_terminal(rows) {
                     Ok(terminal) => terminal,
                     Err(err) => {
@@ -269,7 +263,7 @@ impl RatatuiPane {
                         return Err(err);
                     }
                 };
-                inline_height = Some(height);
+                inline_size = Some((columns, rows));
                 terminal
             }
         };
@@ -288,7 +282,7 @@ impl RatatuiPane {
         let pump = Arc::new(PumpControl {
             stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
-            resize_rows: AtomicU16::new(0),
+            resize_size: AtomicU32::new(0),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(None),
             ctrl_c_policy,
@@ -317,8 +311,9 @@ impl RatatuiPane {
                     }
                     let Ok(read) = event::read() else { return };
                     match read {
-                        Event::Resize(_, rows) => {
-                            pump.resize_rows.store(rows, Ordering::SeqCst);
+                        Event::Resize(columns, rows) => {
+                            pump.resize_size
+                                .store(pack_terminal_size(columns, rows), Ordering::SeqCst);
                             notify_input(&pump);
                         }
                         Event::Key(key) => {
@@ -354,7 +349,7 @@ impl RatatuiPane {
             detached: false,
             keys,
             pump,
-            inline_height,
+            inline_size,
             last_inline_resize: Instant::now(),
         })
     }
@@ -377,20 +372,20 @@ impl RatatuiPane {
         if self.screen != PaneScreen::Inline || self.detached() {
             return false;
         }
-        let rows = self.pump.resize_rows.swap(0, Ordering::SeqCst);
-        let height = inline_viewport_height(rows);
-        if rows == 0 || self.inline_height == Some(height) {
+        let size = self.pump.resize_size.swap(0, Ordering::SeqCst);
+        let (columns, rows) = unpack_terminal_size(size);
+        if size == 0 || self.inline_size == Some((columns, rows)) {
             return false;
         }
         if self.last_inline_resize.elapsed() < INLINE_RESIZE_INTERVAL {
-            self.requeue_resize(rows);
+            self.requeue_resize(size);
             return false;
         }
         let Some(old_terminal) = self.terminal.as_mut() else {
             return false;
         };
         if old_terminal.clear().is_err() {
-            self.requeue_resize(rows);
+            self.requeue_resize(size);
             return false;
         }
         match inline_terminal(rows) {
@@ -398,33 +393,33 @@ impl RatatuiPane {
                 // A fresh terminal has blank diff buffers, so clear its
                 // viewport before its first draw to erase any old-frame cells.
                 if terminal.clear().is_err() {
-                    self.requeue_resize(rows);
+                    self.requeue_resize(size);
                     return true;
                 }
                 self.terminal = Some(terminal);
-                self.inline_height = Some(height);
+                self.inline_size = Some((columns, rows));
                 self.last_inline_resize = Instant::now();
                 true
             }
             Err(_) => {
                 // The old terminal was cleared above and remains owned here;
                 // request its redraw and retry the resize on a later tick.
-                self.requeue_resize(rows);
+                self.requeue_resize(size);
                 true
             }
         }
     }
 
     pub(crate) fn resize_pending(&self) -> bool {
-        self.pump.resize_rows.load(Ordering::SeqCst) != 0
+        self.pump.resize_size.load(Ordering::SeqCst) != 0
     }
 
-    fn requeue_resize(&self, rows: u16) {
+    fn requeue_resize(&self, size: u32) {
         // A newer event wins over a failed/debounced older size.
         let _ = self
             .pump
-            .resize_rows
-            .compare_exchange(0, rows, Ordering::SeqCst, Ordering::SeqCst);
+            .resize_size
+            .compare_exchange(0, size, Ordering::SeqCst, Ordering::SeqCst);
     }
 
     /// True once this pane can no longer draw: the user asked to stop
@@ -727,7 +722,7 @@ mod tests {
         let control = PumpControl {
             stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
-            resize_rows: AtomicU16::new(0),
+            resize_size: AtomicU32::new(0),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(Some({
                 let wakes = Arc::clone(&wakes);
@@ -743,31 +738,24 @@ mod tests {
         assert_eq!(wakes.load(Ordering::SeqCst), 2);
     }
 
-    // P244 §3.2 point 3: leaves exactly one row for the shell prompt once
-    // the terminal is comfortably taller than the floor.
     #[test]
-    fn inline_viewport_height_leaves_one_row_for_the_prompt() {
-        assert_eq!(inline_viewport_height(24), 23);
-        assert_eq!(inline_viewport_height(100), 99);
-    }
-
-    // P244 blocker `inline-height-floor-noop`: below (or at) the floor, the
-    // floor actually binds — the pane claims every row the terminal has
-    // instead of reserving one for the prompt — rather than the floor being
-    // an always-discarded no-op.
-    #[test]
-    fn inline_viewport_height_floor_binds_on_a_short_terminal() {
-        assert_eq!(
-            inline_viewport_height(INLINE_HEIGHT_FLOOR),
-            INLINE_HEIGHT_FLOOR
-        );
-        assert_eq!(inline_viewport_height(5), 5);
-        assert_eq!(inline_viewport_height(2), 2);
+    fn inline_viewport_height_uses_every_terminal_row() {
+        assert_eq!(inline_viewport_height(24), 24);
+        assert_eq!(inline_viewport_height(6), 6);
+        assert_eq!(inline_viewport_height(1), 1);
     }
 
     #[test]
-    fn inline_viewport_height_never_exceeds_or_underflows_a_tiny_terminal() {
+    fn inline_viewport_height_handles_tiny_terminals() {
         assert_eq!(inline_viewport_height(0), 0);
         assert_eq!(inline_viewport_height(1), 1);
+    }
+
+    #[test]
+    fn packed_resize_tracks_width_and_height_independently() {
+        let current = pack_terminal_size(120, 24);
+        assert_ne!(current, pack_terminal_size(80, 24));
+        assert_ne!(current, pack_terminal_size(120, 40));
+        assert_eq!(unpack_terminal_size(current), (120, 24));
     }
 }
