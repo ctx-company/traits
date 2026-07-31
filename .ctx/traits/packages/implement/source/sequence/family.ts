@@ -292,6 +292,13 @@ export const repoGatesStep = sequence.check("repo-gates", {
     // record, so whatever this names is what the worker is told to re-run —
     // there is no second place a gate command can be declared and drift.
     argv: ["just", "test"],
+    // 2026-07-31: the full gate (sdk-check, format-check, clippy, workspace
+    // cargo test) takes ~10 minutes even on a warm worktree clone. With no
+    // declared ceiling the runtime's built-in command default applied and
+    // killed it every round — `ok` could then never be true, and the exit
+    // guard (`alsoRequire`) parked an otherwise-approved run at exhaustion
+    // (run-f60c3ef5, task 0046). Thirty minutes covers a cold first round.
+    timeoutMs: 1_800_000,
     output: repoGatesPassed,
 });
 

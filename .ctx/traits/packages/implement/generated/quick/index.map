@@ -86,8 +86,8 @@
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 298,
-    "end": 298
+    "start": 305,
+    "end": 305
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",

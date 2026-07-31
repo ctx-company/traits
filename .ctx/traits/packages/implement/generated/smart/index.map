@@ -46,18 +46,18 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 347,
-    "end": 347
+    "start": 354,
+    "end": 354
   },
   "prompt:building-review-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 394,
-    "end": 394
+    "start": 401,
+    "end": 401
   },
   "prompt:building-review-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 394,
-    "end": 394
+    "start": 401,
+    "end": 401
   },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
@@ -76,8 +76,8 @@
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 483,
-    "end": 483
+    "start": 490,
+    "end": 490
   },
   "prompt:task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -166,23 +166,23 @@
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 298,
-    "end": 298
+    "start": 305,
+    "end": 305
   },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 460,
-    "end": 460
+    "start": 467,
+    "end": 467
   },
   "sequence:building-body/park-report-record-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 465,
-    "end": 465
+    "start": 472,
+    "end": 472
   },
   "sequence:building-body/park-report-record-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 465,
-    "end": 465
+    "start": 472,
+    "end": 472
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -211,13 +211,13 @@
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 468,
-    "end": 468
+    "start": 475,
+    "end": 475
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then/park-report-append-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 468,
-    "end": 468
+    "start": 475,
+    "end": 475
   },
   "sequence:planning-body": {
     "file": "packages/agents/src/process.ts",

@@ -4,7 +4,7 @@
 //! those transitions: trait file resolution/loading, session persistence,
 //! declared resource evidence, and trusted local command-frame execution.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::Value;
@@ -404,6 +404,48 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             ctx_traits_core::run_info::query_text_initial_value(&loaded.trait_ref, query_selection)
     {
         initial_values.push(value);
+    }
+
+    // Every caller-supplied initial value targeting a port must name a
+    // DECLARED INPUT port. `--set phase=…` against a trait whose port had
+    // been renamed to `task` used to be accepted and silently dropped — the
+    // run started with no inputs and hung awaiting-input (ctx-gate,
+    // 2026-07-31). The trait-args path (`-- --port=value`) already refuses
+    // unknown ports with the accepted list; this closes the `--set` path
+    // the same way. Slot-qualified refs (`slot:x`) are untouched.
+    let declared_input_ports: BTreeSet<&str> = loaded
+        .trait_ref
+        .ports
+        .iter()
+        .filter(|port| {
+            matches!(
+                port.direction,
+                ctx_traits_core::r#trait::PortDirection::Input
+            )
+        })
+        .map(|port| port.id.as_str())
+        .collect();
+    for value in &initial_values {
+        if let Some(port_id) = value.ref_text.strip_prefix("port:")
+            && !declared_input_ports.contains(port_id)
+        {
+            return invalid_request(
+                "run.set",
+                format!(
+                    "unknown input port {port_id:?}; trait {} declares input port(s): {}",
+                    loaded.trait_ref.id,
+                    if declared_input_ports.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        declared_input_ports
+                            .iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                ),
+            );
+        }
     }
 
     // Standing-wall pre-flight (P414): before any assignment, worktree, or
