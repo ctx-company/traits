@@ -8,6 +8,8 @@ import { agent, schema } from "@ctx-traits/cdk";
 // specifier that names a file that actually exists on disk, and dist/*.js
 // is never consulted here. Verified: a "./process.js" specifier throws
 // ERR_MODULE_NOT_FOUND from a real `ctx traits build` invocation.
+export { FEASIBILITY_DOCTRINE, feasibilityGate, feasibilityVerdictSchema } from "./feasibility.ts";
+export type { FeasibilityGateOptions, FeasibilityVerdictValue } from "./feasibility.ts";
 export { commitTail, guardedProduction, reviewerVerdict } from "./process.ts";
 export type {
   CommitTailOptions,

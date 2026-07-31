@@ -19,6 +19,7 @@ use ctx_traits_core::procedure::session::{Session, Status};
 
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
 const WALL_LABEL: &str = "**Wall:**";
+const STATUS_LABEL: &str = "**Status:**";
 const IMPLEMENT_FAMILY_ID: &str = "implement";
 const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
 const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
@@ -46,16 +47,20 @@ pub fn is_implement_family(trait_id: &str) -> bool {
     trait_id == IMPLEMENT_FAMILY_ID || trait_id.starts_with(IMPLEMENT_FAMILY_PREFIX)
 }
 
-/// Parse the explicit `**Wall:** <id>` label, if any, out of the task file
-/// that `task_value` names among the trait's declared `task-board`
-/// directory's direct children. A trait without a declared `task-board`
-/// resource, a missing task value, an unreadable board, or a task value
-/// matching no file yields `None` — never a refusal.
-pub fn explicit_wall_id(
+/// Resolve `task_value` to the text of its task file among the trait's
+/// declared `task-board` directory's direct children, following the same
+/// resolution chain [`explicit_wall_id`] and `blocked_status_marker` both
+/// need: trait is `implement-*` → `task-board` resource → board directory
+/// → `task_file_name_in_board` → validated `presentation_path` read. A
+/// trait without a declared `task-board` resource, a missing task value,
+/// an unreadable board, or a task value matching no file yields `None` —
+/// never a refusal. Returns the file's text alongside its resolved file
+/// name, since callers building refusal messages need the name too.
+fn read_task_board_file(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
     task_value: Option<&str>,
-) -> crate::Result<Option<String>> {
+) -> crate::Result<Option<(String, String)>> {
     if !is_implement_family(trait_ref.id.as_str()) {
         return Ok(None);
     }
@@ -96,7 +101,101 @@ pub fn explicit_wall_id(
         return Ok(None);
     }
     let text = crate::read::read_text(&presented.path)?;
+    Ok(Some((text, file_name)))
+}
+
+/// Parse the explicit `**Wall:** <id>` label, if any, out of the task file
+/// that `task_value` names among the trait's declared `task-board`
+/// directory's direct children. A trait without a declared `task-board`
+/// resource, a missing task value, an unreadable board, or a task value
+/// matching no file yields `None` — never a refusal.
+pub fn explicit_wall_id(
+    trait_ref: &ctx_traits_core::Trait,
+    trait_root: &Utf8Path,
+    task_value: Option<&str>,
+) -> crate::Result<Option<String>> {
+    let Some((text, _file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
+        return Ok(None);
+    };
     Ok(text.lines().find_map(wall_label))
+}
+
+/// A task file carrying an explicit blocked-status marker in its
+/// `**Status:**` header line — the file name (for the refusal message's
+/// clearing instruction) and the offending marker line's text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedStatusMarker {
+    pub file_name: String,
+    pub status_line: String,
+}
+
+/// The deterministic dispatch refusal message for a blocked-status marker.
+pub fn blocked_status_refusal_message(marker: &BlockedStatusMarker) -> String {
+    format!(
+        "task file {} carries a blocked-status marker ({}); edit .internal/tasks/{} and remove the blocked marker once the dependency lands",
+        marker.file_name, marker.status_line, marker.file_name
+    )
+}
+
+/// Scan the task file `task_value` names for an explicit blocked marker on
+/// its `**Status:**` header line — the standalone word `blocked` or the
+/// token `deps-unmet` (word-boundary matched, so "unblocked" never trips).
+/// Deliberately conservative, mirroring the `**Wall:**` precedent:
+/// explicit-labels-only, never inferred from prose. A trait without a
+/// declared `task-board` resource, a missing task value, an unreadable
+/// board, a task value matching no file, or a `**Status:**` line without
+/// either token yields `None` — never a refusal.
+pub fn blocked_status_marker(
+    trait_ref: &ctx_traits_core::Trait,
+    trait_root: &Utf8Path,
+    task_value: Option<&str>,
+) -> crate::Result<Option<BlockedStatusMarker>> {
+    let Some((text, file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
+        return Ok(None);
+    };
+    let Some(status_line) = text.lines().find(|line| line.contains(STATUS_LABEL)) else {
+        return Ok(None);
+    };
+    if !status_line_has_blocked_marker(status_line) {
+        return Ok(None);
+    }
+    Ok(Some(BlockedStatusMarker {
+        file_name,
+        status_line: status_line.trim().to_string(),
+    }))
+}
+
+/// Whether `status_line` contains the standalone word `blocked` or the
+/// token `deps-unmet`, word-boundary matched against ASCII alphanumerics
+/// and `-`/`_` so "unblocked" or "deps-unmet-tracker" never trips.
+fn status_line_has_blocked_marker(status_line: &str) -> bool {
+    let lower = status_line.to_ascii_lowercase();
+    contains_word(&lower, "blocked") || contains_word(&lower, "deps-unmet")
+}
+
+/// Whether `haystack` contains `word` as a standalone token: the match is
+/// not immediately preceded or followed by an ASCII alphanumeric, `-`, or
+/// `_` character.
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let is_word_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    let mut start = 0;
+    while let Some(offset) = haystack[start..].find(word) {
+        let match_start = start + offset;
+        let match_end = match_start + word.len();
+        let before_ok = haystack[..match_start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !is_word_char(c));
+        let after_ok = haystack[match_end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !is_word_char(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        start = match_start + 1;
+    }
+    false
 }
 
 /// Resolve `task_value` to a file name among the board directory's direct
@@ -416,4 +515,48 @@ fn just_recipe_exists(repo_root: &Utf8Path, recipe: &str) -> bool {
         .stdin(std::process::Stdio::null())
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocked_status_line_is_flagged() {
+        assert!(status_line_has_blocked_marker("**Status:** blocked"));
+        assert!(status_line_has_blocked_marker(
+            "**Status:** deps-unmet · waiting on 0046"
+        ));
+        assert!(status_line_has_blocked_marker("**Status:** Blocked"));
+    }
+
+    #[test]
+    fn ready_status_line_is_not_flagged() {
+        assert!(!status_line_has_blocked_marker(
+            "**Status:** ready to implement"
+        ));
+        assert!(!status_line_has_blocked_marker("**Status:** in progress"));
+    }
+
+    #[test]
+    fn unblocked_does_not_trip_the_blocked_token() {
+        assert!(!status_line_has_blocked_marker(
+            "**Status:** unblocked, ready to implement"
+        ));
+    }
+
+    #[test]
+    fn deps_unmet_prefix_does_not_trip_on_unrelated_token() {
+        assert!(!status_line_has_blocked_marker(
+            "**Status:** deps-unmet-tracker-closed"
+        ));
+    }
+
+    #[test]
+    fn contains_word_matches_only_at_boundaries() {
+        assert!(contains_word("status blocked here", "blocked"));
+        assert!(!contains_word("status unblocked here", "blocked"));
+        assert!(!contains_word("status blockedout here", "blocked"));
+        assert!(contains_word("blocked", "blocked"));
+    }
 }

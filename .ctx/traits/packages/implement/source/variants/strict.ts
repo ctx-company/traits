@@ -11,6 +11,10 @@ import {
     declareTaskBoard,
     deriveParkReportStep,
     draft,
+    feasibilityPort,
+    feasibilityStep,
+    gateTimedOut,
+    gateTimedOutStopIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
@@ -26,6 +30,7 @@ import {
     task,
     taskBrief,
     taskExtractionStep,
+    taskNotFeasible,
     TASK_WRITE_SCOPE_RIDER,
     verdictSchemaFor,
     verdictSlot,
@@ -70,7 +75,7 @@ const strictProduceText = prompt.template(
     If you notice a place the draft could be improved, do NOT take it: record it as a typed deviation report entry instead — what was planned, what you actually did (which must match the draft verbatim), the rationale for the proposed improvement, and disposition "rejected — implemented verbatim". A deviation report entry never records something you actually did differently from the draft; an actual departure means the draft was unsatisfiable, and that means STOP, not a recorded deviation. Any deviation report entries from a prior round, if attached as context, must be carried forward verbatim alongside any new ones this round.
     Respect the task contract {taskBrief}; do not widen any interface to make a caller compile — fix the caller.
     A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
-    A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
+    A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
     ${TASK_WRITE_SCOPE_RIDER}
     Run the gates named in this task's own Done-when before reporting.
     Propose leftovers explicitly: end the work summary with a "Leftovers proposed" section listing any legitimate follow-on work (what — one sentence —, reason — needs-unlanded or needs-human —, needs, evidence it does not block this result standing alone, done-when), or state explicitly that none exist. Reviewers adjudicate these, not you.
@@ -106,6 +111,10 @@ const building = guardedProduction({
     minRounds: 3,
     rounds: 5,
     onExhausted: "block",
+    // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
+    // round can fix — stop here rather than grinding toward a doomed park.
+    stopIf: gateTimedOutStopIf,
+    onStop: gateTimedOut,
 });
 
 export default variant({
@@ -143,13 +152,15 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard],
+    signal: [gateTimedOut, taskNotFeasible],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end with verbatim draft execution: extract its contract, draft the approach, implement it exactly as written with a typed deviation record, refine against two independent reviewers, commit — blocking rather than adapting when the draft is unsatisfiable.",
         input: task,
-        output: [commitReport, leftoversPort, parkReportPort],
+        output: [commitReport, leftoversPort, parkReportPort, feasibilityPort],
         sequence: [
             taskExtractionStep(clerk, taskBoard),
+            feasibilityStep(smart1),
             planning,
             building,
             ...commitTail({

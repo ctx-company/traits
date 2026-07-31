@@ -1,4 +1,4 @@
-import { leftoverSchema } from "@ctx-traits/agents";
+import { feasibilityVerdictSchema, leftoverSchema } from "@ctx-traits/agents";
 import { schema, slot } from "@ctx-traits/cdk";
 import { reviewVerdict } from "./schema.ts";
 
@@ -22,5 +22,19 @@ export const verdict = slot({
     id: "review-verdict",
     schema: reviewVerdict,
     description: "smart-1's refinement verdict for the current work state.",
+});
+
+export const parkReport = slot({
+    id: "park-report",
+    schema: schema.list(reviewVerdict),
+    description:
+        "This round's typed park record (P414): empty when the round's verdict is approved, exactly one entry — the round's own verdict, copied unchanged — when it is revise. Written each round by a deterministic project step (deriveParkReportStep), never model-authored, so it can never disagree with the verdict it comes from.",
+});
+
+export const feasibility = slot({
+    id: "feasibility",
+    schema: feasibilityVerdictSchema,
+    description:
+        "Pre-build feasibility triage verdict (0047): audited once before the draft step spends anything. feasible lets the run continue; any other verdict is the park evidence for why it stopped here.",
 });
 

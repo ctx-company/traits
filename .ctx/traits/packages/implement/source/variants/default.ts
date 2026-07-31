@@ -5,6 +5,8 @@ import {
     commitReport,
     declareTaskBoard,
     familyProcedure,
+    feasibilityPort,
+    gateTimedOut,
     leftoversPort,
     ownerItemSchema,
     parkReportPort,
@@ -12,6 +14,7 @@ import {
     smart1Role,
     smart2Role,
     task,
+    taskNotFeasible,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -59,11 +62,12 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard],
+    signal: [gateTimedOut, taskNotFeasible],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
         input: task,
-        output: [commitReport, leftoversPort, parkReportPort],
+        output: [commitReport, leftoversPort, parkReportPort, feasibilityPort],
         sequence: familyProcedure({
             clerk,
             smart1,

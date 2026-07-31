@@ -11,6 +11,10 @@ import {
     declareTaskBoard,
     deriveParkReportStep,
     draft,
+    feasibilityPort,
+    feasibilityStep,
+    gateTimedOut,
+    gateTimedOutStopIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
@@ -24,6 +28,7 @@ import {
     task,
     taskBrief,
     taskExtractionStep,
+    taskNotFeasible,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -147,6 +152,10 @@ const building = guardedProduction({
     minRounds: 3,
     rounds: 5,
     onExhausted: "block",
+    // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
+    // round can fix — stop here rather than grinding toward a doomed park.
+    stopIf: gateTimedOutStopIf,
+    onStop: gateTimedOut,
 });
 
 export default variant({
@@ -182,13 +191,15 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard],
+    signal: [gateTimedOut, taskNotFeasible],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end with a research-informed draft: research, extract its contract, draft the approach, implement it, refine against two independent reviewers with typed amendments, then summarize and commit.",
         input: task,
-        output: [commitReport, leftoversPort, parkReportPort],
+        output: [commitReport, leftoversPort, parkReportPort, feasibilityPort],
         sequence: [
             taskExtractionStep(clerk, taskBoard),
+            feasibilityStep(smart1),
             researchStep,
             planning,
             building,

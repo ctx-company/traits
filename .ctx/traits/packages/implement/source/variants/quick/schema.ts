@@ -26,6 +26,14 @@ export const reviewVerdict = schema.object(
             description:
                 "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
         }),
+        escalation: schema.field(schema.enum(["none", "needs-owner"] as const), {
+            description:
+                "needs-owner if and only if the run as a whole cannot reach an approvable state — never merely because one blocker is outside this round's reach. none otherwise.",
+        }),
+        "escalation-reason": schema.field(schema.text(), {
+            description:
+                "One plain sentence: WHY the run cannot reach an approvable state and the one owner action that would clear it. Non-empty when escalation is needs-owner; an empty string (never omitted — always return the key) otherwise. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        }),
     },
     {
         description:

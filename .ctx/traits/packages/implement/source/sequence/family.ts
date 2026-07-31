@@ -2,6 +2,8 @@
 import {
     clerkRole,
     commitTail,
+    feasibilityGate,
+    feasibilityVerdictSchema,
     guardedProduction,
     LEFTOVER_DOCTRINE,
     leftoverSchema,
@@ -26,7 +28,7 @@ import type {
     SignalHandle,
     SlotHandle,
 } from "@ctx-traits/cdk";
-import { condition, operation, port, prompt, resource, schema, sequence, slot } from "@ctx-traits/cdk";
+import { condition, operation, port, prompt, resource, schema, sequence, signal, slot } from "@ctx-traits/cdk";
 
 // P450 S3, repointed at the task board (2026-07-31): the board is the
 // owner's status surface (P486) — a run never writes it at all. Progress
@@ -162,6 +164,24 @@ export const repoGatesPassed = slot({
     }),
 });
 
+/**
+ * 0047 mechanism 4: a gate the exit guard forced to `ok=false` purely by
+ * timing out is a REPO CONDITION no worker round can fix — the ceiling is
+ * fixed in the trait, not a defect in the work. Every family variant's
+ * build loop stops on this arm the round a gate times out rather than
+ * grinding toward a doomed park (measured: run-f60c3ef5's undeclared
+ * check-step timeout). `gateTimedOutStopIf` is provably mutually exclusive
+ * with every `guardedProduction` `until` — each conjoins `repoGatesPassed.ok
+ * == true`, which a timed-out gate (`command_execution_succeeded` forces
+ * `ok=false` whenever `timed_out` is true) always falsifies — so no
+ * `guard-conflict` diagnostic is reachable.
+ */
+export const gateTimedOut = signal({
+    id: "gate-timed-out",
+    description: "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix.",
+});
+export const gateTimedOutStopIf = condition.fieldEquals(repoGatesPassed, "timed-out", true);
+
 export const commitReport = port.output.text({
     id: "commit-report",
     description:
@@ -207,6 +227,50 @@ export const parkReportPort = port.output.of(schema.list(reviewVerdictSchema), {
     value: parkReport,
     format: ["structured", "table"],
 });
+
+/**
+ * 0047 mechanism 1's agent layer: a shared pre-build feasibility triage —
+ * possible, blocked, oversized, ambiguous — audited BEFORE any planning or
+ * build round spends anything. Complementary to the deterministic
+ * blocked-status-marker dispatch preflight (which catches DECLARED
+ * blockage for free): this catches UNDECLARED blockage (a referenced
+ * artifact that is simply absent) no header ever recorded.
+ */
+export const feasibility = slot({
+    id: "feasibility",
+    schema: feasibilityVerdictSchema,
+    description:
+        "Pre-build feasibility triage verdict (0047): audited once before any planning or build round spends anything. feasible lets the run continue; any other verdict is the park evidence for why it stopped here.",
+});
+export const taskNotFeasible = signal({
+    id: "task-not-feasible",
+    description:
+        "The pre-build feasibility gate found the task blocked, oversized, or ambiguous before any build work began; the run parks on the typed verdict instead of grinding toward a doomed park.",
+});
+export const feasibilityPort = port.output.of(feasibilityVerdictSchema, {
+    id: "feasibility",
+    title: "Feasibility Verdict",
+    description:
+        "Typed pre-build feasibility triage verdict (0047), for discoverability in the run's structured final outputs.",
+    optional: true,
+    value: feasibility,
+    format: ["structured", "table"],
+});
+/**
+ * Build the feasibility-gate step for one variant's own drafting/reviewer
+ * agent — a single shared builder so every adopter gets byte-identical
+ * doctrine and guard wiring; only the agent and the contract ref vary.
+ */
+export function feasibilityStep(agentHandle: AgentHandle, contract: ResourceHandle | SlotHandle = taskBrief): SequenceHandle {
+    return feasibilityGate({
+        id: "feasibility",
+        agent: agentHandle,
+        task,
+        contract,
+        output: feasibility,
+        onStop: taskNotFeasible,
+    });
+}
 
 /**
  * Build a review-verdict schema for one variant: the shared `reviewVerdictSchema`
@@ -357,7 +421,7 @@ export function buildProducePrompt(
             extraFixInstruction ? ` ${extraFixInstruction}` : ""
         }
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
-            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
+            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
             Respect the task contract {taskBrief}.
             Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the task requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
             You owe 100% of the draft's agent-doable pile. For each owner-only item in the draft's SCOPE SPLIT, produce the named substitute evidence (run the tests, dry runs, or static checks it names) — an owner-only classification is never license to skip work a shell can do. If you hit a wall the draft did not classify, flag it in your work summary as a proposed owner-item (item, reason class, why no in-run effort suffices, the substitute evidence you produced) and expect reviewers to challenge it.
@@ -400,7 +464,7 @@ export function reviewSeat(
         extraOutputs: [leftovers],
         text: prompt.template(
             `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {task} against the draft {draft}. Current work summary: {workSummary}.
-            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.${
+            {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent.${
                 deviationReport
                     ? " Recorded deviations: {deviationReport}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the draft verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER."
                     : ""
@@ -546,6 +610,13 @@ export function familyProcedure(opts: {
         buildRounds,
     } = opts;
     const parkReportSlot = parkReportOutput ?? parkReport;
+    // 0047 mechanism 4: every variant stops on a timed-out gate, merged
+    // alongside whatever early-stop arm the caller (e.g. phase's recurrence
+    // breaker) already declares — `condition.any` so either arm alone stops
+    // the loop, `onStop` carrying every signal the matching arm could be.
+    const combinedStopIf = stopIf === undefined ? gateTimedOutStopIf : condition.any([stopIf, gateTimedOutStopIf]);
+    const priorOnStop = onStop === undefined ? [] : Array.isArray(onStop) ? onStop : [onStop];
+    const combinedOnStop = [...priorOnStop, gateTimedOut];
 
     const planning: GuardedProductionHandle = guardedProduction({
         id: "planning",
@@ -575,12 +646,13 @@ export function familyProcedure(opts: {
         minRounds: 3,
         rounds: buildRounds ?? 5,
         onExhausted: "block",
-        stopIf,
-        onStop,
+        stopIf: combinedStopIf,
+        onStop: combinedOnStop,
     });
 
     return [
         taskExtractionStep(clerk, taskBoard),
+        feasibilityStep(smart1),
         planning,
         building,
         ...commitTail({
