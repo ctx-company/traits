@@ -21,6 +21,7 @@ import type {
     GuardedProductionHandle,
     GuardedProductionReviewSeat,
     PromptTemplate,
+    PromptInterpolation,
     ResourceHandle,
     SchemaHandle,
     SchemaObjectField,
@@ -38,6 +39,23 @@ export const TASK_WRITE_SCOPE_RIDER =
 // P450 S4 (P427): the model-side half of the one-turn-discipline fix.
 export const ONE_TURN_DISCIPLINE =
     `End this turn with the structured output and nothing else — no prose status line after the payload.`;
+
+// Keep named placeholder expansion inside this trait while lowering through the
+// supported tagged-template builder. This is intentionally not a CDK API.
+export function promptText(source: string, params: Record<string, PromptInterpolation>): PromptTemplate {
+    const strings: string[] = [];
+    const values: Parameters<typeof prompt.text>[1][] = [];
+    let offset = 0;
+    for (const match of source.matchAll(/\{([A-Za-z_$][A-Za-z0-9_$]*)\}/g)) {
+        const value = params[match[1]];
+        if (value === undefined) continue;
+        strings.push(source.slice(offset, match.index));
+        values.push(value);
+        offset = (match.index ?? 0) + match[0].length;
+    }
+    strings.push(source.slice(offset));
+    return prompt.text(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, ...values);
+}
 
 export function smart1Role(description: string): AgentHandle {
     return reviewerRole("smart-1", description, "Drafting and first-reviewer role.");
@@ -306,7 +324,7 @@ export function taskExtractionStep(agent: AgentHandle, taskBoard: ResourceHandle
 }
 
 export function buildDraftPromptText(): PromptTemplate {
-    return prompt.template(
+    return promptText(
         `Create an implementation draft for {task}.
             Work from the task contract {taskBrief} — a verbatim copy of the task file, your scope contract. Do not re-read the board.
             FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a file marked "detail pending"), it is not marked superseded or cancelled, every prerequisite task it names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
@@ -336,7 +354,7 @@ export function draftStep(agent: AgentHandle) {
  * review is the binding gate.
  */
 export function buildPlanReviewText(): PromptTemplate {
-    return prompt.template(
+    return promptText(
         `Review the implementation draft {draft} for {task} against the task contract {taskBrief}.
             A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the task, proposes an approach that cannot satisfy the task contract, is missing a required SCOPE SPLIT classification, or scopes in work the task does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
             Return the typed verdict (status: approved when no blocker remains, revise otherwise; blockers: the list that justifies revise).
@@ -415,7 +433,7 @@ export function buildProducePrompt(
     opts: { extraFixInstruction?: string; returnContract?: string } = {},
 ): PromptTemplate {
     const { extraFixInstruction, returnContract } = opts;
-    return prompt.template(
+    return promptText(
         `Produce the work for {task} against the draft {draft}.
             If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract.${
             extraFixInstruction ? ` ${extraFixInstruction}` : ""
@@ -455,14 +473,20 @@ export function reviewSeat(
     reviewerNumber: 1 | 2,
     variantDoctrine: string,
     verdictSlotHandle: SlotHandle,
-    opts: { deviationReport?: SlotHandle; extraInstruction?: string; reviewRubric?: ResourceHandle } = {},
+    opts: {
+        deviationReport?: SlotHandle;
+        extraInstruction?: string;
+        reviewRubric?: ResourceHandle;
+        emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
+    } = {},
 ): GuardedProductionReviewSeat {
-    const { deviationReport, extraInstruction, reviewRubric } = opts;
+    const { deviationReport, extraInstruction, reviewRubric, emits } = opts;
     return {
         agent,
         verdictSlot: verdictSlotHandle,
         extraOutputs: [leftovers],
-        text: prompt.template(
+        ...(emits === undefined ? {} : { emits }),
+        text: promptText(
             `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {task} against the draft {draft}. Current work summary: {workSummary}.
             {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent.${
                 deviationReport
@@ -551,7 +575,7 @@ export function deriveParkReportStep(
  * owner's status surface (P486).
  */
 export function buildScribeText(verdict1: SlotHandle, verdict2: SlotHandle): PromptTemplate {
-    return prompt.template(
+    return promptText(
         `The build loop for {task} has ended in dual approval and the work is being committed. The final reviewer verdicts are {verdict1} and {verdict2} — the sole authority on what was implemented (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
             Write a concise commit message for the completed work based only on the task contract {taskBrief} and those verdicts: a short subject line naming the task, then a one-paragraph summary of what the verdicts certify implemented — never work belonging to other tasks.
             Return exactly that message as your output; the runtime injects it into the git commit step.
@@ -588,6 +612,11 @@ export function familyProcedure(opts: {
     stopIf?: GuardValue;
     onStop?: SignalHandle | readonly SignalHandle[];
     reviewExtraInstruction?: string;
+    postReviewSteps?: readonly SequenceHandle[];
+    ownerAnswer?: SlotHandle;
+    ownerAnswerInstruction?: string;
+    review1Emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
+    review2Emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
     planRounds?: number;
     buildRounds?: number;
 }): readonly SequenceHandle[] {
@@ -606,6 +635,11 @@ export function familyProcedure(opts: {
         stopIf,
         onStop,
         reviewExtraInstruction,
+        postReviewSteps,
+        ownerAnswer,
+        ownerAnswerInstruction,
+        review1Emits,
+        review2Emits,
         planRounds,
         buildRounds,
     } = opts;
@@ -632,15 +666,15 @@ export function familyProcedure(opts: {
         produces: workSummary,
         produce: {
             agent: worker,
-            text: buildProducePrompt(),
-            optionalInputs: [leftovers, repoGatesPassed],
+            text: buildProducePrompt({ extraFixInstruction: ownerAnswerInstruction }),
+            optionalInputs: [...(ownerAnswer === undefined ? [] : [ownerAnswer]), leftovers, repoGatesPassed],
         },
         review: [
-            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction }),
-            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction }),
+            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction, emits: review1Emits }),
+            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction, emits: review2Emits }),
         ],
         evidence: [repoGatesStep, captureDiffStep],
-        afterReview: deriveParkReportStep([verdict1, verdict2], { parkReportSlot }),
+        afterReview: [...deriveParkReportStep([verdict1, verdict2], { parkReportSlot }), ...(postReviewSteps ?? [])],
         alsoRequire: condition.equals(repoGatesPassed.ok, true),
         carry: leftovers,
         minRounds: 3,

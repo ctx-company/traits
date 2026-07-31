@@ -101,6 +101,19 @@ format = [
 value = "slot:leftovers"
 
 [[port]]
+id = "feasibility"
+direction = "output"
+schema = "schema:feasibility-verdict"
+optional = true
+description = "Typed pre-build feasibility triage verdict (0047), for discoverability in the run's structured final outputs."
+title = "Feasibility Verdict"
+format = [
+    "structured",
+    "table",
+]
+value = "slot:feasibility"
+
+[[port]]
 id = "park-report"
 direction = "output"
 schema = "[schema:review-verdict-smart]"
@@ -151,6 +164,11 @@ hint = "git diff --stat output, excluding runtime state. No patch bodies: a dele
 id = "repo-gates-passed"
 schema = "schema:repo-gates-result"
 description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
+
+[[slot]]
+id = "feasibility"
+schema = "schema:feasibility-verdict"
+description = "Pre-build feasibility triage verdict (0047): audited once before any planning or build round spends anything. feasible lets the run continue; any other verdict is the park evidence for why it stopped here."
 
 [[slot]]
 id = "research-notes"
@@ -205,6 +223,36 @@ path = ".internal/tasks"
 root = "repo"
 hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
+
+[[schema]]
+id = "feasibility-verdict"
+description = "Typed pre-build feasibility triage: possible, blocked, oversized, or ambiguous, with tool-verified evidence and the owner action that clears a non-feasible verdict."
+
+[schema.fields.evidence]
+schema = "schema:text"
+required = true
+description = "What was checked and how: each referenced file, command, recipe, or prerequisite the task names as existing, and whether your tools confirmed it exists. Default to feasible absent proof of a problem — an unverified claim is never grounds for a non-feasible verdict on its own."
+
+[schema.fields.missing]
+schema = "[schema:text]"
+required = true
+description = "The concrete things missing or wrong, one per entry (a referenced file that does not exist, a prerequisite task not landed, the specific ambiguity). Empty when verdict is feasible."
+
+[schema.fields.owner-action]
+schema = "schema:text"
+required = true
+description = "The one owner action that would clear a non-feasible verdict — land the prerequisite, split the task, or rewrite the Done-when. Empty string (never omitted — always return the key) when verdict is feasible."
+
+[schema.fields.verdict]
+schema = "schema:text"
+required = true
+description = "feasible when the task can be built from inside this run as scoped; blocked when it depends on something not landed; oversized when the scope does not honestly fit one run's budget; ambiguous when it lacks a falsifiable Done-when and any implementation would be a guess."
+allowed = [
+    "feasible",
+    "blocked",
+    "oversized",
+    "ambiguous",
+]
 
 [[schema]]
 id = "decision"
@@ -466,6 +514,14 @@ schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
+[[signal]]
+id = "gate-timed-out"
+description = "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix."
+
+[[signal]]
+id = "task-not-feasible"
+description = "The pre-build feasibility gate found the task blocked, oversized, or ambiguous before any build work began; the run parks on the typed verdict instead of grinding toward a doomed park."
+
 [[agent]]
 id = "worker"
 description = "Implements the draft and applies reviewer fixes."
@@ -496,7 +552,7 @@ text = """
 Produce the work for {port:task} against the draft {slot:draft}.
             If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract. When a verdict carries amendments, those become the new binding contract: rewrite the draft to incorporate them exactly, then implement to the amended draft. If verdict1 and verdict2 propose amendments that genuinely conflict with each other, do NOT adjudicate between them yourself: leave the draft unamended on the conflicting point, implement neither side of the conflict, and report the conflict verbatim (both proposed amendments and why they contradict) as an open item in the work summary — the conflict must remain unresolved and blocking until the reviewers reconcile it in a later round, never silently decided here.
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
-            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change.
+            A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
             Respect the task contract {slot:task-brief}.
             Prefer the minimal, correct, robust implementation: add no validation, abstraction, or defensive code beyond what the task requires. Reuse before you write — when logic duplicates or closely resembles code that already exists, unify it: extract the shared abstraction and call it, never re-implement or copy the logic beside the original. Favor elegance and leanness over cleverness or exhaustive edge-case armor.
             You owe 100% of the draft's agent-doable pile. For each owner-only item in the draft's SCOPE SPLIT, produce the named substitute evidence (run the tests, dry runs, or static checks it names) — an owner-only classification is never license to skip work a shell can do. If you hit a wall the draft did not classify, flag it in your work summary as a proposed owner-item (item, reason class, why no in-run effort suffices, the substitute evidence you produced) and expect reviewers to challenge it.
@@ -518,7 +574,7 @@ output = [
 [prompt.building-review-1]
 text = """
 Review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
-            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
+            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Smart authority: when the plan and the observed work genuinely contradict, resolve the contradiction ONLY by producing a typed amendment record — the change, the contradiction it resolves, the rationale, and its provenance — which then becomes the binding contract going forward; an unrecorded departure is still a plan-fidelity gap, not an amendment. Amending fidelity never amends correctness: a genuine defect remains a BLOCKER under REVIEW_VERDICT_DOCTRINE no matter how the plan was amended.
             Treat a work summary that reports an unresolved cross-reviewer amendment conflict as a BLOCKER in your verdict: the conflict stays open until both reviewers reconcile it in a later round, and status must not be approved while it remains.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
@@ -549,7 +605,7 @@ output = [
 [prompt.building-review-2]
 text = """
 Independently review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
-            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it.
+            {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Smart authority: when the plan and the observed work genuinely contradict, resolve the contradiction ONLY by producing a typed amendment record — the change, the contradiction it resolves, the rationale, and its provenance — which then becomes the binding contract going forward; an unrecorded departure is still a plan-fidelity gap, not an amendment. Amending fidelity never amends correctness: a genuine defect remains a BLOCKER under REVIEW_VERDICT_DOCTRINE no matter how the plan was amended.
             Treat a work summary that reports an unresolved cross-reviewer amendment conflict as a BLOCKER in your verdict: the conflict stays open until both reviewers reconcile it in a later round, and status must not be approved while it remains.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
@@ -578,6 +634,14 @@ output = [
     "slot:review-verdict-2",
     "slot:leftovers",
 ]
+
+[prompt.feasibility-check]
+text = """Before any build work begins for {port:task}, audit it for feasibility against its contract {slot:task-brief} — read the contract, and everything it references, with your own tools. Audit the task from exactly four angles before any build work begins. POSSIBLE: can this be done at all from inside a run — the capability, authority, and tooling a shell here actually has? BLOCKED: does it depend on something not landed? For every file, command, fixture, prerequisite API, or recipe the task references as EXISTING, verify with your own tools that it actually exists in this worktree — a task that says "extend X" where X is absent is blocked, not implementable, however small the rest of the scope looks. OVERSIZED: does the scope honestly fit one run's budget, or does it need splitting into smaller tasks first? AMBIGUOUS: does the task state a falsifiable Done-when, or would any implementation here be a guess at what "done" means? Default to feasible: raise a non-feasible verdict only on evidence you actually checked, never on suspicion or scope alone. Return the typed verdict: the tool-checked evidence, every missing thing named as its own entry (empty when feasible), and the one owner action that would clear a non-feasible verdict (empty string when feasible)."""
+input = [
+    "port:task",
+    "slot:task-brief",
+]
+output = ["slot:feasibility"]
 
 [prompt.planning-produce]
 text = """
@@ -861,6 +925,17 @@ operation = "append"
 slot = "slot:park-report"
 operation = "append"
 
+[[sequence.feasibility-body.sequence]]
+id = "feasibility-check"
+title = "Audit feasibility before building"
+agent = "agent:smart-1"
+prompt = "prompt:feasibility-check"
+input = [
+    "port:task",
+    "slot:task-brief",
+]
+output = ["slot:feasibility"]
+
 [[sequence.planning-body.sequence]]
 id = "planning-produce"
 title = "Planning Produce"
@@ -895,6 +970,7 @@ output = [
     "port:commit-report",
     "port:leftovers",
     "port:park-report",
+    "port:feasibility",
 ]
 
 [[procedure.sequence]]
@@ -907,6 +983,24 @@ input = [
     "resource:task-board",
 ]
 output = ["slot:task-brief"]
+
+[[procedure.sequence]]
+id = "feasibility"
+title = "Feasibility"
+kind = "loop"
+sequence = "sequence:feasibility-body"
+max-iterations = 1
+on-stop = "signal:task-not-feasible"
+
+[procedure.sequence.until]
+slot = "slot:feasibility"
+field = "verdict"
+equals = "feasible"
+
+[procedure.sequence.stop-if.not]
+slot = "slot:feasibility"
+field = "verdict"
+equals = "feasible"
 
 [[procedure.sequence]]
 id = "research"
@@ -936,6 +1030,7 @@ kind = "loop"
 sequence = "sequence:building-body"
 max-iterations = 5
 on-exhausted = "block"
+on-stop = "signal:gate-timed-out"
 
 [[procedure.sequence.until.all]]
 
@@ -972,6 +1067,11 @@ count = "slot:leftovers"
 
 [[procedure.sequence.until.all.any]]
 iteration-at-least = 2
+
+[procedure.sequence.stop-if]
+slot = "slot:repo-gates-passed"
+field = "timed-out"
+equals = true
 
 [[procedure.sequence]]
 id = "shipping-status"

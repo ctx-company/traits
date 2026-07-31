@@ -21,6 +21,7 @@ import {
     ownerItemSchema,
     parkReport,
     parkReportPort,
+    promptText,
     repoGatesPassed,
     repoGatesStep,
     reviewSeat,
@@ -68,7 +69,7 @@ const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 // staying verbatim, or STOP rather than actually depart). Not promoted to
 // the shared kit or `implement-default/source/shared.ts` — no second
 // consumer wants verbatim-or-STOP semantics.
-const strictProduceText = prompt.template(
+const strictProduceText = promptText(
     `Implement {task} following the draft {draft} VERBATIM: execute exactly as specified, with no improvisation and no ACTUAL departure from what is written, however minor.
     If no reviewer verdict is attached to this frame, this is round 1. If one IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when while staying strictly verbatim to the draft — never introduce a new ACTUAL departure to satisfy a finding. If a blocker can only be fixed by actually departing from the draft, do not deviate: STOP and say so plainly in the work summary so the loop can exhaust and block rather than silently adapting.
     If the draft is unsatisfiable as written — it contradicts the actual code, omits a step you need, or cannot be executed against reality — STOP and say so plainly in your work summary rather than adapting around it; do not implement a modified version.

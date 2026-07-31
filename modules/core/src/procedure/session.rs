@@ -3296,6 +3296,281 @@ equals = "approved"
     }
 }
 
+/// P0047 regression fixture: an owner answer is scoped to the worker frame
+/// immediately following an ask, then a deterministic post-review projection
+/// removes it before the next refinement worker frame.
+#[cfg(test)]
+mod owner_answer_lifecycle_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"
+id = "owner-answer-lifecycle-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Owner Answer Lifecycle Fixture"
+summary = "P0047 regression fixture for one-frame owner-answer delivery."
+
+[[agent]]
+id = "reviewer"
+description = "Requests an owner answer."
+summary = "Fixture reviewer role."
+
+[[agent]]
+id = "worker"
+description = "Consumes the owner answer during refinement."
+summary = "Fixture worker role."
+
+[[slot]]
+id = "verdict"
+schema = "schema:verdict"
+description = "Typed review result that triggers the owner ask."
+
+[[slot]]
+id = "owner-answer"
+schema = "schema:text"
+description = "Answer attached only to the first resumed worker frame."
+
+[[slot]]
+id = "first-work"
+schema = "schema:text"
+description = "Progressing refinement work after the owner answer."
+
+[[slot]]
+id = "second-work"
+schema = "schema:text"
+description = "Following refinement work, after owner-answer consumption."
+
+[[schema]]
+id = "verdict"
+description = "Minimal review verdict."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "Whether the owner must answer."
+allowed = ["revise"]
+
+[prompt.review]
+text = "Request the owner decision."
+
+[prompt.ask]
+text = "What owner decision clears the recurring blocker?"
+
+[prompt.first-worker]
+text = "Apply the owner answer to the progressing refinement round."
+
+[prompt.second-worker]
+text = "Continue refinement without a stale owner answer."
+
+[procedure]
+description = "Review, ask, resume one worker frame, consume the answer, then run the following worker frame."
+
+[[procedure.sequence]]
+id = "review"
+title = "Review"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+output = ["slot:verdict"]
+
+[[procedure.sequence]]
+id = "owner-ask"
+title = "Ask owner"
+kind = "ask"
+prompt = "prompt:ask"
+output = ["slot:owner-answer"]
+
+[[procedure.sequence.when.all]]
+slot = "slot:verdict"
+field = "status"
+equals = "revise"
+
+[[procedure.sequence]]
+id = "first-worker"
+title = "Apply owner answer"
+agent = "agent:worker"
+prompt = "prompt:first-worker"
+input = [{ slot = "slot:owner-answer", optional = true }]
+output = ["slot:first-work"]
+
+[[procedure.sequence]]
+id = "owner-answer-consume"
+title = "Consume owner answer"
+kind = "project"
+output = ["slot:owner-answer"]
+
+[[procedure.sequence.projection]]
+destination = "slot:owner-answer"
+
+[procedure.sequence.projection.source]
+literal = ""
+
+[[procedure.sequence]]
+id = "second-worker"
+title = "Continue refinement"
+agent = "agent:worker"
+prompt = "prompt:second-worker"
+input = [{ slot = "slot:owner-answer", optional = true }]
+output = ["slot:second-work"]
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn start_session(trait_ref: &crate::r#trait::Trait) -> Session {
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-owner-answer-lifecycle",
+            "run-id": "run-owner-answer-lifecycle",
+            "provenance": {
+                "started-by": { "surface": "test", "caller": "owner-answer-lifecycle" },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        start_run_session(
+            trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    fn submit_current(
+        trait_ref: &crate::r#trait::Trait,
+        session: Session,
+        slot_ref: &str,
+        value: serde_json::Value,
+        agent: Option<&str>,
+    ) -> CallResponse {
+        let template = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.call_template.as_ref())
+            .expect("current frame template")
+            .clone();
+        let submission = CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots: [(slot_ref.to_string(), value)].into_iter().collect(),
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: Some(CallerProvenance {
+                surface: "test".to_string(),
+                caller: "owner-answer-lifecycle".to_string(),
+                agent: agent.map(str::to_string),
+                harness: None,
+            }),
+        };
+        if agent.is_none() {
+            submit_current_frame_set(trait_ref, session, submission)
+        } else {
+            submit_run_call(trait_ref, session, submission)
+        }
+        .expect("call is accepted")
+    }
+
+    #[test]
+    fn submitted_owner_answer_is_available_once_then_consumed_before_next_worker() {
+        let trait_ref = fixture_trait();
+        let review = submit_current(
+            &trait_ref,
+            start_session(&trait_ref),
+            "slot:verdict",
+            serde_json::json!({"status": "revise"}),
+            Some("reviewer"),
+        );
+        assert_eq!(review.session.status, Status::WaitingOnHuman);
+        assert_eq!(
+            review.session.current_sequence_item_id.as_deref(),
+            Some("owner-ask"),
+            "the recurring review result must route directly to the human ask"
+        );
+
+        let answer = "Use the approved staging credential.";
+        let resumed = submit_current(
+            &trait_ref,
+            review.session,
+            "slot:owner-answer",
+            serde_json::json!(answer),
+            None,
+        );
+        let resumed_frame = resumed
+            .session
+            .next_frame
+            .as_ref()
+            .expect("resumed worker frame");
+        assert_eq!(resumed_frame.item_id.as_deref(), Some("first-worker"));
+        assert!(
+            resumed_frame
+                .available_inputs
+                .iter()
+                .any(|input| input.ref_text == "slot:owner-answer")
+        );
+        assert!(
+            resumed
+                .session
+                .ledger
+                .accepted_slot_values
+                .iter()
+                .any(|value| {
+                    value.ref_text == "slot:owner-answer"
+                        && value.value == serde_json::json!(answer)
+                })
+        );
+
+        let following = submit_current(
+            &trait_ref,
+            resumed.session,
+            "slot:first-work",
+            serde_json::json!("progressed after applying the decision"),
+            Some("worker"),
+        );
+        let following_frame = following
+            .session
+            .next_frame
+            .as_ref()
+            .expect("following worker frame");
+        assert_eq!(following_frame.item_id.as_deref(), Some("second-worker"));
+        // Optional slots remain visible once a value has been accepted, but
+        // the deterministic projection must replace the actionable value.
+        assert!(
+            following_frame
+                .available_inputs
+                .iter()
+                .any(|input| input.ref_text == "slot:owner-answer")
+        );
+        assert!(
+            following
+                .session
+                .ledger
+                .accepted_slot_values
+                .iter()
+                .any(|value| {
+                    value.ref_text == "slot:owner-answer" && value.value == serde_json::json!("")
+                })
+        );
+        assert!(
+            following
+                .session
+                .ledger
+                .accepted_slot_values
+                .iter()
+                .all(|value| {
+                    value.ref_text != "slot:owner-answer"
+                        || value.value != serde_json::json!(answer)
+                }),
+            "the following worker frame must not receive the prior owner answer"
+        );
+    }
+}
+
 /// P399 regression fixtures: a loop's `on-exhausted` disposition end to end
 /// (validate → runtime → emitted-signal evidence), reusing the correction
 /// retry tests' full-session TOML fixture pattern above rather than a new

@@ -6,6 +6,7 @@ import type {
   SchemaHandle,
   SequenceFunction,
   SequenceHandle,
+  SignalHandle,
   SlotHandle,
   SlotWithFields,
 } from "@ctx-traits/cdk";
@@ -87,6 +88,8 @@ export type GuardedProductionReviewSeat = GuardedProductionRole & {
    * interpolates, since an absent value would leave the token unresolved.
    */
   readonly extraInputs?: readonly (SlotHandle | OptionalSlotRead)[];
+  /** Optional conditional signal emitted with this review's accepted output. */
+  readonly emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue; };
 };
 
 export type GuardedProductionOptions<Produces> = {
@@ -213,6 +216,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
       text: seat.text,
       output: seat.extraOutputs ? [verdicts[index], ...seat.extraOutputs] : verdicts[index],
       input: [input.optional(verdicts[index]), ...(seat.extraInputs ?? [])],
+      ...(seat.emits === undefined ? {} : { emits: seat.emits }),
     })
   );
   const sealed = carry === undefined ? undefined : slot.boolean(`${id}-sealed`);

@@ -19,6 +19,7 @@ import {
     leftoversPort,
     ONE_TURN_DISCIPLINE,
     ownerItemSchema,
+    promptText,
     repoGatesPassed,
     repoGatesStep,
     reviewSeat,
@@ -95,7 +96,7 @@ const parkReportPort = port.output.of(schema.list(verdictSchema), {
 
 // implement-smart-only: the research-informed draft produce text (single
 // consumer — not promoted to the shared kit or family shared.ts).
-const smartDraftText = prompt.template(
+const smartDraftText = promptText(
     `Create an implementation draft for {task}, informed by your research {researchNotes}.
     Work from the task contract {taskBrief} — a verbatim copy of the task file, your scope contract. Do not re-read the board.
     FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a file marked "detail pending"), it is not marked superseded or cancelled, every prerequisite task it names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.

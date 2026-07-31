@@ -4,7 +4,7 @@
 // extraction/draft/implement/refinement-loop/commit sequence here — that
 // machinery lives once in ../sequence/family.ts.
 import { blockerSchema, DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, method, port, procedure, resource, schema, signal, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { condition, intent, method, operation, port, procedure, prompt, resource, schema, sequence, signal, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
 import {
     clerk,
     commitReport,
@@ -89,36 +89,71 @@ const verdictSchema = verdictSchemaFor("default", {
     }),
     "recurrence-rounds": schema.field(schema.integer(), {
         description:
-            "The number of consecutive rounds the longest-standing still-open blocker has now been raised: 1 for a first-raised blocker, 0 when blockers is empty. Derived from the same prior-round comparison that sets a blocker's recurrence-of.",
+            "The number of consecutive rounds the longest-standing still-open blocker has had exactly the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty. Reset it to 1 when any carried blocker step changes status or the blocker clears; never infer it from prose.",
+    }),
+    "stall-question": schema.field(schema.text(), {
+        description:
+            `Empty while recurrence-rounds is below ${RECURRENCE_BREAKER_ROUNDS}. At or above that threshold, one concrete, owner-answerable question that names the still-open blocker and the decision or access needed to clear it.`,
     }),
 });
 const verdict1 = verdictSlot("review-verdict-1", "smart-1", verdictSchema);
 const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 
-// P334: the recurrence breaker's own terminal signal, distinct from
-// `refinement-exhausted`/`max-iterations-exhausted`, so a park caused by a
-// twice-unresolved blocker reads as its own named reason in the ledger, the
-// receipt, and `run-status`.
-const recurringBlockerUnresolved = signal({
-    id: "recurring-blocker-unresolved",
-    description: "Either reviewer's verdict still recurs the same unresolved blocker after the breaker's round threshold; the loop stops here rather than spending the rest of its budget.",
+const stallQuestion = slot.text({
+    id: "stall-question",
+    description: "The selected concrete owner question for a zero-delta recurring blocker, projected deterministically from reviewer 1 when both reviewers trip together.",
+});
+const ownerAnswer = slot.text({
+    id: "owner-answer",
+    description: "The owner's answer to the selected phase stall question, attached optionally to the next worker frame.",
+});
+const ownerInputRequired = signal({
+    id: "owner-input-required",
+    description: "A phase reviewer has reached the zero-delta recurrence threshold and requires one owner answer before refinement can resume.",
 });
 
-// P334: mutually exclusive with `tripleGreen` by construction — each
-// disjunct conjoins with that reviewer's own `status == "revise"`, which a
-// `tripleGreen`-matching (i.e. both-approved) round always falsifies, so the
-// runtime can never see both `until` and `stop-if` match in the same
-// evaluation (which would otherwise block as `guard-conflict`).
-const recurrenceStopIf = condition.any([
-    condition.all([
-        condition.fieldEquals(verdict1, "status", "revise"),
-        condition.fieldGte(verdict1, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
-    ]),
-    condition.all([
-        condition.fieldEquals(verdict2, "status", "revise"),
-        condition.fieldGte(verdict2, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
-    ]),
+const recurrenceThreshold1 = condition.all([
+    condition.fieldEquals(verdict1, "status", "revise"),
+    condition.fieldGte(verdict1, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
 ]);
+const recurrenceThreshold2 = condition.all([
+    condition.fieldEquals(verdict2, "status", "revise"),
+    condition.fieldGte(verdict2, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
+]);
+const recurrenceThreshold = condition.any([
+    recurrenceThreshold1,
+    recurrenceThreshold2,
+]);
+
+// This runs after park-report projection but before the loop guard. The ask
+// stays inside the matching branch so a persistent signal cannot expose it in
+// an unrelated later round.
+const recurrenceOwnerQuestion = sequence.when("recurrence-owner-question", {
+    if: recurrenceThreshold,
+    then: [
+        sequence.when("recurrence-question-reviewer-1", {
+            if: recurrenceThreshold1,
+            then: [
+                sequence.project("recurrence-question-project-reviewer-1", {
+                    projections: [{ source: verdict1, field: "stall-question", destination: stallQuestion }],
+                }),
+            ],
+        }),
+        sequence.when("recurrence-question-reviewer-2", {
+            if: condition.all([condition.not(recurrenceThreshold1), recurrenceThreshold2]),
+            then: [
+                sequence.project("recurrence-question-project-reviewer-2", {
+                    projections: [{ source: verdict2, field: "stall-question", destination: stallQuestion }],
+                }),
+            ],
+        }),
+        sequence.ask("recurrence-owner-answer", {
+            prompt: prompt.text`The implementation is stalled on a recurring blocker. Owner answer required: ${stallQuestion}`,
+            when: ownerInputRequired,
+            output: ownerAnswer,
+        }),
+    ],
+});
 
 /**
  * This variant's own park-report list, declared locally (not the shared
@@ -180,7 +215,7 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard, reviewRubric],
-    signal: [recurringBlockerUnresolved, gateTimedOut, taskNotFeasible],
+    signal: [ownerInputRequired, gateTimedOut, taskNotFeasible],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
@@ -198,10 +233,27 @@ export default variant({
             verdict2,
             reviewRubric,
             parkReportOutput: parkReport,
-            stopIf: recurrenceStopIf,
-            onStop: recurringBlockerUnresolved,
+            postReviewSteps: [
+                // An answer is optional context for only the next worker
+                // frame. Clear the accepted value before choosing a new ask.
+                sequence.project("owner-answer-consume", {
+                    projections: [{ source: operation.literal(""), destination: ownerAnswer }],
+                }),
+                sequence.project("recurrence-question-clear", {
+                    projections: [{ source: operation.literal(""), destination: stallQuestion }],
+                }),
+                recurrenceOwnerQuestion,
+            ],
+            ownerAnswer,
+            ownerAnswerInstruction:
+                "When a non-empty owner answer is attached to this frame, apply it to the named recurring stall before continuing other blocker work; record how it resolved or narrowed that stall in the work summary.",
+            review1Emits: { signal: ownerInputRequired, when: recurrenceThreshold1 },
+            review2Emits: {
+                signal: ownerInputRequired,
+                when: condition.all([condition.not(recurrenceThreshold1), recurrenceThreshold2]),
+            },
             reviewExtraInstruction:
-                `Report "recurrence-rounds": the number of consecutive rounds the longest-standing still-open blocker has now been raised (1 for a first-raised blocker, 0 when blockers is empty) — the same comparison that sets a blocker's recurrence-of. The loop terminates early, before the iteration budget, once either reviewer reports a still-revise verdict with recurrence-rounds >= ${RECURRENCE_BREAKER_ROUNDS}.`,
+                `Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status. Set "stall-question" to empty below ${RECURRENCE_BREAKER_ROUNDS}; at or above it, ask one concrete owner-answerable question naming the blocker and the decision or access needed.`,
         }),
     }),
 });
