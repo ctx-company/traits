@@ -63,7 +63,7 @@ import type {
   TraitFamilyHandle,
   TraitHandle,
 } from "./handles.js";
-import { recordDiagnostic, withMeta } from "./meta.js";
+import { withMeta } from "./meta.js";
 import type { CdkDiagnostic, SourceMap } from "./meta.js";
 import {
   canonicalTraitFields,
@@ -643,42 +643,6 @@ export const format = callableNamespace(GeneratedFormat);
  * @example `trait("review", { intent: { require: [intent("cite-evidence")] } })`
  */
 export const intent = callableIntentNamespace(GeneratedIntent);
-
-function deprecatedNamespace<T extends object>(namespace: T, name: string): T {
-  return new Proxy(namespace, {
-    get(target, property, receiver) {
-      // Proxy reads of function metadata and symbols are implementation
-      // details, not use of a deprecated vocabulary namespace.
-      if (typeof property === "string" && property in target && !["length", "name", "prototype"].includes(property)) {
-        recordDiagnostic(
-          "cdk-pascalcase-vocabulary",
-          name,
-          `PascalCase vocabulary namespace ${name} is deprecated; use the lowercase vocabulary namespace`,
-        );
-      }
-      return Reflect.get(target, property, receiver);
-    },
-  });
-}
-
-/** @deprecated Use {@link tone} — same object, kept for source compatibility. */
-export const Tone = deprecatedNamespace(tone, "Tone");
-/** @deprecated Use {@link method} — same object, kept for source compatibility. */
-export const Method = deprecatedNamespace(method, "Method");
-/** @deprecated Use {@link verbosity} — same object, kept for source compatibility. */
-export const Verbosity = deprecatedNamespace(verbosity, "Verbosity");
-/** @deprecated Use {@link directness} — same object, kept for source compatibility. */
-export const Directness = deprecatedNamespace(directness, "Directness");
-/** @deprecated Use {@link scopeControl} — same object, kept for source compatibility. */
-export const ScopeControl = deprecatedNamespace(scopeControl, "ScopeControl");
-/** @deprecated Use {@link initiative} — same object, kept for source compatibility. */
-export const Initiative = deprecatedNamespace(initiative, "Initiative");
-/** @deprecated Use {@link uncertainty} — same object, kept for source compatibility. */
-export const Uncertainty = deprecatedNamespace(uncertainty, "Uncertainty");
-/** @deprecated Use {@link format} — same object, kept for source compatibility. */
-export const Format = deprecatedNamespace(format, "Format");
-/** @deprecated Use {@link intent} — same object, kept for source compatibility. */
-export const Intent = deprecatedNamespace(intent, "Intent");
 
 type PascalCase<Key extends string> = Key extends `${infer Head}${infer Rest}` ? `${Uppercase<Head>}${Rest}` : Key;
 type ScreamingSnakeCase<Key extends string> = Key extends `${infer Head}${infer Rest}`

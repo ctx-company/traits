@@ -214,24 +214,15 @@ export type { SessionBinding, SessionFunction, SessionLifecycle, SessionOptions 
 export { operation, slot } from "./slot.js";
 export type { LiteralProjectionSource, OperationFunction, SlotFields, SlotFunction } from "./slot.js";
 export {
-  Directness,
   directness,
-  Format,
   format,
-  Initiative,
   initiative,
-  Intent,
   intent,
-  Method,
   method,
-  ScopeControl,
   scopeControl,
-  Tone,
   tone,
   trait,
-  Uncertainty,
   uncertainty,
-  Verbosity,
   verbosity,
 } from "./trait.js";
 export type {

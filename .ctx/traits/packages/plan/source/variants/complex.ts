@@ -1,4 +1,4 @@
-import { Method, procedure, prompt, sequence, slot, Tone, variant, Verbosity } from "@ctx-traits/cdk";
+import { method, procedure, prompt, sequence, slot, tone, variant, verbosity } from "@ctx-traits/cdk";
 import { planningAgents } from "../agent.ts";
 import { planData } from "../data.ts";
 import { refineTaskStep, splitTasksStep } from "../sequence/planning.ts";
@@ -16,7 +16,7 @@ export default variant({
     name: "Plan (Complex)",
     summary: "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/.",
     metadata: { tag: ["task", "plan", "bootstrap", "planning", "review"] },
-    behavior: { tone: [Tone.direct, Tone.technical], method: Method.evidenceFirst, verbosity: Verbosity.brief },
+    behavior: { tone: [tone.direct, tone.technical], method: method.evidenceFirst, verbosity: verbosity.brief },
     intent: { focus: ["specific", "correctness"], avoid: ["speculative-claim", "scope-creep"] },
     procedure: procedure({
         description: "Refine the described task against the codebase, split it into small task files, independently critique them, apply one bounded revise pass, and write them to .internal/tasks/ so the implement family can run.",

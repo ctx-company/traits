@@ -1,5 +1,5 @@
 import { blockerSchema, DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { Intent, Method, procedure, variant, Tone, Verbosity } from "@ctx-traits/cdk";
+import { intent, method, procedure, variant, tone, verbosity } from "@ctx-traits/cdk";
 import {
     clerk,
     commitReport,
@@ -32,29 +32,29 @@ export default variant({
         "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
     behavior: {
-        tone: [Tone.direct, Tone.technical],
-        method: Method.evidenceFirst,
-        verbosity: Verbosity.brief,
+        tone: [tone.direct, tone.technical],
+        method: method.evidenceFirst,
+        verbosity: verbosity.brief,
     },
     intent: {
         require: [
-            Intent.focus.correctness,
+            intent.focus.correctness,
             { id: "robustness", summary: "Prefer changes that remain correct under ordinary failure and boundary conditions." },
             { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the task contract." },
             { id: "elegance", summary: "Favor clear, cohesive designs over clever or incidental complexity." },
-            Intent.require.leanness,
-            Intent.require.reuseOverReimplement,
-            Intent.require.reviewBeforeFinal,
-            Intent.require.boundedRefinement,
+            intent.require.leanness,
+            intent.require.reuseOverReimplement,
+            intent.require.reviewBeforeFinal,
+            intent.require.boundedRefinement,
         ],
         avoid: [
-            Intent.avoid.accretion,
-            Intent.avoid.overEngineering,
-            Intent.avoid.goldPlating,
-            Intent.avoid.duplication,
-            Intent.avoid.scopeCreep,
-            Intent.avoid.unboundedLoop,
-            Intent.avoid.rubberStampReview,
+            intent.avoid.accretion,
+            intent.avoid.overEngineering,
+            intent.avoid.goldPlating,
+            intent.avoid.duplication,
+            intent.avoid.scopeCreep,
+            intent.avoid.unboundedLoop,
+            intent.avoid.rubberStampReview,
         ],
     },
     schema: [blockerSchema, ownerItemSchema],

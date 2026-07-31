@@ -1,4 +1,4 @@
-import { Method, procedure, prompt, sequence, Tone, variant, Verbosity } from "@ctx-traits/cdk";
+import { method, procedure, prompt, sequence, tone, variant, verbosity } from "@ctx-traits/cdk";
 import { planningAgents } from "../agent.ts";
 import { planData } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resources/task-format.ts";
@@ -14,7 +14,7 @@ export default variant({
     name: "Plan (Direct)",
     summary: "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement.",
     metadata: { tag: ["task", "plan", "bootstrap", "planning"] },
-    behavior: { tone: [Tone.direct, Tone.technical], method: Method.evidenceFirst, verbosity: Verbosity.brief },
+    behavior: { tone: [tone.direct, tone.technical], method: method.evidenceFirst, verbosity: verbosity.brief },
     intent: { focus: ["specific", "correctness"], avoid: ["speculative-claim", "scope-creep"] },
     procedure: procedure({
         description: "Format the described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/.",

@@ -1,5 +1,5 @@
 import { deviationReportSchema, STRICT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, Intent, procedure, prompt, schema, sequence, slot, variant } from "@ctx-traits/cdk";
+import { condition, intent, procedure, prompt, schema, sequence, slot, variant } from "@ctx-traits/cdk";
 import { agreedDesign, commitReport, gitStatus, target, workSummary } from "../data.ts";
 import { commitMessageStep, gitCommitStep, gitStageStep, guardedCommitTail } from "../sequence/commit.ts";
 import { designStep } from "../sequence/design.ts";
@@ -34,13 +34,13 @@ export default variant({
     resource: [architectureDialect, smellCatalog],
     intent: {
         require: [
-            Intent.require.reviewBeforeFinal,
-            Intent.require.boundedRefinement,
+            intent.require.reviewBeforeFinal,
+            intent.require.boundedRefinement,
             { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
             { id: "verbatim-design-execution", summary: "Execute the agreed design exactly as written; record every departure instead of silently adapting." },
         ],
         avoid: [
-            Intent.avoid.rubberStampReview,
+            intent.avoid.rubberStampReview,
             { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
             { id: "silent-plan-deviation", summary: "Never adapt around an unsatisfiable or contradicted design without recording and disposing of the deviation." },
         ],

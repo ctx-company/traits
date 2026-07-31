@@ -1,5 +1,5 @@
 import { blockerSchema } from "@ctx-traits/agents";
-import { Intent, Method, procedure, trait } from "@ctx-traits/cdk";
+import { intent, method, procedure, trait } from "@ctx-traits/cdk";
 import { buildAgents } from "./agents.ts";
 import { buildSchemas } from "./schemas.ts";
 import { buildSlots } from "./slots.ts";
@@ -69,11 +69,11 @@ export function autoResearch(variant: AutoResearchVariant) {
         },
         intent: {
             require: benchmarkRefactor
-                ? [Intent.require.reviewBeforeFinal, Intent.Correctness]
-                : [Intent.Correctness, Intent.GatesGreenBeforeCommit],
+                ? [intent.require.reviewBeforeFinal, intent.Correctness]
+                : [intent.Correctness, intent.GatesGreenBeforeCommit],
         },
         behavior: {
-            method: [Method.EvidenceFirst],
+            method: [method.EvidenceFirst],
         },
         agent: benchmarkRefactor ? [brSmart1!, brWorker!] : [worker, proposer, summarizer],
         schema: [

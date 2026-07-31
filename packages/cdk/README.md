@@ -24,16 +24,16 @@ Source: https://github.com/ctx-company/ctx-traits (`packages/cdk`).
 ```ts
 import {
   agent,
-  Method,
+  method,
   port,
   procedure,
   prompt,
   sequence,
   slot,
   toDraftJson,
-  Tone,
+  tone,
   trait,
-  Verbosity,
+  verbosity,
 } from "@ctx-traits/cdk";
 
 const codeDiff = port.input.text({ id: "code-diff" });
@@ -49,9 +49,9 @@ const prRiskTriage = trait({
   name: "PR Risk Triage",
   description: "Turns a code diff into one concise PR review comment.",
   behavior: {
-    tone: [Tone.direct, Tone.technical],
-    method: Method.evidenceFirst,
-    verbosity: Verbosity.brief,
+    tone: [tone.direct, tone.technical],
+    method: method.evidenceFirst,
+    verbosity: verbosity.brief,
   },
   agents: [worker, reviewer],
   procedure: procedure({

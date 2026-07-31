@@ -1,6 +1,6 @@
 import { blockerSchema, INTEGRITY_DOCTRINE, reviewerRole, QUICK_VARIANT_DOCTRINE, scribeRole, workerRole } from "@ctx-traits/agents";
 import {
-    Intent,
+    intent,
     port,
     procedure,
     prompt,
@@ -103,11 +103,11 @@ export default variant({
     metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
     intent: {
         require: [
-            Intent.require.reviewBeforeFinal,
+            intent.require.reviewBeforeFinal,
             { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
         ],
         avoid: [
-            Intent.avoid.rubberStampReview,
+            intent.avoid.rubberStampReview,
             { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
         ],
     },

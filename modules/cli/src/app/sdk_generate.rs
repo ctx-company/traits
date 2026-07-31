@@ -678,23 +678,15 @@ fn validate_sources(source_root: &Path, model: &Model) -> crate::Result<()> {
         "normalize.ts explicitDeclarations",
     )?;
     // P331 wrapped these three re-exports in a callable namespace (`tone`,
-    // `method`, `verbosity`) so the uppercase alias now points at that
-    // namespace rather than directly at the generated const; the namespace
-    // itself is what still traces to the generated value.
-    validate_reexported_builtin(&trait_source, "Tone", "tone", "trait.ts Tone")?;
+    // `method`, `verbosity`); 0046 deleted the deprecated PascalCase shims
+    // (`Tone`/`Method`/`Verbosity`) from trait.ts entirely, so only the
+    // namespace binding itself remains to trace to the generated value.
     validate_callable_namespace_binding(&trait_source, "tone", "GeneratedTone", "trait.ts tone")?;
-    validate_reexported_builtin(&trait_source, "Method", "method", "trait.ts Method")?;
     validate_callable_namespace_binding(
         &trait_source,
         "method",
         "GeneratedMethod",
         "trait.ts method",
-    )?;
-    validate_reexported_builtin(
-        &trait_source,
-        "Verbosity",
-        "verbosity",
-        "trait.ts Verbosity",
     )?;
     validate_callable_namespace_binding(
         &trait_source,
@@ -810,31 +802,8 @@ fn read_source(path: PathBuf) -> crate::Result<String> {
     })
 }
 
-fn validate_reexported_builtin(
-    source: &str,
-    const_name: &str,
-    binding: &str,
-    label: &str,
-) -> crate::Result<()> {
-    // P459 will delete the PascalCase shims (`Tone`, `Method`, `Verbosity`)
-    // entirely; until then, `deprecatedNamespace` wraps the direct
-    // re-export by one hop. Accept either shape here, but keep the
-    // exactly-one cardinality so a duplicate still fails. Dated 2026-07-26.
-    let direct = format!("export const {const_name} = {binding};");
-    let deprecated =
-        format!("export const {const_name} = deprecatedNamespace({binding}, \"{const_name}\");");
-    let count = source.matches(&direct).count() + source.matches(&deprecated).count();
-    if count != 1 {
-        return Err(crate::Error::Command {
-            message: format!("{label}: expected exactly one `{direct}` or `{deprecated}`"),
-        });
-    }
-    Ok(())
-}
-
-/// Companion check for a callable-namespace re-export (see
-/// [`validate_reexported_builtin`]): confirms `const_name` is itself built
-/// from the generated const via `callableNamespace(...)`, so the alias
+/// Confirms `const_name` is itself built from the generated const via
+/// `callableNamespace(...)`, so the alias
 /// chain still traces to the generated vocabulary.
 fn validate_callable_namespace_binding(
     source: &str,

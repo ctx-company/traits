@@ -1,4 +1,4 @@
-import { agent, Method, port, procedure, prompt, sequence, slot, Tone, trait, Verbosity } from "@ctx-traits/cdk";
+import { agent, method, port, procedure, prompt, sequence, slot, tone, trait, verbosity } from "@ctx-traits/cdk";
 
 const codeDiff = port.input.text({ id: "code-diff" });
 const changeSummary = slot.text("change-summary");
@@ -13,9 +13,9 @@ export const prRiskTriage = trait({
   name: "PR Risk Triage",
   description: "Turns a code diff into one concise PR review comment.",
   behavior: {
-    tone: [Tone.direct, Tone.technical],
-    method: Method.evidenceFirst,
-    verbosity: Verbosity.brief,
+    tone: [tone.direct, tone.technical],
+    method: method.evidenceFirst,
+    verbosity: verbosity.brief,
   },
   agents: [worker, reviewer],
   procedure: procedure({

@@ -1,5 +1,5 @@
 import { planAmendmentSchema, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, Intent, procedure, prompt, schema, sequence, slot, variant } from "@ctx-traits/cdk";
+import { condition, intent, procedure, prompt, schema, sequence, slot, variant } from "@ctx-traits/cdk";
 import { agreedDesign, commitReport, gitStatus, survey, target, workSummary } from "../data.ts";
 import { commitMessageStep, gitCommitStep, gitStageStep, guardedCommitTail } from "../sequence/commit.ts";
 import { designStep, implementStep } from "../sequence/design.ts";
@@ -42,13 +42,13 @@ export default variant({
     resource: [architectureDialect, smellCatalog],
     intent: {
         require: [
-            Intent.require.reviewBeforeFinal,
-            Intent.require.boundedRefinement,
+            intent.require.reviewBeforeFinal,
+            intent.require.boundedRefinement,
             { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
         ],
         avoid: [
-            Intent.avoid.unboundedLoop,
-            Intent.avoid.rubberStampReview,
+            intent.avoid.unboundedLoop,
+            intent.avoid.rubberStampReview,
             { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
             { id: "taste-only-findings", summary: "Do not block on subjective style without a concrete behavioral consequence." },
         ],

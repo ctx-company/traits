@@ -2,8 +2,8 @@ import {
     agent,
     condition,
     dependency,
-    Intent,
-    Method,
+    intent,
+    method,
     port,
     procedure,
     prompt,
@@ -12,9 +12,9 @@ import {
     schema,
     sequence,
     slot,
-    Tone,
+    tone,
     trait,
-    Verbosity,
+    verbosity,
 } from "@ctx-traits/cdk";
 
 // --- Agents: roles as data. The host binds each to a model/harness in ctx.toml,
@@ -164,13 +164,13 @@ export default trait("guarded-change", {
         source: { path: "../engineering-standards" },
     }),
     behavior: {
-        tone: [Tone.direct, Tone.technical],
-        method: Method.evidenceFirst,
-        verbosity: Verbosity.brief,
+        tone: [tone.direct, tone.technical],
+        method: method.evidenceFirst,
+        verbosity: verbosity.brief,
     },
     intent: {
-        require: [Intent.require.reviewBeforeFinal, Intent.require.gatesGreenBeforeCommit, Intent.require.boundedRefinement, Intent.require.roleAttributedOutput],
-        avoid: [Intent.avoid.unboundedLoop, Intent.avoid.rubberStampReview, Intent.avoid.weakenTestsToPass, Intent.avoid.tasteOnlyBlocking],
+        require: [intent.require.reviewBeforeFinal, intent.require.gatesGreenBeforeCommit, intent.require.boundedRefinement, intent.require.roleAttributedOutput],
+        avoid: [intent.avoid.unboundedLoop, intent.avoid.rubberStampReview, intent.avoid.weakenTestsToPass, intent.avoid.tasteOnlyBlocking],
     },
     resource: [reviewRubric, doneChecklist],
     procedure: procedure({

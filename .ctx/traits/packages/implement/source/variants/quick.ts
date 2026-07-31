@@ -12,7 +12,7 @@
 // reviewer says "not yet" and the worker goes again, until it is satisfied or
 // the budget is gone.
 import { commitTail, guardedProduction } from "@ctx-traits/agents";
-import { condition, Intent, Method, procedure, prompt, sequence, variant, Tone, Verbosity } from "@ctx-traits/cdk";
+import { condition, intent, method, procedure, prompt, sequence, variant, tone, verbosity } from "@ctx-traits/cdk";
 
 import { captureDiffStep, repoGatesPassed, repoGatesStep, reviewDiff } from "../sequence/family.ts";
 import { agent } from "./quick/agent.ts";
@@ -96,21 +96,21 @@ export default variant({
         "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "lean"] },
     behavior: {
-        tone: [Tone.direct, Tone.technical],
-        method: Method.evidenceFirst,
-        verbosity: Verbosity.brief,
+        tone: [tone.direct, tone.technical],
+        method: method.evidenceFirst,
+        verbosity: verbosity.brief,
     },
     intent: {
         require: [
-            Intent.focus.correctness,
-            Intent.require.leanness,
-            Intent.require.reuseOverReimplement,
-            Intent.require.reviewBeforeFinal,
+            intent.focus.correctness,
+            intent.require.leanness,
+            intent.require.reuseOverReimplement,
+            intent.require.reviewBeforeFinal,
         ],
         avoid: [
-            Intent.avoid.overEngineering,
-            Intent.avoid.scopeCreep,
-            Intent.avoid.rubberStampReview,
+            intent.avoid.overEngineering,
+            intent.avoid.scopeCreep,
+            intent.avoid.rubberStampReview,
         ],
     },
     resource: [resource.taskBoard],
