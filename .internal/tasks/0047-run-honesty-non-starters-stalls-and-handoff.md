@@ -1,0 +1,92 @@
+# 0047 — Run honesty: refuse non-starters, ask on stalls, hand off the unsatisfiable
+
+**Status:** ready to implement · **Raised:** 2026-07-31 (owner design discussion; the amnesia
+class is fixed by circulation + step ledgers — everything below targets the remaining class,
+*churn from impossibility*: runs that could never succeed spending their full budget honestly)
+
+Motivating failures, all from 2026-07-31: a 10-round abstention park on a task whose
+prerequisite wasn't landed (run-41e8dc0e, ctx-gate); a gate that no worker round could ever
+make pass burning rounds toward a doomed park (run-f60c3ef5, the undeclared check-step
+timeout); both silent until a human went digging.
+
+## 1. Feasibility gate — a built-in triage check before the loop spends anything
+
+A shared, built-in prompt/step in `@ctx-traits/agents` (schema + doctrine + step builder,
+adoptable by every family): given the task contract and draft, an agent audits it from four
+angles BEFORE the build loop starts:
+
+- **Possible?** — can this be done at all from inside a run (capability, authority, tooling)?
+- **Blocked?** — does it depend on something not landed? Verify, with tools, that everything
+  the task *references as existing* actually exists in the worktree: named files, commands,
+  fixtures, prerequisite APIs, recipes. A task that says "extend X" where X is absent is
+  blocked, not implementable.
+- **Oversized?** — does the scope honestly fit one run's budget, or does it need splitting?
+- **Ambiguous?** — does it state a falsifiable Done-when, or would any implementation be a
+  guess?
+
+Output is a typed verdict: `feasible | blocked | oversized | ambiguous`, each non-feasible
+class carrying evidence (what was checked, what is missing) and the one owner action that
+would clear it. Non-feasible → the run stops THERE (stopIf on the typed field) and parks
+with that verdict as the park report — one cheap frame instead of ten grind rounds. This
+absorbs and typifies the prose `CONTRACT PROBLEM:` convention in the draft prompts.
+
+Companion deterministic layer (zero model cost, wall-preflight shape): dispatch refuses a
+task whose file carries an explicit blocked/deps-unmet marker in its Status header, with one
+actionable sentence. Deleting the marker is precisely the owner decision the refusal asks
+for — proven by today's ctx-gate sequence (run-41e8dc0e refused-by-grinding; the redispatch
+after the owner stripped the header delivered and landed).
+
+## 2. Same-problem stall — detect zero progress, then ASK instead of parking
+
+The step ledger makes "going back and forth on the same thing" measurable in data: a carried
+blocker (recurrence-of set) whose step statuses show ZERO delta across N consecutive rounds.
+The phase variant's typed `recurrence-rounds` + breaker stopIf is the existing half.
+
+The missing half is the owner's "user opinion request": harvest the `ask` step design from
+the retired `.plans/EXECUTION_PLAN.md` (new step kind `ask` + a frame kind that dispatches
+NO agent; session state `waiting-on-human`, distinct from `awaiting-input`; the raising step
+writes its question into a slot, the ask step's prompt interpolates it; the answer binds to
+the step's declared output slot through the ordinary schema-validated sink path). Then a
+tripped breaker PAUSES the run with one concrete question instead of a terminal park, and
+the owner's answer re-enters the loop as a typed input.
+
+## 3. Handoff channel for quick — the workhorse has no escalation
+
+Dual-review variants already hand off honestly: owner-items (item, reason class, substitute
+evidence, close-out) and leftovers (`needs-human`). Quick's verdict schema has NO escalation
+field — its only exits are approved or 10-round park. Add the minimal typed channel:
+`escalation: none | needs-owner` + a one-sentence reason on quick's verdict, surfaced in the
+park report, without un-leaning quick (no owner-items machinery, no scope split).
+
+## 4. Gate honesty — timed-out is not failed
+
+The gate result already carries `timed-out` as a typed field; the exit guard and the
+reviewer contract treat it identically to a real failure. A timed-out gate is a REPO
+CONDITION no worker round can fix (measured: the 0046 first run ground toward a doomed park
+until the owner intervened). Distinguish it end to end: the exit guard / loop routing treats
+timed-out as its own outcome — park immediately with reason "gate exceeds its declared
+ceiling" (or route into mechanism 2's ask), never as another fix round; the reviewer
+doctrine stops asking workers to repair it.
+
+## Watch
+
+- Mechanism 1's agent check and its deterministic preflight are complementary, not
+  alternatives — the preflight catches declared blockage for free; the agent catches
+  undeclared blockage (referenced artifacts absent) that no header ever recorded.
+- Mechanism 2's ask step is runtime work (new frame kind + session state) — the largest
+  piece here by far; the other three are kit/trait/preflight edits. Split the dispatch
+  accordingly; do not let the ask step gate the cheap wins.
+- Priority order (owner-agreed): deterministic preflight refusal → quick escalation flag →
+  gate timed-out distinction → feasibility agent → ask step.
+- Every new field is typed and guard-readable; no mechanism may live only in prompt prose.
+
+## Done when
+
+A task with a blocked-status header is refused at dispatch with one sentence; a task whose
+referenced artifacts are absent parks after the feasibility frame with a typed non-feasible
+verdict naming the missing thing and the clearing owner action; a carried blocker with zero
+step delta across the threshold rounds pauses the run with a concrete question (or, until
+the ask step lands, parks naming the stall); a quick park can carry `needs-owner` + reason;
+a timed-out gate ends the round's routing immediately with a repo-condition park reason
+instead of burning further rounds — and none of these outcomes requires reading a transcript
+to discover.
