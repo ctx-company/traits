@@ -286,7 +286,10 @@ export function feasibilityStep(agentHandle: AgentHandle, contract: ResourceHand
         task,
         contract,
         output: feasibility,
-        onStop: taskNotFeasible,
+        // Owner ruling 2026-07-31 (first live firing, run-bba65cb5): the
+        // audit is WARNING-ONLY for now — the typed verdict is recorded for
+        // the reviewer and the owner, but never stops the run.
+        mode: "warn",
     });
 }
 

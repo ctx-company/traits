@@ -36,28 +36,28 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 56,
-    "end": 56
+    "start": 59,
+    "end": 59
   },
   "prompt:building-review": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 63,
-    "end": 63
+    "start": 66,
+    "end": 66
   },
   "prompt:draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 49,
-    "end": 49
+    "start": 52,
+    "end": 52
   },
   "prompt:feasibility-check": {
     "file": "packages/agents/src/feasibility.ts",
-    "start": 118,
-    "end": 118
+    "start": 127,
+    "end": 127
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 109,
-    "end": 109
+    "start": 112,
+    "end": 112
   },
   "resource:task-board": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/resource.ts",
@@ -106,28 +106,28 @@
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 387,
-    "end": 387
+    "start": 390,
+    "end": 390
   },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 555,
-    "end": 555
+    "start": 558,
+    "end": 558
   },
   "sequence:building-body/park-report-record": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 560,
-    "end": 560
+    "start": 563,
+    "end": 563
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 366,
-    "end": 366
+    "start": 369,
+    "end": 369
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 138,
-    "end": 138
+    "start": 141,
+    "end": 141
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -146,18 +146,8 @@
   },
   "sequence:ctx-branch-arm-s-13-building-body-18-park-report-record-then/park-report-append": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 563,
-    "end": 563
-  },
-  "sequence:feasibility-body": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 123,
-    "end": 123
-  },
-  "sequence:feasibility-body/feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 115,
-    "end": 115
+    "start": 566,
+    "end": 566
   },
   "sequence:procedure/building": {
     "file": "packages/agents/src/process.ts",
@@ -166,13 +156,13 @@
   },
   "sequence:procedure/draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 46,
-    "end": 46
+    "start": 49,
+    "end": 49
   },
-  "sequence:procedure/feasibility": {
+  "sequence:procedure/feasibility-check": {
     "file": "packages/agents/src/feasibility.ts",
-    "start": 122,
-    "end": 122
+    "start": 124,
+    "end": 124
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -251,7 +241,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 113,
-    "end": 113
+    "start": 116,
+    "end": 116
   }
 }

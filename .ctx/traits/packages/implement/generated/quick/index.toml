@@ -541,17 +541,6 @@ operation = "append"
 slot = "slot:park-report"
 operation = "append"
 
-[[sequence.feasibility-body.sequence]]
-id = "feasibility-check"
-title = "Audit feasibility before building"
-agent = "agent:smart-1"
-prompt = "prompt:feasibility-check"
-input = [
-    "port:task",
-    "resource:task-board",
-]
-output = ["slot:feasibility"]
-
 [procedure]
 description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
 input = ["port:task"]
@@ -562,22 +551,15 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "feasibility"
-title = "Feasibility"
-kind = "loop"
-sequence = "sequence:feasibility-body"
-max-iterations = 1
-on-stop = "signal:task-not-feasible"
-
-[procedure.sequence.until]
-slot = "slot:feasibility"
-field = "verdict"
-equals = "feasible"
-
-[procedure.sequence.stop-if.not]
-slot = "slot:feasibility"
-field = "verdict"
-equals = "feasible"
+id = "feasibility-check"
+title = "Audit feasibility before building"
+agent = "agent:smart-1"
+prompt = "prompt:feasibility-check"
+input = [
+    "port:task",
+    "resource:task-board",
+]
+output = ["slot:feasibility"]
 
 [[procedure.sequence]]
 id = "draft-writing"

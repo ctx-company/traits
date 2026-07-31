@@ -74,8 +74,17 @@ export type FeasibilityGateOptions = {
   readonly contract: PromptInterpolation;
   /** Caller-declared slot the audit's typed verdict lands in. */
   readonly output: SlotHandle<FeasibilityVerdictValue>;
-  /** The signal(s) the gate emits when it parks a non-feasible verdict. */
-  readonly onStop: SignalHandle | readonly SignalHandle[];
+  /**
+   * What a non-feasible verdict does to the run. `"block"` stops the
+   * procedure right at this step, with the verdict slot as the park
+   * evidence. `"warn"` (owner ruling 2026-07-31: the audit is advisory for
+   * now) records the same typed verdict in the same slot/output port and
+   * lets the run continue regardless — the verdict is an audit record the
+   * reviewer and the owner read, never a stop.
+   */
+  readonly mode: "block" | "warn";
+  /** The signal(s) the gate emits when it parks a non-feasible verdict. Required in `"block"` mode; unused in `"warn"` mode. */
+  readonly onStop?: SignalHandle | readonly SignalHandle[];
 };
 
 /**
@@ -97,7 +106,7 @@ export type FeasibilityGateOptions = {
  * ```
  */
 export function feasibilityGate(options: FeasibilityGateOptions): SequenceHandle {
-  const { id, agent, task, contract, output, onStop } = options;
+  const { id, agent, task, contract, output, mode } = options;
   // `prompt.text` is a genuine tagged template: every `${}` interpolation
   // must itself be a typed ref (`PromptInterpolation`), never a plain
   // string — so `FEASIBILITY_DOCTRINE` cannot be spliced in via `${...}`.
@@ -118,6 +127,16 @@ export function feasibilityGate(options: FeasibilityGateOptions): SequenceHandle
     text: prompt.text(strings, task, contract),
     output,
   });
+  // Warn mode: the bare audit step — same prompt, same typed verdict in the
+  // same slot — with no loop, no guard, and no stop. The verdict is audit
+  // evidence only; the run proceeds whatever it says.
+  if (mode === "warn") {
+    return checkStep;
+  }
+  const onStop = options.onStop;
+  if (onStop === undefined) {
+    throw new Error(`feasibilityGate ${JSON.stringify(id)}: mode "block" requires onStop`);
+  }
   const feasible = condition.fieldEquals(output, "verdict", "feasible");
   return sequence.loop(id, {
     sequence: sequence.linear(`${id}-body`, [checkStep]),

@@ -66,8 +66,8 @@
   },
   "prompt:feasibility-check": {
     "file": "packages/agents/src/feasibility.ts",
-    "start": 118,
-    "end": 118
+    "start": 127,
+    "end": 127
   },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -91,8 +91,8 @@
   },
   "prompt:task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 317,
-    "end": 317
+    "start": 320,
+    "end": 320
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -156,8 +156,8 @@
   },
   "schema:review-verdict-default": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 302,
-    "end": 302
+    "start": 305,
+    "end": 305
   },
   "schema:reviewer-verdict": {
     "file": "packages/agents/src/process.ts",
@@ -201,8 +201,8 @@
   },
   "sequence:building-body/capture-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 387,
-    "end": 387
+    "start": 390,
+    "end": 390
   },
   "sequence:building-body/owner-answer-consume": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -211,18 +211,18 @@
   },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 555,
-    "end": 555
+    "start": 558,
+    "end": 558
   },
   "sequence:building-body/park-report-record-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 560,
-    "end": 560
+    "start": 563,
+    "end": 563
   },
   "sequence:building-body/park-report-record-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 560,
-    "end": 560
+    "start": 563,
+    "end": 563
   },
   "sequence:building-body/recurrence-owner-question": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -236,8 +236,8 @@
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 366,
-    "end": 366
+    "start": 369,
+    "end": 369
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -261,13 +261,13 @@
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 563,
-    "end": 563
+    "start": 566,
+    "end": 566
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then/park-report-append-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 563,
-    "end": 563
+    "start": 566,
+    "end": 566
   },
   "sequence:ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then/recurrence-owner-answer": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -294,16 +294,6 @@
     "start": 145,
     "end": 145
   },
-  "sequence:feasibility-body": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 123,
-    "end": 123
-  },
-  "sequence:feasibility-body/feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 115,
-    "end": 115
-  },
   "sequence:planning-body": {
     "file": "packages/agents/src/process.ts",
     "start": 223,
@@ -324,10 +314,10 @@
     "start": 258,
     "end": 258
   },
-  "sequence:procedure/feasibility": {
+  "sequence:procedure/feasibility-check": {
     "file": "packages/agents/src/feasibility.ts",
-    "start": 122,
-    "end": 122
+    "start": 124,
+    "end": 124
   },
   "sequence:procedure/planning": {
     "file": "packages/agents/src/process.ts",
@@ -346,8 +336,8 @@
   },
   "sequence:procedure/task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 314,
-    "end": 314
+    "start": 317,
+    "end": 317
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -416,13 +406,13 @@
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 306,
-    "end": 306
+    "start": 309,
+    "end": 309
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 306,
-    "end": 306
+    "start": 309,
+    "end": 309
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",

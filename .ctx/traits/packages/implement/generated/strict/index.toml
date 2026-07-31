@@ -929,17 +929,6 @@ operation = "append"
 slot = "slot:park-report"
 operation = "append"
 
-[[sequence.feasibility-body.sequence]]
-id = "feasibility-check"
-title = "Audit feasibility before building"
-agent = "agent:smart-1"
-prompt = "prompt:feasibility-check"
-input = [
-    "port:task",
-    "slot:task-brief",
-]
-output = ["slot:feasibility"]
-
 [[sequence.planning-body.sequence]]
 id = "planning-produce"
 title = "Planning Produce"
@@ -988,22 +977,15 @@ input = [
 output = ["slot:task-brief"]
 
 [[procedure.sequence]]
-id = "feasibility"
-title = "Feasibility"
-kind = "loop"
-sequence = "sequence:feasibility-body"
-max-iterations = 1
-on-stop = "signal:task-not-feasible"
-
-[procedure.sequence.until]
-slot = "slot:feasibility"
-field = "verdict"
-equals = "feasible"
-
-[procedure.sequence.stop-if.not]
-slot = "slot:feasibility"
-field = "verdict"
-equals = "feasible"
+id = "feasibility-check"
+title = "Audit feasibility before building"
+agent = "agent:smart-1"
+prompt = "prompt:feasibility-check"
+input = [
+    "port:task",
+    "slot:task-brief",
+]
+output = ["slot:feasibility"]
 
 [[procedure.sequence]]
 id = "planning"
