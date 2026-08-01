@@ -297,6 +297,8 @@ enum MergeRowState {
 
 #[derive(Debug, Clone)]
 struct RunHeader {
+    session_id: String,
+    run_id: String,
     input: String,
     harnesses: String,
     done: usize,
@@ -1059,7 +1061,7 @@ fn epoch_clock_utc(epoch: u64) -> String {
 pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneTree {
     let progress = || PaneTree::Leaf {
         id: ids.progress,
-        title: "progress".to_string(),
+        title: "information".to_string(),
     };
     let journey = || PaneTree::Leaf {
         id: ids.journey,
@@ -1870,6 +1872,8 @@ fn run_view(
         .count();
     let total = steps.iter().filter(|step| step.counts_progress).count();
     let header = RunHeader {
+        session_id: session.session_id.as_str().to_string(),
+        run_id: session.run_id.as_str().to_string(),
         input: input_text(session),
         harnesses: harness_summary(&harness_by_role),
         done,
@@ -1915,7 +1919,8 @@ fn run_view(
     }
 }
 
-/// P552: the PROGRESS pane's own bounded standing facts — input, harness,
+/// P552: the information pane's own bounded standing facts — session, run,
+/// input, harness,
 /// and one combined progress/status/current-step/elapsed/work-token/
 /// narrator-token line (or, once completed, the equivalent completed-summary
 /// line) — never the step journey itself, which lives in
@@ -1948,7 +1953,6 @@ fn journey_lines(view: &RunView) -> Vec<tui::Line> {
 /// calls, under a multi-row header the caller must not hand-count either).
 fn journey_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<usize>) {
     let mut lines = Vec::new();
-    muted_line(&mut lines, "journey");
     let target_step = active_step_index(view);
     let mut active_row = None;
     for (index, step) in view.steps.iter().enumerate() {
@@ -2405,12 +2409,13 @@ fn active_step_index(view: &RunView) -> Option<usize> {
         })
 }
 
-/// P552: the PROGRESS pane's own standing facts only — `run`/`trait`/
-/// `session` identity now lives in the P552 title row (trait name, start
-/// clock) and the dashboard's own session identity column, not here; the
-/// completion digest stamp moved to [`journey_lines_with_active_row`] as a
-/// terminal-outputs fact.
+/// P552: the information pane's standing facts, including compact session and
+/// run identity. The completion digest stamp remains in
+/// [`journey_lines_with_active_row`] as a terminal-outputs fact.
 fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
+    identifier_line(lines, "session", &header.session_id, "session-");
+    identifier_line(lines, "run", &header.run_id, "run-");
+
     let mut line = tui::Line::blank();
     line.push("input ", tui::Tone::Muted);
     line.push(header.input.clone(), tui::Tone::Default);
@@ -2500,6 +2505,21 @@ fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
             lines.push(line);
         }
     }
+}
+
+fn identifier_line(lines: &mut Vec<tui::Line>, label: &str, id: &str, prefix: &str) {
+    let mut line = tui::Line::blank();
+    line.push(format!("{label} "), tui::Tone::Muted);
+    line.push(compact_identifier(id, prefix), tui::Tone::Default);
+    lines.push(line);
+}
+
+fn compact_identifier(id: &str, prefix: &str) -> String {
+    id.strip_prefix(prefix)
+        .unwrap_or(id)
+        .chars()
+        .take(12)
+        .collect()
 }
 
 /// P470: the tree's per-step group is now facts-only (mark, ports) — the
@@ -3831,6 +3851,8 @@ mod tests {
     fn view_with(steps: Vec<RunStep>) -> RunView {
         RunView {
             header: RunHeader {
+                session_id: "session-0123456789abcdef".to_string(),
+                run_id: "run-fedcba9876543210".to_string(),
                 input: "not provided".to_string(),
                 harnesses: "unassigned".to_string(),
                 done: 0,
@@ -3853,6 +3875,23 @@ mod tests {
             outputs: Vec::new(),
             merge_rows: Vec::new(),
         }
+    }
+
+    fn line_text(line: &tui::Line) -> String {
+        line.segments().map(|(text, _)| text).collect()
+    }
+
+    #[test]
+    fn progress_lines_show_compact_session_and_run_identifiers() {
+        let lines = progress_lines(&view_with(Vec::new()));
+        assert_eq!(line_text(&lines[0]), "session 0123456789ab");
+        assert_eq!(line_text(&lines[1]), "run fedcba987654");
+    }
+
+    #[test]
+    fn compact_identifier_handles_short_and_nonstandard_values() {
+        assert_eq!(compact_identifier("session-short", "session-"), "short");
+        assert_eq!(compact_identifier("custom-id", "session-"), "custom-id");
     }
 
     // P470 §6 "story derivation": N done steps -> exactly N rows in plan
@@ -4020,8 +4059,7 @@ mod tests {
         let (lines, active_row) = journey_lines_with_active_row(&view);
         let active_row = active_row.expect("an active step must yield a row anchor");
         // The active step's own `view.steps` index is 2; its row can never
-        // be that small once a header, a blank line, a "journey" label, and
-        // two 3-row `Done` step groups all precede it.
+        // be that small once two 3-row `Done` step groups precede it.
         assert_ne!(
             active_row, 2,
             "the anchor must be a rendered row index, not the step's item index"
@@ -4034,6 +4072,15 @@ mod tests {
             label,
             Some("c".to_string()),
             "row {active_row} must be the active step's own render_step_summary line"
+        );
+    }
+
+    #[test]
+    fn journey_content_omits_the_pane_title() {
+        let lines = journey_lines(&view_with(vec![step("work", StepState::Running, None)]));
+        assert!(
+            lines.iter().all(|line| line_text(line) != "journey"),
+            "the pane border is the only journey title"
         );
     }
 
@@ -4153,6 +4200,40 @@ mod tests {
         let area = Rect::new(0, 0, 120, 24);
         let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
         assert_eq!(tree.leaf_ids(), vec![PROGRESS_PANE, JOURNEY_PANE]);
+        assert_eq!(tree.title(PROGRESS_PANE), Some("information"));
+        assert_eq!(tree.title(JOURNEY_PANE), Some("journey"));
+    }
+
+    #[test]
+    fn information_title_and_pane_ids_survive_the_narrow_breakpoint() {
+        let progress = sample_lines(5);
+        let journey = sample_lines(5);
+        let history = sample_event_rows(5);
+        let current = sample_event_rows(5);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        for width in [108, 109] {
+            let area = Rect::new(0, 0, width, 30);
+            let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+            assert_eq!(tree.title(PROGRESS_PANE), Some("information"));
+            assert_eq!(
+                tree.leaf_ids(),
+                vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+            );
+            let layout = tree.resolve(area);
+            for id in tree.leaf_ids() {
+                assert!(
+                    layout
+                        .rect(id)
+                        .is_some_and(|rect| rect.width > 0 && rect.height > 0)
+                );
+            }
+        }
     }
 
     #[test]
