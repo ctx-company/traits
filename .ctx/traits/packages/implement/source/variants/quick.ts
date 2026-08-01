@@ -119,39 +119,29 @@ export default variant({
         "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "lean"] },
     behavior: {
-        tone: [tone.direct, tone.technical],
-        method: method.evidenceFirst,
-        verbosity: verbosity.brief,
+        tone: [tone.Direct, tone.Technical],
+        method: method.EvidenceFirst,
+        verbosity: verbosity.Brief,
     },
     intent: {
         require: [
-            intent.focus.correctness,
-            intent.require.leanness,
-            intent.require.reuseOverReimplement,
-            intent.require.reviewBeforeFinal,
+            intent.focus.Correctness,
+            intent.require.Leanness,
+            intent.require.ReuseOverReimplement,
+            intent.require.ReviewBeforeFinal,
         ],
         avoid: [
-            intent.avoid.overEngineering,
-            intent.avoid.scopeCreep,
-            intent.avoid.rubberStampReview,
+            intent.avoid.OverEngineering,
+            intent.avoid.ScopeCreep,
+            intent.avoid.RubberStampReview,
         ],
     },
     resource: [resource.taskBoard],
     signal: [gateTimedOut],
+    port: [port.commitReport, port.parkReportPort],
     procedure: procedure({
         description:
             "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
-        input: port.task,
-        // 2026-08-01: port:park-report REMOVED from the procedure output.
-        // It is the only output port whose slot is written by `project`
-        // steps, and the only port ever named in the mid-run failure
-        // `output_ports row port:park-report contradicts recomputed
-        // semantic output evidence`, which killed runs in both repos.
-        // slot:park-report and its clear/append projections stay, so the
-        // park evidence is still recorded in the ledger and still read by
-        // `dispatch_preflight::session_park_report` (which reads
-        // accepted_slot_values, never the port).
-        output: [port.commitReport],
         sequence: [
             // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
             // feasibilityCheck,

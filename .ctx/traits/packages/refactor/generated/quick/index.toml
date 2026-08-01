@@ -18,14 +18,12 @@ id = "review-before-final"
 
 [[intent.require]]
 id = "behavior-preserving-default"
-summary = "Preserve observed behavior unless the phase explicitly changes it."
 
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
 [[intent.avoid]]
 id = "interface-widening"
-summary = "Do not broaden public interfaces without a concrete caller need."
 
 [[port]]
 id = "target"

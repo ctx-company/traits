@@ -18,15 +18,12 @@ id = "correctness"
 
 [[intent.require]]
 id = "robustness"
-summary = "Prefer changes that remain correct under ordinary failure and boundary conditions."
 
 [[intent.require]]
 id = "pragmatism"
-summary = "Choose the smallest practical change that satisfies the task contract."
 
 [[intent.require]]
 id = "elegance"
-summary = "Favor clear, cohesive designs over clever or incidental complexity."
 
 [[intent.require]]
 id = "leanness"

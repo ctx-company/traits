@@ -7,7 +7,7 @@ import { surveyStep, frameStep } from "../sequence/survey.ts";
 import { reviewStep } from "../sequence/refinement.ts";
 import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
 import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
-import { architectureDialect, smellCatalog } from "../standards.ts";
+import { architectureDialect, smellCatalog } from "../resource.ts";
 
 const smart1 = smart1Role("Strong analysis model: surveys the target against the standards, designs the boundary, and reviews in the refinement loop.");
 const smart2 = smart2Role("Strong review model: independently reviews the refactored state, including every recorded deviation, in the refinement loop.");
@@ -34,22 +34,21 @@ export default variant({
     resource: [architectureDialect, smellCatalog],
     intent: {
         require: [
-            intent.require.reviewBeforeFinal,
-            intent.require.boundedRefinement,
-            { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
-            { id: "verbatim-design-execution", summary: "Execute the agreed design exactly as written; record every departure instead of silently adapting." },
+            intent.require.ReviewBeforeFinal,
+            intent.require.BoundedRefinement,
+            intent.require.BehaviorPreservingDefault,
+            intent.require.VerbatimExecution,
         ],
         avoid: [
-            intent.avoid.rubberStampReview,
-            { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
-            { id: "silent-plan-deviation", summary: "Never adapt around an unsatisfiable or contradicted design without recording and disposing of the deviation." },
+            intent.avoid.RubberStampReview,
+            intent.avoid.InterfaceWidening,
+            intent.avoid.SilentDeviation,
         ],
     },
+    port: commitReport,
     procedure: procedure({
         description:
             "Refactor one module or entity end to end with verbatim design execution: standards-grounded survey, problem framing, boundary design, verbatim implementation with a typed deviation record, bounded dual-reviewer refinement, commit — blocking rather than adapting when the design cannot be satisfied.",
-        input: target,
-        output: commitReport,
         sequence: [
             surveyStep(smart1, architectureDialect, smellCatalog),
             frameStep(smart1, architectureDialect, smellCatalog),

@@ -1,6 +1,6 @@
 import { CODE_INTEGRITY_DOCTRINE, QUICK_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import { condition, operation, prompt, sequence } from "@ctx-traits/cdk";
-import type { AutoResearchAgents } from "./agents.ts";
+import type { AutoResearchAgents } from "./agent.ts";
 import type { AutoResearchVariantFlags } from "./config.ts";
 import type { AutoResearchSlots } from "./slots.ts";
 
@@ -390,7 +390,7 @@ process.stdout.write(JSON.stringify({
         ? sequence.prompt("review", {
             title: "Review the implemented candidate (smart-1)",
             agent: brSmart1!,
-            text: prompt.template(
+            text: prompt.text(
                 `Review the implemented candidate for {target} against the draft {draft}. Work summary: {implementReceipt}.
                     A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. ${QUICK_VARIANT_DOCTRINE}
                     This is the ONLY review pass for this round — an unapproved candidate is reverted, never repaired.

@@ -162,9 +162,10 @@ function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
     format: mutableScalarArray(fields.format),
     default: normalizePortDefault(fields.default),
   });
-  return withDeclaration<CdkObject, "port", Value>("port", `port:${fields.id}`, declaration, {}, {
+  const handle = withDeclaration<CdkObject, "port", Value>("port", `port:${fields.id}`, declaration, {}, {
     declarations: collectMany([fields.schema, fields.value]),
   });
+  return handle;
 }
 
 function normalizePortDefault(value: PortFields["default"]): JsonObject | undefined {

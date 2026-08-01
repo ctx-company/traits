@@ -1,23 +1,23 @@
 {
   "agent:scribe": {
     "file": "packages/agents/src/index.ts",
-    "start": 37,
-    "end": 37
+    "start": 39,
+    "end": 39
   },
   "agent:smart-1": {
     "file": "packages/agents/src/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 53,
+    "end": 53
   },
   "agent:smart-2": {
     "file": "packages/agents/src/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 53,
+    "end": 53
   },
   "agent:worker": {
     "file": "packages/agents/src/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 29,
+    "end": 29
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/refactor/source/data.ts",
@@ -70,24 +70,24 @@
     "end": 8
   },
   "resource:architecture-dialect": {
-    "file": ".ctx/traits/packages/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/resource.ts",
     "start": 3,
     "end": 3
   },
   "resource:smell-catalog": {
-    "file": ".ctx/traits/packages/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/resource.ts",
     "start": 10,
     "end": 10
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 213,
-    "end": 213
+    "start": 225,
+    "end": 225
   },
   "schema:blocker-step": {
     "file": "packages/agents/src/index.ts",
-    "start": 193,
-    "end": 193
+    "start": 205,
+    "end": 205
   },
   "schema:review-verdict-default": {
     "file": ".ctx/traits/packages/refactor/source/schema.ts",
@@ -96,8 +96,8 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 38,
-    "end": 38
+    "start": 39,
+    "end": 39
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
@@ -141,8 +141,8 @@
   },
   "sequence:procedure/refinement-loop": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 48,
-    "end": 48
+    "start": 47,
+    "end": 47
   },
   "sequence:procedure/survey": {
     "file": ".ctx/traits/packages/refactor/source/sequence/survey.ts",
@@ -151,8 +151,8 @@
   },
   "sequence:refine-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 50,
-    "end": 50
+    "start": 49,
+    "end": 49
   },
   "sequence:refine-refactor/apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",

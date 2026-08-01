@@ -41,43 +41,43 @@
   },
   "prompt:apply-fixes": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 246,
-    "end": 246
+    "start": 245,
+    "end": 245
   },
   "prompt:commit-message": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 263,
-    "end": 263
+    "start": 262,
+    "end": 262
   },
   "prompt:draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 194,
-    "end": 194
+    "start": 193,
+    "end": 193
   },
   "prompt:implement": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 213,
-    "end": 213
+    "start": 212,
+    "end": 212
   },
   "prompt:review-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 226,
-    "end": 226
+    "start": 225,
+    "end": 225
   },
   "prompt:review-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 236,
-    "end": 236
+    "start": 235,
+    "end": 235
   },
   "prompt:review-draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 204,
-    "end": 204
+    "start": 203,
+    "end": 203
   },
   "prompt:understand": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 185,
-    "end": 185
+    "start": 184,
+    "end": 184
   },
   "resource:done-checklist": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
@@ -101,63 +101,63 @@
   },
   "sequence:procedure/commit-message": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 260,
-    "end": 260
+    "start": 259,
+    "end": 259
   },
   "sequence:procedure/draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 191,
-    "end": 191
+    "start": 190,
+    "end": 190
   },
   "sequence:procedure/git-commit": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 277,
-    "end": 277
+    "start": 276,
+    "end": 276
   },
   "sequence:procedure/git-stage": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 271,
-    "end": 271
+    "start": 270,
+    "end": 270
   },
   "sequence:procedure/implement": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 210,
-    "end": 210
+    "start": 209,
+    "end": 209
   },
   "sequence:procedure/refinement-loop": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 220,
-    "end": 220
+    "start": 219,
+    "end": 219
   },
   "sequence:procedure/review-draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 201,
-    "end": 201
+    "start": 200,
+    "end": 200
   },
   "sequence:procedure/understand": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 182,
-    "end": 182
+    "start": 181,
+    "end": 181
   },
   "sequence:refine-work": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 221,
+    "end": 221
+  },
+  "sequence:refine-work/apply-fixes": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 242,
+    "end": 242
+  },
+  "sequence:refine-work/review-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
     "start": 222,
     "end": 222
   },
-  "sequence:refine-work/apply-fixes": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 243,
-    "end": 243
-  },
-  "sequence:refine-work/review-1": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 223,
-    "end": 223
-  },
   "sequence:refine-work/review-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 233,
-    "end": 233
+    "start": 232,
+    "end": 232
   },
   "slot:commit-message": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",

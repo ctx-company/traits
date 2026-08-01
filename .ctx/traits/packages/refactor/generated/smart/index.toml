@@ -21,7 +21,6 @@ id = "bounded-refinement"
 
 [[intent.require]]
 id = "behavior-preserving-default"
-summary = "Preserve observed behavior unless the phase explicitly changes it."
 
 [[intent.avoid]]
 id = "unbounded-loop"
@@ -31,11 +30,9 @@ id = "rubber-stamp-review"
 
 [[intent.avoid]]
 id = "interface-widening"
-summary = "Do not broaden public interfaces without a concrete caller need."
 
 [[intent.avoid]]
-id = "taste-only-findings"
-summary = "Do not block on subjective style without a concrete behavioral consequence."
+id = "taste-only-blocking"
 
 [[port]]
 id = "target"

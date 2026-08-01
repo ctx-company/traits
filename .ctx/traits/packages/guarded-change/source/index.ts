@@ -164,20 +164,19 @@ export default trait("guarded-change", {
         source: { path: "../engineering-standards" },
     }),
     behavior: {
-        tone: [tone.direct, tone.technical],
-        method: method.evidenceFirst,
-        verbosity: verbosity.brief,
+        tone: [tone.Direct, tone.Technical],
+        method: method.EvidenceFirst,
+        verbosity: verbosity.Brief,
     },
     intent: {
-        require: [intent.require.reviewBeforeFinal, intent.require.gatesGreenBeforeCommit, intent.require.boundedRefinement, intent.require.roleAttributedOutput],
-        avoid: [intent.avoid.unboundedLoop, intent.avoid.rubberStampReview, intent.avoid.weakenTestsToPass, intent.avoid.tasteOnlyBlocking],
+        require: [intent.require.ReviewBeforeFinal, intent.require.GatesGreenBeforeCommit, intent.require.BoundedRefinement, intent.require.RoleAttributedOutput],
+        avoid: [intent.avoid.UnboundedLoop, intent.avoid.RubberStampReview, intent.avoid.WeakenTestsToPass, intent.avoid.TasteOnlyBlocking],
     },
     resource: [reviewRubric, doneChecklist],
+    port: commitReport,
     procedure: procedure({
         description:
             "Implement a requested change end to end with cross-model drafting, review, project-gate enforcement, bounded refinement, and a committed summary.",
-        input: [changeRequest, target],
-        output: commitReport,
         sequence: [
             sequence.prompt("understand", {
                 title: "Distil the request (clerk)",

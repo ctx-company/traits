@@ -63,6 +63,11 @@ export interface PromptFunction {
     ...values: Values
   ): PromptTemplate<PromptInputs<Values>>;
   /**
+   * Binds named `{placeholder}` references in existing prompt text. This is
+   * the non-tagged counterpart for prompts assembled from static doctrines.
+   */
+  text(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate;
+  /**
    * Builds a `PromptTemplate` whose body is a resource's content, with the
    * resource itself as the prompt's declared input — the equivalent of
    * `prompt.text` for prompt bodies that live in their own file/inline
@@ -131,8 +136,13 @@ function promptFn(idOrFields: string | PromptFields, text?: string, fields?: Jso
 export const prompt = Object.assign(
   promptFn,
   {
-    text: (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate =>
-      promptTemplate(strings, values),
+    text: (
+      stringsOrText: TemplateStringsArray | string,
+      ...values: readonly PromptInterpolation[] | readonly [Readonly<Record<string, PromptInterpolation>>]
+    ): PromptTemplate =>
+      typeof stringsOrText === "string"
+        ? promptBoundText(stringsOrText, values[0] as Readonly<Record<string, PromptInterpolation>>)
+        : promptTemplate(stringsOrText, values as readonly PromptInterpolation[]),
     resource: (
       value: ResourceHandle | RefHandle | {
         readonly resource: ResourceHandle | RefHandle | string;
@@ -187,6 +197,23 @@ export function promptTemplate(
     kind: "template",
     refs: [...new Set(refs)],
     declaration: { text },
+    declarations: collectMany(values),
+  });
+}
+
+function promptBoundText(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate {
+  const values = Object.values(bindings);
+  const refs = Object.fromEntries(
+    Object.entries(bindings).map(([name, value]) => [name, requirePromptRef(value, `prompt.text ${name}`)]),
+  );
+  const rendered = text.replace(
+    /\{([A-Za-z][A-Za-z0-9-]*)\}/g,
+    (placeholder, name: string) => refs[name] === undefined ? placeholder : `{${refs[name]}}`,
+  );
+  return withMeta({ text: rendered }, {
+    kind: "template",
+    refs: [...new Set(Object.values(refs))],
+    declaration: { text: rendered },
     declarations: collectMany(values),
   });
 }

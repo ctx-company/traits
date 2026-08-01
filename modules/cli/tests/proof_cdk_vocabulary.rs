@@ -1,16 +1,11 @@
-//! P412: a leaf owned by exactly one `intent` facet is reachable both
-//! qualified (`intent.avoid.ScopeCreep`) and bare (`intent.ScopeCreep`) —
-//! this is authoring sugar only, so a real `ctx traits build` of two
-//! otherwise-identical CDK sources (one qualified, one bare) must emit
-//! byte-identical canonical TOML and report the same canonical digest.
+//! A removed bare `intent` leaf must not normalize as its facet-qualified
+//! equivalent. The fixture builds both forms through the public CLI boundary.
 
 use std::fs;
 
 use support::{ScratchRoot, git_init, repo_root, require_success};
 
-/// A CDK source that declares `intent.avoid` either through the qualified
-/// `intent.avoid.ScopeCreep` or the bare `intent.ScopeCreep` alias — the only
-/// difference between the two fixtures this test builds.
+/// A CDK source that declares `intent.avoid` through the supplied expression.
 fn intent_fixture_source(trait_id: &str, intent_expression: &str) -> String {
     format!(
         "import {{ agent, intent, port, procedure, prompt, sequence, slot, trait }} from \"@ctx-traits/cdk\";\n\
@@ -24,9 +19,9 @@ export const draft = trait({{\n\
   name: \"{trait_id}\",\n\
   description: \"Fixture proving bare vs qualified intent leaf resolution.\",\n\
   intent: {{ avoid: [{intent_expression}] }},\n\
-  procedure: procedure({{\n\
+   port: output,\n\
+   procedure: procedure({{\n\
     description: \"Describe what this trait should accomplish.\",\n\
-    output,\n\
     sequence: sequence.prompt({{\n\
       id: \"run\",\n\
       agent: worker,\n\
@@ -102,13 +97,10 @@ fn build_intent_fixture(label: &str, trait_id: &str, intent_expression: &str) ->
     (canonical_toml, canonical_digest)
 }
 
-/// The vocabulary slice absorbed into P458: an unambiguous facet leaf
-/// (`avoid.ScopeCreep`) resolved bare at the `intent` root must build to
-/// byte-identical canonical TOML, and the same canonical digest, as the
-/// qualified form — this sugar never reaches normalization or digest
-/// calculation.
+/// Intent leaves are facet-qualified. A removed bare-root alias must not
+/// silently normalize as the corresponding `avoid` directive.
 #[test]
-fn bare_and_qualified_intent_leaf_build_to_identical_canonical_output() {
+fn bare_intent_leaf_does_not_normalize_as_a_qualified_leaf() {
     // Both fixtures use the same trait id: they build in fully isolated
     // scratch projects, so nothing collides, and using the same id means the
     // canonical TOML and digest are directly comparable without normalizing
@@ -124,16 +116,25 @@ fn bare_and_qualified_intent_leaf_build_to_identical_canonical_output() {
         "intent.ScopeCreep",
     );
 
-    assert_eq!(
-        qualified_toml, bare_toml,
-        "bare `intent.ScopeCreep` and qualified `intent.avoid.ScopeCreep` built different canonical TOML"
-    );
+    assert_ne!(qualified_toml, bare_toml);
     assert!(
         String::from_utf8_lossy(&qualified_toml).contains("scope-creep"),
         "expected the avoid facet's scope-creep slug in canonical output"
     );
+    let qualified: toml::Value = toml::from_str(&String::from_utf8_lossy(&qualified_toml))
+        .expect("qualified fixture must emit canonical TOML");
     assert_eq!(
-        qualified_digest, bare_digest,
-        "bare and qualified intent leaves reported different canonical digests"
+        qualified
+            .get("procedure")
+            .and_then(toml::Value::as_table)
+            .and_then(|procedure| procedure.get("output"))
+            .and_then(toml::Value::as_array),
+        Some(&vec![toml::Value::String("port:summary".to_string())]),
+        "the trait-level output port must be inferred into the procedure contract"
+    );
+    assert_ne!(qualified_digest, bare_digest);
+    assert!(
+        !String::from_utf8_lossy(&bare_toml).contains("scope-creep"),
+        "removed bare `intent.ScopeCreep` alias unexpectedly emitted an avoid directive"
     );
 }

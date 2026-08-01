@@ -20,10 +20,9 @@ export const bindingNesting = trait({
   id: "binding-nesting-fixture",
   name: "Binding Nesting Fixture",
   summary: "A nested list (`[[schema:text]]`) and a list of a union (`[(schema:a|schema:b)]`), pinned for stability.",
+  port: notesPort,
   procedure: procedure({
     description: "Classify grouped raw lines into a list of structured notes.",
-    input: groupedLines,
-    output: notesPort,
     sequence: sequence.prompt("classify-grouped-lines", {
       title: "Classify Grouped Lines",
       agent: worker,

@@ -577,14 +577,7 @@ export default trait("deep-research", {
     metadata: {
         tag: ["research", "evidence", "citations", "verification"],
     },
-    schema: [
-        qualityLevel,
-        depthLevel,
-        deliverablesManifest,
-        qualityVerdict,
-        researchFinding,
-        verificationVerdict,
-    ],
+    port: researchReport,
     resource: [
         researchStandards,
         qualityRubric,
@@ -598,8 +591,6 @@ export default trait("deep-research", {
     procedure: procedure({
         description:
             "Plan typed research contracts from topic plus optional quality and depth, research streams serially, triangulate and gate evidence, synthesize, verify in a bounded loop, and deliver a structured research campaign.",
-        input: [topic, quality, depth],
-        output: researchReport,
         sequence: [
             planStep,
             planGateStep,

@@ -1,23 +1,23 @@
 {
   "agent:scribe": {
     "file": "packages/agents/src/index.ts",
-    "start": 37,
-    "end": 37
+    "start": 39,
+    "end": 39
   },
   "agent:smart-1": {
     "file": "packages/agents/src/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 53,
+    "end": 53
   },
   "agent:smart-2": {
     "file": "packages/agents/src/index.ts",
-    "start": 51,
-    "end": 51
+    "start": 53,
+    "end": 53
   },
   "agent:worker": {
     "file": "packages/agents/src/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 29,
+    "end": 29
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/refactor/source/data.ts",
@@ -31,8 +31,8 @@
   },
   "prompt:apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 97,
-    "end": 97
+    "start": 96,
+    "end": 96
   },
   "prompt:design": {
     "file": ".ctx/traits/packages/refactor/source/sequence/design.ts",
@@ -51,8 +51,8 @@
   },
   "prompt:research": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 65,
-    "end": 65
+    "start": 64,
+    "end": 64
   },
   "prompt:review-1": {
     "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",
@@ -71,33 +71,33 @@
   },
   "prompt:survey": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 74,
-    "end": 74
+    "start": 73,
+    "end": 73
   },
   "resource:architecture-dialect": {
-    "file": ".ctx/traits/packages/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/resource.ts",
     "start": 3,
     "end": 3
   },
   "resource:smell-catalog": {
-    "file": ".ctx/traits/packages/refactor/source/standards.ts",
+    "file": ".ctx/traits/packages/refactor/source/resource.ts",
     "start": 10,
     "end": 10
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 213,
-    "end": 213
+    "start": 225,
+    "end": 225
   },
   "schema:blocker-step": {
     "file": "packages/agents/src/index.ts",
-    "start": 193,
-    "end": 193
+    "start": 205,
+    "end": 205
   },
   "schema:plan-amendment": {
     "file": "packages/agents/src/index.ts",
-    "start": 299,
-    "end": 299
+    "start": 311,
+    "end": 311
   },
   "schema:review-verdict-smart": {
     "file": ".ctx/traits/packages/refactor/source/schema.ts",
@@ -106,8 +106,8 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 56,
-    "end": 56
+    "start": 57,
+    "end": 57
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/refactor/source/sequence/commit.ts",
@@ -151,28 +151,28 @@
   },
   "sequence:procedure/refinement-loop": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 85,
-    "end": 85
+    "start": 84,
+    "end": 84
   },
   "sequence:procedure/research": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 62,
-    "end": 62
+    "start": 61,
+    "end": 61
   },
   "sequence:procedure/survey": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 71,
-    "end": 71
+    "start": 70,
+    "end": 70
   },
   "sequence:refine-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 87,
-    "end": 87
+    "start": 86,
+    "end": 86
   },
   "sequence:refine-refactor/apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/variants/smart.ts",
-    "start": 94,
-    "end": 94
+    "start": 93,
+    "end": 93
   },
   "sequence:refine-refactor/review-1": {
     "file": ".ctx/traits/packages/refactor/source/sequence/refinement.ts",

@@ -25,15 +25,14 @@ const prRiskTriage = trait({
   name: "PR Risk Triage",
   description: "Turns a code diff into one concise PR review comment.",
   behavior: {
-    tone: [tone.direct, tone.technical],
-    method: method.evidenceFirst,
-    verbosity: verbosity.brief,
+    tone: [tone.Direct, tone.Technical],
+    method: method.EvidenceFirst,
+    verbosity: verbosity.Brief,
   },
   agents: [worker, reviewer],
+  port: reviewOutput,
   procedure: procedure({
     description: "Review a PR diff through summary, risk notes, and final comment.",
-    input: codeDiff,
-    output: reviewOutput,
     sequence: [
       sequence.prompt({
         id: "summarize-code-diff",

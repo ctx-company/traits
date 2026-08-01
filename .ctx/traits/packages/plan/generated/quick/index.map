@@ -1,28 +1,28 @@
 {
   "agent:scribe": {
     "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 6,
-    "end": 6
+    "start": 23,
+    "end": 23
   },
   "agent:smart-1": {
     "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 5,
-    "end": 5
+    "start": 19,
+    "end": 19
   },
   "port:task": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 4,
-    "end": 4
+    "start": 3,
+    "end": 3
   },
   "port:written-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 16,
-    "end": 16
+    "start": 23,
+    "end": 23
   },
   "prompt:distill": {
-    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
-    "start": 25,
-    "end": 25
+    "file": ".ctx/traits/packages/plan/source/sequence/formatting.ts",
+    "start": 26,
+    "end": 26
   },
   "prompt:write": {
     "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
@@ -30,7 +30,7 @@
     "end": 7
   },
   "sequence:procedure/distill": {
-    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/plan/source/sequence/formatting.ts",
     "start": 23,
     "end": 23
   },
@@ -41,17 +41,17 @@
   },
   "slot:result": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 15,
-    "end": 15
+    "start": 17,
+    "end": 17
   },
   "slot:task-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 10,
-    "end": 10
+    "start": 12,
+    "end": 12
   },
   "trait:plan": {
     "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
-    "start": 13,
-    "end": 13
+    "start": 7,
+    "end": 7
   }
 }

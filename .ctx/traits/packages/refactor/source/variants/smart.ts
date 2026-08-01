@@ -7,7 +7,7 @@ import { frameStep } from "../sequence/survey.ts";
 import { reviewStep } from "../sequence/refinement.ts";
 import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
 import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
-import { architectureDialect, smellCatalog } from "../standards.ts";
+import { architectureDialect, smellCatalog } from "../resource.ts";
 
 const smart1 = smart1Role(
     "Strong analysis model with research tools: researches prior art before surveying, designs the boundary, and reviews in the refinement loop.",
@@ -42,22 +42,21 @@ export default variant({
     resource: [architectureDialect, smellCatalog],
     intent: {
         require: [
-            intent.require.reviewBeforeFinal,
-            intent.require.boundedRefinement,
-            { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
+            intent.require.ReviewBeforeFinal,
+            intent.require.BoundedRefinement,
+            intent.require.BehaviorPreservingDefault,
         ],
         avoid: [
-            intent.avoid.unboundedLoop,
-            intent.avoid.rubberStampReview,
-            { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
-            { id: "taste-only-findings", summary: "Do not block on subjective style without a concrete behavioral consequence." },
+            intent.avoid.UnboundedLoop,
+            intent.avoid.RubberStampReview,
+            intent.avoid.InterfaceWidening,
+            intent.avoid.TasteOnlyBlocking,
         ],
     },
+    port: commitReport,
     procedure: procedure({
         description:
             "Refactor one module or entity end to end with a research-informed survey: research, survey, problem framing, boundary design, implementation, bounded dual-reviewer refinement with typed amendments, commit.",
-        input: target,
-        output: commitReport,
         sequence: [
             sequence.prompt("research", {
                 title: "Research prior art (smart-1)",

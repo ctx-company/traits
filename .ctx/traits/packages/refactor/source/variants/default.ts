@@ -7,7 +7,7 @@ import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
 import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
 import { designStep, implementStep } from "../sequence/design.ts";
 import { frameStep, surveyStep } from "../sequence/survey.ts";
-import { architectureDialect, smellCatalog } from "../standards.ts";
+import { architectureDialect, smellCatalog } from "../resource.ts";
 
 const smart1 = smart1Role("Strong analysis model: surveys the target against the standards, designs the boundary, and reviews in the refinement loop.");
 const smart2 = smart2Role("Strong review model: independently reviews the refactored state in the refinement loop.");
@@ -23,23 +23,22 @@ export default variant({
     metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
     intent: {
         require: [
-            intent.require.reviewBeforeFinal,
-            intent.require.boundedRefinement,
-            { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
+            intent.require.ReviewBeforeFinal,
+            intent.require.BoundedRefinement,
+            intent.require.BehaviorPreservingDefault,
         ],
         avoid: [
-            intent.avoid.unboundedLoop,
-            intent.avoid.rubberStampReview,
-            { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
-            { id: "taste-only-findings", summary: "Do not block on subjective style without a concrete behavioral consequence." },
+            intent.avoid.UnboundedLoop,
+            intent.avoid.RubberStampReview,
+            intent.avoid.InterfaceWidening,
+            intent.avoid.TasteOnlyBlocking,
         ],
     },
     resource: [architectureDialect, smellCatalog],
+    port: commitReport,
     procedure: procedure({
         description:
             "Refactor one module or entity end to end: standards-grounded survey, problem framing, boundary design, implementation, bounded dual-reviewer refinement, commit.",
-        input: target,
-        output: commitReport,
         sequence: [
             surveyStep(smart1, architectureDialect, smellCatalog),
             frameStep(smart1, architectureDialect, smellCatalog),

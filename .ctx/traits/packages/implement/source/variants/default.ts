@@ -1,4 +1,4 @@
-import { blockerSchema, DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
+import { DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import { intent, method, procedure, variant, tone, verbosity } from "@ctx-traits/cdk";
 import {
     clerk,
@@ -7,7 +7,6 @@ import {
     familyProcedure,
     gateTimedOut,
     leftoversPort,
-    ownerItemSchema,
     parkReportPort,
     scribe,
     smart1Role,
@@ -33,39 +32,37 @@ export default variant({
         "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
     behavior: {
-        tone: [tone.direct, tone.technical],
-        method: method.evidenceFirst,
-        verbosity: verbosity.brief,
+        tone: [tone.Direct, tone.Technical],
+        method: method.EvidenceFirst,
+        verbosity: verbosity.Brief,
     },
     intent: {
         require: [
-            intent.focus.correctness,
-            { id: "robustness", summary: "Prefer changes that remain correct under ordinary failure and boundary conditions." },
-            { id: "pragmatism", summary: "Choose the smallest practical change that satisfies the task contract." },
-            { id: "elegance", summary: "Favor clear, cohesive designs over clever or incidental complexity." },
-            intent.require.leanness,
-            intent.require.reuseOverReimplement,
-            intent.require.reviewBeforeFinal,
-            intent.require.boundedRefinement,
+            intent.focus.Correctness,
+            intent.require.Robustness,
+            intent.require.Pragmatism,
+            intent.require.Elegance,
+            intent.require.Leanness,
+            intent.require.ReuseOverReimplement,
+            intent.require.ReviewBeforeFinal,
+            intent.require.BoundedRefinement,
         ],
         avoid: [
-            intent.avoid.accretion,
-            intent.avoid.overEngineering,
-            intent.avoid.goldPlating,
-            intent.avoid.duplication,
-            intent.avoid.scopeCreep,
-            intent.avoid.unboundedLoop,
-            intent.avoid.rubberStampReview,
+            intent.avoid.Accretion,
+            intent.avoid.OverEngineering,
+            intent.avoid.GoldPlating,
+            intent.avoid.Duplication,
+            intent.avoid.ScopeCreep,
+            intent.avoid.UnboundedLoop,
+            intent.avoid.RubberStampReview,
         ],
     },
-    schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard],
     signal: [gateTimedOut],
+    port: [commitReport, leftoversPort, parkReportPort],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
-        input: task,
-        output: [commitReport, leftoversPort, parkReportPort],
         sequence: familyProcedure({
             clerk,
             smart1,

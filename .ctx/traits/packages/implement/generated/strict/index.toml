@@ -18,15 +18,12 @@ id = "correctness"
 
 [[intent.require]]
 id = "robustness"
-summary = "Prefer changes that remain correct under ordinary failure and boundary conditions."
 
 [[intent.require]]
 id = "pragmatism"
-summary = "Choose the smallest practical change that satisfies the task contract."
 
 [[intent.require]]
 id = "elegance"
-summary = "Favor clear, cohesive designs over clever or incidental complexity."
 
 [[intent.require]]
 id = "leanness"
@@ -41,8 +38,7 @@ id = "review-before-final"
 id = "bounded-refinement"
 
 [[intent.require]]
-id = "verbatim-draft-execution"
-summary = "Execute the agreed draft exactly as written; record every departure instead of silently adapting."
+id = "verbatim-execution"
 
 [[intent.avoid]]
 id = "accretion"
@@ -66,8 +62,7 @@ id = "unbounded-loop"
 id = "rubber-stamp-review"
 
 [[intent.avoid]]
-id = "silent-plan-deviation"
-summary = "Never adapt around an unsatisfiable or contradicted draft without recording and disposing of the deviation."
+id = "silent-deviation"
 
 [[behavior.tone]]
 id = "direct"

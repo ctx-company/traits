@@ -1,18 +1,5 @@
-import { resource, trait } from "@ctx-traits/cdk";
-
-const codingStandards = resource({
-    id: "coding-standards",
-    path: "resources/coding-standards.md",
-    hint: "Shared engineering standards every reviewed change is held to; agents read this file with their own tools and never inline it.",
-    trigger: "on-activation",
-});
-
-const reviewGuidance = resource({
-    id: "review-guidance",
-    path: "resources/review-guidance.md",
-    hint: "How a reviewer separates blocking defects from advisory notes; agents read this file with their own tools.",
-    trigger: "on-activation",
-});
+import { trait } from "@ctx-traits/cdk";
+import { codingStandards, reviewGuidance } from "./resource.ts";
 
 export default trait("engineering-standards", {
     version: "0.1.0",

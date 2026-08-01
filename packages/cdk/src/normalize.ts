@@ -264,13 +264,24 @@ export function collectMany(values: readonly unknown[]): Partial<Record<DeclKind
     signal: [],
     slot: [],
   };
+  const visited = new Set<object>();
   const visit = (value: unknown): void => {
     if (value === undefined || value === null) return;
     if (Array.isArray(value)) return void value.forEach(visit);
     if (typeof value !== "object") return;
+    if (visited.has(value)) return;
+    visited.add(value);
     const meta = metaOf(value);
-    if (meta?.declaration !== undefined && isDeclKind(meta.kind)) result[meta.kind].push(meta.declaration);
-    for (const kind of declKinds) result[kind].push(...(meta?.declarations?.[kind] ?? []));
+    if (meta?.declaration !== undefined && isDeclKind(meta.kind)) {
+      result[meta.kind].push(meta.declaration);
+      visit(meta.declaration);
+    }
+    for (const kind of declKinds) {
+      for (const declaration of meta?.declarations?.[kind] ?? []) {
+        result[kind].push(declaration);
+        visit(declaration);
+      }
+    }
     memberValues(value).forEach(visit);
   };
   values.forEach(visit);
@@ -512,7 +523,6 @@ export function canonicalTraitFields(fields: TraitFields): TraitFields {
       resource: fields.resource ?? fields.resources,
       signal: fields.signal ?? fields.signals,
       session: fields.session ?? fields.sessions,
-      schema: fields.schema ?? fields.schemas,
     }),
   } as TraitFields;
 }
@@ -527,7 +537,7 @@ export function withoutKeys(value: Record<string, unknown>, keys: readonly strin
   return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.has(key))) as JsonObject;
 }
 // dprint-ignore: sdk-generate validates this declaration record from the source text.
-export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session), schema: explicitDeclarationItems("schema", fields.schema) }; }
+export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session) }; }
 export function mergeDeclarationSets(
   ...sets: readonly Partial<Record<DeclKind, readonly JsonObject[]>>[]
 ): Partial<Record<DeclKind, readonly JsonObject[]>> {
@@ -711,10 +721,13 @@ function uniqueDiagnostics(values: readonly CdkDiagnostic[]): CdkDiagnostic[] {
  */
 export function sourceMapFor(value: unknown, draft: JsonObject): SourceMap {
   const entries = new Map<string, SourceAnchor>();
+  const visited = new Set<object>();
   const visit = (item: unknown): void => {
     if (item === undefined || item === null) return;
     if (Array.isArray(item)) return void item.forEach(visit);
     if (typeof item !== "object") return;
+    if (visited.has(item)) return;
+    visited.add(item);
     const meta = metaOf(item);
     if (meta?.ref !== undefined && meta.source !== undefined) entries.set(meta.ref, meta.source);
     Object.entries(meta?.sourceMap ?? {}).forEach(([ref, anchor]) => entries.set(ref, anchor));

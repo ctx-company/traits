@@ -11,7 +11,7 @@ import {
 } from "@ctx-traits/cdk";
 
 import { guardedCommitTail } from "../sequence/commit.ts";
-import { architectureDialect } from "../standards.ts";
+import { architectureDialect } from "../resource.ts";
 
 const smart1 = reviewerRole(
     "smart-1",
@@ -103,20 +103,19 @@ export default variant({
     metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
     intent: {
         require: [
-            intent.require.reviewBeforeFinal,
-            { id: "behavior-preserving-default", summary: "Preserve observed behavior unless the phase explicitly changes it." },
+            intent.require.ReviewBeforeFinal,
+            intent.require.BehaviorPreservingDefault,
         ],
         avoid: [
-            intent.avoid.rubberStampReview,
-            { id: "interface-widening", summary: "Do not broaden public interfaces without a concrete caller need." },
+            intent.avoid.RubberStampReview,
+            intent.avoid.InterfaceWidening,
         ],
     },
     resource: architectureDialect,
+    port: commitReport,
     procedure: procedure({
         description:
             "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit.",
-        input: target,
-        output: commitReport,
         sequence: [
             sequence.prompt("checklist", {
                 title: "Checklist the target (smart-1)",
@@ -139,7 +138,7 @@ export default variant({
             sequence.prompt("review", {
                 title: "Review the implementation (smart-1)",
                 agent: smart1,
-                text: prompt.template(
+                text: prompt.text(
                     `Review the implemented state of {target} against the checklist {checklist}. Current work summary: {workSummary}.
                     A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. Checklist-item fidelity is judged SOLELY by the authority rule below — apply it directly, with no separate "undone step is always a blocker" rule layered on top. ${QUICK_VARIANT_DOCTRINE}
                     This is the ONLY review pass — the worker applies your findings once and the run commits.

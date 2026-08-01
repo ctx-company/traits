@@ -29,10 +29,12 @@ import {
   table,
   toDraftJson,
   toDraftJsonWithSourceMap,
+  tone,
   trait,
   variant,
   worker,
 } from "@ctx-traits/cdk";
+import * as publicCdk from "@ctx-traits/cdk";
 import type {
   AgentHandle,
   ArgvItem,
@@ -60,7 +62,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { callableIntentNamespace } from "../src/trait.js";
 import { bindingNesting } from "./fixtures/binding-nesting.js";
 import { prRiskTriage } from "./fixtures/readme-draft.js";
 
@@ -198,7 +199,7 @@ describe("schema adapters", () => {
         name: "Zod",
         description: "Adapter fixture.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [zodSchema],
+        slot: slot({ id: "zod-adapter-result", schema: zodSchema }),
       }),
     );
     const typeBoxDraft = toDraftJson(
@@ -207,7 +208,7 @@ describe("schema adapters", () => {
         name: "TypeBox",
         description: "Adapter fixture.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [typeBoxSchema],
+        slot: slot({ id: "typebox-adapter-result", schema: typeBoxSchema }),
       }),
     );
 
@@ -239,11 +240,12 @@ describe("schema adapters", () => {
             name: "Zod",
             description: "Adapter fixture.",
             procedure: procedure({ description: "No steps.", sequence: [] }),
-            schema: [
-              schema.zod("result", source, {
+            slot: slot({
+              id: "zod-adapter-result",
+              schema: schema.zod("result", source, {
                 toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny),
               }),
-            ],
+            }),
           }),
         ),
       ),
@@ -342,7 +344,7 @@ describe("schema authoring sugar", () => {
         name: "Sugar Spread",
         description: "Plain spread is last-wins.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [a, b, merged],
+        slot: slot({ id: "sugar-spread-slot", schema: merged }),
       }),
     ) as { readonly schema?: readonly { readonly id: string; readonly fields?: Record<string, unknown>; }[]; };
 
@@ -383,7 +385,7 @@ describe("schema authoring sugar", () => {
         name: "Sugar Optional Nested",
         description: "schema.optional on a spread field must not drop its nested declaration.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [wrapped],
+        slot: slot({ id: "sugar-optional-nested-slot", schema: wrapped }),
       }),
     ) as { readonly schema?: readonly { readonly id: string; }[]; };
 
@@ -464,7 +466,7 @@ describe("schema authoring sugar", () => {
         name: "Sugar Template",
         description: "Template specialization fixture.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [textNote, numberNote],
+        slot: [textNoteSlot, numberNoteSlot],
       }),
     );
 
@@ -503,7 +505,7 @@ describe("schema authoring sugar", () => {
         name: "Sugar Two Spot",
         description: "Origin-preserving spot fixture.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [specialized],
+        slot: slot({ id: "sugar-two-spot-slot", schema: specialized }),
       }),
     );
 
@@ -548,7 +550,7 @@ describe("schema authoring sugar", () => {
         name: "Sugar Origin",
         description: "Origin-preserving spot-to-field-rename fixture.",
         procedure: procedure({ description: "No steps.", sequence: [] }),
-        schema: [defaulted, overridden],
+        slot: [defaultedSlot, overriddenSlot],
       }),
     );
 
@@ -562,6 +564,62 @@ describe("schema authoring sugar", () => {
 });
 
 describe("retired canonical fields", () => {
+  it("exposes built-in vocabulary only through lowercase PascalCase namespaces", () => {
+    expect(tone.Direct).toBe("direct");
+    // @ts-expect-error builtin leaves are PascalCase.
+    expectTypeOf(tone.direct);
+    // @ts-expect-error legacy uppercase namespace is not exported publicly.
+    expectTypeOf(publicCdk.Tone);
+    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined();
+    expect((tone as unknown as Record<string, unknown>).Tone).toBeUndefined();
+    expect((publicCdk as Record<string, unknown>).Tone).toBeUndefined();
+  });
+
+  it("collects a reachable schema once and omits unrelated authored schemas", () => {
+    const reachable = schema.object("reachable-schema", { value: schema.text() });
+    schema.object("unreachable-schema", { value: schema.text() });
+    const draft = toDraftJson(
+      trait("schema-reachability", {
+        name: "Schema Reachability",
+        slot: [
+          slot({ id: "reachable-schema-a", schema: reachable }),
+          slot({ id: "reachable-schema-b", schema: reachable }),
+        ],
+      }),
+    );
+    expect(draft.schema?.map((entry) => entry.id)).toEqual(["reachable-schema"]);
+  });
+
+  it("rejects removed trait schema aliases at typecheck time", () => {
+    const reachable = schema.object("retired-schema-reachable", { value: schema.text() });
+    // @ts-expect-error schema declarations are inferred from reachable slots and ports.
+    trait({ id: "retired-schema", schema: [reachable] });
+    // @ts-expect-error schemas is not a trait authoring alias.
+    trait({ id: "retired-schemas", schemas: [reachable] });
+    // @ts-expect-error variant fields use the same inferred schema closure.
+    variant({ schema: [reachable] });
+    // @ts-expect-error schemas is not a variant authoring alias.
+    variant({ schemas: [reachable] });
+  });
+
+  it("rejects removed procedure contract fields at typecheck time", () => {
+    const request = port.input.text({ id: "retired-contract-request" });
+    const result = slot.text("retired-contract-result");
+    const response = port.output.text({ id: "retired-contract-response", value: result });
+    procedure({
+      description: "Contracts are inferred from reachable steps.",
+      sequence: sequence.prompt("retired-contract-step", { text: prompt.text`Use ${request}.`, output: result }),
+      // @ts-expect-error procedure input ports are inferred from consumed refs.
+      input: request,
+    });
+    procedure({
+      description: "Contracts are inferred from reachable steps.",
+      sequence: sequence.prompt("retired-contract-output-step", { text: prompt.text`Use ${request}.`, output: result }),
+      // @ts-expect-error procedure output ports are inferred from produced bound slots.
+      output: response,
+    });
+  });
+
   it("rejects authoring status/trust on a trait draft", () => {
     trait({
       id: "retired-fields",
@@ -1205,6 +1263,169 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     expect(draft.procedure?.sequence?.[0]?.sequence).toBe("sequence:review-each-body");
   });
 
+  it("infers ports through named control-flow sequences and discovers bound output ports", () => {
+    const request = port.input.text({ id: "contract-request", optional: true });
+    const result = slot.text("contract-result");
+    const response = port.output.of({ id: "contract-response", schema: "schema:text", value: result });
+    const work = sequence.linear("contract-work", [
+      sequence.prompt("contract-prompt", { text: prompt.text`Use ${request}.`, output: result }),
+    ]);
+    const draft = toDraftJson(
+      trait("contract-inference", {
+        name: "Contract Inference",
+        procedure: procedure({
+          description: "Traverse a named sequence inside a loop.",
+          sequence: sequence.loop("contract-loop", { sequence: work, iterations: 1 }),
+        }),
+        port: response,
+      }),
+    );
+
+    expect(draft.procedure?.input).toEqual(["port:contract-request"]);
+    expect(draft.procedure?.output).toEqual(["port:contract-response"]);
+    expect(draft.port).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "contract-request" }),
+      expect.objectContaining({ id: "contract-response", value: "slot:contract-result" }),
+    ]));
+  });
+
+  it("infers a bound output produced by a project step", () => {
+    const source = slot.text("project-source");
+    const result = slot.text("project-result");
+    const response = port.output.of({ id: "project-response", schema: "schema:text", value: result });
+    const draft = toDraftJson(trait("project-contract", {
+      name: "Project Contract",
+      port: response,
+      procedure: procedure({
+        description: "Project a result to the response boundary.",
+        sequence: [sequence.project("project-result", {
+          projections: [{ source, destination: result }],
+        })],
+      }),
+    }));
+
+    expect(draft.procedure?.output).toEqual(["port:project-response"]);
+  });
+
+  it("infers only leaf-local ports in authored order, including direct output sinks", async () => {
+    const request = port.input.text({ id: "ordered-request", default: { cmd: "default-request" } });
+    const result = slot.text("ordered-result");
+    const direct = port.output.text({ id: "direct-result" });
+    const bound = port.output.of({ id: "bound-result", schema: "schema:text", value: result });
+    const unproduced = port.output.text({ id: "unproduced-result" });
+    const nested = sequence.linear("nested-contract", [
+      sequence.prompt("produce-contract", { text: prompt.text`Use ${request}.`, output: result }),
+    ]);
+    const family = trait("isolated-contract", {
+      version: "0.1.0",
+      variants: {
+        one: variant({
+          name: "One",
+          procedure: procedure({
+            description: "Produce nested and direct results.",
+            sequence: sequence.branch("route-contract", {
+              check: condition.output.is("yes"),
+              success: [sequence.loop("nested-loop", { sequence: nested, iterations: 1 })],
+              failure: [sequence.prompt("produce-direct", { text: prompt.text`Finish.`, output: direct })],
+            }),
+          }),
+          port: [bound, direct, unproduced, request],
+        }).default(),
+        two: variant({
+          name: "Two",
+          procedure: procedure({
+            description: "Do not use the sibling boundary.",
+            sequence: sequence.prompt("other", { text: prompt.text`Other.` }),
+          }),
+          port: port.output.text({ id: "bound-result" }),
+        }),
+      },
+    });
+    const resolved = await resolveTraitFamily(family);
+    const one = resolved.leaves.find((leaf) => leaf.path === "one")?.draft;
+    const two = resolved.leaves.find((leaf) => leaf.path === "two")?.draft;
+
+    expect(one?.procedure?.input).toEqual(["port:ordered-request"]);
+    expect(one?.procedure?.output).toEqual(["port:direct-result", "port:bound-result"]);
+    expect(one?.port?.map(({ id }) => id)).toEqual([
+      "ordered-request",
+      "direct-result",
+      "bound-result",
+      "unproduced-result",
+    ]);
+    expect(two?.procedure?.output).toBeUndefined();
+  });
+
+  it("keeps inferred output boundaries local when a procedure handle is reused", () => {
+    const result = slot.text("shared-result");
+    const shared = procedure({
+      description: "Produce one shared result.",
+      sequence: sequence.prompt("produce-shared", { text: prompt.text`Produce.`, output: result }),
+    });
+    const first = port.output.of({ id: "first-output", schema: "schema:text", value: result });
+    const second = port.output.of({ id: "second-output", schema: "schema:text", value: result });
+
+    const a = toDraftJson(trait("first-contract", { name: "First", procedure: shared, port: first }));
+    const b = toDraftJson(trait("second-contract", { name: "Second", procedure: shared, port: second }));
+
+    expect(a.procedure?.output).toEqual(["port:first-output"]);
+    expect(b.procedure?.output).toEqual(["port:second-output"]);
+  });
+
+  it("matches the former explicit contracts across inputs, outputs, and source-map traversal", () => {
+    const required = port.input.text({ id: "parity-required" });
+    const optional = port.input.text({ id: "parity-optional", optional: true });
+    const defaulted = port.input.text({ id: "parity-defaulted", default: { cmd: "default-value" } });
+    const promptResult = slot.text("parity-prompt-result");
+    const projectResult = slot.text("parity-project-result");
+    const promptOutput = port.output.of({ id: "parity-prompt-output", schema: "schema:text", value: promptResult });
+    const projectOutput = port.output.of({ id: "parity-project-output", schema: "schema:text", value: projectResult });
+    const directOutput = port.output.text({ id: "parity-direct-output" });
+    const unproduced = port.output.of({
+      id: "parity-unproduced",
+      schema: "schema:text",
+      value: slot.text("parity-never-produced"),
+    });
+    const nested = sequence.linear("parity-nested", [
+      sequence.prompt("parity-prompt", {
+        text: prompt.text`Use ${required}, ${optional}, and ${defaulted}.`,
+        output: promptResult,
+      }),
+      sequence.project("parity-project", {
+        projections: [{ source: promptResult, destination: projectResult }],
+      }),
+    ]);
+    const { draft, __map } = toDraftJsonWithSourceMap(
+      trait("contract-parity", {
+        name: "Contract Parity",
+        port: [promptOutput, unproduced, required, directOutput, optional, projectOutput, defaulted],
+        procedure: procedure({
+          description: "Exercise every inferred contract boundary.",
+          sequence: sequence.branch("parity-branch", {
+            check: condition.output.is("continue"),
+            success: [sequence.loop("parity-loop", { sequence: nested, iterations: 1 })],
+            failure: [sequence.prompt("parity-direct", { text: prompt.text`Finish.`, output: directOutput })],
+          }),
+        }),
+      }),
+    );
+
+    // This is the exact order and membership formerly authored on procedure().
+    expect(draft.procedure?.input).toEqual([
+      "port:parity-required",
+      "port:parity-optional",
+      "port:parity-defaulted",
+    ]);
+    expect(draft.procedure?.output).toEqual([
+      "port:parity-prompt-output",
+      "port:parity-project-output",
+      "port:parity-direct-output",
+    ]);
+    expect(draft.procedure?.output).not.toContain("port:parity-unproduced");
+    expect(__map["port:parity-prompt-output"]).toBeDefined();
+    expect(__map["port:parity-project-output"]).toBeDefined();
+  });
+
   it("rejects a loop/forEach declaring both sequence and body, or neither", () => {
     const named = sequence.linear("named-body", [sequence.prompt("step", { text: prompt.text`Do work.` })]);
     expect(() => sequence.loop("both", { sequence: named, body: [], iterations: 1 })).toThrow(
@@ -1739,76 +1960,12 @@ describe("markdown doc-resource helpers (P459)", () => {
   });
 });
 
-describe("intent bare-root vocabulary (P412)", () => {
-  it("resolves a bare camelCase/PascalCase/SCREAMING_SNAKE_CASE leaf to the same value as its qualified facet", () => {
-    expect(intent.ScopeCreep).toBe(intent.avoid.ScopeCreep);
-    expect(intent.scopeCreep).toBe(intent.avoid.scopeCreep);
-    expect(intent.SCOPE_CREEP).toBe(intent.avoid.SCOPE_CREEP);
-    expect(intent.ScopeCreep).toBe("scope-creep");
-  });
-
-  it("keeps Object.keys(intent) limited to facet namespaces, not bare leaf aliases", () => {
-    expect(Object.keys(intent).sort()).toEqual(["avoid", "block", "focus", "require"]);
-  });
-
-  it("still allows qualified access alongside bare access", () => {
+describe("vocabulary casing", () => {
+  it("exposes only qualified PascalCase built-in leaves", () => {
+    expect(tone.Direct).toBe("direct");
     expect(intent.avoid.ScopeCreep).toBe("scope-creep");
-    expect(intent.require.Robustness).toBe("robustness");
-  });
-
-  it("types the bare leaf to the same literal as its qualified facet", () => {
-    expectTypeOf(intent.ScopeCreep).toEqualTypeOf(intent.avoid.ScopeCreep);
-  });
-
-  describe("synthetic two-facet catalog with a duplicate leaf", () => {
-    const synthetic = callableIntentNamespace({
-      require: { sharedLeaf: "shared-require", onlyRequire: "only-require" } as const,
-      avoid: { sharedLeaf: "shared-avoid", onlyAvoid: "only-avoid" } as const,
-    });
-
-    it("still resolves each facet's own qualified leaves", () => {
-      expect(synthetic.require.sharedLeaf).toBe("shared-require");
-      expect(synthetic.avoid.sharedLeaf).toBe("shared-avoid");
-      expect(synthetic.require.onlyRequire).toBe("only-require");
-    });
-
-    it("excludes the duplicate leaf from bare enumeration", () => {
-      expect(Object.keys(synthetic)).toEqual(["require", "avoid"]);
-      expect(Object.getOwnPropertyNames(synthetic)).not.toContain("sharedLeaf");
-      expect(Object.getOwnPropertyNames(synthetic)).not.toContain("SharedLeaf");
-      expect(Object.getOwnPropertyNames(synthetic)).not.toContain("SHARED_LEAF");
-    });
-
-    it("throws a deterministic error naming every qualified alternative on bare access", () => {
-      expect(() => (synthetic as unknown as { sharedLeaf: unknown; }).sharedLeaf).toThrow(
-        "intent.sharedLeaf is ambiguous across facets — use intent.require.sharedLeaf or intent.avoid.sharedLeaf",
-      );
-      expect(() => (synthetic as unknown as { SharedLeaf: unknown; }).SharedLeaf).toThrow(
-        "intent.SharedLeaf is ambiguous across facets — use intent.require.SharedLeaf or intent.avoid.SharedLeaf",
-      );
-      expect(() => (synthetic as unknown as { SHARED_LEAF: unknown; }).SHARED_LEAF).toThrow(
-        "intent.SHARED_LEAF is ambiguous across facets — use intent.require.SHARED_LEAF or intent.avoid.SHARED_LEAF",
-      );
-    });
-
-    it("still resolves an unambiguous leaf bare, under every casing form", () => {
-      expect((synthetic as unknown as { onlyRequire: string; }).onlyRequire).toBe("only-require");
-      expect((synthetic as unknown as { OnlyRequire: string; }).OnlyRequire).toBe("only-require");
-      expect((synthetic as unknown as { ONLY_REQUIRE: string; }).ONLY_REQUIRE).toBe("only-require");
-    });
-
-    it("keeps calling the namespace and reading function metadata intact under the proxy", () => {
-      expect(synthetic("custom-slug")).toBe("custom-slug");
-      expect(typeof synthetic.name).toBe("string");
-      expect(Object.getOwnPropertySymbols(synthetic)).toEqual([]);
-    });
-
-    it("excludes the duplicate leaf from the root type at compile time", () => {
-      // A type-only check (never touches the runtime ambiguity guard's throw
-      // above): sharedLeaf is owned by both require and avoid facets, so
-      // `expectTypeOf` must fail to compile if the mapped root type ever
-      // exposes it bare.
-      expectTypeOf(synthetic).not.toHaveProperty("sharedLeaf");
-    });
+    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined();
+    expect((tone as unknown as Record<string, unknown>).DIRECT).toBeUndefined();
+    expect((intent as unknown as Record<string, unknown>).ScopeCreep).toBeUndefined();
   });
 });

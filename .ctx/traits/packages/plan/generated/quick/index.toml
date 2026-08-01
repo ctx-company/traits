@@ -74,11 +74,17 @@ summary = "Write role."
 [prompt.distill]
 text = """
 Turn the task below directly into one or more house-format task files for .internal/tasks/ — skip deriving separate grounding notes.
-                    Task as described: {port:task}
-                    Read the relevant parts of the repository with your tools to ground each task file in this codebase's concrete files, modules, and validation gates.
-                    
-    Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>" heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:** ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any prerequisite task explicitly in the body.
-                    Do not implement anything."""
+            Task as described: {port:task}
+            Read the relevant parts of the repository with your tools to ground each task file in this codebase's concrete files, modules, and validation gates.
+            Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>"
+    heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:**
+    ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an
+    optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing
+    "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every
+    task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task
+    would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any
+    prerequisite task explicitly in the body.
+            Do not implement anything."""
 input = ["port:task"]
 output = ["slot:task-files"]
 

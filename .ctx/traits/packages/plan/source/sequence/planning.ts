@@ -1,6 +1,6 @@
 import type { AgentHandle, PortHandle, SlotHandle } from "@ctx-traits/cdk";
 import { prompt, sequence } from "@ctx-traits/cdk";
-import { TASK_FORMAT_DOCTRINE } from "../resources/task-format.ts";
+import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 export function refineTaskStep(agent: AgentHandle, taskInput: PortHandle, grounding: SlotHandle) {
     return sequence.prompt("refine-task", {
@@ -29,7 +29,7 @@ export function splitTasksStep(agent: AgentHandle, taskInput: PortHandle, ground
     return sequence.prompt("split", {
         title: "Split the work into task files",
         agent,
-        text: prompt.template(
+        text: prompt.text(
             `Task format doctrine: ${TASK_FORMAT_DOCTRINE}
             The work, as described: {task}
             Grounding notes: {grounding}

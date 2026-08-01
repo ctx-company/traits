@@ -25,13 +25,13 @@ export default trait("implement-guided", {
         tag: ["demo", "implementation", "review", "human-in-the-loop"],
     },
     behavior: {
-        tone: [tone.direct, tone.technical],
-        method: method.evidenceFirst,
-        verbosity: verbosity.brief,
+        tone: [tone.Direct, tone.Technical],
+        method: method.EvidenceFirst,
+        verbosity: verbosity.Brief,
     },
     intent: {
-        require: [intent.require.reviewBeforeFinal, intent.require.boundedRefinement, intent.require.roleAttributedOutput],
-        avoid: [intent.avoid.unboundedLoop, intent.avoid.rubberStampReview, intent.avoid.scopeCreep],
+        require: [intent.require.ReviewBeforeFinal, intent.require.BoundedRefinement, intent.require.RoleAttributedOutput],
+        avoid: [intent.avoid.UnboundedLoop, intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
     },
     procedure: procedure({
         description:

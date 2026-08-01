@@ -26,6 +26,7 @@ import type {
   IntentFocusBuiltIn,
   IntentRequireBuiltIn,
   JsonObject,
+  JsonValue,
   MethodBuiltIn,
   ScopeControlBuiltIn,
   ToneBuiltIn,
@@ -54,7 +55,6 @@ import type {
   ProcedureHandle,
   PromptHandle,
   ResourceHandle,
-  SchemaHandle,
   SequenceHandle,
   SequenceLinearHandle,
   SessionHandle,
@@ -63,7 +63,7 @@ import type {
   TraitFamilyHandle,
   TraitHandle,
 } from "./handles.js";
-import { withMeta } from "./meta.js";
+import { metaOf, withMeta } from "./meta.js";
 import type { CdkDiagnostic, SourceMap } from "./meta.js";
 import {
   canonicalTraitFields,
@@ -197,10 +197,6 @@ export interface TraitFields {
   readonly session?: SessionHandle | readonly SessionHandle[];
   /** Alias of {@link TraitFields.session}. */
   readonly sessions?: SessionHandle | readonly SessionHandle[];
-  /** Declared named schemas. @see {@link schema} */
-  readonly schema?: SchemaHandle | readonly SchemaHandle[];
-  /** Alias of {@link TraitFields.schema}. */
-  readonly schemas?: SchemaHandle | readonly SchemaHandle[];
   /** `[[scenario]]` declarations: product review behavior examples. */
   readonly scenario?: CanonicalScenario | readonly CanonicalScenario[];
   /** `[[eval]]` declarations: declared product evaluation checks. */
@@ -266,7 +262,7 @@ const FAMILY_OWNED_KEYS = new Set<string>(["id", "version", "variants"]);
  * `generated/index.toml` document.
  *
  * Authoring a trait document directly in TOML/JSON means every declared
- * agent/port/slot/prompt/sequence/schema has to be hand-collected into the
+ * agent/port/slot/prompt/sequence has to be hand-collected into the
  * right top-level array, in the right shape, with ids kept unique and
  * consistent across every place they're referenced — the exact bookkeeping
  * `trait(...)` automates by walking the fields it's given and collecting
@@ -287,8 +283,6 @@ const FAMILY_OWNED_KEYS = new Set<string>(["id", "version", "variants"]);
  *   summary: "Reviews a diff against a stated focus and returns a structured verdict.",
  *   procedure: procedure({
  *     description: "Review a diff for the stated focus.",
- *     input: [diff, focus],
- *     output,
  *     sequence: reviewStep,
  *   }),
  * });
@@ -300,10 +294,12 @@ export function trait<const Id extends string>(
   fields: Omit<FamilyFields, "id">,
 ): TraitFamilyHandle;
 export function trait<const Fields extends FamilyFields>(
-  fields: Fields & ValidTraitFields<Fields>,
+  fields: Fields & ValidTraitFields<Fields> & NoExtraFields<Fields, FamilyFields>,
 ): TraitFamilyHandle;
 export function trait<const Id extends string>(id: ValidSlug<Id>, fields: Omit<TraitFields, "id">): TraitHandle;
-export function trait<const Fields extends TraitFields>(fields: Fields & ValidTraitFields<Fields>): TraitHandle;
+export function trait<const Fields extends TraitFields>(
+  fields: Fields & ValidTraitFields<Fields> & NoExtraFields<Fields, TraitFields>,
+): TraitHandle;
 export function trait(
   first: string | TraitFields,
   second?: Omit<TraitFields, "id">,
@@ -358,14 +354,30 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     fields.resource,
     fields.signal,
     fields.session,
-    fields.schema,
   ];
   const collected = collectMany(declarationSources);
   const authored = explicitDeclarations(fields);
   resolveGeneratedBranchArmIds([fields.procedure, fields.sequence], collected, authored);
   const explicit = explicitDeclarations(fields);
-  const procedureValue = fields.procedure === undefined ? undefined : normalizeValue(fields.procedure);
-  const merged = mergeDeclarationSets(collected, explicit);
+  let merged = mergeDeclarationSets(collected, explicit);
+  const inferred = fields.procedure === undefined
+    ? undefined
+    : inferProcedureContract(
+      normalizeValue(fields.procedure),
+      merged.sequence ?? [],
+      explicit.port ?? [],
+      merged.port ?? [],
+      fields.procedure,
+    );
+  // Output ports are often declared beside their slot and need not be passed
+  // through `trait({ port })`. Keep the selected declarations reachable in
+  // this assembly so the emitted contract, schema closure, and source map all
+  // describe one boundary. Do not modify the procedure handle: it can be
+  // shared by independent traits with different boundary declarations.
+  if (inferred?.ports.length) {
+    merged = mergeDeclarationSets(merged, { port: inferred.ports });
+  }
+  const procedureValue = inferred?.procedure;
   const draft = compact({
     ...fields.unsafeJson,
     ...withoutKeys(fields as Record<string, unknown>, [
@@ -392,8 +404,6 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
       "signals",
       "session",
       "sessions",
-      "schema",
-      "schemas",
       "unsafeJson",
       "variants",
     ]),
@@ -427,6 +437,89 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     merged,
     diagnostics: collectDiagnostics(declarationSources),
     sourceMap: collectSourceMaps(declarationSources),
+  };
+}
+
+/**
+ * Derives a procedure boundary from the fully materialized procedure and the
+ * declarations reachable within this trait assembly. Candidate declarations
+ * are deliberately limited to this assembled leaf: process-global authoring
+ * records can include sibling native-family leaves with overlapping ids.
+ * They are selected only by an exact consumed port ref or produced bound-slot
+ * ref, keeping unrelated declarations out of the leaf.
+ */
+function inferProcedureContract(
+  procedure: JsonValue | undefined,
+  sequences: readonly JsonObject[],
+  authoredPorts: readonly JsonObject[],
+  reachablePorts: readonly JsonObject[],
+  procedureHandle: ProcedureHandle,
+): { readonly procedure: JsonValue; readonly ports: readonly JsonObject[]; } | undefined {
+  if (procedure === undefined || typeof procedure !== "object" || Array.isArray(procedure)) {
+    return procedure === undefined ? undefined : { procedure, ports: [] };
+  }
+  const consumed = new Set<string>();
+  const produced = new Set<string>();
+  const producedPorts = new Set<string>();
+  const bySequence = new Map(
+    sequences.flatMap((sequence) =>
+      typeof sequence.id === "string" ? [[`sequence:${sequence.id}`, sequence] as const] : []
+    ),
+  );
+  const visitedSequences = new Set<string>();
+  const visit = (value: JsonValue, key?: string): void => {
+    if (typeof value === "string") {
+      if (value.startsWith("port:")) consumed.add(value);
+      if (key === "output" || key === "destination") {
+        if (value.startsWith("slot:")) produced.add(value);
+        if (value.startsWith("port:")) producedPorts.add(value);
+      }
+      if (value.startsWith("sequence:") && !visitedSequences.has(value)) {
+        visitedSequences.add(value);
+        const sequence = bySequence.get(value as `sequence:${string}`);
+        if (sequence !== undefined) visit(sequence);
+      }
+      return;
+    }
+    if (Array.isArray(value)) return void value.forEach((item) => visit(item, key));
+    if (value !== null && typeof value === "object") {
+      Object.entries(value).forEach(([childKey, child]) => {
+        if (child !== undefined) visit(child, childKey);
+      });
+    }
+  };
+  visit(procedure);
+  const procedurePorts = metaOf(procedureHandle)?.declarations?.port ?? [];
+  const ports = mergeDeclarationSets(
+    { port: authoredPorts },
+    { port: reachablePorts },
+    { port: procedurePorts },
+  ).port ?? [];
+  const input: string[] = [];
+  const output: string[] = [];
+  for (const port of ports) {
+    const id = typeof port.id === "string" ? port.id : undefined;
+    if (id === undefined) continue;
+    const ref = `port:${id}`;
+    if (port.direction === "input" && consumed.has(ref)) input.push(ref);
+    if (
+      port.direction === "output"
+      && (producedPorts.has(ref) || (typeof port.value === "string" && produced.has(port.value)))
+    ) {
+      output.push(ref);
+    }
+  }
+  const selected = ports.filter((port) => {
+    const id = typeof port.id === "string" ? `port:${port.id}` : undefined;
+    return id !== undefined && (input.includes(id) || output.includes(id));
+  });
+  return {
+    procedure: compact({
+      ...procedure,
+      input: input.length === 0 ? undefined : input,
+      output: output.length === 0 ? undefined : output,
+    }),
+    ports: selected,
   };
 }
 
@@ -492,116 +585,48 @@ type ValidSlug<Value extends string> = string extends Value ? Value
 type ValidTraitFields<Fields extends { readonly id?: string; }> = Fields["id"] extends string
   ? ValidSlug<Fields["id"]> extends never ? never : unknown
   : unknown;
+/** Generic object-form overloads need this explicit excess-key guard. */
+type NoExtraFields<Fields, Shape> = Record<Exclude<keyof Fields, keyof Shape>, never>;
 
-type CallableNamespace<Values extends Record<string, string>> = ((value: string) => CustomSlug) & CaseAliases<Values>;
+type CallableNamespace<Values extends Record<string, string>> =
+  & ((value: string) => CustomSlug)
+  & PascalCaseLeaves<Values>;
 
 /**
  * Builds a lowercase callable namespace for a flat generated vocabulary map:
- * calling it validates a custom slug, and its PascalCase/camelCase/
- * SCREAMING_SNAKE_CASE properties resolve to the same built-in values.
+ * calling it validates a custom slug, and its PascalCase properties resolve
+ * to generated built-in values.
  */
 function callableNamespace<Values extends Record<string, string>>(values: Values): CallableNamespace<Values> {
-  return Object.assign((value: string): CustomSlug => customSlug(value), caseAliases(values));
+  return Object.assign((value: string): CustomSlug => customSlug(value), pascalCaseLeaves(values));
 }
 
 type IntentAxisAliases<Axes extends Record<string, Record<string, string>>> = {
-  readonly [Axis in keyof Axes]: CaseAliases<Axes[Axis]>;
+  readonly [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]>;
 };
-
-/** All leaf keys declared across every axis of an intent-style facet map. */
-type IntentLeafKeys<Axes> = { [Axis in keyof Axes]: keyof Axes[Axis]; }[keyof Axes] & string;
-/** The axis (or union of axes, if the leaf key is ambiguous) that owns a given leaf key. */
-type IntentLeafOwners<Axes, Key extends PropertyKey> = {
-  [Axis in keyof Axes]: Key extends keyof Axes[Axis] ? Axis : never;
-}[keyof Axes];
-/** True when `Union` has more than one member — used to detect a leaf key owned by >1 axis. */
-type IsUnion<Union, Copy = Union> = Union extends Union ? ([Copy] extends [Union] ? false : true) : never;
-/** Leaf keys owned by exactly one axis — the only ones eligible for a bare root alias. */
-type UniqueIntentLeafKeys<Axes> = {
-  [Key in IntentLeafKeys<Axes>]: IsUnion<IntentLeafOwners<Axes, Key>> extends true ? never : Key;
-}[IntentLeafKeys<Axes>];
-type UniqueIntentLeafOwner<Axes, Key extends PropertyKey> = IntentLeafOwners<Axes, Key> extends infer Axis
-  ? Axis extends keyof Axes ? Axis : never
-  : never;
-/** Slug values of every unbiquitously-owned leaf, keyed by their base (camelCase) name. */
-type UniqueIntentLeafValues<Axes> = {
-  [Key in UniqueIntentLeafKeys<Axes>]: Key extends keyof Axes[UniqueIntentLeafOwner<Axes, Key>]
-    ? Axes[UniqueIntentLeafOwner<Axes, Key>][Key]
-    : never;
-};
-/** Bare root aliases for every unambiguous leaf, with the same casing forms as `CaseAliases`. */
-type IntentRootAliases<Axes extends Record<string, Record<string, string>>> = CaseAliases<UniqueIntentLeafValues<Axes>>;
 
 type IntentNamespace<Axes extends Record<string, Record<string, string>>> =
   & ((value: string) => CustomSlug)
-  & IntentAxisAliases<Axes>
-  & IntentRootAliases<Axes>;
+  & IntentAxisAliases<Axes>;
 
 /**
- * Builds the `intent` callable namespace: one level of nested aliasing over
- * the `require`/`focus`/`avoid`/`block` axes, reusing the flat `caseAliases`
- * conversion per axis instead of a second camel-to-SCREAMING implementation.
- * Leaves owned by exactly one axis are also installed on the root, non-
- * enumerably, under the same casing forms (e.g. `intent.avoid.ScopeCreep`
- * is also reachable as `intent.ScopeCreep`). A leaf owned by more than one
- * axis stays qualified-only: it is absent from the root's own keys, and
- * bare access throws naming every valid qualified form.
+ * Builds the `intent` callable namespace. Built-ins remain facet-qualified;
+ * a caller may use the function only for a validated custom slug.
  */
 export function callableIntentNamespace<Axes extends Record<string, Record<string, string>>>(
   axes: Axes,
 ): IntentNamespace<Axes> {
-  const aliasedAxes = {} as { [Axis in keyof Axes]: CaseAliases<Axes[Axis]>; };
-  const owningAxes = new Map<string, string[]>();
+  const aliasedAxes = {} as { [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]>; };
   for (const axis of Object.keys(axes) as (keyof Axes)[]) {
     const axisMap = axes[axis] as Record<string, string>;
-    aliasedAxes[axis] = caseAliases(axisMap) as CaseAliases<Axes[typeof axis]>;
-    for (const leafKey of Object.keys(axisMap)) {
-      const owners = owningAxes.get(leafKey) ?? [];
-      owners.push(axis as string);
-      owningAxes.set(leafKey, owners);
-    }
+    aliasedAxes[axis] = pascalCaseLeaves(axisMap) as PascalCaseLeaves<Axes[typeof axis]>;
   }
-  const root = Object.assign((value: string): CustomSlug => customSlug(value), aliasedAxes);
-  const ambiguousAliases = new Map<string, readonly string[]>();
-  for (const [leafKey, owners] of owningAxes) {
-    // A leaf key that shadows an axis name (e.g. a facet named `avoid`) never
-    // gets a bare alias — the qualified namespace at that key always wins.
-    if (leafKey in root) continue;
-    if (owners.length > 1) {
-      for (const aliasKey of aliasFormsOf(leafKey)) ambiguousAliases.set(aliasKey, owners);
-      continue;
-    }
-    const [owner] = owners;
-    const value = (axes[owner as keyof Axes] as Record<string, string>)[leafKey];
-    for (const aliasKey of aliasFormsOf(leafKey)) {
-      if (aliasKey in root) continue;
-      Object.defineProperty(root, aliasKey, { value, enumerable: false, configurable: true });
-    }
-  }
-  if (ambiguousAliases.size === 0) {
-    return root as IntentNamespace<Axes>;
-  }
-  return new Proxy(root, {
-    get(target, property, receiver) {
-      if (typeof property === "string") {
-        const owners = ambiguousAliases.get(property);
-        if (owners !== undefined) {
-          throw new Error(
-            `intent.${property} is ambiguous across facets — use ${
-              owners.map((axis) => `intent.${axis}.${property}`).join(" or ")
-            }`,
-          );
-        }
-      }
-      return Reflect.get(target, property, receiver);
-    },
-  }) as IntentNamespace<Axes>;
+  return Object.assign((value: string): CustomSlug => customSlug(value), aliasedAxes) as IntentNamespace<Axes>;
 }
 
 /**
  * Builds a validated custom tone slug for `behavior.tone` alongside the
- * generated `Tone` built-ins (also reachable as `tone.Direct`,
- * `tone.DIRECT`, etc. via the same case-alias map).
+ * generated `Tone` built-ins (for example, `tone.Direct`).
  * @example `trait("review", { behavior: { tone: tone("blunt") } })`
  */
 export const tone = callableNamespace(GeneratedTone);
@@ -631,8 +656,7 @@ export const format = callableNamespace(GeneratedFormat);
 /**
  * Builds a validated custom intent slug for use alongside the generated
  * `Intent` facets (`require`/`focus`/`avoid`/`block`), each reachable as
- * e.g. `intent.avoid.ScopeCreep`, `intent.avoid.scopeCreep`, or
- * `intent.avoid.SCOPE_CREEP`.
+ * e.g. `intent.avoid.ScopeCreep`.
  *
  * Behavior/intent facets accept any lowercase slug, not just the generated
  * built-ins — `intent(...)` (and the other behavior namespaces above)
@@ -645,34 +669,20 @@ export const format = callableNamespace(GeneratedFormat);
 export const intent = callableIntentNamespace(GeneratedIntent);
 
 type PascalCase<Key extends string> = Key extends `${infer Head}${infer Rest}` ? `${Uppercase<Head>}${Rest}` : Key;
-type ScreamingSnakeCase<Key extends string> = Key extends `${infer Head}${infer Rest}`
-  ? Head extends Uppercase<Head> ? `_${Head}${ScreamingSnakeCase<Rest>}`
-  : `${Uppercase<Head>}${ScreamingSnakeCase<Rest>}`
-  : Key;
-type CaseAliases<Values extends Record<string, string>> = {
-  [Key in keyof Values as Key | PascalCase<Key & string> | ScreamingSnakeCase<Key & string>]: Values[Key];
+type PascalCaseLeaves<Values extends Record<string, string>> = {
+  [Key in keyof Values as PascalCase<Key & string>]: Values[Key];
 };
 
 function pascalKey(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
-function screamingKey(key: string): string {
-  return key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase();
-}
-/** The `camelCase`/`PascalCase`/`SCREAMING_SNAKE_CASE` forms of a single lower-camel-case key. */
-function aliasFormsOf(key: string): readonly string[] {
-  return [key, pascalKey(key), screamingKey(key)];
-}
-
-/** Adds `PascalCase` and `SCREAMING_SNAKE_CASE` aliases to a lower-camel-case built-in value map. */
-function caseAliases<Values extends Record<string, string>>(values: Values): CaseAliases<Values> {
+/** Adds PascalCase leaves to a lower-camel-case generated vocabulary map. */
+function pascalCaseLeaves<Values extends Record<string, string>>(values: Values): PascalCaseLeaves<Values> {
   const aliases: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    for (const aliasKey of aliasFormsOf(key)) {
-      aliases[aliasKey] = value;
-    }
+    aliases[pascalKey(key)] = value;
   }
-  return aliases as CaseAliases<Values>;
+  return aliases as PascalCaseLeaves<Values>;
 }
 
 function customSlug<T extends string>(value: T): T & CustomSlug {

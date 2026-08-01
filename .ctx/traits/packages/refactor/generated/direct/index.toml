@@ -14,7 +14,6 @@ tag = [
 
 [[intent.require]]
 id = "annotation-fidelity"
-summary = "Every annotation becomes exactly one checklist item; nothing is dropped or merged away."
 
 [[intent.require]]
 id = "preserve-scope"

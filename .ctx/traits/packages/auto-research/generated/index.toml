@@ -28,12 +28,6 @@ schema = "schema:text"
 description = "The bounded optimization objective for this experiment run."
 
 [[port]]
-id = "experiment-command"
-direction = "input"
-schema = "[schema:text]"
-description = "No-shell argv executed for baseline and candidate measurements."
-
-[[port]]
 id = "metric-field"
 direction = "input"
 schema = "schema:text"
@@ -44,6 +38,12 @@ id = "max-experiments"
 direction = "input"
 schema = "schema:integer"
 description = "Positive runtime-resolved bound on candidate experiments."
+
+[[port]]
+id = "experiment-command"
+direction = "input"
+schema = "[schema:text]"
+description = "No-shell argv executed for baseline and candidate measurements."
 
 [[port]]
 id = "max-wall-time-ms"

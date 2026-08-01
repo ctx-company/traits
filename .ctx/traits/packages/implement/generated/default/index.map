@@ -181,8 +181,8 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/default.ts",
-    "start": 64,
-    "end": 64
+    "start": 63,
+    "end": 63
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -331,7 +331,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/default.ts",
-    "start": 30,
-    "end": 30
+    "start": 29,
+    "end": 29
   }
 }

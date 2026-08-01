@@ -16,7 +16,6 @@ import {
   compact,
   compactAs,
   headingBlock,
-  normalizeRefList,
   sourceMapForSequenceItems,
   validateSlug,
 } from "./normalize.js";
@@ -100,8 +99,6 @@ export interface DependencyFields {
 export interface ProcedureFields {
   readonly description: string;
   readonly worktreeRequired?: boolean;
-  readonly input?: unknown;
-  readonly output?: unknown;
   readonly sequenceOrder?: readonly string[];
   readonly sequence?: SequenceHandle | readonly SequenceHandle[] | readonly JsonObject[];
 }
@@ -119,16 +116,13 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
   return compactAs<CanonicalDependency>({ ...fields, source: fields.source as JsonValue | undefined });
 }
 /**
- * Assembles a procedure from inputs, outputs, and sequence steps: the one
- * thing a trait actually runs, wiring together the ports the caller sees
- * and the ordered sequence of prompt/command/control-flow steps that
- * produce them.
+ * Assembles a procedure from sequence steps. Its contract is inferred from
+ * consumed input ports and output ports bound to produced slots.
  *
- * Passing the port/slot/sequence handles built elsewhere in the trait (as
- * the example below does) is how a step's `input`/`output` refs stay
+ * Passing the slot/sequence handles built elsewhere in the trait is how a
+ * step's `input`/`output` refs stay
  * traceable to a real declaration instead of an untyped string. But
- * `ProcedureFields.input`/`output` are typed `unknown` and `sequence` also
- * accepts raw `JsonObject[]`, so `procedure(...)` itself does not enforce
+ * `sequence` also accepts raw `JsonObject[]`, so `procedure(...)` itself does not enforce
  * this at `tsc` — a mismatched or misspelled ref passed here only surfaces
  * at synth or run time. The `tsc`-checked guarantee lives one level down,
  * at the individual `sequence.*` step builders, whose `input`/`output`
@@ -139,8 +133,6 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
  * ```ts
  * procedure({
  *   description: "Review a diff for the stated focus and return one structured verdict with findings.",
- *   input: [diff, focus],
- *   output,
  *   sequence: sequence.prompt("review", { agent: reviewer, text: prompt.text`Review ${diff}.`, output: review }),
  * });
  * ```
@@ -156,15 +148,13 @@ export function procedure(fields: ProcedureFields): ProcedureHandle {
     compact({
       description: fields.description,
       "worktree-required": fields.worktreeRequired,
-      input: normalizeRefList(fields.input),
-      output: normalizeRefList(fields.output),
       "sequence-order": fields.sequenceOrder === undefined ? undefined : Array.from(fields.sequenceOrder),
       sequence: items,
     }),
     {
       kind: "procedure",
-      declarations: collectMany([fields.input, fields.output, sequenceValues]),
-      diagnostics: collectDiagnostics([fields.input, fields.output, sequenceValues]),
+      declarations: collectMany([sequenceValues]),
+      diagnostics: collectDiagnostics([sequenceValues]),
       sourceMap,
     },
   );

@@ -1,23 +1,23 @@
 {
   "agent:proposer": {
-    "file": ".ctx/traits/packages/auto-research/source/agents.ts",
-    "start": 27,
-    "end": 27
-  },
-  "agent:summarizer": {
-    "file": ".ctx/traits/packages/auto-research/source/agents.ts",
-    "start": 35,
-    "end": 35
-  },
-  "agent:worker": {
-    "file": ".ctx/traits/packages/auto-research/source/agents.ts",
+    "file": ".ctx/traits/packages/auto-research/source/agent.ts",
     "start": 19,
     "end": 19
+  },
+  "agent:summarizer": {
+    "file": ".ctx/traits/packages/auto-research/source/agent.ts",
+    "start": 25,
+    "end": 25
+  },
+  "agent:worker": {
+    "file": ".ctx/traits/packages/auto-research/source/agent.ts",
+    "start": 13,
+    "end": 13
   },
   "port:experiment-command": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
-    "start": 19,
-    "end": 19
+    "start": 31,
+    "end": 31
   },
   "port:max-cost-microusd": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
@@ -31,8 +31,8 @@
   },
   "port:max-experiments": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
-    "start": 31,
-    "end": 31
+    "start": 25,
+    "end": 25
   },
   "port:max-token-estimate": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
@@ -46,8 +46,8 @@
   },
   "port:metric-field": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
-    "start": 25,
-    "end": 25
+    "start": 19,
+    "end": 19
   },
   "port:objective": {
     "file": ".ctx/traits/packages/auto-research/source/slots.ts",
@@ -361,7 +361,7 @@
   },
   "trait:auto-research": {
     "file": ".ctx/traits/packages/auto-research/source/index.ts",
-    "start": 59,
-    "end": 59
+    "start": 58,
+    "end": 58
   }
 }

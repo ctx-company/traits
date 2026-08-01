@@ -21,22 +21,18 @@ id = "bounded-refinement"
 
 [[intent.require]]
 id = "behavior-preserving-default"
-summary = "Preserve observed behavior unless the phase explicitly changes it."
 
 [[intent.require]]
-id = "verbatim-design-execution"
-summary = "Execute the agreed design exactly as written; record every departure instead of silently adapting."
+id = "verbatim-execution"
 
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
 [[intent.avoid]]
 id = "interface-widening"
-summary = "Do not broaden public interfaces without a concrete caller need."
 
 [[intent.avoid]]
-id = "silent-plan-deviation"
-summary = "Never adapt around an unsatisfiable or contradicted design without recording and disposing of the deviation."
+id = "silent-deviation"
 
 [[port]]
 id = "target"
@@ -342,8 +338,8 @@ input = [
     "port:target",
     "slot:agreed-design",
     "slot:work-summary",
-    "slot:deviation-report",
     "resource:architecture-dialect",
+    "slot:deviation-report",
 ]
 output = ["slot:review-verdict-1"]
 
@@ -365,8 +361,8 @@ input = [
     "port:target",
     "slot:agreed-design",
     "slot:work-summary",
-    "slot:deviation-report",
     "resource:architecture-dialect",
+    "slot:deviation-report",
 ]
 output = ["slot:review-verdict-2"]
 
@@ -453,8 +449,8 @@ input = [
     "port:target",
     "slot:agreed-design",
     "slot:work-summary",
-    "slot:deviation-report",
     "resource:architecture-dialect",
+    "slot:deviation-report",
 ]
 output = ["slot:review-verdict-1"]
 
@@ -467,8 +463,8 @@ input = [
     "port:target",
     "slot:agreed-design",
     "slot:work-summary",
-    "slot:deviation-report",
     "resource:architecture-dialect",
+    "slot:deviation-report",
 ]
 output = ["slot:review-verdict-2"]
 

@@ -1,6 +1,5 @@
-import { blockerSchema } from "@ctx-traits/agents";
 import { intent, method, procedure, trait } from "@ctx-traits/cdk";
-import { buildAgents } from "./agents.ts";
+import { benchmarkReviewer, benchmarkWorker, proposer, summarizer, worker } from "./agent.ts";
 import { buildSchemas } from "./schemas.ts";
 import { buildSlots } from "./slots.ts";
 import { buildSteps } from "./steps.ts";
@@ -12,9 +11,14 @@ export function autoResearch(variant: AutoResearchVariant) {
     const traitId = benchmarkRefactor ? "benchmark-refactor" : "auto-research";
 
     const schemas = buildSchemas({ benchmarkRefactor });
-    const agents = buildAgents({ benchmarkRefactor });
     const slots = buildSlots(schemas, { benchmarkRefactor });
-    const sequence = buildSteps(agents, slots, { benchmarkRefactor });
+    const sequence = buildSteps(
+        benchmarkRefactor
+            ? { brSmart1: benchmarkReviewer, brWorker: benchmarkWorker }
+            : { worker, proposer, summarizer },
+        slots,
+        { benchmarkRefactor },
+    );
 
     const {
         readinessStatus,
@@ -32,7 +36,6 @@ export function autoResearch(variant: AutoResearchVariant) {
         summaryRow,
         summarySchema,
     } = schemas;
-    const { worker, proposer, summarizer, brSmart1, brWorker } = agents;
     const {
         objective,
         experimentCommand,
@@ -52,10 +55,6 @@ export function autoResearch(variant: AutoResearchVariant) {
         summaryPort,
     } = slots;
 
-    const inputs = benchmarkRefactor
-        ? [target!, benchmarkCommand!, improvementTarget!, noiseThreshold!, maxRounds!, timeLimitSeconds!]
-        : [objective!, metricField!, maxExperiments!, experimentCommand!, maxWallTime!, maxTokenEstimate!, maxCost!, maxDelta!];
-
     return trait(traitId, {
         version: "0.1.0",
         name: benchmarkRefactor ? "Benchmark Refactor" : "Auto Research",
@@ -69,35 +68,34 @@ export function autoResearch(variant: AutoResearchVariant) {
         },
         intent: {
             require: benchmarkRefactor
-                ? [intent.require.reviewBeforeFinal, intent.Correctness]
-                : [intent.Correctness, intent.GatesGreenBeforeCommit],
+                ? [intent.require.ReviewBeforeFinal, intent.focus.Correctness]
+                : [intent.focus.Correctness, intent.require.GatesGreenBeforeCommit],
         },
         behavior: {
             method: [method.EvidenceFirst],
         },
-        agent: benchmarkRefactor ? [brSmart1!, brWorker!] : [worker, proposer, summarizer],
-        schema: [
-            ...(benchmarkRefactor ? [blockerSchema, reviewStatusSchema!, reviewVerdictSchema!, roundStatus!] : []),
-            readinessStatus,
-            readiness,
-            gitRefSchema,
-            resultStatus,
-            experimentResult,
-            ...(benchmarkRefactor ? [] : [proposalSchema]),
-            summaryStatus,
-            decisionStatus,
-            ...(benchmarkRefactor ? [summaryReason!] : []),
-            summaryRow,
-            summarySchema,
-        ],
+        agent: benchmarkRefactor ? [benchmarkReviewer, benchmarkWorker] : [worker, proposer, summarizer],
+        // Keep the inferred procedure boundary in the historical contract
+        // order rather than incidental first use order in the step graph.
+        port: benchmarkRefactor
+            ? [target!, benchmarkCommand!, improvementTarget!, noiseThreshold!, maxRounds!, timeLimitSeconds!, summaryPort]
+            : [
+                objective!,
+                metricField!,
+                maxExperiments!,
+                experimentCommand!,
+                maxWallTime!,
+                maxTokenEstimate!,
+                maxCost!,
+                maxDelta!,
+                summaryPort,
+            ],
         ...(benchmarkRefactor ? {} : { resource: [summaryReplay!], "schema-version": "0.3" }),
         procedure: procedure({
             description: benchmarkRefactor
                 ? "Verify an isolated worktree, seed a trusted baseline benchmark, run a bounded scope/draft/implement/review round loop, and deterministically keep only benchmark-measured improvements beyond the noise threshold."
                 : "Verify an isolated worktree, seed a trusted baseline, run a dynamically bounded fresh-proposal experiment loop, and deterministically keep only command-measured improvements.",
             worktreeRequired: true,
-            input: inputs,
-            output: summaryPort,
             sequence,
         }),
     });

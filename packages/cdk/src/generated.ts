@@ -199,8 +199,11 @@ export const Uncertainty = {
  * @property robustness Prefer changes that remain correct under ordinary failure and boundary conditions.
  * @property pragmatism Choose the smallest practical change that satisfies the phase contract.
  * @property elegance Favor clear, cohesive designs over clever or incidental complexity.
+ * @property behavior-preserving-default Preserve observed behavior unless the phase explicitly changes it.
+ * @property verbatim-execution Execute the agreed draft exactly as written and record departures.
+ * @property annotation-fidelity Turn every annotation into one checklist item without dropping or merging it.
  */
-export type IntentRequireBuiltIn = "inspect-changed-behavior" | "report-actionable-finding" | "verify-coverage" | "state-assumptions" | "preserve-scope" | "leanness" | "reuse-over-reimplement" | "review-before-final" | "gates-green-before-commit" | "bounded-refinement" | "role-attributed-output" | "robustness" | "pragmatism" | "elegance";
+export type IntentRequireBuiltIn = "inspect-changed-behavior" | "report-actionable-finding" | "verify-coverage" | "state-assumptions" | "preserve-scope" | "leanness" | "reuse-over-reimplement" | "review-before-final" | "gates-green-before-commit" | "bounded-refinement" | "role-attributed-output" | "robustness" | "pragmatism" | "elegance" | "behavior-preserving-default" | "verbatim-execution" | "annotation-fidelity";
 /** Built-in IntentFocusBuiltIn values.
  * @property correctness Prioritize correctness and observable behavior over style preferences.
  * @property tests Pay attention to test coverage and assertions.
@@ -226,8 +229,10 @@ export type IntentFocusBuiltIn = "correctness" | "tests" | "specific" | "securit
  * @property over-engineering Do not build beyond the demonstrated need.
  * @property gold-plating Do not add unrequested polish or features.
  * @property duplication Do not duplicate logic that should be shared.
+ * @property interface-widening Do not broaden public interfaces without a concrete caller need.
+ * @property silent-deviation Do not silently adapt an unsatisfiable or contradicted plan.
  */
-export type IntentAvoidBuiltIn = "style-only" | "scope-creep" | "big-rewrite" | "unrequested-refactor" | "speculative-claim" | "unbounded-loop" | "rubber-stamp-review" | "weaken-tests-to-pass" | "taste-only-blocking" | "accretion" | "over-engineering" | "gold-plating" | "duplication";
+export type IntentAvoidBuiltIn = "style-only" | "scope-creep" | "big-rewrite" | "unrequested-refactor" | "speculative-claim" | "unbounded-loop" | "rubber-stamp-review" | "weaken-tests-to-pass" | "taste-only-blocking" | "accretion" | "over-engineering" | "gold-plating" | "duplication" | "interface-widening" | "silent-deviation";
 /** Built-in IntentBlockBuiltIn values.
  * @property destructive-change Do not perform destructive changes without explicit approval.
  * @property secret-exfiltration Do not reveal, copy, upload, or move secrets or credentials.
@@ -268,6 +273,12 @@ export const Intent = {
     pragmatism: "pragmatism",
     /** Favor clear, cohesive designs over clever or incidental complexity. Favor clear, cohesive designs over clever or incidental complexity. */
     elegance: "elegance",
+    /** Preserve observed behavior unless the phase explicitly changes it. Keep existing observable behavior intact unless the task explicitly requires a behavior change. */
+    behaviorPreservingDefault: "behavior-preserving-default",
+    /** Execute the agreed draft exactly as written and record departures. Follow the approved draft or design and explicitly report every necessary departure. */
+    verbatimExecution: "verbatim-execution",
+    /** Turn every annotation into one checklist item without dropping or merging it. Preserve each human annotation as exactly one actionable checklist item. */
+    annotationFidelity: "annotation-fidelity",
   } as const satisfies Record<string, IntentRequireBuiltIn>,
   focus: {
     /** Prioritize correctness and observable behavior over style preferences. Prefer a real bug or behavior gap over naming or style feedback. */
@@ -314,6 +325,10 @@ export const Intent = {
     goldPlating: "gold-plating",
     /** Do not duplicate logic that should be shared. Reuse or extract common behavior that should evolve together. */
     duplication: "duplication",
+    /** Do not broaden public interfaces without a concrete caller need. Keep externally visible interfaces narrow unless a demonstrated caller requires expansion. */
+    interfaceWidening: "interface-widening",
+    /** Do not silently adapt an unsatisfiable or contradicted plan. Record and resolve deviations instead of making unreported changes to an agreed plan or design. */
+    silentDeviation: "silent-deviation",
   } as const satisfies Record<string, IntentAvoidBuiltIn>,
   block: {
     /** Do not perform destructive changes without explicit approval. Refuse to delete data or rewrite history unless the user approves. */

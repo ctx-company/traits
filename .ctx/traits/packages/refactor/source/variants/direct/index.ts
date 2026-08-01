@@ -1,9 +1,11 @@
 import { intent, procedure, variant } from "@ctx-traits/cdk";
 
-import { port } from "./data.ts";
-import annotate from "./sequence/annotation.ts";
-import checklist from "./sequence/checklist.ts";
-import implement from "./sequence/implementation.ts";
+import { directWorkReport } from "../../direct-data.ts";
+import {
+    directAnnotationStep,
+    directChecklistStep,
+    directImplementationStep,
+} from "../../sequence/direct.ts";
 
 export default variant({
     name: "Refactor (Direct)",
@@ -11,14 +13,14 @@ export default variant({
     metadata: { tag: ["first-party", "refactoring", "annotations"] },
     intent: {
         require: [
-            { id: "annotation-fidelity", summary: "Every annotation becomes exactly one checklist item; nothing is dropped or merged away." },
-            intent.PreserveScope,
+            intent.require.AnnotationFidelity,
+            intent.require.PreserveScope,
         ],
-        avoid: [intent.ScopeCreep, intent.OverEngineering],
+        avoid: [intent.avoid.ScopeCreep, intent.avoid.OverEngineering],
     },
+    port: directWorkReport,
     procedure: procedure({
         description: "Collect human annotations interactively, plan them as a checklist, implement every item, and report.",
-        output: port.workReport,
-        sequence: [annotate, checklist, implement],
+        sequence: [directAnnotationStep, directChecklistStep, directImplementationStep],
     }),
 });

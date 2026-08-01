@@ -1,22 +1,16 @@
-import { port as cdkPort, slot as cdkSlot } from "@ctx-traits/cdk";
+import { port, slot } from "@ctx-traits/cdk";
+import { directAnnotations } from "./direct-schema.ts";
 
-import * as schema from "./schema.ts";
-
-const annotations = cdkSlot({
+export const directAnnotationsSlot = slot({
     id: "annotations",
-    schema: schema.annotations,
+    schema: directAnnotations,
     description: "Typed ctx-annotate output, validated against this schema before use.",
 });
-
-const checklist = cdkSlot.text({
+export const directChecklist = slot.text({
     id: "checklist",
     description: "Ordered checklist: one actionable item per annotation with file, location, and change.",
 });
-
-const workReport = cdkPort.output.text({
+export const directWorkReport = port.output.text({
     id: "work-report",
     description: "Final report of the implemented annotation checklist.",
 });
-
-export const slot = { annotations, checklist };
-export const port = { workReport };

@@ -14,12 +14,6 @@ export function buildSlots(schemas: AutoResearchSchemas, { benchmarkRefactor }: 
             id: "objective",
             description: "The bounded optimization objective for this experiment run.",
         });
-    const experimentCommand = benchmarkRefactor
-        ? undefined
-        : port.input.of(schema.list(schema.text()), {
-            id: "experiment-command",
-            description: "No-shell argv executed for baseline and candidate measurements.",
-        });
     const metricField = benchmarkRefactor
         ? undefined
         : port.input.text({
@@ -31,6 +25,12 @@ export function buildSlots(schemas: AutoResearchSchemas, { benchmarkRefactor }: 
         : port.input.of(schema.integer(), {
             id: "max-experiments",
             description: "Positive runtime-resolved bound on candidate experiments.",
+        });
+    const experimentCommand = benchmarkRefactor
+        ? undefined
+        : port.input.of(schema.list(schema.text()), {
+            id: "experiment-command",
+            description: "No-shell argv executed for baseline and candidate measurements.",
         });
 
     // benchmark-refactor's own inputs: caller-selected code area, a no-shell
