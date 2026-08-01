@@ -4040,7 +4040,7 @@ fn validate_registry(registry: &HarnessRegistry) -> crate::Result<()> {
 fn known_output_parser(output: &str) -> bool {
     matches!(
         output,
-        "raw-json" | "claude-json" | "claude-stream-json" | "opencode-json"
+        "raw-json" | "claude-json" | "claude-stream-json" | "opencode-json" | "pi-json"
     )
 }
 
@@ -4652,10 +4652,9 @@ pub fn probe_harness_version(harness: &HarnessDefinition) -> crate::Result<()> {
 /// agent-variant selector, the closest existing typed field to the phase's
 /// named flag).
 ///
-/// `pi` (the `@mariozechner/pi-coding-agent` CLI) carries its verified
-/// headless JSON-event contract: `--mode json` selects the non-interactive
-/// JSON-event output mode (one of pi's four resolved app modes — interactive,
-/// print, json, rpc — so it needs no separate print/`-p` flag), `--model` and
+/// `pi` (the `@earendil-works/pi-coding-agent` CLI) carries its verified
+/// headless JSON-event contract: `--mode json` selects JSON event output and
+/// `--print` makes the positional prompt non-interactive. `--model` and
 /// `--thinking` select model and reasoning effort, `--append-system-prompt`
 /// appends text or file contents to the system prompt (verified against
 /// pi's own `--help`, distinct from `--system-prompt`, which replaces it —
@@ -4796,7 +4795,10 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                 transports: vec![RunTransport::Cli],
                 version_probe: vec!["--version".to_string()],
                 cli: Some(HarnessCliConvention {
-                    argv: ["--mode", "json"].into_iter().map(String::from).collect(),
+                    argv: ["--mode", "json", "--print"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
                     narrator_argv: None,
                     warm_argv: None,
                     json_schema_flag: None,
@@ -4808,14 +4810,10 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     dir_flag: None,
                     prompt_via: Some("arg".to_string()),
                     stream: Some(true),
-                    // `pi-json` was never a real parser id — the registry only knows
-                    // raw-json/claude-json/claude-stream-json/opencode-json — so
-                    // this definition could never validate. It went unnoticed
-                    // because an unconfigured built-in was never materialized
-                    // into the registry and so never validated. `raw-json` is the
-                    // generic decoder and is a placeholder: pi's actual stream
-                    // shape is unverified (no pi binary on any machine here yet).
-                    output: Some("raw-json".to_string()),
+                    // Pi emits NDJSON events, including a `session` header and
+                    // a completed assistant message. `raw-json` accepts only
+                    // one document and would discard that stream structure.
+                    output: Some("pi-json".to_string()),
                 }),
                 mcp: None,
             },
@@ -5055,6 +5053,39 @@ fn config_error(field_path: impl Into<String>, message: impl Into<String>) -> cr
 #[cfg(test)]
 mod config_tests {
     use super::*;
+
+    #[test]
+    fn pi_built_in_definition_uses_valid_ndjson_convention() {
+        let definition = built_in_harness_definition("pi", &HarnessRegistry::default());
+        let cli = definition.cli.as_ref().expect("pi has a CLI convention");
+
+        assert_eq!(definition.kind(), "pi");
+        assert_eq!(definition.bin(), "pi");
+        assert_eq!(
+            cli.argv,
+            ["--mode", "json", "--print"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(cli.model_flag.as_deref(), Some("--model"));
+        assert_eq!(cli.reasoning_effort_flag.as_deref(), Some("--thinking"));
+        assert_eq!(
+            cli.system_prompt_flag.as_deref(),
+            Some("--append-system-prompt")
+        );
+        assert_eq!(cli.session_flag.as_deref(), Some("--session"));
+        assert_eq!(cli.prompt_via.as_deref(), Some("arg"));
+        assert_eq!(cli.output.as_deref(), Some("pi-json"));
+        assert!(cli.json_schema_flag.is_none());
+        assert!(cli.dir_flag.is_none());
+
+        let registry = HarnessRegistry {
+            harness: BTreeMap::from([("pi".to_string(), definition)]),
+            ..HarnessRegistry::default()
+        };
+        validate_registry(&registry).expect("the Pi built-in convention is valid");
+    }
 
     /// P564: the `{worktree}` token is the only overlay form that yields a
     /// per-run path. Everything else in this test asserts the forms it must

@@ -8277,6 +8277,22 @@ mod resolve_progress_tests {
     }
 
     #[test]
+    fn parses_pi_ndjson_session_and_nested_message_end_output() {
+        let parsed = super::parse_harness_output(
+            concat!(
+                r#"{"type":"session","id":"pi-session-123"}"#, "\n",
+                r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"answer\":true}"}]}}"#
+            ),
+            "pi-json",
+            &requested(),
+        )
+        .expect("Pi NDJSON parses through the generic stream traversal");
+
+        assert_eq!(parsed.harness_session_id.as_deref(), Some("pi-session-123"));
+        assert_eq!(parsed.slots.get("slot:answer"), Some(&json!(true)));
+    }
+
+    #[test]
     fn missing_slot_keeps_one_best_partial_candidate() {
         let requested = vec![
             requested().pop().unwrap(),
