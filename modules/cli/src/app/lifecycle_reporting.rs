@@ -888,13 +888,17 @@ pub(crate) fn handle_trust_status(file: &str, json: bool) -> crate::Result<Comma
     // Selects by the store's own append-only sequence, never wall-clock
     // `updated_at` (P534 review blocker 2) — `seq` is the only authority
     // for which identity-bound record is current.
-    let recorded = rows
-        .iter()
-        .filter(|row| row.trait_id.as_deref() == Some(trait_ref.id.as_str()))
-        .max_by_key(|row| row.seq.unwrap_or(0))
-        .or_else(|| {
-            rows.iter()
-                .find(|row| row.trait_id.is_none() && row.digest == canonical_digest.as_str())
+    let recorded = document
+        .record_for_current(trait_ref.id.as_str(), canonical_digest.as_str())
+        .and_then(|record| {
+            // `seq` is absent in older stores, so `(seq, digest)` cannot
+            // identify a record. Keep the selector's exact append-only record
+            // identity when joining to its classified row.
+            document
+                .digests
+                .iter()
+                .position(|candidate| std::ptr::eq(candidate, record))
+                .and_then(|index| rows.get(index))
         });
 
     if json {

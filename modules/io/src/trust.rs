@@ -48,10 +48,8 @@ pub struct TrustRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trait_id: Option<String>,
     /// The approval ACT this record was written in: every record from one
-    /// `update_digests_locked` call shares it. `None` for legacy records,
-    /// which fall back to per-record currency. This is what lets a native
-    /// family's leaves — several canonical digests under one trait id — all
-    /// be current at once, while a later act still supersedes them wholesale.
+    /// `update_digests_locked` call shares it. It preserves append-only
+    /// history metadata; executable authority is always exact-digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub act: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,6 +71,20 @@ pub struct Document {
 }
 
 impl Document {
+    /// The latest exact-digest decision applicable to `trait_id`. Raw digest
+    /// evidence remains applicable to every trait with those exact bytes.
+    /// Store order resolves ties in legacy unsequenced evidence, matching the
+    /// append-only order used when sequences are later assigned.
+    pub fn exact_record(&self, trait_id: &str, digest: &str) -> Option<&TrustRecord> {
+        self.digests
+            .iter()
+            .filter(|record| {
+                record.digest == digest
+                    && (record.trait_id.is_none() || record.trait_id.as_deref() == Some(trait_id))
+            })
+            .max_by_key(|record| record.seq.unwrap_or(0))
+    }
+
     pub fn record(&self, digest: &str) -> Option<&TrustRecord> {
         self.digests
             .iter()
@@ -80,9 +92,18 @@ impl Document {
             .max_by_key(|record| record.seq.unwrap_or(0))
     }
 
-    /// The latest identity-bound approval for `trait_id`. Blocks remain
-    /// exact-digest decisions and never replace approval currency.
+    /// The latest identity-bound record for `trait_id`, retained as history
+    /// for reporting only. Start authority is always exact-digest evidence.
     pub fn record_for_trait(&self, trait_id: &str) -> Option<&TrustRecord> {
+        self.digests
+            .iter()
+            .filter(|record| record.trait_id.as_deref() == Some(trait_id))
+            .max_by_key(|record| record.seq.unwrap_or(0))
+    }
+
+    /// The prior approval for a named trait. Blocks remain historical events,
+    /// but cannot be reported as evidence an approval superseded.
+    pub fn verified_record_for_trait(&self, trait_id: &str) -> Option<&TrustRecord> {
         self.digests
             .iter()
             .filter(|record| {
@@ -99,79 +120,37 @@ impl Document {
             })
             .max_by_key(|record| record.seq.unwrap_or(0))
     }
+
+    /// Reporting selection: exact current-digest evidence (named or raw)
+    /// wins, then the latest identity history supplies stale context.
+    pub fn record_for_current(&self, trait_id: &str, digest: &str) -> Option<&TrustRecord> {
+        self.exact_record(trait_id, digest)
+            .or_else(|| self.record_for_trait(trait_id))
+    }
 }
 
-/// Start-time decision derived from append-only, identity-bound history.
-/// Raw digest records intentionally remain exact-digest evidence only.
+/// Start-time decision derived from exact-digest append-only evidence.
+/// Raw digest records intentionally remain exact-digest evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartTrust {
     Verified(TrustRecord),
     Blocked(TrustRecord),
-    Superseded {
-        candidate: TrustRecord,
-        current: TrustRecord,
-    },
     Unreviewed,
 }
 
 impl Document {
     pub fn start_trust(&self, trait_id: &str, digest: &str) -> StartTrust {
-        let Some(current) = self.record_for_trait(trait_id) else {
-            // A fresh identity-bound block is authoritative for the exact
-            // candidate even before this trait has any verified lineage.
-            if let Some(record) = self.latest_named_for_digest(trait_id, digest)
-                && record.state == TrustState::Blocked
-            {
-                return StartTrust::Blocked(record.clone());
+        // Trust is a decision about exact canonical bytes. Identity history is
+        // retained for reporting, but a later decision for another digest does
+        // not invalidate this digest's last decision.
+        let candidate = self.exact_record(trait_id, digest);
+        match candidate {
+            Some(record) if record.state == TrustState::Verified => {
+                StartTrust::Verified(record.clone())
             }
-            // Legacy/raw evidence intentionally has no trait lineage, but is
-            // still authoritative for its exact bytes.
-            return match self.record(digest) {
-                Some(record)
-                    if record.trait_id.is_none() && record.state == TrustState::Verified =>
-                {
-                    StartTrust::Verified(record.clone())
-                }
-                Some(record)
-                    if record.trait_id.is_none() && record.state == TrustState::Blocked =>
-                {
-                    StartTrust::Blocked(record.clone())
-                }
-                _ => StartTrust::Unreviewed,
-            };
-        };
-        let candidate = self
-            .digests
-            .iter()
-            .filter(|record| {
-                record.digest == digest
-                    && (record.trait_id.is_none() || record.trait_id.as_deref() == Some(trait_id))
-            })
-            .max_by_key(|record| record.seq.unwrap_or(0));
-        if matches!(candidate, Some(record) if record.state == TrustState::Blocked) {
-            return StartTrust::Blocked(candidate.expect("matched above").clone());
+            Some(record) => StartTrust::Blocked(record.clone()),
+            None => StartTrust::Unreviewed,
         }
-        if current.digest != digest {
-            // Currency is per approval ACT, not per record: every digest
-            // written in the same act carries that act's sequence, so a native
-            // family's leaves are all current together. Only a LATER act
-            // supersedes them.
-            return match self.latest_named_for_digest(trait_id, digest) {
-                Some(candidate) if candidate.state == TrustState::Verified => {
-                    if candidate.act.is_some() && candidate.act == current.act {
-                        StartTrust::Verified(candidate.clone())
-                    } else {
-                        StartTrust::Superseded {
-                            candidate: candidate.clone(),
-                            current: current.clone(),
-                        }
-                    }
-                }
-                None => StartTrust::Unreviewed,
-                Some(_) => StartTrust::Unreviewed,
-            };
-        }
-        StartTrust::Verified(current.clone())
     }
 }
 
@@ -633,14 +612,12 @@ pub fn update_digests_locked(updates: &[DigestTrustUpdate]) -> crate::Result<Vec
         .filter_map(|record| record.seq)
         .max()
         .unwrap_or(0);
-    // One call is one approval ACT. Sequences stay unique (the store's own
+    // One call is one trust-decision act. Sequences stay unique (the store's own
     // guard requires it), so the act is recorded separately: every record
     // written together carries the same `act`. A native family is the reason —
     // its leaves are one authored package with one canonical digest EACH, all
-    // reported under the same trait id, so per-record currency made each leaf
-    // supersede the previous and left only the last approved, i.e. `trust
-    // approve implement` silently covering one variant. Currency is per act:
-    // see `start_trust`.
+    // reported under the same trait id. Executable authority remains the latest
+    // exact-digest decision; `act` only preserves the grouped history.
     let act = next_seq + 1;
     let mut results = Vec::with_capacity(updates.len());
     for update in updates {
@@ -649,12 +626,14 @@ pub fn update_digests_locked(updates: &[DigestTrustUpdate]) -> crate::Result<Vec
         // carried, only when it names a different digest — a re-approval of
         // the same digest supersedes nothing.
         let supersedes = update.trait_id.as_deref().and_then(|trait_id| {
-            document.record_for_trait(trait_id).and_then(|prior| {
-                (prior.digest != update.digest).then(|| SupersededEvidence {
-                    digest: prior.digest.clone(),
-                    approved_at: prior.updated_at.clone(),
+            document
+                .verified_record_for_trait(trait_id)
+                .and_then(|prior| {
+                    (prior.digest != update.digest).then(|| SupersededEvidence {
+                        digest: prior.digest.clone(),
+                        approved_at: prior.updated_at.clone(),
+                    })
                 })
-            })
         });
         next_seq += 1;
         document.digests.push(TrustRecord {
@@ -774,6 +753,8 @@ fn epoch_seconds() -> String {
 mod tests {
     use super::*;
 
+    static TRUST_STORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn record(digest: &str, state: TrustState, seq: Option<u64>) -> TrustRecord {
         TrustRecord {
             digest: digest.to_string(),
@@ -787,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn start_trust_derives_currency_from_sequence_and_preserves_blocks() {
+    fn start_trust_uses_latest_exact_digest_decision() {
         let mut document = Document {
             digests: vec![
                 record("sha256:x", TrustState::Verified, Some(1)),
@@ -800,7 +781,7 @@ mod tests {
 
         assert!(matches!(
             document.start_trust("example", "sha256:y"),
-            StartTrust::Superseded { .. }
+            StartTrust::Verified(record) if record.seq == Some(2)
         ));
         assert!(matches!(
             document.start_trust("example", "sha256:x"),
@@ -811,6 +792,68 @@ mod tests {
         assert!(matches!(
             document.start_trust("example", "sha256:x"),
             StartTrust::Blocked(record) if record.seq == Some(4)
+        ));
+
+        document.digests.push(TrustRecord {
+            digest: "sha256:raw".to_string(),
+            state: TrustState::Verified,
+            trait_id: None,
+            act: None,
+            updated_at: None,
+            reason: None,
+            seq: Some(6),
+        });
+        assert!(matches!(
+            document.start_trust("example", "sha256:raw"),
+            StartTrust::Verified(record) if record.seq == Some(6)
+        ));
+        assert!(matches!(
+            document.start_trust("example", "sha256:unseen"),
+            StartTrust::Unreviewed
+        ));
+    }
+
+    #[test]
+    fn reporting_prefers_exact_digest_before_identity_history() {
+        let mut document = Document {
+            digests: vec![
+                record("sha256:a", TrustState::Verified, Some(1)),
+                record("sha256:b", TrustState::Verified, Some(2)),
+            ],
+        };
+        assert!(matches!(
+            document.record_for_current("example", "sha256:a"),
+            Some(record) if record.digest == "sha256:a"
+        ));
+        document
+            .digests
+            .push(record("sha256:b", TrustState::Blocked, Some(3)));
+        assert!(matches!(
+            document.record_for_current("example", "sha256:unseen"),
+            Some(record) if record.digest == "sha256:b" && record.state == TrustState::Blocked
+        ));
+    }
+
+    #[test]
+    fn unsequenced_exact_evidence_has_one_authoritative_record() {
+        let document = Document {
+            digests: vec![
+                record("sha256:a", TrustState::Verified, None),
+                record("sha256:a", TrustState::Blocked, None),
+            ],
+        };
+
+        assert!(matches!(
+            document.exact_record("example", "sha256:a"),
+            Some(record) if record.state == TrustState::Blocked
+        ));
+        assert!(matches!(
+            document.record_for_current("example", "sha256:a"),
+            Some(record) if record.state == TrustState::Blocked
+        ));
+        assert!(matches!(
+            document.start_trust("example", "sha256:a"),
+            StartTrust::Blocked(record) if record.state == TrustState::Blocked
         ));
     }
 
@@ -924,6 +967,7 @@ mod tests {
 
     #[test]
     fn update_digests_locked_computes_supersession_only_for_a_different_digest() {
+        let _lock = TRUST_STORE_TEST_LOCK.lock().unwrap();
         let dir = scratch_dir("locked-write");
         // Isolate the global config root this process resolves the trust
         // store under — parallel tests mutating this env var would race, so
@@ -965,6 +1009,55 @@ mod tests {
         .expect("second write");
         let supersedes = second[0].supersedes.as_ref().expect("supersedes digest_x");
         assert_eq!(supersedes.digest, digest_x);
+
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn update_after_block_supersedes_prior_verified_digest() {
+        let _lock = TRUST_STORE_TEST_LOCK.lock().unwrap();
+        let dir = scratch_dir("locked-write-after-block");
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", dir.as_std_path());
+        }
+
+        let digest_a = format!("sha256:{}", "a".repeat(64));
+        let digest_b = format!("sha256:{}", "b".repeat(64));
+        update_digests_locked(&[DigestTrustUpdate::named(
+            "example".to_string(),
+            digest_a.clone(),
+            TrustState::Verified,
+            None,
+        )])
+        .expect("approve A");
+        update_digests_locked(&[DigestTrustUpdate::named(
+            "example".to_string(),
+            digest_b.clone(),
+            TrustState::Blocked,
+            None,
+        )])
+        .expect("block B");
+        let approval = update_digests_locked(&[DigestTrustUpdate::named(
+            "example".to_string(),
+            digest_b,
+            TrustState::Verified,
+            None,
+        )])
+        .expect("approve B");
+        assert_eq!(
+            approval[0]
+                .supersedes
+                .as_ref()
+                .map(|evidence| &evidence.digest),
+            Some(&digest_a),
+            "a block is not approval evidence that a later approval supersedes"
+        );
 
         unsafe {
             match previous {

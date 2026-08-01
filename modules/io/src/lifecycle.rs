@@ -90,9 +90,7 @@ pub fn resolve_trust_verdict_for_trait(
     Ok(match store.start_trust(trait_id, canonical_digest) {
         crate::trust::StartTrust::Verified(_) => TrustVerdict::Verified,
         crate::trust::StartTrust::Blocked(_) => TrustVerdict::Blocked,
-        crate::trust::StartTrust::Superseded { .. } | crate::trust::StartTrust::Unreviewed => {
-            TrustVerdict::Unreviewed
-        }
+        crate::trust::StartTrust::Unreviewed => TrustVerdict::Unreviewed,
     })
 }
 
@@ -132,9 +130,7 @@ pub fn authorize_start(
             (TrustVerdict::Verified, Some(record.clone()))
         }
         crate::trust::StartTrust::Blocked(_) => (TrustVerdict::Blocked, None),
-        crate::trust::StartTrust::Superseded { .. } | crate::trust::StartTrust::Unreviewed => {
-            (TrustVerdict::Unreviewed, None)
-        }
+        crate::trust::StartTrust::Unreviewed => (TrustVerdict::Unreviewed, None),
     };
     Ok(StartAuthorization {
         status,

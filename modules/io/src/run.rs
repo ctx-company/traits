@@ -65,6 +65,56 @@ pub struct LoadedTrait {
     pub canonical_digest: String,
 }
 
+/// Read-only relationship between a recorded source path and the bytes the
+/// session committed to run. It is display evidence only; replay always uses
+/// a valid pinned document first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraitSourceDrift {
+    Current,
+    Rebuilt {
+        current_source_digest: String,
+    },
+    Missing,
+    /// A document was recorded, but it cannot prove the session's committed
+    /// identity and digests. This is distinct from a pre-pinning ledger.
+    UnrecoverableInvalidPin {
+        current_source_digest: Option<String>,
+    },
+    UnrecoverableLegacy {
+        current_source_digest: Option<String>,
+    },
+}
+
+impl TraitSourceDrift {
+    pub fn warning(&self) -> Option<String> {
+        match self {
+            Self::Current => None,
+            Self::Rebuilt {
+                current_source_digest,
+            } => Some(format!(
+                "trait source rebuilt to {current_source_digest}; pinned session bytes remain resumable"
+            )),
+            Self::Missing => Some("trait source path disappeared; pinned session bytes remain resumable".to_string()),
+            Self::UnrecoverableInvalidPin {
+                current_source_digest,
+            } => Some(match current_source_digest {
+                Some(digest) => format!(
+                    "trait source rebuilt to {digest}; pinned session document is malformed or does not match the recorded digests and is unrecoverable"
+                ),
+                None => "trait source path disappeared; pinned session document is malformed or does not match the recorded digests and is unrecoverable".to_string(),
+            }),
+            Self::UnrecoverableLegacy {
+                current_source_digest,
+            } => Some(match current_source_digest {
+                Some(digest) => format!(
+                    "trait source rebuilt to {digest}; legacy session has no pinned document and is unrecoverable"
+                ),
+                None => "trait source path disappeared; legacy session has no pinned document and is unrecoverable".to_string(),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ResourceEvidenceMode<'a> {
     ReadDeclared { root_override: Option<&'a str> },
@@ -324,18 +374,6 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     );
     if !gates.is_empty() {
         let trust_detail = match &authorization.decision {
-            crate::trust::StartTrust::Superseded { candidate, current } => {
-                let mut detail = format!(
-                    "approved {}, superseded by {} at {} — re-approve to run this version",
-                    candidate.updated_at.as_deref().unwrap_or("an unknown time"),
-                    current.digest,
-                    current.updated_at.as_deref().unwrap_or("an unknown time"),
-                );
-                if let Some(commit) = last_change_commit(&loaded.trait_root) {
-                    detail.push_str(&format!("; last change commit {commit}"));
-                }
-                detail
-            }
             crate::trust::StartTrust::Blocked(record) => {
                 let mut detail = format!(
                     "candidate {} is blocked by sequence {} recorded at {}",
@@ -666,6 +704,20 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         session_id.as_str(),
     )?;
     let canonical_digest = ctx_traits_core::digest::Digest::parse(&loaded.canonical_digest)?;
+    let pinned_document = if request.ephemeral {
+        None
+    } else {
+        // Re-read after selection so a file changed during start cannot be
+        // pinned under the earlier digest.
+        let text = crate::read::read_text(&loaded.path)?;
+        if ctx_traits_core::digest::Digest::source(&text).as_str() != loaded.source_digest {
+            return invalid_request(
+                "run.trait-source",
+                "trait source changed while starting; retry with stable source bytes",
+            );
+        }
+        Some(text)
+    };
     let trust_approval = authorization.approval.map(|record| {
         ctx_traits_core::procedure::session::TrustApprovalProvenance {
             trait_id: loaded.trait_ref.id.to_string(),
@@ -703,6 +755,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 trait_source: Some(ctx_traits_core::procedure::session::TraitSource {
                     kind: loaded.source_kind,
                     path: loaded.path.to_string(),
+                    document: pinned_document,
                 }),
                 query_selection: selected_query,
                 worktree: worktree_provenance,
@@ -813,10 +866,37 @@ pub fn status(request: InspectRequest<'_>) -> crate::Result<InspectOutcome> {
     // not persisted: a later `call` reloads the ledger and must see the same
     // optimistic-concurrency digest the status response issued.
     let _ = request.elapsed_seconds;
-    let loaded = load_trait_for_session(request.trait_file, request.trait_id, &session, "run")?;
+    let loaded = load_trait_for_session(request.trait_file, request.trait_id, &session, "run");
+    // A legacy ledger whose source has drifted cannot be refreshed without
+    // matching recovery bytes, but status must still expose that fact without
+    // changing or rejecting the ledger. Try an explicit recovery source first.
+    let unrecoverable_source = matches!(
+        trait_source_drift(&session),
+        TraitSourceDrift::UnrecoverableLegacy { .. }
+            | TraitSourceDrift::UnrecoverableInvalidPin { .. }
+    );
+    if unrecoverable_source && loaded.is_err() {
+        let mut session = session;
+        if let Some(warning) = trait_source_drift(&session).warning() {
+            session.warnings.push(warning);
+        }
+        let resource_supported =
+            ctx_traits_core::procedure::session::declared_resource_evidence_supported(
+                &session.resource_evidence,
+            );
+        return Ok(InspectOutcome {
+            session,
+            resource_supported,
+            command_failure: None,
+        });
+    }
+    let loaded = loaded?;
     validate_pinned_approval(&session, &loaded)?;
-    let refreshed =
+    let mut refreshed =
         ctx_traits_core::procedure::session::refresh_run_session(&loaded.trait_ref, session)?;
+    if !unrecoverable_source && let Some(warning) = trait_source_drift(&refreshed).warning() {
+        refreshed.warnings.push(warning);
+    }
     let resource_supported =
         ctx_traits_core::procedure::session::declared_resource_evidence_supported(
             &refreshed.resource_evidence,
@@ -1623,18 +1703,46 @@ pub fn load_trait(
     ctx_traits_core::digest::Digest,
 )> {
     let path = Utf8Path::new(file);
-    let encoding = ctx_traits_core::encoding::Encoding::from_path(path)?;
     let text = crate::read::read_text(path)?;
+    let (trait_ref, trait_root, source_digest, canonical_digest) = load_trait_text(path, &text)?;
+    Ok((trait_ref, trait_root, source_digest, canonical_digest))
+}
+
+fn load_trait_text(
+    path: &Utf8Path,
+    text: &str,
+) -> crate::Result<(
+    ctx_traits_core::Trait,
+    Utf8PathBuf,
+    ctx_traits_core::digest::Digest,
+    ctx_traits_core::digest::Digest,
+)> {
+    load_trait_text_with_context(path, path, text)
+}
+
+/// Decode `text` with the recorded document's encoding while resolving package
+/// resources from the source path supplied by the current resume caller.
+fn load_trait_text_with_context(
+    encoding_path: &Utf8Path,
+    package_path: &Utf8Path,
+    text: &str,
+) -> crate::Result<(
+    ctx_traits_core::Trait,
+    Utf8PathBuf,
+    ctx_traits_core::digest::Digest,
+    ctx_traits_core::digest::Digest,
+)> {
+    let encoding = ctx_traits_core::encoding::Encoding::from_path(encoding_path)?;
     let (trait_ref, warnings) =
-        ctx_traits_core::encoding::decode_trait_with_warnings(encoding, &text)?;
-    crate::decode_diagnostics::print_decode_warnings(file, &warnings);
-    let trait_root = crate::layout::package_root_for_manifest(path)
+        ctx_traits_core::encoding::decode_trait_with_warnings(encoding, text)?;
+    crate::decode_diagnostics::print_decode_warnings(encoding_path.as_str(), &warnings);
+    let trait_root = crate::layout::package_root_for_manifest(package_path)
         .map(Utf8Path::to_path_buf)
         .ok_or_else(|| crate::environment::Error::Filesystem {
-            path: file.to_string(),
+            path: package_path.to_string(),
             source: std::io::Error::other("trait file has no package root"),
         })?;
-    let source_digest = ctx_traits_core::digest::Digest::source(&text);
+    let source_digest = ctx_traits_core::digest::Digest::source(text);
     let canonical_digest = ctx_traits_core::digest::canonical_digest(&trait_ref)?;
     Ok((trait_ref, trait_root, source_digest, canonical_digest))
 }
@@ -1645,27 +1753,184 @@ pub fn load_trait_for_session(
     session: &ctx_traits_core::procedure::session::Session,
     field_prefix: &str,
 ) -> crate::Result<LoadedTrait> {
-    let loaded = if trait_file.is_some() || trait_id.is_some() {
-        load_trait_source(trait_file, trait_id, field_prefix)?
-    } else {
-        let source = session.provenance.trait_source.as_ref().ok_or_else(|| {
-            invalid_request_error(
-                &format!("{field_prefix}.trait-source"),
-                "run-session ledger does not record a trait file; pass --file <trait.toml>",
-            )
-        })?;
-        let (trait_ref, trait_root, source_digest, canonical_digest) = load_trait(&source.path)?;
-        LoadedTrait {
+    let source = session.provenance.trait_source.as_ref().ok_or_else(|| {
+        invalid_request_error(
+            &format!("{field_prefix}.trait-source"),
+            "run-session ledger does not record a trait file; pass --file <trait.toml>",
+        )
+    })?;
+    let path = Utf8PathBuf::from(&source.path);
+    let from_parts =
+        |trait_ref: ctx_traits_core::Trait,
+         trait_root: Utf8PathBuf,
+         source_digest: ctx_traits_core::digest::Digest,
+         canonical_digest: ctx_traits_core::digest::Digest| LoadedTrait {
             trait_ref,
             trait_root,
-            path: Utf8PathBuf::from(&source.path),
+            path: path.clone(),
             source_kind: source.kind.clone(),
             source_digest: source_digest.as_str().to_string(),
             canonical_digest: canonical_digest.as_str().to_string(),
+        };
+    let explicit = (trait_file.is_some() || trait_id.is_some())
+        .then(|| load_trait_source(trait_file, trait_id, field_prefix))
+        .transpose()
+        .ok()
+        .flatten();
+    // A valid pin is authoritative on every resume path. An explicit source
+    // may supply package context only after its decoded trait identity proves
+    // it belongs to this session; its rebuilt bytes never replace the pin.
+    if let Some(pinned) = source.document.as_deref()
+        && let package_path = explicit
+            .as_ref()
+            .filter(|loaded| package_context_matches_session(loaded, session))
+            .map(|loaded| loaded.path.as_path())
+            .unwrap_or(path.as_path())
+        && let Ok((trait_ref, trait_root, source_digest, canonical_digest)) =
+            load_trait_text_with_context(&path, package_path, pinned)
+    {
+        let pinned = from_parts(trait_ref, trait_root, source_digest, canonical_digest);
+        if verify_loaded_trait_matches_session(&pinned, session, field_prefix).is_ok() {
+            return Ok(pinned);
         }
+    }
+    // An explicit recovery file and the recorded legacy path are independent
+    // candidates. A decodable mismatch from one must not conceal a matching
+    // candidate from the other.
+    let mut mismatch = None;
+    if let Some(loaded) = explicit {
+        if verify_loaded_trait_matches_session(&loaded, session, field_prefix).is_ok() {
+            return Ok(loaded);
+        }
+        mismatch = Some(loaded);
+    }
+    if let Ok((trait_ref, trait_root, source_digest, canonical_digest)) = load_trait(&source.path) {
+        let loaded = from_parts(trait_ref, trait_root, source_digest, canonical_digest);
+        if verify_loaded_trait_matches_session(&loaded, session, field_prefix).is_ok() {
+            return Ok(loaded);
+        }
+        mismatch.get_or_insert(loaded);
+    }
+    Err(session_source_mismatch(
+        session,
+        mismatch.as_ref(),
+        field_prefix,
+    ))
+}
+
+/// An explicit rebuilt source may anchor pinned bytes only when both the
+/// document and its enclosing package claim this session's trait identity.
+fn package_context_matches_session(
+    loaded: &LoadedTrait,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> bool {
+    if loaded.trait_ref.id.as_str() != session.trait_id {
+        return false;
+    }
+    match crate::distribution::read_package_manifest(&loaded.trait_root) {
+        Ok(Some(manifest)) => manifest.package.id == session.trait_id,
+        // Flat legacy documents are their package's sole identity: they have
+        // no [package] manifest to validate separately.
+        Ok(None) => loaded.path == loaded.trait_root.join(crate::layout::TRAIT_MANIFEST),
+        Err(_) => false,
+    }
+}
+
+/// Classify the recorded path without decoding or changing the session.
+pub fn trait_source_drift(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> TraitSourceDrift {
+    trait_source_drift_from(session, None)
+}
+
+/// As [`trait_source_drift`], resolving a relative ledger path from its
+/// owning repository rather than the dashboard process's current directory.
+pub fn trait_source_drift_from(
+    session: &ctx_traits_core::procedure::session::Session,
+    repository_root: Option<&Utf8Path>,
+) -> TraitSourceDrift {
+    let Some(source) = session.provenance.trait_source.as_ref() else {
+        return TraitSourceDrift::UnrecoverableLegacy {
+            current_source_digest: None,
+        };
     };
-    verify_loaded_trait_matches_session(&loaded, session, field_prefix)?;
-    Ok(loaded)
+    let source_path = Utf8Path::new(&source.path);
+    let path = if source_path.is_relative() {
+        repository_root
+            .map(|root| root.join(source_path))
+            .unwrap_or_else(|| source_path.to_path_buf())
+    } else {
+        source_path.to_path_buf()
+    };
+    let current = crate::read::read_text(&path)
+        .ok()
+        .map(|text| ctx_traits_core::digest::Digest::source(&text).to_string());
+    let expected = session.source_digest.as_ref().map(ToString::to_string);
+    let pin_present = source.document.is_some();
+    let valid_pin = source.document.as_deref().is_some_and(|document| {
+        // `path` is rooted at the repository that owns this session. Keep the
+        // ledger path only for selecting its original encoding.
+        load_trait_text_with_context(source_path, &path, document)
+            .map(|(trait_ref, _, source_digest, canonical_digest)| {
+                trait_ref.id.as_str() == session.trait_id
+                    && session
+                        .source_digest
+                        .as_ref()
+                        .is_some_and(|expected| source_digest.as_str() == expected.as_str())
+                    && session
+                        .canonical_digest
+                        .as_ref()
+                        .is_some_and(|expected| canonical_digest.as_str() == expected.as_str())
+            })
+            .unwrap_or(false)
+    });
+    match (valid_pin, current, expected) {
+        (_, Some(current), Some(expected)) if current == expected => TraitSourceDrift::Current,
+        (true, Some(current_source_digest), _) => TraitSourceDrift::Rebuilt {
+            current_source_digest,
+        },
+        (true, None, _) => TraitSourceDrift::Missing,
+        (false, current_source_digest, _) if pin_present => {
+            TraitSourceDrift::UnrecoverableInvalidPin {
+                current_source_digest,
+            }
+        }
+        (false, current_source_digest, _) => TraitSourceDrift::UnrecoverableLegacy {
+            current_source_digest,
+        },
+    }
+}
+
+fn session_source_mismatch(
+    session: &ctx_traits_core::procedure::session::Session,
+    loaded: Option<&LoadedTrait>,
+    field_prefix: &str,
+) -> crate::Error {
+    let expected_source = session.source_digest.as_deref().unwrap_or("unknown");
+    let expected_canonical = session.canonical_digest.as_deref().unwrap_or("unknown");
+    let current_source = loaded
+        .map(|loaded| loaded.source_digest.as_str())
+        .unwrap_or("unavailable");
+    let current_canonical = loaded
+        .map(|loaded| loaded.canonical_digest.as_str())
+        .unwrap_or("unavailable");
+    invalid_request_error(
+        &format!("{field_prefix}.trait-source"),
+        format!(
+            "session {} started at {} expects source {} and canonical {} but current source is {} and canonical is {}; recover the original bytes with --file, or start a fresh run/worktree harvest",
+            session.session_id.as_str(),
+            session
+                .provenance
+                .started_at_epoch
+                .map(|epoch| epoch.to_string())
+                .as_deref()
+                .unwrap_or("unknown time"),
+            expected_source,
+            expected_canonical,
+            current_source,
+            current_canonical,
+        ),
+    )
 }
 
 pub fn read_session(

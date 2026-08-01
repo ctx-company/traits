@@ -1655,8 +1655,16 @@ fn sessions_from_inventory_tagged(
                     } else {
                         run_view::session_status(&session.status).to_string()
                     };
-                    let phase = parked_ask_presentation(session, repo_path)
+                    let mut phase = parked_ask_presentation(session, repo_path)
                         .unwrap_or_else(|| run_view::phase_text(session));
+                    if let Some(warning) = ctx_traits_io::run::trait_source_drift_from(
+                        session,
+                        repo_path.map(camino::Utf8Path::new),
+                    )
+                    .warning()
+                    {
+                        phase.push_str(&format!("; {warning}"));
+                    }
                     let elapsed_text =
                         tui::elapsed_text(Duration::from_secs(session.ledger.elapsed_seconds));
                     let token_usage = session
@@ -1924,6 +1932,15 @@ fn merges_from_inventory(
 /// `load_trust`'s own rule.
 fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
     let document = ctx_traits_io::trust::read_store()?;
+    Ok(build_trust_rows_from(&document, all))
+}
+
+/// Projects a supplied trust document for the TRUST screen. Keeping the join
+/// pure makes exact-digest authority testable without machine-local store IO.
+fn build_trust_rows_from(
+    document: &ctx_traits_io::trust::Document,
+    all: &[DashboardTraitRow],
+) -> Vec<TrustRow> {
     let current: Vec<(String, String)> = all
         .iter()
         .filter(|row| row.error.is_none() && !row.canonical_digest.is_empty())
@@ -1935,9 +1952,7 @@ fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
         if row.error.is_some() || row.canonical_digest.is_empty() {
             continue;
         }
-        let record = document
-            .record_for_trait(&row.id)
-            .or_else(|| document.record(&row.canonical_digest));
+        let record = document.record_for_current(&row.id, &row.canonical_digest);
         let report_row = record.map(|record| ctx_traits_io::trust::TrustReportRow {
             trait_id: Some(row.id.clone()),
             digest: record.digest.clone(),
@@ -1966,7 +1981,7 @@ fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
         });
     }
 
-    let classified = ctx_traits_io::trust::classify_records(&document, &current);
+    let classified = ctx_traits_io::trust::classify_records(document, &current);
     for orphan in classified
         .into_iter()
         .filter(|row| row.freshness == ctx_traits_io::trust::TrustFreshness::Orphaned)
@@ -1985,7 +2000,7 @@ fn build_trust_rows(all: &[DashboardTraitRow]) -> crate::Result<Vec<TrustRow>> {
     }
 
     sort_trust_rows(&mut rows);
-    Ok(rows)
+    rows
 }
 
 /// The one ordering site for TRUST rows: actionable rows (a resolvable
@@ -2992,9 +3007,8 @@ fn trait_preview_facts(
 }
 
 /// Joins `trust_document` against `trait_id`/`canonical_digest` (§4.2 point
-/// 3): an identity-bound record (`record_for_trait`) is preferred, matching
-/// the write path this screen itself now uses (§4.4); a legacy digest-only
-/// record is the fallback. Returns `(state, reason, stale, has_record)` —
+/// 3): exact current-digest evidence is preferred before identity history.
+/// Returns `(state, reason, stale, has_record)` —
 /// `stale` is `load_trust`'s own "record's digest moved" notion, reused
 /// rather than re-derived.
 fn trust_record_facts(
@@ -3002,7 +3016,7 @@ fn trust_record_facts(
     trait_id: &str,
     canonical_digest: &str,
 ) -> (String, String, bool, bool) {
-    if let Some(record) = document.record_for_trait(trait_id) {
+    if let Some(record) = document.record_for_current(trait_id, canonical_digest) {
         let stale = record.digest != canonical_digest;
         return (
             record.state.as_str().to_string(),
@@ -5820,6 +5834,164 @@ mod tests {
         assert_eq!(
             explanation_task_text("working...", Duration::from_secs(60)),
             "working... 00:01:00"
+        );
+    }
+
+    #[test]
+    fn preview_trust_prefers_current_digest_over_later_identity_history() {
+        let document = ctx_traits_io::trust::Document {
+            digests: vec![
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:a".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Blocked,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: Some("A is blocked".to_string()),
+                    seq: Some(1),
+                },
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:b".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Verified,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: None,
+                    seq: Some(2),
+                },
+            ],
+        };
+        assert_eq!(
+            trust_record_facts(&document, "fixture", "sha256:a"),
+            (
+                "blocked".to_string(),
+                "A is blocked".to_string(),
+                false,
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn trust_facts_keep_exact_and_raw_current_evidence_ahead_of_history() {
+        let mut document = ctx_traits_io::trust::Document {
+            digests: vec![
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:a".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Verified,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: None,
+                    seq: Some(1),
+                },
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:b".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Verified,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: None,
+                    seq: Some(2),
+                },
+            ],
+        };
+        assert_eq!(
+            trust_record_facts(&document, "fixture", "sha256:a").0,
+            "verified"
+        );
+
+        document.digests.push(ctx_traits_io::trust::TrustRecord {
+            digest: "sha256:a".to_string(),
+            state: ctx_traits_io::trust::TrustState::Blocked,
+            trait_id: Some("fixture".to_string()),
+            act: None,
+            updated_at: None,
+            reason: None,
+            seq: Some(3),
+        });
+        assert_eq!(
+            trust_record_facts(&document, "fixture", "sha256:a").0,
+            "blocked"
+        );
+
+        document.digests.push(ctx_traits_io::trust::TrustRecord {
+            digest: "sha256:a".to_string(),
+            state: ctx_traits_io::trust::TrustState::Verified,
+            trait_id: None,
+            act: None,
+            updated_at: None,
+            reason: None,
+            seq: Some(4),
+        });
+        assert_eq!(
+            trust_record_facts(&document, "fixture", "sha256:a").0,
+            "verified"
+        );
+        let unseen = trust_record_facts(&document, "fixture", "sha256:c");
+        assert_eq!(unseen.0, "blocked");
+        assert!(
+            unseen.2,
+            "unseen current bytes must be marked stale history"
+        );
+    }
+
+    #[test]
+    fn trust_rows_keep_exact_and_raw_current_evidence_ahead_of_history() {
+        let all = [dashboard_trait_row("fixture", "sha256:a", None, None)];
+        let mut document = ctx_traits_io::trust::Document {
+            digests: vec![
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:a".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Verified,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: None,
+                    seq: Some(1),
+                },
+                ctx_traits_io::trust::TrustRecord {
+                    digest: "sha256:b".to_string(),
+                    state: ctx_traits_io::trust::TrustState::Verified,
+                    trait_id: Some("fixture".to_string()),
+                    act: None,
+                    updated_at: None,
+                    reason: None,
+                    seq: Some(2),
+                },
+            ],
+        };
+        let class = |document: &ctx_traits_io::trust::Document| {
+            build_trust_rows_from(document, &all)[0].class
+        };
+        assert_eq!(class(&document), trust_story::TrustClass::Verified);
+
+        document.digests.push(ctx_traits_io::trust::TrustRecord {
+            digest: "sha256:a".to_string(),
+            state: ctx_traits_io::trust::TrustState::Blocked,
+            trait_id: Some("fixture".to_string()),
+            act: None,
+            updated_at: None,
+            reason: None,
+            seq: Some(3),
+        });
+        assert_eq!(class(&document), trust_story::TrustClass::Blocked);
+
+        document.digests.push(ctx_traits_io::trust::TrustRecord {
+            digest: "sha256:a".to_string(),
+            state: ctx_traits_io::trust::TrustState::Verified,
+            trait_id: None,
+            act: None,
+            updated_at: None,
+            reason: None,
+            seq: Some(4),
+        });
+        assert_eq!(class(&document), trust_story::TrustClass::Verified);
+
+        let unseen = [dashboard_trait_row("fixture", "sha256:c", None, None)];
+        assert_eq!(
+            build_trust_rows_from(&document, &unseen)[0].class,
+            trust_story::TrustClass::MovedBlock
         );
     }
 

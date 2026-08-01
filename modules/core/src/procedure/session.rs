@@ -357,6 +357,10 @@ pub enum MergeRung {
 pub struct TraitSource {
     pub kind: String,
     pub path: String,
+    /// Exact source text loaded at session start. This is deliberately kept
+    /// with the ledger so a rebuilt source path cannot change a resumed run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
 }
 
 /// Resolvable worktree provenance for a `--worktree` run: the prepared
