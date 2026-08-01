@@ -19,11 +19,6 @@
     "start": 12,
     "end": 12
   },
-  "port:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/variants/quick/port.ts",
-    "start": 30,
-    "end": 30
-  },
   "port:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/port.ts",
     "start": 20,
@@ -49,11 +44,6 @@
     "start": 52,
     "end": 52
   },
-  "prompt:feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 127,
-    "end": 127
-  },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 112,
@@ -73,11 +63,6 @@
     "file": "packages/agents/src/index.ts",
     "start": 205,
     "end": 205
-  },
-  "schema:feasibility-verdict": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 31,
-    "end": 31
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -159,11 +144,6 @@
     "start": 49,
     "end": 49
   },
-  "sequence:procedure/feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 124,
-    "end": 124
-  },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
     "start": 359,
@@ -179,11 +159,6 @@
     "start": 197,
     "end": 197
   },
-  "signal:task-not-feasible": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 263,
-    "end": 263
-  },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 16,
@@ -193,11 +168,6 @@
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
     "start": 5,
     "end": 5
-  },
-  "slot:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
-    "start": 34,
-    "end": 34
   },
   "slot:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",

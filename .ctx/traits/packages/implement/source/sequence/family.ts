@@ -689,7 +689,8 @@ export function familyProcedure(opts: {
 
     return [
         taskExtractionStep(clerk, taskBoard),
-        feasibilityStep(smart1),
+        // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+        // feasibilityStep(smart1),
         planning,
         building,
         ...commitTail({

@@ -101,19 +101,6 @@ format = [
 value = "slot:leftovers"
 
 [[port]]
-id = "feasibility"
-direction = "output"
-schema = "schema:feasibility-verdict"
-optional = true
-description = "Typed pre-build feasibility triage verdict (0047), for discoverability in the run's structured final outputs."
-title = "Feasibility Verdict"
-format = [
-    "structured",
-    "table",
-]
-value = "slot:feasibility"
-
-[[port]]
 id = "park-report"
 direction = "output"
 schema = "[schema:review-verdict-smart]"
@@ -164,11 +151,6 @@ hint = "git diff --stat output, excluding runtime state. No patch bodies: a dele
 id = "repo-gates-passed"
 schema = "schema:repo-gates-result"
 description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
-
-[[slot]]
-id = "feasibility"
-schema = "schema:feasibility-verdict"
-description = "Pre-build feasibility triage verdict (0047): audited once before any planning or build round spends anything. feasible lets the run continue; any other verdict is the park evidence for why it stopped here."
 
 [[slot]]
 id = "research-notes"
@@ -223,36 +205,6 @@ path = ".internal/tasks"
 root = "repo"
 hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
-
-[[schema]]
-id = "feasibility-verdict"
-description = "Typed pre-build feasibility triage: possible, blocked, oversized, or ambiguous, with tool-verified evidence and the owner action that clears a non-feasible verdict."
-
-[schema.fields.evidence]
-schema = "schema:text"
-required = true
-description = "What was checked and how: each referenced file, command, recipe, or prerequisite the task names as existing, and whether your tools confirmed it exists. Default to feasible absent proof of a problem — an unverified claim is never grounds for a non-feasible verdict on its own."
-
-[schema.fields.missing]
-schema = "[schema:text]"
-required = true
-description = "The concrete things missing or wrong, one per entry (a referenced file that does not exist, a prerequisite task not landed, the specific ambiguity). Empty when verdict is feasible."
-
-[schema.fields.owner-action]
-schema = "schema:text"
-required = true
-description = "The one owner action that would clear a non-feasible verdict — land the prerequisite, split the task, or rewrite the Done-when. Empty string (never omitted — always return the key) when verdict is feasible."
-
-[schema.fields.verdict]
-schema = "schema:text"
-required = true
-description = "feasible when the task can be built from inside this run as scoped; blocked when it depends on something not landed; oversized when the scope does not honestly fit one run's budget; ambiguous when it lacks a falsifiable Done-when and any implementation would be a guess."
-allowed = [
-    "feasible",
-    "blocked",
-    "oversized",
-    "ambiguous",
-]
 
 [[schema]]
 id = "decision"
@@ -518,10 +470,6 @@ description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" 
 id = "gate-timed-out"
 description = "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix."
 
-[[signal]]
-id = "task-not-feasible"
-description = "The pre-build feasibility gate found the task blocked, oversized, or ambiguous before any build work began; the run parks on the typed verdict instead of grinding toward a doomed park."
-
 [[agent]]
 id = "worker"
 description = "Implements the draft and applies reviewer fixes."
@@ -634,14 +582,6 @@ output = [
     "slot:review-verdict-2",
     "slot:leftovers",
 ]
-
-[prompt.feasibility-check]
-text = """Before any build work begins for {port:task}, audit it for feasibility against its contract {slot:task-brief} — read the contract, and everything it references, with your own tools. Audit the task from exactly four angles before any build work begins. POSSIBLE: can this be done at all from inside a run — the capability, authority, and tooling a shell here actually has? BLOCKED: does it depend on something not landed? For every file, command, fixture, prerequisite API, or recipe the task references as EXISTING, verify with your own tools that it actually exists in this worktree — a task that says "extend X" where X is absent is blocked, not implementable, however small the rest of the scope looks. OVERSIZED: does the scope honestly fit one run's budget, or does it need splitting into smaller tasks first? AMBIGUOUS: does the task state a falsifiable Done-when, or would any implementation here be a guess at what "done" means? Default to feasible: raise a non-feasible verdict only on evidence you actually checked, never on suspicion or scope alone. Return the typed verdict: the tool-checked evidence, every missing thing named as its own entry (empty when feasible), and the one owner action that would clear a non-feasible verdict (empty string when feasible)."""
-input = [
-    "port:task",
-    "slot:task-brief",
-]
-output = ["slot:feasibility"]
 
 [prompt.planning-produce]
 text = """
@@ -959,7 +899,6 @@ output = [
     "port:commit-report",
     "port:leftovers",
     "port:park-report",
-    "port:feasibility",
 ]
 
 [[procedure.sequence]]
@@ -972,17 +911,6 @@ input = [
     "resource:task-board",
 ]
 output = ["slot:task-brief"]
-
-[[procedure.sequence]]
-id = "feasibility-check"
-title = "Audit feasibility before building"
-agent = "agent:smart-1"
-prompt = "prompt:feasibility-check"
-input = [
-    "port:task",
-    "slot:task-brief",
-]
-output = ["slot:feasibility"]
 
 [[procedure.sequence]]
 id = "research"

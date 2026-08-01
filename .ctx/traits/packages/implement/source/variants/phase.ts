@@ -10,7 +10,6 @@ import {
     commitReport,
     declareTaskBoard,
     familyProcedure,
-    feasibilityPort,
     gateTimedOut,
     leftoversPort,
     ownerItemSchema,
@@ -18,7 +17,6 @@ import {
     smart1Role,
     smart2Role,
     task,
-    taskNotFeasible,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -91,69 +89,71 @@ const verdictSchema = verdictSchemaFor("default", {
         description:
             "The number of consecutive rounds the longest-standing still-open blocker has had exactly the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty. Reset it to 1 when any carried blocker step changes status or the blocker clears; never infer it from prose.",
     }),
-    "stall-question": schema.field(schema.text(), {
-        description:
-            `Empty while recurrence-rounds is below ${RECURRENCE_BREAKER_ROUNDS}. At or above that threshold, one concrete, owner-answerable question that names the still-open blocker and the decision or access needed to clear it.`,
-    }),
+    // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+    // "stall-question": schema.field(schema.text(), {
+    //     description:
+    //         `Empty while recurrence-rounds is below ${RECURRENCE_BREAKER_ROUNDS}. At or above that threshold, one concrete, owner-answerable question that names the still-open blocker and the decision or access needed to clear it.`,
+    // }),
 });
 const verdict1 = verdictSlot("review-verdict-1", "smart-1", verdictSchema);
 const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 
-const stallQuestion = slot.text({
-    id: "stall-question",
-    description: "The selected concrete owner question for a zero-delta recurring blocker, projected deterministically from reviewer 1 when both reviewers trip together.",
-});
-const ownerAnswer = slot.text({
-    id: "owner-answer",
-    description: "The owner's answer to the selected phase stall question, attached optionally to the next worker frame.",
-});
-const ownerInputRequired = signal({
-    id: "owner-input-required",
-    description: "A phase reviewer has reached the zero-delta recurrence threshold and requires one owner answer before refinement can resume.",
-});
-
-const recurrenceThreshold1 = condition.all([
-    condition.fieldEquals(verdict1, "status", "revise"),
-    condition.fieldGte(verdict1, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
-]);
-const recurrenceThreshold2 = condition.all([
-    condition.fieldEquals(verdict2, "status", "revise"),
-    condition.fieldGte(verdict2, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
-]);
-const recurrenceThreshold = condition.any([
-    recurrenceThreshold1,
-    recurrenceThreshold2,
-]);
-
-// This runs after park-report projection but before the loop guard. The ask
-// stays inside the matching branch so a persistent signal cannot expose it in
-// an unrelated later round.
-const recurrenceOwnerQuestion = sequence.when("recurrence-owner-question", {
-    if: recurrenceThreshold,
-    then: [
-        sequence.when("recurrence-question-reviewer-1", {
-            if: recurrenceThreshold1,
-            then: [
-                sequence.project("recurrence-question-project-reviewer-1", {
-                    projections: [{ source: verdict1, field: "stall-question", destination: stallQuestion }],
-                }),
-            ],
-        }),
-        sequence.when("recurrence-question-reviewer-2", {
-            if: condition.all([condition.not(recurrenceThreshold1), recurrenceThreshold2]),
-            then: [
-                sequence.project("recurrence-question-project-reviewer-2", {
-                    projections: [{ source: verdict2, field: "stall-question", destination: stallQuestion }],
-                }),
-            ],
-        }),
-        sequence.ask("recurrence-owner-answer", {
-            prompt: prompt.text`The implementation is stalled on a recurring blocker. Owner answer required: ${stallQuestion}`,
-            when: ownerInputRequired,
-            output: ownerAnswer,
-        }),
-    ],
-});
+// DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+// const stallQuestion = slot.text({
+//     id: "stall-question",
+//     description: "The selected concrete owner question for a zero-delta recurring blocker, projected deterministically from reviewer 1 when both reviewers trip together.",
+// });
+// const ownerAnswer = slot.text({
+//     id: "owner-answer",
+//     description: "The owner's answer to the selected phase stall question, attached optionally to the next worker frame.",
+// });
+// const ownerInputRequired = signal({
+//     id: "owner-input-required",
+//     description: "A phase reviewer has reached the zero-delta recurrence threshold and requires one owner answer before refinement can resume.",
+// });
+//
+// const recurrenceThreshold1 = condition.all([
+//     condition.fieldEquals(verdict1, "status", "revise"),
+//     condition.fieldGte(verdict1, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
+// ]);
+// const recurrenceThreshold2 = condition.all([
+//     condition.fieldEquals(verdict2, "status", "revise"),
+//     condition.fieldGte(verdict2, "recurrence-rounds", RECURRENCE_BREAKER_ROUNDS),
+// ]);
+// const recurrenceThreshold = condition.any([
+//     recurrenceThreshold1,
+//     recurrenceThreshold2,
+// ]);
+//
+// // This runs after park-report projection but before the loop guard. The ask
+// // stays inside the matching branch so a persistent signal cannot expose it in
+// // an unrelated later round.
+// const recurrenceOwnerQuestion = sequence.when("recurrence-owner-question", {
+//     if: recurrenceThreshold,
+//     then: [
+//         sequence.when("recurrence-question-reviewer-1", {
+//             if: recurrenceThreshold1,
+//             then: [
+//                 sequence.project("recurrence-question-project-reviewer-1", {
+//                     projections: [{ source: verdict1, field: "stall-question", destination: stallQuestion }],
+//                 }),
+//             ],
+//         }),
+//         sequence.when("recurrence-question-reviewer-2", {
+//             if: condition.all([condition.not(recurrenceThreshold1), recurrenceThreshold2]),
+//             then: [
+//                 sequence.project("recurrence-question-project-reviewer-2", {
+//                     projections: [{ source: verdict2, field: "stall-question", destination: stallQuestion }],
+//                 }),
+//             ],
+//         }),
+//         sequence.ask("recurrence-owner-answer", {
+//             prompt: prompt.text`The implementation is stalled on a recurring blocker. Owner answer required: ${stallQuestion}`,
+//             when: ownerInputRequired,
+//             output: ownerAnswer,
+//         }),
+//     ],
+// });
 
 /**
  * This variant's own park-report list, declared locally (not the shared
@@ -215,12 +215,12 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard, reviewRubric],
-    signal: [ownerInputRequired, gateTimedOut, taskNotFeasible],
+    signal: [gateTimedOut],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
         input: task,
-        output: [commitReport, leftoversPort, parkReportPort, feasibilityPort],
+        output: [commitReport, leftoversPort, parkReportPort],
         sequence: familyProcedure({
             clerk,
             smart1,
@@ -233,27 +233,9 @@ export default variant({
             verdict2,
             reviewRubric,
             parkReportOutput: parkReport,
-            postReviewSteps: [
-                // An answer is optional context for only the next worker
-                // frame. Clear the accepted value before choosing a new ask.
-                sequence.project("owner-answer-consume", {
-                    projections: [{ source: operation.literal(""), destination: ownerAnswer }],
-                }),
-                sequence.project("recurrence-question-clear", {
-                    projections: [{ source: operation.literal(""), destination: stallQuestion }],
-                }),
-                recurrenceOwnerQuestion,
-            ],
-            ownerAnswer,
-            ownerAnswerInstruction:
-                "When a non-empty owner answer is attached to this frame, apply it to the named recurring stall before continuing other blocker work; record how it resolved or narrowed that stall in the work summary.",
-            review1Emits: { signal: ownerInputRequired, when: recurrenceThreshold1 },
-            review2Emits: {
-                signal: ownerInputRequired,
-                when: condition.all([condition.not(recurrenceThreshold1), recurrenceThreshold2]),
-            },
+            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
             reviewExtraInstruction:
-                `Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status. Set "stall-question" to empty below ${RECURRENCE_BREAKER_ROUNDS}; at or above it, ask one concrete owner-answerable question naming the blocker and the decision or access needed.`,
+                `Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status.`,
         }),
     }),
 });

@@ -13,7 +13,7 @@
 // park-report projection (0047) is the one addition since: a deterministic,
 // zero-prompt `project` step, never a spliced doctrine block, so it stays
 // lean by this same rule.
-import { commitTail, feasibilityGate, guardedProduction } from "@ctx-traits/agents";
+import { commitTail, guardedProduction } from "@ctx-traits/agents";
 import { condition, intent, method, procedure, prompt, sequence, variant, tone, verbosity } from "@ctx-traits/cdk";
 
 import {
@@ -23,7 +23,6 @@ import {
     repoGatesPassed,
     repoGatesStep,
     reviewDiff,
-    taskNotFeasible,
 } from "../sequence/family.ts";
 import { agent } from "./quick/agent.ts";
 import * as port from "./quick/port.ts";
@@ -34,17 +33,18 @@ import * as slot from "./quick/slot.ts";
 // draft step spends anything. Quick has no extraction step, so the contract
 // ref is the task-board resource itself — the agent reads the task file
 // with its own tools rather than from a pre-extracted brief.
-const feasibilityCheck = feasibilityGate({
-    id: "feasibility",
-    agent: agent.smart,
-    task: port.task,
-    contract: resource.taskBoard,
-    output: slot.feasibility,
-    // Owner ruling 2026-07-31 (first live firing, run-bba65cb5): the audit
-    // is WARNING-ONLY for now — the typed verdict is recorded for the
-    // reviewer and the owner, but never stops the run.
-    mode: "warn",
-});
+// DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+// const feasibilityCheck = feasibilityGate({
+//     id: "feasibility",
+//     agent: agent.smart,
+//     task: port.task,
+//     contract: resource.taskBoard,
+//     output: slot.feasibility,
+//     // Owner ruling 2026-07-31 (first live firing, run-bba65cb5): the audit
+//     // is WARNING-ONLY for now — the typed verdict is recorded for the
+//     // reviewer and the owner, but never stops the run.
+//     mode: "warn",
+// });
 
 const draftStep = sequence.prompt("draft-writing", {
     title: "Draft the work",
@@ -137,14 +137,15 @@ export default variant({
         ],
     },
     resource: [resource.taskBoard],
-    signal: [gateTimedOut, taskNotFeasible],
+    signal: [gateTimedOut],
     procedure: procedure({
         description:
             "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
         input: port.task,
-        output: [port.commitReport, port.parkReportPort, port.feasibilityPort],
+        output: [port.commitReport, port.parkReportPort],
         sequence: [
-            feasibilityCheck,
+            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+            // feasibilityCheck,
             draftStep,
             building,
             ...commitTail({

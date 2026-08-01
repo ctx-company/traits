@@ -101,19 +101,6 @@ format = [
 value = "slot:leftovers"
 
 [[port]]
-id = "feasibility"
-direction = "output"
-schema = "schema:feasibility-verdict"
-optional = true
-description = "Typed pre-build feasibility triage verdict (0047), for discoverability in the run's structured final outputs."
-title = "Feasibility Verdict"
-format = [
-    "structured",
-    "table",
-]
-value = "slot:feasibility"
-
-[[port]]
 id = "park-report"
 direction = "output"
 schema = "[schema:review-verdict-default]"
@@ -166,11 +153,6 @@ schema = "schema:repo-gates-result"
 description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
 
 [[slot]]
-id = "feasibility"
-schema = "schema:feasibility-verdict"
-description = "Pre-build feasibility triage verdict (0047): audited once before any planning or build round spends anything. feasible lets the run continue; any other verdict is the park evidence for why it stopped here."
-
-[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict-default"
 description = "smart-1's refinement verdict for the current work state."
@@ -179,16 +161,6 @@ description = "smart-1's refinement verdict for the current work state."
 id = "review-verdict-2"
 schema = "schema:review-verdict-default"
 description = "smart-2's refinement verdict for the current work state."
-
-[[slot]]
-id = "stall-question"
-schema = "schema:text"
-description = "The selected concrete owner question for a zero-delta recurring blocker, projected deterministically from reviewer 1 when both reviewers trip together."
-
-[[slot]]
-id = "owner-answer"
-schema = "schema:text"
-description = "The owner's answer to the selected phase stall question, attached optionally to the next worker frame."
 
 [[slot]]
 id = "park-report"
@@ -233,36 +205,6 @@ id = "review-rubric"
 path = "resources/review-rubric.md"
 hint = "The three required review dimensions (scope, correctness, gates-ran), their evidence expectations, and the blocker/status relationship; agents read this file with their own tools."
 trigger = "on-demand"
-
-[[schema]]
-id = "feasibility-verdict"
-description = "Typed pre-build feasibility triage: possible, blocked, oversized, or ambiguous, with tool-verified evidence and the owner action that clears a non-feasible verdict."
-
-[schema.fields.evidence]
-schema = "schema:text"
-required = true
-description = "What was checked and how: each referenced file, command, recipe, or prerequisite the task names as existing, and whether your tools confirmed it exists. Default to feasible absent proof of a problem — an unverified claim is never grounds for a non-feasible verdict on its own."
-
-[schema.fields.missing]
-schema = "[schema:text]"
-required = true
-description = "The concrete things missing or wrong, one per entry (a referenced file that does not exist, a prerequisite task not landed, the specific ambiguity). Empty when verdict is feasible."
-
-[schema.fields.owner-action]
-schema = "schema:text"
-required = true
-description = "The one owner action that would clear a non-feasible verdict — land the prerequisite, split the task, or rewrite the Done-when. Empty string (never omitted — always return the key) when verdict is feasible."
-
-[schema.fields.verdict]
-schema = "schema:text"
-required = true
-description = "feasible when the task can be built from inside this run as scoped; blocked when it depends on something not landed; oversized when the scope does not honestly fit one run's budget; ambiguous when it lacks a falsifiable Done-when and any implementation would be a guess."
-allowed = [
-    "feasible",
-    "blocked",
-    "oversized",
-    "ambiguous",
-]
 
 [[schema]]
 id = "decision"
@@ -563,11 +505,6 @@ schema = "schema:scope-findings"
 required = true
 description = "Scope-dimension findings: does the diff implement exactly what the task contract asks, source-anchored."
 
-[schema.fields.stall-question]
-schema = "schema:text"
-required = true
-description = "Empty while recurrence-rounds is below 2. At or above that threshold, one concrete, owner-answerable question that names the still-open blocker and the decision or access needed to clear it."
-
 [schema.fields.status]
 schema = "schema:text"
 required = true
@@ -585,14 +522,6 @@ description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" 
 [[signal]]
 id = "gate-timed-out"
 description = "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix."
-
-[[signal]]
-id = "task-not-feasible"
-description = "The pre-build feasibility gate found the task blocked, oversized, or ambiguous before any build work began; the run parks on the typed verdict instead of grinding toward a doomed park."
-
-[[signal]]
-id = "owner-input-required"
-description = "A phase reviewer has reached the zero-delta recurrence threshold and requires one owner answer before refinement can resume."
 
 [[agent]]
 id = "worker"
@@ -622,7 +551,7 @@ summary = "Second-reviewer role."
 [prompt.building-produce]
 text = """
 Produce the work for {port:task} against the draft {slot:draft}.
-            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract. When a non-empty owner answer is attached to this frame, apply it to the named recurring stall before continuing other blocker work; record how it resolved or narrowed that stall in the work summary.
+            If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a reviewer verdict IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when — those are mandatory to merge; a blocker demanding a gate or deliverable that belongs to a later task is out of scope, note it as a follow-up and do not expand this task to satisfy it; address advisory notes only when the fix is cheap and safe. Treat any blocker with recurrence-of set as proof your prior fix treated a symptom: do the root fix that establishes the required-fix invariant — extending or widening the previously patched check is not an acceptable resolution — even when that is larger than fixing the specific cases named. Where multiple reviewers conflict, prefer correctness and the task contract.
             A leftovers list from this round's most recent review, if any, is attached as context: carry every still-valid entry into your revised "Leftovers proposed" section verbatim — never re-copy from memory. If your fixes invalidate one of those entries' evidence, say so explicitly instead of silently dropping or silently keeping it. Any new leftover your fixes surfaced is proposed separately, in the same section, for the next review round to adjudicate.
             A repository gate result from this round's most recent evidence, if any, is attached as context. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and use what it reports Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
             Respect the task contract {slot:task-brief}.
@@ -645,7 +574,7 @@ text = """
 Review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
             {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
-            Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status. Set "stall-question" to empty below 2; at or above it, ask one concrete owner-answerable question naming the blocker and the decision or access needed.
+            Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the task contract {slot:task-brief} and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the task's own Done-when if the summary does not prove they ran.
                     Judge the work SOLELY against this task's stated scope and Done-when. A task is complete when its own Done-when holds — even if the overall project does not yet build or pass whole-project gates, which belong to later tasks. Do not invent acceptance criteria the task does not state, and do not fail the work for deliverables or gates scoped to a different task.
@@ -677,7 +606,7 @@ text = """
 Independently review the produced work for {port:task} against the draft {slot:draft}. Current work summary: {slot:work-summary}.
             {slot:review-diff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {slot:repo-gates-passed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never grounds for a blocker on its own; the loop stops on it before another round is spent. Score the work against the review rubric {resource:review-rubric}: report scope, correctness, and gates-ran, each as a mandatory first finding plus any further findings, every entry citing a concrete repo-relative file and line; a failed dimension is also recorded as a typed BLOCKER, never left as evidence-only.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
-            Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status. Set "stall-question" to empty below 2; at or above it, ask one concrete owner-answerable question naming the blocker and the decision or access needed.
+            Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status.
             Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the task contract {slot:task-brief} and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the task's own Done-when if the summary does not prove they ran.
                     Judge the work SOLELY against this task's stated scope and Done-when. A task is complete when its own Done-when holds — even if the overall project does not yet build or pass whole-project gates, which belong to later tasks. Do not invent acceptance criteria the task does not state, and do not fail the work for deliverables or gates scoped to a different task.
@@ -706,14 +635,6 @@ output = [
     "slot:leftovers",
 ]
 
-[prompt.feasibility-check]
-text = """Before any build work begins for {port:task}, audit it for feasibility against its contract {slot:task-brief} — read the contract, and everything it references, with your own tools. Audit the task from exactly four angles before any build work begins. POSSIBLE: can this be done at all from inside a run — the capability, authority, and tooling a shell here actually has? BLOCKED: does it depend on something not landed? For every file, command, fixture, prerequisite API, or recipe the task references as EXISTING, verify with your own tools that it actually exists in this worktree — a task that says "extend X" where X is absent is blocked, not implementable, however small the rest of the scope looks. OVERSIZED: does the scope honestly fit one run's budget, or does it need splitting into smaller tasks first? AMBIGUOUS: does the task state a falsifiable Done-when, or would any implementation here be a guess at what "done" means? Default to feasible: raise a non-feasible verdict only on evidence you actually checked, never on suspicion or scope alone. Return the typed verdict: the tool-checked evidence, every missing thing named as its own entry (empty when feasible), and the one owner action that would clear a non-feasible verdict (empty string when feasible)."""
-input = [
-    "port:task",
-    "slot:task-brief",
-]
-output = ["slot:feasibility"]
-
 [prompt.planning-produce]
 text = """
 Create an implementation draft for {port:task}.
@@ -741,11 +662,6 @@ input = [
     "slot:task-brief",
 ]
 output = ["slot:planning-verdict"]
-
-[prompt.recurrence-owner-answer]
-text = "The implementation is stalled on a recurring blocker. Owner answer required: {slot:stall-question}"
-input = ["slot:stall-question"]
-output = ["slot:owner-answer"]
 
 [prompt.shipping-message]
 text = """
@@ -799,7 +715,6 @@ input = [
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
     { slot = "slot:work-summary", optional = true },
-    { slot = "slot:owner-answer", optional = true },
     { slot = "slot:leftovers", optional = true },
     { slot = "slot:repo-gates-passed", optional = true },
 ]
@@ -853,19 +768,6 @@ output = [
     "slot:leftovers",
 ]
 
-[[sequence.building-body.sequence.emits]]
-signal = "signal:owner-input-required"
-
-[[sequence.building-body.sequence.emits.when.all]]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence.emits.when.all]]
-slot = "slot:review-verdict-1"
-field = "recurrence-rounds"
-at-least = 2
-
 [[sequence.building-body.sequence]]
 id = "building-review-2"
 title = "Building Review 2"
@@ -886,33 +788,6 @@ output = [
     "slot:review-verdict-2",
     "slot:leftovers",
 ]
-
-[[sequence.building-body.sequence.emits]]
-signal = "signal:owner-input-required"
-
-[[sequence.building-body.sequence.emits.when.all]]
-
-[[sequence.building-body.sequence.emits.when.all.not.all]]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence.emits.when.all.not.all]]
-slot = "slot:review-verdict-1"
-field = "recurrence-rounds"
-at-least = 2
-
-[[sequence.building-body.sequence.emits.when.all]]
-
-[[sequence.building-body.sequence.emits.when.all.all]]
-slot = "slot:review-verdict-2"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence.emits.when.all.all]]
-slot = "slot:review-verdict-2"
-field = "recurrence-rounds"
-at-least = 2
 
 [[sequence.building-body.sequence]]
 id = "park-report-clear"
@@ -947,60 +822,6 @@ sequence = "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-t
 slot = "slot:review-verdict-2"
 field = "status"
 equals = "revise"
-
-[[sequence.building-body.sequence]]
-id = "owner-answer-consume"
-title = "Owner Answer Consume"
-kind = "project"
-output = ["slot:owner-answer"]
-
-[[sequence.building-body.sequence.projection]]
-destination = "slot:owner-answer"
-
-[sequence.building-body.sequence.projection.source]
-literal = ""
-
-[[sequence.building-body.sequence]]
-id = "recurrence-question-clear"
-title = "Recurrence Question Clear"
-kind = "project"
-output = ["slot:stall-question"]
-
-[[sequence.building-body.sequence.projection]]
-destination = "slot:stall-question"
-
-[sequence.building-body.sequence.projection.source]
-literal = ""
-
-[[sequence.building-body.sequence]]
-id = "recurrence-owner-question"
-title = "Recurrence Owner Question"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then"
-
-[[sequence.building-body.sequence.when.any]]
-
-[[sequence.building-body.sequence.when.any.all]]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence.when.any.all]]
-slot = "slot:review-verdict-1"
-field = "recurrence-rounds"
-at-least = 2
-
-[[sequence.building-body.sequence.when.any]]
-
-[[sequence.building-body.sequence.when.any.all]]
-slot = "slot:review-verdict-2"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence.when.any.all]]
-slot = "slot:review-verdict-2"
-field = "recurrence-rounds"
-at-least = 2
 
 [[sequence.building-body.sequence]]
 id = "building-seal"
@@ -1085,85 +906,6 @@ operation = "append"
 slot = "slot:park-report"
 operation = "append"
 
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence]]
-id = "recurrence-question-reviewer-1"
-title = "Recurrence Question Reviewer 1"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-1-then"
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all]]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all]]
-slot = "slot:review-verdict-1"
-field = "recurrence-rounds"
-at-least = 2
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence]]
-id = "recurrence-question-reviewer-2"
-title = "Recurrence Question Reviewer 2"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-2-then"
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all]]
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all.not.all]]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all.not.all]]
-slot = "slot:review-verdict-1"
-field = "recurrence-rounds"
-at-least = 2
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all]]
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all.all]]
-slot = "slot:review-verdict-2"
-field = "status"
-equals = "revise"
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence.when.all.all]]
-slot = "slot:review-verdict-2"
-field = "recurrence-rounds"
-at-least = 2
-
-[[sequence.ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then.sequence]]
-id = "recurrence-owner-answer"
-title = "Recurrence Owner Answer"
-kind = "ask"
-prompt = "prompt:recurrence-owner-answer"
-input = ["slot:stall-question"]
-output = ["slot:owner-answer"]
-when = "signal:owner-input-required"
-
-[[sequence.ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-1-then.sequence]]
-id = "recurrence-question-project-reviewer-1"
-title = "Recurrence Question Project Reviewer 1"
-kind = "project"
-input = ["slot:review-verdict-1"]
-output = ["slot:stall-question"]
-
-[[sequence.ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-1-then.sequence.projection]]
-source = "slot:review-verdict-1"
-field = "stall-question"
-destination = "slot:stall-question"
-
-[[sequence.ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-2-then.sequence]]
-id = "recurrence-question-project-reviewer-2"
-title = "Recurrence Question Project Reviewer 2"
-kind = "project"
-input = ["slot:review-verdict-2"]
-output = ["slot:stall-question"]
-
-[[sequence.ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-2-then.sequence.projection]]
-source = "slot:review-verdict-2"
-field = "stall-question"
-destination = "slot:stall-question"
-
 [[sequence.planning-body.sequence]]
 id = "planning-produce"
 title = "Planning Produce"
@@ -1197,7 +939,6 @@ output = [
     "port:commit-report",
     "port:leftovers",
     "port:park-report",
-    "port:feasibility",
 ]
 
 [[procedure.sequence]]
@@ -1210,17 +951,6 @@ input = [
     "resource:task-board",
 ]
 output = ["slot:task-brief"]
-
-[[procedure.sequence]]
-id = "feasibility-check"
-title = "Audit feasibility before building"
-agent = "agent:smart-1"
-prompt = "prompt:feasibility-check"
-input = [
-    "port:task",
-    "slot:task-brief",
-]
-output = ["slot:feasibility"]
 
 [[procedure.sequence]]
 id = "planning"

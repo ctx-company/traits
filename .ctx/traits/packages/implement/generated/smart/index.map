@@ -29,11 +29,6 @@
     "start": 203,
     "end": 203
   },
-  "port:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 268,
-    "end": 268
-  },
   "port:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 220,
@@ -41,8 +36,8 @@
   },
   "port:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 87,
-    "end": 87
+    "start": 84,
+    "end": 84
   },
   "port:task": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -64,11 +59,6 @@
     "start": 57,
     "end": 57
   },
-  "prompt:feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 127,
-    "end": 127
-  },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 57,
@@ -81,8 +71,8 @@
   },
   "prompt:research": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 126,
-    "end": 126
+    "start": 123,
+    "end": 123
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -113,11 +103,6 @@
     "file": "packages/agents/src/process.ts",
     "start": 32,
     "end": 32
-  },
-  "schema:feasibility-verdict": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 31,
-    "end": 31
   },
   "schema:leftover": {
     "file": "packages/agents/src/index.ts",
@@ -206,8 +191,8 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 196,
-    "end": 196
+    "start": 193,
+    "end": 193
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -254,11 +239,6 @@
     "start": 258,
     "end": 258
   },
-  "sequence:procedure/feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 124,
-    "end": 124
-  },
   "sequence:procedure/planning": {
     "file": "packages/agents/src/process.ts",
     "start": 258,
@@ -266,8 +246,8 @@
   },
   "sequence:procedure/research": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 123,
-    "end": 123
+    "start": 120,
+    "end": 120
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -289,11 +269,6 @@
     "start": 197,
     "end": 197
   },
-  "signal:task-not-feasible": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 263,
-    "end": 263
-  },
   "slot:building-sealed": {
     "file": "packages/agents/src/process.ts",
     "start": 222,
@@ -309,11 +284,6 @@
     "start": 102,
     "end": 102
   },
-  "slot:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 257,
-    "end": 257
-  },
   "slot:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 113,
@@ -321,8 +291,8 @@
   },
   "slot:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 81,
-    "end": 81
+    "start": 78,
+    "end": 78
   },
   "slot:planning-verdict": {
     "file": "packages/agents/src/process.ts",
@@ -336,8 +306,8 @@
   },
   "slot:research-notes": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 56,
-    "end": 56
+    "start": 53,
+    "end": 53
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -381,7 +351,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/smart.ts",
-    "start": 162,
-    "end": 162
+    "start": 159,
+    "end": 159
   }
 }

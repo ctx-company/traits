@@ -11,8 +11,6 @@ import {
     declareTaskBoard,
     deriveParkReportStep,
     draft,
-    feasibilityPort,
-    feasibilityStep,
     gateTimedOut,
     gateTimedOutStopIf,
     leftovers,
@@ -29,7 +27,6 @@ import {
     task,
     taskBrief,
     taskExtractionStep,
-    taskNotFeasible,
     verdictSchemaFor,
     verdictSlot,
     worker,
@@ -192,15 +189,16 @@ export default variant({
     },
     schema: [blockerSchema, ownerItemSchema],
     resource: [taskBoard],
-    signal: [gateTimedOut, taskNotFeasible],
+    signal: [gateTimedOut],
     procedure: procedure({
         description:
             "Implement one task from the task board end to end with a research-informed draft: research, extract its contract, draft the approach, implement it, refine against two independent reviewers with typed amendments, then summarize and commit.",
         input: task,
-        output: [commitReport, leftoversPort, parkReportPort, feasibilityPort],
+        output: [commitReport, leftoversPort, parkReportPort],
         sequence: [
             taskExtractionStep(clerk, taskBoard),
-            feasibilityStep(smart1),
+            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+            // feasibilityStep(smart1),
             researchStep,
             planning,
             building,

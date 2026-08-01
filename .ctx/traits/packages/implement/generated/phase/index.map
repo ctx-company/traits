@@ -29,11 +29,6 @@
     "start": 203,
     "end": 203
   },
-  "port:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 268,
-    "end": 268
-  },
   "port:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 220,
@@ -64,11 +59,6 @@
     "start": 57,
     "end": 57
   },
-  "prompt:feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 127,
-    "end": 127
-  },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 57,
@@ -78,11 +68,6 @@
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 57,
     "end": 57
-  },
-  "prompt:recurrence-owner-answer": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 151,
-    "end": 151
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -96,8 +81,8 @@
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 41,
-    "end": 41
+    "start": 39,
+    "end": 39
   },
   "resource:task-board": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -116,23 +101,18 @@
   },
   "schema:correctness-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 64,
-    "end": 64
+    "start": 62,
+    "end": 62
   },
   "schema:decision": {
     "file": "packages/agents/src/process.ts",
     "start": 32,
     "end": 32
   },
-  "schema:feasibility-verdict": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 31,
-    "end": 31
-  },
   "schema:gates-ran-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 64,
-    "end": 64
+    "start": 62,
+    "end": 62
   },
   "schema:leftover": {
     "file": "packages/agents/src/index.ts",
@@ -151,8 +131,8 @@
   },
   "schema:review-finding": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 48,
-    "end": 48
+    "start": 46,
+    "end": 46
   },
   "schema:review-verdict-default": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -166,8 +146,8 @@
   },
   "schema:scope-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 64,
-    "end": 64
+    "start": 62,
+    "end": 62
   },
   "sequence:building-body": {
     "file": "packages/agents/src/process.ts",
@@ -204,11 +184,6 @@
     "start": 390,
     "end": 390
   },
-  "sequence:building-body/owner-answer-consume": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 239,
-    "end": 239
-  },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 558,
@@ -223,16 +198,6 @@
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 563,
     "end": 563
-  },
-  "sequence:building-body/recurrence-owner-question": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 131,
-    "end": 131
-  },
-  "sequence:building-body/recurrence-question-clear": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 242,
-    "end": 242
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -269,31 +234,6 @@
     "start": 566,
     "end": 566
   },
-  "sequence:ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then/recurrence-owner-answer": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 150,
-    "end": 150
-  },
-  "sequence:ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then/recurrence-question-reviewer-1": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 134,
-    "end": 134
-  },
-  "sequence:ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then/recurrence-question-reviewer-2": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 142,
-    "end": 142
-  },
-  "sequence:ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-1-then/recurrence-question-project-reviewer-1": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 137,
-    "end": 137
-  },
-  "sequence:ctx-branch-arm-s-67-ctx-branch-arm-s-13-building-body-25-recurrence-owner-question-then-30-recurrence-question-reviewer-2-then/recurrence-question-project-reviewer-2": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 145,
-    "end": 145
-  },
   "sequence:planning-body": {
     "file": "packages/agents/src/process.ts",
     "start": 223,
@@ -313,11 +253,6 @@
     "file": "packages/agents/src/process.ts",
     "start": 258,
     "end": 258
-  },
-  "sequence:procedure/feasibility-check": {
-    "file": "packages/agents/src/feasibility.ts",
-    "start": 124,
-    "end": 124
   },
   "sequence:procedure/planning": {
     "file": "packages/agents/src/process.ts",
@@ -344,16 +279,6 @@
     "start": 197,
     "end": 197
   },
-  "signal:owner-input-required": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 110,
-    "end": 110
-  },
-  "signal:task-not-feasible": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 263,
-    "end": 263
-  },
   "slot:building-sealed": {
     "file": "packages/agents/src/process.ts",
     "start": 222,
@@ -369,20 +294,10 @@
     "start": 102,
     "end": 102
   },
-  "slot:feasibility": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 257,
-    "end": 257
-  },
   "slot:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 113,
     "end": 113
-  },
-  "slot:owner-answer": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 106,
-    "end": 106
   },
   "slot:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -428,11 +343,6 @@
     "file": "packages/agents/src/process.ts",
     "start": 308,
     "end": 308
-  },
-  "slot:stall-question": {
-    "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 102,
-    "end": 102
   },
   "slot:task-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
