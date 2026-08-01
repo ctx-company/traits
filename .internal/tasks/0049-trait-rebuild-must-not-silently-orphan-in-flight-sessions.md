@@ -3,6 +3,44 @@
 **Status:** ready to implement · **Raised:** 2026-08-01 (owner hit it twice in one night; every
 resume of a live session failed with an opaque manifest error)
 
+## Correction, 2026-08-01 (verified before implementing — read this first)
+
+The original premise below was WRONG in one important way, and the task must not be built on it.
+
+**A rebuild is already caught, clearly.** Resuming a session whose trait SOURCE changed fails with
+
+```
+invalid manifest at drive.source-digest: stale run-session source:
+loaded source digest does not match session ledger
+```
+
+which is exactly the readable guard this task asked for — it already exists. Verified by
+zero-frame drives (`ctx traits drive --session <id> --max-frames 0`) against four ctx-gate
+sessions on 2026-08-01. A session whose source digest still matches resumes fine EVEN WHEN its
+canonical digest differs (canonical moves when the kit rebuilds from unchanged source).
+
+**The `output_ports row port:park-report contradicts recomputed semantic output evidence`
+failure is therefore a DIFFERENT, still-unreproduced defect.** Ruled out on 2026-08-01, each by
+inspecting every ledger in both repos' stores:
+
+- not the source/canonical digest mismatch (that has its own guard, above);
+- not first-vs-last accepted value in `accepted_slot_values` (no ledger holds more than one
+  entry for `slot:park-report`);
+- not the empty-array omission rule (every `[]` park-report row is internally consistent:
+  status `accepted`, row digest == slot digest);
+- not the merge path (no merge frame records it);
+- not reproducible from any persisted ledger — every stored ledger in both repos passes.
+
+That leaves a transient in-memory state during a drive: most likely the deterministic `project`
+steps of `deriveParkReportStep` (clear to `[]`, then append) updating `slot:park-report` without
+refreshing the `output_ports` row in the same transition, so the next contract validation sees a
+row that disagrees with the slot it is derived from. THAT is the hypothesis to test first —
+reproduce by manually driving a quick session (`--no-drive` + `ctx traits call`) to a revise
+verdict so the park-report projection runs, then validate the ledger.
+
+Scope note: the pinning work below is still worth doing (a rebuild still ENDS a run rather than
+letting it continue), but it is an enhancement, not the fix for this error.
+
 ## What happens today
 
 `ctx traits drive --session <id>` reloads the trait from the FILE PATH recorded in the ledger —
