@@ -42,10 +42,33 @@ Two independent defects:
   recovered (`--file <path>` already exists as an override), or start a fresh run and harvest
   the worktree. Do not silently accept a changed trait: replaying a ledger against a different
   procedure shape is exactly the unsound thing the contract check is there to prevent.
-- **Consider pinning by default**: record enough to reload the exact shape (the canonical
-  document is content-addressed and already digested — the cache may already hold it), so a
-  resume can be offered against the original trait rather than only refused. Decide explicitly
-  whether that is worth the storage; refusing clearly is the floor, pinning is the upgrade.
+- **Pin the shape so the run survives the rebuild** (owner ask 2026-08-01 — required, not
+  optional): a session must be resumable against the exact trait bytes it started under, so
+  rebuilding a trait mid-run never destroys the run. Refusing clearly is only the floor.
+
+  What already exists, verified 2026-08-01 — do not rebuild these:
+
+  - **Approval history is already permanent.** `~/.config/ctx/trust.toml` is keyed by
+    CANONICAL DIGEST, one entry per approved byte-set (445 entries live), and nothing prunes
+    it. A digest approved months ago is still approved today, so an older shape is already
+    trusted for replay — no "historical approval" mechanism needs inventing.
+  - **Different repos already run different versions of the same trait.** Trust is keyed by
+    digest, not by trait id or repo, and every repo carries its own package copy with its own
+    digest. ctx-gate ran `implement@98b08bb7` while ctx-trait moved past it, both approved,
+    on 2026-08-01. This is a capability the product HAS.
+
+  What is missing is only the bytes: nothing retains the canonical document a session started
+  under. `~/.config/ctx/cache` is a per-repo/per-worktree build cache, NOT a digest-addressed
+  canonical store, and the ledger records the digest plus a FILE PATH whose contents change.
+  So the work is: persist the canonical document with (or addressable from) the session — it is
+  content-addressed already, so a digest-keyed store or a per-session copy both work — and make
+  resume load by digest, falling back to the recorded path only when the digest still matches.
+
+- **Fix the reporting that makes coexistence look broken.** `ctx traits trust <id>` compares the
+  current build against the latest approval for that ID and prints "rebuilt since — the bytes
+  running today are unreviewed" even when the running digest is itself approved. That false
+  drift report is what makes per-repo/per-version coexistence FEEL unsupported when it is not.
+  Report per-digest state, so an approved older digest reads as approved.
 
 ## Watch
 
@@ -61,7 +84,10 @@ Two independent defects:
 
 ## Done when
 
-Resuming a session whose trait was rebuilt fails with a one-sentence explanation naming the
-digest change and the available options, never with a contract-invariant message; a session
-whose trait is unchanged resumes exactly as before; and an orphaned session is identifiable
-from `run-status` without attempting a drive.
+A session started under digest A still drives to completion after its trait is rebuilt to
+digest B — resumed against A's own pinned bytes, with A's existing trust approval honored and
+no contract violation; a session whose trait is unchanged resumes exactly as before; when
+pinned bytes genuinely cannot be recovered, the refusal is a one-sentence explanation naming
+both digests and the options, never a contract-invariant message; an orphaned session is
+identifiable from `run-status` without attempting a drive; and `trust <id>` no longer reports
+drift for a digest that is itself approved.
