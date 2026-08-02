@@ -1079,6 +1079,31 @@ fn apply_scroll_and_derive_follow(
     *follow = scroll.is_at_bottom(budget);
 }
 
+/// Only row-at-a-time scroll keys are safe to fold. Page and jump keys share
+/// `ScrollDelta` variants with row keys, so classify the original key first.
+fn repeat_row_scroll_key(key: &KeyEvent) -> Option<tui_kit::ScrollDelta> {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => Some(tui_kit::ScrollDelta::Up(1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(tui_kit::ScrollDelta::Down(1)),
+        _ => None,
+    }
+}
+
+fn capped_repeat_delta(
+    delta: tui_kit::ScrollDelta,
+    repeats: Option<usize>,
+    budget: usize,
+) -> tui_kit::ScrollDelta {
+    let Some(repeats) = repeats else {
+        return delta;
+    };
+    match delta {
+        tui_kit::ScrollDelta::Up(_) => tui_kit::ScrollDelta::Up(repeats.min(budget)),
+        tui_kit::ScrollDelta::Down(_) => tui_kit::ScrollDelta::Down(repeats.min(budget)),
+        tui_kit::ScrollDelta::Start | tui_kit::ScrollDelta::End => delta,
+    }
+}
+
 fn push_stream_row(state: &mut RunPanelState, kind: StreamRowKind, text: String) {
     let at = state.run_started.elapsed();
     state.current_stream.push_back(StreamRow { at, kind, text });
@@ -1566,7 +1591,8 @@ pub(crate) fn render_pane_body(
             .collect::<Vec<_>>()
     });
 
-    for key in pending_keys.drain(..) {
+    let mut pending_keys = pending_keys.drain(..).peekable();
+    while let Some(key) = pending_keys.next() {
         if let Some(step) = tui_panes::tab_cycle_key(&key) {
             match step {
                 TabStep::Next => focus.next(),
@@ -1574,7 +1600,19 @@ pub(crate) fn render_pane_body(
             }
             continue;
         }
-        let Some(delta) = tui_kit::scroll_key(&key) else {
+        let repeat_delta = repeat_row_scroll_key(&key);
+        let repeats = repeat_delta.map(|delta| {
+            let mut repeats = 1;
+            while pending_keys
+                .peek()
+                .is_some_and(|next| repeat_row_scroll_key(next) == Some(delta))
+            {
+                pending_keys.next();
+                repeats += 1;
+            }
+            repeats
+        });
+        let Some(delta) = repeat_delta.or_else(|| tui_kit::scroll_key(&key)) else {
             continue;
         };
         let Some(id) = key_target.or_else(|| focus.current()) else {
@@ -1585,25 +1623,45 @@ pub(crate) fn render_pane_body(
         {
             let scroll = scrolls.get_mut(id);
             scroll.set_len(progress.len());
-            apply_scroll_and_derive_follow(scroll, progress_follow, delta, inner.height as usize);
+            apply_scroll_and_derive_follow(
+                scroll,
+                progress_follow,
+                capped_repeat_delta(delta, repeats, inner.height as usize),
+                inner.height as usize,
+            );
         } else if id == ids.journey
             && let (Some(journey), Some(inner)) = (&journey, journey_inner)
         {
             let scroll = scrolls.get_mut(id);
             scroll.set_len(journey.len());
-            apply_scroll_and_derive_follow(scroll, journey_follow, delta, inner.height as usize);
+            apply_scroll_and_derive_follow(
+                scroll,
+                journey_follow,
+                capped_repeat_delta(delta, repeats, inner.height as usize),
+                inner.height as usize,
+            );
         } else if id == ids.history
             && let (Some(history), Some(inner)) = (&history, history_inner)
         {
             let scroll = scrolls.get_mut(id);
             scroll.set_len(history.len());
-            apply_scroll_and_derive_follow(scroll, history_follow, delta, inner.height as usize);
+            apply_scroll_and_derive_follow(
+                scroll,
+                history_follow,
+                capped_repeat_delta(delta, repeats, inner.height as usize),
+                inner.height as usize,
+            );
         } else if id == ids.current
             && let (Some(current), Some(inner)) = (&current, current_inner)
         {
             let scroll = scrolls.get_mut(id);
             scroll.set_len(current.len());
-            apply_scroll_and_derive_follow(scroll, current_follow, delta, inner.height as usize);
+            apply_scroll_and_derive_follow(
+                scroll,
+                current_follow,
+                capped_repeat_delta(delta, repeats, inner.height as usize),
+                inner.height as usize,
+            );
         }
     }
 
@@ -4679,6 +4737,160 @@ mod tests {
             })
             .expect("draw");
         assert_eq!(focus.current(), Some(PROGRESS_PANE));
+    }
+
+    #[test]
+    fn repeated_row_scrolls_fold_to_the_rendered_pane_budget_and_drain() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let journey = sample_lines(100);
+        let progress = sample_lines(3);
+        let mut scrolls = PaneScrolls::new();
+        let mut progress_follow = true;
+        let mut journey_follow = true;
+        let mut history_follow = true;
+        let mut current_follow = true;
+        let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+        let mut keys = vec![
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        ];
+        keys.extend(std::iter::repeat_n(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            100,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("test terminal");
+
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &progress,
+                        journey_lines: &journey,
+                        active_row: Some(0),
+                        history_rows: &[],
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                    },
+                );
+            })
+            .expect("draw");
+
+        let area = Rect::new(0, 0, 120, 11);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&[]),
+            current: Some(&[]),
+            title: PaneTitleRow::Reserved(None),
+        };
+        let body = pane_body_area(area, &data.title);
+        let layout = pane_tree(&LIVE_PANE_IDS, body, &data).resolve(body);
+        let budget = tui_panes::pane_inner(layout.rect(JOURNEY_PANE).expect("journey pane")).height;
+
+        assert!(
+            keys.is_empty(),
+            "all repeat events must drain in this frame"
+        );
+        assert_eq!(
+            scrolls.get(JOURNEY_PANE).window(budget as usize).start,
+            budget as usize
+        );
+        assert!(
+            !journey_follow,
+            "a folded movement off the tail releases follow"
+        );
+    }
+
+    #[test]
+    fn row_repeat_folding_stops_at_direction_and_tab_boundaries() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let journey = sample_lines(100);
+        let history = sample_event_rows(100);
+        let progress = sample_lines(3);
+        let mut scrolls = PaneScrolls::new();
+        let mut progress_follow = true;
+        let mut journey_follow = true;
+        let mut history_follow = true;
+        let mut current_follow = true;
+        let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+        let mut keys = vec![
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        ];
+        keys.extend(std::iter::repeat_n(
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            100,
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(120, 22)).expect("test terminal");
+
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: None,
+                        progress_lines: &progress,
+                        journey_lines: &journey,
+                        active_row: Some(0),
+                        history_rows: &history,
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                    },
+                );
+            })
+            .expect("draw");
+
+        assert!(keys.is_empty());
+        assert_eq!(focus.current(), Some(HISTORY_PANE));
+        assert_eq!(scrolls.get(JOURNEY_PANE).window(1).start, 1);
+        assert!(scrolls.get(HISTORY_PANE).window(1).start > 1);
+        assert!(!journey_follow);
+        assert!(!history_follow);
+    }
+
+    #[test]
+    fn page_and_jump_keys_are_not_folded_as_row_repeats() {
+        for key in [
+            KeyEvent::new(KeyCode::PageUp, crossterm::event::KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::PageDown, crossterm::event::KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Home, crossterm::event::KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::End, crossterm::event::KeyModifiers::NONE),
+        ] {
+            assert_eq!(repeat_row_scroll_key(&key), None);
+            assert!(tui_kit::scroll_key(&key).is_some());
+        }
+        assert_eq!(
+            capped_repeat_delta(tui_kit::ScrollDelta::Down(10), None, 3),
+            tui_kit::ScrollDelta::Down(10),
+        );
     }
 
     #[test]
