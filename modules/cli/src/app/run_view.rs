@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -25,6 +26,80 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 pub(crate) struct RunPanel {
     state: Arc<Mutex<RunPanelState>>,
     cadence: Arc<PanelCadence>,
+    handoff: Arc<DashboardHandoff>,
+}
+
+/// The request, spawned dashboard, and teardown state are one lifecycle. This
+/// prevents `close` from observing an empty handle while a launcher is between
+/// taking a request and publishing its thread.
+struct DashboardHandoff {
+    state: Mutex<DashboardHandoffState>,
+}
+
+#[derive(Default)]
+struct DashboardHandoffState {
+    pending_session: Option<String>,
+    dashboard: Option<JoinHandle<()>>,
+    closing: bool,
+}
+
+impl DashboardHandoff {
+    fn request(&self, session_id: String) {
+        if let Ok(mut state) = self.state.lock()
+            && !state.closing
+            && state.pending_session.is_none()
+            && state.dashboard.is_none()
+        {
+            state.pending_session = Some(session_id);
+        }
+    }
+
+    fn drive(&self) {
+        self.drive_with(|session_id| {
+            std::thread::spawn(move || {
+                if let Err(error) = crate::app::dashboard::run_for_session(session_id) {
+                    eprintln!("dashboard: {error}");
+                }
+            })
+        });
+    }
+
+    fn drive_with(&self, launch: impl FnOnce(String) -> JoinHandle<()>) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let Some(session_id) = (!state.closing && state.dashboard.is_none())
+            .then(|| state.pending_session.take())
+            .flatten()
+        else {
+            return;
+        };
+        state.dashboard = Some(launch(session_id));
+    }
+
+    fn close(&self) {
+        self.close_after(|| {});
+    }
+
+    fn close_after(&self, before_lock: impl FnOnce()) {
+        before_lock();
+        let dashboard = self.state.lock().ok().and_then(|mut state| {
+            state.closing = true;
+            state.pending_session = None;
+            state.dashboard.take()
+        });
+        if let Some(thread) = dashboard {
+            let _ = thread.join();
+        }
+    }
+}
+
+struct HandoffDriver(Arc<DashboardHandoff>);
+
+impl Drop for HandoffDriver {
+    fn drop(&mut self) {
+        self.0.drive();
+    }
 }
 
 /// Cheap, lock-free admission control for 20ms harness observers and direct
@@ -172,6 +247,9 @@ struct RunPanelState {
     /// (a blank title row) before success and permanently for a
     /// missing-narrator/failed/killed attempt. Never a placeholder.
     title: Option<String>,
+    /// Shared with the panel so a key drained during any render path can be
+    /// launched after that path releases the panel mutex.
+    handoff: Arc<DashboardHandoff>,
 }
 
 /// One row of the CURRENT step's verbatim message/thinking stream.
@@ -447,6 +525,9 @@ impl RunPanel {
                 run_started: now,
             },
         );
+        let handoff = Arc::new(DashboardHandoff {
+            state: Mutex::new(DashboardHandoffState::default()),
+        });
         let state = Arc::new(Mutex::new(RunPanelState {
             cadence: Arc::clone(&cadence),
             input_generation,
@@ -483,16 +564,19 @@ impl RunPanel {
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
             title,
+            handoff: Arc::clone(&handoff),
         }));
         let panel = Self {
             state: Arc::clone(&state),
             cadence: Arc::clone(&cadence),
+            handoff,
         };
         let weak_state = Arc::downgrade(&state);
         let wake_cadence = Arc::clone(&cadence);
+        let wake_handoff = Arc::clone(&panel.handoff);
         if let Ok(mut state) = state.lock() {
             state.repaint.install_input_wake(Arc::new(move || {
-                tick_weak(&weak_state, &wake_cadence);
+                tick_weak(&weak_state, &wake_cadence, &wake_handoff);
             }));
         }
         panel.render();
@@ -509,13 +593,17 @@ impl RunPanel {
     /// and the alternate screen used to outlive the process. Idempotent; any
     /// late render from a lingering clone no-ops on the detached pane.
     pub(crate) fn close(&self) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let tree_lines = state.last_tree_lines.clone();
-        let _ = state.repaint.commit_inline_scrollback(&tree_lines);
-        state.repaint.quit();
-        state.cadence.inactive();
+        if let Ok(mut state) = self.state.lock() {
+            let tree_lines = state.last_tree_lines.clone();
+            let _ = state.repaint.commit_inline_scrollback(&tree_lines);
+            state.repaint.quit();
+            state.cadence.inactive();
+        }
+        self.handoff.close();
+    }
+
+    fn handoff_driver(&self) -> HandoffDriver {
+        HandoffDriver(Arc::clone(&self.handoff))
     }
 
     /// The sole active-key transition detector (P455): when the active step
@@ -529,6 +617,7 @@ impl RunPanel {
         &self,
         session: &ctx_traits_core::procedure::session::Session,
     ) -> Option<CompletedStepContext> {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return None;
         };
@@ -595,6 +684,7 @@ impl RunPanel {
     }
 
     pub(crate) fn push_bytes(&self, chunk: &[u8]) {
+        let _handoff = self.handoff_driver();
         if chunk.is_empty() {
             return;
         }
@@ -623,6 +713,7 @@ impl RunPanel {
     /// P496: update the between-narrations token pill shown while the live
     /// line still holds the initialization fallback. Presentation only.
     pub(crate) fn set_thinking_tokens(&self, tokens: u64) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -637,6 +728,7 @@ impl RunPanel {
     }
 
     pub(crate) fn push_summary(&self, summary: String) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -658,6 +750,7 @@ impl RunPanel {
     /// while the pane is up before any step has actually started, so setup
     /// activity is visible instead of the pane sitting frozen.
     pub(crate) fn note(&self, text: String) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -672,6 +765,7 @@ impl RunPanel {
     /// for a failed/timed-out/disabled narration; only a successful summary
     /// ever reaches this method.
     pub(crate) fn push_step_summary(&self, context: &CompletedStepContext, summary: String) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -684,6 +778,7 @@ impl RunPanel {
     }
 
     pub(crate) fn finish_live(&self, summary: &str) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -698,6 +793,7 @@ impl RunPanel {
     }
 
     pub(crate) fn tick(&self) {
+        let _handoff = self.handoff_driver();
         if !self.cadence.should_run() {
             return;
         }
@@ -705,10 +801,12 @@ impl RunPanel {
             return;
         };
         let outcome = tick_locked(&mut state);
+        drop(state);
         self.cadence.observe(outcome);
     }
 
     pub(crate) fn add_output_tokens(&self, tokens: u64) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -737,6 +835,7 @@ impl RunPanel {
     /// into the drive-wide narrator total shown in the header, distinct from
     /// `add_output_tokens`'s per-step work-agent total above.
     pub(crate) fn add_narrator_tokens(&self, tokens: u64) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -761,6 +860,7 @@ impl RunPanel {
     /// `merge_story::activity_event`'s doc comment); `Stalled` at any other
     /// frame_id is a terminal park/failure outcome for that stage.
     pub(crate) fn merge_event(&self, event: &ActivityEvent) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -775,6 +875,7 @@ impl RunPanel {
     /// missing-narrator/failed/killed attempt — that path leaves the row
     /// permanently blank instead of calling this with a placeholder.
     pub(crate) fn set_title(&self, title: String) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -783,6 +884,7 @@ impl RunPanel {
     }
 
     fn render(&self) {
+        let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -799,18 +901,24 @@ impl RunPanel {
     }
 }
 
-fn tick_weak(state: &Weak<Mutex<RunPanelState>>, cadence: &PanelCadence) {
+fn tick_weak(
+    state: &Weak<Mutex<RunPanelState>>,
+    cadence: &PanelCadence,
+    handoff: &Arc<DashboardHandoff>,
+) {
     if !cadence.should_run() {
         return;
     }
-    let Some(state) = state.upgrade() else {
+    let Some(panel_state) = state.upgrade() else {
         return;
     };
-    let Ok(mut state) = state.lock() else {
+    let Ok(mut locked_state) = panel_state.lock() else {
         return;
     };
-    let outcome = tick_locked(&mut state);
+    let outcome = tick_locked(&mut locked_state);
+    drop(locked_state);
     cadence.observe(outcome);
+    handoff.drive();
 }
 
 fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
@@ -909,17 +1017,29 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             changed = true;
             continue;
         }
-        if key.code == KeyCode::Char('q') {
-            state.modal = Some(tui_kit::Modal::confirm(
-                "Quit live view?",
-                [
-                    "The run keeps going in the background.",
-                    "Reattach anytime with `ctx traits dashboard`.",
-                ]
-                .join("\n"),
-            ));
-            changed = true;
-            continue;
+        match live_view_key_action(&key) {
+            Some(LiveViewKeyAction::OpenDashboard) => {
+                state.repaint.quit();
+                state.cadence.inactive();
+                state
+                    .handoff
+                    .request(state.session.session_id.as_str().to_string());
+                changed = true;
+                continue;
+            }
+            Some(LiveViewKeyAction::ConfirmQuit) => {
+                state.modal = Some(tui_kit::Modal::confirm(
+                    "Quit live view?",
+                    [
+                        "The run keeps going in the background.",
+                        "Reattach anytime with `ctx traits dashboard`.",
+                    ]
+                    .join("\n"),
+                ));
+                changed = true;
+                continue;
+            }
+            None => {}
         }
         if tui_panes::tab_cycle_key(&key).is_some() || tui_kit::scroll_key(&key).is_some() {
             changed = true;
@@ -927,6 +1047,22 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
         state.pending_keys.push(key);
     }
     changed
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum LiveViewKeyAction {
+    OpenDashboard,
+    ConfirmQuit,
+}
+
+/// Bare `d` hands presentation to the dashboard immediately. `q` intentionally
+/// retains its existing confirmation-modal behavior.
+fn live_view_key_action(key: &KeyEvent) -> Option<LiveViewKeyAction> {
+    match key.code {
+        KeyCode::Char('d') if key.modifiers.is_empty() => Some(LiveViewKeyAction::OpenDashboard),
+        KeyCode::Char('q') => Some(LiveViewKeyAction::ConfirmQuit),
+        _ => None,
+    }
 }
 
 /// P470 blocker fix (`down-key-forces-follow-jump`): applies one scroll
@@ -3690,6 +3826,122 @@ fn muted_line(lines: &mut Vec<tui::Line>, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dashboard_handoff_is_immediate_and_q_keeps_confirmation_behavior() {
+        let bare_d = KeyEvent::new(KeyCode::Char('d'), crossterm::event::KeyModifiers::NONE);
+        let bare_q = KeyEvent::new(KeyCode::Char('q'), crossterm::event::KeyModifiers::NONE);
+        let modified_d = KeyEvent::new(KeyCode::Char('d'), crossterm::event::KeyModifiers::CONTROL);
+        let modified_q = KeyEvent::new(KeyCode::Char('q'), crossterm::event::KeyModifiers::CONTROL);
+
+        assert_eq!(
+            live_view_key_action(&bare_d),
+            Some(LiveViewKeyAction::OpenDashboard)
+        );
+        assert_eq!(
+            live_view_key_action(&bare_q),
+            Some(LiveViewKeyAction::ConfirmQuit)
+        );
+        assert_eq!(live_view_key_action(&modified_d), None);
+        assert_eq!(
+            live_view_key_action(&modified_q),
+            Some(LiveViewKeyAction::ConfirmQuit)
+        );
+    }
+
+    #[test]
+    fn dashboard_handoff_lifecycle_drives_a_render_drained_request_once() {
+        let handoff = DashboardHandoff {
+            state: Mutex::new(DashboardHandoffState::default()),
+        };
+        let launches = Arc::new(AtomicU64::new(0));
+
+        // This models a render draining `d`: it records the request while the
+        // panel lock is held, then the post-unlock driver observes it.
+        handoff.request("session".to_string());
+        for _ in 0..2 {
+            let launches = Arc::clone(&launches);
+            handoff.drive_with(move |_| {
+                launches.fetch_add(1, Ordering::SeqCst);
+                std::thread::spawn(|| {})
+            });
+        }
+        handoff.close();
+
+        assert_eq!(launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dashboard_handoff_lifecycle_close_joins_a_published_launch() {
+        let handoff = Arc::new(DashboardHandoff {
+            state: Mutex::new(DashboardHandoffState::default()),
+        });
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        handoff.request("session".to_string());
+        handoff.drive_with(move |_| {
+            std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+        });
+        started_rx.recv().unwrap();
+
+        let closing = Arc::clone(&handoff);
+        let close = std::thread::spawn(move || closing.close());
+        release_tx.send(()).unwrap();
+        close.join().unwrap();
+
+        let state = handoff.state.lock().unwrap();
+        assert!(state.closing);
+        assert!(state.dashboard.is_none());
+        assert!(state.pending_session.is_none());
+    }
+
+    #[test]
+    fn dashboard_handoff_lifecycle_close_waits_for_handle_publication() {
+        let handoff = Arc::new(DashboardHandoff {
+            state: Mutex::new(DashboardHandoffState::default()),
+        });
+        let (launch_entered_tx, launch_entered_rx) = std::sync::mpsc::channel();
+        let (allow_publication_tx, allow_publication_rx) = std::sync::mpsc::channel();
+        let (close_entered_tx, close_entered_rx) = std::sync::mpsc::channel();
+        let (dashboard_started_tx, dashboard_started_rx) = std::sync::mpsc::channel();
+        let (release_dashboard_tx, release_dashboard_rx) = std::sync::mpsc::channel();
+        handoff.request("session".to_string());
+
+        let driving = Arc::clone(&handoff);
+        let drive = std::thread::spawn(move || {
+            driving.drive_with(move |_| {
+                launch_entered_tx.send(()).unwrap();
+                allow_publication_rx.recv().unwrap();
+                std::thread::spawn(move || {
+                    dashboard_started_tx.send(()).unwrap();
+                    release_dashboard_rx.recv().unwrap();
+                })
+            });
+        });
+        launch_entered_rx.recv().unwrap();
+
+        let closing = Arc::clone(&handoff);
+        let close = std::thread::spawn(move || {
+            closing.close_after(|| close_entered_tx.send(()).unwrap());
+        });
+        close_entered_rx.recv().unwrap();
+
+        // `drive_with` still owns the lifecycle mutex, so close cannot take an
+        // empty handle slot before this release publishes the dashboard thread.
+        allow_publication_tx.send(()).unwrap();
+        dashboard_started_rx.recv().unwrap();
+        release_dashboard_tx.send(()).unwrap();
+        drive.join().unwrap();
+        close.join().unwrap();
+
+        let state = handoff.state.lock().unwrap();
+        assert!(state.closing);
+        assert!(state.dashboard.is_none());
+        assert!(state.pending_session.is_none());
+    }
 
     fn activity_event(frame_id: &str, kind: ActivityKind, text: Option<&str>) -> ActivityEvent {
         ActivityEvent {

@@ -682,6 +682,9 @@ struct State {
     /// reload and every collapse toggle. [`selected_session`] is the only
     /// accessor any action key reads a row through.
     sessions_visible: Vec<VisibleRow>,
+    /// A live-view handoff identity pinned through a possible live-to-terminal
+    /// regrouping; resolving by identity survives asynchronous snapshots.
+    initial_session_id: Option<String>,
     /// Which [`SessionGroup`]s are collapsed to their count-row form.
     /// Everything except `Live` starts collapsed.
     collapsed_groups: HashSet<SessionGroup>,
@@ -827,7 +830,13 @@ impl DashboardSnapshot {
 
 impl State {
     fn new() -> Self {
-        let mut state = Self::new_without_worker();
+        let mut state = Self::new_without_worker_for_session(None);
+        state.worker = Some(worker::Handle::new());
+        state
+    }
+
+    fn new_for_session(session_id: String) -> Self {
+        let mut state = Self::new_without_worker_for_session(Some(session_id));
         state.worker = Some(worker::Handle::new());
         state
     }
@@ -835,6 +844,10 @@ impl State {
     /// The worker owns the only mutable IO model. The render state never uses
     /// this constructor, so it cannot accidentally scan stores while drawing.
     fn new_without_worker() -> Self {
+        Self::new_without_worker_for_session(None)
+    }
+
+    fn new_without_worker_for_session(initial_session_id: Option<String>) -> Self {
         let mut collapsed_groups = HashSet::new();
         collapsed_groups.extend([
             SessionGroup::Pending,
@@ -845,6 +858,7 @@ impl State {
             screen: Screen::Sessions,
             sessions: Vec::new(),
             sessions_visible: Vec::new(),
+            initial_session_id,
             collapsed_groups,
             traits: Vec::new(),
             merges: Vec::new(),
@@ -942,6 +956,11 @@ impl State {
         // moves the selection; the render pass re-clamps the scroll offset
         // against the real rect height on the next render.
         self.current_list_mut().move_by(delta as i64, usize::MAX);
+        // Navigation is an explicit user choice, so later snapshots must not
+        // snap the list back to the run-view handoff target.
+        if self.screen == Screen::Sessions {
+            self.initial_session_id = None;
+        }
     }
 
     fn reload(&mut self) {
@@ -1047,6 +1066,7 @@ impl State {
         self.has_snapshot = true;
         self.refresh_error = None;
         rebuild_visible_sessions(self);
+        resolve_initial_session(self);
         rebuild_visible_trust(self);
         let trust_ids: Vec<String> = self
             .trust
@@ -1210,6 +1230,40 @@ impl State {
         // signal to page off of.
         self.reload_duration = Some(reload_started.elapsed());
         Ok(())
+    }
+}
+
+/// Reveals and selects the handoff target only after applying an inventory
+/// snapshot, so a run that completes during terminal handoff lands in its new
+/// (normally collapsed) terminal group rather than a neighboring list row.
+fn resolve_initial_session(state: &mut State) {
+    let Some(session_id) = state.initial_session_id.clone() else {
+        return;
+    };
+    let Some(index) = state
+        .sessions
+        .iter()
+        .position(|row| row.session_id == session_id)
+    else {
+        return;
+    };
+    let row = &state.sessions[index];
+    let group = session_group(row.class, row.status.as_ref(), row.outcome.as_ref());
+    let terminal = row.class == SessionClass::Terminal;
+    if state.collapsed_groups.remove(&group) {
+        rebuild_visible_sessions(state);
+    }
+    if let Some(visible_index) = state.sessions_visible.iter().position(
+        |row| matches!(row, VisibleRow::Session(session_index) if *session_index == index),
+    ) {
+        state.list_sessions.set_selected(visible_index);
+        // A snapshot captured before the run finished can land after the
+        // terminal handoff. Keep following that identity until a terminal
+        // snapshot observes its regrouping; otherwise a retained numeric row
+        // selection can land on a header or neighboring session next reload.
+        if terminal {
+            state.initial_session_id = None;
+        }
     }
 }
 
@@ -2033,13 +2087,26 @@ fn sort_trust_rows(rows: &mut [TrustRow]) {
 /// every path (quit key, panic-safe teardown via `RatatuiPane`); dashboard
 /// exit never signals or otherwise touches any listed run.
 pub(crate) fn run() -> crate::Result<()> {
+    run_with_initial_session(None)
+}
+
+/// Opens SESSIONS with this identity selected once its first inventory snapshot
+/// arrives. Used by the live run pane after it has restored terminal ownership.
+pub(crate) fn run_for_session(session_id: String) -> crate::Result<()> {
+    run_with_initial_session(Some(session_id))
+}
+
+fn run_with_initial_session(initial_session_id: Option<String>) -> crate::Result<()> {
     let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
         ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
             path: "<tty>".to_string(),
             source,
         })
     })?;
-    let mut state = State::new();
+    let mut state = match initial_session_id {
+        Some(session_id) => State::new_for_session(session_id),
+        None => State::new(),
+    };
     state.reload();
     // `State::new()` already seeds `focus` on the SESSIONS list pane, which
     // every tree (even the narrow-terminal single-leaf one) includes; the
@@ -6152,6 +6219,109 @@ mod tests {
 
         assert!(!session_preview_matches_current(&state, "A"));
         assert!(session_preview_matches_current(&state, "B"));
+    }
+
+    #[test]
+    fn initial_live_session_identity_selects_its_row() {
+        let mut state = State::new_without_worker_for_session(Some("target".to_string()));
+        state.sessions = vec![
+            row_with_id("neighbor", SessionClass::Live),
+            row_with_id("target", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+
+        resolve_initial_session(&mut state);
+
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("target")
+        );
+        assert_eq!(state.initial_session_id.as_deref(), Some("target"));
+    }
+
+    #[test]
+    fn initial_terminal_session_identity_expands_and_selects_its_row() {
+        let mut state = State::new_without_worker_for_session(Some("target".to_string()));
+        state.sessions = vec![
+            row_with_id("neighbor", SessionClass::Terminal),
+            row_with_id("target", SessionClass::Terminal),
+        ];
+        rebuild_visible_sessions(&mut state);
+        assert!(state.collapsed_groups.contains(&SessionGroup::Completed));
+
+        resolve_initial_session(&mut state);
+
+        assert!(!state.collapsed_groups.contains(&SessionGroup::Completed));
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("target")
+        );
+        assert!(state.initial_session_id.is_none());
+    }
+
+    #[test]
+    fn initial_session_selection_survives_live_to_terminal_snapshot() {
+        let mut state = State::new_without_worker_for_session(Some("target".to_string()));
+        state.sessions = vec![
+            row_with_id("live-neighbor", SessionClass::Live),
+            row_with_id("target", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        resolve_initial_session(&mut state);
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("target")
+        );
+        assert_eq!(state.initial_session_id.as_deref(), Some("target"));
+
+        // A later snapshot can classify the same identity as terminal and add
+        // neighboring rows. Its completed group starts collapsed.
+        state.sessions = vec![
+            row_with_id("live-neighbor", SessionClass::Live),
+            row_with_id("terminal-neighbor", SessionClass::Terminal),
+            row_with_id("target", SessionClass::Terminal),
+        ];
+        rebuild_visible_sessions(&mut state);
+        assert!(state.collapsed_groups.contains(&SessionGroup::Completed));
+        resolve_initial_session(&mut state);
+
+        assert!(!state.collapsed_groups.contains(&SessionGroup::Completed));
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("target")
+        );
+        assert!(state.initial_session_id.is_none());
+    }
+
+    #[test]
+    fn session_navigation_releases_initial_selection_pin() {
+        let mut state = State::new_without_worker_for_session(Some("target".to_string()));
+        state.sessions = vec![
+            row_with_id("target", SessionClass::Live),
+            row_with_id("chosen", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        resolve_initial_session(&mut state);
+        state.move_selection(1);
+
+        assert!(state.initial_session_id.is_none());
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("chosen")
+        );
+    }
+
+    #[test]
+    fn selected_live_session_requests_preview_on_reload() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("selected", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+
+        let request = state.session_preview_request().expect("selected live row");
+
+        assert_eq!(request.session_id, "selected");
+        assert_eq!(request.run_id, "r-selected");
     }
 
     #[test]
