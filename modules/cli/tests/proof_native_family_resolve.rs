@@ -388,4 +388,15 @@ fn source_less_canonical_package_remains_valid() {
         check.status.success(),
         "source-less package check failed\nstdout: {stdout}\nstderr: {stderr}"
     );
+    let rebuild = run_ctx(&["traits", "build", "source-less"], &proj, &home);
+    let (stdout, stderr) = utf8(&rebuild);
+    assert!(
+        !rebuild.status.success(),
+        "named build unexpectedly succeeded without an authoring source\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("resolves to")
+            && stderr.contains("no TypeScript or JavaScript authoring source"),
+        "named build must explain the source-less package refusal:\n{stderr}"
+    );
 }

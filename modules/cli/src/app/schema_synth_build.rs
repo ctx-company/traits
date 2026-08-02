@@ -328,7 +328,19 @@ pub(crate) fn handle_build(
     out: Option<&str>,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
-    let evidence = match route_cdk_build(path, format, out)? {
+    let source_path = if camino::Utf8Path::new(path).extension().is_some() {
+        camino::Utf8PathBuf::from(path)
+    } else {
+        let (trait_path, _) = ctx_traits_io::run::resolve_trait_path(None, Some(path), "build")?;
+        crate::app::cdk_build::package_cdk_source(&trait_path)?.ok_or_else(|| {
+            crate::Error::Command {
+                message: format!(
+                    "cannot rebuild named trait {path:?}: it resolves to {trait_path}, but its package has no TypeScript or JavaScript authoring source"
+                ),
+            }
+        })?
+    };
+    let evidence = match route_cdk_build(source_path.as_str(), format, out)? {
         CdkBuildRouted::Single(evidence) => *evidence,
         CdkBuildRouted::Family(family_report) => {
             // Every leaf, so a family's lock carries the whole topology the

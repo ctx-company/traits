@@ -291,6 +291,30 @@ fn hidden_commands_still_run_under_help() {
     }
 }
 
+#[test]
+fn build_and_refine_help_advertise_trait_names_with_path_escape_hatches() {
+    let scratch = ScratchRoot::new("cli-surface-build-refine-operands");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+
+    for command in ["build", "refine"] {
+        let help = require_success(
+            &format!("`ctx traits {command} --help`"),
+            &["traits", command, "--help"],
+            &repo,
+            &scratch.home(),
+        );
+        assert!(
+            help.contains("<TRAIT>"),
+            "{command} help must advertise a trait operand:\n{help}"
+        );
+        assert!(
+            help.contains("explicit") && help.contains("escape hatch"),
+            "{command} help must document explicit paths as an escape hatch:\n{help}"
+        );
+    }
+}
+
 fn seed_demo_trait(repo: &std::path::Path) {
     git_init(repo);
     write_fixture_file(

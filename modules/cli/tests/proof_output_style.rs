@@ -391,13 +391,19 @@ fn build_default_output_matches_the_panel_registry_shape() {
         &repo,
         &home,
     );
-    let stdout = require_success(
-        "`ctx traits build` for fixture-build-panel",
+    require_success(
+        "initial explicit-path `ctx traits build` for fixture-build-panel",
         &[
             "traits",
             "build",
             ".ctx/traits/packages/fixture-build-panel/source/index.ts",
         ],
+        &repo,
+        &home,
+    );
+    let stdout = require_success(
+        "`ctx traits build` for fixture-build-panel",
+        &["traits", "build", "fixture-build-panel"],
         &repo,
         &home,
     );

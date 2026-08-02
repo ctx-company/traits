@@ -41,7 +41,7 @@ Manage:
   new         Scaffold a new trait package from a template, or list available templates
   list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
 Author:
-  build       Compile a TypeScript or JavaScript authoring source file into the canonical trait document
+  build       Compile a named trait or explicit TypeScript/JavaScript source path into the canonical trait document
   check       Check a trait for validation, audit, and drift
   diff        Show layer-aware diff for a trait
   explain     Explain why a trait would or wouldn't activate for a task
@@ -671,13 +671,16 @@ pub enum TraitsCommand {
         #[arg(long)]
         check: bool,
     },
-    /// Compile a TypeScript or JavaScript authoring source file into the canonical trait document.
+    /// Compile a named trait or explicit TypeScript/JavaScript authoring source
+    /// path into the canonical trait document.
     ///
     /// `build` executes only at the CLI/IO boundary. The authoring module must
     /// emit draft JSON by exporting `default` or `draft`;
     /// core synth still receives parsed draft JSON only.
     Build {
-        /// CDK source path: .ts or .mjs.
+        /// Trait name to rebuild. Pass an explicit .ts or .mjs source path as
+        /// an escape hatch.
+        #[arg(value_name = "TRAIT")]
         path: String,
 
         /// Output format: toml, json, or yaml. Defaults to toml.
@@ -743,8 +746,9 @@ pub enum TraitsCommand {
     /// or prints the candidate report. With `--apply`, mutates canonical source
     /// only after gates pass. Never edits generated exports directly.
     Refine {
-        /// Trait ID or local trait file path to refine. Until trait-ID
-        /// resolution exists, pass a local trait file path.
+        /// Trait name to refine. Pass an explicit canonical trait file path as
+        /// an escape hatch.
+        #[arg(value_name = "TRAIT")]
         id_or_path: String,
 
         /// Change request describing the desired refinement.

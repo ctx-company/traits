@@ -154,6 +154,66 @@ fn build_publishes_native_family_leaves_and_manifest_table() {
     );
 }
 
+#[test]
+fn building_a_variant_name_republishes_its_complete_native_family() {
+    let scratch = ScratchRoot::new("cdk-native-family-build-variant-name");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+
+    let trait_id = "family-fixture";
+    assert!(
+        run_ctx(&["traits", "init", trait_id], &proj, &home)
+            .status
+            .success()
+    );
+    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    fs::write(&source_path, family_fixture_source()).unwrap();
+    assert!(
+        run_ctx(
+            &[
+                "traits",
+                "build",
+                ".ctx/traits/packages/family-fixture/source/index.ts",
+            ],
+            &proj,
+            &home,
+        )
+        .status
+        .success()
+    );
+
+    fs::write(
+        &source_path,
+        family_fixture_source().replace("The ${name} leaf.", "Rebuilt ${name} leaf."),
+    )
+    .unwrap();
+    let rebuild = run_ctx(&["traits", "build", "family-fixture:quick"], &proj, &home);
+    let (stdout, stderr) = utf8(&rebuild);
+    assert!(
+        rebuild.status.success(),
+        "named variant build failed\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("family: family-fixture")
+            && stdout.contains("leaf: default")
+            && stdout.contains("leaf: quick"),
+        "named variant build did not report the complete family: {stdout}"
+    );
+    for selector in ["default", "quick"] {
+        let leaf = fs::read_to_string(proj.join(format!(
+            ".ctx/traits/packages/{trait_id}/generated/{selector}/index.toml"
+        )))
+        .unwrap();
+        assert!(
+            leaf.contains(&format!("summary = \"Rebuilt {selector} leaf.\"")),
+            "named variant build did not refresh {selector}: {leaf}"
+        );
+    }
+}
+
 /// `ctx traits build` on a native family source refuses to publish when the
 /// package has no root `trait.toml` at all: it must not create one
 /// containing only `[family]` and no `[package]` table.
