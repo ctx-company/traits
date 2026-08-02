@@ -357,6 +357,10 @@ pub enum MergeRung {
 pub struct TraitSource {
     pub kind: String,
     pub path: String,
+    /// Repository that owned the selected source. This anchors
+    /// relative paths when a session is resumed from another checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<String>,
     /// Exact source text loaded at session start. This is deliberately kept
     /// with the ledger so a rebuilt source path cannot change a resumed run.
     #[serde(default, skip_serializing_if = "Option::is_none")]

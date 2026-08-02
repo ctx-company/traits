@@ -703,6 +703,40 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         request.ephemeral,
         session_id.as_str(),
     )?;
+    // A relative selected source belongs to the checkout that resolved it,
+    // not an arbitrary location chosen for the output ledger.
+    let source_repository_root = loaded
+        .path
+        .parent()
+        .and_then(|parent| {
+            crate::repository::discover_repo_root_at(parent)
+                .ok()
+                .flatten()
+        })
+        .or_else(|| crate::repository::discover_repo_root().ok());
+    // Store an absolute path so a later resume never reinterprets it from
+    // another checkout. Do not canonicalize or collapse `..`: filesystem
+    // traversal through a directory symlink changes what a following `..`
+    // means, including its package context.
+    let persisted_source_path = if loaded.path.is_relative() {
+        let cwd =
+            std::env::current_dir().map_err(|source| crate::environment::Error::Filesystem {
+                path: loaded.path.to_string(),
+                source,
+            })?;
+        let cwd = Utf8PathBuf::from_path_buf(cwd).map_err(|path| {
+            crate::environment::Error::Filesystem {
+                path: path.display().to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "current working directory is not valid UTF-8",
+                ),
+            }
+        })?;
+        cwd.join(&loaded.path)
+    } else {
+        loaded.path.clone()
+    };
     let canonical_digest = ctx_traits_core::digest::Digest::parse(&loaded.canonical_digest)?;
     let pinned_document = if request.ephemeral {
         None
@@ -754,7 +788,8 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 warnings: worktree_retry_warnings,
                 trait_source: Some(ctx_traits_core::procedure::session::TraitSource {
                     kind: loaded.source_kind,
-                    path: loaded.path.to_string(),
+                    path: persisted_source_path.to_string(),
+                    repository_root: source_repository_root.map(|root| root.to_string()),
                     document: pinned_document,
                 }),
                 query_selection: selected_query,
@@ -1759,7 +1794,19 @@ pub fn load_trait_for_session(
             "run-session ledger does not record a trait file; pass --file <trait.toml>",
         )
     })?;
-    let path = Utf8PathBuf::from(&source.path);
+    let source_path = Utf8PathBuf::from(&source.path);
+    // A ledger's recorded relative path belongs to the checkout where it was
+    // started, never the checkout from which a later resume happens.
+    let path = if source_path.is_relative() {
+        source
+            .repository_root
+            .as_deref()
+            .map(Utf8Path::new)
+            .map(|root| root.join(&source_path))
+            .unwrap_or(source_path)
+    } else {
+        source_path
+    };
     let from_parts =
         |trait_ref: ctx_traits_core::Trait,
          trait_root: Utf8PathBuf,
@@ -1778,12 +1825,12 @@ pub fn load_trait_for_session(
         .ok()
         .flatten();
     // A valid pin is authoritative on every resume path. An explicit source
-    // may supply package context only after its decoded trait identity proves
-    // it belongs to this session; its rebuilt bytes never replace the pin.
+    // may supply package context only from the package recorded by the ledger;
+    // matching IDs in another repository are not ownership evidence.
     if let Some(pinned) = source.document.as_deref()
         && let package_path = explicit
             .as_ref()
-            .filter(|loaded| package_context_matches_session(loaded, session))
+            .filter(|loaded| package_context_matches_session(loaded, session, &path))
             .map(|loaded| loaded.path.as_path())
             .unwrap_or(path.as_path())
         && let Ok((trait_ref, trait_root, source_digest, canonical_digest)) =
@@ -1804,7 +1851,8 @@ pub fn load_trait_for_session(
         }
         mismatch = Some(loaded);
     }
-    if let Ok((trait_ref, trait_root, source_digest, canonical_digest)) = load_trait(&source.path) {
+    if let Ok((trait_ref, trait_root, source_digest, canonical_digest)) = load_trait(path.as_str())
+    {
         let loaded = from_parts(trait_ref, trait_root, source_digest, canonical_digest);
         if verify_loaded_trait_matches_session(&loaded, session, field_prefix).is_ok() {
             return Ok(loaded);
@@ -1823,8 +1871,13 @@ pub fn load_trait_for_session(
 fn package_context_matches_session(
     loaded: &LoadedTrait,
     session: &ctx_traits_core::procedure::session::Session,
+    recorded_path: &Utf8Path,
 ) -> bool {
     if loaded.trait_ref.id.as_str() != session.trait_id {
+        return false;
+    }
+    if crate::layout::package_root_for_manifest(recorded_path) != Some(loaded.trait_root.as_path())
+    {
         return false;
     }
     match crate::distribution::read_package_manifest(&loaded.trait_root) {
@@ -1856,7 +1909,11 @@ pub fn trait_source_drift_from(
     };
     let source_path = Utf8Path::new(&source.path);
     let path = if source_path.is_relative() {
-        repository_root
+        source
+            .repository_root
+            .as_deref()
+            .map(Utf8Path::new)
+            .or(repository_root)
             .map(|root| root.join(source_path))
             .unwrap_or_else(|| source_path.to_path_buf())
     } else {

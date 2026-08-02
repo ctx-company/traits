@@ -45,6 +45,21 @@ fn resource_manifest(summary: &str) -> String {
     )
 }
 
+#[cfg(unix)]
+fn symlink_source(target: &std::path::Path, link: &std::path::Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(unix)]
+fn symlink_directory(target: &std::path::Path, link: &std::path::Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(windows)]
+fn symlink_source(target: &std::path::Path, link: &std::path::Path) {
+    std::os::windows::fs::symlink_file(target, link).unwrap();
+}
+
 #[test]
 fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     let scratch = ScratchRoot::new("trait-shape-pinning");
@@ -99,9 +114,8 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
         "test",
     )
     .expect("the owning repository's rebuilt path supplies pinned package context");
-    assert_eq!(
-        loaded.trait_root,
-        repo.join(".ctx/traits/pin"),
+    assert!(
+        loaded.trait_root.ends_with(".ctx/traits/pin"),
         "pinned commands and resources must resolve from the owning package"
     );
     assert_eq!(
@@ -506,14 +520,14 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     )
     .unwrap();
 
+    let without_file = owner.join("flat-pinned-without-file.json");
+    fs::copy(&ledger, &without_file).unwrap();
     let resumed = run_ctx(
         &[
             "traits",
             "drive",
-            "--file",
-            owner.join(FLAT_FILE).to_str().unwrap(),
             "--session",
-            ledger.to_str().unwrap(),
+            without_file.to_str().unwrap(),
             "--progress",
             "none",
         ],
@@ -523,18 +537,19 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     let (stdout, stderr) = utf8(&resumed);
     assert!(
         resumed.status.success(),
-        "owner-qualified flat context must resolve pinned resources after rebuild: stdout={stdout} stderr={stderr}"
+        "ledger-owned flat context must resolve pinned resources after rebuild: stdout={stdout} stderr={stderr}"
     );
 
     let session: ctx_traits_core::procedure::session::Session =
         serde_json::from_str(&fs::read_to_string(&ledger).unwrap()).unwrap();
-    let foreign = dashboard.join(".ctx/traits/foreign/trait.toml");
+    let foreign = dashboard.join(".ctx/traits/pin/generated/index.toml");
     fs::create_dir_all(foreign.parent().unwrap()).unwrap();
     fs::write(
-        &foreign,
-        manifest("foreign source").replace("id = \"pin\"", "id = \"foreign\""),
+        dashboard.join(".ctx/traits/pin/trait.toml"),
+        "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Foreign Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
+    fs::write(&foreign, resource_manifest("foreign source")).unwrap();
     let loaded = ctx_traits_io::run::load_trait_for_session(
         Some(foreign.to_str().unwrap()),
         None,
@@ -542,7 +557,342 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
         "test",
     )
     .expect("foreign flat context must leave the pinned source authoritative");
-    assert_ne!(loaded.trait_root, foreign.parent().unwrap());
+    assert!(loaded.trait_root.ends_with(".ctx/traits/pin"));
+    assert_ne!(loaded.trait_root, dashboard.join(".ctx/traits/pin"));
+
+    // A package in another repository may claim the same package and trait ID,
+    // but it must not redirect the pinned resource root during a real resume.
+    let explicit_foreign = run_ctx(
+        &[
+            "traits",
+            "drive",
+            "--file",
+            foreign.to_str().unwrap(),
+            "--session",
+            ledger.to_str().unwrap(),
+            "--progress",
+            "none",
+        ],
+        &dashboard,
+        &scratch.home(),
+    );
+    let (stdout, stderr) = utf8(&explicit_foreign);
+    assert!(
+        explicit_foreign.status.success(),
+        "same-ID foreign package must not redirect pinned resources: stdout={stdout} stderr={stderr}"
+    );
+}
+
+#[test]
+fn source_owner_root_survives_an_outside_ledger_output() {
+    let scratch = ScratchRoot::new("trait-shape-source-owner-output");
+    let owner = scratch.home().join("owner");
+    let output_repo = scratch.home().join("output");
+    let resume_repo = scratch.home().join("resume");
+    let nested_owner = owner.join("nested");
+    fs::create_dir_all(owner.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(&nested_owner).unwrap();
+    fs::create_dir_all(&output_repo).unwrap();
+    fs::create_dir_all(&resume_repo).unwrap();
+    git_init(&owner);
+    git_init(&output_repo);
+    git_init(&resume_repo);
+    fs::write(
+        owner.join(".ctx/traits/pin/trait.toml"),
+        "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    let target = owner.join("target/different-extension.json");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    fs::write(&target, resource_manifest("source A")).unwrap();
+    symlink_source(
+        std::path::Path::new("../../../../target/different-extension.json"),
+        &owner.join(FILE),
+    );
+    fs::create_dir_all(owner.join(".ctx/traits/pin/resources")).unwrap();
+    fs::write(
+        owner.join(".ctx/traits/pin/resources/session-package"),
+        "owner package resource\n",
+    )
+    .unwrap();
+    // Give the output repository a same-path package whose resource cannot
+    // satisfy the owner's declaration. A ledger-root package context would
+    // therefore redirect this run and fail.
+    fs::create_dir_all(output_repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::write(
+        output_repo.join(".ctx/traits/pin/trait.toml"),
+        "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Output Pin\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    fs::write(output_repo.join(FILE), resource_manifest("output source")).unwrap();
+    fs::create_dir_all(output_repo.join(".ctx/traits/pin/resources")).unwrap();
+    fs::write(
+        output_repo.join(".ctx/traits/pin/resources/session-package"),
+        "foreign package resource\n",
+    )
+    .unwrap();
+    require_success(
+        "activate owner fixture",
+        &["traits", "activate", "--file", FILE],
+        &owner,
+        &scratch.home(),
+    );
+    require_success(
+        "approve owner source",
+        &["traits", "trust", "approve", "pin"],
+        &owner,
+        &scratch.home(),
+    );
+    let ledger = output_repo.join("pinned.json");
+    require_success(
+        "start pinned run from nested owner directory",
+        &[
+            "traits",
+            "run",
+            "--file",
+            "../.ctx/traits/pin/generated/index.toml",
+            "--no-drive",
+            "--out",
+            ledger.to_str().unwrap(),
+            "--progress",
+            "none",
+        ],
+        &nested_owner,
+        &scratch.home(),
+    );
+    let session: ctx_traits_core::procedure::session::Session =
+        serde_json::from_str(&fs::read_to_string(&ledger).unwrap()).unwrap();
+    let recorded_root = session
+        .provenance
+        .trait_source
+        .as_ref()
+        .unwrap()
+        .repository_root
+        .as_deref()
+        .unwrap();
+    assert_eq!(
+        fs::canonicalize(recorded_root).unwrap(),
+        fs::canonicalize(&owner).unwrap(),
+        "the source owner, not the ledger output repository, anchors relative paths"
+    );
+    assert!(
+        session
+            .provenance
+            .trait_source
+            .as_ref()
+            .unwrap()
+            .path
+            .ends_with(FILE),
+        "a nested-CWD symlink source must retain its lexical owner-stable path"
+    );
+
+    let unchanged = output_repo.join("unchanged.json");
+    fs::copy(&ledger, &unchanged).unwrap();
+    let unchanged_resume = run_ctx(
+        &[
+            "traits",
+            "drive",
+            "--session",
+            unchanged.to_str().unwrap(),
+            "--progress",
+            "none",
+        ],
+        &resume_repo,
+        &scratch.home(),
+    );
+    let (stdout, stderr) = utf8(&unchanged_resume);
+    assert!(
+        unchanged_resume.status.success(),
+        "an unchanged symlink source must retain TOML encoding and owner resources: stdout={stdout} stderr={stderr}"
+    );
+    fs::write(owner.join(FILE), resource_manifest("source B")).unwrap();
+    assert!(matches!(
+        trait_source_drift_from(&session, None),
+        TraitSourceDrift::Rebuilt { .. }
+    ));
+    let owner_source = owner.join(FILE).to_str().unwrap().to_string();
+    for explicit_source in [None, Some(owner_source.as_str())] {
+        let loaded =
+            ctx_traits_io::run::load_trait_for_session(explicit_source, None, &session, "test")
+                .expect("the pinned document must retain the owner package context");
+        assert_eq!(
+            fs::canonicalize(loaded.trait_root).unwrap(),
+            fs::canonicalize(owner.join(".ctx/traits/pin")).unwrap(),
+            "pinned loading must retain the owner's package root"
+        );
+    }
+
+    let without_file = output_repo.join("without-file.json");
+    let with_file = output_repo.join("with-file.json");
+    fs::copy(&ledger, &without_file).unwrap();
+    fs::copy(&ledger, &with_file).unwrap();
+    for (label, args) in [
+        (
+            "resume without explicit owner file",
+            vec![
+                "traits",
+                "drive",
+                "--session",
+                without_file.to_str().unwrap(),
+                "--progress",
+                "none",
+            ],
+        ),
+        (
+            "resume with explicit owner file",
+            vec![
+                "traits",
+                "drive",
+                "--file",
+                &owner_source,
+                "--session",
+                with_file.to_str().unwrap(),
+                "--progress",
+                "none",
+            ],
+        ),
+    ] {
+        let output = run_ctx(&args, &resume_repo, &scratch.home());
+        let (stdout, stderr) = utf8(&output);
+        assert!(
+            output.status.success(),
+            "{label} must use the owner package resources: stdout={stdout} stderr={stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn relative_source_preserves_symlink_parent_dotdot_traversal() {
+    let scratch = ScratchRoot::new("trait-shape-symlink-parent-dotdot");
+    let repo = scratch.home().join("repo");
+    let nested = repo.join("nested");
+    let selected_package = repo.join("outside/.ctx/traits/packages/pin");
+    let collapsed_package = nested.join(".ctx/traits/packages/pin");
+    fs::create_dir_all(selected_package.join("generated")).unwrap();
+    fs::create_dir_all(collapsed_package.join("generated")).unwrap();
+    fs::create_dir_all(repo.join("outside/child")).unwrap();
+    fs::create_dir_all(&nested).unwrap();
+    git_init(&repo);
+    fs::write(
+        selected_package.join("package.toml"),
+        "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Selected Pin\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    fs::write(
+        selected_package.join("generated/index.toml"),
+        resource_manifest("selected source"),
+    )
+    .unwrap();
+    fs::create_dir_all(selected_package.join("resources")).unwrap();
+    fs::write(
+        selected_package.join("resources/session-package"),
+        "owner package resource\n",
+    )
+    .unwrap();
+    fs::write(
+        collapsed_package.join("package.toml"),
+        "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Collapsed Pin\"\nstatus = \"draft\"\n",
+    )
+    .unwrap();
+    fs::write(
+        collapsed_package.join("generated/index.toml"),
+        resource_manifest("lexically collapsed source"),
+    )
+    .unwrap();
+    fs::create_dir_all(collapsed_package.join("resources")).unwrap();
+    fs::write(
+        collapsed_package.join("resources/session-package"),
+        "collapsed package resource\n",
+    )
+    .unwrap();
+    symlink_directory(
+        std::path::Path::new("../outside/child"),
+        &nested.join("link"),
+    );
+
+    let selected = "link/../.ctx/traits/packages/pin/generated/index.toml";
+    let activation_source = selected_package.join("generated/index.toml");
+    require_success(
+        "activate symlink traversal fixture",
+        &[
+            "traits",
+            "activate",
+            "--file",
+            activation_source.to_str().unwrap(),
+        ],
+        &nested,
+        &scratch.home(),
+    );
+    let (_, _, _, canonical_digest) =
+        ctx_traits_io::run::load_trait(activation_source.to_str().unwrap()).unwrap();
+    require_success(
+        "approve selected symlink traversal source",
+        &[
+            "traits",
+            "trust",
+            "approve",
+            "--digest",
+            canonical_digest.as_str(),
+        ],
+        &nested,
+        &scratch.home(),
+    );
+    let ledger = repo.join("pinned.json");
+    require_success(
+        "start pinned symlink traversal run",
+        &[
+            "traits",
+            "run",
+            "--file",
+            selected,
+            "--no-drive",
+            "--out",
+            ledger.to_str().unwrap(),
+            "--progress",
+            "none",
+        ],
+        &nested,
+        &scratch.home(),
+    );
+    let session: ctx_traits_core::procedure::session::Session =
+        serde_json::from_str(&fs::read_to_string(&ledger).unwrap()).unwrap();
+    let recorded = &session.provenance.trait_source.as_ref().unwrap().path;
+    assert!(recorded.contains("link/../.ctx/traits/packages/pin/generated/index.toml"));
+    assert_ne!(
+        fs::canonicalize(recorded).unwrap(),
+        fs::canonicalize(collapsed_package.join("generated/index.toml")).unwrap(),
+        "the preserved traversal must name the source selected through the directory symlink"
+    );
+    assert!(matches!(
+        trait_source_drift_from(&session, None),
+        TraitSourceDrift::Current
+    ));
+
+    let loaded = ctx_traits_io::run::load_trait_for_session(None, None, &session, "test")
+        .expect("the unchanged pin must retain its filesystem package context");
+    assert_eq!(
+        fs::canonicalize(loaded.trait_root).unwrap(),
+        fs::canonicalize(&selected_package).unwrap(),
+        "pinned resources must use the package reached through the selected traversal"
+    );
+    let resumed = run_ctx(
+        &[
+            "traits",
+            "drive",
+            "--session",
+            ledger.to_str().unwrap(),
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    let (stdout, stderr) = utf8(&resumed);
+    assert!(
+        resumed.status.success(),
+        "unchanged resume must retain TOML encoding and selected resources: stdout={stdout} stderr={stderr}"
+    );
 }
 
 #[test]
