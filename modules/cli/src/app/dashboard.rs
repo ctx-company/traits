@@ -683,7 +683,7 @@ struct State {
     /// accessor any action key reads a row through.
     sessions_visible: Vec<VisibleRow>,
     /// Which [`SessionGroup`]s are collapsed to their count-row form.
-    /// `Completed` starts collapsed (P506 Done-when).
+    /// Everything except `Live` starts collapsed.
     collapsed_groups: HashSet<SessionGroup>,
     traits: Vec<TraitRow>,
     merges: Vec<MergeRow>,
@@ -836,7 +836,11 @@ impl State {
     /// this constructor, so it cannot accidentally scan stores while drawing.
     fn new_without_worker() -> Self {
         let mut collapsed_groups = HashSet::new();
-        collapsed_groups.insert(SessionGroup::Completed);
+        collapsed_groups.extend([
+            SessionGroup::Pending,
+            SessionGroup::Failed,
+            SessionGroup::Completed,
+        ]);
         Self {
             screen: Screen::Sessions,
             sessions: Vec::new(),
@@ -1315,7 +1319,7 @@ fn parked_ask_presentation(
 /// later P504 typed-session-state landing is a one-function change.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum SessionGroup {
-    NeedsUserInput,
+    Live,
     Pending,
     Failed,
     Completed,
@@ -1325,7 +1329,7 @@ impl SessionGroup {
     /// The owner's fixed display order.
     fn order() -> [SessionGroup; 4] {
         [
-            SessionGroup::NeedsUserInput,
+            SessionGroup::Live,
             SessionGroup::Pending,
             SessionGroup::Failed,
             SessionGroup::Completed,
@@ -1334,7 +1338,7 @@ impl SessionGroup {
 
     fn label(self) -> &'static str {
         match self {
-            SessionGroup::NeedsUserInput => "needs user input",
+            SessionGroup::Live => "live",
             SessionGroup::Pending => "pending",
             SessionGroup::Failed => "failed",
             SessionGroup::Completed => "completed",
@@ -1350,35 +1354,34 @@ impl SessionGroup {
 /// "look at me, this is not moving" bucket, matching every other blocked
 /// status: the owner's four buckets have no home for a row that will never
 /// progress on its own, and hiding it inside `Pending` would be dishonest.
-/// `Live` always wins as `Pending` (rendered with its own live-driver
-/// indicator inside that group) regardless of the ledger's last-recorded
-/// status, mirroring [`classify_session`]'s own `Live`-wins-first rule.
+/// A held driver is live regardless of the ledger's last-recorded status.
+/// Otherwise an interrupted or killed outcome wins over stale status text.
 fn session_group(
     class: SessionClass,
     status: Option<&ctx_traits_core::procedure::session::Status>,
     outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
 ) -> SessionGroup {
+    if class == SessionClass::Live {
+        return SessionGroup::Live;
+    }
+    let Some(status) = status else {
+        return SessionGroup::Failed;
+    };
+    if ctx_traits_core::procedure::activity::SessionState::derive(status, outcome, false)
+        == ctx_traits_core::procedure::activity::SessionState::Cancelled
+    {
+        return SessionGroup::Failed;
+    }
     match status {
-        None => SessionGroup::Failed,
-        Some(status) => match ctx_traits_core::procedure::activity::SessionState::derive(
-            status,
-            outcome,
-            class == SessionClass::Live,
-        ) {
-            ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman => {
-                SessionGroup::NeedsUserInput
-            }
-            ctx_traits_core::procedure::activity::SessionState::Completed => {
-                SessionGroup::Completed
-            }
-            ctx_traits_core::procedure::activity::SessionState::Running
-            | ctx_traits_core::procedure::activity::SessionState::WaitingOnAgent => {
-                SessionGroup::Pending
-            }
-            ctx_traits_core::procedure::activity::SessionState::Blocked
-            | ctx_traits_core::procedure::activity::SessionState::Failed
-            | ctx_traits_core::procedure::activity::SessionState::Cancelled => SessionGroup::Failed,
-        },
+        ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Live,
+        ctx_traits_core::procedure::session::Status::AwaitingInput
+        | ctx_traits_core::procedure::session::Status::WaitingOnHuman => SessionGroup::Pending,
+        ctx_traits_core::procedure::session::Status::Completed => SessionGroup::Completed,
+        ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
+        | ctx_traits_core::procedure::session::Status::BlockedAgentUnassigned
+        | ctx_traits_core::procedure::session::Status::Rejected
+        | ctx_traits_core::procedure::session::Status::Blocked
+        | ctx_traits_core::procedure::session::Status::Failed => SessionGroup::Failed,
     }
 }
 
@@ -1401,8 +1404,8 @@ enum VisibleRow {
 
 /// Rebuilds [`State::sessions_visible`] from `state.sessions` and
 /// `state.collapsed_groups` — called after every reload and every collapse
-/// toggle, never in the draw path. Groups with no members emit no header
-/// (§ validation plan point 2).
+/// toggle, never in the draw path. Every display group emits a header,
+/// including empty and collapsed groups.
 fn rebuild_visible_sessions(state: &mut State) {
     let mut buckets: Vec<(SessionGroup, Vec<usize>)> = SessionGroup::order()
         .into_iter()
@@ -1416,9 +1419,6 @@ fn rebuild_visible_sessions(state: &mut State) {
     }
     let mut visible = Vec::new();
     for (group, indices) in buckets {
-        if indices.is_empty() {
-            continue;
-        }
         let collapsed = state.collapsed_groups.contains(&group);
         visible.push(VisibleRow::GroupHeader {
             group,
@@ -5531,22 +5531,48 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
         .min(SESSION_CLOCK_WIDTH);
     let tokens_width =
         remaining.saturating_sub(repo_width + state_width + phase_width + elapsed_width);
-    // P552: the persisted session title is this row's primary run label when
-    // one resolved — shown in the same column/width budget `phase` used
-    // (never widening the row), with the short session id retained
-    // separately for identity/disambiguation regardless.
-    let primary_label = row.title.as_deref().unwrap_or(&row.phase);
+    // State and detail share the existing state/phase budget. This keeps the
+    // additive separator visible without widening the list.
+    let detail_width = state_width + 1 + phase_width;
+    let state_and_detail = session_state_label(row);
     let label = format!(
-        "{} {} {} {} {} {}",
+        "{} {} {} {} {}",
         list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
         short_id,
-        list_field(&row.state_text, state_width),
-        list_field(primary_label, phase_width),
+        list_field(&state_and_detail, detail_width),
         list_field(&row.elapsed_text, elapsed_width),
         list_field(&row.tokens_text, tokens_width),
     );
     debug_assert!(tui::display_width(&label) <= LIST_LABEL_WIDTH);
     label
+}
+
+/// Dashboard-local state/detail presentation. `phase_text` repeats the
+/// persisted status, while this list already renders the current display
+/// state; remove only that exact known prefix before adding useful detail.
+fn session_state_label(row: &SessionRow) -> String {
+    let phase = normalized_session_phase(row);
+    let detail = row.title.as_deref().unwrap_or(phase);
+    if detail.is_empty() || detail == row.state_text {
+        row.state_text.clone()
+    } else {
+        format!("{} · {detail}", row.state_text)
+    }
+}
+
+fn normalized_session_phase(row: &SessionRow) -> &str {
+    let Some(status) = row.status.as_ref() else {
+        return &row.phase;
+    };
+    let prefix = run_view::session_status(status);
+    if row.phase == prefix {
+        ""
+    } else {
+        row.phase
+            .strip_prefix(&format!("{prefix} · "))
+            .or_else(|| row.phase.strip_prefix(&format!("{prefix}; ")))
+            .unwrap_or(&row.phase)
+    }
 }
 
 /// One SESSIONS visible row's list label (P506 §3.1/§3.4): a group header
@@ -6716,19 +6742,206 @@ mod tests {
     }
 
     #[test]
-    fn session_group_maps_cancelled_parked_ask_to_failed_not_needs_user_input() {
+    fn session_group_maps_all_dashboard_states() {
         use ctx_traits_core::procedure::session::{DriveOutcomeKind, Status};
-        assert_eq!(
-            session_group(SessionClass::Resumable, Some(&Status::WaitingOnHuman), None),
-            SessionGroup::NeedsUserInput
-        );
-        assert_eq!(
-            session_group(
-                SessionClass::Terminal,
-                Some(&Status::WaitingOnHuman),
-                Some(&DriveOutcomeKind::Interrupted)
+        let cases = [
+            (
+                "held",
+                SessionClass::Live,
+                Some(Status::Failed),
+                None,
+                SessionGroup::Live,
             ),
-            SessionGroup::Failed
+            (
+                "awaiting agent",
+                SessionClass::Resumable,
+                Some(Status::AwaitingAgentOutput),
+                None,
+                SessionGroup::Live,
+            ),
+            (
+                "awaiting input",
+                SessionClass::Resumable,
+                Some(Status::AwaitingInput),
+                None,
+                SessionGroup::Pending,
+            ),
+            (
+                "waiting on human",
+                SessionClass::Resumable,
+                Some(Status::WaitingOnHuman),
+                None,
+                SessionGroup::Pending,
+            ),
+            (
+                "rejected",
+                SessionClass::Resumable,
+                Some(Status::Rejected),
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "permission blocked",
+                SessionClass::Resumable,
+                Some(Status::BlockedCommandPermissionRequired),
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "agent blocked",
+                SessionClass::Resumable,
+                Some(Status::BlockedAgentUnassigned),
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "blocked",
+                SessionClass::Resumable,
+                Some(Status::Blocked),
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "failed",
+                SessionClass::Terminal,
+                Some(Status::Failed),
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "completed",
+                SessionClass::Terminal,
+                Some(Status::Completed),
+                None,
+                SessionGroup::Completed,
+            ),
+            (
+                "unreadable",
+                SessionClass::Unreadable,
+                None,
+                None,
+                SessionGroup::Failed,
+            ),
+            (
+                "interrupted",
+                SessionClass::Terminal,
+                Some(Status::WaitingOnHuman),
+                Some(DriveOutcomeKind::Interrupted),
+                SessionGroup::Failed,
+            ),
+            (
+                "killed",
+                SessionClass::Terminal,
+                Some(Status::AwaitingAgentOutput),
+                Some(DriveOutcomeKind::Killed),
+                SessionGroup::Failed,
+            ),
+        ];
+        for (name, class, status, outcome, expected) in cases {
+            assert_eq!(
+                session_group(class, status.as_ref(), outcome.as_ref()),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_groups_have_fixed_display_order_and_labels() {
+        assert_eq!(
+            SessionGroup::order().map(SessionGroup::label),
+            ["live", "pending", "failed", "completed"]
+        );
+    }
+
+    #[test]
+    fn session_group_projection_defaults_and_toggles_survive_reload() {
+        use ctx_traits_core::procedure::session::Status;
+        let mut state = State::new_without_worker();
+        let live = row_with_id("live", SessionClass::Live);
+        let mut pending = row_with_id("pending", SessionClass::Resumable);
+        pending.status = Some(Status::AwaitingInput);
+        let mut failed = row_with_id("failed", SessionClass::Resumable);
+        failed.status = Some(Status::Failed);
+        let mut completed = row_with_id("completed", SessionClass::Terminal);
+        completed.status = Some(Status::Completed);
+        state.sessions = vec![
+            live.clone(),
+            pending.clone(),
+            failed.clone(),
+            completed.clone(),
+        ];
+        rebuild_visible_sessions(&mut state);
+
+        assert!(matches!(
+            state.sessions_visible[0],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Live,
+                count: 1,
+                collapsed: false
+            }
+        ));
+        assert!(matches!(state.sessions_visible[1], VisibleRow::Session(0)));
+        assert!(matches!(
+            state.sessions_visible[2],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Pending,
+                count: 1,
+                collapsed: true
+            }
+        ));
+        assert!(matches!(
+            state.sessions_visible[3],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Failed,
+                count: 1,
+                collapsed: true
+            }
+        ));
+        assert!(matches!(
+            state.sessions_visible[4],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Completed,
+                count: 1,
+                collapsed: true
+            }
+        ));
+
+        for group in SessionGroup::order() {
+            let index = state.sessions_visible.iter().position(|row| matches!(row, VisibleRow::GroupHeader { group: current, .. } if *current == group)).expect("group header");
+            state.list_sessions.set_selected(index);
+            toggle_selected_group(&mut state);
+        }
+        assert_eq!(state.collapsed_groups, HashSet::from([SessionGroup::Live]));
+
+        let snapshot = DashboardSnapshot::from_state(&state);
+        state.apply_snapshot(&snapshot);
+        assert_eq!(state.collapsed_groups, HashSet::from([SessionGroup::Live]));
+        assert!(matches!(
+            state.sessions_visible[0],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Live,
+                collapsed: true,
+                ..
+            }
+        ));
+        assert!(
+            state
+                .sessions_visible
+                .iter()
+                .any(|row| matches!(row, VisibleRow::Session(1)))
+        );
+        assert!(
+            state
+                .sessions_visible
+                .iter()
+                .any(|row| matches!(row, VisibleRow::Session(2)))
+        );
+        assert!(
+            state
+                .sessions_visible
+                .iter()
+                .any(|row| matches!(row, VisibleRow::Session(3)))
         );
     }
 
@@ -7046,6 +7259,40 @@ mod tests {
         assert_eq!(
             tui::display_width(&trust_row_label(&trust)),
             LIST_LABEL_WIDTH
+        );
+    }
+
+    #[test]
+    fn session_row_label_omits_repeated_state_and_keeps_additive_detail() {
+        use ctx_traits_core::procedure::session::Status;
+        let mut session = row_with_id("session-1", SessionClass::Resumable);
+        session.state_text = "in-progress".to_string();
+        session.status = Some(Status::AwaitingAgentOutput);
+
+        session.phase = "in-progress".to_string();
+        assert_eq!(session_state_label(&session), "in-progress");
+
+        session.phase = "in-progress · checking output".to_string();
+        assert_eq!(
+            session_state_label(&session),
+            "in-progress · checking output"
+        );
+
+        session.phase = "in-progress; trait source warning".to_string();
+        assert_eq!(
+            session_state_label(&session),
+            "in-progress · trait source warning"
+        );
+
+        session.phase = "in-progress · ignored phase".to_string();
+        session.title = Some("persisted title".to_string());
+        assert_eq!(
+            session_state_label(&session),
+            "in-progress · persisted title"
+        );
+        assert!(
+            tui::display_width(&session_row_label(&session, &[session.session_id.clone()]))
+                <= LIST_LABEL_WIDTH
         );
     }
 
