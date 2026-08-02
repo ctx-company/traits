@@ -356,11 +356,43 @@ pub(crate) enum Modal {
         /// what will be trusted before any keypress confirms it). Empty for
         /// every pre-P473 caller, which renders exactly as before.
         body: String,
-        buffer: String,
-        /// Char (not byte) index.
-        cursor: usize,
+        input: TextInput,
         multiline: bool,
     },
+}
+
+/// Reusable single-line or multi-line Unicode editing state.  Both modal and
+/// inline callers use this so cursor semantics cannot drift.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TextInput {
+    buffer: String,
+    /// Char (not byte) index.
+    cursor: usize,
+}
+
+impl TextInput {
+    pub(crate) fn new(seed: impl Into<String>) -> Self {
+        let buffer = seed.into();
+        let cursor = buffer.chars().count();
+        Self { buffer, cursor }
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.buffer
+    }
+
+    pub(crate) fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.buffer.clear();
+        self.cursor = 0;
+    }
+
+    pub(crate) fn handle_key(&mut self, multiline: bool, key: &KeyEvent) -> ModalOutcome {
+        text_input_key(&mut self.buffer, &mut self.cursor, multiline, key)
+    }
 }
 
 /// The result of routing one key through a [`Modal`]. `Pending` means the
@@ -400,13 +432,10 @@ impl Modal {
         seed: impl Into<String>,
         multiline: bool,
     ) -> Self {
-        let buffer = seed.into();
-        let cursor = buffer.chars().count();
         Modal::TextInput {
             title: title.into(),
             body: body.into(),
-            buffer,
-            cursor,
+            input: TextInput::new(seed),
             multiline,
         }
     }
@@ -430,11 +459,8 @@ impl Modal {
                 _ => ModalOutcome::Pending,
             },
             Modal::TextInput {
-                buffer,
-                cursor,
-                multiline,
-                ..
-            } => text_input_key(buffer, cursor, *multiline, key),
+                input, multiline, ..
+            } => input.handle_key(*multiline, key),
         }
     }
 }
@@ -858,8 +884,7 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
         }
         Modal::TextInput {
             body,
-            buffer,
-            cursor,
+            input,
             multiline,
             ..
         } => {
@@ -870,7 +895,7 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
             };
             // The input line and submit hint must always stay on-screen with
             // typed input visible (blocker: answer-modal-body-overflow-unhandled).
-            let buffer_line_count = buffer.split('\n').count() as u16;
+            let buffer_line_count = input.text().split('\n').count() as u16;
             let (rendered_body, hidden_count) =
                 budgeted_body_lines(body, inner.width, inner.height, buffer_line_count);
             let mut lines: Vec<RLine<'static>> = Vec::new();
@@ -892,14 +917,14 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
                 lines.push(RLine::default());
                 rendered_body.len() as u16 + u16::from(hidden_count > 0) + 1
             };
-            lines.extend(buffer.split('\n').map(|l| RLine::from(l.to_string())));
+            lines.extend(input.text().split('\n').map(|l| RLine::from(l.to_string())));
             lines.push(RLine::default());
             lines.push(RLine::from(Span::styled(
                 hint,
                 Style::default().add_modifier(Modifier::DIM),
             )));
             frame.render_widget(Paragraph::new(lines), inner);
-            let (row, col) = cursor_row_col(buffer, *cursor);
+            let (row, col) = cursor_row_col(input.text(), input.cursor());
             let cursor_x = inner.x + (col as u16).min(inner.width.saturating_sub(1));
             let cursor_y =
                 inner.y + (body_row_offset + row as u16).min(inner.height.saturating_sub(1));
@@ -924,6 +949,39 @@ pub(crate) fn edit_file(pane: &mut RatatuiPane, path: &camino::Utf8Path) -> crat
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_input_shared_unicode_reset_and_submit() {
+        let mut input = super::TextInput::default();
+        assert!(matches!(
+            input.handle_key(false, &KeyEvent::from(KeyCode::Char('é'))),
+            super::ModalOutcome::Pending
+        ));
+        assert_eq!(input.text(), "é");
+        input.reset();
+        assert_eq!(input.text(), "");
+        assert_eq!(
+            input.handle_key(false, &KeyEvent::from(KeyCode::Enter)),
+            super::ModalOutcome::Submitted(String::new())
+        );
+    }
+
+    #[test]
+    fn text_input_unicode_movement_deletion_reset_and_modal_submit() {
+        let mut input = TextInput::new("aéz");
+        input.handle_key(false, &KeyEvent::from(KeyCode::Left));
+        input.handle_key(false, &KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(input.text(), "az");
+        assert_eq!(input.cursor(), 1);
+        input.handle_key(false, &KeyEvent::from(KeyCode::Char('界')));
+        assert_eq!(input.text(), "a界z");
+        input.reset();
+        assert_eq!(input.text(), "");
+        let mut modal = Modal::text_input("title", "é", false);
+        assert_eq!(
+            modal.handle_key(&KeyEvent::from(KeyCode::Enter)),
+            ModalOutcome::Submitted("é".to_string())
+        );
+    }
     use super::*;
     use crossterm::event::KeyEventKind;
 
@@ -1241,8 +1299,8 @@ mod tests {
             modal.handle_key(&key(KeyCode::Char('x'))),
             ModalOutcome::Pending
         );
-        if let Modal::TextInput { buffer, .. } = &modal {
-            assert_eq!(buffer, "xab");
+        if let Modal::TextInput { input, .. } = &modal {
+            assert_eq!(input.text(), "xab");
         } else {
             panic!("expected text input");
         }
@@ -1251,8 +1309,8 @@ mod tests {
             modal.handle_key(&key(KeyCode::Backspace)),
             ModalOutcome::Pending
         );
-        if let Modal::TextInput { buffer, .. } = &modal {
-            assert_eq!(buffer, "xa");
+        if let Modal::TextInput { input, .. } = &modal {
+            assert_eq!(input.text(), "xa");
         } else {
             panic!("expected text input");
         }

@@ -103,6 +103,11 @@ pub(crate) struct NarratorTokenSnapshot {
     pub(crate) complete: Option<bool>,
 }
 
+/// Generic bounded one-shot accounting used by narrator and the live guide.
+/// The legacy narrator names remain aliases so existing narration behavior is
+/// unchanged while independent callers cannot accidentally share a meter.
+pub(crate) type OneShotTokenTracker = NarratorTokenTracker;
+
 impl NarratorTokenTracker {
     /// `pub(crate)` (not just module-private) so the P552 one-time
     /// session-title dispatch — which runs from `drive.rs`, outside the
@@ -1069,7 +1074,10 @@ Trait: {trait_name}\n\
     )
 }
 
-fn narrator_stdout_text(stdout: &str, output_id: Option<&str>) -> Option<String> {
+/// Extract the human-facing text from the documented one-shot output formats.
+/// Narrator and guide calls share this parser so supported harness conventions
+/// cannot drift between the two tool-less call sites.
+pub(crate) fn narrator_stdout_text(stdout: &str, output_id: Option<&str>) -> Option<String> {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
         return None;
@@ -1083,7 +1091,8 @@ fn narrator_stdout_text(stdout: &str, output_id: Option<&str>) -> Option<String>
         _ => Vec::new(),
     };
     // Prefer a final `result` string — claude stream-json ends with one, and it is
-    // the whole answer rather than a streamed partial-message fragment.
+    // the whole answer rather than a streamed partial-message fragment. Do not
+    // interpret arbitrary stream fields named `result` as final narrator output.
     for value in values.iter().rev() {
         if value.get("type").and_then(Value::as_str) == Some("result")
             && let Some(result) = value.get("result").and_then(Value::as_str)
@@ -1611,7 +1620,8 @@ pub(crate) fn balanced_json_objects(text: &str) -> Vec<String> {
 mod tests {
     use super::{
         IngestOutcome, NarrationWindows, NarratorConfig, NarratorTraceContext, TokenProgress,
-        collect_thinking_texts, ingest_chunk, narrate_cold, progress_texts, session_title_prompt,
+        collect_thinking_texts, ingest_chunk, narrate_cold, narrator_stdout_text, progress_texts,
+        session_title_prompt,
     };
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -1854,4 +1864,53 @@ mod tests {
 
         std::fs::remove_dir_all(trace_dir).unwrap();
     }
+
+    #[test]
+    fn narrator_stdout_text_ignores_result_on_non_final_stream_event() {
+        let output = concat!(
+            r#"{"type":"text_delta","delta":"assistant answer","result":"wrong value"}"#,
+            "\n",
+            r#"{"type":"text_delta","delta":" continues"}"#,
+        );
+        assert_eq!(
+            narrator_stdout_text(output, Some("opencode-json")).as_deref(),
+            Some("assistant answer  continues")
+        );
+    }
+
+    #[test]
+    fn narrator_stdout_text_prefers_genuine_final_result_event() {
+        let output = concat!(
+            r#"{"type":"text_delta","delta":"partial"}"#,
+            "\n",
+            r#"{"type":"result","result":"final answer"}"#,
+        );
+        assert_eq!(
+            narrator_stdout_text(output, Some("opencode-json")).as_deref(),
+            Some("final answer")
+        );
+    }
+}
+#[test]
+fn guide_call_lifecycle_reservation_is_incomplete_until_worker_settles() {
+    let tracker = OneShotTokenTracker::default();
+    tracker.begin_call();
+    let snapshot = tracker.snapshot();
+    assert_eq!(snapshot.complete, Some(false));
+    tracker.end_call(7);
+    let snapshot = tracker.snapshot();
+    assert_eq!(snapshot.complete, Some(true));
+    assert_eq!(snapshot.tokens, Some(7));
+}
+
+#[test]
+fn guide_call_lifecycle_multiple_reservations_remain_incomplete_until_all_settle() {
+    let tracker = OneShotTokenTracker::default();
+    tracker.begin_call();
+    tracker.begin_call();
+    tracker.end_call(3);
+    assert_eq!(tracker.snapshot().complete, Some(false));
+    tracker.end_call(4);
+    assert_eq!(tracker.snapshot().complete, Some(true));
+    assert_eq!(tracker.snapshot().tokens, Some(7));
 }

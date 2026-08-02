@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -21,6 +22,29 @@ use crate::app::tui_panes::{
 };
 use crate::app::tui_ratatui::{self, RatatuiPane};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::widgets::Paragraph;
+
+type GuideDispatch = Arc<dyn Fn(String, String) -> crate::Result<String> + Send + Sync>;
+
+#[derive(Default)]
+struct AskPane {
+    input: tui_kit::TextInput,
+    answer: Option<String>,
+    phase: AskPhase,
+    /// Authoritative request state. Presentation may collapse while this stays
+    /// true, preventing a second paid call until the worker settles.
+    in_flight: bool,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AskPhase {
+    #[default]
+    Collapsed,
+    Editing,
+    Waiting,
+    Answered,
+}
 
 #[derive(Clone)]
 pub(crate) struct RunPanel {
@@ -247,9 +271,14 @@ struct RunPanelState {
     /// (a blank title row) before success and permanently for a
     /// missing-narrator/failed/killed attempt. Never a placeholder.
     title: Option<String>,
-    /// Shared with the panel so a key drained during any render path can be
-    /// launched after that path releases the panel mutex.
-    handoff: Arc<DashboardHandoff>,
+    ask: Option<AskPane>,
+    guide_dispatch: Option<GuideDispatch>,
+    guide_tokens: Option<crate::app::harness_stream::OneShotTokenTracker>,
+    guide_ledger_path: Option<camino::Utf8PathBuf>,
+    ask_results: Option<mpsc::Receiver<(u64, Result<String, String>)>>,
+    /// Detached guide workers wake through this non-owning handle after they
+    /// queue a result, so a completed answer does not wait for another event.
+    wake_state: Weak<Mutex<RunPanelState>>,
 }
 
 /// One row of the CURRENT step's verbatim message/thinking stream.
@@ -404,6 +433,7 @@ struct RunHeader {
     /// P445: drive-wide narrator output tokens, shown distinctly from
     /// `output_tokens` (the work agent's total).
     narrator_tokens: Option<u64>,
+    guide_tokens: Option<u64>,
     structured_count: usize,
     structured_label: Option<String>,
     structured_verdict: Option<String>,
@@ -492,6 +522,7 @@ struct PresentationState<'a> {
     step_summaries: &'a BTreeMap<String, String>,
     step_summary_at: &'a BTreeMap<String, Duration>,
     narrator_tokens: u64,
+    guide_tokens: u64,
     run_started: Instant,
 }
 
@@ -534,6 +565,7 @@ impl RunPanel {
                 step_summaries: &BTreeMap::new(),
                 step_summary_at: &BTreeMap::new(),
                 narrator_tokens: 0,
+                guide_tokens: 0,
                 run_started: now,
             },
         );
@@ -576,7 +608,12 @@ impl RunPanel {
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
             title,
-            handoff: Arc::clone(&handoff),
+            ask: None,
+            guide_dispatch: None,
+            guide_tokens: None,
+            guide_ledger_path: None,
+            ask_results: None,
+            wake_state: Weak::new(),
         }));
         let panel = Self {
             state: Arc::clone(&state),
@@ -587,6 +624,7 @@ impl RunPanel {
         let wake_cadence = Arc::clone(&cadence);
         let wake_handoff = Arc::clone(&panel.handoff);
         if let Ok(mut state) = state.lock() {
+            state.wake_state = weak_state.clone();
             state.repaint.install_input_wake(Arc::new(move || {
                 tick_weak(&weak_state, &wake_cadence, &wake_handoff);
             }));
@@ -616,6 +654,24 @@ impl RunPanel {
 
     fn handoff_driver(&self) -> HandoffDriver {
         HandoffDriver(Arc::clone(&self.handoff))
+    }
+
+    /// Install the optional, explicitly configured guide. The pane keeps only
+    /// its current request state; the dispatcher receives a bounded display
+    /// snapshot and has no access to the session mutation path.
+    pub(crate) fn set_guide(
+        &self,
+        dispatch: GuideDispatch,
+        tokens: crate::app::harness_stream::OneShotTokenTracker,
+        ledger_path: camino::Utf8PathBuf,
+    ) {
+        if let Ok(mut state) = self.state.lock() {
+            state.ask = Some(AskPane::default());
+            state.guide_dispatch = Some(dispatch);
+            state.guide_tokens = Some(tokens);
+            state.guide_ledger_path = Some(ledger_path);
+            render_locked(&mut state);
+        }
     }
 
     /// The sole active-key transition detector (P455): when the active step
@@ -949,11 +1005,7 @@ fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
     // (unlike a driven frame's `tick_observer`), so a Running merge row is
     // the ONLY other source — besides an active step — of an elapsed clock
     // that must keep ticking without a discrete event to trigger it.
-    let has_running_work = state.active_started.is_some()
-        || state
-            .merge_rows
-            .iter()
-            .any(|row| row.state == MergeRowState::Running);
+    let has_running_work = has_running_work(state);
     if !changed && (!has_running_work || state.last_timer_paint.elapsed() < Duration::from_secs(1))
     {
         return TickOutcome {
@@ -971,6 +1023,17 @@ fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
         resize_retry,
         ..TickOutcome::default()
     }
+}
+
+fn has_running_work(state: &RunPanelState) -> bool {
+    state.active_started.is_some()
+        // Presentation may be collapsed or reopened while the detached
+        // request remains authoritative; keep polling until it settles.
+        || state.ask.as_ref().is_some_and(|ask| ask.in_flight)
+        || state
+            .merge_rows
+            .iter()
+            .any(|row| row.state == MergeRowState::Running)
 }
 
 fn mark_timer_painted(state: &mut RunPanelState) {
@@ -993,6 +1056,11 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
             step_summaries: &state.step_summaries,
             step_summary_at: &state.step_summary_at,
             narrator_tokens: state.narrator_tokens,
+            guide_tokens: state
+                .guide_tokens
+                .as_ref()
+                .and_then(|tracker| tracker.snapshot().tokens)
+                .unwrap_or(0),
             run_started: state.run_started,
         },
     );
@@ -1009,8 +1077,17 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
 /// keypress stays responsive even when a throttled tick skips the render
 /// below.
 fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
-    let keys = state.repaint.poll_detach();
     let mut changed = false;
+    if let Some(receiver) = state.ask_results.as_ref()
+        && let Ok((generation, result)) = receiver.try_recv()
+    {
+        if let Some(ask) = state.ask.as_mut() {
+            apply_ask_result(ask, generation, result);
+        }
+        state.ask_results = None;
+        changed = true;
+    }
+    let keys = state.repaint.poll_detach();
     for key in keys {
         if let Some(modal) = state.modal.as_mut() {
             match modal.handle_key(&key) {
@@ -1029,29 +1106,21 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             changed = true;
             continue;
         }
-        match live_view_key_action(&key) {
-            Some(LiveViewKeyAction::OpenDashboard) => {
-                state.repaint.quit();
-                state.cadence.inactive();
-                state
-                    .handoff
-                    .request(state.session.session_id.as_str().to_string());
-                changed = true;
-                continue;
-            }
-            Some(LiveViewKeyAction::ConfirmQuit) => {
-                state.modal = Some(tui_kit::Modal::confirm(
-                    "Quit live view?",
-                    [
-                        "The run keeps going in the background.",
-                        "Reattach anytime with `ctx traits dashboard`.",
-                    ]
-                    .join("\n"),
-                ));
-                changed = true;
-                continue;
-            }
-            None => {}
+        if state.ask.is_some() && apply_ask_key(state, key) {
+            changed = true;
+            continue;
+        }
+        if key.code == KeyCode::Char('q') {
+            state.modal = Some(tui_kit::Modal::confirm(
+                "Quit live view?",
+                [
+                    "The run keeps going in the background.",
+                    "Reattach anytime with `ctx traits dashboard`.",
+                ]
+                .join("\n"),
+            ));
+            changed = true;
+            continue;
         }
         if tui_panes::tab_cycle_key(&key).is_some() || tui_kit::scroll_key(&key).is_some() {
             changed = true;
@@ -1061,20 +1130,119 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     changed
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum LiveViewKeyAction {
-    OpenDashboard,
-    ConfirmQuit,
+fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
+    let Some(ask) = state.ask.as_mut() else {
+        return false;
+    };
+    if let Some(consumed) = apply_ask_presentation_key(ask, &key) {
+        return consumed;
+    }
+    match key.code {
+        KeyCode::Enter => {
+            let question = ask.input.text().trim().to_string();
+            if question.is_empty() {
+                return true;
+            }
+            let Some(dispatch) = state.guide_dispatch.clone() else {
+                return true;
+            };
+            let Some(tokens) = state.guide_tokens.clone() else {
+                return true;
+            };
+            // Reserve before spawning so a terminal snapshot cannot miss a
+            // accepted request that has not yet been scheduled.
+            tokens.begin_call();
+            ask.phase = AskPhase::Waiting;
+            ask.in_flight = true;
+            ask.answer = None;
+            ask.generation = ask.generation.wrapping_add(1);
+            let generation = ask.generation;
+            let (current_step, statuses) = guide_snapshot(&state.view);
+            let session = state.session.clone();
+            let plan = state.plan.clone();
+            let ledger_path = state.guide_ledger_path.clone();
+            let (sender, receiver) = mpsc::channel();
+            state.ask_results = Some(receiver);
+            let weak_state = state.wake_state.clone();
+            let cadence = Arc::clone(&state.cadence);
+            let input_generation = Arc::clone(&state.input_generation);
+            // The worker owns neither panel nor session: a late message is
+            // simply discarded after close or a newer generation.
+            std::thread::spawn(move || {
+                let context = crate::app::guide::evidence(
+                    &session,
+                    &plan,
+                    ledger_path.as_deref(),
+                    &current_step,
+                    &statuses,
+                );
+                let result = dispatch(question, context).map_err(|error| error.to_string());
+                let _ = sender.send((generation, result));
+                // Results are not terminal input, so explicitly wake the
+                // panel's cadence. The weak handle cannot retain a closed TUI.
+                input_generation.fetch_add(1, Ordering::Release);
+                tick_weak(&weak_state, &cadence);
+            });
+            true
+        }
+        _ => matches!(
+            ask.input.handle_key(false, &key),
+            tui_kit::ModalOutcome::Pending
+        ),
+    }
 }
 
-/// Bare `d` hands presentation to the dashboard immediately. `q` intentionally
-/// retains its existing confirmation-modal behavior.
-fn live_view_key_action(key: &KeyEvent) -> Option<LiveViewKeyAction> {
-    match key.code {
-        KeyCode::Char('d') if key.modifiers.is_empty() => Some(LiveViewKeyAction::OpenDashboard),
-        KeyCode::Char('q') => Some(LiveViewKeyAction::ConfirmQuit),
-        _ => None,
+/// Handle presentation-only keys before dispatch. Keeping this reducer small
+/// makes every visible phase transition share the live router's exact rules.
+fn apply_ask_presentation_key(ask: &mut AskPane, key: &KeyEvent) -> Option<bool> {
+    if ask.phase == AskPhase::Collapsed {
+        if key.code == KeyCode::Char('?') {
+            ask.input.reset();
+            ask.answer = None;
+            ask.phase = AskPhase::Editing;
+            return Some(true);
+        }
+        return Some(false);
     }
+    if key.code == KeyCode::Esc {
+        ask.input.reset();
+        ask.answer = None;
+        ask.phase = AskPhase::Collapsed;
+        ask.generation = ask.generation.wrapping_add(1);
+        return Some(true);
+    }
+    if ask.phase == AskPhase::Waiting || ask.in_flight {
+        return Some(true);
+    }
+    None
+}
+
+fn apply_ask_result(ask: &mut AskPane, generation: u64, result: Result<String, String>) -> bool {
+    if ask.generation != generation {
+        ask.in_flight = false;
+        return false;
+    }
+    ask.in_flight = false;
+    ask.answer = Some(result.unwrap_or_else(|error| format!("Guide unavailable: {error}")));
+    ask.phase = AskPhase::Answered;
+    true
+}
+
+fn guide_snapshot(view: &RunView) -> (String, String) {
+    let step = view
+        .steps
+        .iter()
+        .find(|step| step.active)
+        .map(|step| step.label.as_str())
+        .unwrap_or("none")
+        .to_string();
+    let statuses = view
+        .steps
+        .iter()
+        .map(|step| format!("{}: {:?}", step.label, step.state))
+        .collect::<Vec<_>>()
+        .join("; ");
+    (step, statuses)
 }
 
 /// P470 blocker fix (`down-key-forces-follow-jump`): applies one scroll
@@ -1148,6 +1316,11 @@ fn render_locked(state: &mut RunPanelState) {
             state.session.provenance.started_at_epoch,
         )
     });
+    let ask_lines = state.ask.as_ref().map(ask_lines);
+    let ask_cursor = state
+        .ask
+        .as_ref()
+        .and_then(|ask| (ask.phase == AskPhase::Editing).then_some(ask.input.cursor()));
     let RunPanelState {
         repaint,
         scrolls,
@@ -1179,6 +1352,8 @@ fn render_locked(state: &mut RunPanelState) {
                 focus,
                 pending_keys,
                 modal,
+                ask_lines: ask_lines.as_deref(),
+                ask_cursor,
             },
         );
     });
@@ -1365,6 +1540,22 @@ struct LiveFrame<'a> {
     focus: &'a mut FocusRing,
     pending_keys: &'a mut Vec<KeyEvent>,
     modal: Option<&'a tui_kit::Modal>,
+    ask_lines: Option<&'a [String]>,
+    ask_cursor: Option<usize>,
+}
+
+fn ask_lines(ask: &AskPane) -> Vec<String> {
+    if ask.phase == AskPhase::Collapsed {
+        return vec!["[?] Ask the guide".to_string()];
+    }
+    let mut lines = vec![format!("Ask: {}", ask.input.text())];
+    if ask.phase == AskPhase::Waiting {
+        lines.push("Guide: thinking...".to_string());
+    }
+    if let Some(answer) = &ask.answer {
+        lines.push(format!("Guide: {answer}"));
+    }
+    lines
 }
 
 fn drawable_pane_ids(tree: &PaneTree, layout: &PaneLayoutResult) -> Vec<PaneId> {
@@ -1405,19 +1596,30 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         focus,
         pending_keys,
         modal,
+        ask_lines,
+        ask_cursor,
     } = state;
     let full_area = frame.area();
-    let regions = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(1)])
-        .split(full_area);
+    let ask_height = ask_lines.map_or(0, |lines| lines.len().saturating_add(1) as u16);
+    let regions = live_frame_regions(full_area, ask_height);
     frame.render_widget(
         tui_kit::keymap_footer(
-            "[q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane",
+            if ask_lines.is_some() { "[?] ask · [q] exit · [ctrl-c] kill · [tab] cycle pane" } else { "[q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane" },
             None,
         ),
-        regions[1],
+        regions[2],
     );
+    if let Some(lines) = ask_lines {
+        frame.render_widget(Paragraph::new(lines.join("\n")), regions[1]);
+        if let Some(cursor) = ask_cursor {
+            // "Ask: " is ASCII, while the input cursor is a character index.
+            frame.set_cursor_position((
+                regions[1].x
+                    + (5u16.saturating_add(cursor as u16)).min(regions[1].width.saturating_sub(1)),
+                regions[1].y,
+            ));
+        }
+    }
     let data = PaneData {
         progress: Some(progress_lines),
         journey: Some(journey_lines),
@@ -1448,6 +1650,19 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     if let Some(modal) = modal {
         tui_kit::render_modal(frame, full_area, modal);
     }
+}
+
+fn live_frame_regions(full_area: Rect, ask_height: u16) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            // Leave a real body row even in a six-row terminal with the
+            // two-row expanded ask strip and footer present.
+            Constraint::Min(3),
+            Constraint::Length(ask_height),
+            Constraint::Length(1),
+        ])
+        .split(full_area)
 }
 
 /// P552: which of the (up to) four panes' user-driven scroll state should
@@ -2103,6 +2318,7 @@ fn run_view(
         output_tokens: (!presentation.output_tokens.is_empty())
             .then(|| presentation.output_tokens.values().sum()),
         narrator_tokens: (presentation.narrator_tokens > 0).then_some(presentation.narrator_tokens),
+        guide_tokens: (presentation.guide_tokens > 0).then_some(presentation.guide_tokens),
         structured_count,
         structured_label: structured_producers
             .first()
@@ -2442,6 +2658,9 @@ pub(crate) fn render_ledger_run_view(
     let narrator_tokens = token_usage
         .and_then(|usage| usage.narrator_tokens)
         .unwrap_or(0);
+    let guide_tokens = token_usage
+        .and_then(|usage| usage.guide_tokens)
+        .unwrap_or(0);
     let started_at_epoch = session.provenance.started_at_epoch;
     let activity = super::story::load_activity(ledger_path);
     let (step_summaries, step_summary_at) = activity
@@ -2462,6 +2681,7 @@ pub(crate) fn render_ledger_run_view(
             step_summaries: &step_summaries,
             step_summary_at: &step_summary_at,
             narrator_tokens,
+            guide_tokens,
             run_started,
         },
     );
@@ -2792,6 +3012,12 @@ fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
                 tui::Tone::Muted,
             );
         }
+        if let Some(tokens) = header.guide_tokens {
+            line.push(
+                format!(" · guide {}", tui::token_text(tokens)),
+                tui::Tone::Muted,
+            );
+        }
         if let Some(stopped) = &header.stopped {
             line.push(format!(" · {stopped}"), tui::Tone::Muted);
         }
@@ -2834,6 +3060,12 @@ fn render_header(lines: &mut Vec<tui::Line>, header: &RunHeader) {
         if let Some(tokens) = header.narrator_tokens {
             line.push(
                 format!(" · narrator {}", tui::token_text(tokens)),
+                tui::Tone::Muted,
+            );
+        }
+        if let Some(tokens) = header.guide_tokens {
+            line.push(
+                format!(" · guide {}", tui::token_text(tokens)),
                 tui::Tone::Muted,
             );
         }
@@ -4340,6 +4572,7 @@ mod tests {
                 elapsed: None,
                 output_tokens: None,
                 narrator_tokens: None,
+                guide_tokens: None,
                 structured_count: 0,
                 structured_label: None,
                 structured_verdict: None,
@@ -5170,6 +5403,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
@@ -5198,6 +5433,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
@@ -5401,6 +5638,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 )
             })
@@ -5451,6 +5690,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
@@ -5480,6 +5721,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
@@ -5698,6 +5941,164 @@ mod tests {
         assert!(
             !cadence.should_run(),
             "detachment must disable timer admission for the remaining frame"
+        );
+    }
+
+    #[test]
+    fn ask_pane_routes_open_edit_answer_and_collapse_visibility() {
+        let mut ask = AskPane::default();
+        assert_eq!(ask_lines(&ask), ["[?] Ask the guide"]);
+        assert_eq!(
+            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?'))),
+            Some(true)
+        );
+        assert_eq!(ask.phase, AskPhase::Editing);
+        assert!(matches!(
+            ask.input
+                .handle_key(false, &KeyEvent::from(KeyCode::Char('é'))),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask_lines(&ask), ["Ask: é"]);
+        assert_eq!(ask.input.cursor(), 1);
+        assert!(matches!(
+            ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask.input.cursor(), 0);
+        let generation = ask.generation;
+        assert!(apply_ask_result(
+            &mut ask,
+            generation,
+            Ok("answer".to_string())
+        ));
+        assert_eq!(ask_lines(&ask), ["Ask: é", "Guide: answer"]);
+        assert_eq!(
+            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc)),
+            Some(true)
+        );
+        assert_eq!(ask_lines(&ask), ["[?] Ask the guide"]);
+    }
+
+    #[test]
+    fn text_input_inline_ask_unicode_editing_resets_after_collapse_and_reopen() {
+        let mut ask = AskPane::default();
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        for key in ['文', 'é'] {
+            assert!(matches!(
+                ask.input
+                    .handle_key(false, &KeyEvent::from(KeyCode::Char(key))),
+                tui_kit::ModalOutcome::Pending
+            ));
+        }
+        assert!(matches!(
+            ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert!(matches!(
+            ask.input
+                .handle_key(false, &KeyEvent::from(KeyCode::Backspace)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask.input.text(), "é");
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        assert_eq!(ask.input.text(), "");
+        assert_eq!(ask.input.cursor(), 0);
+    }
+
+    #[test]
+    fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
+        for area in [
+            Rect::new(0, 0, 160, 40),
+            Rect::new(0, 0, 70, 20),
+            // Seven rows is the smallest viewport that can contain the
+            // usable three-row body, answered three-row ask, and footer.
+            Rect::new(0, 0, 70, 7),
+        ] {
+            // Waiting and answered panes use three rows: input plus response
+            // and the reserved separator. This is the largest ask footprint.
+            let regions = live_frame_regions(area, 3);
+            assert_eq!(regions[1].width, area.width);
+            assert!(regions[0].height >= 3, "body must retain usable rows");
+            assert_eq!(regions[1].height, 3);
+            assert_eq!(regions[2].height, 1);
+            assert!(regions[0].bottom() <= regions[1].y);
+            assert!(regions[1].bottom() <= regions[2].y);
+        }
+    }
+
+    #[test]
+    fn ask_pane_worker_completion_wakes_the_cadence_immediately() {
+        let input = Arc::new(AtomicU64::new(0));
+        let handled = Arc::new(AtomicU64::new(0));
+        let cadence = PanelCadence::new(Arc::clone(&input), handled);
+        cadence.painted();
+        assert!(!cadence.should_run());
+        // This is the notification emitted after the detached worker queues
+        // its result, before its weak-panel tick is attempted.
+        input.fetch_add(1, Ordering::Release);
+        assert!(cadence.should_run());
+    }
+
+    #[test]
+    fn guide_call_lifecycle_discards_stale_results_after_collapse() {
+        let mut ask = AskPane {
+            phase: AskPhase::Waiting,
+            in_flight: true,
+            generation: 7,
+            ..AskPane::default()
+        };
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        assert!(ask.in_flight, "collapsing must not permit another call");
+        assert!(!apply_ask_result(&mut ask, 7, Ok("stale".to_string())));
+        assert_eq!(ask.phase, AskPhase::Collapsed);
+        assert!(ask.answer.is_none());
+        assert!(!ask.in_flight);
+    }
+
+    #[test]
+    fn guide_call_lifecycle_blocks_reopen_submission_until_the_reserved_call_settles() {
+        let mut ask = AskPane {
+            phase: AskPhase::Waiting,
+            in_flight: true,
+            generation: 3,
+            ..AskPane::default()
+        };
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        assert_eq!(ask.phase, AskPhase::Editing);
+        assert!(ask.in_flight);
+        // The presentation router consumes Enter while the reservation is
+        // live, so reopening cannot launch another call.
+        assert_eq!(
+            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Enter)),
+            Some(true)
+        );
+        assert!(!apply_ask_result(&mut ask, 3, Ok("settled".to_string())));
+        assert!(!ask.in_flight);
+    }
+
+    #[test]
+    fn guide_header_tokens_labels_live_and_reconstructed_usage() {
+        let mut view = view_with(Vec::new());
+        view.header.output_tokens = Some(1_000);
+        view.header.narrator_tokens = Some(2_000);
+        view.header.guide_tokens = Some(3_000);
+        let mut lines = Vec::new();
+        render_header(&mut lines, &view.header);
+        let rendered = lines.iter().map(line_text).collect::<String>();
+        assert!(rendered.contains("1.0k"));
+        assert!(rendered.contains("narrator 2.0k"));
+        assert!(rendered.contains("guide 3.0k"));
+        view.header.completed = true;
+        let mut completed = Vec::new();
+        render_header(&mut completed, &view.header);
+        assert!(
+            completed
+                .iter()
+                .map(line_text)
+                .collect::<String>()
+                .contains("guide 3.0k")
         );
     }
 }

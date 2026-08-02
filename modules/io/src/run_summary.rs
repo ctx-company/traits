@@ -51,6 +51,8 @@ pub struct RunSummary {
     pub work_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narrator_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guide_tokens: Option<u64>,
     /// Whether the ledger's most recent `merge_frames` entry exists at all —
     /// lets the MERGES projection skip ledgers with nothing to show without
     /// reading the ledger.
@@ -107,6 +109,11 @@ impl RunSummary {
                 .as_ref()
                 .and_then(|outcome| outcome.token_usage.as_ref())
                 .and_then(|usage| usage.narrator_tokens),
+            guide_tokens: session
+                .last_drive_outcome
+                .as_ref()
+                .and_then(|outcome| outcome.token_usage.as_ref())
+                .and_then(|usage| usage.guide_tokens),
             has_merge_frames: last_merge.is_some(),
             last_merge_status: last_merge.map(|frame| merge_status_str(frame.status)),
         }

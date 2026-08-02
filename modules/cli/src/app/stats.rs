@@ -93,6 +93,12 @@ fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
         report.token_evidence.narrator_tokens_observed_runs,
         report.token_evidence.narrator_tokens_missing_runs
     ))?;
+    w(format!(
+        "    guide-tokens-total: {} (observed {} run(s), missing {} run(s))",
+        report.token_evidence.guide_tokens_total,
+        report.token_evidence.guide_tokens_observed_runs,
+        report.token_evidence.guide_tokens_missing_runs
+    ))?;
     if report.traits.is_empty() {
         w("  traits: (none)")?;
         return Ok(());
@@ -114,6 +120,12 @@ fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
             trait_row.token_evidence.narrator_tokens_total,
             trait_row.token_evidence.narrator_tokens_observed_runs,
             trait_row.token_evidence.narrator_tokens_missing_runs
+        ))?;
+        w(format!(
+            "        guide-tokens-total: {} (observed {} run(s), missing {} run(s))",
+            trait_row.token_evidence.guide_tokens_total,
+            trait_row.token_evidence.guide_tokens_observed_runs,
+            trait_row.token_evidence.guide_tokens_missing_runs
         ))?;
         for digest_row in &trait_row.digests {
             w(format!(

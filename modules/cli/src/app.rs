@@ -21,6 +21,7 @@ mod eval;
 mod explain_inspect;
 mod frame_prompt;
 mod generate;
+mod guide;
 mod harness_stream;
 mod help_surface;
 mod hook;

@@ -1063,9 +1063,9 @@ pub struct AgentDefaults {
     /// `[agent.role.<role>]` (single table) or `[[agent.role.<role>]]`
     /// (ordered list of seats, P456). One namespace (P476) for every seat:
     /// `default` (the DRIVER seat, renamed from the old `master`, and the
-    /// fallback for any role with no table of its own), `narrator`, `merger`,
-    /// `merger-deep`, and every trait-declared role — see
-    /// [`STANDING_SEATS`]/[`is_standing_seat`] for the four seats that never
+    /// fallback for any role with no table of its own), `narrator`, `guide`,
+    /// `merger`, `merger-deep`, and every trait-declared role — see
+    /// [`STANDING_SEATS`]/[`is_standing_seat`] for the standing seats that never
     /// inherit `default`'s value themselves and are restricted to exactly one
     /// seat. A nearer config scope's whole value — table or list — replaces
     /// the same role key entirely in [`merge_agent_defaults`]; seats are
@@ -1142,6 +1142,11 @@ const STANDING_SEATS: &[StandingSeat] = &[
     },
     StandingSeat {
         name: "narrator",
+        requires_full_declaration: false,
+        one_shot: true,
+    },
+    StandingSeat {
+        name: "guide",
         requires_full_declaration: false,
         one_shot: true,
     },
@@ -1386,6 +1391,12 @@ impl ResolvedRuntimeAssignments {
         self.assignment_for_role("narrator")
     }
 
+    /// The optional live-TUI guide. Like narrator, it is an exact-name
+    /// standing seat and is unavailable unless explicitly configured.
+    pub fn guide_assignment(&self) -> Option<ProfileAssignment> {
+        self.assignment_for_role("guide")
+    }
+
     /// Merge is available if and only if `[agent.role.merger]` itself is
     /// present: unlike a trait role assignment, an `--assign merger=...`
     /// override on its own must never make the merge command available,
@@ -1466,6 +1477,10 @@ impl ResolvedRuntimeAssignments {
     pub fn resolved_narrator_assignment(&mut self) -> crate::Result<Option<ProfileAssignment>> {
         let assignment = self.narrator_assignment();
         self.resolve_assignment_model(assignment)
+    }
+
+    pub fn resolved_guide_assignment(&mut self) -> crate::Result<Option<ProfileAssignment>> {
+        self.resolve_assignment_model(self.guide_assignment())
     }
 
     pub fn resolved_merger_assignment(&mut self) -> crate::Result<Option<ProfileAssignment>> {
@@ -4304,6 +4319,12 @@ fn validate_attach_assignment(role: &str, assignment: &ProfileAssignment) -> cra
 }
 
 fn validate_assignment_common(role: &str, assignment: &ProfileAssignment) -> crate::Result<()> {
+    if role == "guide" && !assignment.extra_args.is_empty() {
+        return invalid_config(
+            format!("assign.{role}.extra-args"),
+            "guide must not declare extra-args because its argv is tool-less",
+        );
+    }
     if let Some(effort) = assignment.reasoning_effort.as_deref() {
         validate_reasoning_effort(effort, &format!("assign.{role}.reasoning-effort"))?;
     }
@@ -5901,5 +5922,14 @@ mod config_tests {
         );
         ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, &text)
             .expect("minimal trait decodes")
+    }
+
+    #[test]
+    fn guide_tool_less_rejects_assignment_extra_args() {
+        let assignment = ProfileAssignment {
+            extra_args: vec!["--enable-tools".to_string()],
+            ..ProfileAssignment::default()
+        };
+        assert!(validate_assignment_common("guide", &assignment).is_err());
     }
 }

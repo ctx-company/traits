@@ -59,6 +59,7 @@ pub struct RunRecord {
     pub recorded_at_epoch: Option<u64>,
     pub work_tokens: Option<u64>,
     pub narrator_tokens: Option<u64>,
+    pub guide_tokens: Option<u64>,
 }
 
 impl RunRecord {
@@ -74,6 +75,7 @@ impl RunRecord {
             recorded_at_epoch: last_drive_outcome.map(|outcome| outcome.recorded_at_epoch),
             work_tokens: token_usage.and_then(|usage| usage.work_tokens),
             narrator_tokens: token_usage.and_then(|usage| usage.narrator_tokens),
+            guide_tokens: token_usage.and_then(|usage| usage.guide_tokens),
         }
     }
 }
@@ -120,6 +122,8 @@ fn accumulate_token_evidence<'a>(
     let mut work_tokens_observed_runs = 0u64;
     let mut narrator_tokens_total = 0u64;
     let mut narrator_tokens_observed_runs = 0u64;
+    let mut guide_tokens_total = 0u64;
+    let mut guide_tokens_observed_runs = 0u64;
     for record in records {
         runs += 1;
         if let Some(tokens) = record.work_tokens {
@@ -130,6 +134,10 @@ fn accumulate_token_evidence<'a>(
             narrator_tokens_total += tokens;
             narrator_tokens_observed_runs += 1;
         }
+        if let Some(tokens) = record.guide_tokens {
+            guide_tokens_total += tokens;
+            guide_tokens_observed_runs += 1;
+        }
     }
     TokenEvidence {
         work_tokens_total,
@@ -138,6 +146,9 @@ fn accumulate_token_evidence<'a>(
         narrator_tokens_total,
         narrator_tokens_observed_runs,
         narrator_tokens_missing_runs: runs - narrator_tokens_observed_runs,
+        guide_tokens_total,
+        guide_tokens_observed_runs,
+        guide_tokens_missing_runs: runs - guide_tokens_observed_runs,
     }
 }
 
@@ -192,6 +203,9 @@ pub struct TokenEvidence {
     pub narrator_tokens_total: u64,
     pub narrator_tokens_observed_runs: u64,
     pub narrator_tokens_missing_runs: u64,
+    pub guide_tokens_total: u64,
+    pub guide_tokens_observed_runs: u64,
+    pub guide_tokens_missing_runs: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

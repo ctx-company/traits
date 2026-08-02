@@ -66,6 +66,38 @@ pub(crate) fn standing_agent_argv(
     argv
 }
 
+/// Build the strictly tool-less one-shot argv used by the live guide. Unlike
+/// narrator's historical convenience path, this never falls back to `argv`:
+/// an omitted `narrator-argv` means the harness has not declared a safe
+/// tool-less convention.
+pub(crate) fn tool_less_standing_agent_argv(
+    harness: &HarnessDefinition,
+    cli: &HarnessCliConvention,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+    system_prompt: &str,
+) -> crate::Result<Vec<String>> {
+    if cli.narrator_argv.as_ref().is_none_or(Vec::is_empty) {
+        return Err(crate::Error::Command {
+            message: "guide requires an explicit non-empty cli.narrator-argv tool-less convention"
+                .to_string(),
+        });
+    }
+    let mut argv = Vec::new();
+    argv.push(harness.bin().to_string());
+    argv.extend(cli.narrator_argv.clone().unwrap_or_default());
+    if let (Some(flag), Some(model)) = (cli.model_flag.as_ref(), model) {
+        argv.push(flag.clone());
+        argv.push(model.to_string());
+    }
+    append_reasoning_effort(&mut argv, harness, cli, reasoning_effort);
+    if let Some(flag) = cli.system_prompt_flag.as_ref() {
+        argv.push(flag.clone());
+        argv.push(system_prompt.to_string());
+    }
+    Ok(argv)
+}
+
 /// Append a resolved reasoning effort using the harness's declared mapping.
 /// Codex uses its generic config flag rather than a standalone flag.
 pub(crate) fn append_reasoning_effort(
@@ -307,7 +339,9 @@ pub(crate) fn run_one_shot(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_confinement, append_exec_dir, standing_agent_argv};
+    use super::{
+        append_confinement, append_exec_dir, standing_agent_argv, tool_less_standing_agent_argv,
+    };
     use ctx_traits_io::confinement::ConfinementPayloads;
     use ctx_traits_io::harness_config::{
         HarnessCliConvention, HarnessDefinition, HarnessRegistry, built_in_harness_definition,
@@ -424,6 +458,113 @@ mod tests {
                 "model_reasoning_effort=\"high\"",
             ]
         );
+    }
+
+    #[test]
+    fn guide_tool_less_refuses_normal_cli_fallback() {
+        let harness = harness("custom");
+        let cli = HarnessCliConvention {
+            argv: vec!["run-with-tools".to_string()],
+            narrator_argv: None,
+            warm_argv: None,
+            json_schema_flag: None,
+            model_flag: None,
+            reasoning_effort_flag: None,
+            system_prompt_flag: None,
+            resume_flag: None,
+            session_flag: None,
+            dir_flag: None,
+            prompt_via: None,
+            stream: None,
+            output: None,
+        };
+        assert!(tool_less_standing_agent_argv(&harness, &cli, None, None, "system").is_err());
+    }
+
+    #[test]
+    fn guide_tool_less_keeps_only_declared_safe_and_typed_arguments() {
+        let harness = harness("custom");
+        let cli = HarnessCliConvention {
+            argv: vec!["unsafe".to_string()],
+            narrator_argv: Some(vec!["safe".to_string()]),
+            model_flag: Some("--model".to_string()),
+            reasoning_effort_flag: Some("--reasoning".to_string()),
+            system_prompt_flag: Some("--system".to_string()),
+            warm_argv: None,
+            json_schema_flag: None,
+            resume_flag: None,
+            session_flag: None,
+            dir_flag: None,
+            prompt_via: None,
+            stream: None,
+            output: None,
+        };
+        assert_eq!(
+            tool_less_standing_agent_argv(&harness, &cli, Some("m"), Some("low"), "system")
+                .unwrap(),
+            [
+                "custom",
+                "safe",
+                "--model",
+                "m",
+                "--reasoning",
+                "low",
+                "--system",
+                "system"
+            ]
+        );
+    }
+
+    #[test]
+    fn guide_tool_less_never_forwards_untrusted_assignment_arguments() {
+        let harness = harness("custom");
+        let cli = HarnessCliConvention {
+            argv: vec!["unsafe".to_string(), "--enable-tools".to_string()],
+            narrator_argv: Some(vec!["safe".to_string()]),
+            model_flag: None,
+            reasoning_effort_flag: None,
+            system_prompt_flag: None,
+            warm_argv: None,
+            json_schema_flag: None,
+            resume_flag: None,
+            session_flag: None,
+            dir_flag: None,
+            prompt_via: None,
+            stream: None,
+            output: None,
+        };
+        let argv = tool_less_standing_agent_argv(&harness, &cli, None, None, "system").unwrap();
+        assert_eq!(argv, ["custom", "safe"]);
+        assert!(!argv.iter().any(|arg| arg == "--enable-tools"));
+    }
+
+    #[test]
+    fn guide_tool_less_rejects_resolved_assignment_extra_args() {
+        // Assignment validation rejects this before dispatch. The argv builder
+        // has no extra-argument parameter, which is the second line of
+        // defense for a resolved guide assignment.
+        let assignment: ctx_traits_io::harness_config::ProfileAssignment =
+            toml::from_str("extra-args = [\"--enable-tools\"]").unwrap();
+        assert!(!assignment.extra_args.is_empty());
+        let harness = harness("custom");
+        let cli = HarnessCliConvention {
+            argv: vec!["unsafe".to_string()],
+            narrator_argv: Some(vec!["safe".to_string()]),
+            model_flag: None,
+            reasoning_effort_flag: None,
+            system_prompt_flag: None,
+            warm_argv: None,
+            json_schema_flag: None,
+            resume_flag: None,
+            session_flag: None,
+            dir_flag: None,
+            prompt_via: None,
+            stream: None,
+            output: None,
+        };
+        let argv = tool_less_standing_agent_argv(&harness, &cli, None, None, "system").unwrap();
+        assert_eq!(argv, ["custom", "safe"]);
+        assert!(!argv.iter().any(|arg| assignment.extra_args.contains(arg)));
     }
 
     fn cli(dir_flag: Option<&str>) -> HarnessCliConvention {

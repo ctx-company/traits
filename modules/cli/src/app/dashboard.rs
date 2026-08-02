@@ -1725,24 +1725,7 @@ fn sessions_from_inventory_tagged(
                         .last_drive_outcome
                         .as_ref()
                         .and_then(|outcome| outcome.token_usage.as_ref());
-                    let tokens_text = match token_usage {
-                        Some(usage)
-                            if usage.work_tokens.is_some() || usage.narrator_tokens.is_some() =>
-                        {
-                            format!(
-                                "{}/{}",
-                                usage
-                                    .work_tokens
-                                    .map(tui::token_text)
-                                    .unwrap_or_else(|| "-".to_string()),
-                                usage
-                                    .narrator_tokens
-                                    .map(tui::token_text)
-                                    .unwrap_or_else(|| "-".to_string())
-                            )
-                        }
-                        _ => "-".to_string(),
-                    };
+                    let tokens_text = dashboard_tokens_text(token_usage);
                     (
                         state_text,
                         phase,
@@ -1791,6 +1774,35 @@ fn sessions_from_inventory_tagged(
         }
     });
     rows
+}
+
+fn dashboard_tokens_text(
+    usage: Option<&ctx_traits_core::procedure::session::TokenUsageEvidence>,
+) -> String {
+    let Some(usage) = usage.filter(|usage| {
+        usage.work_tokens.is_some()
+            || usage.narrator_tokens.is_some()
+            || usage.guide_tokens.is_some()
+    }) else {
+        return "-".to_string();
+    };
+    format!(
+        "W:{} N:{} G:{}",
+        dashboard_token_value(usage.work_tokens),
+        dashboard_token_value(usage.narrator_tokens),
+        dashboard_token_value(usage.guide_tokens),
+    )
+}
+
+fn dashboard_token_value(tokens: Option<u64>) -> String {
+    tokens
+        .map(tui::token_text)
+        .map(|text| {
+            text.trim_end_matches(" tok")
+                .replace(".0k", "k")
+                .replace(".0m", "m")
+        })
+        .unwrap_or_else(|| "-".to_string())
 }
 
 /// Builds both TRAITS' and TRUST's rows from the single
@@ -5590,7 +5602,7 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
     let id_width = tui::display_width(&short_id);
     // Session identity is never clipped: steal cells from descriptive columns.
     let remaining = LIST_LABEL_WIDTH.saturating_sub(id_width + 5);
-    let phase_width = remaining.saturating_sub(32).min(19);
+    let mut phase_width = remaining.saturating_sub(32).min(19);
     let repo_width = remaining.saturating_sub(19 + phase_width).min(12);
     let state_width = remaining
         .saturating_sub(repo_width + phase_width + 10)
@@ -5598,12 +5610,26 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
     let elapsed_width = remaining
         .saturating_sub(repo_width + state_width + phase_width + 3)
         .min(SESSION_CLOCK_WIDTH);
-    let tokens_width =
+    let base_tokens_width =
         remaining.saturating_sub(repo_width + state_width + phase_width + elapsed_width);
-    // State and detail share the existing state/phase budget. This keeps the
-    // additive separator visible without widening the list.
-    let detail_width = state_width + 1 + phase_width;
-    let state_and_detail = session_state_label(row);
+    // A complete compact usage triplet is `W:1k N:1k G:1k` (14 cells).
+    // Keep its labels visible on ordinary rows by borrowing descriptive phase
+    // cells before truncating the accounting column.
+    let token_target: usize = if row.tokens_text.contains("G:") {
+        14
+    } else {
+        0
+    };
+    let borrowed = token_target
+        .saturating_sub(base_tokens_width)
+        .min(phase_width);
+    phase_width = phase_width.saturating_sub(borrowed);
+    let tokens_width = base_tokens_width.saturating_add(borrowed);
+    // P552: the persisted session title is this row's primary run label when
+    // one resolved — shown in the same column/width budget `phase` used
+    // (never widening the row), with the short session id retained
+    // separately for identity/disambiguation regardless.
+    let primary_label = row.title.as_deref().unwrap_or(&row.phase);
     let label = format!(
         "{} {} {} {} {}",
         list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
@@ -5918,6 +5944,22 @@ mod tests {
             outcome: None,
             title: None,
         }
+    }
+
+    #[test]
+    fn dashboard_guide_tokens_standard_session_row_keeps_all_labels() {
+        let mut session = row_with_id("session-1234", SessionClass::Terminal);
+        session.tokens_text = "W:1k N:1k G:1k".to_string();
+        let label = session_row_label(&session, std::slice::from_ref(&session.session_id));
+        assert!(label.contains("W:1k"));
+        assert!(label.contains("N:1k"));
+        assert!(label.contains("G:1k"));
+
+        session.tokens_text = "W:1m N:1m G:1m".to_string();
+        let label = session_row_label(&session, std::slice::from_ref(&session.session_id));
+        assert!(label.contains("W:1m"));
+        assert!(label.contains("N:1m"));
+        assert!(label.contains("G:1m"));
     }
 
     #[test]
@@ -8591,4 +8633,25 @@ mod tests {
             reason: None,
         }
     }
+}
+#[test]
+fn dashboard_guide_tokens_compact_labels_survive_token_column_width() {
+    let mut usage = ctx_traits_core::procedure::session::TokenUsageEvidence::default();
+    assert_eq!(dashboard_tokens_text(Some(&usage)), "-");
+    usage.guide_tokens = Some(3);
+    assert_eq!(dashboard_tokens_text(Some(&usage)), "W:- N:- G:3");
+    usage.work_tokens = Some(10);
+    usage.narrator_tokens = Some(2);
+    assert_eq!(dashboard_tokens_text(Some(&usage)), "W:10 N:2 G:3");
+    assert_eq!(
+        list_field(&dashboard_tokens_text(Some(&usage)), 15),
+        "W:10 N:2 G:3   "
+    );
+    usage.work_tokens = Some(1_000);
+    usage.narrator_tokens = Some(1_000);
+    usage.guide_tokens = Some(1_000);
+    assert_eq!(
+        list_field(&dashboard_tokens_text(Some(&usage)), 15),
+        "W:1k N:1k G:1k "
+    );
 }

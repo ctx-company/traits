@@ -839,6 +839,14 @@ pub struct TokenUsageEvidence {
     /// `narrator_tokens` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narration_complete: Option<bool>,
+    /// Output tokens observed across ephemeral live-guide calls. Guide text is
+    /// never persisted; this aggregate is terminal accounting only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guide_tokens: Option<u64>,
+    /// Whether every guide request had settled when terminal evidence was
+    /// stamped. `None` when no guide request was made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guide_complete: Option<bool>,
 }
 
 /// The two P445 evidence values a terminal [`DriveOutcome`] carries, bundled

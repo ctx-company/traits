@@ -55,11 +55,49 @@ const NARRATOR_SETTLE_GRACE_MS: u64 = 1_000;
 /// one-shot dispatch outside the drive frame loop, and a `[run]
 /// frame-seconds` declared for the drive's own frames must never silently
 /// cut narration too.
-fn narrator_timeout_ms(profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments) -> u64 {
-    match profile.budget_for_seat("narrator", None).frame_seconds {
-        Some(seconds) => seconds.saturating_mul(1000),
-        None => DEFAULT_NARRATOR_TIMEOUT_MS,
+fn one_shot_timeout_ms(
+    profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    seat: &str,
+    default_ms: u64,
+) -> u64 {
+    match profile.budget_for_seat(seat, None).frame_seconds {
+        Some(seconds) => one_shot_timeout_from_seconds(seconds),
+        None => default_ms,
     }
+}
+
+fn one_shot_timeout_from_seconds(seconds: u64) -> u64 {
+    seconds.saturating_mul(1000)
+}
+
+fn narrator_timeout_ms(profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments) -> u64 {
+    one_shot_timeout_ms(profile, "narrator", DEFAULT_NARRATOR_TIMEOUT_MS)
+}
+
+#[cfg(test)]
+#[test]
+fn guide_timeout_uses_guide_default_and_saturates_seconds() {
+    // The two standing seats deliberately use distinct lookup names. A
+    // configured guide budget must therefore not be mistaken for narrator's.
+    assert_eq!(DEFAULT_NARRATOR_TIMEOUT_MS, 20_000);
+    let guide_seconds = 7;
+    let narrator_seconds = 11;
+    assert_eq!(one_shot_timeout_from_seconds(guide_seconds), 7_000);
+    assert_eq!(one_shot_timeout_from_seconds(narrator_seconds), 11_000);
+    assert_ne!(
+        one_shot_timeout_from_seconds(guide_seconds),
+        one_shot_timeout_from_seconds(narrator_seconds)
+    );
+    // An undeclared guide budget is intentionally narrator-sized, not tied to
+    // the run frame budget.
+    assert_eq!(
+        None::<u64>
+            .map(one_shot_timeout_from_seconds)
+            .unwrap_or(DEFAULT_NARRATOR_TIMEOUT_MS),
+        DEFAULT_NARRATOR_TIMEOUT_MS
+    );
+    assert_eq!(one_shot_timeout_from_seconds(7), 7_000);
+    assert_eq!(one_shot_timeout_from_seconds(u64::MAX), u64::MAX);
 }
 
 /// A concurrent wave's outcomes (P344 `--max-in-flight`), keyed by absolute
@@ -983,6 +1021,14 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // not part of `drive_loop`'s own return value.
     let work_total = WorkTokenTotal::default();
     let narrator_tokens = harness_stream::NarratorTokenTracker::default();
+    let guide_tokens = harness_stream::OneShotTokenTracker::default();
+    install_live_guide(
+        run_panel.0.as_ref(),
+        &mut profile,
+        input.execution_dir,
+        guide_tokens.clone(),
+        ledger_path.clone(),
+    )?;
     let activity = ActivityRecorder::default();
     activity
         .attach_sink(ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger_path));
@@ -1063,15 +1109,21 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // snapshot instead of racing it. A no-op when nothing is in flight; a
     // genuinely slow/hung call still reports incomplete past this bound.
     narrator_tokens.settle(std::time::Duration::from_millis(NARRATOR_SETTLE_GRACE_MS));
+    guide_tokens.settle(std::time::Duration::from_millis(NARRATOR_SETTLE_GRACE_MS));
     let narrator_snapshot = narrator_tokens.snapshot();
+    let guide_snapshot = guide_tokens.snapshot();
     let work_tokens = work_total.get();
     let token_usage = (work_tokens > 0
         || narrator_snapshot.tokens.is_some()
-        || narrator_snapshot.complete.is_some())
+        || narrator_snapshot.complete.is_some()
+        || guide_snapshot.tokens.is_some()
+        || guide_snapshot.complete.is_some())
     .then_some(ctx_traits_core::procedure::session::TokenUsageEvidence {
         work_tokens: (work_tokens > 0).then_some(work_tokens),
         narrator_tokens: narrator_snapshot.tokens,
         narration_complete: narrator_snapshot.complete,
+        guide_tokens: guide_snapshot.tokens,
+        guide_complete: guide_snapshot.complete,
     });
     let evidence = ctx_traits_core::procedure::session::DriveTerminalEvidence {
         effective_budget: Some(budget_evidence(&budget)),
@@ -4133,6 +4185,54 @@ fn validate_narrator_assignment(
         "progress narration",
     )
     .map(|_| ())
+}
+
+fn install_live_guide(
+    panel: Option<&run_view::RunPanel>,
+    profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    exec_dir: Option<&camino::Utf8Path>,
+    tokens: harness_stream::OneShotTokenTracker,
+    ledger_path: camino::Utf8PathBuf,
+) -> crate::Result<()> {
+    let Some(panel) = panel else {
+        return Ok(());
+    };
+    let Some(assignment) = profile.resolved_guide_assignment()? else {
+        return Ok(());
+    };
+    let plan = plan_from_assignment(assignment.clone(), None, None);
+    let (harness, cli) = agent_dispatch::validate_cli_standing_agent(
+        &profile.registry,
+        plan.mode,
+        &plan.harness_id,
+        plan.transport,
+        plan.model.as_deref(),
+        plan.reasoning_effort.as_deref(),
+        "live guide",
+    )?;
+    // The guide must opt into the narrow one-shot convention; normal argv may
+    // carry tool capability and is intentionally never a fallback.
+    if cli.narrator_argv.as_ref().is_none_or(Vec::is_empty) {
+        return Err(crate::Error::Command {
+            message: "live guide requires explicit narrator-argv".to_string(),
+        });
+    }
+    let config = crate::app::guide::GuideConfig {
+        harness,
+        cli,
+        assignment,
+        timeout_ms: one_shot_timeout_ms(profile, "guide", DEFAULT_NARRATOR_TIMEOUT_MS),
+        exec_dir: exec_dir.map(camino::Utf8PathBuf::from),
+        tokens: tokens.clone(),
+    };
+    panel.set_guide(
+        Arc::new(move |question, context| {
+            crate::app::guide::dispatch(config.clone(), question, context).map(|reply| reply.text)
+        }),
+        tokens,
+        ledger_path,
+    );
+    Ok(())
 }
 
 fn probe_version(
