@@ -348,6 +348,10 @@ pub(crate) struct PaneData<'a> {
 }
 
 const CURRENT_STREAM_CAP: usize = 400;
+/// The ask strip is intentionally one display row for the answer. Keep its
+/// presentation-only state bounded as well, so a verbose model cannot crowd
+/// the live 2x2 view or retain an unbounded response in memory.
+const MAX_GUIDE_ANSWER_CHARS: usize = 600;
 
 /// Presentation-only context for a just-completed step (P455), returned by
 /// [`RunPanel::refresh`] when it observes an accepted active-key transition.
@@ -1223,9 +1227,22 @@ fn apply_ask_result(ask: &mut AskPane, generation: u64, result: Result<String, S
         return false;
     }
     ask.in_flight = false;
-    ask.answer = Some(result.unwrap_or_else(|error| format!("Guide unavailable: {error}")));
+    ask.answer =
+        Some(displayable_guide_answer(&result.unwrap_or_else(|error| {
+            format!("Guide unavailable: {error}")
+        })));
     ask.phase = AskPhase::Answered;
     true
+}
+
+fn displayable_guide_answer(answer: &str) -> String {
+    let cleaned = tui::clean_live_text(answer);
+    let normalized = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut bounded: String = normalized.chars().take(MAX_GUIDE_ANSWER_CHARS).collect();
+    if bounded.chars().count() < normalized.chars().count() {
+        bounded.push_str("...");
+    }
+    bounded
 }
 
 fn guide_snapshot(view: &RunView) -> (String, String) {
@@ -6025,6 +6042,41 @@ mod tests {
             assert!(regions[0].bottom() <= regions[1].y);
             assert!(regions[1].bottom() <= regions[2].y);
         }
+    }
+
+    #[test]
+    fn ask_pane_normalizes_and_bounds_multiline_answers() {
+        let answer = format!(
+            "first\n\nsecond\tthird {}",
+            "x".repeat(MAX_GUIDE_ANSWER_CHARS)
+        );
+        let display = displayable_guide_answer(&answer);
+        assert_eq!(
+            display.split_whitespace().take(3).collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+        assert!(!display.contains(['\n', '\r']));
+        assert!(display.chars().count() <= MAX_GUIDE_ANSWER_CHARS + 3);
+        assert!(display.ends_with("..."));
+    }
+
+    #[test]
+    fn ask_pane_sanitizes_untrusted_answer_controls() {
+        let answer = format!(
+            "\x1b[31mfirst\x1b[0m\nsecond\u{0007}\u{202e}third {}",
+            "x".repeat(MAX_GUIDE_ANSWER_CHARS)
+        );
+        let display = displayable_guide_answer(&answer);
+
+        assert_eq!(
+            display.split_whitespace().take(3).collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+        assert!(!display.contains('\x1b'));
+        assert!(!display.chars().any(|ch| ch.is_control()));
+        assert!(!display.contains('\u{202e}'));
+        assert!(display.chars().count() <= MAX_GUIDE_ANSWER_CHARS + 3);
+        assert!(display.ends_with("..."));
     }
 
     #[test]
