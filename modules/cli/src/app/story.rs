@@ -9,6 +9,7 @@ mod assisted;
 use camino::Utf8PathBuf;
 
 use ctx_traits_core::procedure::runtime::FinalState;
+use ctx_traits_core::procedure::runtime::PathSegment;
 use ctx_traits_core::procedure::session::{MergeFrame, MergeStatus, Session};
 use ctx_traits_core::procedure::story::{
     self, StoryBeat, StoryLevel, StoryReport, StorySpine, ValueGloss,
@@ -20,6 +21,23 @@ use crate::app::merge_story::{Explanation, GateRow, explain_frame, gate_rows, st
 use crate::app::run_format::render_runtime_path;
 use crate::app::run_view::{session_status, stop_reason_summary};
 use crate::app::tui::{self, Line, Tone, labeled_line, write_plain_line as w};
+
+/// Formats a persisted step title for human-facing output. Only loop control
+/// segments own round numbers; item and other control segments may repeat an
+/// iteration field for unrelated bookkeeping.
+pub(crate) fn format_step_title(title: &str, position_path: &[PathSegment]) -> String {
+    let rounds = position_path
+        .iter()
+        .filter(|segment| segment.kind == "loop")
+        .filter_map(|segment| segment.iteration)
+        .map(|iteration| iteration.saturating_add(1).to_string())
+        .collect::<Vec<_>>();
+    if rounds.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title} ({})", rounds.join("/"))
+    }
+}
 
 pub(crate) fn handle_story(
     run: &str,
@@ -396,7 +414,10 @@ fn render_plain(session: &Session, report: &StoryReport, level: StoryLevel) -> c
             "    [{}] {} — {}",
             beat.acceptance_order,
             render_runtime_path(&beat.position_path),
-            beat.title.as_deref().unwrap_or("(untitled)")
+            format_step_title(
+                beat.title.as_deref().unwrap_or("(untitled)"),
+                &beat.position_path
+            )
         ))?;
         if !beat.reason.is_empty() {
             w(format!("        reason: {}", beat.reason))?;
@@ -622,7 +643,10 @@ pub(crate) fn story_document(
             Tone::Muted,
         );
         header.push(
-            beat.title.as_deref().unwrap_or("(untitled)").to_string(),
+            format_step_title(
+                beat.title.as_deref().unwrap_or("(untitled)"),
+                &beat.position_path,
+            ),
             Tone::Default,
         );
         lines.push(header);
@@ -829,7 +853,10 @@ fn render_markdown(session: &Session, report: &StoryReport, level: StoryLevel) -
                 "| {} | {} | {} | {} | {} | {} | {} |",
                 beat.acceptance_order,
                 markdown_cell(&render_runtime_path(&beat.position_path)),
-                markdown_cell(beat.title.as_deref().unwrap_or("")),
+                markdown_cell(&format_step_title(
+                    beat.title.as_deref().unwrap_or(""),
+                    &beat.position_path
+                )),
                 markdown_cell(&beat.actor),
                 markdown_cell(&detail),
                 markdown_cell(&command),
@@ -891,4 +918,44 @@ fn render_markdown(session: &Session, report: &StoryReport, level: StoryLevel) -
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment(kind: &str, iteration: Option<usize>) -> PathSegment {
+        PathSegment {
+            kind: kind.to_string(),
+            id: None,
+            index: 0,
+            iteration,
+            item_index: None,
+        }
+    }
+
+    #[test]
+    fn step_title_rounds_only_use_enclosing_loop_segments() {
+        assert_eq!(format_step_title("build", &[]), "build");
+        assert_eq!(
+            format_step_title("build", &[segment("loop", Some(0))]),
+            "build (1)"
+        );
+        assert_eq!(
+            format_step_title("build", &[segment("loop", Some(4))]),
+            "build (5)"
+        );
+        assert_eq!(
+            format_step_title(
+                "build",
+                &[
+                    segment("loop", Some(1)),
+                    segment("parallel", Some(9)),
+                    segment("loop", Some(2)),
+                    segment("item", Some(2)),
+                ]
+            ),
+            "build (2/3)"
+        );
+    }
 }

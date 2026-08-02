@@ -2746,6 +2746,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
             view.terminal = session_is_terminal(&session, &view.ledger_path);
             if state_digest == view.state_digest {
                 let summary = run_view::load_sidecar_activity_summary(
+                    &session,
                     &view.ledger_path,
                     session.provenance.started_at_epoch,
                 );
@@ -2822,7 +2823,8 @@ fn reconstruct_panes(
             // still reach the caller rather than being discarded in favor of
             // the (unrelated) trait-resolution failure.
             let started_at_epoch = session.provenance.started_at_epoch;
-            let summary = run_view::load_sidecar_activity_summary(ledger_path, started_at_epoch);
+            let summary =
+                run_view::load_sidecar_activity_summary(session, ledger_path, started_at_epoch);
             PaneReconstruction {
                 progress: fallback_lines(session, &error.to_string()),
                 journey: Vec::new(),

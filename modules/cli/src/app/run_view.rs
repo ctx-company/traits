@@ -341,6 +341,7 @@ pub(crate) struct CompletedStepContext {
 struct RunView {
     header: RunHeader,
     steps: Vec<RunStep>,
+    history: Vec<HistoryStep>,
     narration: Option<RunNarration>,
     outputs: Vec<RunOutput>,
     /// P549: merge stage rows, rendered directly after `steps` in the same
@@ -349,6 +350,17 @@ struct RunView {
     /// itself (not derived by [`run_view`]) since a merge event has nothing
     /// to do with the plan/session `run_view` otherwise projects from.
     merge_rows: Vec<MergeRowView>,
+}
+
+/// One accepted execution as recorded by the ledger. Unlike `RunStep`, this
+/// is deliberately not a plan projection: a loop body can occur many times.
+#[derive(Debug, Clone)]
+struct HistoryStep {
+    label: String,
+    elapsed: Option<Duration>,
+    output_tokens: Option<u64>,
+    summary: Option<String>,
+    summary_at: Option<Duration>,
 }
 
 /// One folded row of merge stage progress, keyed by the P504
@@ -1799,21 +1811,17 @@ impl EventRow {
     }
 }
 
-/// The story column's compressed history: one event per completed step,
-/// plan order — `<label>: <summary>` when a P455 summary landed, otherwise
+/// The story column's compressed history: one event per accepted ledger
+/// execution in ledger order — `<label>: <summary>` when a P455 summary landed, otherwise
 /// the truthful facts fallback `<label> · elapsed · tokens` — never a
 /// placeholder. `at` is when the row itself was stamped (the summary's own
 /// landing time, or the step's own elapsed for the fallback). Render through
 /// [`event_row_line`] for the fixed P552 `HH:MM:SS  ·  ` prefix.
 fn story_history_lines(view: &RunView) -> Vec<EventRow> {
-    view.steps
-        .iter()
-        .filter(|step| step.state == StepState::Done)
-        .map(story_row_line)
-        .collect()
+    view.history.iter().map(story_row_line).collect()
 }
 
-fn story_row_line(step: &RunStep) -> EventRow {
+fn story_row_line(step: &HistoryStep) -> EventRow {
     let at = step.summary_at.or(step.elapsed).unwrap_or_default();
     let (tail, tone) = match &step.summary {
         Some(summary) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
@@ -2101,9 +2109,19 @@ fn run_view(
             .map(|(_, _, _, port_id)| port_id.clone()),
         structured_verdict: crate::app::structured_output::producer_verdict(session),
     };
+    let history = session
+        .ledger
+        .sequence_statuses
+        .iter()
+        .filter(|status| {
+            status.status == ctx_traits_core::procedure::runtime::SequenceStatusKind::Accepted
+        })
+        .map(|status| history_step_from_status(status, &presentation))
+        .collect();
     RunView {
         header,
         steps,
+        history,
         narration,
         outputs,
         // P549: never derived from `trait_ref`/`plan`/`session` — every
@@ -2111,6 +2129,94 @@ fn run_view(
         // folded `merge_rows` when a merge span is live.
         merge_rows: Vec::new(),
     }
+}
+
+/// Resolves an accepted status to the presentation record written when that
+/// exact execution ran. This deliberately does not consult the current plan
+/// projection: a root status has no persisted path, and a resumed run may no
+/// longer render the branch that produced an earlier accepted status.
+fn history_step_from_status(
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+    presentation: &PresentationState<'_>,
+) -> HistoryStep {
+    let key = history_presentation_key(status, presentation);
+    let loop_key = history_loop_container_key(status);
+    HistoryStep {
+        label: super::story::format_step_title(&status.title, &status.position_path),
+        elapsed: key
+            .as_ref()
+            .and_then(|key| presentation.finished_durations.get(key).copied())
+            .or_else(|| {
+                loop_key
+                    .as_ref()
+                    .and_then(|key| presentation.loop_elapsed.get(key).copied())
+            }),
+        output_tokens: key
+            .as_ref()
+            .and_then(|key| presentation.output_tokens.get(key).copied())
+            .or_else(|| {
+                loop_key
+                    .as_ref()
+                    .and_then(|key| presentation.loop_output_tokens.get(key).copied())
+            }),
+        summary: key
+            .as_ref()
+            .and_then(|key| presentation.step_summaries.get(key).cloned()),
+        summary_at: key
+            .as_ref()
+            .and_then(|key| presentation.step_summary_at.get(key).copied()),
+    }
+}
+
+/// Control completion statuses record the root item's ordinary status path,
+/// while their aggregate presentation facts use the container-only `loop:`
+/// key. Keep this separate from the per-execution lookup so a completed
+/// loop/for-each row retains its accumulated facts without making leaf rows
+/// depend on the live plan projection.
+fn history_loop_container_key(
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+) -> Option<String> {
+    if !matches!(
+        status.reason.as_str(),
+        "control item completed: loop" | "control item completed: for-each"
+    ) {
+        return None;
+    }
+    if status.position_path.is_empty() {
+        return Some(format!(
+            "loop:procedure:{}:{}",
+            status.item_id.as_deref().unwrap_or_default(),
+            status.run_index
+        ));
+    }
+    Some(loop_container_key(&status.position_path))
+}
+
+fn history_presentation_key(
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+    presentation: &PresentationState<'_>,
+) -> Option<String> {
+    let prefix = if status.position_path.len() <= 1 {
+        format!(
+            "{}:{}:",
+            status.run_index,
+            status.item_id.as_deref().unwrap_or_default()
+        )
+    } else {
+        format!(
+            "{}:{}:",
+            status.run_index,
+            structural_path_key(&status.position_path)
+        )
+    };
+    presentation
+        .finished_durations
+        .keys()
+        .chain(presentation.output_tokens.keys())
+        .chain(presentation.step_summaries.keys())
+        .chain(presentation.step_summary_at.keys())
+        .find(|key| key.starts_with(&prefix))
+        .cloned()
 }
 
 /// P552: the information pane's own bounded standing facts — session, run,
@@ -2384,11 +2490,9 @@ pub(crate) fn render_ledger_run_view(
 /// The sidecar-only slice of [`LedgerPaneProjection`]: `current`/`history`
 /// and the `activity_available`/`activity_degraded` authority, sourced
 /// purely from [`super::story::load_activity`] — no [`ctx_traits_core::Trait`]
-/// or [`ctx_traits_core::procedure::run::Plan`] involved. `history` here is
-/// the honest `<key>: <text>` sidecar-only rendering ([`sidecar_history_lines`]),
-/// not the richer plan-labeled [`story_history_lines`] rendering the full
-/// [`render_ledger_run_view`] path produces when a plan IS resolved — the two
-/// never disagree about WHICH steps completed, only about the label spelling.
+/// or [`ctx_traits_core::procedure::run::Plan`] involved. Its history retains
+/// the ledger's persisted status title and position path, so an unchanged
+/// dashboard refresh cannot replace round-aware rows with opaque sidecar keys.
 /// Shared by the full [`render_ledger_run_view`] reconstruction's
 /// trait-resolution-failure fallback and by [`load_sidecar_activity_summary`],
 /// the dashboard-only entry point an unchanged-digest refresh calls without
@@ -2410,6 +2514,7 @@ pub(crate) struct SidecarActivitySummary {
 /// neither loses history/current availability just because trait loading
 /// failed or was skipped as an optimization.
 pub(crate) fn load_sidecar_activity_summary(
+    session: &ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
     started_at_epoch: Option<u64>,
 ) -> SidecarActivitySummary {
@@ -2417,7 +2522,7 @@ pub(crate) fn load_sidecar_activity_summary(
     let (current, activity_degraded) = current_and_degraded(&activity, started_at_epoch);
     let history = activity
         .as_ref()
-        .map(|activity| sidecar_history_lines(activity, started_at_epoch))
+        .map(|activity| sidecar_history_lines(session, activity, started_at_epoch))
         .unwrap_or_default();
     SidecarActivitySummary {
         history,
@@ -2428,27 +2533,69 @@ pub(crate) fn load_sidecar_activity_summary(
 }
 
 /// Sidecar-only history rows (P552 review `dashboard-attach-contract-absent`):
-/// one row per persisted step summary, `<key>: <text>` in landing order —
-/// honest about using the sidecar's own step KEY rather than a resolved
-/// plan's human step LABEL, since this path by construction never has a
-/// resolved plan to ask. Never mixed with [`story_row_line`]'s
-/// summary-or-facts-fallback shape: a step with no narrator summary simply
-/// has no sidecar entry and so contributes no row here (the plan-labeled
-/// [`story_history_lines`] path is what shows the elapsed/tokens fallback,
-/// once a plan resolves).
+/// one row per accepted ledger status in ledger order. Sidecar summaries join
+/// by the status' structural key prefix, including its persisted iteration,
+/// rather than title or current loop state.
 fn sidecar_history_lines(
+    session: &ctx_traits_core::procedure::session::Session,
     activity: &ctx_traits_core::procedure::story::ActivityInput,
     started_at_epoch: Option<u64>,
 ) -> Vec<EventRow> {
-    let mut entries: Vec<_> = activity.step_summaries.iter().collect();
-    entries.sort_by_key(|entry| entry.at_epoch_ms);
-    entries
+    let accepted = session
+        .ledger
+        .sequence_statuses
+        .iter()
+        .filter(|status| {
+            status.status == ctx_traits_core::procedure::runtime::SequenceStatusKind::Accepted
+        })
+        .collect::<Vec<_>>();
+    if accepted.is_empty() {
+        let mut entries: Vec<_> = activity.step_summaries.iter().collect();
+        entries.sort_by_key(|entry| entry.at_epoch_ms);
+        return entries
+            .into_iter()
+            .map(|entry| {
+                EventRow::new(
+                    epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
+                    format!("{}: {}", entry.key, entry.text),
+                    tui::Tone::Default,
+                )
+            })
+            .collect();
+    }
+    accepted
         .into_iter()
-        .map(|entry| {
+        .map(|status| {
+            let key_prefix = if status.position_path.len() <= 1 {
+                format!(
+                    "{}:{}:",
+                    status.run_index,
+                    status.item_id.as_deref().unwrap_or_default()
+                )
+            } else {
+                format!(
+                    "{}:{}:",
+                    status.run_index,
+                    structural_path_key(&status.position_path)
+                )
+            };
+            let summary = activity
+                .step_summaries
+                .iter()
+                .find(|entry| entry.key.starts_with(&key_prefix));
+            let at_epoch_ms = summary.map_or(0, |entry| entry.at_epoch_ms);
+            let tail = match summary {
+                Some(summary) => format!(
+                    "{}: {}",
+                    super::story::format_step_title(&status.title, &status.position_path),
+                    summary.text
+                ),
+                None => super::story::format_step_title(&status.title, &status.position_path),
+            };
             EventRow::new(
-                epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
-                format!("{}: {}", entry.key, entry.text),
-                tui::Tone::Default,
+                epoch_ms_to_duration(started_at_epoch, at_epoch_ms),
+                tail,
+                summary.map_or(tui::Tone::Muted, |_| tui::Tone::Default),
             )
         })
         .collect()
@@ -3159,6 +3306,13 @@ fn stamp_live_iterations(
     session: &ctx_traits_core::procedure::session::Session,
     position_path: &[ctx_traits_core::procedure::runtime::PathSegment],
 ) -> Vec<ctx_traits_core::procedure::runtime::PathSegment> {
+    stamp_control_stack_iterations(&session.control_stack, position_path)
+}
+
+fn stamp_control_stack_iterations(
+    control_stack: &[ctx_traits_core::procedure::runtime::ControlFrame],
+    position_path: &[ctx_traits_core::procedure::runtime::PathSegment],
+) -> Vec<ctx_traits_core::procedure::runtime::PathSegment> {
     let mut stamped = position_path.to_vec();
     if stamped.len() < 3 {
         return stamped;
@@ -3169,7 +3323,7 @@ fn stamp_live_iterations(
     // erase what a different-kind frame already established on its segment.
     let mut validated_frames = Vec::with_capacity(control_end - 1);
     for (depth, segment) in stamped[1..control_end].iter_mut().enumerate() {
-        let Some(frame) = session.control_stack.get(depth) else {
+        let Some(frame) = control_stack.get(depth) else {
             continue;
         };
         if runtime_control_kind_name(frame.kind.clone()) != segment.kind
@@ -4158,6 +4312,16 @@ mod tests {
         }
     }
 
+    fn history_step(label: &str, elapsed: Option<Duration>, summary: Option<&str>) -> HistoryStep {
+        HistoryStep {
+            label: label.to_string(),
+            elapsed,
+            output_tokens: Some(1_200),
+            summary: summary.map(str::to_string),
+            summary_at: summary.map(|_| Duration::from_secs(7)),
+        }
+    }
+
     fn view_with(steps: Vec<RunStep>) -> RunView {
         RunView {
             header: RunHeader {
@@ -4181,6 +4345,7 @@ mod tests {
                 structured_verdict: None,
             },
             steps,
+            history: Vec::new(),
             narration: None,
             outputs: Vec::new(),
             merge_rows: Vec::new(),
@@ -4204,29 +4369,330 @@ mod tests {
         assert_eq!(compact_identifier("custom-id", "session-"), "custom-id");
     }
 
-    // P470 §6 "story derivation": N done steps -> exactly N rows in plan
-    // order; running/pending steps produce no story row.
+    // P470's plan projection still only supplies journey rows; history is
+    // now populated from accepted ledger executions.
     #[test]
     fn story_history_lines_only_covers_done_steps_in_plan_order() {
-        let view = view_with(vec![
+        let mut view = view_with(vec![
             step("a", StepState::Done, None),
             step("b", StepState::Running, None),
             step("c", StepState::Done, Some("finished cleanly")),
             step("d", StepState::Pending, None),
         ]);
+        view.history = vec![
+            history_step("a", Some(Duration::from_secs(5)), None),
+            history_step("c", Some(Duration::from_secs(7)), Some("finished cleanly")),
+        ];
         let lines = story_history_lines(&view);
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn accepted_history_uses_persisted_paths_for_top_level_and_resumed_loop_facts() {
+        use ctx_traits_core::procedure::runtime::{
+            PathSegment, SequenceStatus, SequenceStatusKind,
+        };
+
+        let top_level = SequenceStatus {
+            sequence_index: 0,
+            run_index: 0,
+            item_id: Some("prepare".to_string()),
+            title: "Prepare workspace".to_string(),
+            status: SequenceStatusKind::Accepted,
+            reason: String::new(),
+            position_path: Vec::new(),
+        };
+        // This path is from round one even though a resumed run may currently
+        // display another branch or a later loop round.
+        let resumed_loop = SequenceStatus {
+            sequence_index: 0,
+            run_index: 1,
+            item_id: Some("work".to_string()),
+            title: "Execute work".to_string(),
+            status: SequenceStatusKind::Accepted,
+            reason: String::new(),
+            position_path: vec![
+                PathSegment {
+                    kind: "procedure".to_string(),
+                    id: Some("loop-body".to_string()),
+                    index: 1,
+                    iteration: None,
+                    item_index: None,
+                },
+                PathSegment {
+                    kind: "loop".to_string(),
+                    id: Some("loop-body".to_string()),
+                    index: 0,
+                    iteration: Some(0),
+                    item_index: None,
+                },
+                PathSegment {
+                    kind: "item".to_string(),
+                    id: Some("work".to_string()),
+                    index: 0,
+                    iteration: Some(0),
+                    item_index: None,
+                },
+            ],
+        };
+        let top_key = structural_step_key(0, "prepare", &top_level.position_path, "worker");
+        let loop_key = structural_step_key(1, "work", &resumed_loop.position_path, "worker");
+        let mut elapsed = BTreeMap::new();
+        elapsed.insert(top_key.clone(), Duration::from_secs(4));
+        elapsed.insert(loop_key.clone(), Duration::from_secs(9));
+        let mut tokens = BTreeMap::new();
+        tokens.insert(top_key.clone(), 120);
+        tokens.insert(loop_key.clone(), 340);
+        let mut summaries = BTreeMap::new();
+        summaries.insert(top_key.clone(), "prepared".to_string());
+        summaries.insert(loop_key.clone(), "executed first round".to_string());
+        let mut summary_at = BTreeMap::new();
+        summary_at.insert(top_key, Duration::from_secs(5));
+        summary_at.insert(loop_key, Duration::from_secs(10));
+        let active_started = None;
+        let loop_elapsed = BTreeMap::new();
+        let loop_tokens = BTreeMap::new();
+        let presentation = PresentationState {
+            active_started: &active_started,
+            finished_durations: &elapsed,
+            output_tokens: &tokens,
+            loop_elapsed: &loop_elapsed,
+            loop_output_tokens: &loop_tokens,
+            step_summaries: &summaries,
+            step_summary_at: &summary_at,
+            narrator_tokens: 0,
+            run_started: Instant::now(),
+        };
+
+        let top_history = history_step_from_status(&top_level, &presentation);
+        let loop_history = history_step_from_status(&resumed_loop, &presentation);
+        assert_eq!(top_history.label, "Prepare workspace");
+        assert_eq!(top_history.elapsed, Some(Duration::from_secs(4)));
+        assert_eq!(top_history.output_tokens, Some(120));
+        assert_eq!(top_history.summary.as_deref(), Some("prepared"));
+        assert_eq!(loop_history.label, "Execute work (1)");
+        assert_eq!(loop_history.elapsed, Some(Duration::from_secs(9)));
+        assert_eq!(loop_history.output_tokens, Some(340));
+        assert_eq!(
+            loop_history.summary.as_deref(),
+            Some("executed first round")
+        );
+        assert!(
+            event_row_line(&story_row_line(&loop_history), 80)
+                .segments()
+                .map(|(text, _)| text)
+                .collect::<String>()
+                .starts_with("00:00:10  \u{b7}  ")
+        );
+    }
+
+    #[test]
+    fn historical_loop_round_is_not_rewritten_by_a_later_live_control_frame() {
+        use ctx_traits_core::procedure::runtime::{
+            ControlFrame, ControlKind, EffectBuffer, PathSegment, SequenceStatus,
+            SequenceStatusKind,
+        };
+
+        let historical_path = vec![
+            PathSegment {
+                kind: "procedure".to_string(),
+                id: Some("loop-body".to_string()),
+                index: 1,
+                iteration: None,
+                item_index: None,
+            },
+            PathSegment {
+                kind: "loop".to_string(),
+                id: Some("loop-body".to_string()),
+                index: 0,
+                iteration: Some(0),
+                item_index: None,
+            },
+            PathSegment {
+                kind: "item".to_string(),
+                id: Some("work".to_string()),
+                index: 0,
+                iteration: Some(0),
+                item_index: None,
+            },
+        ];
+        let live_frame = ControlFrame {
+            kind: ControlKind::Loop,
+            parent_run_index: 1,
+            control_item_id: Some("repeat".to_string()),
+            sequence_id: "loop-body".to_string(),
+            next_index: 0,
+            iteration_index: Some(2),
+            max_iterations: None,
+            max_items: None,
+            item_index: None,
+            item_total: None,
+            over_slot: None,
+            item_slot: None,
+            list_digest: None,
+            concurrent: false,
+            until: None,
+            stop_if: None,
+            on_exhausted: None,
+            on_stop: None,
+            on_complete: None,
+            on_failure: None,
+            parallel_branch_sequence_ids: Vec::new(),
+            parallel_buffer: EffectBuffer {
+                accepted_slot_values: Vec::new(),
+                accepted_output_port_values: Vec::new(),
+                slot_revisions: Vec::new(),
+                emitted_signals: Vec::new(),
+            },
+            parallel_committed_branches: Vec::new(),
+            branch_decisions_watermark: 0,
+            guard_evaluations_watermark: 0,
+            join: None,
+            branch_failure: Vec::new(),
+            parallel_branch_refs: Vec::new(),
+            parallel_branch_outcomes: Vec::new(),
+        };
+        let live_path = stamp_control_stack_iterations(&[live_frame], &historical_path);
+        assert_eq!(live_path[1].iteration, Some(2));
+
+        let status = SequenceStatus {
+            sequence_index: 0,
+            run_index: 1,
+            item_id: Some("work".to_string()),
+            title: "Execute work".to_string(),
+            status: SequenceStatusKind::Accepted,
+            reason: String::new(),
+            position_path: historical_path,
+        };
+        let active_started = None;
+        let elapsed = BTreeMap::new();
+        let tokens = BTreeMap::new();
+        let loop_elapsed = BTreeMap::new();
+        let loop_tokens = BTreeMap::new();
+        let summaries = BTreeMap::new();
+        let summary_at = BTreeMap::new();
+        let presentation = PresentationState {
+            active_started: &active_started,
+            finished_durations: &elapsed,
+            output_tokens: &tokens,
+            loop_elapsed: &loop_elapsed,
+            loop_output_tokens: &loop_tokens,
+            step_summaries: &summaries,
+            step_summary_at: &summary_at,
+            narrator_tokens: 0,
+            run_started: Instant::now(),
+        };
+        assert_eq!(
+            history_step_from_status(&status, &presentation).label,
+            "Execute work (1)"
+        );
+    }
+
+    #[test]
+    fn accepted_loop_and_for_each_control_history_retain_aggregate_facts() {
+        use ctx_traits_core::procedure::runtime::{SequenceStatus, SequenceStatusKind};
+
+        let active_started = None;
+        let elapsed = BTreeMap::new();
+        let tokens = BTreeMap::new();
+        let summaries = BTreeMap::new();
+        let summary_at = BTreeMap::new();
+        let mut loop_elapsed = BTreeMap::new();
+        let mut loop_tokens = BTreeMap::new();
+        for (item_id, run_index, elapsed_seconds, output_tokens) in [
+            (Some("repeat-checks"), 2, 42, 900),
+            (Some("each-check"), 3, 17, 300),
+            (None, 4, 13, 200),
+            (None, 5, 11, 100),
+        ] {
+            let key = format!("loop:procedure:{}:{run_index}", item_id.unwrap_or_default());
+            loop_elapsed.insert(key.clone(), Duration::from_secs(elapsed_seconds));
+            loop_tokens.insert(key, output_tokens);
+        }
+        let presentation = PresentationState {
+            active_started: &active_started,
+            finished_durations: &elapsed,
+            output_tokens: &tokens,
+            loop_elapsed: &loop_elapsed,
+            loop_output_tokens: &loop_tokens,
+            step_summaries: &summaries,
+            step_summary_at: &summary_at,
+            narrator_tokens: 0,
+            run_started: Instant::now(),
+        };
+
+        for (item_id, title, run_index, reason, elapsed_seconds, output_tokens) in [
+            (
+                Some("repeat-checks"),
+                "Repeat checks",
+                2,
+                "control item completed: loop",
+                42,
+                900,
+            ),
+            (
+                Some("each-check"),
+                "Check each item",
+                3,
+                "control item completed: for-each",
+                17,
+                300,
+            ),
+            (
+                None,
+                "Repeat anonymous checks",
+                4,
+                "control item completed: loop",
+                13,
+                200,
+            ),
+            (
+                None,
+                "Check anonymous items",
+                5,
+                "control item completed: for-each",
+                11,
+                100,
+            ),
+        ] {
+            let status = SequenceStatus {
+                sequence_index: run_index,
+                run_index,
+                item_id: item_id.map(str::to_string),
+                title: title.to_string(),
+                status: SequenceStatusKind::Accepted,
+                reason: reason.to_string(),
+                position_path: Vec::new(),
+            };
+            let history = history_step_from_status(&status, &presentation);
+            assert_eq!(history.elapsed, Some(Duration::from_secs(elapsed_seconds)));
+            assert_eq!(history.output_tokens, Some(output_tokens));
+            let row = story_row_line(&history);
+            assert!(
+                row.tail
+                    .contains(&tui::elapsed_text(Duration::from_secs(elapsed_seconds)))
+            );
+            assert!(row.tail.contains(&format!("{output_tokens} tok")));
+            let line = event_row_line(&row, 80);
+            let text = line.segments().map(|(text, _)| text).collect::<String>();
+            assert!(text.starts_with(&format!("00:00:{elapsed_seconds:02}  \u{b7}  {title}")));
+        }
     }
 
     // A step with a landed P455 summary joins its row; one without falls
     // back to the truthful facts line — never a placeholder.
     #[test]
     fn story_row_line_prefers_summary_over_facts_fallback() {
-        let with_summary = story_row_line(&step("a", StepState::Done, Some("did the thing")));
+        let with_summary = story_row_line(&history_step(
+            "a",
+            Some(Duration::from_secs(5)),
+            Some("did the thing"),
+        ));
         assert_eq!(with_summary.at, Duration::from_secs(7));
         assert!(with_summary.tail.contains("did the thing"));
 
-        let without_summary = story_row_line(&step("b", StepState::Done, None));
+        let without_summary =
+            story_row_line(&history_step("b", Some(Duration::from_secs(5)), None));
         assert_eq!(without_summary.at, Duration::from_secs(5));
         assert!(without_summary.tail.contains('5')); // elapsed
         assert!(without_summary.tail.contains("tok")); // tokens
