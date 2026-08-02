@@ -40,7 +40,7 @@ tasks.each do |task|
   status = begin
     Process.run(
       "ctx",
-      ["traits", "run", trait_id, "--set", "task=#{task}", "--worktree", "--merge", "--progress", progress],
+      ["traits", "run", trait_id, "--set", "task=#{task}", "--worktree", "--merge", "--progress", progress, "--verbose"],
       input: Process::Redirect::Inherit,
       output: Process::Redirect::Inherit,
       error: Process::Redirect::Inherit,
