@@ -1184,8 +1184,12 @@ pub(crate) fn drain_text_deltas(buffer: &mut String) -> Vec<String> {
 /// `--format json`, and Pi's `--mode json` event stream all satisfy this.
 /// Centralized here so drive, merge, and this module's own narrator path
 /// dispatch on one list instead of repeating the id set at each call site.
-pub(crate) const GENERIC_STREAM_JSON_OUTPUTS: &[&str] =
-    &["claude-stream-json", "opencode-json", "pi-json"];
+pub(crate) const GENERIC_STREAM_JSON_OUTPUTS: &[&str] = &[
+    "claude-stream-json",
+    "opencode-json",
+    "pi-json",
+    "codex-json",
+];
 
 /// Session id from a harness stream even when slot parsing failed — the init
 /// event usually survives truncation and malformed payloads, and it is what
@@ -1209,10 +1213,15 @@ pub(crate) fn stream_harness_session_id(output_id: &str, stdout: &str) -> Option
 /// id in a bare `id` field, which every other harness uses for message/event
 /// identity rather than a session — so a generic root-`id` guess would treat
 /// arbitrary Pi events as session headers. Only `pi-json`'s documented
-/// `{"type":"session","id":...}` shape is recognized as a session for Pi.
+/// `{"type":"session","id":...}` shape and Codex's `thread.started`
+/// `thread_id` event are recognized as session identities with non-generic
+/// keys.
 pub(crate) fn session_id_from_event(output_id: &str, value: &Value) -> Option<String> {
     if output_id == "pi-json" {
         return pi_session_id_from(value);
+    }
+    if output_id == "codex-json" {
+        return codex_session_id_from(value);
     }
     session_id_from(value)
 }
@@ -1223,6 +1232,17 @@ fn pi_session_id_from(value: &Value) -> Option<String> {
         return None;
     }
     object.get("id").and_then(Value::as_str).map(str::to_string)
+}
+
+fn codex_session_id_from(value: &Value) -> Option<String> {
+    let object = value.as_object()?;
+    if object.get("type").and_then(Value::as_str) != Some("thread.started") {
+        return None;
+    }
+    object
+        .get("thread_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn session_id_from(value: &Value) -> Option<String> {
@@ -1310,6 +1330,18 @@ const THINKING_TEXT_KINDS: &[&str] =
 const FALLBACK_PROSE_KINDS: &[&str] = &["text", "text_delta"];
 
 fn collect_progress_texts(value: &Value, texts: &mut Vec<String>) {
+    if let Some(text) = value
+        .as_object()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("item.completed"))
+        .and_then(|event| event.get("item"))
+        .and_then(Value::as_object)
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("agent_message"))
+        .and_then(|item| item.get("text"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+    {
+        texts.push(text.to_string());
+    }
     collect_kind_texts(value, PROGRESS_TEXT_KINDS, texts);
 }
 
@@ -1470,6 +1502,7 @@ fn collect_thinking_token_estimates(value: &Value, out: &mut Vec<u64>) {
 /// and OpenCode-style (`part`/`parts`/`content`) nested event payloads.
 const NESTED_OBJECT_WRAPPER_KEYS: &[&str] = &[
     "result", "output", "message", "content", "text", "data", "body", "response", "part", "parts",
+    "item",
 ];
 
 /// Recursively search a JSON value for the first nested object matching
@@ -1578,7 +1611,7 @@ pub(crate) fn balanced_json_objects(text: &str) -> Vec<String> {
 mod tests {
     use super::{
         IngestOutcome, NarrationWindows, NarratorConfig, NarratorTraceContext, TokenProgress,
-        collect_thinking_texts, ingest_chunk, narrate_cold, session_title_prompt,
+        collect_thinking_texts, ingest_chunk, narrate_cold, progress_texts, session_title_prompt,
     };
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -1622,6 +1655,16 @@ mod tests {
         let mut texts = Vec::new();
         collect_thinking_texts(&value, &mut texts);
         assert_eq!(texts, vec!["Considering the fix".to_string()]);
+    }
+
+    #[test]
+    fn codex_completed_agent_message_is_passthrough_progress() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"Codex response"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(progress_texts(&[value]), ["Codex response"]);
     }
 
     /// A redacted-thinking claude stream (empty `thinking_delta`s) leaves the

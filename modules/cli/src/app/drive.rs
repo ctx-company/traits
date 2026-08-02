@@ -4183,13 +4183,12 @@ fn harness_argv(
         argv.push(flag.clone());
         argv.push(model.clone());
     }
-    if let (Some(flag), Some(effort)) = (
-        cli.reasoning_effort_flag.as_ref(),
-        plan.reasoning_effort.as_ref(),
-    ) {
-        argv.push(flag.clone());
-        argv.push(effort.clone());
-    }
+    agent_dispatch::append_reasoning_effort(
+        &mut argv,
+        harness,
+        cli,
+        plan.reasoning_effort.as_deref(),
+    );
     if let Some(flag) = cli.system_prompt_flag.as_ref() {
         argv.push(flag.clone());
         argv.push(composed_system_prompt(
@@ -6160,13 +6159,12 @@ fn warm_harness_argv(
         argv.push(flag.clone());
         argv.push(model.clone());
     }
-    if let (Some(flag), Some(effort)) = (
-        cli.reasoning_effort_flag.as_ref(),
-        plan.reasoning_effort.as_ref(),
-    ) {
-        argv.push(flag.clone());
-        argv.push(effort.clone());
-    }
+    agent_dispatch::append_reasoning_effort(
+        &mut argv,
+        harness,
+        cli,
+        plan.reasoning_effort.as_deref(),
+    );
     if let Some(flag) = cli.system_prompt_flag.as_ref() {
         argv.push(flag.clone());
         let prompt = match kind {
@@ -6700,14 +6698,13 @@ fn mcp_harness_argv(
             argv.push(flag.clone());
             argv.push(model.clone());
         }
-        if !mcp_has_reasoning
-            && let (Some(flag), Some(effort)) = (
-                cli.reasoning_effort_flag.as_ref(),
-                plan.reasoning_effort.as_ref(),
-            )
-        {
-            argv.push(flag.clone());
-            argv.push(effort.clone());
+        if !mcp_has_reasoning {
+            agent_dispatch::append_reasoning_effort(
+                &mut argv,
+                harness,
+                cli,
+                plan.reasoning_effort.as_deref(),
+            );
         }
     }
     if let Some(mcp) = mcp {
@@ -8062,8 +8059,8 @@ mod resolve_progress_tests {
     use serde_json::{Value, json};
 
     use super::{
-        RejectionClass, RejectionHandling, RequestedSlotKey, resolve_correction_delivery,
-        resolve_progress_with,
+        AssignmentPlan, HarnessArgvAttempt, RejectionClass, RejectionHandling, RequestedSlotKey,
+        harness_argv, resolve_correction_delivery, resolve_progress_with,
     };
     use crate::app::surface::cli::DriveProgress;
     use ctx_traits_core::procedure::runtime::{SchemaStatus, SchemaValidation};
@@ -8290,6 +8287,78 @@ mod resolve_progress_tests {
 
         assert_eq!(parsed.harness_session_id.as_deref(), Some("pi-session-123"));
         assert_eq!(parsed.slots.get("slot:answer"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn parses_codex_ndjson_thread_and_agent_message_output() {
+        let parsed = super::parse_harness_output(
+            concat!(
+                r#"{"type":"thread.started","thread_id":"codex-thread-123"}"#, "\n",
+                r#"{"type":"item.completed","item":{"type":"agent_message","text":"{\"answer\":true}"}}"#
+            ),
+            "codex-json",
+            &requested(),
+        )
+        .expect("Codex JSONL parses through the generic stream traversal");
+
+        assert_eq!(
+            parsed.harness_session_id.as_deref(),
+            Some("codex-thread-123")
+        );
+        assert_eq!(parsed.slots.get("slot:answer"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn worker_codex_argv_retains_subagent_controls() {
+        let harness = ctx_traits_io::harness_config::built_in_harness_definition(
+            "codex",
+            &ctx_traits_io::harness_config::HarnessRegistry::default(),
+        );
+        let cli = harness.cli.as_ref().expect("Codex has a CLI convention");
+        let plan = AssignmentPlan {
+            harness_id: "codex".to_string(),
+            transport: ctx_traits_io::harness_config::RunTransport::Cli,
+            mode: ctx_traits_io::harness_config::RunAssignmentMode::Harness,
+            session_mode: ctx_traits_io::harness_config::RunSessionMode::PerFrame,
+            model: None,
+            reasoning_effort: Some("high".to_string()),
+            system_prompt: None,
+            extra_args: vec![],
+            model_resolution_evidence: None,
+            from_session: false,
+            seat_index: None,
+            list_length: None,
+        };
+
+        let argv = harness_argv(
+            &harness,
+            cli,
+            &plan,
+            None,
+            HarnessArgvAttempt {
+                schema: None,
+                harness_session_id: None,
+                exec_dir: None,
+                confinement: None,
+            },
+        );
+
+        assert_eq!(
+            argv,
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--config",
+                "approval_policy=\"never\"",
+                "--config",
+                "agents.enabled=false",
+                "--config",
+                "features.multi_agent_v2=false",
+                "--config",
+                "model_reasoning_effort=\"high\""
+            ]
+        );
     }
 
     #[test]

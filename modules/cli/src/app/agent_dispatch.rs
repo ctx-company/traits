@@ -57,16 +57,32 @@ pub(crate) fn standing_agent_argv(
         argv.push(flag.clone());
         argv.push(model.to_string());
     }
-    if let (Some(flag), Some(effort)) = (cli.reasoning_effort_flag.as_ref(), reasoning_effort) {
-        argv.push(flag.clone());
-        argv.push(effort.to_string());
-    }
+    append_reasoning_effort(&mut argv, harness, cli, reasoning_effort);
     if let Some(flag) = cli.system_prompt_flag.as_ref() {
         argv.push(flag.clone());
         argv.push(system_prompt.to_string());
     }
     argv.extend(extra_args.to_vec());
     argv
+}
+
+/// Append a resolved reasoning effort using the harness's declared mapping.
+/// Codex uses its generic config flag rather than a standalone flag.
+pub(crate) fn append_reasoning_effort(
+    argv: &mut Vec<String>,
+    harness: &HarnessDefinition,
+    cli: &HarnessCliConvention,
+    reasoning_effort: Option<&str>,
+) {
+    let (Some(flag), Some(effort)) = (cli.reasoning_effort_flag.as_ref(), reasoning_effort) else {
+        return;
+    };
+    argv.push(flag.clone());
+    if harness.kind() == "codex" && flag == "--config" {
+        argv.push(format!("model_reasoning_effort=\"{effort}\""));
+    } else {
+        argv.push(effort.to_string());
+    }
 }
 
 /// Pin a server-anchored CLI harness to the requested execution directory.
@@ -130,7 +146,13 @@ pub(crate) fn append_confinement(
                 normalized.push(arg);
             }
             *argv = normalized;
-            argv.extend(["--ask-for-approval".to_string(), "never".to_string()]);
+            // `codex exec` does not accept the interactive
+            // `--ask-for-approval` option. Its documented config override is
+            // valid on `exec` and preserves the same non-interactive policy.
+            argv.extend([
+                "--config".to_string(),
+                "approval_policy=\"never\"".to_string(),
+            ]);
             if let Some(sandbox) = payloads
                 .codex
                 .get("sandbox")
@@ -285,9 +307,11 @@ pub(crate) fn run_one_shot(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_confinement, append_exec_dir};
+    use super::{append_confinement, append_exec_dir, standing_agent_argv};
     use ctx_traits_io::confinement::ConfinementPayloads;
-    use ctx_traits_io::harness_config::{HarnessCliConvention, HarnessDefinition};
+    use ctx_traits_io::harness_config::{
+        HarnessCliConvention, HarnessDefinition, HarnessRegistry, built_in_harness_definition,
+    };
 
     fn harness(kind: &str) -> HarnessDefinition {
         HarnessDefinition {
@@ -367,12 +391,37 @@ mod tests {
             argv,
             [
                 "codex",
-                "--ask-for-approval",
-                "never",
+                "--config",
+                "approval_policy=\"never\"",
                 "--sandbox",
                 "workspace-write",
                 "--add-dir",
                 "/tmp/worktree"
+            ]
+        );
+    }
+
+    #[test]
+    fn standing_agent_codex_argv_retains_subagent_controls() {
+        let harness = built_in_harness_definition("codex", &HarnessRegistry::default());
+        let cli = harness.cli.as_ref().expect("Codex has a CLI convention");
+
+        let argv = standing_agent_argv(&harness, cli, false, None, Some("high"), "system", &[]);
+
+        assert_eq!(
+            argv,
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--config",
+                "approval_policy=\"never\"",
+                "--config",
+                "agents.enabled=false",
+                "--config",
+                "features.multi_agent_v2=false",
+                "--config",
+                "model_reasoning_effort=\"high\"",
             ]
         );
     }

@@ -160,7 +160,7 @@ schema-version = "0.1.0"
 # `[agent.role.default]`.
 #
 # [agent.role.default]
-# harness = "opencode"            # a built-in id: claude-code, opencode, pi
+# harness = "opencode"            # a built-in id: claude-code, opencode, pi, codex
 # model = "openai/gpt-5.6-terra"
 # reasoning-effort = "medium"     # low | medium | high  (mapped per harness)
 # session-mode = "per-frame"      # per-frame | persistent
@@ -198,7 +198,7 @@ schema-version = "0.1.0"
 # policy = "park"                 # park | warn — out-of-tree mutation findings
 
 # --- Harnesses ----------------------------------------------------------------
-# claude-code, opencode and pi are built in and need no configuration. A table
+# claude-code, opencode, pi and codex are built in and need no configuration. A table
 # here MERGES over the built-in, so state only what differs; an omitted field is
 # inherited, and `flag = ""` explicitly unsets an inherited one.
 #

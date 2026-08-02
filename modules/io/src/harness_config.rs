@@ -4040,7 +4040,12 @@ fn validate_registry(registry: &HarnessRegistry) -> crate::Result<()> {
 fn known_output_parser(output: &str) -> bool {
     matches!(
         output,
-        "raw-json" | "claude-json" | "claude-stream-json" | "opencode-json" | "pi-json"
+        "raw-json"
+            | "claude-json"
+            | "claude-stream-json"
+            | "opencode-json"
+            | "pi-json"
+            | "codex-json"
     )
 }
 
@@ -4675,6 +4680,23 @@ pub fn probe_harness_version(harness: &HarnessDefinition) -> crate::Result<()> {
 /// `GENERIC_STREAM_JSON_OUTPUTS`-gated decoder (which already walks a
 /// `message`/`content` wrapper chain looking for the requested slot keys)
 /// handles it too, with no Pi-specific parser.
+///
+/// `codex` carries the Codex CLI 0.146.0 non-interactive contract: `exec`
+/// selects the non-interactive command, `--json` emits JSONL events, and the
+/// documented `approval_policy="never"` config override prevents a headless
+/// frame from waiting for confirmation. Codex accepts `--model` and `--cd`
+/// directly, but its
+/// reasoning uses `--config model_reasoning_effort="<value>"`; the dispatch
+/// renderer recognizes Codex's `--config` mapping so the resolved effort is
+/// applied to every invocation. Developer-instruction settings cannot be
+/// represented by this flag/value convention and use the existing prompt
+/// fallback. Its `--output-schema` expects a file path, not
+/// the inline schema this convention supplies, so schema enforcement likewise
+/// remains in the prompt contract. `exec resume` has positional session and
+/// prompt arguments, so correction retries visibly cold-start rather than
+/// invoking it with a guessed argv shape. `agents.enabled=false` disables
+/// legacy subagents and `features.multi_agent_v2=false` prevents the V2
+/// override, leaving both multi-agent implementations disabled.
 fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
     vec![
         (
@@ -4814,6 +4836,43 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     // a completed assistant message. `raw-json` accepts only
                     // one document and would discard that stream structure.
                     output: Some("pi-json".to_string()),
+                }),
+                mcp: None,
+            },
+        ),
+        (
+            "codex",
+            HarnessDefinition {
+                kind: Some("codex".to_string()),
+                bin: Some("codex".to_string()),
+                transports: vec![RunTransport::Cli],
+                version_probe: vec!["--version".to_string()],
+                cli: Some(HarnessCliConvention {
+                    argv: [
+                        "exec",
+                        "--json",
+                        "--config",
+                        "approval_policy=\"never\"",
+                        "--config",
+                        "agents.enabled=false",
+                        "--config",
+                        "features.multi_agent_v2=false",
+                    ]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                    narrator_argv: None,
+                    warm_argv: None,
+                    json_schema_flag: None,
+                    model_flag: Some("--model".to_string()),
+                    reasoning_effort_flag: Some("--config".to_string()),
+                    system_prompt_flag: None,
+                    resume_flag: None,
+                    session_flag: None,
+                    dir_flag: Some("--cd".to_string()),
+                    prompt_via: Some("arg".to_string()),
+                    stream: Some(true),
+                    output: Some("codex-json".to_string()),
                 }),
                 mcp: None,
             },
@@ -5085,6 +5144,50 @@ mod config_tests {
             ..HarnessRegistry::default()
         };
         validate_registry(&registry).expect("the Pi built-in convention is valid");
+    }
+
+    #[test]
+    fn codex_built_in_definition_uses_verified_exec_convention() {
+        let definition = built_in_harness_definition("codex", &HarnessRegistry::default());
+        let cli = definition.cli.as_ref().expect("Codex has a CLI convention");
+
+        assert_eq!(
+            built_in_harness_ids(),
+            ["claude-code", "opencode", "pi", "codex"]
+        );
+        assert_eq!(definition.kind(), "codex");
+        assert_eq!(definition.bin(), "codex");
+        assert_eq!(
+            cli.argv,
+            [
+                "exec",
+                "--json",
+                "--config",
+                "approval_policy=\"never\"",
+                "--config",
+                "agents.enabled=false",
+                "--config",
+                "features.multi_agent_v2=false",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(cli.model_flag.as_deref(), Some("--model"));
+        assert_eq!(cli.dir_flag.as_deref(), Some("--cd"));
+        assert_eq!(cli.prompt_via.as_deref(), Some("arg"));
+        assert_eq!(cli.output.as_deref(), Some("codex-json"));
+        assert!(cli.json_schema_flag.is_none());
+        assert_eq!(cli.reasoning_effort_flag.as_deref(), Some("--config"));
+        assert!(cli.system_prompt_flag.is_none());
+        assert!(cli.resume_flag.is_none());
+        assert!(cli.session_flag.is_none());
+
+        let registry = HarnessRegistry {
+            harness: BTreeMap::from([("codex".to_string(), definition)]),
+            ..HarnessRegistry::default()
+        };
+        validate_registry(&registry).expect("the Codex built-in convention is valid");
     }
 
     /// P564: the `{worktree}` token is the only overlay form that yields a
