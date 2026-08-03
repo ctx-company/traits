@@ -1,0 +1,56 @@
+# 0062 — Task becomes a CDK type: uniform content nodes, deterministic extraction, iterable steps
+
+**Status:** ready to implement · **Depends on:** 0060, and MUST land after 0056 · **Raised:** 2026-08-03 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+Fourth slice of the task-interface arc, and the largest. Dispatch nothing else alongside it.
+
+## Decisions
+
+- **A task is a uniform node.** `task.content`, `task.subtasks.*.content`, `task.steps.*.content`
+  are the same accessor at three depths, so a trait author can run over a whole task, over its
+  subtasks, or over its steps with the same authoring shape.
+- **Granularity is the trait author's call and we take no position on it.** A parent may be
+  dispatched and iterate its subtasks; a child may be dispatched alone; a task may iterate its own
+  steps. We do not interfere with how people want to use this.
+- **`openSteps` is a derived field.** `forEach` iterates a collection with no filter, so a trait
+  that wants the remaining work needs the derived collection rather than a guard in every body.
+- **Extraction becomes deterministic.** `taskExtractionStep` currently asks a model to copy a file
+  byte-for-byte — a mechanical job given to an agent, where it can drift. With a typed provider it
+  is a command step: no model, exact strings, one frame cheaper per run.
+- **Steps are never invented at run time.** They come from the curated task document. A drafter
+  may plan freely inside `slot:draft`, but it does not author or write back steps.
+- **A stepless task dispatched against a step-iterating trait is refused**, naming the task.
+  `forEach` over an empty collection is a silent no-op — a run that completes having done nothing
+  is the worst possible outcome, so this must fail loudly at dispatch.
+- **Commit per step** (owner call: it does not hurt, and history/bisect get better).
+- **A failed step parks the run by default.** Skipping silently produces a "done" task with a hole
+  in it. A call-for-help path may soften this later, once there is an elegant interface for it.
+
+## Scope
+
+The kit ships the Task schema. Extraction becomes a command step producing a typed `slot:task`.
+Field proxies extend P398's typed field refs so `over: task.openSteps` typechecks and
+`step.content` interpolates. The implement family is rewritten onto it, retiring
+`taskExtractionStep` and the text `slot:task-brief`.
+
+## Watch
+
+- **This touches every trait in the fleet.** Digests move, everything relocks and re-approves, and
+  it lands in files that have churned heavily. Give it its own dispatch with nothing riding along.
+- **It multiplies gate cost.** A per-step loop runs the gate per step, so 0056 (cheap per-round
+  gate, full suite at merge) must land first or this makes a two-day problem N times worse.
+- `blockerStepSchema` keeps its real job — tracking fixes *within* a step — and loses its
+  accidental one: reconstructing the task's decomposition in prose every round because the loop had
+  no structural notion of steps.
+- A parked run now leaves N clean commits on its branch rather than an uncommitted worktree.
+  "Parked" and "partially landed" stop being in tension; the branch is expected to be mergeable.
+- Marking steps done across runs is NOT this task's job — runs never write the board. That arrives
+  with reconcile (later slice); until then the owner checks boxes from the park report.
+
+## Done when
+
+The kit ships a Task schema whose nodes all carry `content`; extraction runs with no model; a
+trait iterates `task.openSteps` with a guarded produce/review loop per step; each step commits;
+a step failure parks the run leaving a mergeable branch; a stepless task dispatched against a
+step-iterating trait is refused by name; and the implement family runs on the new type with its
+digests relocked and re-approved.

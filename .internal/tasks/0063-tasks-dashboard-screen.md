@@ -1,0 +1,38 @@
+# 0063 — A TASKS screen in the dashboard
+
+**Status:** ready to implement · **Depends on:** 0060 · **Raised:** 2026-08-03 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+Fifth slice of the task-interface arc. The board becomes operable without an editor.
+
+## Decisions
+
+- **A fifth screen** beside SESSIONS, TRAITS, MERGES and TRUST.
+- **Rows group by derived state** — blocked, ready, in-flight, parked, done — where blocked comes
+  from unmet `depends-on` and in-flight/parked come from joining the session store on the ledger's
+  task key. Nothing is written back to the board to make this work.
+- **The detail pane shows relations resolved, with live statuses**, both directions:
+  `blocked by 0049 (ready) ✗ / 0010.1 (done) ✓`, `blocks …`, `children …`. A bare list of ids is
+  useless; the status is the point.
+- **Keys: sync, split, archive, dispatch.** Sync is manual only, with a visible "last synced" —
+  never automatic on opening the screen (owner call).
+- **Dispatch from the board starts a run.** A blocked task refuses *with its reason shown*, rather
+  than being invisibly disabled — the owner should always learn why.
+- Reconcile and split-from-park-report are a later slice; the screen should leave room for them
+  but not wait on them.
+
+## Watch
+
+- The join is many-runs-to-many-tasks, not one-to-one: a run may be keyed to a parent while doing
+  a child's work (0062 permits exactly that), so a parent can be in-flight with idle-looking
+  children. Ugly to retrofit; get the shape right first.
+- Two caches with two cadences — the session inventory the dashboard already polls, and the
+  provider's board snapshot. Keep them distinct or "last synced" means two different things.
+- P552's one-renderer contract: verify live, preview and attached surfaces at both width
+  breakpoints. 0048, 0053 and 0055 touch the same renderer — coordinate or expect conflicts.
+
+## Done when
+
+The TASKS screen lists the board grouped by derived state; a task's relations render with the
+other side's live status; sync refreshes on keypress and shows when it last ran; dispatching from
+the board starts a run; a blocked task refuses with its reason on screen; and a parked run is
+visible from its task row.
