@@ -1,6 +1,8 @@
 # 0056 — The per-round gate must be cheap; the full suite belongs to the merge gate
 
-**Status:** ready to implement · **Raised:** 2026-08-03 (third time this ceiling has been retuned)
+**Status:** IMPLEMENTED 2026-08-03 (`8d7b581f`) — `just test` is the per-round gate (7 s warm),
+`just test-full` is the landing gate declared as `[merge] gate`; reviewer doctrine states a round's
+gate proves only what it runs · **Raised:** 2026-08-03 (third time this ceiling has been retuned)
 
 ## The problem
 

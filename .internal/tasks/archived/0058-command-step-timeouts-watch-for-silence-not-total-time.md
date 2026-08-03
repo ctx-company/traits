@@ -1,6 +1,8 @@
 # 0058 — Command-step timeouts should watch for silence, and live in project config
 
-**Status:** designed with the owner 2026-08-03, ready to implement · **Raised:** 2026-08-03
+**Status:** IMPLEMENTED 2026-08-03 (`84ab7745`) — idle and wall bounds in `[run]`
+(`command-idle-seconds`, `command-seconds`) with doctor provenance, the two kills reported
+distinctly, and `repo-gates` no longer declaring `timeout-ms` · **Raised:** 2026-08-03
 
 ## Why
 
