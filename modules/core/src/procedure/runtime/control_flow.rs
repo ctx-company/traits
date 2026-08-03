@@ -57,6 +57,10 @@ fn refresh_runtime_status(trait_ref: &Trait, state: &mut State) -> crate::Result
                 state.final_state,
                 FinalState::Blocked | FinalState::Failed | FinalState::Rejected
             ) {
+                // A control item may have committed a project write before a
+                // guard makes this run terminal. Keep the externally returned
+                // ledger synchronized with that newly committed evidence.
+                state.output_ports = finalize_outputs(trait_ref, state)?;
                 sort_state(state);
                 return Ok(());
             }

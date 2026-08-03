@@ -192,6 +192,20 @@ session-mode = "per-frame"
 /// dual-reviewer alike): the `blocker`/`review-verdict` schema declarations.
 const SCHEMA_BLOCKS: &str = r#"
 [[schema]]
+id = "repo-gates-result"
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+
+[schema.fields.timed-out]
+schema = "schema:boolean"
+
+[[schema]]
 id = "blocker"
 description = "One blocking defect."
 
@@ -341,6 +355,11 @@ schema = "schema:review-verdict"
 description = "Fixture reviewer verdict."
 
 [[slot]]
+id = "repo-gates-passed"
+schema = "schema:repo-gates-result"
+description = "Deterministic gate evidence used by the guarded exit and stop paths."
+
+[[slot]]
 id = "park-report"
 schema = "[schema:review-verdict]"
 description = "This round's still-revise verdict(s); cleared and re-appended every round."
@@ -422,6 +441,18 @@ slot = "slot:review-verdict"
 field = "status"
 equals = "revise"
 
+[[sequence.review-loop.sequence]]
+id = "repo-gates"
+title = "Record repository gate"
+kind = "project"
+output = ["slot:repo-gates-passed"]
+
+[[sequence.review-loop.sequence.projection]]
+destination = "slot:repo-gates-passed"
+
+[sequence.review-loop.sequence.projection.source]
+literal = {{ argv = ["fixture-gate"], ok = true, timed-out = false }}
+
 [procedure]
 description = "Implement, review in a bounded loop, then commit when the tree is dirty."
 input = ["port:task"]
@@ -443,10 +474,20 @@ sequence = "sequence:review-loop"
 max-iterations = {max_iterations}
 on-exhausted = "{on_exhausted}"
 
-[procedure.sequence.until]
+[[procedure.sequence.until.all]]
 slot = "slot:review-verdict"
 field = "status"
 equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:repo-gates-passed"
+field = "ok"
+equals = true
+
+[procedure.sequence.stop-if]
+slot = "slot:repo-gates-passed"
+field = "timed-out"
+equals = true
 
 [[procedure.sequence]]
 id = "check-git-status"
@@ -1143,6 +1184,205 @@ fn assert_park_entries(ledger_text: &str, expected: &[(&str, &str)]) {
             "park report missing entry wall={wall:?} blocker={blocker:?}:\n{entries:#?}"
         );
     }
+}
+
+/// Submit one deterministic agent frame through the public call boundary.
+/// Keeping this below the fixture helpers makes the guarded-loop regression
+/// exercise the same persisted-session validation that caught the stale port
+/// row, rather than an in-process transition shortcut.
+fn call_fixture_frame(
+    repo: &Path,
+    home: &Path,
+    ledger_path: &Path,
+    agent: &str,
+    produced_slots: serde_json::Value,
+) {
+    let ledger: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(ledger_path).expect("fixture session ledger readable"),
+    )
+    .expect("fixture session ledger is JSON");
+    let template = &ledger["next-frame"]["call-template"];
+    let mut data = serde_json::json!({
+        "session-id": template["session-id"],
+        "run-id": template["run-id"],
+        "state-digest": template["state-digest"],
+        "expected-sequence-item-id": template["expected-sequence-item-id"],
+        "expected-run-index": template["expected-run-index"],
+        "expected-source-index": template["expected-source-index"],
+        "produced-slots": produced_slots,
+    });
+    if let Some(position_path) = template["expected-position-path"].as_array() {
+        data.as_object_mut()
+            .expect("fixture call payload is an object")
+            .insert(
+                "expected-position-path".to_string(),
+                position_path.clone().into(),
+            );
+    }
+    let data_path = ledger_path.with_extension(format!("{agent}.call.json"));
+    fs::write(&data_path, data.to_string()).expect("fixture call payload writable");
+    let output = run_ctx(
+        &[
+            "traits",
+            "call",
+            "--session",
+            ledger_path.to_str().unwrap(),
+            "--agent",
+            agent,
+            "--data",
+            data_path.to_str().unwrap(),
+            "--json",
+        ],
+        repo,
+        home,
+    );
+    assert!(
+        output.status.success(),
+        "{agent} call must preserve the output-port ledger contract: {:?}",
+        utf8(&output)
+    );
+}
+
+/// A quick-shaped guarded exit writes the optional park-report port through a
+/// project, then blocks at loop exhaustion. Before the refresh at the
+/// terminal control-flow boundary, the persisted session still held the
+/// entry-time output-port snapshot and `ctx traits call` rejected it.
+#[test]
+fn guarded_exhaustion_refreshes_project_written_park_report_output() {
+    let id = "implement-fixture-park-guarded-call";
+    let (scratch, repo, home) = setup_fixture(
+        "p461-park-guarded-call",
+        id,
+        &fixture_trait_toml(id, 1, "block"),
+        &[("P980", None)],
+    );
+    let ledger_path = scratch.path().join("guarded-call.json");
+    require_success(
+        "guarded fixture `ctx traits run --no-drive`",
+        &[
+            "traits",
+            "run",
+            id,
+            "--set",
+            "task=P980",
+            "--no-drive",
+            "--out",
+            ledger_path.to_str().unwrap(),
+            "--json",
+        ],
+        &repo,
+        &home,
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "worker",
+        serde_json::json!({ "slot:work-summary": "implemented" }),
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "smart-1",
+        serde_json::json!({
+            "slot:review-verdict": {
+                "status": "revise",
+                "blockers": [],
+                "wall-id": "WALL-P461-GUARDED",
+            },
+        }),
+    );
+
+    let ledger_text = fs::read_to_string(&ledger_path).expect("guarded ledger readable");
+    let ledger: serde_json::Value =
+        serde_json::from_str(&ledger_text).expect("guarded ledger is JSON");
+    assert_eq!(ledger["ledger"]["final-state"], "blocked", "{ledger:#?}");
+    let park_slot = ledger["ledger"]["accepted-slot-values"]
+        .as_array()
+        .expect("guarded ledger carries accepted slot values")
+        .iter()
+        .find(|value| value["ref-text"] == "slot:park-report")
+        .expect("guarded loop records slot:park-report");
+    let park_port = ledger["ledger"]["output-ports"]
+        .as_array()
+        .expect("guarded ledger carries output ports")
+        .iter()
+        .find(|value| value["port-ref"] == "port:park-report")
+        .expect("guarded loop accepts port:park-report");
+    assert_eq!(park_port["status"], "accepted");
+    assert_eq!(park_port["value-digest"], park_slot["value-digest"]);
+
+    let _ = scratch;
+}
+
+/// The same write can be followed by quick's distinct timed-out stop guard.
+/// Its terminal return must also retain the derived park-report port row.
+#[test]
+fn guarded_timed_out_stop_refreshes_project_written_park_report_output() {
+    let id = "implement-fixture-park-guarded-stop";
+    let trait_toml =
+        fixture_trait_toml(id, 1, "block").replace("timed-out = false", "timed-out = true");
+    let (scratch, repo, home) =
+        setup_fixture("p461-park-guarded-stop", id, &trait_toml, &[("P981", None)]);
+    let ledger_path = scratch.path().join("guarded-stop.json");
+    require_success(
+        "timed-out fixture `ctx traits run --no-drive`",
+        &[
+            "traits",
+            "run",
+            id,
+            "--set",
+            "task=P981",
+            "--no-drive",
+            "--out",
+            ledger_path.to_str().unwrap(),
+            "--json",
+        ],
+        &repo,
+        &home,
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "worker",
+        serde_json::json!({ "slot:work-summary": "implemented" }),
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "smart-1",
+        serde_json::json!({
+            "slot:review-verdict": {
+                "status": "revise",
+                "blockers": [],
+                "wall-id": "WALL-P461-TIMED-OUT",
+            },
+        }),
+    );
+
+    let ledger: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&ledger_path).expect("timed-out ledger readable"))
+            .expect("timed-out ledger is JSON");
+    assert_eq!(ledger["ledger"]["final-state"], "blocked", "{ledger:#?}");
+    let park_slot = ledger["ledger"]["accepted-slot-values"]
+        .as_array()
+        .expect("timed-out ledger carries accepted slot values")
+        .iter()
+        .find(|value| value["ref-text"] == "slot:park-report")
+        .expect("timed-out stop records slot:park-report");
+    let park_port = ledger["ledger"]["output-ports"]
+        .as_array()
+        .expect("timed-out ledger carries output ports")
+        .iter()
+        .find(|value| value["port-ref"] == "port:park-report")
+        .expect("timed-out stop accepts port:park-report");
+    assert_eq!(park_port["status"], "accepted");
+    assert_eq!(park_port["value-digest"], park_slot["value-digest"]);
+
+    let _ = scratch;
 }
 
 #[test]

@@ -60,6 +60,19 @@ optional = true
 description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
 value = "slot:commit-output"
 
+[[port]]
+id = "park-report"
+direction = "output"
+schema = "[schema:review-verdict]"
+optional = true
+description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created."
+title = "Park Report"
+format = [
+    "structured",
+    "table",
+]
+value = "slot:park-report"
+
 [[slot]]
 id = "review-diff"
 schema = "schema:text"
@@ -471,7 +484,10 @@ operation = "append"
 [procedure]
 description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
 input = ["port:task"]
-output = ["port:commit-report"]
+output = [
+    "port:commit-report",
+    "port:park-report",
+]
 
 [[procedure.sequence]]
 id = "draft-writing"
