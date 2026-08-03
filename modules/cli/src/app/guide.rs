@@ -97,19 +97,6 @@ pub(crate) fn dispatch(
     question: String,
     context: String,
 ) -> crate::Result<GuideReply> {
-    let argv = agent_dispatch::tool_less_standing_agent_argv(
-        &config.harness,
-        &config.cli,
-        config.assignment.model.as_deref(),
-        config.assignment.reasoning_effort.as_deref(),
-        SYSTEM_PROMPT,
-    )?;
-    let instructions = if config.cli.system_prompt_flag.is_some() {
-        String::new()
-    } else {
-        format!("{SYSTEM_PROMPT}\n\n")
-    };
-    let prompt = guide_prompt(&instructions, &context, &question);
     let call_total = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let counter = ctx_traits_io::harness::AttemptTokenAccumulator::new({
         let call_total = Arc::clone(&call_total);
@@ -117,36 +104,51 @@ pub(crate) fn dispatch(
             call_total.fetch_add(delta, std::sync::atomic::Ordering::Relaxed);
         }
     });
-    let outcome = agent_dispatch::run_one_shot(agent_dispatch::RunOneShotRequest {
-        harness: &config.harness,
-        argv,
-        prompt,
-        prompt_via_stdin: config.cli.prompt_via.as_deref() == Some("stdin"),
-        timeout_ms: config.timeout_ms,
-        exec_dir: config.exec_dir.as_deref(),
-        env_overlay: &BTreeMap::new(),
-        observers: agent_dispatch::RunOneShotObservers {
-            stdout_observer: Some(counter.observer()),
-            ..Default::default()
-        },
-        sandbox: None,
-    });
+    let result = (|| {
+        let argv = agent_dispatch::tool_less_standing_agent_argv(
+            &config.harness,
+            &config.cli,
+            config.assignment.model.as_deref(),
+            config.assignment.reasoning_effort.as_deref(),
+            SYSTEM_PROMPT,
+        )?;
+        let instructions = if config.cli.system_prompt_flag.is_some() {
+            String::new()
+        } else {
+            format!("{SYSTEM_PROMPT}\n\n")
+        };
+        let prompt = guide_prompt(&instructions, &context, &question);
+        let outcome = agent_dispatch::run_one_shot(agent_dispatch::RunOneShotRequest {
+            harness: &config.harness,
+            argv,
+            prompt,
+            prompt_via_stdin: config.cli.prompt_via.as_deref() == Some("stdin"),
+            timeout_ms: config.timeout_ms,
+            exec_dir: config.exec_dir.as_deref(),
+            env_overlay: &BTreeMap::new(),
+            observers: agent_dispatch::RunOneShotObservers {
+                stdout_observer: Some(counter.observer()),
+                ..Default::default()
+            },
+            sandbox: None,
+        })?;
+        if outcome.exit_code.unwrap_or(1) != 0
+            || outcome.timed_out
+            || outcome.killed
+            || outcome.stdout_truncated
+        {
+            return Err(crate::Error::Command {
+                message: "guide request did not complete".to_string(),
+            });
+        }
+        let text = response_text(config.cli.output.as_deref(), &outcome.stdout)?;
+        Ok(GuideReply { text })
+    })();
     counter.finish();
     config
         .tokens
         .end_call(call_total.load(std::sync::atomic::Ordering::Relaxed));
-    let outcome = outcome?;
-    if outcome.exit_code.unwrap_or(1) != 0
-        || outcome.timed_out
-        || outcome.killed
-        || outcome.stdout_truncated
-    {
-        return Err(crate::Error::Command {
-            message: "guide request did not complete".to_string(),
-        });
-    }
-    let text = response_text(config.cli.output.as_deref(), &outcome.stdout)?;
-    Ok(GuideReply { text })
+    result
 }
 
 fn bound_text(value: &str, max: usize) -> String {
@@ -221,6 +223,43 @@ fn guide_raw_json_text(stdout: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ctx_traits_io::harness_config::{HarnessRegistry, built_in_harness_definition};
+
+    #[test]
+    fn guide_tool_less_builtin_claude_is_toolless_and_output_compatible() {
+        let harness = built_in_harness_definition("claude-code", &HarnessRegistry::default());
+        let cli = harness.cli.as_ref().expect("Claude has a CLI convention");
+
+        let argv =
+            agent_dispatch::tool_less_standing_agent_argv(&harness, cli, None, None, SYSTEM_PROMPT)
+                .expect("built-in Claude declares a guide convention");
+
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            argv.windows(3)
+                .find(|window| window[0] == "--disallowedTools")
+                .expect("all built-in tools are denied"),
+            ["--disallowedTools", "*", "mcp__*"]
+        );
+        assert_eq!(
+            argv.windows(3)
+                .find(|window| window[0] == "--output-format")
+                .expect("guide output matches its parser"),
+            ["--output-format", "stream-json", "--verbose"]
+        );
+        assert_eq!(
+            response_text(
+                cli.output.as_deref(),
+                r#"{"type":"result","result":"final answer"}"#,
+            )
+            .unwrap(),
+            "final answer"
+        );
+    }
 
     #[test]
     fn guide_dispatch_parses_final_results_without_reasoning() {

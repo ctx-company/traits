@@ -1837,9 +1837,11 @@ impl ResolvedRuntimeAssignments {
         self.assignment_for_role("narrator")
     }
 
-    /// The optional live-TUI guide. Like narrator, it is an exact-name
-    /// standing seat and is unavailable unless explicitly configured.
+    /// The optional live-TUI guide. Unlike narrator, an `--assign guide=...`
+    /// override cannot create it: the read-only ask surface is available only
+    /// when its exact-name config table explicitly opts in.
     pub fn guide_assignment(&self) -> Option<ProfileAssignment> {
+        single_role_table(&self.agent_defaults, "guide")?;
         self.assignment_for_role("guide")
     }
 
@@ -6320,10 +6322,24 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     .into_iter()
                     .map(String::from)
                     .collect(),
-                    // Narration is a one-shot with no tools and a tiny prompt;
-                    // the streaming worker convention above would pay for
-                    // machinery a status line never uses.
-                    narrator_argv: Some(vec!["-p".to_string()]),
+                    // Standing one-shots (narrator and guide) have no tools.
+                    // `*` denies every built-in tool and `mcp__*` every MCP
+                    // tool. Keep their output compatible with the shared
+                    // Claude stream parser rather than accepting plain text.
+                    narrator_argv: Some(
+                        [
+                            "-p",
+                            "--output-format",
+                            "stream-json",
+                            "--verbose",
+                            "--disallowedTools",
+                            "*",
+                            "mcp__*",
+                        ]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ),
                     // Deliberately absent. A warm process is spawned once and
                     // cannot carry a per-frame `--json-schema`, so shipping a
                     // warm convention here would silently trade typed-output
@@ -8070,5 +8086,40 @@ mod config_tests {
             ..ProfileAssignment::default()
         };
         assert!(validate_assignment_common("guide", &assignment).is_err());
+    }
+
+    #[test]
+    fn guide_requires_its_own_config_table_before_an_override_can_apply() {
+        let mut profile = ResolvedRuntimeAssignments {
+            registry: HarnessRegistry::default(),
+            assignments: BTreeMap::from([("guide".to_string(), single("override-harness"))]),
+            seat_assignments: BTreeMap::new(),
+            agent_defaults: AgentDefaults {
+                role: BTreeMap::from([(
+                    DEFAULT_SEAT.to_string(),
+                    RoleAssignmentValue::Single(single("default-harness")),
+                )]),
+                ..AgentDefaults::default()
+            },
+            qualifier_by_role: BTreeMap::new(),
+            budget: RunProfileBudget::default(),
+            worktree: WorktreeConfig::default(),
+            model_catalogs: BTreeMap::new(),
+            model_catalog_capability_reports: Vec::new(),
+            builtin_detection: None,
+            builtin_fallback_selections: BTreeMap::new(),
+        };
+        assert_eq!(profile.guide_assignment(), None);
+
+        profile.agent_defaults.role.insert(
+            "guide".to_string(),
+            RoleAssignmentValue::Single(single("configured-harness")),
+        );
+        assert_eq!(
+            profile
+                .guide_assignment()
+                .and_then(|assignment| assignment.harness),
+            Some("override-harness".to_string())
+        );
     }
 }

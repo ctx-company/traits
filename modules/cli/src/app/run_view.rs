@@ -1672,7 +1672,9 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         ask_cursor,
     } = state;
     let full_area = frame.area();
-    let ask_height = ask_lines.map_or(0, |lines| lines.len().saturating_add(1) as u16);
+    // A configured but collapsed guide consumes exactly one row; expanded
+    // states consume only the rows they visibly render.
+    let ask_height = ask_lines.map_or(0, |lines| lines.len() as u16);
     let regions = live_frame_regions(full_area, ask_height);
     frame.render_widget(
         tui_kit::keymap_footer(
@@ -6087,19 +6089,21 @@ mod tests {
 
     #[test]
     fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
+        let collapsed = live_frame_regions(Rect::new(0, 0, 70, 7), 1);
+        assert_eq!(collapsed[1].height, 1, "collapsed ask uses one row");
         for area in [
             Rect::new(0, 0, 160, 40),
             Rect::new(0, 0, 70, 20),
-            // Seven rows is the smallest viewport that can contain the
-            // usable three-row body, answered three-row ask, and footer.
-            Rect::new(0, 0, 70, 7),
+            // Six rows is the smallest viewport that can contain the usable
+            // three-row body, expanded two-row ask strip, and footer.
+            Rect::new(0, 0, 70, 6),
         ] {
-            // Waiting and answered panes use three rows: input plus response
-            // and the reserved separator. This is the largest ask footprint.
-            let regions = live_frame_regions(area, 3);
+            // Waiting and answered panes use input plus response. This is the
+            // largest ask footprint.
+            let regions = live_frame_regions(area, 2);
             assert_eq!(regions[1].width, area.width);
             assert!(regions[0].height >= 3, "body must retain usable rows");
-            assert_eq!(regions[1].height, 3);
+            assert_eq!(regions[1].height, 2);
             assert_eq!(regions[2].height, 1);
             assert!(regions[0].bottom() <= regions[1].y);
             assert!(regions[1].bottom() <= regions[2].y);
