@@ -1,0 +1,75 @@
+# 0057 — Worktree runs pay a full cold Rust build; they need a warm cache that survives
+
+**Status:** ready to design — owner deferred the generic solution 2026-08-03; the stopgaps
+(dropping the useless clone, raising the gate ceiling) are already in · **Raised:** 2026-08-03
+
+## The problem
+
+Every run builds the entire Rust workspace from scratch. On a warm checkout the repo gate is
+trivial — 56 s of test execution, ~22 s of incremental compile — but inside a fresh worktree it
+exceeded 30 minutes, and the timed-out `stop-if` parked three of five runs at ROUND 1
+(run-d9183ad4 task 0004, run-003644ea task 0051.1, task 0051). Two concurrent dispatches each pay
+it independently.
+
+## Root cause, verified (do not re-derive)
+
+**Cargo anchors freshness to absolute paths.** Every dep-info file records its own outputs by
+absolute path — 454 of 454 in this repo's target reference `/…/ctx-trait/target/...`. Move or copy
+the directory and every unit is stale, including third-party crates whose sources never moved
+(they live in `~/.cargo/registry`, unchanged).
+
+Proven by controlled experiment on 2026-08-03: identical source tree, identical mtimes, identical
+environment, only `CARGO_TARGET_DIR` pointed at a copy-on-write clone of the existing target —
+cargo immediately recompiled `memchr`, `libc`, `serde`, `winnow`, `ctx-traits-core`. One variable,
+full rebuild. In the parked worktree, all 511 crate fingerprints carried the run's start time.
+
+Ruled out: cargo lock contention (no "Blocking waiting for file lock" in any gate tail; targets are
+per-worktree and genuinely isolated), mtime skew (the CoW clone preserves them), source churn
+(registry crates rebuilt too).
+
+## Already done (stopgaps, not the fix)
+
+- `[worktree] warm = ["target"]` REMOVED — it cloned ~14 GB per run for a target cargo discards
+  (13 worktrees held 190 GB).
+- `repo-gates` `timeout-ms` raised 30 min → 90 min so a cold build no longer parks a run at round 1.
+
+## Options, with the trade each carries
+
+1. **Fixed worktree pool.** N slots at constant paths (`slot-1`…`slot-N`), leased per run, reset
+   between runs. Both the source path and the target path recur, so dependencies AND local crates
+   stay warm; no lock waiting, no cross-branch thrash. Costs: lease/reset machinery, and worktrees
+   stop being per-run forensic artifacts — a run must land or export its diff before its slot is
+   reused. This is the complete fix.
+2. **One shared target via the git common dir.** `CARGO_TARGET_DIR=$(git rev-parse
+   --path-format=absolute --git-common-dir)/cargo-target` — verified to return the same path from
+   the main checkout and from inside a worktree. Keeps the ~460 dependency units warm. Two costs:
+   concurrent builds serialize on cargo's build lock (bearable — waiting minutes for a warm build
+   beats 30 minutes of parallel cold rebuild), and concurrent runs on DIFFERENT revisions overwrite
+   each other's workspace-crate artifacts, so our own crates plus ~40 proof binaries thrash.
+   **Implementation trap:** `just test`/`just lint` hard-set `CARGO_TARGET_DIR` (justfile:52,57), so
+   the worktree env alone changes nothing — both must move together. Note those overrides were
+   added deliberately after cross-worktree cache flakes; this reverses that decision.
+3. **`sccache`** with `SCCACHE_BASEDIRS` for path normalisation. Owner deprioritised 2026-08-03.
+4. **Rewrite the absolute prefix inside copied `.d` files.** Recovers dependencies only (local crate
+   source paths still change) and depends on a private cargo format. Hack of last resort.
+
+## The measurement that decides between them
+
+What share of a cold build is the ~460 dependency units versus our ~50 local units and ~40 proof
+binaries? If dependencies dominate, option 2 alone may be enough and the pool never needs building.
+Take this measurement before committing to a design.
+
+## Watch
+
+- Whatever lands must keep concurrent runs genuinely independent — the reason per-worktree targets
+  exist is that a shared cache once produced phantom "cannot find X" failures that read as real gate
+  failures.
+- Task 0056 (cheap per-round gate, full suite at merge) is complementary, not a substitute: a
+  build-only gate still pays the cold compile once per worktree.
+
+## Done when
+
+A second and subsequent run in a given slot (or against the shared cache) compiles incrementally
+rather than from scratch; a repo gate in a run's worktree completes in single-digit minutes;
+concurrent runs neither wait on each other for the whole build nor invalidate each other's
+workspace crates; and the gate `timeout-ms` stops needing to track the repo's growth.
