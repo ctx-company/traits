@@ -409,6 +409,68 @@ mod tests {
     }
 
     #[test]
+    fn every_stage_preserves_its_first_failure_against_late_updates() {
+        let stages = [
+            (StartupStage::Initialization, "Initialization"),
+            (StartupStage::Trust, "Trust gate"),
+            (StartupStage::Harness, "Harness probe"),
+            (StartupStage::Worktree, "Worktree"),
+            (StartupStage::Seeding, "Seeding"),
+            (StartupStage::Warm, "Warm"),
+        ];
+
+        for (failed_stage, label) in stages {
+            let view = StartupView {
+                inner: Arc::new(Mutex::new(Inner {
+                    pane: None,
+                    interrupted: false,
+                    rows: stages
+                        .into_iter()
+                        .map(|(stage, row_label)| Row {
+                            stage,
+                            label: row_label,
+                            state: State::Pending,
+                            detail: "pending".to_string(),
+                        })
+                        .collect(),
+                })),
+            };
+            let first_failure = format!("{label} refused");
+            view.apply(StartupUpdate {
+                stage: failed_stage,
+                state: StartupStageState::Running,
+                detail: "starting".to_string(),
+            });
+            view.apply(StartupUpdate {
+                stage: failed_stage,
+                state: StartupStageState::Failed,
+                detail: first_failure.clone(),
+            });
+            view.apply(StartupUpdate {
+                stage: failed_stage,
+                state: StartupStageState::Running,
+                detail: "stale retry".to_string(),
+            });
+            view.apply(StartupUpdate {
+                stage: failed_stage,
+                state: StartupStageState::Failed,
+                detail: "later failure".to_string(),
+            });
+
+            let inner = view.inner.lock().unwrap();
+            for row in &inner.rows {
+                if row.stage == failed_stage {
+                    assert_eq!(row.state, State::Failed, "{label}");
+                    assert_eq!(row.detail, first_failure, "{label}");
+                } else {
+                    assert_eq!(row.state, State::Pending, "{label} changed {:?}", row.stage);
+                    assert_eq!(row.detail, "pending", "{label} changed {:?}", row.stage);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn interruption_prevents_later_observer_updates_from_erasing_failure() {
         let view = StartupView {
             inner: Arc::new(Mutex::new(Inner {

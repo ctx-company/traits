@@ -1451,7 +1451,135 @@ pub fn run_info(
 #[cfg(test)]
 mod startup_observer_tests {
     use super::*;
+    use std::process::Command;
     use std::sync::{Arc, Mutex};
+
+    const CHILD_TEST_ROOT: &str = "CTX_TRAITS_STARTUP_OBSERVER_TEST_ROOT";
+
+    fn run_in_isolated_child() -> bool {
+        if std::env::var_os(CHILD_TEST_ROOT).is_some() {
+            return true;
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "ctx-traits-startup-observer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let test_name = std::thread::current().name().unwrap().to_string();
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test_name, "--nocapture"])
+            .current_dir(&root)
+            .env(CHILD_TEST_ROOT, &root)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &home)
+            .status()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            status.success(),
+            "isolated startup observer test failed: {test_name}"
+        );
+        false
+    }
+
+    fn child_test_root() -> std::path::PathBuf {
+        std::env::var_os(CHILD_TEST_ROOT)
+            .map(std::path::PathBuf::from)
+            .expect("startup observer fixture must run in its isolated child")
+    }
+
+    struct StartupFixture {
+        root: std::path::PathBuf,
+        trait_path: String,
+    }
+
+    impl StartupFixture {
+        fn approved() -> Self {
+            let root = child_test_root();
+            let generated = root.join(".ctx/traits/startup-fixture/generated");
+            std::fs::create_dir_all(&generated).unwrap();
+            let trait_path = generated.join("index.toml");
+            std::fs::write(
+                &trait_path,
+                "id = \"startup-fixture\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Startup fixture\"\nsummary = \"startup observer fixture\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+            )
+            .unwrap();
+            std::fs::write(
+                generated.parent().unwrap().join("trait.toml"),
+                "[package]\nid = \"startup-fixture\"\nversion = \"0.1.0\"\nname = \"Startup fixture\"\nstatus = \"ready\"\n",
+            )
+            .unwrap();
+            let trait_path = trait_path.to_string_lossy().into_owned();
+            let loaded = load_trait_source(Some(&trait_path), None, "test").unwrap();
+            crate::trust::update_named_digest(
+                "startup-fixture",
+                &loaded.canonical_digest,
+                crate::trust::TrustState::Verified,
+                Some("startup observer fixture".to_string()),
+            )
+            .unwrap();
+            assert!(matches!(
+                crate::lifecycle::authorize_start(
+                    &loaded.trait_root,
+                    "startup-fixture",
+                    &loaded.canonical_digest
+                )
+                .unwrap()
+                .decision,
+                crate::trust::StartTrust::Verified(_)
+            ));
+            Self { root, trait_path }
+        }
+
+        fn start(
+            &self,
+            worktree: Option<Option<&str>>,
+            trait_args: &[String],
+            expect_success: bool,
+        ) -> Vec<StartupUpdate> {
+            let updates = Arc::new(Mutex::new(Vec::new()));
+            let observed = Arc::clone(&updates);
+            let result = start(StartRequest {
+                trait_file: Some(&self.trait_path),
+                trait_id: None,
+                query: None,
+                trait_args,
+                input_values: Vec::new(),
+                out: None,
+                session_store: None,
+                ephemeral: true,
+                resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+                assign_overrides: &[],
+                agent_assignments: None,
+                provider_capability_reports: Vec::new(),
+                provider_warnings: Vec::new(),
+                harness_probes: Vec::new(),
+                caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+                state_source: "test",
+                trait_arg_evidence: "test",
+                worktree,
+                defer_commands: false,
+                narrate_progress: false,
+                startup_observer: Some(Arc::new(move |update| {
+                    observed.lock().unwrap().push(update)
+                })),
+                strict_loops: false,
+                merge_rung: None,
+            });
+            if expect_success {
+                result.unwrap();
+            } else {
+                assert!(result.is_err());
+            }
+            updates.lock().unwrap().clone()
+        }
+    }
 
     #[test]
     fn startup_observer_does_not_classify_setup_text_as_seed_or_warm() {
@@ -1475,15 +1603,11 @@ mod startup_observer_tests {
 
     #[test]
     fn startup_observer_hides_untrusted_trait_details() {
+        if !run_in_isolated_child() {
+            return;
+        }
         const SENTINEL: &str = "PREAUTH_SENTINEL";
-        let root = std::env::temp_dir().join(format!(
-            "ctx-traits-startup-observer-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = child_test_root();
         let generated = root.join(format!(".ctx/traits/{SENTINEL}/generated"));
         std::fs::create_dir_all(&generated).unwrap();
         let trait_path = generated.join("index.toml");
@@ -1540,12 +1664,24 @@ mod startup_observer_tests {
         assert_eq!(
             details
                 .iter()
-                .map(|update| update.detail.as_str())
+                .map(|update| (update.stage, update.state, update.detail.as_str()))
                 .collect::<Vec<_>>(),
             vec![
-                "loading trait",
-                "checking lifecycle and trust",
-                "trait authorization was refused"
+                (
+                    StartupStage::Initialization,
+                    StartupStageState::Running,
+                    "loading trait"
+                ),
+                (
+                    StartupStage::Trust,
+                    StartupStageState::Running,
+                    "checking lifecycle and trust"
+                ),
+                (
+                    StartupStage::Trust,
+                    StartupStageState::Failed,
+                    "trait authorization was refused"
+                ),
             ]
         );
         assert!(
@@ -1553,7 +1689,136 @@ mod startup_observer_tests {
                 .iter()
                 .all(|update| !update.detail.contains(SENTINEL))
         );
-        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn startup_observer_reports_no_worktree_stages_in_order_without_reopening_terminals() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let fixture = StartupFixture::approved();
+        let updates = fixture.start(None, &[], true);
+        let tuples = updates
+            .iter()
+            .map(|update| (update.stage, update.state))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tuples,
+            vec![
+                (StartupStage::Initialization, StartupStageState::Running),
+                (StartupStage::Trust, StartupStageState::Running),
+                (StartupStage::Trust, StartupStageState::Done),
+                (StartupStage::Harness, StartupStageState::Running),
+                (StartupStage::Harness, StartupStageState::Running),
+                (StartupStage::Harness, StartupStageState::Done),
+                (StartupStage::Worktree, StartupStageState::Done),
+                (StartupStage::Seeding, StartupStageState::Done),
+                (StartupStage::Warm, StartupStageState::Done),
+                (StartupStage::Initialization, StartupStageState::Done),
+            ]
+        );
+        assert_eq!(
+            updates[6..9]
+                .iter()
+                .map(|update| update.detail.as_str())
+                .collect::<Vec<_>>(),
+            vec!["not requested", "not requested", "not requested"]
+        );
+        assert_terminal_states_are_monotonic(&updates);
+    }
+
+    #[test]
+    fn startup_observer_attributes_deterministic_harness_and_worktree_failures() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let fixture = StartupFixture::approved();
+        let updates = fixture.start(None, &["--unknown=value".to_string()], false);
+        assert_eq!(
+            updates.last().map(|update| (update.stage, update.state)),
+            Some((StartupStage::Harness, StartupStageState::Failed))
+        );
+        let updates = fixture.start(Some(Some("../invalid")), &[], false);
+        assert_eq!(
+            updates.last().map(|update| (update.stage, update.state)),
+            Some((StartupStage::Worktree, StartupStageState::Failed))
+        );
+        assert_terminal_states_are_monotonic(&updates);
+    }
+
+    #[test]
+    fn startup_observer_orders_configured_worktree_substages_without_reopening_them() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let fixture = StartupFixture::approved();
+        std::fs::write(
+            fixture.root.join(".gitignore"),
+            ".ctx/worktrees/\nseed.txt\nwarm-valid/\n",
+        )
+        .unwrap();
+        std::fs::write(fixture.root.join("seed.txt"), "seed\n").unwrap();
+        std::fs::create_dir_all(fixture.root.join("warm-valid")).unwrap();
+        std::fs::write(fixture.root.join("warm-valid/cache"), "warm\n").unwrap();
+        std::fs::write(
+            fixture.root.join(".ctx/config.toml"),
+            "[worktree]\nseed = [\"seed.txt\"]\nwarm = [\"warm-valid\"]\n",
+        )
+        .unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "startup@example.invalid"],
+            vec!["config", "user.name", "Startup observer"],
+            vec!["add", "-A"],
+            vec!["commit", "-qm", "startup fixture"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(&fixture.root)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+
+        let updates = fixture.start(Some(Some("observer-order")), &[], true);
+
+        let stages = updates
+            .iter()
+            .map(|update| update.stage)
+            .collect::<Vec<_>>();
+        let worktree = stages
+            .iter()
+            .position(|stage| *stage == StartupStage::Worktree)
+            .unwrap();
+        let seeding = stages
+            .iter()
+            .position(|stage| *stage == StartupStage::Seeding)
+            .unwrap();
+        let warm = stages
+            .iter()
+            .position(|stage| *stage == StartupStage::Warm)
+            .unwrap();
+        assert!(
+            worktree < seeding && seeding < warm,
+            "configured worktree stages were not ordered Worktree -> Seeding -> Warm: {updates:?}"
+        );
+        assert_terminal_states_are_monotonic(&updates);
+    }
+
+    fn assert_terminal_states_are_monotonic(updates: &[StartupUpdate]) {
+        let mut terminal = BTreeSet::new();
+        for update in updates {
+            assert!(
+                !terminal.contains(&update.stage) || update.state != StartupStageState::Running,
+                "terminal startup stage {:?} reopened: {updates:?}",
+                update.stage
+            );
+            if update.state != StartupStageState::Running {
+                terminal.insert(update.stage);
+            }
+        }
     }
 }
 

@@ -753,7 +753,25 @@ fn epoch_seconds() -> String {
 mod tests {
     use super::*;
 
-    static TRUST_STORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    const CHILD_CONFIG_HOME: &str = "CTX_TRAITS_TRUST_TEST_CONFIG_HOME";
+
+    fn run_with_isolated_config_home() -> bool {
+        if std::env::var_os(CHILD_CONFIG_HOME).is_some() {
+            return true;
+        }
+
+        let root = scratch_dir("child-config");
+        let test_name = std::thread::current().name().unwrap().to_string();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test_name, "--nocapture"])
+            .env(CHILD_CONFIG_HOME, &root)
+            .env("XDG_CONFIG_HOME", &root)
+            .status()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+        assert!(status.success(), "isolated trust test failed: {test_name}");
+        false
+    }
 
     fn record(digest: &str, state: TrustState, seq: Option<u64>) -> TrustRecord {
         TrustRecord {
@@ -967,15 +985,8 @@ mod tests {
 
     #[test]
     fn update_digests_locked_computes_supersession_only_for_a_different_digest() {
-        let _lock = TRUST_STORE_TEST_LOCK.lock().unwrap();
-        let dir = scratch_dir("locked-write");
-        // Isolate the global config root this process resolves the trust
-        // store under — parallel tests mutating this env var would race, so
-        // this is deliberately the one test in this module that touches it
-        // (P534 review blocker 1's noted env-global test-isolation risk).
-        let previous = std::env::var_os("XDG_CONFIG_HOME");
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", dir.as_std_path());
+        if !run_with_isolated_config_home() {
+            return;
         }
 
         let digest_x = format!("sha256:{}", "a".repeat(64));
@@ -1009,22 +1020,12 @@ mod tests {
         .expect("second write");
         let supersedes = second[0].supersedes.as_ref().expect("supersedes digest_x");
         assert_eq!(supersedes.digest, digest_x);
-
-        unsafe {
-            match previous {
-                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
-            }
-        }
     }
 
     #[test]
     fn update_after_block_supersedes_prior_verified_digest() {
-        let _lock = TRUST_STORE_TEST_LOCK.lock().unwrap();
-        let dir = scratch_dir("locked-write-after-block");
-        let previous = std::env::var_os("XDG_CONFIG_HOME");
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", dir.as_std_path());
+        if !run_with_isolated_config_home() {
+            return;
         }
 
         let digest_a = format!("sha256:{}", "a".repeat(64));
@@ -1058,13 +1059,6 @@ mod tests {
             Some(&digest_a),
             "a block is not approval evidence that a later approval supersedes"
         );
-
-        unsafe {
-            match previous {
-                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
-            }
-        }
     }
 
     #[test]

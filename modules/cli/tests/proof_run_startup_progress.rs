@@ -108,6 +108,136 @@ fn make_delayed_config_fifo(fixture: &Fixture) {
     assert!(status.success(), "could not create delayed config FIFO");
 }
 
+fn failed_startup_pty(
+    fixture: &Fixture,
+    command: &str,
+    label: &str,
+    reason: &str,
+    check_termios: bool,
+) {
+    let output = Command::new("expect")
+        .args([
+            "-c",
+            r#"
+                set timeout 30
+                set child_status {}
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_COMMAND); status=\$?; stty -a > .ctx/startup-failure-termios; printf '__STARTUP_FAILURE_COMPLETE__\\n'; exit \$status"
+                expect {
+                    -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
+                    eof { set child_status [wait] }
+                }
+                if {[lindex $child_status 3] == 0} { exit 1 }
+            "#,
+        ])
+        .current_dir(&fixture.repo)
+        .env_clear()
+        .env("HOME", &fixture.home)
+        .env("XDG_CONFIG_HOME", &fixture.home)
+        .env("XDG_CACHE_HOME", &fixture.home)
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("TERM", "xterm-256color")
+        .env("CTX_STARTUP_BIN", ctx_bin())
+        .env("CTX_STARTUP_COMMAND", command)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "failed startup PTY failed: {output:?}"
+    );
+    let output = String::from_utf8_lossy(&output.stdout);
+    let marker = output
+        .find("__STARTUP_FAILURE_COMPLETE__")
+        .unwrap_or_else(|| panic!("post-exit failure marker was not visible: {output:?}"));
+    let committed = &output[..marker];
+    assert!(
+        committed.contains(label),
+        "failed startup did not preserve {label:?} in scrollback: {output:?}"
+    );
+    assert!(
+        committed.contains(reason),
+        "failed startup did not preserve {reason:?} in scrollback: {output:?}"
+    );
+    if check_termios {
+        let termios =
+            fs::read_to_string(fixture.repo.join(".ctx/startup-failure-termios")).unwrap();
+        let flags = termios.split_whitespace().collect::<Vec<_>>();
+        assert!(
+            flags.contains(&"icanon")
+                && flags.contains(&"echo")
+                && !flags.contains(&"-icanon")
+                && !flags.contains(&"-echo"),
+            "failed startup left the slave terminal in raw mode: {termios:?}"
+        );
+    }
+}
+
+#[test]
+fn startup_pty_commits_each_failed_stage_before_restoring_the_terminal() {
+    let fixture = command_trait_fixture();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run --file missing.toml",
+        "Initialization",
+        "trait authorization was refused",
+        true,
+    );
+
+    let fixture = untrusted_query_fixture();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run -- benign",
+        "Trust gate",
+        "trait authorization was refused",
+        false,
+    );
+
+    let fixture = command_trait_fixture();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run --file .ctx/traits/demo/generated/index.toml -- --unknown=value",
+        "Harness probe",
+        "unknown trait argument",
+        false,
+    );
+
+    let fixture = command_trait_fixture();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run --file .ctx/traits/demo/generated/index.toml --worktree=../invalid",
+        "Worktree",
+        "worktree id",
+        false,
+    );
+
+    let fixture = command_trait_fixture();
+    fs::write(
+        fixture.repo.join(".ctx/config.toml"),
+        "[worktree]\nseed = [\"../invalid\"]\n",
+    )
+    .unwrap();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run --file .ctx/traits/demo/generated/index.toml --worktree=seed-failure",
+        "Seeding",
+        "worktree seed",
+        false,
+    );
+
+    let fixture = command_trait_fixture();
+    fs::write(
+        fixture.repo.join(".ctx/config.toml"),
+        "[worktree]\nwarm = [\"../invalid\"]\n",
+    )
+    .unwrap();
+    failed_startup_pty(
+        &fixture,
+        "$CTX_STARTUP_BIN traits run --file .ctx/traits/demo/generated/index.toml --worktree=warm-failure",
+        "Warm",
+        "worktree warm path",
+        false,
+    );
+}
+
 #[test]
 fn startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable() {
     let fixture = command_trait_fixture();
@@ -157,11 +287,13 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
             "-c",
             r#"
                 set timeout 30
-                spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml"
+                set child_status {}
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml; status=\$?; stty -a > .ctx/startup-success-termios; printf '__STARTUP_HANDOFF_COMPLETE__\\n'; exit \$status"
                 expect {
                     -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
-                    eof
+                    eof { set child_status [wait] }
                 }
+                if {[lindex $child_status 3] != 0} { exit 1 }
             "#,
         ])
         .current_dir(&fixture.repo)
@@ -187,6 +319,23 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
     assert!(
         output.contains("information"),
         "startup pane did not hand off into the live run layout: {output:?}"
+    );
+    assert!(
+        output.contains("__STARTUP_HANDOFF_COMPLETE__"),
+        "post-exit shell marker was not visible after startup handoff: {output:?}"
+    );
+    assert!(
+        output.find("Run startup") < output.find("information"),
+        "startup content did not precede the live run content: {output:?}"
+    );
+    let termios = fs::read_to_string(fixture.repo.join(".ctx/startup-success-termios")).unwrap();
+    let flags = termios.split_whitespace().collect::<Vec<_>>();
+    assert!(
+        flags.contains(&"icanon")
+            && flags.contains(&"echo")
+            && !flags.contains(&"-icanon")
+            && !flags.contains(&"-echo"),
+        "successful handoff left the slave terminal in raw mode: {termios:?}"
     );
 }
 

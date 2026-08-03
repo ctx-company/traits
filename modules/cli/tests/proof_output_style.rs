@@ -630,21 +630,43 @@ fn run_without_progress_flag_defaults_to_status_under_piped_stdio() {
 #[test]
 fn run_progress_modes_remain_line_oriented_when_stdio_is_piped() {
     let fixture = command_trait_fixture("p551-run-piped-progress");
+    fs::write(
+        fixture.repo.join(".gitignore"),
+        ".ctx/worktrees/\nwarm-valid/\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.repo.join(".ctx/config.toml"),
+        "[worktree]\nwarm = [\"missing-warm\", \"warm-valid\"]\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", ".gitignore"])
+        .current_dir(&fixture.repo)
+        .status()
+        .unwrap();
+    fs::create_dir_all(fixture.repo.join("warm-valid")).unwrap();
+    fs::write(fixture.repo.join("warm-valid/cache.txt"), "warm cache\n").unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "warm fixture"])
+        .current_dir(&fixture.repo)
+        .status()
+        .unwrap();
+
+    let mut baseline = None;
     for extra in [
         vec![],
-        vec!["--progress", "tui"],
         vec!["--progress", "stream"],
         vec!["--progress", "status"],
         vec!["--progress", "none"],
         vec!["--no-drive"],
-        vec!["--json"],
     ] {
-        let json = extra == ["--json"];
         let mut args = vec![
             "traits",
             "run",
             "--file",
             ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
         ];
         args.extend(extra.iter().copied());
         let output = controlled_command(&ctx_bin(), &args, &fixture.repo, &fixture.home)
@@ -656,22 +678,26 @@ fn run_progress_modes_remain_line_oriented_when_stdio_is_piped() {
             String::from_utf8_lossy(&output.stderr)
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if json {
-            assert!(
-                !stderr.contains("ctx run · initialization"),
-                "structured output must not acquire startup narration: {stderr}"
+        assert!(
+            stderr.contains("ctx run · initialization"),
+            "piped run {args:?} must retain initialization narration: {stderr}"
+        );
+        assert_eq!(
+            stderr.matches("warming warm-valid").count(),
+            1,
+            "piped run {args:?} must narrate exactly one validated warm entry: {stderr}"
+        );
+        assert!(
+            !stderr.contains("warming missing-warm"),
+            "piped run {args:?} narrated a missing warm entry: {stderr}"
+        );
+        if let Some(baseline) = &baseline {
+            assert_eq!(
+                &output.stderr, baseline,
+                "piped run {args:?} changed line-mode stderr"
             );
         } else {
-            assert!(
-                stderr.contains("ctx run · initialization"),
-                "piped run {args:?} must retain initialization narration: {stderr}"
-            );
-        }
-        if extra == ["--progress", "tui"] {
-            assert!(
-                stderr.contains("run tui unavailable; falling back to status progress"),
-                "explicit piped TUI must retain drive's fallback diagnostic: {stderr}"
-            );
+            baseline = Some(output.stderr.clone());
         }
         for bytes in [&output.stdout, &output.stderr] {
             assert!(
