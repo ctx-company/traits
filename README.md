@@ -15,11 +15,14 @@ brew install ctx-company/tap/ctx
 
 ### Direct download
 Every release publishes a `ctx` binary for macOS and Linux, on both Intel and ARM.
-Pick your platform's archive from the [latest release](https://github.com/ctx-company/traits/releases/latest):
+Set `VERSION` to the [latest release](https://github.com/ctx-company/traits/releases/latest)
+and `TARGET` to one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`:
 
 ```sh
-curl -fsSL https://github.com/ctx-company/traits/releases/latest/download/ctx-v0.1.0-alpha.1-aarch64-apple-darwin.tar.gz \
-    | tar -xz -C /usr/local/bin
+VERSION=0.1.0-alpha.1 TARGET=aarch64-apple-darwin \
+    sh -c 'curl -fsSL "https://github.com/ctx-company/traits/releases/download/v${VERSION}/ctx-v${VERSION}-${TARGET}.tar.gz" \
+    | tar -xz -C /usr/local/bin'
 ```
 
 ### From source
