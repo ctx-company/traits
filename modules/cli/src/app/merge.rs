@@ -2265,7 +2265,8 @@ fn run_landing_gate(
                     timed_out: outcome.timed_out,
                 });
             }
-            if !outcome.success || outcome.stdout_truncated || outcome.stderr_truncated {
+            let truncated = outcome.stdout_truncated || outcome.stderr_truncated;
+            if !outcome.success {
                 if let Some(capture_path) = run.capture_path {
                     gate_evidence.push(format!("gate-output={capture_path}"));
                 }
@@ -2274,16 +2275,37 @@ fn run_landing_gate(
                     run_id,
                     MergeStage::Gates,
                     format!(
-                        "{}{label} failed: exit={:?} timed-out={} truncated={}",
+                        "{}{label} failed: exit={:?} timed-out={} truncated={truncated}",
                         reasons::GATE_FAILED_PREFIX,
                         outcome.exit_code,
                         outcome.timed_out,
-                        outcome.stdout_truncated || outcome.stderr_truncated
                     ),
                     gate_evidence,
                     retry_warnings,
                     live,
                 ));
+            }
+            // Truncation is a property of OUR COPY of the output, never of the
+            // gate's verdict — the exit code is the verdict, and a gate that
+            // exited 0 passed. Parking on truncation alone turned every green
+            // gate red the moment `just test-full` grew past the 64 KiB
+            // capture limit (its output is ~71 KiB: a full workspace build
+            // plus ~40 proof binaries), so every run in flight parked with
+            // `exit=Some(0)` and nothing to fix. Record where the complete
+            // output lives and carry on.
+            if truncated {
+                if let Some(capture_path) = run.capture_path {
+                    gate_evidence.push(format!("gate-output={capture_path}"));
+                    gate_warnings.push(format!(
+                        "{label} passed, but its output exceeded the capture limit; \
+                         the complete output is at {capture_path}"
+                    ));
+                } else {
+                    gate_warnings.push(format!(
+                        "{label} passed, but its output exceeded the capture limit \
+                         and no capture file was written"
+                    ));
+                }
             }
         }
     }
