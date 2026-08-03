@@ -439,6 +439,19 @@ pub fn resolve_worktree_env_overlay(
 /// worktree rather than the invocation checkout (P564).
 const WORKTREE_ENV_TOKEN: &str = "{worktree}";
 
+/// The `[worktree.env]` token that resolves to a STABLE build-cache directory
+/// leased to this run's worktree (0057).
+///
+/// `{worktree}` gives every run its own path, which is what keeps concurrent
+/// runs from colliding — but a path that is new every run is a build cache
+/// that is cold every run, because every toolchain anchors freshness to
+/// absolute paths. This token keeps the isolation and drops the coldness: it
+/// resolves to one of a small fixed set of directories under the repository's
+/// global cache root, leased so that no two LIVE worktrees hold the same one
+/// and a finished run's warmed directory is handed to the next run. See
+/// [`crate::target_slot`].
+const CACHE_SLOT_ENV_TOKEN: &str = "{cache-slot}";
+
 fn resolve_worktree_env_value(
     value: &str,
     repo_root: &Utf8Path,
@@ -465,6 +478,37 @@ fn resolve_worktree_env_value(
             worktree_root.to_string()
         } else {
             worktree_root.join(rest).to_string()
+        }));
+    }
+    if value == CACHE_SLOT_ENV_TOKEN || value.starts_with(&format!("{CACHE_SLOT_ENV_TOKEN}/")) {
+        let rest = value
+            .strip_prefix(CACHE_SLOT_ENV_TOKEN)
+            .unwrap_or_default()
+            .trim_start_matches('/');
+        if rest.split('/').any(|segment| segment == "..") {
+            return invalid_config(
+                "worktree.env",
+                format!("{CACHE_SLOT_ENV_TOKEN} value {value:?} must not contain a '..' segment"),
+            );
+        }
+        // No worktree means no lease to take: a host-side command falls back
+        // to its own default rather than borrowing a slot some run may hold.
+        let Some(worktree_root) = worktree_root else {
+            return Ok(None);
+        };
+        let main_root = crate::repository::discover_main_repo_root(repo_root)?;
+        let canonical = crate::state::canonical_repo_root(&main_root)?;
+        let key = crate::state::repo_key(&canonical);
+        let slots_root = crate::state::global_cache_root(&key)?.join("build-slots");
+        let slot = crate::target_slot::resolve(
+            &slots_root,
+            worktree_root,
+            crate::target_slot::DEFAULT_TARGET_SLOTS,
+        )?;
+        return Ok(Some(if rest.is_empty() {
+            slot.to_string()
+        } else {
+            slot.join(rest).to_string()
         }));
     }
     resolve_shared_worktree_env_value(value, repo_root).map(Some)
@@ -6566,6 +6610,38 @@ mod config_tests {
         assert!(!without.contains_key("CARGO_TARGET_DIR"));
         assert!(!without.contains_key("WORKTREE_ROOT"));
         assert_eq!(without.get("PLAIN").map(String::as_str), Some("verbatim"));
+    }
+
+    /// 0057: with no worktree there is no lease to take, so the entry is
+    /// DROPPED rather than resolved — a host-side command must fall back to
+    /// its own default, never borrow a slot a live run may be building in.
+    #[test]
+    fn a_cache_slot_overlay_is_dropped_when_no_worktree_is_in_play() {
+        let mut env = BTreeMap::new();
+        env.insert("CARGO_TARGET_DIR".to_string(), "{cache-slot}".to_string());
+        let resolved =
+            resolve_worktree_env_overlay(&env, Utf8Path::new("/repo"), None).expect("resolve");
+        assert!(
+            resolved.is_empty(),
+            "a slot must never be leased for a spawn that has no worktree: {resolved:?}"
+        );
+    }
+
+    /// A traversal would climb out of the leased slot and back into a shared
+    /// path — reintroducing the cross-run collision the lease exists to end.
+    #[test]
+    fn a_cache_slot_overlay_refuses_a_traversal_segment() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "CARGO_TARGET_DIR".to_string(),
+            "{cache-slot}/../shared".to_string(),
+        );
+        let error = resolve_worktree_env_overlay(&env, Utf8Path::new("/repo"), None)
+            .expect_err("traversal must be refused at resolution");
+        assert!(
+            error.to_string().contains(".."),
+            "the refusal must name the traversal: {error}"
+        );
     }
 
     /// A traversal out of the worktree lands back in the shared checkout,

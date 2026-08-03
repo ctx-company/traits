@@ -73,6 +73,7 @@ pub mod run_queue;
 pub mod run_session;
 pub mod run_summary;
 pub mod state;
+pub mod target_slot;
 pub mod tripwire;
 pub mod trust;
 pub mod worktree;

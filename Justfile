@@ -1,4 +1,12 @@
-checkout_target_dir := justfile_directory() / "target"
+# Where the gates build. An inherited CARGO_TARGET_DIR wins, falling back to
+# this checkout's own target. The fallback is why gates in a run's worktree
+# used to be cold every time: `justfile_directory()` is the WORKTREE inside a
+# run, so each run built into a brand-new path and every toolchain treats a
+# moved cache as no cache. Runs now inherit a leased, stable slot via
+# `[worktree.env] CARGO_TARGET_DIR = "{cache-slot}"` (0057) — leased, so two
+# concurrent runs still never share one, which is what the hard override here
+# was originally defending against.
+gate_target_dir := env_var_or_default("CARGO_TARGET_DIR", justfile_directory() / "target")
 target_dir := env_var_or_default("CARGO_TARGET_DIR", "target")
 
 install:
@@ -49,7 +57,7 @@ ts-test:
 
 lint:
 	cargo fmt --check
-	CARGO_TARGET_DIR="{{checkout_target_dir}}" cargo clippy --workspace --all-targets --all-features -- -D warnings
+	CARGO_TARGET_DIR="{{gate_target_dir}}" cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # The PER-ROUND gate (0056). The implement trait's check step runs `just test`
 # every build round, in a fresh worktree, for every run — so this must stay
@@ -65,7 +73,7 @@ lint:
 test:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	export CARGO_TARGET_DIR="{{checkout_target_dir}}"
+	export CARGO_TARGET_DIR="{{gate_target_dir}}"
 	target_dir="$CARGO_TARGET_DIR"
 	just sdk-check
 	just ts-format-check
@@ -80,7 +88,7 @@ test:
 test-full:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	export CARGO_TARGET_DIR="{{checkout_target_dir}}"
+	export CARGO_TARGET_DIR="{{gate_target_dir}}"
 	target_dir="$CARGO_TARGET_DIR"
 	just sdk-check
 	just ts-format-check

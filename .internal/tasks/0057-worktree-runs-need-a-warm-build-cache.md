@@ -1,7 +1,7 @@
 # 0057 — Worktree runs pay a full cold Rust build; they need a warm cache that survives
 
-**Status:** ready to design — owner deferred the generic solution 2026-08-03; the stopgaps
-(dropping the useless clone, raising the gate ceiling) are already in · **Raised:** 2026-08-03
+**Status:** IMPLEMENTED 2026-08-03 — leased cache slots (option 1's warmth without option 1's cost
+to forensics). See "What shipped" · **Raised:** 2026-08-03
 
 ## The problem
 
@@ -33,7 +33,36 @@ per-worktree and genuinely isolated), mtime skew (the CoW clone preserves them),
   (13 worktrees held 190 GB).
 - `repo-gates` `timeout-ms` raised 30 min → 90 min so a cold build no longer parks a run at round 1.
 
-## Options, with the trade each carries
+## What shipped
+
+Neither listed option as written. Option 1 kept both paths stable but made worktrees reusable, which
+would have destroyed the per-run forensic artifact this loop is repeatedly harvested from; option 2
+kept one path stable but made concurrent runs share it. What shipped keeps the worktree per-run and
+disposable and moves ONLY the build directory to a stable path, leased:
+
+- `modules/io/src/target_slot.rs` — a small fixed set of directories under the repository's global
+  cache root (`<cache-root>/build-slots/slot-N`, `DEFAULT_TARGET_SLOTS = 4`), assigned per worktree
+  through a lock-guarded registry. The same worktree always resolves to the same slot (a run stays
+  warm across frames, and a parked worktree stays warm for its resume); no two LIVE worktrees hold
+  the same slot; a slot whose worktree no longer exists is handed to the next run, warm. No release
+  hook and no pid liveness, so a killed driver leaks nothing.
+- `{cache-slot}` — a `[worktree.env]` token beside `{worktree}`, dropped (not resolved) when there is
+  no worktree, and refusing `..` exactly as `{worktree}` does. This repo now declares
+  `CARGO_TARGET_DIR = "{cache-slot}"`.
+- `justfile` — the hard `CARGO_TARGET_DIR` override is gone; an inherited value now wins
+  (`gate_target_dir`). This is the trap noted below, and it is safe to reverse precisely because the
+  slot is leased: the override existed to stop runs SHARING a cache, which leasing prevents.
+
+Verified end-to-end through the real resolver: same worktree → same slot twice; a second live
+worktree → a different slot; a removed worktree's slot → reused by the next run.
+
+**Honest limits.** The first run in each slot is still cold — a cache cannot be seeded by copying,
+which is the whole finding above. Warmth starts from the second run per slot. And a fifth concurrent
+run, or four parked worktrees holding every slot, falls back to sharing the least-recently-assigned
+slot and pays the toolchain's build lock; prune worktrees, or raise the slot count, if that becomes
+common.
+
+## Options considered (the trade each carried)
 
 1. **Fixed worktree pool.** N slots at constant paths (`slot-1`…`slot-N`), leased per run, reset
    between runs. Both the source path and the target path recur, so dependencies AND local crates
