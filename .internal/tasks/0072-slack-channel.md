@@ -1,0 +1,58 @@
+# 0072 — The `slack` channel: one card per run, edited in place
+
+**Status:** ready to implement · **Depends on:** 0069, 0070 · **Raised:** 2026-08-03 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+Fifth slice of the handoff arc. The first channel with a secret and the first with a hard budget, so
+it is the one that proves capability-driven rendering actually works.
+
+## Decisions
+
+- **One card per run, updated — not a stream.** `Upsert` keyed `(session, channel)` with the stored
+  message `ts`. A run posts once and then edits itself as rounds land, gates report and it parks or
+  completes. A channel that posts per milestone gets muted within a week, and a muted channel is
+  worse than no channel.
+- **`Card` fidelity, `SlackBlocks` wire, hard budget.** The renderer degrades deterministically —
+  a twelve-blocker park report becomes a count, the top blockers and a link to the full brief. The
+  channel declares the budget; it never truncates. Truncation mid-structure is how a park report
+  turns into a lie.
+- **The headline is the escalation, not the status.** `needs-owner` with its one-sentence reason
+  (0047) is what makes someone open the thread. "Run parked" without it is a notification nobody
+  acts on.
+- **It cites the prior receipts.** The card links the PR and the brief path from the receipts of
+  channels that ran before it, which is the entire reason 0069 puts `prior` on the envelope. Route
+  it after `github-pr`.
+- **The token is an env-var reference in config, resolved in the host, never printed** — not in the
+  log, not in `doctor`, not in `--dry-run`. `resolve()` checks that it resolves and that the target
+  channel exists, at `doctor` time.
+- **Delivery is at-most-once with a bounded retry, then a recorded failure.** No infinite retry, no
+  silent drop. A miss you can see beats a duplicate you cannot recall.
+- **Threading is out.** No per-round replies, no thread of updates. One message, edited. Anything
+  richer belongs to a future task with evidence that this is insufficient.
+
+## Scope
+
+The `slack` channel with `Upsert` + stored `ts` + `chat.update`; `SlackBlocks` rendering from the
+`Card` fidelity with declared budget and deterministic degrade; env-referenced token resolution;
+`resolve()` covering token and channel existence; bounded retry with recorded failure;
+`--dry-run` printing the rendered blocks and destination.
+
+## Watch
+
+- **Rate limits are the real constraint**, and 0070's debounce is what respects them. Coalesce a
+  burst of milestones into one edit; never send per milestone because the API accepted the last one.
+- A message deleted by a human is not recreated (0070). Slack is also where that will actually
+  happen, so it is worth an explicit test rather than a decision on paper.
+- Posting to Slack publishes to people who did not ask. First delivery to a newly configured channel
+  should be visibly deliberate — declared in committed config, and previewable with `--dry-run`
+  before anything is sent.
+- The block kit shape is a compatibility surface with a rendering engine we do not control. Keep the
+  block construction in one place and snapshot it, so a layout change is a diff rather than an
+  archaeology exercise.
+
+## Done when
+
+A dispatched run produces one Slack card that edits itself through the run's milestones and ends
+showing the terminal state; the escalation reason is the headline of a `needs-owner` park; the card
+links the PR and brief from prior receipts; a park report far over budget degrades to a summary and
+a link rather than truncating; the token resolves from an env reference and appears in no output;
+and a failed send is recorded with its reason while the run is unaffected.

@@ -1,0 +1,66 @@
+# 0068 — The run brief: promote `story`, and make it render the ports
+
+**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-03 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+First slice of the handoff arc. The brief already exists, it is hidden, and it does not render the
+content that makes it a brief.
+
+## Decisions
+
+- **`story` IS the brief — do not build a second renderer.** `ctx traits story`
+  (`surface/cli.rs:202`) is already a read-only, offline, pure render of a persisted ledger, with
+  `--json` and `--markdown` ("PR-comment-ready markdown block") and three levels. It is
+  `#[command(hide = true)]`. Unhide it and finish it. A parallel "brief" command would be the same
+  function with a different name.
+- **`RunState` is the type, and it is not terminal-only.** It carries a `phase`
+  (`running · parked · completed · failed · landed`), so a mid-run snapshot and a terminal one are
+  the same struct through the same renderer. 0070 needs this and it costs nothing to get right now.
+- **The typed output ports render.** `story.rs:527` prints `completion: status=… outputs=<count>` —
+  a count. The park report, the feasibility verdict and the commit report ARE the handoff content;
+  rendering their number instead of their body is the defect this task exists to fix. Render
+  generically over declared ports using each port's `format` (`["structured", "table"]`), not with a
+  per-port special case.
+- **Three fidelities from one source: `Line`, `Card`, `Document`.** One line for a status row, a
+  card for a notification, a document for a PR body. Degrade rules (what a `Card` drops from a
+  twelve-blocker park report) live in the renderer, deterministic and snapshot-tested — never in a
+  consumer.
+- **`--level assisted` produces a snapshot, never a recomputation.** It spends narrator calls at
+  render time, so two renders of one ledger differ. Any assisted render that leaves this process is
+  persisted as bytes and re-read; it is never re-derived. `default` and `detailed` stay pure and may
+  be recomputed freely.
+- **0047's escalation flag is a first-class field of the brief.** Quick's verdict carries
+  `escalation: none | needs-owner` with a one-sentence reason. That is the single most actionable
+  fact a parked run produces, and a brief that buries it inside a blocker list has wasted it.
+- **The ledger is the only input.** No worktree reads, no git shelling, no provider, no network.
+  Everything the brief says is already in the run store, and keeping it that way is what makes every
+  downstream channel testable offline.
+
+## Scope
+
+`RunState` extraction from a persisted ledger; a `render(&RunState, &Spec) -> Rendered` free
+function with the three fidelities and the existing wire formats; port bodies in all three; the
+escalation flag promoted; the command unhidden with its help text rewritten for a first-class
+surface.
+
+## Watch
+
+- **The park report is not currently a port.** 0050 removed `port:park-report` from quick as
+  containment and it has not been restored, so a parked quick run's `final_outputs` does not contain
+  it. Read `slot:park-report` from `accepted_slot_values` the way `dispatch_preflight.rs` already
+  does, behind a compatibility path that names 0050 in a comment and that 0050 deletes. Do not block
+  this task on that one.
+- Unhiding makes `story`'s output a compatibility surface. `--json` in particular becomes something
+  other tools parse — settle the shape here, because changing it later is a breaking change.
+- P552's one-renderer contract applies: verify the same content at both width breakpoints.
+  0048, 0053 and 0055 touch the same renderer — coordinate or expect conflicts.
+- `assisted` degrades to `default` with a stated notice when no activity was recorded. Keep that
+  notice in the rendered output, not only on the terminal, or a delivered brief will silently claim
+  a fidelity it does not have.
+
+## Done when
+
+`ctx traits story` is a visible command; a parked run's brief shows the park report's blockers, the
+feasibility verdict and the escalation flag as content rather than a count; `Line`, `Card` and
+`Document` render from one `RunState` with deterministic degrade; an assisted render is persisted
+rather than recomputed; and the whole path runs against a stored ledger with no network and no
+model calls at `default`.

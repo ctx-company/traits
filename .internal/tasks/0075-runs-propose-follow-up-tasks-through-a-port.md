@@ -1,0 +1,51 @@
+# 0075 — Runs propose follow-up tasks through a typed port
+
+**Status:** filed, not scheduled (owner call 2026-08-03 — deferred; the mechanism it plugs into, 0064's proposal set, is itself not scheduled) · **Depends on:** 0060, 0064, 0069 · **Raised:** 2026-08-03 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+The last piece of the handoff picture. A run discovers work it is not doing — a defect it stepped
+around, a cleanup its change implies, an assumption worth checking. Today that goes into a commit
+message or is lost.
+
+## Decisions
+
+- **A typed output port, not a new mechanic.** The run emits task-shaped proposals through a
+  declared port. It stays inside the existing evidence model: digested, replayable, visible in the
+  brief, and part of the run's structured final outputs like any other port.
+- **It flows into 0064's proposal set — a third producer, not a third pipeline.** Reconcile proposes
+  from repository evidence, park-split proposes from a park report's blockers, and this proposes from
+  what the run noticed. One proposal type, one owner review surface, one accept path through the
+  read-write provider.
+- **Runs never write the board, and this does not change that.** The port is a proposal. Creation
+  happens through the provider, under the owner's read-write capability, one confirmation at a time
+  (0064). A run that could create tasks would fill the board with its own reasoning within a week.
+- **Every proposal cites checkable evidence** — a file and line, a failing case, a commit — under the
+  same rule 0064 sets for reconcile. "Might be worth looking at" is noise, and noise on a task board
+  is worse than an empty one.
+- **Deduplication composes above the provider.** Matching a proposal against existing board entries
+  is the review surface's job, using `list`/`get`. The run has no board access and must not be asked
+  to guess what already exists.
+- **Opt-in per trait.** The port is declared by traits that want it, not added to the fleet. 0062
+  already documents what a fleet-wide port change costs — every digest moves, everything relocks and
+  re-approves — and this is not worth that.
+- **The brief renders proposals.** A handoff that reports what a run *did* but not what it *found* is
+  half a handoff, and the proposals are most likely to be acted on at the moment someone reads the
+  card.
+
+## Watch
+
+- The failure mode is volume, not accuracy. A run that proposes eight follow-ups per dispatch trains
+  the owner to reject in bulk, which is how the mechanic dies. Bound it, and prefer a proposal the
+  run can point at over one it can only argue for.
+- Proposals must not become an input to the next run. Their only consumer is the owner's review
+  surface; a loop that reads its own prior proposals will elaborate them indefinitely.
+- Not the same as park-split. Split decomposes THIS task from a park report's structure; this creates
+  work the task never contained. Keep them distinct producers even though they share the object.
+- Nothing here should be reachable while the run is live — the proposals are read from the terminal
+  session's outputs, like every other handoff input.
+
+## Done when
+
+Not scheduled. When taken up: a trait may declare a follow-up proposal port; a run's proposals land
+in its structured outputs and render in its brief; they enter 0064's proposal set as a distinct
+producer; each carries checkable evidence; the owner accepts them one at a time through the
+read-write provider; and no run can create a task.
