@@ -553,15 +553,24 @@ fn merge_gate_repo_declaration_replaces_global_wholesale() {
 
 /// P477: an invalid `[merge] gate-seconds` (zero) must fail validation on
 /// the public path, exactly like `run.max-in-flight`'s existing validation.
+/// Runs against a SCRATCH repo, never `repo_root()` — same reason as the
+/// P476 note above: this repository now declares its own `[merge] gate`
+/// (0056's landing gate), and a repo-owned requirement leaf legitimately
+/// overrides a personal `$CTX_CONFIG` declaration, so pointing this proof at
+/// the live repo would test precedence rather than the validation it exists
+/// to pin.
 #[test]
 fn merge_gate_seconds_zero_is_rejected_on_public_path() {
     let scratch = ScratchRoot::new("p477-gate-seconds-validation");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    git_init(&repo);
     let config = scratch.home().join("repo.toml");
     fs::write(&config, "[merge]\ngate-seconds = 0\n").unwrap();
     let mut command = support::controlled_command(
         &support::ctx_bin(),
         &["traits", "doctor", "--config"],
-        &repo_root(),
+        &repo,
         &scratch.home(),
     );
     command.env("CTX_CONFIG", &config);
@@ -573,15 +582,24 @@ fn merge_gate_seconds_zero_is_rejected_on_public_path() {
 
 /// P477: a declared gate command with no executable (an empty argv) must
 /// fail validation on the public path.
+/// Runs against a SCRATCH repo, never `repo_root()` — same reason as the
+/// P476 note above: this repository now declares its own `[merge] gate`
+/// (0056's landing gate), and a repo-owned requirement leaf legitimately
+/// overrides a personal `$CTX_CONFIG` declaration, so pointing this proof at
+/// the live repo would test precedence rather than the validation it exists
+/// to pin.
 #[test]
 fn merge_gate_empty_command_is_rejected_on_public_path() {
     let scratch = ScratchRoot::new("p477-gate-empty-command");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    git_init(&repo);
     let config = scratch.home().join("repo.toml");
     fs::write(&config, "[merge]\ngate = [[]]\n").unwrap();
     let mut command = support::controlled_command(
         &support::ctx_bin(),
         &["traits", "doctor", "--config"],
-        &repo_root(),
+        &repo,
         &scratch.home(),
     );
     command.env("CTX_CONFIG", &config);

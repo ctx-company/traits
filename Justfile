@@ -51,7 +51,33 @@ lint:
 	cargo fmt --check
 	CARGO_TARGET_DIR="{{checkout_target_dir}}" cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+# The PER-ROUND gate (0056). The implement trait's check step runs `just test`
+# every build round, in a fresh worktree, for every run — so this must stay
+# cheap enough to pay ten times over without dominating the run. It proves the
+# round did not break the build: formatting, generated-SDK drift, lint over the
+# shipped code, and the unit tests.
+#
+# Deliberately NOT here: compiling and linking the ~40 integration proof
+# binaries and running them. That is the slow half, and several of those proofs
+# drive real runs under tight time budgets, so under concurrent dispatches they
+# fail for load rather than for defects — the loop then gets told its work is
+# broken when it is not. Those run once, at merge, via `test-full`.
 test:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	export CARGO_TARGET_DIR="{{checkout_target_dir}}"
+	target_dir="$CARGO_TARGET_DIR"
+	just sdk-check
+	just ts-format-check
+	cargo fmt --check
+	cargo clippy --workspace --all-features -- -D warnings
+	cargo test --workspace --lib
+
+# The LANDING gate (0056): everything `test` proves, plus the full proof
+# suites, run ONCE before a branch touches main. Declared as `[merge] gate` in
+# .ctx/traits/runtime.toml, so nothing lands unproven even though rounds stop
+# paying for the whole suite.
+test-full:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	export CARGO_TARGET_DIR="{{checkout_target_dir}}"
