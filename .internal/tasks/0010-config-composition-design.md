@@ -1,6 +1,24 @@
 # 0010 — Config composition: decide what OVERRIDES and what DEFAULTS
 
-**Status:** DESIGN — decide before implementing · **Raised:** 2026-07-28
+**Status:** SPLIT 2026-08-03 — the design below is DECIDED and its first implementation slice has
+landed (merge of run-a3e5fc88). The remaining implementation lives in five follow-on tasks; do not
+dispatch this file. · **Raised:** 2026-07-28
+
+## Split
+
+Run-a3e5fc88 worked this task for ten rounds and parked with five open blockers — it is bigger than
+one run. The landed slice carries the corrected tripwire, confinement and build-cache provenance
+keys plus the verified portions of requirement resolution and provenance reporting. What remains:
+
+| task | scope |
+|---|---|
+| 0010.1 | leaf-wise requirement resolution driven by classified per-leaf metadata |
+| 0010.2 | provenance carrying the semantic reason and every additive contributor |
+| 0010.3 | requirement conflicts surfaced as warnings on ordinary commands |
+| 0010.4 | leaf-wise default overlay so partial declarations stop erasing siblings |
+| 0010.5 | behavioural proof for additive-map conflicts, resolver and public path |
+
+The design record below stays as the authority those five answer to.
 
 ## The problem, in the owner's words
 
