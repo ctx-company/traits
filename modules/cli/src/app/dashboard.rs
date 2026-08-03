@@ -1056,6 +1056,7 @@ impl State {
     }
 
     fn apply_snapshot(&mut self, snapshot: &DashboardSnapshot) {
+        let selected = selected_visible_row(self);
         self.sessions = snapshot.sessions.clone();
         self.traits = snapshot.traits.clone();
         self.merges = snapshot.merges.clone();
@@ -1066,6 +1067,7 @@ impl State {
         self.has_snapshot = true;
         self.refresh_error = None;
         rebuild_visible_sessions(self);
+        restore_visible_selection(self, selected);
         resolve_initial_session(self);
         rebuild_visible_trust(self);
         let trust_ids: Vec<String> = self
@@ -1456,6 +1458,13 @@ enum VisibleRow {
     Session(usize),
 }
 
+/// Stable selection identity across reloads. The rendered row index is not
+/// stable because group headers and sessions can appear, disappear, or move.
+enum VisibleSelection {
+    Group(SessionGroup),
+    Session(String),
+}
+
 /// Rebuilds [`State::sessions_visible`] from `state.sessions` and
 /// `state.collapsed_groups` — called after every reload and every collapse
 /// toggle, never in the draw path. Every display group emits a header,
@@ -1485,6 +1494,56 @@ fn rebuild_visible_sessions(state: &mut State) {
     }
     state.sessions_visible = visible;
     state.list_sessions.set_len(state.sessions_visible.len());
+}
+
+/// Captures the logical row selected before replacing the inventory snapshot.
+fn selected_visible_row(state: &State) -> Option<VisibleSelection> {
+    match state.sessions_visible.get(state.list_sessions.selected())? {
+        VisibleRow::GroupHeader { group, .. } => Some(VisibleSelection::Group(*group)),
+        VisibleRow::Session(index) => state
+            .sessions
+            .get(*index)
+            .map(|row| VisibleSelection::Session(row.session_id.clone())),
+    }
+}
+
+/// Restores a snapshot-stable selection. A session that is no longer visible
+/// resolves to its group header, never to an unrelated session at its old row.
+fn restore_visible_selection(state: &mut State, selected: Option<VisibleSelection>) {
+    let Some(selected) = selected else {
+        return;
+    };
+    let target = match selected {
+        VisibleSelection::Group(group) => state.sessions_visible.iter().position(
+            |row| matches!(row, VisibleRow::GroupHeader { group: candidate, .. } if *candidate == group),
+        ),
+        VisibleSelection::Session(session_id) => {
+            let session = state.sessions.iter().find(|row| row.session_id == session_id);
+            state.sessions_visible.iter().position(|row| match (row, session) {
+                (VisibleRow::Session(index), Some(session)) => {
+                    state.sessions[*index].session_id == session.session_id
+                }
+                _ => false,
+            })
+            .or_else(|| {
+                session.and_then(|row| {
+                    let group = session_group(row.class, row.status.as_ref(), row.outcome.as_ref());
+                    state.sessions_visible.iter().position(
+                        |visible| matches!(visible, VisibleRow::GroupHeader { group: candidate, .. } if *candidate == group),
+                    )
+                })
+            })
+            .or_else(|| {
+                state
+                    .sessions_visible
+                    .iter()
+                    .position(|row| matches!(row, VisibleRow::GroupHeader { .. }))
+            })
+        }
+    };
+    if let Some(index) = target {
+        state.list_sessions.set_selected(index);
+    }
 }
 
 /// Rebuilds TRUST's list projection while retaining the complete trust history
@@ -5952,6 +6011,12 @@ mod tests {
         }
     }
 
+    fn snapshot_with_sessions(sessions: Vec<SessionRow>) -> DashboardSnapshot {
+        let mut state = State::new_without_worker();
+        state.sessions = sessions;
+        DashboardSnapshot::from_state(&state)
+    }
+
     #[test]
     fn dashboard_guide_tokens_standard_session_row_keeps_all_labels() {
         let mut session = row_with_id("session-1234", SessionClass::Terminal);
@@ -6220,8 +6285,108 @@ mod tests {
             Ok(std::sync::Arc::new(DashboardSnapshot::from_state(&latest))),
         ]);
 
-        assert_eq!(state.list_sessions.selected(), 3);
+        assert!(matches!(
+            state.sessions_visible.get(state.list_sessions.selected()),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Live,
+                ..
+            })
+        ));
         assert_eq!(state.sessions[0].session_id, "latest-a");
+    }
+
+    #[test]
+    fn snapshot_restores_selected_session_after_same_group_reorder() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![
+            row_with_id("A", SessionClass::Live),
+            row_with_id("B", SessionClass::Live),
+        ];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(2);
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![
+            row_with_id("B", SessionClass::Live),
+            row_with_id("A", SessionClass::Live),
+        ]));
+
+        assert_eq!(
+            selected_session(&state).map(|row| row.session_id.as_str()),
+            Some("B")
+        );
+    }
+
+    #[test]
+    fn snapshot_restores_selected_header_after_preceding_count_changes() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("live", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(2);
+        assert!(matches!(
+            state.sessions_visible.get(state.list_sessions.selected()),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Pending,
+                ..
+            })
+        ));
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![
+            row_with_id("live-a", SessionClass::Live),
+            row_with_id("live-b", SessionClass::Live),
+        ]));
+
+        assert!(matches!(
+            state.sessions_visible.get(state.list_sessions.selected()),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Pending,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn snapshot_moving_selection_into_collapsed_group_selects_its_header() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("target", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![
+            row_with_id("other", SessionClass::Live),
+            row_with_id("target", SessionClass::Terminal),
+        ]));
+
+        assert!(state.collapsed_groups.contains(&SessionGroup::Completed));
+        assert!(selected_session(&state).is_none());
+        assert!(matches!(
+            state.sessions_visible.get(state.list_sessions.selected()),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Completed,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn snapshot_with_missing_selected_session_uses_a_header() {
+        let mut state = State::new_without_worker();
+        state.sessions = vec![row_with_id("gone", SessionClass::Live)];
+        rebuild_visible_sessions(&mut state);
+        state.list_sessions.set_selected(1);
+
+        state.apply_snapshot(&snapshot_with_sessions(vec![row_with_id(
+            "other",
+            SessionClass::Live,
+        )]));
+
+        assert!(selected_session(&state).is_none());
+        assert!(matches!(
+            state.sessions_visible.get(state.list_sessions.selected()),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Live,
+                ..
+            })
+        ));
     }
 
     fn attached_view_for(id: &str) -> AttachedView {
@@ -7163,6 +7328,28 @@ mod tests {
                 .iter()
                 .any(|row| matches!(row, VisibleRow::Session(3)))
         );
+    }
+
+    #[test]
+    fn group_headers_are_not_session_action_targets() {
+        let mut state = State::new_without_worker();
+        rebuild_visible_sessions(&mut state);
+
+        assert!(matches!(
+            state.sessions_visible.first(),
+            Some(VisibleRow::GroupHeader {
+                group: SessionGroup::Live,
+                count: 0,
+                collapsed: false,
+            })
+        ));
+        assert!(selected_session(&state).is_none());
+
+        attach_selected(&mut state);
+        open_kill_modal(&mut state);
+
+        assert!(state.attached_session_id.is_none());
+        assert!(!state.modal_host.is_open());
     }
 
     // MERGES row classification (P472 §3.3): a `merges_from_inventory`-level
