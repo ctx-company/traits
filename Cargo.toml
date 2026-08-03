@@ -13,7 +13,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 # Matches the rust-toolchain.toml pin: the only compiler this workspace is
 # actually built and gated on. The previous 1.85.0 was a claim nothing checked
@@ -21,7 +21,7 @@ edition = "2024"
 rust-version = "1.97.1"
 authors = ["Oskar Cieslik"]
 license = "Apache-2.0"
-repository = "https://github.com/ctx-company/ctx-traits"
+repository = "https://github.com/ctx-company/traits"
 publish = false
 
 [workspace.dependencies]

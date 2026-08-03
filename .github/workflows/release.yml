@@ -10,6 +10,11 @@ name: Release
 # Archive naming contract, shared with modules/cli/Cargo.toml's
 # [package.metadata.binstall] and Formula/ctx.rb: ctx-v{version}-{target}.tar.gz,
 # containing the `ctx` binary at the archive root.
+#
+# The binstall metadata is inert until `ctx-traits-cli` is published to a
+# registry (the workspace sets publish = false); it is kept because it pins
+# the same naming contract this workflow and the formula depend on. Publishing
+# for `cargo binstall` waits for the ctx-company/cli consolidation.
 env:
   ARCHIVE_PREFIX: ctx
 
@@ -96,7 +101,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ needs.build.outputs.version }}"
-          repo="ctx-company/ctx-traits"
+          # Derived, never hardcoded: a literal here drifted from the real
+          # repository and every rendered download URL would have 404'd.
+          repo="${GITHUB_REPOSITORY}"
           render() {
             local target="$1" placeholder="$2"
             local sha
@@ -152,3 +159,87 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "${tag}" \
             --generate-notes
+
+  # The formula only becomes `brew install` once it lives in a tap. Kept as a
+  # separate job from `publish` so a tap failure can never leave the release
+  # itself unpublished — the archives are the product, the tap is a pointer.
+  tap:
+    name: push formula to the Homebrew tap
+    needs: [build, publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: formula
+          path: dist
+      - name: Push to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ctx-company/homebrew-tap
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          # Skipping is deliberate rather than failing: the tap repository and
+          # its token are owner-provisioned, and a release whose binaries are
+          # already published must not be reported as failed because a
+          # follow-on pointer could not be written.
+          if [[ -z "${TAP_TOKEN:-}" ]]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set — skipping the tap push."
+            echo "::warning::Install this release directly with: brew install --formula https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/ctx.rb"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp dist/ctx.rb tap/Formula/ctx.rb
+          cd tap
+          git config user.name "ctx release"
+          git config user.email "release@ctx.company"
+          git add Formula/ctx.rb
+          if git diff --cached --quiet; then
+            echo "tap already carries this formula — nothing to push"
+            exit 0
+          fi
+          git commit -m "ctx ${tag}"
+          git push
+
+  # @ctx-traits/cdk is what `ctx traits init` scaffolds a dependency on, so an
+  # unpublished CDK means a new user's first `pnpm install` fails. Its version
+  # is the package's own, NOT the tag: the binary and the authoring SDK are
+  # separately versioned artifacts that happen to release together.
+  npm:
+    name: publish @ctx-traits/cdk
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.5.0
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ctx-traits/cdk run build
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::warning::NPM_TOKEN is not set — skipping the CDK publish."
+            exit 0
+          fi
+          cd packages/cdk
+          version=$(node -p "require('./package.json').version")
+          # Republishing an existing version is an npm error, and a retagged
+          # release must stay idempotent.
+          if npm view "@ctx-traits/cdk@${version}" version >/dev/null 2>&1; then
+            echo "@ctx-traits/cdk@${version} is already published — nothing to do"
+            exit 0
+          fi
+          npm publish

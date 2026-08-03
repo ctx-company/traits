@@ -19,7 +19,7 @@ This alpha targets `ctx` CLI `0.1.0`. The CDK emits draft JSON only; `ctx traits
 delegates validation and canonical synthesis to the Rust/WASM core, so the published
 CDK version and the CLI version must be paired as above.
 
-Source: https://github.com/ctx-company/ctx-traits (`packages/cdk`).
+Source: https://github.com/ctx-company/traits (`packages/cdk`).
 
 ```ts
 import {

@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ctx-company/ctx-traits.git",
+    "url": "git+https://github.com/ctx-company/traits.git",
     "directory": "packages/config"
   },
   "publishConfig": {

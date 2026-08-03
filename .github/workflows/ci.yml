@@ -40,9 +40,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: just ts-build
 
-      # `just test` runs sdk-check, ts-format-check, `just lint`
-      # (fmt + clippy + doc) and the cargo suite.
-      - run: just test
+      # `just test-full`, NOT `just test`: since 0056 `just test` is the cheap
+      # per-round gate the implement trait pays every build round, and it
+      # deliberately skips the integration proof suites. CI is the place those
+      # must run, so it takes the landing gate — sdk-check, ts-format-check,
+      # `just lint` (fmt + clippy + doc) and the whole cargo suite.
+      - run: just test-full
       - run: just ts-typecheck
       - run: just ts-lint
       - run: just ts-test
