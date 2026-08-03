@@ -665,7 +665,7 @@ pub struct RuntimeConfig {
     /// that distinction when protecting individual leaves from CTX_CONFIG.
     #[serde(skip)]
     #[schemars(skip)]
-    authored_requirements: BTreeMap<String, AuthoredConfigLeaf>,
+    authored_requirements: BTreeMap<ConfigLeaf, AuthoredConfigLeaf>,
     /// `$CTX_CONFIG` agent defaults are applied after the matching personal
     /// qualifier has been flattened. Keeping them transient prevents a
     /// personal `[repo.*]` assignment from incorrectly beating the explicit
@@ -691,10 +691,221 @@ enum ConfigSemantic {
     Additive,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct AuthoredConfigLeaf {
     semantic: ConfigSemantic,
-    value: String,
+    value: toml::Value,
+}
+
+impl Eq for AuthoredConfigLeaf {}
+
+/// Every stable, authored RuntimeConfig leaf. Dynamic map entries are
+/// deliberately represented by their table shape; their existing per-key
+/// additive resolution remains outside this catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ConfigLeaf {
+    SchemaVersion,
+    WorktreeSeed,
+    WorktreeWarm,
+    WorktreeSetup,
+    WorktreeSetupSeconds,
+    WorktreeSetupCaptureBytes,
+    WorktreeConfinementEnabled,
+    WorktreeConfinementSandbox,
+    WorktreeConfinementAllow,
+    WorktreeEnv,
+    WorktreeTripwirePolicy,
+    WorktreeTripwireSentinel,
+    WorktreeRetentionCheap,
+    WorktreeRetentionExpensive,
+    WorktreeRetentionExpensiveGraceDays,
+    RunWorktree,
+    RunMaxFrames,
+    RunFrameSeconds,
+    RunTotalSeconds,
+    RunMaxRetries,
+    RunAttachWaitSeconds,
+    RunIdleSeconds,
+    RunMaxInFlight,
+    RunWait,
+    RunStrictLoops,
+    RunBuildCache,
+    RunInlinePromptBytes,
+    RunStory,
+    MergeWait,
+    MergeOverlap,
+    MergeAuto,
+    MergeDeep,
+    MergeBranch,
+    MergeGate,
+    MergeGateSeconds,
+    MergeGenerated,
+    MergeDiskFloorMb,
+    GitLongSeconds,
+    PublishExclude,
+    RegistryBase,
+    HarnessDynamic,
+    AgentDynamic,
+    HostDynamic,
+    RepoDynamic,
+}
+
+impl ConfigLeaf {
+    const ALL: &[Self] = &[
+        Self::SchemaVersion,
+        Self::WorktreeSeed,
+        Self::WorktreeWarm,
+        Self::WorktreeSetup,
+        Self::WorktreeSetupSeconds,
+        Self::WorktreeSetupCaptureBytes,
+        Self::WorktreeConfinementEnabled,
+        Self::WorktreeConfinementSandbox,
+        Self::WorktreeConfinementAllow,
+        Self::WorktreeEnv,
+        Self::WorktreeTripwirePolicy,
+        Self::WorktreeTripwireSentinel,
+        Self::WorktreeRetentionCheap,
+        Self::WorktreeRetentionExpensive,
+        Self::WorktreeRetentionExpensiveGraceDays,
+        Self::RunWorktree,
+        Self::RunMaxFrames,
+        Self::RunFrameSeconds,
+        Self::RunTotalSeconds,
+        Self::RunMaxRetries,
+        Self::RunAttachWaitSeconds,
+        Self::RunIdleSeconds,
+        Self::RunMaxInFlight,
+        Self::RunWait,
+        Self::RunStrictLoops,
+        Self::RunBuildCache,
+        Self::RunInlinePromptBytes,
+        Self::RunStory,
+        Self::MergeWait,
+        Self::MergeOverlap,
+        Self::MergeAuto,
+        Self::MergeDeep,
+        Self::MergeBranch,
+        Self::MergeGate,
+        Self::MergeGateSeconds,
+        Self::MergeGenerated,
+        Self::MergeDiskFloorMb,
+        Self::GitLongSeconds,
+        Self::PublishExclude,
+        Self::RegistryBase,
+        Self::HarnessDynamic,
+        Self::AgentDynamic,
+        Self::HostDynamic,
+        Self::RepoDynamic,
+    ];
+
+    fn path(self) -> &'static str {
+        match self {
+            Self::SchemaVersion => "schema-version",
+            Self::WorktreeSeed => "worktree.seed",
+            Self::WorktreeWarm => "worktree.warm",
+            Self::WorktreeSetup => "worktree.setup",
+            Self::WorktreeSetupSeconds => "worktree.setup-seconds",
+            Self::WorktreeSetupCaptureBytes => "worktree.setup-capture-bytes",
+            Self::WorktreeConfinementEnabled => "worktree.confinement.enabled",
+            Self::WorktreeConfinementSandbox => "worktree.confinement.sandbox",
+            Self::WorktreeConfinementAllow => "worktree.confinement.allow",
+            Self::WorktreeEnv => "worktree.env",
+            Self::WorktreeTripwirePolicy => "worktree.tripwire.policy",
+            Self::WorktreeTripwireSentinel => "worktree.tripwire.sentinel",
+            Self::WorktreeRetentionCheap => "worktree.retention.cheap",
+            Self::WorktreeRetentionExpensive => "worktree.retention.expensive",
+            Self::WorktreeRetentionExpensiveGraceDays => "worktree.retention.expensive-grace-days",
+            Self::RunWorktree => "run.worktree",
+            Self::RunMaxFrames => "run.max-frames",
+            Self::RunFrameSeconds => "run.frame-seconds",
+            Self::RunTotalSeconds => "run.total-seconds",
+            Self::RunMaxRetries => "run.max-retries",
+            Self::RunAttachWaitSeconds => "run.attach-wait-seconds",
+            Self::RunIdleSeconds => "run.idle-seconds",
+            Self::RunMaxInFlight => "run.max-in-flight",
+            Self::RunWait => "run.wait",
+            Self::RunStrictLoops => "run.strict-loops",
+            Self::RunBuildCache => "run.build-cache",
+            Self::RunInlinePromptBytes => "run.inline-prompt-bytes",
+            Self::RunStory => "run.story",
+            Self::MergeWait => "merge.wait",
+            Self::MergeOverlap => "merge.overlap",
+            Self::MergeAuto => "merge.auto",
+            Self::MergeDeep => "merge.deep",
+            Self::MergeBranch => "merge.branch",
+            Self::MergeGate => "merge.gate",
+            Self::MergeGateSeconds => "merge.gate-seconds",
+            Self::MergeGenerated => "merge.generated",
+            Self::MergeDiskFloorMb => "merge.disk-floor-mb",
+            Self::GitLongSeconds => "git.long-seconds",
+            Self::PublishExclude => "publish.exclude",
+            Self::RegistryBase => "registry.base",
+            Self::HarnessDynamic => "harness.*",
+            Self::AgentDynamic => "agent.*",
+            Self::HostDynamic => "host.*",
+            Self::RepoDynamic => "repo.*",
+        }
+    }
+
+    fn semantic(self) -> ConfigSemantic {
+        match self {
+            Self::WorktreeSeed
+            | Self::WorktreeWarm
+            | Self::WorktreeEnv
+            | Self::WorktreeTripwireSentinel
+            | Self::RunBuildCache
+            | Self::PublishExclude => ConfigSemantic::Additive,
+            Self::RunWait
+            | Self::RunStory
+            | Self::MergeWait
+            | Self::MergeAuto
+            | Self::MergeDeep
+            | Self::GitLongSeconds
+            | Self::RegistryBase
+            // These maps are resolved by machine-scoped qualifier handling,
+            // not by repository requirement precedence.
+            | Self::HarnessDynamic
+            | Self::AgentDynamic
+            | Self::HostDynamic
+            | Self::RepoDynamic => ConfigSemantic::Default,
+            Self::SchemaVersion
+            | Self::WorktreeSetup
+            | Self::WorktreeSetupSeconds
+            | Self::WorktreeSetupCaptureBytes
+            | Self::WorktreeConfinementEnabled
+            | Self::WorktreeConfinementSandbox
+            | Self::WorktreeConfinementAllow
+            | Self::WorktreeTripwirePolicy
+            | Self::WorktreeRetentionCheap
+            | Self::WorktreeRetentionExpensive
+            | Self::WorktreeRetentionExpensiveGraceDays
+            | Self::RunWorktree
+            | Self::RunMaxFrames
+            | Self::RunFrameSeconds
+            | Self::RunTotalSeconds
+            | Self::RunMaxRetries
+            | Self::RunAttachWaitSeconds
+            | Self::RunIdleSeconds
+            | Self::RunMaxInFlight
+            | Self::RunStrictLoops
+            | Self::RunInlinePromptBytes
+            | Self::MergeOverlap
+            | Self::MergeBranch
+            | Self::MergeGate
+            | Self::MergeGateSeconds
+            | Self::MergeGenerated
+            | Self::MergeDiskFloorMb => ConfigSemantic::Requirement,
+        }
+    }
+}
+
+impl From<&str> for ConfigLeaf {
+    fn from(path: &str) -> Self {
+        *ConfigLeaf::ALL
+            .iter()
+            .find(|leaf| leaf.path() == path)
+            .unwrap_or_else(|| panic!("unknown RuntimeConfig leaf {path}"))
+    }
 }
 
 /// `[git]` process-timeout policy (P489): the long-running side of git
@@ -2705,6 +2916,9 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
 
     let mut project = RuntimeConfig::default();
     for (layer, path, next) in &documents {
+        if *layer == ConfigLayer::Environment {
+            continue;
+        }
         merge_project_config(
             &mut project,
             next.clone(),
@@ -2729,14 +2943,11 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     }
 
     let mut runtime = project;
-    // Broad project merging preserves historic CTX_CONFIG behavior where a
-    // repository leaves a requirement absent. Re-install only repository
-    // declarations so an explicit repository requirement remains immutable.
-    for (layer, path, document) in &documents {
-        if *layer == ConfigLayer::Repo {
-            install_repo_requirements(&mut runtime, document, Some(path.to_string()), &mut winners);
-        }
-    }
+    let effective_repo_requirements = effective_repo_requirements(&documents);
+    // Project merging records most winners as it goes, but schema-version has
+    // no generic overlay branch. Record every retained requirement here from
+    // the same last-effective map that protects it from CTX_CONFIG.
+    record_effective_repo_requirement_winners(&effective_repo_requirements, &mut winners);
     // Machine tables are authoritative for these facts. Keep project-only
     // fields from the project resolution and then install machine fields.
     // Schema compatibility is document-local/repository-owned, not an
@@ -2789,6 +3000,14 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     }
     for (layer, path, document) in &documents {
         if *layer == ConfigLayer::Environment {
+            apply_environment_requirement_leaves(
+                &mut runtime,
+                document,
+                &effective_repo_requirements,
+                *layer,
+                Some(path.to_string()),
+                &mut winners,
+            );
             apply_environment_defaults(
                 &mut runtime,
                 document,
@@ -2804,7 +3023,8 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     let mut validation_agent = runtime.agent.clone();
     merge_agent_defaults(&mut validation_agent, runtime.environment_agent.clone());
     validate_agent_defaults(&validation_agent)?;
-    let requirement_conflicts = requirement_conflicts(&documents);
+    let requirement_conflicts =
+        requirement_conflicts_for_effective(&documents, &effective_repo_requirements);
     // P568: fold each built-in harness's config table over its compiled-in
     // definition ONCE, here, where the runtime document is finalized. Every
     // consumer reads `runtime.harness` directly — dispatch, narration,
@@ -2876,112 +3096,214 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     })
 }
 
-fn install_repo_requirements(
-    runtime: &mut RuntimeConfig,
-    repo: &RuntimeConfig,
-    source: Option<String>,
+fn repo_requirement(config: &RuntimeConfig, leaf: ConfigLeaf) -> bool {
+    config
+        .authored_requirements
+        .get(&leaf)
+        .is_some_and(|leaf| leaf.semantic == ConfigSemantic::Requirement)
+}
+
+type EffectiveRepoRequirements<'a> =
+    BTreeMap<ConfigLeaf, (&'a Utf8PathBuf, &'a AuthoredConfigLeaf)>;
+
+fn effective_repo_requirements(
+    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+) -> EffectiveRepoRequirements<'_> {
+    let mut effective = BTreeMap::new();
+    for (layer, path, document) in documents {
+        if *layer == ConfigLayer::Repo {
+            for (leaf, value) in &document.authored_requirements {
+                if value.semantic == ConfigSemantic::Requirement {
+                    effective.insert(*leaf, (path, value));
+                }
+            }
+        }
+    }
+    effective
+}
+
+fn record_effective_repo_requirement_winners(
+    effective: &EffectiveRepoRequirements<'_>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
-    if repo_requirement(repo, "schema-version") {
-        runtime.schema_version = repo.schema_version.clone();
+    for (leaf, (path, _)) in effective {
+        record_winner(
+            winners,
+            leaf.path(),
+            ConfigLayer::Repo,
+            Some(path.to_string()),
+        );
     }
-    if repo_requirement(repo, "worktree.setup") {
-        runtime.worktree.setup = repo.worktree.setup.clone();
-    }
-    if repo_requirement(repo, "worktree.setup-seconds") {
-        runtime.worktree.setup_seconds = repo.worktree.setup_seconds;
-    }
-    if repo_requirement(repo, "worktree.setup-capture-bytes") {
-        runtime.worktree.setup_capture_bytes = repo.worktree.setup_capture_bytes;
-    }
-    if repo_requirement(repo, "worktree.confinement.enabled") {
-        runtime.worktree.confinement.enabled = repo.worktree.confinement.enabled;
-    }
-    if repo_requirement(repo, "worktree.confinement.sandbox") {
-        runtime.worktree.confinement.sandbox = repo.worktree.confinement.sandbox;
-    }
-    if repo_requirement(repo, "worktree.confinement.allow") {
-        runtime.worktree.confinement.allow = repo.worktree.confinement.allow.clone();
-    }
-    if repo_requirement(repo, "worktree.tripwire.policy") {
-        runtime.worktree.tripwire.policy = repo.worktree.tripwire.policy;
-    }
-    if repo_requirement(repo, "worktree.retention.cheap") {
-        runtime.worktree.retention.cheap = repo.worktree.retention.cheap.clone();
-    }
-    if repo_requirement(repo, "worktree.retention.expensive") {
-        runtime.worktree.retention.expensive = repo.worktree.retention.expensive.clone();
-    }
-    if repo_requirement(repo, "worktree.retention.expensive-grace-days") {
-        runtime.worktree.retention.expensive_grace_days =
-            repo.worktree.retention.expensive_grace_days;
-    }
-    if let Some(source) = &repo.run {
-        let target = runtime.run.get_or_insert_with(RunTable::default);
-        if repo_requirement(repo, "run.worktree") {
-            target.worktree = source.worktree;
+}
+
+fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, leaf: ConfigLeaf) {
+    match leaf {
+        ConfigLeaf::SchemaVersion => target.schema_version = source.schema_version.clone(),
+        ConfigLeaf::WorktreeSetup => target.worktree.setup = source.worktree.setup.clone(),
+        ConfigLeaf::WorktreeSetupSeconds => {
+            target.worktree.setup_seconds = source.worktree.setup_seconds
         }
-        if repo_requirement(repo, "run.max-frames") {
-            target.budget.max_frames = source.budget.max_frames;
+        ConfigLeaf::WorktreeSetupCaptureBytes => {
+            target.worktree.setup_capture_bytes = source.worktree.setup_capture_bytes
         }
-        if repo_requirement(repo, "run.frame-seconds") {
-            target.budget.frame_seconds = source.budget.frame_seconds;
+        ConfigLeaf::WorktreeConfinementEnabled => {
+            target.worktree.confinement.enabled = source.worktree.confinement.enabled
         }
-        if repo_requirement(repo, "run.total-seconds") {
-            target.budget.total_seconds = source.budget.total_seconds;
+        ConfigLeaf::WorktreeConfinementSandbox => {
+            target.worktree.confinement.sandbox = source.worktree.confinement.sandbox
         }
-        if repo_requirement(repo, "run.max-retries") {
-            target.budget.max_retries = source.budget.max_retries;
+        ConfigLeaf::WorktreeConfinementAllow => {
+            target.worktree.confinement.allow = source.worktree.confinement.allow.clone()
         }
-        if repo_requirement(repo, "run.attach-wait-seconds") {
-            target.budget.attach_wait_seconds = source.budget.attach_wait_seconds;
+        ConfigLeaf::WorktreeTripwirePolicy => {
+            target.worktree.tripwire.policy = source.worktree.tripwire.policy
         }
-        if repo_requirement(repo, "run.idle-seconds") {
-            target.budget.idle_seconds = source.budget.idle_seconds;
+        ConfigLeaf::WorktreeRetentionCheap => {
+            target.worktree.retention.cheap = source.worktree.retention.cheap.clone()
         }
-        if repo_requirement(repo, "run.max-in-flight") {
-            target.max_in_flight = source.max_in_flight;
+        ConfigLeaf::WorktreeRetentionExpensive => {
+            target.worktree.retention.expensive = source.worktree.retention.expensive.clone()
         }
-        if repo_requirement(repo, "run.strict-loops") {
-            target.strict_loops = source.strict_loops;
+        ConfigLeaf::WorktreeRetentionExpensiveGraceDays => {
+            target.worktree.retention.expensive_grace_days =
+                source.worktree.retention.expensive_grace_days
         }
-        if repo_requirement(repo, "run.inline-prompt-bytes") {
-            target.inline_prompt_bytes = source.inline_prompt_bytes;
+        ConfigLeaf::RunWorktree => {
+            target.run.get_or_insert_with(RunTable::default).worktree =
+                source.run.as_ref().and_then(|run| run.worktree)
         }
-    }
-    if let Some(source) = &repo.merge {
-        let target = runtime.merge.get_or_insert_with(MergeTable::default);
-        if repo_requirement(repo, "merge.overlap") {
-            target.overlap = source.overlap;
+        ConfigLeaf::RunMaxFrames => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .max_frames = source.run.as_ref().and_then(|run| run.budget.max_frames)
         }
-        if repo_requirement(repo, "merge.branch") {
-            target.branch = source.branch.clone();
+        ConfigLeaf::RunFrameSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .frame_seconds = source.run.as_ref().and_then(|run| run.budget.frame_seconds)
         }
-        if repo_requirement(repo, "merge.gate") {
-            target.gate = source.gate.clone();
+        ConfigLeaf::RunTotalSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .total_seconds = source.run.as_ref().and_then(|run| run.budget.total_seconds)
         }
-        if repo_requirement(repo, "merge.gate-seconds") {
-            target.gate_seconds = source.gate_seconds;
+        ConfigLeaf::RunMaxRetries => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .max_retries = source.run.as_ref().and_then(|run| run.budget.max_retries)
         }
-        if repo_requirement(repo, "merge.generated") {
-            target.generated = source.generated.clone();
+        ConfigLeaf::RunAttachWaitSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .attach_wait_seconds = source
+                .run
+                .as_ref()
+                .and_then(|run| run.budget.attach_wait_seconds)
         }
-        if repo_requirement(repo, "merge.disk-floor-mb") {
-            target.disk_floor_mb = source.disk_floor_mb;
+        ConfigLeaf::RunIdleSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .idle_seconds = source.run.as_ref().and_then(|run| run.budget.idle_seconds)
         }
-    }
-    for field in repo.authored_requirements.keys() {
-        if repo_requirement(repo, field) {
-            record_winner(winners, field, ConfigLayer::Repo, source.clone());
+        ConfigLeaf::RunMaxInFlight => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .max_in_flight = source.run.as_ref().and_then(|run| run.max_in_flight)
+        }
+        ConfigLeaf::RunStrictLoops => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .strict_loops = source.run.as_ref().and_then(|run| run.strict_loops)
+        }
+        ConfigLeaf::RunInlinePromptBytes => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .inline_prompt_bytes = source.run.as_ref().and_then(|run| run.inline_prompt_bytes)
+        }
+        ConfigLeaf::MergeOverlap => {
+            target.merge.get_or_insert_with(MergeTable::default).overlap =
+                source.merge.as_ref().and_then(|merge| merge.overlap)
+        }
+        ConfigLeaf::MergeBranch => {
+            target.merge.get_or_insert_with(MergeTable::default).branch =
+                source.merge.as_ref().and_then(|merge| merge.branch.clone())
+        }
+        ConfigLeaf::MergeGate => {
+            target.merge.get_or_insert_with(MergeTable::default).gate =
+                source.merge.as_ref().and_then(|merge| merge.gate.clone())
+        }
+        ConfigLeaf::MergeGateSeconds => {
+            target
+                .merge
+                .get_or_insert_with(MergeTable::default)
+                .gate_seconds = source.merge.as_ref().and_then(|merge| merge.gate_seconds)
+        }
+        ConfigLeaf::MergeGenerated => {
+            target
+                .merge
+                .get_or_insert_with(MergeTable::default)
+                .generated = source
+                .merge
+                .as_ref()
+                .and_then(|merge| merge.generated.clone())
+        }
+        ConfigLeaf::MergeDiskFloorMb => {
+            target
+                .merge
+                .get_or_insert_with(MergeTable::default)
+                .disk_floor_mb = source.merge.as_ref().and_then(|merge| merge.disk_floor_mb)
+        }
+        ConfigLeaf::WorktreeSeed
+        | ConfigLeaf::WorktreeWarm
+        | ConfigLeaf::WorktreeEnv
+        | ConfigLeaf::WorktreeTripwireSentinel
+        | ConfigLeaf::RunWait
+        | ConfigLeaf::RunBuildCache
+        | ConfigLeaf::RunStory
+        | ConfigLeaf::MergeWait
+        | ConfigLeaf::MergeAuto
+        | ConfigLeaf::MergeDeep
+        | ConfigLeaf::GitLongSeconds
+        | ConfigLeaf::PublishExclude
+        | ConfigLeaf::RegistryBase
+        | ConfigLeaf::HarnessDynamic
+        | ConfigLeaf::AgentDynamic
+        | ConfigLeaf::HostDynamic
+        | ConfigLeaf::RepoDynamic => {
+            unreachable!("only requirement leaves are applied directly")
         }
     }
 }
 
-fn repo_requirement(config: &RuntimeConfig, field: &str) -> bool {
-    config
-        .authored_requirements
-        .get(field)
-        .is_some_and(|leaf| leaf.semantic == ConfigSemantic::Requirement)
+fn apply_environment_requirement_leaves(
+    runtime: &mut RuntimeConfig,
+    environment: &RuntimeConfig,
+    effective: &EffectiveRepoRequirements<'_>,
+    layer: ConfigLayer,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    for (leaf, value) in &environment.authored_requirements {
+        if value.semantic == ConfigSemantic::Requirement && !effective.contains_key(leaf) {
+            apply_requirement_leaf(runtime, environment, *leaf);
+            record_winner(winners, leaf.path(), layer, source.clone());
+        }
+    }
 }
 
 fn push_unique(values: &mut Vec<String>, additions: impl IntoIterator<Item = String>) {
@@ -3369,34 +3691,29 @@ fn apply_additive_values(
     }
 }
 
+#[cfg(test)]
 fn requirement_conflicts(
     documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
 ) -> Vec<ConfigRequirementConflict> {
+    requirement_conflicts_for_effective(documents, &effective_repo_requirements(documents))
+}
+
+fn requirement_conflicts_for_effective(
+    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+    effective: &EffectiveRepoRequirements<'_>,
+) -> Vec<ConfigRequirementConflict> {
     let mut output = Vec::new();
-    // Repository documents are applied in path order. Keep the effective
-    // declaration for each leaf so one rejected environment value names the
-    // source that actually remains in force.
-    let mut effective = BTreeMap::new();
-    for (layer, path, repo) in documents {
-        if *layer == ConfigLayer::Repo {
-            for (field, leaf) in &repo.authored_requirements {
-                if leaf.semantic == ConfigSemantic::Requirement {
-                    effective.insert(field.as_str(), (path, leaf));
-                }
-            }
-        }
-    }
     for (layer, path, candidate) in documents
         .iter()
         .filter(|(layer, _, _)| *layer == ConfigLayer::Environment)
     {
-        for (field, rejected) in &candidate.authored_requirements {
-            if let Some((repo_path, required)) = effective.get(field.as_str())
+        for (leaf, rejected) in &candidate.authored_requirements {
+            if let Some((repo_path, required)) = effective.get(leaf)
                 && rejected.semantic == ConfigSemantic::Requirement
                 && rejected.value != required.value
             {
                 output.push(ConfigRequirementConflict {
-                    field: field.clone(),
+                    field: leaf.path().to_string(),
                     rejected_source: path.to_string(),
                     repo_source: repo_path.to_string(),
                 });
@@ -3550,67 +3867,16 @@ pub fn load_runtime_config(path: &Utf8Path) -> crate::Result<RuntimeConfig> {
     Ok(config)
 }
 
-/// Semantic classification for every non-dynamic RuntimeConfig leaf. Dynamic
-/// map entries inherit the semantic of their enclosing table in
-/// [`config_semantic`]. Keeping defaults here too makes this a coverage list,
-/// rather than a hand-maintained exception list that can silently turn a new
-/// requirement into an overrideable default.
-const CONFIG_FIELD_SEMANTICS: &[(&str, ConfigSemantic)] = &[
-    ("schema-version", ConfigSemantic::Requirement),
-    ("worktree.seed", ConfigSemantic::Additive),
-    ("worktree.warm", ConfigSemantic::Additive),
-    ("worktree.setup", ConfigSemantic::Requirement),
-    ("worktree.setup-seconds", ConfigSemantic::Requirement),
-    ("worktree.setup-capture-bytes", ConfigSemantic::Requirement),
-    ("worktree.confinement.enabled", ConfigSemantic::Requirement),
-    ("worktree.confinement.sandbox", ConfigSemantic::Requirement),
-    ("worktree.confinement.allow", ConfigSemantic::Requirement),
-    ("worktree.env", ConfigSemantic::Additive),
-    ("worktree.tripwire.policy", ConfigSemantic::Requirement),
-    ("worktree.tripwire.sentinel", ConfigSemantic::Additive),
-    ("worktree.retention.cheap", ConfigSemantic::Requirement),
-    ("worktree.retention.expensive", ConfigSemantic::Requirement),
-    (
-        "worktree.retention.expensive-grace-days",
-        ConfigSemantic::Requirement,
-    ),
-    ("run.worktree", ConfigSemantic::Requirement),
-    ("run.max-frames", ConfigSemantic::Requirement),
-    ("run.frame-seconds", ConfigSemantic::Requirement),
-    ("run.total-seconds", ConfigSemantic::Requirement),
-    ("run.max-retries", ConfigSemantic::Requirement),
-    ("run.attach-wait-seconds", ConfigSemantic::Requirement),
-    ("run.idle-seconds", ConfigSemantic::Requirement),
-    ("run.max-in-flight", ConfigSemantic::Requirement),
-    ("run.wait", ConfigSemantic::Default),
-    ("run.strict-loops", ConfigSemantic::Requirement),
-    ("run.build-cache", ConfigSemantic::Additive),
-    ("run.inline-prompt-bytes", ConfigSemantic::Requirement),
-    ("run.story", ConfigSemantic::Default),
-    ("merge.wait", ConfigSemantic::Default),
-    ("merge.overlap", ConfigSemantic::Requirement),
-    ("merge.auto", ConfigSemantic::Default),
-    ("merge.deep", ConfigSemantic::Default),
-    ("merge.branch", ConfigSemantic::Requirement),
-    ("merge.gate", ConfigSemantic::Requirement),
-    ("merge.gate-seconds", ConfigSemantic::Requirement),
-    ("merge.generated", ConfigSemantic::Requirement),
-    ("merge.disk-floor-mb", ConfigSemantic::Requirement),
-    ("git.long-seconds", ConfigSemantic::Default),
-    ("publish.exclude", ConfigSemantic::Additive),
-    ("registry.base", ConfigSemantic::Default),
-];
-
-fn authored_requirement_values(document: &toml::Value) -> BTreeMap<String, AuthoredConfigLeaf> {
-    CONFIG_FIELD_SEMANTICS
+fn authored_requirement_values(document: &toml::Value) -> BTreeMap<ConfigLeaf, AuthoredConfigLeaf> {
+    ConfigLeaf::ALL
         .iter()
-        .filter_map(|(field, semantic)| {
-            toml_value_at(document, field).map(|value| {
+        .filter_map(|leaf| {
+            toml_value_at(document, leaf.path()).cloned().map(|value| {
                 (
-                    (*field).into(),
+                    *leaf,
                     AuthoredConfigLeaf {
-                        semantic: *semantic,
-                        value: value.to_string(),
+                        semantic: leaf.semantic(),
+                        value,
                     },
                 )
             })
@@ -3621,9 +3887,9 @@ fn authored_requirement_values(document: &toml::Value) -> BTreeMap<String, Autho
 /// The authoritative semantic classifier for concrete authored paths. Dynamic
 /// map entries are classified by their enclosing table at resolution time.
 fn config_semantic(field: &str) -> ConfigSemantic {
-    CONFIG_FIELD_SEMANTICS
+    ConfigLeaf::ALL
         .iter()
-        .find_map(|(path, semantic)| (*path == field).then_some(*semantic))
+        .find_map(|leaf| (leaf.path() == field).then_some(leaf.semantic()))
         .or_else(|| {
             ["worktree.env.", "run.build-cache."]
                 .iter()
@@ -4133,13 +4399,13 @@ fn merge_project_config(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
-    let setup_declared = repo_requirement(&next, "worktree.setup");
-    let confinement_enabled = repo_requirement(&next, "worktree.confinement.enabled");
-    let confinement_sandbox = repo_requirement(&next, "worktree.confinement.sandbox");
-    let confinement_allow = repo_requirement(&next, "worktree.confinement.allow");
-    let tripwire_policy = repo_requirement(&next, "worktree.tripwire.policy");
-    let retention_cheap = repo_requirement(&next, "worktree.retention.cheap");
-    let retention_expensive = repo_requirement(&next, "worktree.retention.expensive");
+    let setup_declared = repo_requirement(&next, ConfigLeaf::WorktreeSetup);
+    let confinement_enabled = repo_requirement(&next, ConfigLeaf::WorktreeConfinementEnabled);
+    let confinement_sandbox = repo_requirement(&next, ConfigLeaf::WorktreeConfinementSandbox);
+    let confinement_allow = repo_requirement(&next, ConfigLeaf::WorktreeConfinementAllow);
+    let tripwire_policy = repo_requirement(&next, ConfigLeaf::WorktreeTripwirePolicy);
+    let retention_cheap = repo_requirement(&next, ConfigLeaf::WorktreeRetentionCheap);
+    let retention_expensive = repo_requirement(&next, ConfigLeaf::WorktreeRetentionExpensive);
     if next.schema_version.is_some() {
         base.schema_version = next.schema_version;
     }
@@ -6400,17 +6666,17 @@ mod config_tests {
             expensive_grace_days: Some(3),
         };
         configured.authored_requirements = [
-            "worktree.retention.cheap",
-            "worktree.retention.expensive",
-            "worktree.retention.expensive-grace-days",
+            ConfigLeaf::WorktreeRetentionCheap,
+            ConfigLeaf::WorktreeRetentionExpensive,
+            ConfigLeaf::WorktreeRetentionExpensiveGraceDays,
         ]
         .into_iter()
-        .map(|field| {
+        .map(|leaf| {
             (
-                field.to_string(),
+                leaf,
                 AuthoredConfigLeaf {
                     semantic: ConfigSemantic::Requirement,
-                    value: String::new(),
+                    value: toml::Value::String(String::new()),
                 },
             )
         })
@@ -6545,26 +6811,23 @@ mod config_tests {
                     "worktree.confinement.enabled".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "false".into(),
+                        value: toml::Value::Boolean(false),
                     },
                 ),
                 (
                     "worktree.retention.cheap".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "[\"repo-cheap\"]".into(),
+                        value: toml::Value::Array(vec![toml::Value::String("repo-cheap".into())]),
                     },
                 ),
             ]),
             ..RuntimeConfig::default()
         };
 
-        install_repo_requirements(
-            &mut runtime,
-            &repo,
-            Some("repo.toml".into()),
-            &mut BTreeMap::new(),
-        );
+        for leaf in repo.authored_requirements.keys().copied() {
+            apply_requirement_leaf(&mut runtime, &repo, leaf);
+        }
 
         assert!(!runtime.worktree.confinement.enabled);
         assert!(!runtime.worktree.confinement.sandbox);
@@ -6581,7 +6844,7 @@ mod config_tests {
     fn partial_requirement_table_keeps_undeclared_fallback_siblings() {
         let leaf = |value: &str| AuthoredConfigLeaf {
             semantic: ConfigSemantic::Requirement,
-            value: value.into(),
+            value: toml::Value::String(value.into()),
         };
         let global = RuntimeConfig {
             worktree: WorktreeConfig {
@@ -6640,14 +6903,14 @@ mod config_tests {
                     "run.strict-loops".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "false".into(),
+                        value: toml::Value::Boolean(false),
                     },
                 ),
                 (
                     "merge.gate".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "[]".into(),
+                        value: toml::Value::Array(Vec::new()),
                     },
                 ),
             ]),
@@ -6659,14 +6922,14 @@ mod config_tests {
                     "run.strict-loops".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "true".into(),
+                        value: toml::Value::Boolean(true),
                     },
                 ),
                 (
                     "merge.gate".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
-                        value: "[]".into(),
+                        value: toml::Value::Array(Vec::new()),
                     },
                 ),
             ]),
@@ -6688,7 +6951,7 @@ mod config_tests {
     fn requirement_conflict_names_only_the_effective_repository_source() {
         let leaf = |value: &str| AuthoredConfigLeaf {
             semantic: ConfigSemantic::Requirement,
-            value: value.into(),
+            value: toml::Value::String(value.into()),
         };
         let repository = |value| RuntimeConfig {
             authored_requirements: BTreeMap::from([("merge.gate".into(), leaf(value))]),
@@ -6727,55 +6990,12 @@ mod config_tests {
 
     #[test]
     fn runtime_config_semantic_catalog_covers_every_authored_static_leaf() {
-        // This list is the RuntimeConfig schema surface that has a stable TOML
-        // path. Maps are classified by their enclosing dynamic-table prefix.
-        let expected = [
-            "schema-version",
-            "worktree.seed",
-            "worktree.warm",
-            "worktree.setup",
-            "worktree.setup-seconds",
-            "worktree.setup-capture-bytes",
-            "worktree.confinement.enabled",
-            "worktree.confinement.sandbox",
-            "worktree.confinement.allow",
-            "worktree.env",
-            "worktree.tripwire.policy",
-            "worktree.tripwire.sentinel",
-            "worktree.retention.cheap",
-            "worktree.retention.expensive",
-            "worktree.retention.expensive-grace-days",
-            "run.worktree",
-            "run.max-frames",
-            "run.frame-seconds",
-            "run.total-seconds",
-            "run.max-retries",
-            "run.attach-wait-seconds",
-            "run.idle-seconds",
-            "run.max-in-flight",
-            "run.wait",
-            "run.strict-loops",
-            "run.build-cache",
-            "run.inline-prompt-bytes",
-            "run.story",
-            "merge.wait",
-            "merge.overlap",
-            "merge.auto",
-            "merge.deep",
-            "merge.branch",
-            "merge.gate",
-            "merge.gate-seconds",
-            "merge.generated",
-            "merge.disk-floor-mb",
-            "git.long-seconds",
-            "publish.exclude",
-            "registry.base",
-        ];
+        let expected = runtime_config_schema_leaves();
         assert_eq!(
-            CONFIG_FIELD_SEMANTICS
+            ConfigLeaf::ALL
                 .iter()
-                .map(|(path, _)| *path)
-                .collect::<Vec<_>>(),
+                .map(|leaf| leaf.path().to_string())
+                .collect::<BTreeSet<_>>(),
             expected
         );
         assert_eq!(
@@ -6788,29 +7008,90 @@ mod config_tests {
         );
     }
 
+    /// Derive the authored RuntimeConfig surface from schemars rather than a
+    /// second hand-maintained field list. Dynamic maps are one schema-level
+    /// shape and machine-scoped tables are deliberately one classified prefix.
+    fn runtime_config_schema_leaves() -> BTreeSet<String> {
+        fn visit<'a>(
+            root: &'a serde_json::Value,
+            node: &'a serde_json::Value,
+            path: &mut Vec<String>,
+            leaves: &mut BTreeSet<String>,
+        ) {
+            if let Some(reference) = node.get("$ref").and_then(serde_json::Value::as_str) {
+                let name = reference
+                    .strip_prefix("#/$defs/")
+                    .expect("RuntimeConfig schema references local definitions");
+                visit(root, &root["$defs"][name], path, leaves);
+                return;
+            }
+            if let Some(branches) = node.get("anyOf").and_then(serde_json::Value::as_array) {
+                for branch in branches {
+                    if branch.get("type").and_then(serde_json::Value::as_str) != Some("null") {
+                        visit(root, branch, path, leaves);
+                    }
+                }
+                return;
+            }
+            if let Some(branches) = node.get("allOf").and_then(serde_json::Value::as_array) {
+                for branch in branches {
+                    visit(root, branch, path, leaves);
+                }
+                return;
+            }
+            if path.len() == 1 && matches!(path[0].as_str(), "harness" | "agent" | "host" | "repo")
+            {
+                leaves.insert(format!("{}.*", path[0]));
+                return;
+            }
+            if let Some(properties) = node
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+            {
+                for (name, child) in properties {
+                    path.push(name.clone());
+                    visit(root, child, path, leaves);
+                    path.pop();
+                }
+                return;
+            }
+            if node.get("additionalProperties").is_some() {
+                leaves.insert(path.join("."));
+                return;
+            }
+            leaves.insert(path.join("."));
+        }
+
+        let schema = serde_json::to_value(schemars::schema_for!(RuntimeConfig))
+            .expect("RuntimeConfig schema serializes");
+        let mut leaves = BTreeSet::new();
+        visit(&schema, &schema, &mut Vec::new(), &mut leaves);
+        leaves
+    }
+
     #[test]
     fn every_requirement_leaf_rejects_a_differing_environment_declaration() {
-        let requirements: BTreeMap<String, AuthoredConfigLeaf> = CONFIG_FIELD_SEMANTICS
+        let requirements: BTreeMap<ConfigLeaf, AuthoredConfigLeaf> = ConfigLeaf::ALL
             .iter()
-            .filter(|(_, semantic)| *semantic == ConfigSemantic::Requirement)
-            .map(|(field, semantic)| {
+            .filter(|leaf| leaf.semantic() == ConfigSemantic::Requirement)
+            .map(|leaf| {
                 (
-                    (*field).to_string(),
+                    *leaf,
                     AuthoredConfigLeaf {
-                        semantic: *semantic,
-                        value: "repository".into(),
+                        semantic: leaf.semantic(),
+                        value: toml::Value::String("repository".into()),
                     },
                 )
             })
             .collect();
-        let environment: BTreeMap<String, AuthoredConfigLeaf> = requirements
+        let environment: BTreeMap<ConfigLeaf, AuthoredConfigLeaf> = requirements
             .iter()
             .map(|(field, leaf)| {
                 (
-                    field.clone(),
+                    *field,
                     AuthoredConfigLeaf {
                         semantic: leaf.semantic,
-                        value: "environment".into(),
+                        value: toml::Value::String("environment".into()),
                     },
                 )
             })
@@ -6835,14 +7116,172 @@ mod config_tests {
         ]);
         assert_eq!(
             conflicts.len(),
-            CONFIG_FIELD_SEMANTICS
+            ConfigLeaf::ALL
                 .iter()
-                .filter(|(_, semantic)| *semantic == ConfigSemantic::Requirement)
+                .filter(|leaf| leaf.semantic() == ConfigSemantic::Requirement)
                 .count()
         );
         assert!(conflicts.iter().all(|conflict| {
             conflict.rejected_source == "environment.toml" && conflict.repo_source == "repo.toml"
         }));
+    }
+
+    #[test]
+    fn every_requirement_leaf_retains_its_repository_value_during_resolution() {
+        let values = [
+            (ConfigLeaf::SchemaVersion, "\"repo\"", "\"environment\""),
+            (
+                ConfigLeaf::WorktreeSetup,
+                "[[\"repo\"]]",
+                "[[\"environment\"]]",
+            ),
+            (ConfigLeaf::WorktreeSetupSeconds, "1", "2"),
+            (ConfigLeaf::WorktreeSetupCaptureBytes, "1", "2"),
+            (ConfigLeaf::WorktreeConfinementEnabled, "false", "true"),
+            (ConfigLeaf::WorktreeConfinementSandbox, "false", "true"),
+            (
+                ConfigLeaf::WorktreeConfinementAllow,
+                "[\"repo\"]",
+                "[\"environment\"]",
+            ),
+            (ConfigLeaf::WorktreeTripwirePolicy, "\"park\"", "\"warn\""),
+            (
+                ConfigLeaf::WorktreeRetentionCheap,
+                "[\"repo\"]",
+                "[\"environment\"]",
+            ),
+            (
+                ConfigLeaf::WorktreeRetentionExpensive,
+                "[\"repo\"]",
+                "[\"environment\"]",
+            ),
+            (ConfigLeaf::WorktreeRetentionExpensiveGraceDays, "1", "2"),
+            (ConfigLeaf::RunWorktree, "false", "true"),
+            (ConfigLeaf::RunMaxFrames, "1", "2"),
+            (ConfigLeaf::RunFrameSeconds, "1", "2"),
+            (ConfigLeaf::RunTotalSeconds, "1", "2"),
+            (ConfigLeaf::RunMaxRetries, "1", "2"),
+            (ConfigLeaf::RunAttachWaitSeconds, "1", "2"),
+            (ConfigLeaf::RunIdleSeconds, "1", "2"),
+            (ConfigLeaf::RunMaxInFlight, "1", "2"),
+            (ConfigLeaf::RunStrictLoops, "false", "true"),
+            (ConfigLeaf::RunInlinePromptBytes, "1", "2"),
+            (ConfigLeaf::MergeOverlap, "\"land\"", "\"park\""),
+            (ConfigLeaf::MergeBranch, "\"repo\"", "\"environment\""),
+            (ConfigLeaf::MergeGate, "[[\"repo\"]]", "[[\"environment\"]]"),
+            (ConfigLeaf::MergeGateSeconds, "1", "2"),
+            (
+                ConfigLeaf::MergeGenerated,
+                "[]",
+                "[{ paths = [\"environment\"], rebuild = [[\"echo\", \"environment\"]] }]",
+            ),
+            (ConfigLeaf::MergeDiskFloorMb, "0", "2"),
+        ];
+
+        assert_eq!(
+            values
+                .iter()
+                .map(|(leaf, _, _)| *leaf)
+                .collect::<BTreeSet<_>>(),
+            ConfigLeaf::ALL
+                .iter()
+                .copied()
+                .filter(|leaf| leaf.semantic() == ConfigSemantic::Requirement)
+                .collect(),
+            "the resolution table must exercise every requirement leaf"
+        );
+
+        for (leaf, repo_value, environment_value) in values {
+            let parse = |value: &str| {
+                let text = format!("{} = {value}", leaf.path());
+                let document: toml::Value = toml::from_str(&text).expect("test declaration parses");
+                let mut config: RuntimeConfig =
+                    toml::from_str(&text).expect("test declaration decodes");
+                config.authored_requirements = authored_requirement_values(&document);
+                config
+            };
+            let repo = parse(repo_value);
+            let environment = parse(environment_value);
+            let repo_path = Utf8PathBuf::from("repo.toml");
+            let effective = BTreeMap::from([(
+                leaf,
+                (
+                    &repo_path,
+                    repo.authored_requirements
+                        .get(&leaf)
+                        .expect("repo leaf is authored"),
+                ),
+            )]);
+            let mut runtime = RuntimeConfig::default();
+            apply_requirement_leaf(&mut runtime, &repo, leaf);
+            let expected = runtime.clone();
+            apply_environment_requirement_leaves(
+                &mut runtime,
+                &environment,
+                &effective,
+                ConfigLayer::Environment,
+                Some("environment.toml".into()),
+                &mut BTreeMap::new(),
+            );
+            assert_eq!(
+                runtime,
+                expected,
+                "{} must retain the repository value",
+                leaf.path()
+            );
+        }
+    }
+
+    #[test]
+    fn repository_schema_version_wins_over_environment_with_provenance() {
+        let parse = |text: &str| {
+            let document: toml::Value = toml::from_str(text).expect("test config parses");
+            let mut config: RuntimeConfig = toml::from_str(text).expect("test config decodes");
+            config.authored_requirements = authored_requirement_values(&document);
+            config
+        };
+        let repo_path = Utf8PathBuf::from("repository/.ctx/config.toml");
+        let environment_path = Utf8PathBuf::from("environment.toml");
+        let repo = parse("schema-version = \"repository\"");
+        let environment = parse("schema-version = \"environment\"");
+        let documents = vec![
+            (ConfigLayer::Repo, repo_path.clone(), repo.clone()),
+            (
+                ConfigLayer::Environment,
+                environment_path,
+                environment.clone(),
+            ),
+        ];
+        let mut runtime = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_project_config(
+            &mut runtime,
+            repo,
+            ConfigLayer::Repo,
+            Some(repo_path.to_string()),
+            &mut winners,
+        );
+        let effective = effective_repo_requirements(&documents);
+        record_effective_repo_requirement_winners(&effective, &mut winners);
+        apply_environment_requirement_leaves(
+            &mut runtime,
+            &environment,
+            &effective,
+            ConfigLayer::Environment,
+            Some("environment.toml".into()),
+            &mut winners,
+        );
+
+        assert_eq!(runtime.schema_version.as_deref(), Some("repository"));
+        assert_eq!(winners["schema-version"].layer, ConfigLayer::Repo);
+        assert_eq!(
+            winners["schema-version"].source.as_deref(),
+            Some("repository/.ctx/config.toml")
+        );
+        assert_eq!(
+            winners["schema-version"].reason,
+            ConfigReason::RepoRequirement
+        );
     }
 
     #[test]

@@ -37,6 +37,55 @@ fn doctor_reports_effective_defaults_and_rejects_conflicting_path() {
     assert_ne!(output.status.code(), Some(0));
 }
 
+/// Repository requirements are resolved per authored leaf, so an environment
+/// document can still supply absent leaves but cannot displace a repository
+/// declaration in any requirement family.
+#[test]
+fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
+    let scratch = ScratchRoot::new("p101-requirement-leaves");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    git_init(&repo);
+    fs::write(
+        repo.join(".ctx/config.toml"),
+        "schema-version = 'repo-schema'\n\
+[worktree]\nsetup = []\n\
+[run]\nworktree = false\nmax-frames = 7\nstrict-loops = false\n\
+[merge]\noverlap = 'park'\ngate = []\n",
+    )
+    .unwrap();
+    let environment = scratch.home().join("environment.toml");
+    fs::write(
+        &environment,
+        "schema-version = 'environment-schema'\n\
+[worktree]\nsetup = [['environment-setup']]\n\
+[run]\nworktree = true\nmax-frames = 9\nstrict-loops = true\n\
+[merge]\noverlap = 'land'\ngate = [['environment-gate']]\n",
+    )
+    .unwrap();
+    let mut command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    );
+    command.env("CTX_CONFIG", &environment);
+    let output = command.output().unwrap();
+    assert_exit_code(&output, 0);
+    let (stdout, _) = utf8(&output);
+    for expected in [
+        "worktree.setup: 0 [repo:",
+        "run.worktree: false [repo:",
+        "run.max-frames: 7 [repo:",
+        "run.strict-loops: false [repo:",
+        "merge.overlap: park [repo:",
+        "merge.gate: absent (empty) [repo:",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected:?}: {stdout}");
+    }
+    assert!(stdout.contains("schema-version rejected from"), "{stdout}");
+}
+
 /// P476: a pre-P476 `[agent.master]`/`[agent.narrator]`/`[agent.merger]`/
 /// `[agent.merger-deep]` table, or a pre-P476 bare `[agent]` scalar, fails
 /// decode with a message naming its exact `[agent.role.*]` replacement —
