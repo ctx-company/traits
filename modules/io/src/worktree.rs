@@ -2191,6 +2191,7 @@ fn run_setup_command(
             exec_dir: Some(worktree_path),
             success_exit_code: &[0],
             timeout_ms: Some(timeout_ms),
+            idle_timeout_ms: None,
             capture_limit,
             tick_observer: None,
         },
@@ -2761,6 +2762,7 @@ fn clone_directory(source: &Utf8Path, dest: &Utf8Path) -> crate::Result<Option<S
         exec_dir: None,
         success_exit_code: &[0],
         timeout_ms: Some(WARM_CLONE_TIMEOUT_MS),
+        idle_timeout_ms: None,
         capture_limit: WARM_CLONE_CAPTURE_BYTES,
         tick_observer: None,
     }) {

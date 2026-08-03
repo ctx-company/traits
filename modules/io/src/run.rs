@@ -2692,6 +2692,7 @@ fn apply_default_inputs(
                 exec_dir,
                 success_exit_code: &[0],
                 timeout_ms: Some(default.timeout_ms.unwrap_or(DEFAULT_INPUT_TIMEOUT_MS)),
+                idle_timeout_ms: None,
                 capture_limit: default
                     .capture_bytes
                     .map_or(DEFAULT_INPUT_CAPTURE_LIMIT, |bytes| bytes as usize),
@@ -2870,7 +2871,25 @@ fn advance_command_frames(
             resolve_resource_argv_for_spawn(&resource_roots, trait_ref, &argv, &resource_argv)?;
         let cwd = command.cwd.clone();
         let success_exit_code = command.success_exit_code.clone();
-        let timeout_ms = command.timeout_ms;
+        // 0058: how long a command step may take is a property of the machine
+        // and the project, not of the recipe, so the repository's own config
+        // owns both bounds and a trait-declared `timeout-ms` is only the
+        // fallback for a repo that declares neither. Resolved here rather
+        // than threaded from the caller because a command step is the only
+        // consumer, and this runs once per gate.
+        let command_policy = exec_dir
+            .or(Some(Utf8Path::new(".")))
+            .and_then(|dir| crate::harness_config::resolve_runtime_config(dir).ok())
+            .map(|config| config.effective_run_policy());
+        let timeout_ms = command_policy
+            .as_ref()
+            .and_then(|policy| policy.command_seconds)
+            .map(|seconds| seconds.saturating_mul(1_000))
+            .or(command.timeout_ms);
+        let idle_timeout_ms = command_policy
+            .as_ref()
+            .and_then(|policy| policy.command_idle_seconds)
+            .map(|seconds| seconds.saturating_mul(1_000));
         let capture_limit = command
             .capture_bytes
             .map_or(COMMAND_CAPTURE_LIMIT, |bytes| bytes as usize);
@@ -2888,6 +2907,7 @@ fn advance_command_frames(
                 exec_dir,
                 success_exit_code: &success_exit_code,
                 timeout_ms,
+                idle_timeout_ms,
                 // Command steps may emit structured payloads (annotation JSON,
                 // tool reports) far larger than terminal-style output; 256 KiB
                 // keeps them intact without letting a runaway stream flood the
@@ -3331,8 +3351,15 @@ fn classify_command_output_route(
 }
 
 fn format_command_report(outcome: &crate::command::RunOutput) -> String {
+    // 0058: when a bound fired, name WHICH one. "no output within its idle
+    // window" and "exceeded its wall-clock ceiling" are different repository
+    // conditions, and neither is the worker's defect.
+    let timeout_line = outcome
+        .timeout_reason
+        .map(|reason| format!("timeout: {reason}\n"))
+        .unwrap_or_default();
     format!(
-        "exit-code: {:?}\nstdout-truncated: {}\nstderr-truncated: {}\nstdout:\n{}\nstderr:\n{}",
+        "{timeout_line}exit-code: {:?}\nstdout-truncated: {}\nstderr-truncated: {}\nstdout:\n{}\nstderr:\n{}",
         outcome.exit_code,
         outcome.stdout_truncated,
         outcome.stderr_truncated,

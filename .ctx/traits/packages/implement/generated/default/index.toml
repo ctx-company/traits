@@ -638,7 +638,6 @@ argv = [
     "just",
     "test",
 ]
-timeout-ms = 5400000
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"

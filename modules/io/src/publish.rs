@@ -168,6 +168,7 @@ fn check_version(package: &str, version: &str) -> crate::Result<()> {
         exec_dir: None,
         success_exit_code: &[0],
         timeout_ms: Some(120_000),
+        idle_timeout_ms: None,
         capture_limit: 16_384,
         tick_observer: None,
     })?;
@@ -377,6 +378,7 @@ fn pack_check(staging: &Utf8Path) -> crate::Result<Vec<String>> {
         exec_dir: Some(staging),
         success_exit_code: &[0],
         timeout_ms: Some(120_000),
+        idle_timeout_ms: None,
         capture_limit: 1_000_000,
         tick_observer: None,
     })?;

@@ -377,28 +377,16 @@ export const repoGatesStep = sequence.check("repo-gates", {
     // record, so whatever this names is what the worker is told to re-run —
     // there is no second place a gate command can be declared and drift.
     argv: ["just", "test"],
-    // This is a PER-COMMAND-STEP ceiling read straight from the canonical
-    // (`run.rs`: `command.timeout_ms`). No config layer overrides it —
-    // `[run] frame-seconds` bounds AGENT frames, not this — and when it is
-    // undeclared the runtime falls back to its 120s command default.
-    //
-    // History, so this stops being rediscovered:
-    //   2026-07-31  undeclared → 120s default → every gate reported a false
-    //               timeout, and `alsoRequire` parked otherwise-approved runs
-    //               (run-f60c3ef5, task 0046). Set to 30 min.
-    //   2026-08-03  30 min too tight: after three large merges a fresh
-    //               worktree rebuilds most crates and relinks ~40 proof
-    //               binaries, and two concurrent dispatches share the CPU.
-    //               Three of five runs died at ROUND 1 on the timed-out
-    //               stop-if (run-d9183ad4 task 0004, run-003644ea task
-    //               0051.1, task 0051). Raised to 90 min.
-    //
-    // A generous ceiling is cheap now that a timed-out gate has its own
-    // stop-if: a genuine hang parks immediately with a repo-condition
-    // reason instead of grinding, so this number only has to be larger than
-    // a healthy worst case, never tuned to it. The real fix is a cheaper
-    // per-round gate (task 0056) — this is the backstop until then.
-    timeoutMs: 5_400_000,
+    // No `timeoutMs` here by design (0058). How long a gate may take is a
+    // property of the machine and the project — repo size, load, how many
+    // runs share the box — never of the recipe, and a portable trait runs
+    // against a TypeScript project and a Rust workspace alike. This number
+    // lived here through three retunes (undeclared → the runtime's 120s
+    // default killed every gate; 30 min parked three runs at round 1 once
+    // main grew) before moving to `[run] command-seconds` /
+    // `command-idle-seconds`, where the runtime now bounds it by SILENCE
+    // rather than duration: a gate still printing is working however long it
+    // takes, and one that has gone quiet is killed quickly.
     output: repoGatesPassed,
 });
 

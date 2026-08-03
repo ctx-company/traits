@@ -2112,6 +2112,7 @@ fn run_declared_command(
             exec_dir: Some(worktree_path),
             success_exit_code: &[0],
             timeout_ms: Some(timeout_ms),
+            idle_timeout_ms: None,
             capture_limit: 65_536,
             tick_observer: None,
         },

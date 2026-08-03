@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read};
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,7 +18,21 @@ use camino::{Utf8Path, Utf8PathBuf};
 /// (both `apply_default_inputs`'s and command-step's requests set an explicit
 /// value and never rely on this; a caller that wants a longer bound must set
 /// `timeout_ms` explicitly rather than relying on this fallback).
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+/// Default silence window for a command step: how long it may produce NO
+/// output before the runtime treats it as hung (0058). Liveness, not
+/// duration, is what generalises across ecosystems — a command still
+/// printing is working however long it takes, and one that has gone quiet
+/// is stuck. Ten minutes because compilers legitimately go silent for
+/// minutes on a single large unit or a long link (cargo prints
+/// `Compiling <crate>` and then nothing; a slow `tsc` or bundler behaves the
+/// same), so a shorter window would kill healthy work.
+pub const DEFAULT_COMMAND_IDLE_MS: u64 = 600_000;
+
+/// Absolute backstop for a command step (0058), applied however chatty the
+/// command is. Idle detection alone would let a command that prints forever
+/// — a retry loop, an accidental watch mode — run without end. Deliberately
+/// loose enough never to fire in normal use.
+pub const DEFAULT_COMMAND_WALL_MS: u64 = 14_400_000;
 /// Inherited by every caller that passes `capture_limit: 0` on [`RunRequest`]
 /// — `0` means "use this default", not "capture nothing". Every call site in
 /// this tree that could plausibly capture non-trivial output sets an explicit
@@ -91,7 +107,13 @@ pub struct RunRequest<'a> {
     /// `"project-root"` convention for every invocation-anchored caller.
     pub exec_dir: Option<&'a Utf8Path>,
     pub success_exit_code: &'a [i32],
+    /// Absolute wall-clock ceiling. `None` resolves to
+    /// [`DEFAULT_COMMAND_WALL_MS`] — a backstop, not a duration estimate;
+    /// [`RunRequest::idle_timeout_ms`] is what actually decides hung-ness.
     pub timeout_ms: Option<u64>,
+    /// Silence window (0058): kill once the command has produced no output
+    /// for this long. `None` resolves to [`DEFAULT_COMMAND_IDLE_MS`].
+    pub idle_timeout_ms: Option<u64>,
     pub capture_limit: usize,
     /// Polled once per wait iteration (same cadence as the internal 10ms
     /// `try_wait` loop) while this command runs. Lets a live `--progress tui`
@@ -109,6 +131,10 @@ pub struct RunOutput {
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
     pub timed_out: bool,
+    /// Which bound ended the command when `timed_out` (0058). `None` when it
+    /// exited on its own. The two are different repository conditions and a
+    /// reviewer must not read either as the worker's defect.
+    pub timeout_reason: Option<&'static str>,
     pub success: bool,
     /// The effective capture ceiling this run actually applied (after the
     /// `capture_limit: 0` → [`DEFAULT_CAPTURE_LIMIT`] sentinel is resolved),
@@ -172,6 +198,7 @@ pub fn run_with_env(
     let (stdout, stdout_truncated) = lossy_utf8(raw.stdout, raw.stdout_truncated);
     let (stderr, stderr_truncated) = lossy_utf8(raw.stderr, raw.stderr_truncated);
     Ok(RunOutput {
+        timeout_reason: raw.timeout_kind.map(TimeoutKind::reason),
         exit_code: raw.exit_code,
         stdout,
         stdout_truncated,
@@ -198,8 +225,30 @@ struct RawOutput {
     stderr: Vec<u8>,
     stderr_truncated: bool,
     timed_out: bool,
+    /// Which bound fired, when `timed_out` (0058). The two are different
+    /// repository conditions and must not read alike: silence means hung,
+    /// the wall clock means genuinely endless.
+    timeout_kind: Option<TimeoutKind>,
     success: bool,
     capture_limit: usize,
+}
+
+/// Which bound ended a command step (0058).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutKind {
+    /// No output for the configured silence window.
+    Idle,
+    /// Exceeded the absolute wall-clock backstop despite producing output.
+    Wall,
+}
+
+impl TimeoutKind {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Idle => "command produced no output within its idle window",
+            Self::Wall => "command exceeded its absolute wall-clock ceiling",
+        }
+    }
 }
 
 /// Read a pipe to EOF, keeping at most `limit` bytes but continuing to drain
@@ -209,7 +258,16 @@ struct RawOutput {
 /// it would let a real pipe failure masquerade as a short, successful
 /// capture, which a byte-exact caller (e.g. a P420 `--deep` merge's
 /// conflict-stage blob reads) must never observe.
-fn read_capped<R: Read>(mut reader: R, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+/// [`read_capped`] plus a liveness stamp: every non-empty read records how
+/// far into the run output last arrived, measured against the SAME clock the
+/// waiting loop uses, so the loop can tell a working command from a hung one
+/// (0058). `None` keeps the plain capture behaviour.
+fn read_capped_observed<R: Read>(
+    mut reader: R,
+    limit: usize,
+    last_output: Option<Arc<AtomicU64>>,
+    started: Instant,
+) -> std::io::Result<(Vec<u8>, bool)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let mut truncated = false;
@@ -217,6 +275,9 @@ fn read_capped<R: Read>(mut reader: R, limit: usize) -> std::io::Result<(Vec<u8>
         match reader.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
+                if let Some(stamp) = last_output.as_ref() {
+                    stamp.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                }
                 if buf.len() < limit {
                     let remaining = limit - buf.len();
                     let take = remaining.min(n);
@@ -326,16 +387,39 @@ fn run_raw(
         request.capture_limit
     };
 
+    // One clock shared by both reader threads and the wait loop below, so a
+    // "last output arrived at" stamp is directly comparable with elapsed
+    // run time (0058).
+    let started = Instant::now();
+    let last_output = Arc::new(AtomicU64::new(0));
+
     let stdout_pipe: ChildStdout = child.stdout.take().expect("stdout piped at spawn");
     let stderr_pipe: ChildStderr = child.stderr.take().expect("stderr piped at spawn");
-    let stdout_handle = thread::spawn(move || read_capped(stdout_pipe, limit));
-    let stderr_handle = thread::spawn(move || read_capped(stderr_pipe, limit));
+    let stdout_stamp = Arc::clone(&last_output);
+    let stderr_stamp = Arc::clone(&last_output);
+    let stdout_handle = thread::spawn(move || {
+        read_capped_observed(stdout_pipe, limit, Some(stdout_stamp), started)
+    });
+    let stderr_handle = thread::spawn(move || {
+        read_capped_observed(stderr_pipe, limit, Some(stderr_stamp), started)
+    });
 
-    let timeout = Duration::from_millis(request.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
-    let started = Instant::now();
+    // 0058: liveness first, duration only as a backstop. A command still
+    // printing is working however long it takes — that is what a cold build
+    // of a large workspace looks like — while one that has gone quiet is
+    // stuck. A fixed wall-clock ceiling cannot be right for a TypeScript
+    // project and a Rust workspace at once, and ours had to be retuned three
+    // times before this landed.
+    let wall = Duration::from_millis(request.timeout_ms.unwrap_or(DEFAULT_COMMAND_WALL_MS));
+    let idle_limit =
+        Duration::from_millis(request.idle_timeout_ms.unwrap_or(DEFAULT_COMMAND_IDLE_MS));
     let mut timed_out = false;
+    let mut timeout_kind: Option<TimeoutKind> = None;
     let mut exited_status: Option<ExitStatus> = None;
     loop {
+        let elapsed = started.elapsed();
+        let quiet_for =
+            elapsed.saturating_sub(Duration::from_millis(last_output.load(Ordering::Relaxed)));
         match child
             .try_wait()
             .map_err(|e| crate::environment::Error::Filesystem {
@@ -346,8 +430,15 @@ fn run_raw(
                 exited_status = Some(status);
                 break;
             }
-            None if started.elapsed() >= timeout => {
+            None if quiet_for >= idle_limit => {
                 timed_out = true;
+                timeout_kind = Some(TimeoutKind::Idle);
+                let _ = child.kill();
+                break;
+            }
+            None if elapsed >= wall => {
+                timed_out = true;
+                timeout_kind = Some(TimeoutKind::Wall);
                 let _ = child.kill();
                 break;
             }
@@ -400,6 +491,7 @@ fn run_raw(
         stderr,
         stderr_truncated,
         timed_out,
+        timeout_kind,
         success,
         capture_limit: limit,
     })
@@ -592,7 +684,7 @@ mod tests {
         let reader = FailingReader {
             remaining: b"partial",
         };
-        let result = read_capped(reader, 1024);
+        let result = read_capped_observed(reader, 1024, None, Instant::now());
         assert!(
             result.is_err(),
             "a real read error must never be reported as EOF/partial success"
@@ -602,7 +694,8 @@ mod tests {
     #[test]
     fn read_capped_reads_exact_bytes_under_limit() {
         let reader = std::io::Cursor::new(b"hello world".to_vec());
-        let (bytes, truncated) = read_capped(reader, 1024).expect("read succeeds");
+        let (bytes, truncated) =
+            read_capped_observed(reader, 1024, None, Instant::now()).expect("read succeeds");
         assert_eq!(bytes, b"hello world");
         assert!(!truncated);
     }
@@ -626,6 +719,7 @@ mod tests {
             exec_dir: None,
             success_exit_code: &[0],
             timeout_ms: Some(30_000),
+            idle_timeout_ms: None,
             capture_limit: byte_count + 1,
             tick_observer: None,
         };
@@ -653,6 +747,7 @@ mod tests {
             exec_dir: None,
             success_exit_code: &[0],
             timeout_ms: Some(30_000),
+            idle_timeout_ms: None,
             capture_limit: 100,
             tick_observer: None,
         };
@@ -679,6 +774,7 @@ mod tests {
             exec_dir: None,
             success_exit_code: &[0],
             timeout_ms: Some(30_000),
+            idle_timeout_ms: None,
             capture_limit: 1024,
             tick_observer: None,
         };
@@ -709,6 +805,7 @@ mod tests {
             exec_dir: None,
             success_exit_code: &[0],
             timeout_ms: Some(30_000),
+            idle_timeout_ms: None,
             capture_limit: 1024,
             tick_observer: None,
         };
@@ -736,6 +833,7 @@ mod tests {
             exec_dir: None,
             success_exit_code: &[0],
             timeout_ms: Some(30_000),
+            idle_timeout_ms: None,
             capture_limit: 100,
             tick_observer: None,
         };

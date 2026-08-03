@@ -726,6 +726,10 @@ enum ConfigLeaf {
     RunMaxRetries,
     RunAttachWaitSeconds,
     RunIdleSeconds,
+    /// 0058 `[run] command-seconds`: absolute backstop for command steps.
+    RunCommandSeconds,
+    /// 0058 `[run] command-idle-seconds`: silence window for command steps.
+    RunCommandIdleSeconds,
     RunMaxInFlight,
     RunWait,
     RunStrictLoops,
@@ -774,6 +778,8 @@ impl ConfigLeaf {
         Self::RunMaxRetries,
         Self::RunAttachWaitSeconds,
         Self::RunIdleSeconds,
+        Self::RunCommandSeconds,
+        Self::RunCommandIdleSeconds,
         Self::RunMaxInFlight,
         Self::RunWait,
         Self::RunStrictLoops,
@@ -822,6 +828,8 @@ impl ConfigLeaf {
             Self::RunMaxRetries => "run.max-retries",
             Self::RunAttachWaitSeconds => "run.attach-wait-seconds",
             Self::RunIdleSeconds => "run.idle-seconds",
+            Self::RunCommandSeconds => "run.command-seconds",
+            Self::RunCommandIdleSeconds => "run.command-idle-seconds",
             Self::RunMaxInFlight => "run.max-in-flight",
             Self::RunWait => "run.wait",
             Self::RunStrictLoops => "run.strict-loops",
@@ -886,6 +894,8 @@ impl ConfigLeaf {
             | Self::RunMaxRetries
             | Self::RunAttachWaitSeconds
             | Self::RunIdleSeconds
+            | Self::RunCommandSeconds
+            | Self::RunCommandIdleSeconds
             | Self::RunMaxInFlight
             | Self::RunStrictLoops
             | Self::RunInlinePromptBytes
@@ -1150,6 +1160,10 @@ pub struct EffectiveRunPolicy {
     pub max_retries: Option<u64>,
     pub attach_wait_seconds: Option<u64>,
     pub idle_seconds: Option<u64>,
+    /// 0058: absolute wall-clock backstop for command/check steps, seconds.
+    pub command_seconds: Option<u64>,
+    /// 0058: silence window for command/check steps, seconds.
+    pub command_idle_seconds: Option<u64>,
     pub max_in_flight: usize,
     pub wait: bool,
     pub strict_loops: bool,
@@ -1203,6 +1217,8 @@ impl RuntimeConfig {
             max_retries: budget.and_then(|value| value.max_retries),
             attach_wait_seconds: budget.and_then(|value| value.attach_wait_seconds),
             idle_seconds: budget.and_then(|value| value.idle_seconds),
+            command_seconds: budget.and_then(|value| value.command_seconds),
+            command_idle_seconds: budget.and_then(|value| value.command_idle_seconds),
             max_in_flight: run.and_then(|value| value.max_in_flight).unwrap_or(1),
             wait: run.and_then(|value| value.wait).unwrap_or(false),
             strict_loops: run.and_then(|value| value.strict_loops).unwrap_or(false),
@@ -1685,6 +1701,19 @@ pub struct RunProfileBudget {
     pub attach_wait_seconds: Option<u64>,
     #[serde(default)]
     pub idle_seconds: Option<u64>,
+    /// 0058 `[run] command-seconds`: absolute wall-clock backstop for a
+    /// command/check step (the repo gate), in seconds. A backstop, not an
+    /// estimate — `command-idle-seconds` is what decides hung-ness. `None`
+    /// resolves to `crate::command::DEFAULT_COMMAND_WALL_MS`.
+    #[serde(default)]
+    pub command_seconds: Option<u64>,
+    /// 0058 `[run] command-idle-seconds`: how long a command/check step may
+    /// produce NO output before the runtime treats it as hung, in seconds.
+    /// Liveness generalises across ecosystems where a fixed duration cannot:
+    /// a command still printing is working however long it takes. `None`
+    /// resolves to `crate::command::DEFAULT_COMMAND_IDLE_MS`.
+    #[serde(default)]
+    pub command_idle_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3234,6 +3263,26 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
                 .run
                 .get_or_insert_with(RunTable::default)
                 .inline_prompt_bytes = source.run.as_ref().and_then(|run| run.inline_prompt_bytes)
+        }
+        ConfigLeaf::RunCommandSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .command_seconds = source
+                .run
+                .as_ref()
+                .and_then(|run| run.budget.command_seconds)
+        }
+        ConfigLeaf::RunCommandIdleSeconds => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .command_idle_seconds = source
+                .run
+                .as_ref()
+                .and_then(|run| run.budget.command_idle_seconds)
         }
         ConfigLeaf::MergeOverlap => {
             target.merge.get_or_insert_with(MergeTable::default).overlap =
@@ -5749,6 +5798,7 @@ fn ensure_model_catalog(
                 exec_dir: None,
                 success_exit_code: &[0],
                 timeout_ms: Some(10_000),
+                idle_timeout_ms: None,
                 capture_limit: 1024 * 1024,
                 tick_observer: None,
             }) {
@@ -5831,6 +5881,7 @@ fn run_harness_probe(harness: &HarnessDefinition) -> crate::Result<HarnessProbeO
         exec_dir: None,
         success_exit_code: &[0],
         timeout_ms: Some(10_000),
+        idle_timeout_ms: None,
         capture_limit: 4096,
         tick_observer: None,
     })?;
@@ -7163,6 +7214,8 @@ mod config_tests {
             (ConfigLeaf::RunMaxRetries, "1", "2"),
             (ConfigLeaf::RunAttachWaitSeconds, "1", "2"),
             (ConfigLeaf::RunIdleSeconds, "1", "2"),
+            (ConfigLeaf::RunCommandSeconds, "1", "2"),
+            (ConfigLeaf::RunCommandIdleSeconds, "1", "2"),
             (ConfigLeaf::RunMaxInFlight, "1", "2"),
             (ConfigLeaf::RunStrictLoops, "false", "true"),
             (ConfigLeaf::RunInlinePromptBytes, "1", "2"),

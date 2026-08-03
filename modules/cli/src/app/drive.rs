@@ -3992,6 +3992,7 @@ fn ensure_drive_probe(
             exec_dir: execution_dir,
             success_exit_code: &[0],
             timeout_ms: Some(10_000),
+            idle_timeout_ms: None,
             capture_limit: 4096,
             tick_observer: None,
         },

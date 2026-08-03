@@ -201,6 +201,7 @@ mod tests {
             stdout_truncated: false,
             stderr_truncated: false,
             timed_out: false,
+            timeout_reason: None,
             success: false,
             capture_limit: 4096,
         }
@@ -227,6 +228,7 @@ mod tests {
             stdout_truncated: false,
             stderr_truncated: false,
             timed_out: false,
+            timeout_reason: None,
             success: false,
             capture_limit: 4096,
         };

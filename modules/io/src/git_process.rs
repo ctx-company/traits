@@ -50,6 +50,7 @@ pub fn run(request: Request<'_>) -> crate::Result<RunOutput> {
         exec_dir: request.exec_dir,
         success_exit_code: request.success_exit_code,
         timeout_ms: Some(request.timeout_ms),
+        idle_timeout_ms: None,
         capture_limit: request.capture_limit,
         tick_observer: None,
     })
@@ -69,6 +70,7 @@ pub fn run_bytes(request: Request<'_>) -> crate::Result<RunBytesOutput> {
             exec_dir: request.exec_dir,
             success_exit_code: request.success_exit_code,
             timeout_ms: Some(request.timeout_ms),
+            idle_timeout_ms: None,
             capture_limit: request.capture_limit,
             tick_observer: None,
         },
