@@ -31,7 +31,7 @@ jobs:
       # Install remote dependencies
       - name: Install command-line gates (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes just jq ripgrep
+        run: sudo apt-get update && sudo apt-get install --yes just jq ripgrep expect
       - name: Install command-line gates (macOS)
         if: runner.os == 'macOS'
         run: brew install just jq ripgrep

@@ -121,7 +121,7 @@ refactor-direct:
 	ctx traits run refactor:direct --worktree --progress tui
 
 implement tasks:
-	@crystal run --link-flags="-fuse-ld=/usr/bin/ld" {{justfile_directory()}}/.internal/scripts/implement.cr -- {{quote(tasks)}}
+	@{{justfile_directory()}}/.internal/scripts/implement.sh {{quote(tasks)}}
 
 implement-with trait_id tasks:
-	@crystal run --link-flags="-fuse-ld=/usr/bin/ld" {{justfile_directory()}}/.internal/scripts/implement.cr -- --trait {{quote(trait_id)}} {{quote(tasks)}}
+	@{{justfile_directory()}}/.internal/scripts/implement.sh --trait {{quote(trait_id)}} {{quote(tasks)}}

@@ -73,18 +73,22 @@ fn make_delayed_config_fifo(fixture: &Fixture) {
 fn startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable() {
     let fixture = command_trait_fixture();
 
-    // `script` allocates a slave PTY, but does not answer ratatui's cursor
-    // query. This exercises the allocation-error fallback without corrupting
-    // the normal line-oriented startup narration.
-    let output = Command::new("script")
+    // A PTY that allocates but never answers ratatui's cursor query, which is
+    // what exercises the allocation-error fallback without corrupting the
+    // normal line-oriented startup narration. `expect` with no reply handler
+    // is exactly that, and it is the same tool the other proofs in this file
+    // already use. `script` was doing this job and could not: its argument
+    // grammar differs between BSD and util-linux — `script -q /dev/null CMD`
+    // runs the command on macOS and is rejected on Linux with "unrecognized
+    // option", so this proof passed locally and failed on every Linux runner.
+    let output = Command::new("expect")
         .args([
-            "-q",
-            "/dev/null",
-            ctx_bin().to_str().unwrap(),
-            "traits",
-            "run",
-            "--file",
-            ".ctx/traits/demo/generated/index.toml",
+            "-c",
+            r#"
+                set timeout 30
+                spawn -noecho $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml
+                expect eof
+            "#,
         ])
         .current_dir(&fixture.repo)
         .env_clear()
@@ -92,6 +96,7 @@ fn startup_pty_falls_back_to_the_existing_initialization_line_when_unavailable()
         .env("XDG_CONFIG_HOME", &fixture.home)
         .env("XDG_CACHE_HOME", &fixture.home)
         .env("PATH", std::env::var("PATH").unwrap())
+        .env("CTX_STARTUP_BIN", ctx_bin())
         .output()
         .unwrap();
     assert!(output.status.success(), "startup PTY failed: {output:?}");

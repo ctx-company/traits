@@ -22,7 +22,7 @@
     "directory": "packages/cdk"
   },
   "publishConfig": {
-    "access": "public",
+    "access": "restricted",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "exports": {

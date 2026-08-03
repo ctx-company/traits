@@ -754,26 +754,6 @@ fn continuing_exhaustion_lands_the_commit() {
 #[test]
 #[serial]
 fn batch_halts_at_the_first_blocked_phase() {
-    // The batch driver under test is `just implement`, which runs a Crystal
-    // script from `.internal/scripts`. Crystal is local authoring tooling —
-    // not a product dependency, not something `ctx` ever shells out to, and
-    // not installed on CI runners. Its absence is therefore a missing
-    // prerequisite rather than a defect in the batch contract, so this skips
-    // rather than failing, and still runs automatically wherever the driver
-    // exists. To cover this in CI, install Crystal there or port the driver.
-    let has_batch_driver = std::process::Command::new("crystal")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok();
-    if !has_batch_driver {
-        eprintln!(
-            "SKIPPED batch_halts_at_the_first_blocked_phase: `crystal` is not on PATH, so `just implement` cannot run"
-        );
-        return;
-    }
-
     const WALL: &str = "WALL-P461-BATCH-FIXTURE";
     let id = "implement-fixture-park-batch";
     let (scratch, repo, home) = setup_fixture(
