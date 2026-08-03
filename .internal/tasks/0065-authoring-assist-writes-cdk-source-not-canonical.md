@@ -62,12 +62,6 @@ The three meta-trait packages (`generate-trait`, `refine-trait`, `import-trait` 
   provenance quietly starts claiming the model produced bytes it did not.
 - **`--candidate <file>` must keep working.** It now supplies TS, and offline replay includes a
   real build — still zero provider calls, which is the property that makes gate tests cheap.
-- **`compose` is the odd one out and must be decided, not inherited.** It is the only assist
-  operation with no meta-trait and no provider: `compose.rs:186` hardcodes
-  `provider_available: false`, so a command whose help says "LLM-assisted by default and always"
-  can never call a model. Its deterministic half (conflict records, binding proposals, port
-  compatibility) is real and worth keeping. Either it follows this design with a `compose-trait`
-  package, or it is deleted; leaving it as-is is worse than either.
 
 ## Done when
 

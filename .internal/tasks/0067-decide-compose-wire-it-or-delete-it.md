@@ -1,0 +1,60 @@
+# 0067 — Decide `compose`: give it a meta-trait, or delete the command
+
+**Status:** filed, not scheduled (owner call 2026-08-03 — deferred deliberately; captured so the decision is not lost and so 0065 does not have to carry it) · **Depends on:** 0065 and 0066 if the command is kept; nothing if it is deleted · **Raised:** 2026-08-03 (owner design session)
+
+`ctx traits compose <ids...>` merges N existing traits into one. It is the only LLM-assisted
+operation with no meta-trait package, and it cannot call a model at all: `compose.rs:186` hardcodes
+`provider_available: false`, so without `--candidate` it builds its deterministic plan, prints the
+candidate envelope and exits with "model provider adapter is unavailable; no candidate was produced
+or written". Its help text meanwhile states the contract is "LLM-assisted by default and always".
+Hidden from the CLI surface, and untouched since the initial commit.
+
+This task is a decision, not an implementation. Do not half-fix it.
+
+## What actually exists today
+
+- **The deterministic half is real and works.** `trait::composition::plan` (1 129 lines,
+  `modules/core/src/trait/composition.rs`) produces conflict records naming every participant's
+  trait id, field path and value; binding proposals; and port-compatibility records.
+  `Context::from_plan` is canonically digested. `PlanResult` already blocks a write on
+  `needs-decision` or `failed`, and the envelope carries the standing assertion that "source
+  attribution, conflicts, and binding evidence cannot be erased by model candidate".
+- **`--candidate` works fully offline**, evaluating a supplied merged trait against the plan
+  through the shared assist gates. Deleting the command would not lose gate coverage of
+  composition; it would lose the only way to reach it from the CLI.
+- **The library has a second consumer.** `plan` is exported through the wasm ABI as `compose_json`
+  (`modules/wasm-core/src/abi.rs:474`), so deleting the command does not delete the module, and the
+  module's tests keep it honest either way.
+
+## The fork
+
+**(a) Keep it.** Add a `compose-trait` built-in package: input is the deterministic plan (conflicts
+and binding proposals), output is CDK source per 0065, run through the bounded guarded loop per
+0066. The model's job is narrow and well posed — resolve the enumerated conflicts, nothing else —
+which is a better-specified task than `generate`'s. Cost: a seventh meta-trait, a seventh grounding
+surface, and a command that must be un-hidden and documented.
+
+**(b) Delete the command; keep `composition::plan` as a library.** The wasm ABI keeps the plan
+available. The argument: composition answers a question the product stopped asking. Packaging
+doctrine is now single-trait — fold standards and knowledge into the consuming trait as its own
+resources and split only when a second consumer exists — and `dependency` plus resources is how
+traits share material. "Merge two traits into a third" is the pre-dependency answer.
+
+## Watch
+
+- **Whichever way it goes, the help text is a bug today.** A command documenting a contract it
+  cannot satisfy is worse than either outcome, and it is currently shipping.
+- Do not pick (a) for sunk-cost reasons. The 1 129 lines survive under (b); only the CLI entry
+  point and its handler go.
+- Under (a), compose inherits everything 0065 and 0066 decide — it cannot be the one assist
+  operation that still writes canonical TOML in a single unguarded call.
+- Under (b), check `proof_cli_surface` and the help-surface listings for compose references before
+  removing, and decide whether `Operation::Compose` stays in the assist enum for the wasm/library
+  path or goes with it.
+
+## Done when
+
+Either a `compose-trait` package exists and `ctx traits compose` produces a converged, buildable
+merged trait through the guarded loop with the command un-hidden and documented; or the command,
+its handler and its CLI surface are gone, `composition::plan` remains reachable through the wasm
+ABI, and no help text anywhere still promises LLM-assisted composition.
