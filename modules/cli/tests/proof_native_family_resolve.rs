@@ -51,6 +51,17 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         utf8(&init).1
     );
 
+    // What this file proves is leaf resolution and start-time trust, not
+    // harness discovery — so the fixture's one role is pinned rather than
+    // left to probe PATH. Unpinned, `ctx traits run` refuses before it ever
+    // reaches the trust check on any machine with no coding agent installed,
+    // which is every CI runner and no developer laptop.
+    fs::write(
+        proj.join(".ctx/config.toml"),
+        "[agent.role.worker]\nharness = \"claude-code\"\n",
+    )
+    .unwrap();
+
     let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source())
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
