@@ -97,10 +97,6 @@ struct ConfigDoctorValue {
 pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()>> {
     let report = ctx_traits_io::harness_config::resolve_config_report(Utf8Path::new("."))?;
     let mut knobs = std::collections::BTreeMap::new();
-    // `winner_key` defaults to `name` itself, except for P475 budget fields
-    // (D7): those reuse their seat's whole-table `agent.role.<role>` winner
-    // — the winners map records one provenance per role, not per budget
-    // field — rather than a fourth, never-populated provenance channel.
     fn add_as(
         knobs: &mut std::collections::BTreeMap<String, ConfigDoctorValue>,
         winners: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::ConfigWinner>,
@@ -116,7 +112,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                 contributors: Vec::new(),
             },
         );
-        let reason = config_reason(&winner).to_string();
+        let reason = winner.reason.label().to_string();
         knobs.insert(
             name,
             ConfigDoctorValue {
@@ -636,12 +632,12 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             }
         }
     }
-    for name in report.runtime.agent.role.keys() {
-        add(
+    for (name, assignment) in &report.runtime.agent.role {
+        add_assignment_rows(
             &mut knobs,
             &report.winners,
-            format!("agent.role.{name}"),
-            format_role(&report.runtime.agent.role[name]),
+            &format!("agent.role.{name}"),
+            assignment,
         );
     }
     // P451: every declared variant/repo qualifier table, plus the active
@@ -650,30 +646,30 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     // a real run would resolve (that proof lives in run provenance).
     for (variant, value) in &report.runtime.agent.variant {
         for role in value.role.keys() {
-            add(
+            add_assignment_rows(
                 &mut knobs,
                 &report.winners,
-                format!("agent.variant.{variant}.role.{role}"),
-                format_role(&value.role[role]),
+                &format!("agent.variant.{variant}.role.{role}"),
+                &value.role[role],
             );
         }
     }
     for (repo_key, repo_override) in &report.runtime.repo {
         for role in repo_override.agent.role.keys() {
-            add(
+            add_assignment_rows(
                 &mut knobs,
                 &report.winners,
-                format!("repo.{repo_key}.agent.role.{role}"),
-                format_role(&repo_override.agent.role[role]),
+                &format!("repo.{repo_key}.agent.role.{role}"),
+                &repo_override.agent.role[role],
             );
         }
         for (variant, value) in &repo_override.agent.variant {
             for role in value.role.keys() {
-                add(
+                add_assignment_rows(
                     &mut knobs,
                     &report.winners,
-                    format!("repo.{repo_key}.agent.variant.{variant}.role.{role}"),
-                    format_role(&value.role[role]),
+                    &format!("repo.{repo_key}.agent.variant.{variant}.role.{role}"),
+                    &value.role[role],
                 );
             }
         }
@@ -686,14 +682,10 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             .unwrap_or_else(|| "none (ad-hoc invocation)".to_string()),
     );
     // P475: seat budgets, for the union of every configured role and the
-    // four standing seats, resolved through the same
+    // four standing seats, resolve through the same
     // `ResolvedRuntimeAssignments::budget_for_seat` path drive/merge/narrator
-    // dispatch use — so a value shown here is exactly what a frame would
-    // resolve, not a second best-effort read of the raw config. A seat's
-    // winner reuses its already-recorded `agent.role.<name>` whole-table
-    // winner (a nearer scope replaces the whole table, budget included, so
-    // the two winners are always identical) rather than a fourth provenance
-    // channel.
+    // dispatch use. Their rows retain the assignment leaf winner, so inherited
+    // budget fields and replacement seats report their actual source.
     {
         let profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[])?;
         let mut roles: std::collections::BTreeSet<String> =
@@ -782,7 +774,10 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                     ),
                 ] {
                     let winner_key = if declared {
-                        format!("agent.role.{role}")
+                        match seat_label {
+                            Some(label) => format!("agent.role.{role}.{label}.budget.{field}"),
+                            None => format!("agent.role.{role}.budget.{field}"),
+                        }
                     } else {
                         String::new()
                     };
@@ -989,24 +984,72 @@ fn format_env_var_kind(kind: ctx_traits_io::env_reference::EnvVarKind) -> &'stat
     }
 }
 
-fn format_role(value: &ctx_traits_io::harness_config::RoleAssignmentValue) -> String {
-    value
-        .entries()
-        .iter()
-        .map(|assignment| {
-            format!(
-                "harness={}, transport={}, session-mode={}, model={}, reasoning-effort={}, extra-args={}, system-prompt={}",
+fn add_assignment_rows(
+    knobs: &mut std::collections::BTreeMap<String, ConfigDoctorValue>,
+    winners: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::ConfigWinner>,
+    prefix: &str,
+    value: &ctx_traits_io::harness_config::RoleAssignmentValue,
+) {
+    for (index, assignment) in value.entries().iter().enumerate() {
+        let prefix = if value.is_list() {
+            format!("{prefix}.{}", index + 1)
+        } else {
+            prefix.to_string()
+        };
+        let rows = [
+            (
+                "harness",
                 crate::app::presentation::wire_name(&assignment.harness),
+            ),
+            (
+                "transport",
                 crate::app::presentation::wire_name(&assignment.transport),
+            ),
+            (
+                "session-mode",
                 crate::app::presentation::wire_name(&assignment.session_mode),
+            ),
+            (
+                "model",
                 crate::app::presentation::wire_name(&assignment.model),
+            ),
+            (
+                "reasoning-effort",
                 crate::app::presentation::wire_name(&assignment.reasoning_effort),
+            ),
+            (
+                "extra-args",
                 crate::app::presentation::wire_name(&assignment.extra_args),
-                if assignment.system_prompt.is_some() { "present" } else { "absent" },
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
+            ),
+            (
+                "system-prompt",
+                if assignment.system_prompt.is_some() {
+                    "present".into()
+                } else {
+                    "absent".into()
+                },
+            ),
+        ];
+        for (field, rendered) in rows {
+            let name = format!("{prefix}.{field}");
+            let winner = winners.get(&name).cloned().unwrap_or(
+                ctx_traits_io::harness_config::ConfigWinner {
+                    layer: ctx_traits_io::harness_config::ConfigLayer::BuiltIn,
+                    source: None,
+                    reason: ctx_traits_io::harness_config::ConfigReason::Default,
+                    contributors: Vec::new(),
+                },
+            );
+            knobs.insert(
+                name,
+                ConfigDoctorValue {
+                    value: rendered,
+                    reason: winner.reason.label().to_string(),
+                    winner,
+                },
+            );
+        }
+    }
 }
 
 /// The single owner of the `ConfigLayer` → display-label mapping — every
@@ -1028,19 +1071,6 @@ fn format_winner(winner: &ctx_traits_io::harness_config::ConfigWinner) -> String
     match winner.source.as_deref() {
         Some(source) => format!("{layer}: {source}"),
         None => layer.to_string(),
-    }
-}
-
-fn config_reason(winner: &ctx_traits_io::harness_config::ConfigWinner) -> &'static str {
-    match winner.reason {
-        ctx_traits_io::harness_config::ConfigReason::Default => "default",
-        ctx_traits_io::harness_config::ConfigReason::RepoDefault => "repo default",
-        ctx_traits_io::harness_config::ConfigReason::RepoRequirement => "repo requirement",
-        ctx_traits_io::harness_config::ConfigReason::PersonalRepoOverride => {
-            "your per-repo override"
-        }
-        ctx_traits_io::harness_config::ConfigReason::EnvironmentOverride => "environment override",
-        ctx_traits_io::harness_config::ConfigReason::Additive => "additive",
     }
 }
 

@@ -86,6 +86,254 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     assert!(stdout.contains("schema-version rejected from"), "{stdout}");
 }
 
+#[test]
+fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
+    let scratch = ScratchRoot::new("p1010-layered-provenance");
+    let repo = scratch.home().join("repo");
+    let global = scratch.home().join("ctx/config.toml");
+    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(global.parent().unwrap()).unwrap();
+    git_init(&repo);
+
+    // Discover the key doctor exposes to users before installing its matching
+    // personal override.
+    let initial = require_success(
+        "discover active repository qualifier",
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    );
+    let active_key = initial
+        .lines()
+        .find(|line| line.trim_start().starts_with("repo.active-key:"))
+        .and_then(|line| line.split_once(':'))
+        .map(|(_, value)| value.split('[').next().unwrap_or(value).trim())
+        .unwrap_or_else(|| panic!("doctor did not report an active key: {initial}"));
+
+    fs::write(
+        &global,
+        format!(
+            "[host.layered]\nformat = 'global-format'\n\
+[harness.layered]\nkind = 'custom'\nbin = 'global-bin'\ntransports = ['cli']\nversion-probe = ['--version']\n\
+[harness.layered.cli]\nargv = []\nprompt-via = 'stdin'\noutput = 'raw-json'\n\
+[harness.layered.mcp]\nallowed-tools = ['global-tool', 'duplicate-tool']\n\
+[[agent.role.worker]]\nharness = 'global-worker'\nmodel = 'stale-global-model'\n\
+[[agent.role.worker]]\nharness = 'global-second-worker'\n\
+[publish]\nexclude = ['global-exclude', 'duplicate-exclude']\n\
+[worktree.env]\nGLOBAL_ONLY = 'global'\nCONFLICT = 'global'\n\
+[run.build-cache.shared]\nenv = 'GLOBAL_CACHE'\n\
+[repo.\"{active_key}\".host.layered]\nprofile = 'personal-profile'\n\
+[repo.\"{active_key}\".agent.role.worker]\nmodel = 'personal-model'\n\
+[repo.\"{active_key}\".publish]\nexclude = ['personal-exclude', 'duplicate-exclude']\n\
+[repo.\"{active_key}\".worktree.env]\nCONFLICT = 'personal'\n\
+[repo.\"{active_key}\".run.build-cache.shared]\nenv = 'PERSONAL_CACHE'\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/config.toml"),
+        "[run]\nmax-frames = 7\n\
+[host.layered]\nformat = 'repo-format'\n\
+[harness.layered]\nbin = 'repo-bin'\n\
+[harness.layered.mcp]\nmcp-config-flag = '--repo-mcp'\n\
+[[agent.role.worker]]\nharness = 'repo-worker'\n\
+[publish]\nexclude = ['repo-exclude', 'duplicate-exclude']\n\
+[worktree.env]\nREPO_ONLY = 'repo'\nCONFLICT = 'repo'\n\
+[run.build-cache.shared]\nenv = 'REPO_CACHE'\n",
+    )
+    .unwrap();
+    let environment = scratch.home().join("environment.toml");
+    fs::write(
+        &environment,
+        "[host.layered]\nproject-path = 'environment-project'\n\
+[[agent.role.worker]]\nharness = 'environment-worker'\n\
+[publish]\nexclude = ['environment-exclude', 'duplicate-exclude']\n\
+[worktree.env]\nENV_ONLY = 'environment'\nCONFLICT = 'environment'\n\
+[run.build-cache.shared]\nenv = 'ENV_CACHE'\n",
+    )
+    .unwrap();
+    let global_source = fs::canonicalize(&global).unwrap().display().to_string();
+    let repo_source = fs::canonicalize(&repo)
+        .unwrap()
+        .join(".")
+        .join(".ctx/config.toml")
+        .display()
+        .to_string();
+    let environment_source = environment.display().to_string();
+
+    let mut text_command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    );
+    text_command.env("CTX_CONFIG", &environment);
+    let text_output = text_command.output().unwrap();
+    assert_exit_code(&text_output, 0);
+    let (text, _) = utf8(&text_output);
+    for expected in [
+        format!("host.layered.profile: personal-profile [user-global: {global_source}] [your per-repo override]"),
+        format!("host.layered.format: repo-format [repo: {repo_source}] [repo default]"),
+        format!("host.layered.project-path: environment-project [environment: {environment_source}] [environment override]"),
+        format!("harness.layered.cli.prompt-via: stdin [user-global: {global_source}] [default]"),
+        format!("harness.layered.bin: repo-bin [repo: {repo_source}] [repo default]"),
+        format!("harness.layered.mcp.mcp-config-flag: --repo-mcp [repo: {repo_source}] [repo default]"),
+        format!("agent.role.worker.1.harness: environment-worker [environment: {environment_source}] [environment override]"),
+        format!("run.max-frames: 7 [repo: {repo_source}] [repo requirement]"),
+        "publish.exclude: [\".git\",\"node_modules\",\"target\",\".turbo\",\"global-exclude\",\"duplicate-exclude\",\"repo-exclude\",\"environment-exclude\",\"personal-exclude\"]".to_string(),
+        format!("worktree.env.CONFLICT: repo [repo: {repo_source}] [additive]"),
+        format!("run.build-cache.shared.env: REPO_CACHE [repo: {repo_source}] [additive]"),
+    ] {
+        assert!(text.contains(&expected), "missing {expected:?}: {text}");
+    }
+
+    let mut json_command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config", "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    json_command.env("CTX_CONFIG", &environment);
+    let json_output = json_command.output().unwrap();
+    assert_exit_code(&json_output, 0);
+    let (json, _) = utf8(&json_output);
+    let report: serde_json::Value = serde_json::from_str(&json).unwrap_or_else(|error| {
+        panic!("doctor --config --json did not emit JSON: {error}\n{json}")
+    });
+    let knobs = &report["knobs"];
+    for (key, value, layer, source, winner_reason, reason) in [
+        (
+            "host.layered.profile",
+            "personal-profile",
+            "user-global",
+            &global_source,
+            "personal-repo-override",
+            "your per-repo override",
+        ),
+        (
+            "host.layered.format",
+            "repo-format",
+            "repo",
+            &repo_source,
+            "repo-default",
+            "repo default",
+        ),
+        (
+            "host.layered.project-path",
+            "environment-project",
+            "environment",
+            &environment_source,
+            "environment-override",
+            "environment override",
+        ),
+        (
+            "harness.layered.cli.prompt-via",
+            "stdin",
+            "user-global",
+            &global_source,
+            "default",
+            "default",
+        ),
+        (
+            "harness.layered.mcp.mcp-config-flag",
+            "--repo-mcp",
+            "repo",
+            &repo_source,
+            "repo-default",
+            "repo default",
+        ),
+        (
+            "run.max-frames",
+            "7",
+            "repo",
+            &repo_source,
+            "repo-requirement",
+            "repo requirement",
+        ),
+        (
+            "agent.role.worker.1.harness",
+            "environment-worker",
+            "environment",
+            &environment_source,
+            "environment-override",
+            "environment override",
+        ),
+    ] {
+        assert_eq!(knobs[key]["value"], value, "{key}: {report}");
+        assert_eq!(knobs[key]["winner"]["layer"], layer, "{key}: {report}");
+        assert_eq!(
+            knobs[key]["winner"]["source"],
+            source.as_str(),
+            "{key}: {report}"
+        );
+        assert_eq!(
+            knobs[key]["winner"]["reason"], winner_reason,
+            "{key}: {report}"
+        );
+        assert_eq!(knobs[key]["reason"], reason, "{key}: {report}");
+    }
+    assert_eq!(knobs["worktree.env.CONFLICT"]["value"], "repo");
+    assert_eq!(knobs["worktree.env.CONFLICT"]["winner"]["layer"], "repo");
+    assert_eq!(
+        knobs["worktree.env.CONFLICT"]["winner"]["source"],
+        repo_source
+    );
+    assert_eq!(
+        knobs["worktree.env.CONFLICT"]["winner"]["reason"],
+        "additive"
+    );
+    assert_eq!(
+        knobs["agent.role.worker.1.model"]["winner"]["layer"], "built-in",
+        "replaced list seat retained a stale global model winner: {report}"
+    );
+    assert_eq!(
+        knobs["harness.layered.mcp.allowed-tools"]["winner"]["layer"], "built-in",
+        "the global MCP table was replaced rather than retaining its stale winner"
+    );
+    assert_eq!(knobs["run.build-cache.shared.env"]["value"], "REPO_CACHE");
+    assert_eq!(
+        knobs["run.build-cache.shared.env"]["winner"]["layer"],
+        "repo"
+    );
+    assert_eq!(
+        knobs["run.build-cache.shared.env"]["winner"]["source"],
+        repo_source
+    );
+    assert_eq!(
+        knobs["run.build-cache.shared.env"]["winner"]["reason"],
+        "additive"
+    );
+    let contributors = knobs["publish.exclude"]["winner"]["contributors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("missing publish contributors: {report}"));
+    assert_eq!(
+        contributors,
+        &vec![
+            serde_json::json!({ "layer": "built-in", "source": serde_json::Value::Null }),
+            serde_json::json!({ "layer": "user-global", "source": global_source }),
+            serde_json::json!({ "layer": "repo", "source": repo_source }),
+            serde_json::json!({ "layer": "environment", "source": environment_source }),
+        ]
+    );
+    assert_eq!(
+        knobs["worktree.env.CONFLICT"]["winner"]["contributors"],
+        serde_json::json!([
+            { "layer": "user-global", "source": global_source },
+            { "layer": "repo", "source": repo_source },
+            { "layer": "environment", "source": environment_source },
+        ]),
+        "the global root and personal block must share one contributor"
+    );
+    assert_eq!(
+        knobs["run.build-cache.shared.env"]["winner"]["contributors"],
+        serde_json::json!([
+            { "layer": "user-global", "source": global_source },
+            { "layer": "repo", "source": repo_source },
+            { "layer": "environment", "source": environment_source },
+        ])
+    );
+}
+
 /// P476: a pre-P476 `[agent.master]`/`[agent.narrator]`/`[agent.merger]`/
 /// `[agent.merger-deep]` table, or a pre-P476 bare `[agent]` scalar, fails
 /// decode with a message naming its exact `[agent.role.*]` replacement —
@@ -350,9 +598,9 @@ fn migrate_config_rewrites_an_inline_agent_table_losslessly() {
 }
 
 /// P476: every seat — the `default` driver, `narrator`, `merger`,
-/// `merger-deep`, and a declared trait role — renders through the SAME
-/// `agent.role.<name>` doctor listing, each with its config layer/source
-/// intact (P418 provenance), never a separate special-cased block.
+/// `merger-deep`, and a declared trait role — renders each authored assignment
+/// leaf with its own config layer/source rather than attaching one broad role
+/// winner to fields that may inherit from different layers.
 #[test]
 fn doctor_config_renders_every_seat_through_one_uniform_listing() {
     let scratch = ScratchRoot::new("p476-doctor-uniform-seats");
@@ -383,16 +631,16 @@ fn doctor_config_renders_every_seat_through_one_uniform_listing() {
             .lines()
             .find(|line| {
                 line.trim_start()
-                    .starts_with(&format!("agent.role.{role}: "))
+                    .starts_with(&format!("agent.role.{role}.harness: "))
             })
-            .unwrap_or_else(|| panic!("missing uniform agent.role.{role} listing: {stdout}"));
+            .unwrap_or_else(|| panic!("missing agent.role.{role}.harness listing: {stdout}"));
         assert!(
-            line.contains("harness=claude"),
-            "agent.role.{role} must report its configured harness: {line}"
+            line.contains(": claude "),
+            "agent.role.{role}.harness must report its configured harness: {line}"
         );
         assert!(
             line.contains("[repo:"),
-            "agent.role.{role} must carry its repo-layer source: {line}"
+            "agent.role.{role}.harness must carry its repo-layer source: {line}"
         );
     }
 }
@@ -445,7 +693,7 @@ fn doctor_uses_repo_defaults_after_global_defaults() {
     let (stdout, _) = utf8(&output);
     assert!(stdout.contains("run.max-in-flight: 2 [repo:"), "{stdout}");
     assert!(
-        stdout.contains("agent.role.worker: harness=repo-worker"),
+        stdout.contains("agent.role.worker.harness: repo-worker"),
         "{stdout}"
     );
     assert!(stdout.contains("[repo default]"), "{stdout}");

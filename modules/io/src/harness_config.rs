@@ -1166,6 +1166,19 @@ pub struct ConfigWinner {
     pub contributors: Vec<ConfigContributor>,
 }
 
+impl ConfigReason {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::RepoDefault => "repo default",
+            Self::RepoRequirement => "repo requirement",
+            Self::PersonalRepoOverride => "your per-repo override",
+            Self::EnvironmentOverride => "environment override",
+            Self::Additive => "additive",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveConfig<T> {
     pub value: T,
@@ -3417,17 +3430,24 @@ fn apply_repo_defaults(
     // Keep the report's runtime document fully collapsed. The repo map remains
     // for qualifier evidence at dispatch time, but its matching personal
     // defaults must also be visible to non-dispatch consumers such as doctor.
-    let role_keys: Vec<String> = qualifier.agent.role.keys().cloned().collect();
-    let variant_role_keys = variant_role_keys(&qualifier.agent.variant);
+    let role_keys: Vec<_> = qualifier.agent.role.iter().collect();
+    let variant_role_keys = variant_role_assignments(&qualifier.agent.variant);
     let model_tier_present = !qualifier.agent.model_tier.is_empty();
+    reconcile_assignment_winners(winners, &runtime.agent, &qualifier.agent, "agent");
     merge_agent_defaults(&mut runtime.agent, qualifier.agent.clone());
-    for role in role_keys {
-        record_personal_winner(winners, format!("agent.role.{role}"), source.clone());
-    }
-    for (variant, role) in variant_role_keys {
-        record_personal_winner(
+    for (role, assignment) in role_keys {
+        record_personal_assignment_winners(
             winners,
-            format!("agent.variant.{variant}.role.{role}"),
+            &format!("agent.role.{role}"),
+            assignment,
+            source.clone(),
+        );
+    }
+    for (variant, role, assignment) in variant_role_keys {
+        record_personal_assignment_winners(
+            winners,
+            &format!("agent.variant.{variant}.role.{role}"),
+            assignment,
             source.clone(),
         );
     }
@@ -3435,17 +3455,23 @@ fn apply_repo_defaults(
         record_personal_winner(winners, "agent.model-tier", source.clone());
     }
     for (id, harness) in &qualifier.harness {
+        if harness.mcp.is_some() {
+            remove_winner_subtree(winners, &format!("harness.{id}.mcp"));
+        }
         let merged = runtime
             .harness
             .get(id)
             .map(|base| harness.merged_onto(base))
             .unwrap_or_else(|| harness.clone());
         runtime.harness.insert(id.clone(), merged);
-        if layer == ConfigLayer::UserGlobal {
-            record_personal_winner(winners, format!("harness.{id}"), source.clone());
-        } else {
-            record_winner(winners, format!("harness.{id}"), layer, source.clone());
-        }
+        record_harness_winners(
+            winners,
+            id,
+            harness,
+            layer,
+            source.clone(),
+            layer == ConfigLayer::UserGlobal,
+        );
     }
     for (name, host) in &qualifier.host {
         runtime
@@ -3453,11 +3479,14 @@ fn apply_repo_defaults(
             .entry(name.clone())
             .or_default()
             .merge(host.clone());
-        if layer == ConfigLayer::UserGlobal {
-            record_personal_winner(winners, format!("host.{name}"), source.clone());
-        } else {
-            record_winner(winners, format!("host.{name}"), layer, source.clone());
-        }
+        record_host_winners(
+            winners,
+            name,
+            host,
+            layer,
+            source.clone(),
+            layer == ConfigLayer::UserGlobal,
+        );
     }
     let run = runtime.run.get_or_insert_with(RunTable::default);
     if qualifier.run.wait.is_some() {
@@ -3504,17 +3533,25 @@ fn apply_environment_defaults(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
-    let role_keys: Vec<String> = document.agent.role.keys().cloned().collect();
-    let variant_role_keys = variant_role_keys(&document.agent.variant);
+    let role_keys: Vec<_> = document.agent.role.iter().collect();
+    let variant_role_keys = variant_role_assignments(&document.agent.variant);
     let model_tier_present = !document.agent.model_tier.is_empty();
+    reconcile_assignment_winners(winners, &runtime.agent, &document.agent, "agent");
     merge_agent_defaults(&mut runtime.agent, document.agent.clone());
-    for role in role_keys {
-        record_winner(winners, format!("agent.role.{role}"), layer, source.clone());
-    }
-    for (variant, role) in variant_role_keys {
-        record_winner(
+    for (role, assignment) in role_keys {
+        record_assignment_winners(
             winners,
-            format!("agent.variant.{variant}.role.{role}"),
+            &format!("agent.role.{role}"),
+            assignment,
+            layer,
+            source.clone(),
+        );
+    }
+    for (variant, role, assignment) in variant_role_keys {
+        record_assignment_winners(
+            winners,
+            &format!("agent.variant.{variant}.role.{role}"),
+            assignment,
             layer,
             source.clone(),
         );
@@ -3523,13 +3560,16 @@ fn apply_environment_defaults(
         record_winner(winners, "agent.model-tier", layer, source.clone());
     }
     for (id, harness) in &document.harness {
+        if harness.mcp.is_some() {
+            remove_winner_subtree(winners, &format!("harness.{id}.mcp"));
+        }
         let merged = runtime
             .harness
             .get(id)
             .map(|base| harness.merged_onto(base))
             .unwrap_or_else(|| harness.clone());
         runtime.harness.insert(id.clone(), merged);
-        record_winner(winners, format!("harness.{id}"), layer, source.clone());
+        record_harness_winners(winners, id, harness, layer, source.clone(), false);
     }
     for (name, host) in &document.host {
         runtime
@@ -3537,7 +3577,7 @@ fn apply_environment_defaults(
             .entry(name.clone())
             .or_default()
             .merge(host.clone());
-        record_winner(winners, format!("host.{name}"), layer, source.clone());
+        record_host_winners(winners, name, host, layer, source.clone(), false);
     }
     if let Some(next) = &document.run {
         let run = runtime.run.get_or_insert_with(RunTable::default);
@@ -3611,6 +3651,7 @@ fn apply_additive_values(
             .collect(),
     );
     let mut contributors: BTreeMap<String, Vec<ConfigContributor>> = BTreeMap::new();
+    let mut effective: BTreeMap<String, ConfigContributor> = BTreeMap::new();
     contributors.insert(
         "publish.exclude".into(),
         vec![ConfigContributor {
@@ -3626,30 +3667,36 @@ fn apply_additive_values(
             document.worktree.tripwire.sentinel.clone(),
         );
         for (key, value) in &document.worktree.env {
+            let contributor = ConfigContributor {
+                layer: *layer,
+                source: Some(path.to_string()),
+            };
+            record_additive_contributor(
+                &mut contributors,
+                format!("worktree.env.{key}"),
+                contributor.clone(),
+            );
             // Repository-owned map entries are retained over personal/env.
             if *layer == ConfigLayer::Repo || !runtime.worktree.env.contains_key(key) {
                 runtime.worktree.env.insert(key.clone(), value.clone());
-                contributors
-                    .entry(format!("worktree.env.{key}"))
-                    .or_default()
-                    .push(ConfigContributor {
-                        layer: *layer,
-                        source: Some(path.to_string()),
-                    });
+                effective.insert(format!("worktree.env.{key}"), contributor);
             }
         }
         if let Some(run) = &document.run {
             let target = runtime.run.get_or_insert_with(RunTable::default);
             for (name, cache) in &run.build_cache {
+                let contributor = ConfigContributor {
+                    layer: *layer,
+                    source: Some(path.to_string()),
+                };
+                record_additive_contributor(
+                    &mut contributors,
+                    format!("run.build-cache.{name}"),
+                    contributor.clone(),
+                );
                 if *layer == ConfigLayer::Repo || !target.build_cache.contains_key(name) {
                     target.build_cache.insert(name.clone(), cache.clone());
-                    contributors
-                        .entry(format!("run.build-cache.{name}"))
-                        .or_default()
-                        .push(ConfigContributor {
-                            layer: *layer,
-                            source: Some(path.to_string()),
-                        });
+                    effective.insert(format!("run.build-cache.{name}"), contributor);
                 }
             }
         }
@@ -3664,22 +3711,17 @@ fn apply_additive_values(
             source: Some(path.to_string()),
         };
         if !document.worktree.seed.is_empty() {
-            contributors
-                .entry("worktree.seed".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "worktree.seed".into(), contributor());
         }
         if !document.worktree.warm.is_empty() {
-            contributors
-                .entry("worktree.warm".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "worktree.warm".into(), contributor());
         }
         if !document.worktree.tripwire.sentinel.is_empty() {
-            contributors
-                .entry("worktree.tripwire.sentinel".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(
+                &mut contributors,
+                "worktree.tripwire.sentinel".into(),
+                contributor(),
+            );
         }
         if document
             .publish
@@ -3687,10 +3729,7 @@ fn apply_additive_values(
             .and_then(|publish| publish.exclude.as_ref())
             .is_some()
         {
-            contributors
-                .entry("publish.exclude".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "publish.exclude".into(), contributor());
         }
     }
     for (path, override_) in personal {
@@ -3701,6 +3740,15 @@ fn apply_additive_values(
             override_.worktree.tripwire.sentinel.clone(),
         );
         for (key, value) in &override_.worktree.env {
+            let contributor = ConfigContributor {
+                layer: ConfigLayer::UserGlobal,
+                source: Some(path.to_string()),
+            };
+            record_additive_contributor(
+                &mut contributors,
+                format!("worktree.env.{key}"),
+                contributor.clone(),
+            );
             let inserted = !runtime.worktree.env.contains_key(key);
             runtime
                 .worktree
@@ -3708,29 +3756,26 @@ fn apply_additive_values(
                 .entry(key.clone())
                 .or_insert_with(|| value.clone());
             if inserted {
-                contributors
-                    .entry(format!("worktree.env.{key}"))
-                    .or_default()
-                    .push(ConfigContributor {
-                        layer: ConfigLayer::UserGlobal,
-                        source: Some(path.to_string()),
-                    });
+                effective.insert(format!("worktree.env.{key}"), contributor);
             }
         }
         let run = runtime.run.get_or_insert_with(RunTable::default);
         for (name, cache) in &override_.run.build_cache {
+            let contributor = ConfigContributor {
+                layer: ConfigLayer::UserGlobal,
+                source: Some(path.to_string()),
+            };
+            record_additive_contributor(
+                &mut contributors,
+                format!("run.build-cache.{name}"),
+                contributor.clone(),
+            );
             let inserted = !run.build_cache.contains_key(name);
             run.build_cache
                 .entry(name.clone())
                 .or_insert_with(|| cache.clone());
             if inserted {
-                contributors
-                    .entry(format!("run.build-cache.{name}"))
-                    .or_default()
-                    .push(ConfigContributor {
-                        layer: ConfigLayer::UserGlobal,
-                        source: Some(path.to_string()),
-                    });
+                effective.insert(format!("run.build-cache.{name}"), contributor);
             }
         }
         if !override_.publish.exclude.is_empty() {
@@ -3743,35 +3788,29 @@ fn apply_additive_values(
             source: Some(path.to_string()),
         };
         if !override_.worktree.seed.is_empty() {
-            contributors
-                .entry("worktree.seed".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "worktree.seed".into(), contributor());
         }
         if !override_.worktree.warm.is_empty() {
-            contributors
-                .entry("worktree.warm".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "worktree.warm".into(), contributor());
         }
         if !override_.worktree.tripwire.sentinel.is_empty() {
-            contributors
-                .entry("worktree.tripwire.sentinel".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(
+                &mut contributors,
+                "worktree.tripwire.sentinel".into(),
+                contributor(),
+            );
         }
         if !override_.publish.exclude.is_empty() {
-            contributors
-                .entry("publish.exclude".into())
-                .or_default()
-                .push(contributor());
+            record_additive_contributor(&mut contributors, "publish.exclude".into(), contributor());
         }
     }
     for (key, sources) in contributors {
-        let last = sources
-            .last()
-            .cloned()
-            .expect("additive contributor exists");
+        let last = effective.remove(&key).unwrap_or_else(|| {
+            sources
+                .last()
+                .cloned()
+                .expect("additive contributor exists")
+        });
         winners.insert(
             key,
             ConfigWinner {
@@ -3781,6 +3820,19 @@ fn apply_additive_values(
                 contributors: sources,
             },
         );
+    }
+}
+
+/// A matching personal block can come from a document already traversed above.
+/// It contributes values at its merge position, but must appear once per leaf.
+fn record_additive_contributor(
+    contributors: &mut BTreeMap<String, Vec<ConfigContributor>>,
+    key: String,
+    contributor: ConfigContributor,
+) {
+    let sources = contributors.entry(key).or_default();
+    if !sources.contains(&contributor) {
+        sources.push(contributor);
     }
 }
 
@@ -4476,6 +4528,11 @@ fn record_personal_winner(
     );
 }
 
+fn remove_winner_subtree(winners: &mut BTreeMap<String, ConfigWinner>, prefix: &str) {
+    let child_prefix = format!("{prefix}.");
+    winners.retain(|key, _| key != prefix && !key.starts_with(&child_prefix));
+}
+
 fn builtin_winner() -> ConfigWinner {
     ConfigWinner {
         layer: ConfigLayer::BuiltIn,
@@ -4751,71 +4808,36 @@ fn merge_machine_config(
         base.schema_version = next.schema_version;
     }
     for (name, harness) in next.harness {
+        if harness.mcp.is_some() {
+            remove_winner_subtree(winners, &format!("harness.{name}.mcp"));
+        }
+        record_harness_winners(winners, &name, &harness, layer, source.clone(), false);
         let merged = base
             .harness
             .get(&name)
             .map(|current| harness.merged_onto(current))
             .unwrap_or(harness);
         base.harness.insert(name.clone(), merged);
-        let prefix = format!("harness.{name}");
-        record_winner(winners, prefix.clone(), layer, source.clone());
-        for field in ["kind", "bin", "transports", "version-probe", "cli", "mcp"] {
-            record_winner(winners, format!("{prefix}.{field}"), layer, source.clone());
-        }
-        if base.harness[&name].cli.is_some() {
-            for field in [
-                "argv",
-                "narrator-argv",
-                "warm-argv",
-                "json-schema-flag",
-                "model-flag",
-                "reasoning-effort-flag",
-                "system-prompt-flag",
-                "resume-flag",
-                "session-flag",
-                "dir-flag",
-                "prompt-via",
-                "stream",
-                "output",
-            ] {
-                record_winner(
-                    winners,
-                    format!("{prefix}.cli.{field}"),
-                    layer,
-                    source.clone(),
-                );
-            }
-        }
-        if base.harness[&name].mcp.is_some() {
-            for field in [
-                "mcp-config-flag",
-                "allowed-tools-flag",
-                "allowed-tools",
-                "system-prompt-flag",
-                "reasoning-effort-flag",
-                "config-via",
-            ] {
-                record_winner(
-                    winners,
-                    format!("{prefix}.mcp.{field}"),
-                    layer,
-                    source.clone(),
-                );
-            }
-        }
     }
     let agent = next.agent;
-    let role_keys: Vec<String> = agent.role.keys().cloned().collect();
+    let role_keys: Vec<_> = agent.role.iter().collect();
     let model_tier_present = !agent.model_tier.is_empty();
-    let agent_variant_role_keys = variant_role_keys(&agent.variant);
-    merge_agent_defaults(&mut base.agent, agent);
-    for name in role_keys {
-        record_winner(winners, format!("agent.role.{name}"), layer, source.clone());
-    }
-    for (variant, role) in agent_variant_role_keys {
-        record_winner(
+    let agent_variant_role_keys = variant_role_assignments(&agent.variant);
+    reconcile_assignment_winners(winners, &base.agent, &agent, "agent");
+    for (name, assignment) in role_keys {
+        record_assignment_winners(
             winners,
-            format!("agent.variant.{variant}.role.{role}"),
+            &format!("agent.role.{name}"),
+            assignment,
+            layer,
+            source.clone(),
+        );
+    }
+    for (variant, role, assignment) in agent_variant_role_keys {
+        record_assignment_winners(
+            winners,
+            &format!("agent.variant.{variant}.role.{role}"),
+            assignment,
             layer,
             source.clone(),
         );
@@ -4828,43 +4850,238 @@ fn merge_machine_config(
             source.clone(),
         );
     }
+    merge_agent_defaults(&mut base.agent, agent);
     for (repo_key, repo_override) in next.repo {
-        let role_keys: Vec<String> = repo_override.agent.role.keys().cloned().collect();
-        let repo_variant_role_keys = variant_role_keys(&repo_override.agent.variant);
         let target = base.repo.entry(repo_key.clone()).or_default();
+        reconcile_assignment_winners(
+            winners,
+            &target.agent,
+            &repo_override.agent,
+            &format!("repo.{repo_key}.agent"),
+        );
+        let role_keys: Vec<_> = repo_override.agent.role.iter().collect();
+        let repo_variant_role_keys = variant_role_assignments(&repo_override.agent.variant);
+        for (role, assignment) in role_keys {
+            record_assignment_winners(
+                winners,
+                &format!("repo.{repo_key}.agent.role.{role}"),
+                assignment,
+                layer,
+                source.clone(),
+            );
+        }
+        for (variant, role, assignment) in repo_variant_role_keys {
+            record_assignment_winners(
+                winners,
+                &format!("repo.{repo_key}.agent.variant.{variant}.role.{role}"),
+                assignment,
+                layer,
+                source.clone(),
+            );
+        }
         merge_agent_defaults(&mut target.agent, repo_override.agent);
-        for role in role_keys {
-            record_winner(
-                winners,
-                format!("repo.{repo_key}.agent.role.{role}"),
-                layer,
-                source.clone(),
-            );
-        }
-        for (variant, role) in repo_variant_role_keys {
-            record_winner(
-                winners,
-                format!("repo.{repo_key}.agent.variant.{variant}.role.{role}"),
-                layer,
-                source.clone(),
-            );
-        }
     }
 }
 
-/// Every `(variant, role)` key declared in a `[agent.variant.*]` (or
-/// repo-scoped `[repo."<key>"].agent.variant.*`) table, flattened for winner
-/// bookkeeping.
-fn variant_role_keys(variant: &BTreeMap<String, VariantOverride>) -> Vec<(String, String)> {
+fn variant_role_assignments(
+    variant: &BTreeMap<String, VariantOverride>,
+) -> Vec<(String, String, &RoleAssignmentValue)> {
     variant
         .iter()
         .flat_map(|(name, value)| {
             value
                 .role
-                .keys()
-                .map(move |role| (name.clone(), role.clone()))
+                .iter()
+                .map(move |(role, assignment)| (name.clone(), role.clone(), assignment))
         })
         .collect()
+}
+
+/// Drop leaf provenance when assignment resolution replaces a role value
+/// wholesale. Single-to-single is the only field-wise assignment merge.
+fn reconcile_assignment_winners(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    base: &AgentDefaults,
+    next: &AgentDefaults,
+    prefix: &str,
+) {
+    for (role, next_value) in &next.role {
+        if !matches!(
+            (base.role.get(role), next_value),
+            (
+                Some(RoleAssignmentValue::Single(_)),
+                RoleAssignmentValue::Single(_)
+            )
+        ) {
+            remove_winner_subtree(winners, &format!("{prefix}.role.{role}"));
+        }
+    }
+    for (variant, next_variant) in &next.variant {
+        let base_variant = base.variant.get(variant);
+        for (role, next_value) in &next_variant.role {
+            if !matches!(
+                (
+                    base_variant.and_then(|value| value.role.get(role)),
+                    next_value
+                ),
+                (
+                    Some(RoleAssignmentValue::Single(_)),
+                    RoleAssignmentValue::Single(_)
+                )
+            ) {
+                remove_winner_subtree(winners, &format!("{prefix}.variant.{variant}.role.{role}"));
+            }
+        }
+    }
+}
+
+fn record_assignment_winners(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    prefix: &str,
+    value: &RoleAssignmentValue,
+    layer: ConfigLayer,
+    source: Option<String>,
+) {
+    for (index, assignment) in value.entries().iter().enumerate() {
+        let prefix = if value.is_list() {
+            format!("{prefix}.{}", index + 1)
+        } else {
+            prefix.to_string()
+        };
+        for (field, present) in [
+            ("harness", assignment.harness.is_some()),
+            ("transport", assignment.transport.is_some()),
+            ("session-mode", assignment.session_mode.is_some()),
+            ("model", assignment.model.is_some()),
+            ("model-tier", assignment.model_tier.is_some()),
+            ("reasoning-effort", assignment.reasoning_effort.is_some()),
+            ("system-prompt", assignment.system_prompt.is_some()),
+            ("extra-args", !assignment.extra_args.is_empty()),
+            (
+                "budget.frame-seconds",
+                assignment.budget.frame_seconds.is_some(),
+            ),
+            (
+                "budget.idle-seconds",
+                assignment.budget.idle_seconds.is_some(),
+            ),
+            (
+                "budget.max-retries",
+                assignment.budget.max_retries.is_some(),
+            ),
+        ] {
+            if present {
+                record_winner(winners, format!("{prefix}.{field}"), layer, source.clone());
+            }
+        }
+    }
+}
+
+fn record_personal_assignment_winners(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    prefix: &str,
+    value: &RoleAssignmentValue,
+    source: Option<String>,
+) {
+    let mut authored = BTreeMap::new();
+    record_assignment_winners(
+        &mut authored,
+        prefix,
+        value,
+        ConfigLayer::UserGlobal,
+        source.clone(),
+    );
+    for key in authored.into_keys() {
+        record_personal_winner(winners, key, source.clone());
+    }
+}
+
+fn record_harness_winners(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    name: &str,
+    harness: &HarnessDefinition,
+    layer: ConfigLayer,
+    source: Option<String>,
+    personal: bool,
+) {
+    let prefix = format!("harness.{name}");
+    let mut record = |key: String| {
+        if personal {
+            record_personal_winner(winners, key, source.clone())
+        } else {
+            record_winner(winners, key, layer, source.clone())
+        }
+    };
+    for (field, present) in [
+        ("kind", harness.kind.is_some()),
+        ("bin", harness.bin.is_some()),
+        ("transports", !harness.transports.is_empty()),
+        ("version-probe", !harness.version_probe.is_empty()),
+    ] {
+        if present {
+            record(format!("{prefix}.{field}"));
+        }
+    }
+    if let Some(cli) = &harness.cli {
+        for (field, present) in [
+            ("argv", !cli.argv.is_empty()),
+            ("narrator-argv", cli.narrator_argv.is_some()),
+            ("warm-argv", cli.warm_argv.is_some()),
+            ("json-schema-flag", cli.json_schema_flag.is_some()),
+            ("model-flag", cli.model_flag.is_some()),
+            ("reasoning-effort-flag", cli.reasoning_effort_flag.is_some()),
+            ("system-prompt-flag", cli.system_prompt_flag.is_some()),
+            ("resume-flag", cli.resume_flag.is_some()),
+            ("session-flag", cli.session_flag.is_some()),
+            ("dir-flag", cli.dir_flag.is_some()),
+            ("prompt-via", cli.prompt_via.is_some()),
+            ("stream", cli.stream.is_some()),
+            ("output", cli.output.is_some()),
+        ] {
+            if present {
+                record(format!("{prefix}.cli.{field}"));
+            }
+        }
+    }
+    if let Some(mcp) = &harness.mcp {
+        for (field, present) in [
+            ("mcp-config-flag", mcp.mcp_config_flag.is_some()),
+            ("allowed-tools-flag", mcp.allowed_tools_flag.is_some()),
+            ("allowed-tools", !mcp.allowed_tools.is_empty()),
+            ("system-prompt-flag", mcp.system_prompt_flag.is_some()),
+            ("reasoning-effort-flag", mcp.reasoning_effort_flag.is_some()),
+            ("config-via", mcp.config_via.is_some()),
+        ] {
+            if present {
+                record(format!("{prefix}.mcp.{field}"));
+            }
+        }
+    }
+}
+
+fn record_host_winners(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    name: &str,
+    host: &HostOverride,
+    layer: ConfigLayer,
+    source: Option<String>,
+    personal: bool,
+) {
+    for (field, present) in [
+        ("profile", host.profile.is_some()),
+        ("format", host.format.is_some()),
+        ("project-path", host.project_path.is_some()),
+        ("global-path", host.global_path.is_some()),
+    ] {
+        if present {
+            let key = format!("host.{name}.{field}");
+            if personal {
+                record_personal_winner(winners, key, source.clone())
+            } else {
+                record_winner(winners, key, layer, source.clone())
+            }
+        }
+    }
 }
 
 fn merge_agent_defaults(base: &mut AgentDefaults, next: AgentDefaults) {
@@ -6877,7 +7094,10 @@ mod config_tests {
                 .as_deref(),
             Some("global")
         );
-        assert_eq!(winners["agent.role.worker"].layer, ConfigLayer::UserGlobal);
+        assert_eq!(
+            winners["agent.role.worker.harness"].layer,
+            ConfigLayer::UserGlobal
+        );
     }
 
     #[test]
@@ -7452,6 +7672,7 @@ mod config_tests {
                     "worker".into(),
                     RoleAssignmentValue::List(vec![ProfileAssignment {
                         harness: Some("repo-seat".into()),
+                        model: Some("stale-repo-model".into()),
                         ..ProfileAssignment::default()
                     }]),
                 )]),
@@ -7498,7 +7719,11 @@ mod config_tests {
         };
         assert_eq!(seats.len(), 2);
         assert_eq!(seats[0].harness.as_deref(), Some("global-one"));
-        assert_eq!(winners["agent.role.worker"].layer, ConfigLayer::UserGlobal);
+        assert_eq!(
+            winners["agent.role.worker.1.harness"].layer,
+            ConfigLayer::UserGlobal
+        );
+        assert!(!winners.contains_key("agent.role.worker.1.model"));
     }
 
     #[test]
@@ -7810,8 +8035,8 @@ mod config_tests {
             Some("global".into()),
             &mut winners,
         );
-        assert!(winners.contains_key("agent.variant.smart.role.reviewer"));
-        assert!(winners.contains_key("repo.repo-a.agent.role.worker"));
+        assert!(winners.contains_key("agent.variant.smart.role.reviewer.harness"));
+        assert!(winners.contains_key("repo.repo-a.agent.role.worker.harness"));
         assert_eq!(
             effective.agent.variant["smart"].role["reviewer"],
             RoleAssignmentValue::Single(single("smart-harness"))

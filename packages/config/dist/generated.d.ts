@@ -144,6 +144,8 @@ export type RunSessionMode = "per-frame" | "persistent";
 export interface RunTable {
     attachWaitSeconds?: number;
     buildCache?: Record<string, BuildCacheConfig>;
+    commandIdleSeconds?: number;
+    commandSeconds?: number;
     frameSeconds?: number;
     idleSeconds?: number;
     inlinePromptBytes?: number;
