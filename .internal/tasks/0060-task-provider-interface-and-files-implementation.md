@@ -8,9 +8,9 @@ being *the* board and becomes *one implementation* of it.
 ## Decisions
 
 - **Verb set:** `resolve · get · list · create · update · sync`. Small on purpose.
-- **`split`, `dispatchable` and `reconcile` compose ABOVE the provider** — backends only ever
-  implement reads, creates and updates. Backends differ too much (Linear has real sub-issues,
-  files have a naming convention) for split to be primitive. `reconcile` is deferred (later slice).
+- **`split` and `dispatchable` compose ABOVE the provider** — backends only ever implement reads,
+  creates and updates. Backends differ too much (Linear has real sub-issues, files have a naming
+  convention) for split to be primitive.
 - **Relations are stored one-directional** (`depends-on`, `parent`) and inverses (`blocks`,
   `children`) are computed, so the two halves can never disagree.
 - **`get()` returns relations RESOLVED** — each edge carrying the other task's key, title and
@@ -30,8 +30,9 @@ being *the* board and becomes *one implementation* of it.
 
 ## Watch
 
-- `sync` re-reads the backend; it is NOT verification against reality (that is reconcile, later).
-  Keep the two concepts and their names apart from the start.
+- `sync` re-reads the backend: it reports what the backend says, not whether the backend is right.
+  Do not let it grow into verification of the repository's actual state — that is a different
+  question and it needs a different name.
 - The provider stays pure: derived state that needs the session store (`in-flight`, `parked`)
   belongs to its consumers, not here.
 - Parent status derives from children — implement it as a computation over the graph, never a

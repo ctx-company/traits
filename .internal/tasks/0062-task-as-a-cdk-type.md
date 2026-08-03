@@ -44,8 +44,8 @@ Field proxies extend P398's typed field refs so `over: task.openSteps` typecheck
   no structural notion of steps.
 - A parked run now leaves N clean commits on its branch rather than an uncommitted worktree.
   "Parked" and "partially landed" stop being in tension; the branch is expected to be mergeable.
-- Marking steps done across runs is NOT this task's job — runs never write the board. That arrives
-  with reconcile (later slice); until then the owner checks boxes from the park report.
+- Marking steps done across runs is NOT this task's job — runs never write the board. The owner
+  checks boxes from the park report.
 
 ## Done when
 

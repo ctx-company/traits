@@ -17,8 +17,6 @@ Fifth slice of the task-interface arc. The board becomes operable without an edi
   never automatic on opening the screen (owner call).
 - **Dispatch from the board starts a run.** A blocked task refuses *with its reason shown*, rather
   than being invisibly disabled — the owner should always learn why.
-- Reconcile and split-from-park-report are a later slice; the screen should leave room for them
-  but not wait on them.
 
 ## Watch
 
