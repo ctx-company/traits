@@ -1,56 +1,95 @@
-# 0055 — The run title never appears, and its reserved row leaves a blank line above the grid
+# 0055 — The title row shows a pending state, and a failed first attempt stops being terminal
 
-**Status:** ready to implement · **Raised:** 2026-08-02 (owner, watching a live run)
+**Status:** ready to implement · **Raised:** 2026-08-02 · **Updated:** 2026-08-03 (owner: the title
+is not always missing — it looks like it goes missing after a timeout or a failed first try)
 
 ## Symptom
 
-The live view shows an empty line above the four panes where the run title used to be. Nothing
-is rendered into it, and the panes start one row lower than they should.
+The live view sometimes shows an empty line above the four panes where the run title belongs:
+nothing rendered, one row of height spent. Other runs show a title fine. The owner's reading is
+right — it is not random, and it is not "titles are broken": it is what happens when the ONE
+title attempt a session ever gets does not come back.
 
-## Two defects, and both need fixing
+## Root cause (verified in code)
 
-**1. The row is reserved whether or not there is a title.** `PaneTitleRow::Reserved(Option<&Line>)`
-(`run_view.rs:1758`) always carves one row off the top via `pane_body_area`, but the render only
-draws when the option is `Some`:
+`claim_session_title_attempt` (`modules/io/src/run_session.rs:371`) writes
+`SessionTitleState { attempted: true, title: None }` to the ledger **before the narration call is
+made**, and returns `false` for every later caller. The call then runs
+(`drive.rs:3706`), and only a success reaches `record_session_title`:
 
 ```rust
-if let PaneTitleRow::Reserved(Some(title_line)) = &data.title { … }
+let Ok(title) = result else { return; };   // timeout, harness error, kill → nothing recorded
 ```
 
-So `Reserved(None)` = a blank row that costs height and shows nothing. A missing title must
-collapse the row (`PaneTitleRow::None`) so the panes reclaim it; reserving space for a value that
-does not exist is what produces the blank line.
+Because `attempted` is already `true`, nothing ever tries again. `record_session_title`'s own doc
+states the consequence plainly: *"A failed/killed attempt is never recorded here — the claim above
+already marked `attempted` permanently, so title-less remains this session's terminal state."*
 
-**2. The title is not arriving.** `state.title` is only ever set by `RunPanel::set_title`, called
-from one place — `drive.rs:3720`, at the end of the session-title narration path. That path
-returns early without setting anything when: no narrator seat resolves (documented as
-"permanently title-less"), the narration call fails (`let Ok(title) = result else { return }`), or
-`record_session_title` fails to persist. Any of those leaves the panel title-less for the whole
-run, which combined with defect 1 is exactly the blank row.
+So one slow or failed narrator call — exactly the timeout the owner suspected — costs the run its
+title for its entire life. The claim exists to stop concurrent drivers racing on the same title;
+it should not also mean "a failure is forever."
 
-Find out WHICH of those it is on a current run before changing behaviour — the narrator seat
-assignment, the narration call result, and the ledger write are three different failures with
-three different fixes. `record_session_title` writes to the ledger, so a run's persisted
-`session-title` (readable via `persisted_session_title` in `dashboard.rs:2906`) tells you whether
-the title was ever produced: present in the ledger but missing from the view is a panel-wiring
-bug; absent from both is a narration/seat problem.
+Compounding it, the row is reserved whether or not a title exists:
+`PaneTitleRow::Reserved(Option<&Line>)` (`run_view.rs:1758`) always carves a row through
+`pane_body_area`, while the render only draws for `Some`. Absent title ⇒ blank row that still
+costs height.
+
+## Target
+
+**1. The row always says something true, from the first paint.** The trait name and start time are
+known at dispatch — before any narration — so the row renders immediately in a pending state and
+upgrades in place when the title lands:
+
+```
+(Generating session title…) · Implement (Quick) · Started at 04:43:01
+   ↓ narration returns
+Migrate the plan family onto the task board · Implement (Quick) · Started at 04:43:01
+```
+
+`title_row_line` (`run_view.rs:1423`) already composes `title · trait · started-at`; it needs a
+title-state argument rather than a plain `&str`, and `PaneTitleRow` needs to stop reserving an
+empty row — with a pending state there is always content, so the blank line disappears by
+construction.
+
+**2. A failed or timed-out attempt is retryable; only a real dead end is terminal.** Distinguish
+the three states the current `attempted: bool` collapses into one:
+
+- **in flight** — claimed, call running. Renders `(Generating session title…)`. A second driver
+  must still be refused (the claim's real job), but a claim whose driver died must not pin the
+  session forever — a claim needs an owner and a way to lapse.
+- **failed / timed out** — claimable again. Retry on the next drive, bounded (two or three
+  attempts, then stop trying), so the pending state cannot spin forever.
+- **no narrator seat resolvable** — genuinely terminal, exactly as today. Nothing will ever
+  produce a title, so say so rather than showing a pending state that never resolves.
+
+That is a change to `SessionTitleState` (currently `{ attempted: bool, title: Option<String> }`) —
+a persisted, ledger-visible shape, so it needs a compatible read of existing sessions: an old
+`attempted: true, title: None` should read as terminal-title-less, not as retryable, so replaying
+old ledgers does not start narrating.
+
+**3. What the row shows when the title never arrives.** After the retry budget is spent, or with no
+narrator seat, the row keeps the facts it has — `Implement (Quick) · Started at 04:43:01` — with no
+title segment and no filler like "untitled". The row stays because trait and time are real; only
+the title is absent.
 
 ## Watch
 
-- The dashboard reads the same persisted title (`dashboard.rs:1738`, `:2699`, `:2757`) and shows
-  it in session rows — check whether it is blank there too. Blank in both points at production;
-  blank only in the live view points at the panel.
-- A title that arrives mid-run must repaint into a row that was previously collapsed — the layout
-  has to grow by a row at that moment without disturbing scroll positions or follow state.
-- Keep the no-title case honest: no placeholder text, no "untitled" filler. The row simply is not
-  there until a title exists.
-- Same renderer as 0044/0048/0051/0053/0054; `title_row_line` is also used by the attached
-  dashboard view, so verify all three surfaces and both width breakpoints.
+- The dashboard reads the same persisted title (`dashboard.rs:1738`, `:2699`, `:2757`,
+  `persisted_session_title`) — a session that retried and succeeded must show its title there too,
+  and a pending session must not render the placeholder as if it were the title.
+- A title landing mid-run repaints a row that already exists (it was pending), so this must not
+  disturb scroll or follow state — simpler than growing the layout, but verify.
+- Retries cost narrator tokens: they run through the same `narrator_tokens` accounting, so a
+  bounded retry must not silently multiply a run's narration budget. Keep the bound small and
+  record attempts.
+- Same renderer as 0044/0048/0051/0053/0054; `title_row_line` also serves the attached dashboard
+  view. Verify all three surfaces at both width breakpoints.
 
 ## Done when
 
-A run with a title shows it on the top row (title · trait · started-at, as `title_row_line`
-composes it) in the live view and the attached view; a run without one shows no row at all and
-the panes use the full height; a title arriving mid-run appears without disturbing scroll or
-follow; and the reason titles were missing is identified and fixed at its own layer rather than
-papered over with a placeholder.
+A live run shows `(Generating session title…) · <trait> · Started at <time>` from its first paint
+and upgrades in place when the title arrives; a timed-out or failed first attempt is retried on a
+later drive within a small bound instead of being terminal; a session with no resolvable narrator
+seat shows the trait/time row without a title and never retries; no run ever renders a blank
+reserved row; existing ledgers with `attempted: true, title: None` keep reading as terminal; and
+the same states render correctly in the attached dashboard view.

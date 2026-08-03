@@ -1,12 +1,12 @@
 # 0050 — Root-cause the park-report ledger-contract failure, then restore the output port
 
 **Status:** ready to investigate · **Raised:** 2026-08-01 (after this failure killed runs repeatedly
-in both ctx-trait and ctx-gate across a full day)
+across a full day of runs)
 
 ## What was removed, and why this task exists
 
 `port:park-report` was removed from `implement:quick`'s procedure output on 2026-08-01 as
-CONTAINMENT, not as a fix. Runs in both repos were dying mid-flight with:
+CONTAINMENT, not as a fix. Runs were dying mid-flight with:
 
 ```
 invalid manifest at run-session.ledger: run ledger contract invalid:
@@ -20,9 +20,12 @@ standing-wall preflight still reads it (`dispatch_preflight.rs` reads `slot:park
 missing, is park-report appearing in a parked run's STRUCTURED FINAL OUTPUTS, where an owner or a
 tool reads it without opening the ledger. That is worth restoring once the defect is understood.
 
-The same removal was applied to ctx-gate's vendored copy (the whole implement package was synced
-from ctx-trait, since ctx-gate cannot rebuild the trait — its source imports the kit from outside
-its repo root). Restoring the port must be done in both.
+SCOPE: this task is ctx-trait ONLY. A run is confined to its own worktree in one repository, so
+anything involving a sibling checkout (syncing a vendored copy, approving trust there, dispatching
+a run there) is not in-run work and must never appear as a blocker here — a run that tries it
+spins until it parks, which is exactly what happened on 2026-08-03 (run-f2799f78, blocker
+`ctx-gate-restoration-missing`, three steps no in-run effort could ever close). Propagating the
+restored port to any vendored copy elsewhere is an owner step, tracked separately.
 
 ## What is established (do not re-derive)
 
@@ -36,14 +39,14 @@ its repo root). Restoring the port must be done in both.
   (`deriveParkReportStep`: clear to `[]`, then append inside the revise branch) rather than through
   a prompt/command step's declared output. Every other port's slot is written once through the
   normal acceptance path, which refreshes `output_ports` in the same transition. That is why the
-  error never named any other port, in either repo.
+  error never named any other port.
 - All 641 ledgers on this machine are internally consistent — nothing on disk is corrupt, and the
   failure state is transient (a failing transition errors out without persisting).
 - The known-good fixture `modules/cli/tests/proof_park_honesty.rs` declares the IDENTICAL shape
   (park-report as an optional output port with `value = "slot:park-report"`, clear/append project
   steps inside a branch inside a loop) and PASSES. So the shape alone does not reproduce it.
 
-## Ruled out (each checked against every ledger in both repos)
+## Ruled out (each checked against every ledger in the run stores on this machine)
 
 - Trait source/canonical digest drift — that has its own clean guard and a different message
   (`stale run-session source: loaded source digest does not match session ledger`).
@@ -81,22 +84,28 @@ both fact maps on mismatch and run one real dispatch.
    state" is what makes the check meaningful, and weakening it hides real drift.
 2. Add a regression proof at the exact shape that failed (quick's full guarded loop with a
    project-written output port, driven through a revise round).
-3. Restore `port:park-report` to `implement:quick`'s procedure output in BOTH repos, rebuild,
-   relock, re-approve. The removal sites carry a `2026-08-01` comment naming this task.
+3. Restore `port:park-report` to `implement:quick`'s procedure output in THIS repository,
+   rebuild, relock, re-approve. The removal sites carry a `2026-08-01` comment naming this task.
+   Note that procedure I/O is inferred from declared ports since 0046's rule-4 work landed, so
+   restoring means re-declaring the port (`quick/port.ts` and quick's `port:` list) — which is
+   also why merely deleting the containment comment is not enough.
 4. Check the sibling variants (default/smart/strict/phase) — they declare park-report ports too and
    were never exercised as hard as quick; whatever fix lands must cover them.
 
 ## Watch
 
-- Do not restore the port before the regression proof exists — this failure cost a full day of runs
-  across two repos, and it is silent until a run dies mid-flight.
+- Do not restore the port before the regression proof exists — this failure cost a full day of
+  runs, and it is silent until a run dies mid-flight.
 - Related: 0049 (a session should execute the bytes it started under, and ledger errors should name
   their cause in one readable sentence rather than an internal invariant).
+- OUT OF SCOPE, explicitly: any change, check, approval or dispatch in a sibling repository. Runs
+  are single-repo by construction; cross-repo propagation is an owner step and belongs on the
+  board as its own task, not as a blocker inside this one.
 
 ## Done when
 
 The exact transition that leaves a stale `output_ports` row is identified and fixed at its layer; a
 regression proof fails without the fix and passes with it; `port:park-report` is back in
-`implement:quick`'s procedure output in both repos, rebuilt, relocked and re-approved; a parked run
-again surfaces its park report in structured final outputs; and a full implement run in each repo
-completes without a ledger-contract error.
+`implement:quick`'s procedure output in this repository, rebuilt, relocked and re-approved; a parked run
+again surfaces its park report in structured final outputs; and a full implement run in this
+repository completes without a ledger-contract error.
