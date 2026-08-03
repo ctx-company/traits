@@ -340,11 +340,18 @@ fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
         "Ctrl-C did not restore the inline terminal to cooked, visible-cursor mode: {output:?}"
     );
     let termios = fs::read_to_string(fixture.repo.join(".ctx/startup-termios")).unwrap();
-    let lflags = termios
-        .lines()
-        .find_map(|line| line.strip_prefix("lflags: "))
-        .expect("stty output did not contain local flags");
-    let flags = lflags.split_whitespace().collect::<Vec<_>>();
+    // Every token, not the `lflags:` line: BSD `stty -a` labels its groups
+    // (`lflags: icanon isig ... echo`, with tab-indented continuations) and
+    // GNU `stty -a` prints the same flags with no label at all, so parsing
+    // the label found nothing on Linux and this proof failed there alone.
+    // `icanon`/`echo` are local flags in both formats and appear nowhere else
+    // in the dump, so scanning the whole file is exact rather than merely
+    // lenient — and `-echoctl`/`-echoprt` are distinct tokens from `-echo`.
+    let flags = termios.split_whitespace().collect::<Vec<_>>();
+    assert!(
+        flags.contains(&"icanon") || flags.contains(&"-icanon"),
+        "stty output did not contain local flags: {termios:?}"
+    );
     assert!(
         flags.contains(&"icanon")
             && flags.contains(&"echo")
