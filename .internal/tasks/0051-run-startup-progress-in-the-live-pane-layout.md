@@ -1,6 +1,22 @@
 # 0051 — Run startup progress belongs in the live pane layout, not in inline text lines
 
-**Status:** ready to implement · **Raised:** 2026-08-02 (owner, watching a dispatch)
+**Status:** SPLIT 2026-08-03 — the startup surface LANDED (merge of run-3db74807); the remainder is
+three follow-on tasks. Do not dispatch this file. · **Raised:** 2026-08-02 (owner, watching a dispatch)
+
+## Split
+
+Run-3db74807 worked this for ten rounds and parked. What landed: the paned startup view
+(`modules/cli/src/app/run_startup_view.rs`) with typed per-stage rows, ordered worktree substage
+tracking, RAII finalization that commits inline scrollback and restores the terminal, and failure
+attribution that fails the active stage without overwriting a recorded one.
+
+| task | scope |
+|---|---|
+| 0051.1 | startup pane must not render trait-authored text before trust succeeds (trust boundary — live on main) |
+| 0051.2 | restore the piped explicit `--progress tui` fallback (piped stderr regression — live on main) |
+| 0051.3 | fixture-backed coverage: observer ordering, failure scrollback, resize, cooked-mode, line-mode warm |
+
+The contract below stays as the authority those three answer to.
 
 ## Today
 
