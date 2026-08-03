@@ -1676,7 +1676,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     let regions = live_frame_regions(full_area, ask_height);
     frame.render_widget(
         tui_kit::keymap_footer(
-            if ask_lines.is_some() { "[?] ask · [q] exit · [ctrl-c] kill · [tab] cycle pane" } else { "[q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane" },
+            if ask_lines.is_some() { "[?] ask · [q] exit · [ctrl-c] kill · [tab] cycle pane" } else { "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane" },
             None,
         ),
         regions[2],
