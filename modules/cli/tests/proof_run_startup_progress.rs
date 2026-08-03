@@ -60,6 +60,45 @@ fn command_trait_fixture() -> Fixture {
     }
 }
 
+fn untrusted_query_fixture() -> Fixture {
+    const SENTINEL: &str = "PREAUTH_STARTUP_SENTINEL";
+    let scratch = ScratchRoot::new("p551-startup-preauthorization");
+    let home = scratch.home();
+    let repo = home.join("repo");
+    fs::create_dir_all(repo.join(format!(".ctx/traits/{SENTINEL}/generated"))).unwrap();
+    git_init(&repo);
+    let path = format!(".ctx/traits/{SENTINEL}/generated/index.toml");
+    fs::write(
+        repo.join(&path),
+        format!(
+            "id = \"{SENTINEL}\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"benign query fixture\"\nsummary = \"benign {SENTINEL}\"\nstatus = \"draft\"\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(format!(".ctx/traits/{SENTINEL}/trait.toml")),
+        format!(
+            "[package]\nid = \"{SENTINEL}\"\nversion = \"0.1.0\"\nname = \"benign query fixture\"\nstatus = \"active\"\n"
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-q", "-m", "init"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Fixture {
+        _scratch: scratch,
+        repo,
+        home,
+    }
+}
+
 fn make_delayed_config_fifo(fixture: &Fixture) {
     let status = Command::new("mkfifo")
         .arg(".ctx/traits/runtime.toml")
@@ -358,5 +397,48 @@ fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
             && !flags.contains(&"-icanon")
             && !flags.contains(&"-echo"),
         "Ctrl-C left the slave terminal in raw mode: {termios:?}"
+    );
+}
+
+#[test]
+fn startup_pty_query_refusal_never_commits_untrusted_trait_details() {
+    const SENTINEL: &str = "PREAUTH_STARTUP_SENTINEL";
+    let fixture = untrusted_query_fixture();
+    let output = Command::new("expect")
+        .args([
+            "-c",
+            r#"
+                set timeout 30
+                set child_status {}
+                spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run -- benign"
+                expect {
+                    -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
+                    eof { set child_status [wait] }
+                }
+                if {[lindex $child_status 3] == 0} { exit 1 }
+            "#,
+        ])
+        .current_dir(&fixture.repo)
+        .env_clear()
+        .env("HOME", &fixture.home)
+        .env("XDG_CONFIG_HOME", &fixture.home)
+        .env("XDG_CACHE_HOME", &fixture.home)
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("TERM", "xterm-256color")
+        .env("CTX_STARTUP_BIN", ctx_bin())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "untrusted query PTY failed: {output:?}"
+    );
+    let output = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.contains("trait authorization was refused"),
+        "startup refusal was not generic: {output:?}"
+    );
+    assert!(
+        !output.contains(SENTINEL),
+        "untrusted trait detail leaked into PTY redraw or scrollback: {output:?}"
     );
 }

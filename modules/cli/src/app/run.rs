@@ -244,51 +244,55 @@ fn start_run_session(
     let (trait_args, json) = split_trailing_json_flag(input.trait_args, input.json);
     let query = if input.file.is_none() && input.trait_id.is_none() && !trait_args.is_empty() {
         let query = trait_args.join(" ");
-        let pre_authorization = input.startup_observer.is_some();
-        let report_pre_authorization_failure = |detail: &str| {
-            if let Some(observer) = &input.startup_observer {
-                observer(ctx_traits_io::run::StartupUpdate {
-                    stage: ctx_traits_io::run::StartupStage::Initialization,
-                    state: ctx_traits_io::run::StartupStageState::Failed,
-                    detail: detail.to_string(),
+        // The inline startup pane must not inspect untrusted inventory itself:
+        // `run::start` owns selection, warning capture, and authorization as one
+        // operation so no candidate detail can reach the terminal beforehand.
+        if input.startup_observer.is_some() {
+            Some(query)
+        } else {
+            let pre_authorization = input.startup_observer.is_some();
+            let report_pre_authorization_failure = |detail: &str| {
+                if let Some(observer) = &input.startup_observer {
+                    observer(ctx_traits_io::run::StartupUpdate {
+                        stage: ctx_traits_io::run::StartupStage::Initialization,
+                        state: ctx_traits_io::run::StartupStageState::Failed,
+                        detail: detail.to_string(),
+                    });
+                }
+            };
+            let context =
+                ctx_traits_io::inventory::InventoryContext::discover().inspect_err(|_| {
+                    report_pre_authorization_failure(
+                        "could not inspect trait inventory before authorization",
+                    );
+                })?;
+            let selection =
+                ctx_traits_io::run_query::select(&query, &context).inspect_err(|_| {
+                    report_pre_authorization_failure(
+                        "could not select a trait before authorization",
+                    );
+                })?;
+            if selection.status != ctx_traits_core::run_info::RunInfoSelectionStatus::Selected {
+                if json {
+                    print_json_report(&selection.selection, "query run selection")?;
+                } else if !pre_authorization {
+                    run_format::print_run_selection("ctx traits run", &selection.selection);
+                }
+                if pre_authorization {
+                    report_pre_authorization_failure("query did not select an authorized trait");
+                }
+                let gate_detail =
+                    ctx_traits_core::run_info::selection_refusal_detail(&selection.selection);
+                return Err(crate::Error::Command {
+                    message: format!(
+                        "query run did not select exactly one runnable trait ({}){}",
+                        crate::app::presentation::wire_name(&selection.status),
+                        gate_detail
+                    ),
                 });
             }
-        };
-        let context = ctx_traits_io::inventory::InventoryContext::discover().inspect_err(|_| {
-            report_pre_authorization_failure(
-                "could not inspect trait inventory before authorization",
-            );
-        })?;
-        let selection = ctx_traits_io::run_query::select(&query, &context).inspect_err(|_| {
-            report_pre_authorization_failure("could not select a trait before authorization");
-        })?;
-        // Query inventory decodes every candidate. It is only a preflight;
-        // discard its warnings so an unauthorized candidate cannot leak into
-        // the pane when the selected document is later authorized by start().
-        if pre_authorization {
-            let _ = ctx_traits_io::decode_diagnostics::end_capture();
-            ctx_traits_io::decode_diagnostics::begin_capture();
+            Some(query)
         }
-        if selection.status != ctx_traits_core::run_info::RunInfoSelectionStatus::Selected {
-            if json {
-                print_json_report(&selection.selection, "query run selection")?;
-            } else if !pre_authorization {
-                run_format::print_run_selection("ctx traits run", &selection.selection);
-            }
-            if pre_authorization {
-                report_pre_authorization_failure("query did not select an authorized trait");
-            }
-            let gate_detail =
-                ctx_traits_core::run_info::selection_refusal_detail(&selection.selection);
-            return Err(crate::Error::Command {
-                message: format!(
-                    "query run did not select exactly one runnable trait ({}){}",
-                    crate::app::presentation::wire_name(&selection.status),
-                    gate_detail
-                ),
-            });
-        }
-        Some(query)
     } else {
         None
     };
@@ -382,9 +386,9 @@ pub(crate) fn handle_session_start(
     ) {
         Ok(outcome) => outcome,
         Err(error) => {
-            if let Some(view) = startup.as_ref() {
-                view.fail(error.to_string());
-            }
+            // `start` owns every startup-stage failure notification. In
+            // particular, do not replace its fixed pre-authorization detail
+            // with an error that may contain untrusted trait text.
             return Err(error);
         }
     };

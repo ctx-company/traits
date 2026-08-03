@@ -361,6 +361,10 @@ pub struct RunInfoSelectionOutput {
 // ---------------------------------------------------------------------------
 
 pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
+    const PRE_AUTHORIZATION_FAILURE: &str = "trait authorization was refused";
+    let pre_authorization = request.startup_observer.is_some();
+    let generic_pre_authorization_error =
+        |field| invalid_request_error(field, PRE_AUTHORIZATION_FAILURE);
     let update = |stage, state, detail: String| {
         if let Some(observer) = &request.startup_observer {
             observer(StartupUpdate {
@@ -401,20 +405,43 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             );
             return message;
         }
-        let context = crate::inventory::InventoryContext::discover().inspect_err(|_error| {
-            update(
-                StartupStage::Initialization,
-                StartupStageState::Failed,
-                "could not inspect trait inventory before authorization".to_string(),
-            );
-        })?;
-        let selection = crate::run_query::select(query, &context).inspect_err(|_error| {
-            update(
-                StartupStage::Initialization,
-                StartupStageState::Failed,
-                "could not select a trait before authorization".to_string(),
-            );
-        })?;
+        let context = crate::inventory::InventoryContext::discover()
+            .inspect_err(|_error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    "could not inspect trait inventory before authorization".to_string(),
+                );
+            })
+            .map_err(|error| {
+                if pre_authorization {
+                    generic_pre_authorization_error("run.query")
+                } else {
+                    error
+                }
+            })?;
+        let selection = crate::run_query::select(query, &context)
+            .inspect_err(|_error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    "could not select a trait before authorization".to_string(),
+                );
+            })
+            .map_err(|error| {
+                if pre_authorization {
+                    generic_pre_authorization_error("run.query")
+                } else {
+                    error
+                }
+            })?;
+        // Inventory selection decodes every candidate. Its warnings describe
+        // untrusted documents, so discard them before evaluating any outcome;
+        // keep capture active for warnings from work authorized below.
+        if pre_authorization {
+            let _ = crate::decode_diagnostics::end_capture();
+            crate::decode_diagnostics::begin_capture();
+        }
         if selection.status != ctx_traits_core::run_info::RunInfoSelectionStatus::Selected {
             let gate_detail =
                 ctx_traits_core::run_info::selection_refusal_detail(&selection.selection);
@@ -427,7 +454,11 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 StartupStageState::Failed,
                 "query did not select an authorized trait".to_string(),
             );
-            return invalid_request("run.query", message);
+            return if pre_authorization {
+                invalid_request("run.query", PRE_AUTHORIZATION_FAILURE)
+            } else {
+                invalid_request("run.query", message)
+            };
         }
         selected_query = Some(selection.selection.clone());
         let loaded = selection.loaded.ok_or_else(|| {
@@ -438,9 +469,13 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             update(
                 StartupStage::Initialization,
                 StartupStageState::Failed,
-                error.to_string(),
+                PRE_AUTHORIZATION_FAILURE.to_string(),
             );
-            error
+            if pre_authorization {
+                generic_pre_authorization_error("run.query")
+            } else {
+                error
+            }
         })?;
         LoadedTrait {
             trait_ref: loaded.trait_ref,
@@ -451,16 +486,24 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             canonical_digest: loaded.canonical_digest,
         }
     } else {
-        load_trait_source(request.trait_file, request.trait_id, "run").inspect_err(|_error| {
-            update(
-                StartupStage::Initialization,
-                StartupStageState::Failed,
-                // The document has not passed authorization yet. Keep the
-                // startup surface generic; the normal returned error remains
-                // available after the terminal is restored.
-                "could not load trait before authorization".to_string(),
-            );
-        })?
+        load_trait_source(request.trait_file, request.trait_id, "run")
+            .inspect_err(|_error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    // The document has not passed authorization yet. Keep the
+                    // startup surface generic; the normal returned error remains
+                    // available after the terminal is restored.
+                    "could not load trait before authorization".to_string(),
+                );
+            })
+            .map_err(|error| {
+                if pre_authorization {
+                    generic_pre_authorization_error("run.trait-source")
+                } else {
+                    error
+                }
+            })?
     };
     update(
         StartupStage::Trust,
@@ -478,6 +521,13 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             StartupStageState::Failed,
             "trait authorization could not be checked".to_string(),
         );
+    })
+    .map_err(|error| {
+        if pre_authorization {
+            generic_pre_authorization_error("run-session.lifecycle-trust")
+        } else {
+            error
+        }
     })?;
     let gates = ctx_traits_core::r#trait::activation::lifecycle_trust_gates_for_check(
         loaded.trait_ref.id.as_str(),
@@ -499,7 +549,11 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             StartupStageState::Failed,
             "trait authorization was refused".to_string(),
         );
-        return invalid_request("run-session.lifecycle-trust", message);
+        return if pre_authorization {
+            invalid_request("run-session.lifecycle-trust", PRE_AUTHORIZATION_FAILURE)
+        } else {
+            invalid_request("run-session.lifecycle-trust", message)
+        };
     }
     update(
         StartupStage::Trust,
@@ -1397,6 +1451,7 @@ pub fn run_info(
 #[cfg(test)]
 mod startup_observer_tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn startup_observer_does_not_classify_setup_text_as_seed_or_warm() {
@@ -1416,6 +1471,89 @@ mod startup_observer_tests {
             startup_stage_for_worktree_phase("warm validation ../invalid"),
             StartupStage::Warm
         );
+    }
+
+    #[test]
+    fn startup_observer_hides_untrusted_trait_details() {
+        const SENTINEL: &str = "PREAUTH_SENTINEL";
+        let root = std::env::temp_dir().join(format!(
+            "ctx-traits-startup-observer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let generated = root.join(format!(".ctx/traits/{SENTINEL}/generated"));
+        std::fs::create_dir_all(&generated).unwrap();
+        let trait_path = generated.join("index.toml");
+        std::fs::write(
+            &trait_path,
+            format!(
+                "id = \"{SENTINEL}\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"{SENTINEL}\"\nsummary = \"{SENTINEL}\"\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            generated.parent().unwrap().join("trait.toml"),
+            format!(
+                "[package]\nid = \"{SENTINEL}\"\nversion = \"0.1.0\"\nname = \"{SENTINEL}\"\nstatus = \"draft\"\n"
+            ),
+        )
+        .unwrap();
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&updates);
+        let trait_path = trait_path.to_string_lossy().into_owned();
+        let error = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: Vec::new(),
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: Some(Arc::new(move |update| {
+                observed.lock().unwrap().push(update)
+            })),
+            strict_loops: false,
+            merge_rung: None,
+        })
+        .unwrap_err();
+        let details = updates.lock().unwrap();
+        assert_eq!(
+            error.to_string(),
+            "invalid manifest at run-session.lifecycle-trust: trait authorization was refused"
+        );
+        assert_eq!(
+            details
+                .iter()
+                .map(|update| update.detail.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "loading trait",
+                "checking lifecycle and trust",
+                "trait authorization was refused"
+            ]
+        );
+        assert!(
+            details
+                .iter()
+                .all(|update| !update.detail.contains(SENTINEL))
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 
