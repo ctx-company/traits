@@ -57,7 +57,17 @@ Verified end-to-end through the real resolver: same worktree → same slot twice
 worktree → a different slot; a removed worktree's slot → reused by the next run.
 
 **Honest limits.** The first run in each slot is still cold — a cache cannot be seeded by copying,
-which is the whole finding above. Warmth starts from the second run per slot. And a fifth concurrent
+which is the whole finding above. Warmth starts from the second run per slot.
+
+More importantly, this warms DEPENDENCIES, not the workspace's own crates. Registry crates build
+from `~/.cargo/registry`, a path that never moves, so a slot's copies of them stay valid for every
+run that inherits it. Our ~50 local crates build from the WORKTREE, a path that is new every run, so
+they are rebuilt each time by the same path-anchoring this task documents. That is the residual
+cost, and it is why 0056 matters alongside this: with the ~40 proof binaries moved to the landing
+gate, what a round still pays for is roughly those 50 local units rather than the whole graph.
+Eliminating even that needs the source path to recur too — the worktree POOL of option 1 — which was
+declined here for the forensic reason above. Measure a real run's gate before deciding it is worth
+revisiting. And a fifth concurrent
 run, or four parked worktrees holding every slot, falls back to sharing the least-recently-assigned
 slot and pays the toolchain's build lock; prune worktrees, or raise the slot count, if that becomes
 common.
