@@ -5625,11 +5625,17 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
         .min(phase_width);
     phase_width = phase_width.saturating_sub(borrowed);
     let tokens_width = base_tokens_width.saturating_add(borrowed);
-    // P552: the persisted session title is this row's primary run label when
-    // one resolved — shown in the same column/width budget `phase` used
-    // (never widening the row), with the short session id retained
-    // separately for identity/disambiguation regardless.
-    let primary_label = row.title.as_deref().unwrap_or(&row.phase);
+    // State and detail share the existing state/phase budget. This keeps the
+    // additive separator visible without widening the list.
+    //
+    // P552's persisted session title is the DETAIL half of that column:
+    // `session_state_label` already prefers `row.title` over the phase text,
+    // so a resolved title shows without a column of its own, and the short
+    // session id stays separate for identity/disambiguation regardless.
+    // `phase_width` here is post-borrow, so the token triplet's borrowing
+    // still narrows this column rather than overflowing the row.
+    let detail_width = state_width + 1 + phase_width;
+    let state_and_detail = session_state_label(row);
     let label = format!(
         "{} {} {} {} {}",
         list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),

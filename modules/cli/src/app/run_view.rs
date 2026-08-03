@@ -279,6 +279,11 @@ struct RunPanelState {
     /// Detached guide workers wake through this non-owning handle after they
     /// queue a result, so a completed answer does not wait for another event.
     wake_state: Weak<Mutex<RunPanelState>>,
+    /// The same handoff the owning `RunPanel` holds. A detached worker's wake
+    /// has to pump it too: `tick_weak` drives the handoff after ticking, and
+    /// a worker that could only reach the panel's weak state would tick
+    /// without ever driving a dashboard the tick may have queued.
+    handoff: Arc<DashboardHandoff>,
 }
 
 /// One row of the CURRENT step's verbatim message/thinking stream.
@@ -633,6 +638,7 @@ impl RunPanel {
             guide_ledger_path: None,
             ask_results: None,
             wake_state: Weak::new(),
+            handoff: Arc::clone(&handoff),
         }));
         let panel = Self {
             state: Arc::clone(&state),
@@ -1095,6 +1101,22 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
 /// render path via [`render_locked`], plus directly by `tick` so a quit
 /// keypress stays responsive even when a throttled tick skips the render
 /// below.
+#[derive(Debug, PartialEq, Eq)]
+enum LiveViewKeyAction {
+    OpenDashboard,
+    ConfirmQuit,
+}
+
+/// Bare `d` hands presentation to the dashboard immediately. `q` intentionally
+/// retains its existing confirmation-modal behavior.
+fn live_view_key_action(key: &KeyEvent) -> Option<LiveViewKeyAction> {
+    match key.code {
+        KeyCode::Char('d') if key.modifiers.is_empty() => Some(LiveViewKeyAction::OpenDashboard),
+        KeyCode::Char('q') => Some(LiveViewKeyAction::ConfirmQuit),
+        _ => None,
+    }
+}
+
 fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     let mut changed = false;
     if let Some(receiver) = state.ask_results.as_ref()
@@ -1129,17 +1151,34 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             changed = true;
             continue;
         }
-        if key.code == KeyCode::Char('q') {
-            state.modal = Some(tui_kit::Modal::confirm(
-                "Quit live view?",
-                [
-                    "The run keeps going in the background.",
-                    "Reattach anytime with `ctx traits dashboard`.",
-                ]
-                .join("\n"),
-            ));
-            changed = true;
-            continue;
+        // Routed through `live_view_key_action` rather than matched inline so
+        // the key contract has one definition the tests can hold: `d` is
+        // presentation-only handoff, `q` keeps its confirmation. This runs
+        // AFTER the ask pane consumes keys — while the guide is open, `d` and
+        // `q` are text, not commands.
+        match live_view_key_action(&key) {
+            Some(LiveViewKeyAction::OpenDashboard) => {
+                state.repaint.quit();
+                state.cadence.inactive();
+                state
+                    .handoff
+                    .request(state.session.session_id.as_str().to_string());
+                changed = true;
+                continue;
+            }
+            Some(LiveViewKeyAction::ConfirmQuit) => {
+                state.modal = Some(tui_kit::Modal::confirm(
+                    "Quit live view?",
+                    [
+                        "The run keeps going in the background.",
+                        "Reattach anytime with `ctx traits dashboard`.",
+                    ]
+                    .join("\n"),
+                ));
+                changed = true;
+                continue;
+            }
+            None => {}
         }
         if tui_panes::tab_cycle_key(&key).is_some() || tui_kit::scroll_key(&key).is_some() {
             changed = true;
@@ -1184,6 +1223,7 @@ fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
             state.ask_results = Some(receiver);
             let weak_state = state.wake_state.clone();
             let cadence = Arc::clone(&state.cadence);
+            let handoff = Arc::clone(&state.handoff);
             let input_generation = Arc::clone(&state.input_generation);
             // The worker owns neither panel nor session: a late message is
             // simply discarded after close or a newer generation.
@@ -1200,7 +1240,7 @@ fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
                 // Results are not terminal input, so explicitly wake the
                 // panel's cadence. The weak handle cannot retain a closed TUI.
                 input_generation.fetch_add(1, Ordering::Release);
-                tick_weak(&weak_state, &cadence);
+                tick_weak(&weak_state, &cadence, &handoff);
             });
             true
         }
@@ -4726,6 +4766,7 @@ mod tests {
             step_summaries: &summaries,
             step_summary_at: &summary_at,
             narrator_tokens: 0,
+            guide_tokens: 0,
             run_started: Instant::now(),
         };
 
@@ -4845,6 +4886,7 @@ mod tests {
             step_summaries: &summaries,
             step_summary_at: &summary_at,
             narrator_tokens: 0,
+            guide_tokens: 0,
             run_started: Instant::now(),
         };
         assert_eq!(
@@ -4883,6 +4925,7 @@ mod tests {
             step_summaries: &summaries,
             step_summary_at: &summary_at,
             narrator_tokens: 0,
+            guide_tokens: 0,
             run_started: Instant::now(),
         };
 
@@ -5517,6 +5560,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
@@ -5598,6 +5643,8 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
+                        ask_lines: None,
+                        ask_cursor: None,
                     },
                 );
             })
