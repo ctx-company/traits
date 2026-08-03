@@ -248,6 +248,9 @@ pub struct PrepareOptions<'a> {
     /// Phase-boundary narrator (P551): called with a short message as each
     /// preparation phase starts. `None` runs silently.
     pub progress: Option<&'a dyn Fn(&str)>,
+    /// Typed startup-only notification emitted before each configured warm
+    /// path is validated. It is separate from the stable text narrator.
+    pub warm_validation: Option<&'a dyn Fn(&str)>,
 }
 
 pub fn prepare_worktree(
@@ -262,6 +265,7 @@ pub fn prepare_worktree(
         setup_capture_bytes,
         worktree_add_timeout_ms,
         progress,
+        warm_validation,
     } = options;
     let (repo_root, path, branch) = resolve_worktree_location(id)?;
     let mut warnings = RetryWarnings::new();
@@ -287,6 +291,7 @@ pub fn prepare_worktree(
                     .map_or(DEFAULT_SETUP_CAPTURE_BYTES, |bytes| bytes as usize),
             },
             progress,
+            warm_validation,
         },
         worktree_add_timeout_ms.unwrap_or(crate::git_process::LONG_TIMEOUT_MS),
         &mut warnings,
@@ -368,6 +373,7 @@ pub fn resume_or_prepare_worktree(
                     .map_or(DEFAULT_SETUP_CAPTURE_BYTES, |bytes| bytes as usize),
             },
             progress,
+            warm_validation: None,
         },
         budget
             .worktree_add_timeout_ms
@@ -2024,6 +2030,7 @@ struct SetupPlan<'a> {
     setup_env: &'a BTreeMap<String, String>,
     budget: SetupBudget,
     progress: Option<&'a dyn Fn(&str)>,
+    warm_validation: Option<&'a dyn Fn(&str)>,
 }
 
 fn create_new_worktree(
@@ -2078,7 +2085,13 @@ fn create_new_worktree(
     // (installing a toolchain, priming a cache) already sees the warm cache
     // rather than racing it. Warnings never block the run — see
     // [`warm_worktree_paths`].
-    for warning in warm_worktree_paths(repo_root, path, contents.warm, setup_plan.progress)? {
+    for warning in warm_worktree_paths(
+        repo_root,
+        path,
+        contents.warm,
+        setup_plan.progress,
+        setup_plan.warm_validation,
+    )? {
         warnings.push(warning);
     }
     let scope_id = path.file_name().unwrap_or("worktree");
@@ -2661,9 +2674,15 @@ pub fn warm_worktree_paths(
     worktree_path: &Utf8Path,
     warm: &[String],
     progress: Option<&dyn Fn(&str)>,
+    warm_validation: Option<&dyn Fn(&str)>,
 ) -> crate::Result<Vec<String>> {
     let mut warnings = Vec::new();
     for entry in warm {
+        // Startup needs attribution before validation, but the text narrator
+        // reports only a clone that will actually be attempted.
+        if let Some(observer) = warm_validation {
+            observer(entry);
+        }
         let relative = validate_repo_relative_path(entry, "worktree.warm", "worktree warm path")?;
         let source = repo_root.join(&relative);
         let metadata = match std::fs::symlink_metadata(source.as_std_path()) {

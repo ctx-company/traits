@@ -465,6 +465,22 @@ impl RatatuiPane {
         unhandled
     }
 
+    /// Startup owns the same inline terminal before a live panel exists. It
+    /// needs to observe Ctrl-C without tearing the pane down itself so its
+    /// owner can first commit the final startup rows to scrollback.
+    pub(crate) fn poll_startup_interrupt(&mut self) -> bool {
+        if self.detached() {
+            return false;
+        }
+        while let Ok(key) = self.keys.try_recv() {
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                crate::app::interrupt::request_kill();
+                return true;
+            }
+        }
+        false
+    }
+
     /// General-purpose draw entry point for the P423 dashboard's screen
     /// hierarchy: callers build arbitrary ratatui widgets against the given
     /// frame instead of being limited to [`Self::render`]'s single styled-line

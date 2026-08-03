@@ -522,6 +522,7 @@ pub(crate) fn run_builtin_trait(
         merge_rung: None,
         // generate's eval runs are internal machinery, not a waiting human.
         narrate_progress: false,
+        startup_observer: None,
     })?;
     let session = outcome
         .session_path
@@ -557,6 +558,7 @@ pub(crate) fn run_builtin_trait(
         execution_dir: None,
         clear_merge_intent: false,
         panel_handoff: None,
+        startup: None,
     })?;
     if report.status != "completed" {
         return Err(crate::Error::Command {

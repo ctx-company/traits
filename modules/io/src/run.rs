@@ -5,9 +5,51 @@
 //! declared resource evidence, and trusted local command-frame execution.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::Value;
+
+/// A synchronous notification emitted while a run session is being prepared.
+/// Adapters may render it, but it never changes orchestration semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StartupStage {
+    Initialization,
+    Trust,
+    Harness,
+    Worktree,
+    Seeding,
+    Warm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupStageState {
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct StartupUpdate {
+    pub stage: StartupStage,
+    pub state: StartupStageState,
+    pub detail: String,
+}
+
+pub type StartupObserver = std::sync::Arc<dyn Fn(StartupUpdate) + Send + Sync>;
+
+/// Worktree's progress callback intentionally remains textual for existing
+/// line-mode callers. Keep its translation here exact so a setup command that
+/// merely mentions "seed" or "warm" cannot change the active startup row.
+fn startup_stage_for_worktree_phase(phase: &str) -> StartupStage {
+    match phase {
+        "seeding" => StartupStage::Seeding,
+        phase if phase.starts_with("warming ") || phase.starts_with("warm validation ") => {
+            StartupStage::Warm
+        }
+        _ => StartupStage::Worktree,
+    }
+}
 
 /// Default-input command wall-clock ceiling, used when a port's
 /// `default.command` declares no `timeout-ms`.
@@ -121,7 +163,6 @@ pub enum ResourceEvidenceMode<'a> {
     Unavailable { reason: &'a str },
 }
 
-#[derive(Debug)]
 pub struct StartRequest<'a> {
     pub trait_file: Option<&'a str>,
     pub trait_id: Option<&'a str>,
@@ -155,6 +196,9 @@ pub struct StartRequest<'a> {
     /// is blank and "slow" is indistinguishable from "hung". CLI-owned:
     /// `--json` callers and MCP hosts leave it false and stay silent.
     pub narrate_progress: bool,
+    /// Optional structured startup progress sink. Line-oriented callers leave
+    /// this unset and retain `narrate_progress` exactly as before.
+    pub startup_observer: Option<StartupObserver>,
     /// User strictness override: every loop stops the run blocked when its
     /// exit condition never matched, regardless of its declared
     /// `on-exhausted` policy or signals — a continuing loop's declared
@@ -317,39 +361,86 @@ pub struct RunInfoSelectionOutput {
 // ---------------------------------------------------------------------------
 
 pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
+    let update = |stage, state, detail: String| {
+        if let Some(observer) = &request.startup_observer {
+            observer(StartupUpdate {
+                stage,
+                state,
+                detail,
+            });
+        }
+    };
+    update(
+        StartupStage::Initialization,
+        StartupStageState::Running,
+        "loading trait".to_string(),
+    );
     let mut selected_query = None;
     let loaded = if let Some(query) = request.query {
         if request.trait_file.is_some() || request.trait_id.is_some() {
-            return invalid_request(
+            let message = invalid_request(
                 "run.query",
                 "query run is only accepted when no trait file or trait ID is supplied",
             );
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                "query run is only accepted when no trait file or trait ID is supplied".to_string(),
+            );
+            return message;
         }
         if request.trait_args.iter().any(|arg| arg.starts_with("--")) {
-            return invalid_request(
+            let message = invalid_request(
                 "run.query",
                 "query run expects query text after --, not trait arguments; pass a trait ID or --file for trait arguments",
             );
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                "query run expects query text after --, not trait arguments; pass a trait ID or --file for trait arguments".to_string(),
+            );
+            return message;
         }
-        let context = crate::inventory::InventoryContext::discover()?;
-        let selection = crate::run_query::select(query, &context)?;
+        let context = crate::inventory::InventoryContext::discover().inspect_err(|_error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                "could not inspect trait inventory before authorization".to_string(),
+            );
+        })?;
+        let selection = crate::run_query::select(query, &context).inspect_err(|_error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                "could not select a trait before authorization".to_string(),
+            );
+        })?;
         if selection.status != ctx_traits_core::run_info::RunInfoSelectionStatus::Selected {
             let gate_detail =
                 ctx_traits_core::run_info::selection_refusal_detail(&selection.selection);
-            return invalid_request(
-                "run.query",
-                format!(
-                    "query run did not select exactly one runnable trait ({:?}){}",
-                    selection.status, gate_detail
-                ),
+            let message = format!(
+                "query run did not select exactly one runnable trait ({:?}){}",
+                selection.status, gate_detail
             );
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                "query did not select an authorized trait".to_string(),
+            );
+            return invalid_request("run.query", message);
         }
         selected_query = Some(selection.selection.clone());
         let loaded = selection.loaded.ok_or_else(|| {
-            invalid_request_error(
+            let error = invalid_request_error(
                 "run.query",
                 "query selection did not include selected trait",
-            )
+            );
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
+            );
+            error
         })?;
         LoadedTrait {
             trait_ref: loaded.trait_ref,
@@ -360,13 +451,34 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             canonical_digest: loaded.canonical_digest,
         }
     } else {
-        load_trait_source(request.trait_file, request.trait_id, "run")?
+        load_trait_source(request.trait_file, request.trait_id, "run").inspect_err(|_error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                // The document has not passed authorization yet. Keep the
+                // startup surface generic; the normal returned error remains
+                // available after the terminal is restored.
+                "could not load trait before authorization".to_string(),
+            );
+        })?
     };
+    update(
+        StartupStage::Trust,
+        StartupStageState::Running,
+        "checking lifecycle and trust".to_string(),
+    );
     let authorization = crate::lifecycle::authorize_start(
         &loaded.trait_root,
         loaded.trait_ref.id.as_str(),
         &loaded.canonical_digest,
-    )?;
+    )
+    .inspect_err(|_error| {
+        update(
+            StartupStage::Trust,
+            StartupStageState::Failed,
+            "trait authorization could not be checked".to_string(),
+        );
+    })?;
     let gates = ctx_traits_core::r#trait::activation::lifecycle_trust_gates_for_check(
         loaded.trait_ref.id.as_str(),
         &authorization.status,
@@ -374,32 +486,26 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     );
     if !gates.is_empty() {
         let trust_detail = match &authorization.decision {
-            crate::trust::StartTrust::Blocked(record) => {
-                let mut detail = format!(
-                    "candidate {} is blocked by sequence {} recorded at {}",
-                    record.digest,
-                    record.seq.unwrap_or(0),
-                    record.updated_at.as_deref().unwrap_or("an unknown time"),
-                );
-                if let Some(commit) = last_change_commit(&loaded.trait_root) {
-                    detail.push_str(&format!("; last change commit {commit}"));
-                }
-                detail
-            }
-            crate::trust::StartTrust::Unreviewed => format!(
-                "candidate {} has no current approval record",
-                loaded.canonical_digest
-            ),
-            crate::trust::StartTrust::Verified(_) => String::new(),
+            crate::trust::StartTrust::Blocked(_) => "approval is blocked",
+            crate::trust::StartTrust::Unreviewed => "approval is required",
+            crate::trust::StartTrust::Verified(_) => "authorization was refused",
         };
-        return invalid_request(
-            "run-session.lifecycle-trust",
-            format!(
-                "executable run blocked by lifecycle/trust gates: {}; {trust_detail}",
-                ctx_traits_core::r#trait::activation::format_gate_refusal(&gates)
-            ),
+        let message = format!(
+            "executable run blocked by lifecycle/trust gates: {}; {trust_detail}",
+            ctx_traits_core::r#trait::activation::format_gate_refusal(&gates)
         );
+        update(
+            StartupStage::Trust,
+            StartupStageState::Failed,
+            "trait authorization was refused".to_string(),
+        );
+        return invalid_request("run-session.lifecycle-trust", message);
     }
+    update(
+        StartupStage::Trust,
+        StartupStageState::Done,
+        "approved".to_string(),
+    );
 
     // A `worktreeRequired` procedure can never actually be run outside a Git
     // repository (worktree preparation itself requires one): refuse it here,
@@ -412,28 +518,51 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         .as_ref()
         .is_some_and(|procedure| procedure.worktree_required)
         && matches!(
-            crate::state::discover_invocation_root()?,
+            crate::state::discover_invocation_root().inspect_err(|error| {
+                update(
+                    StartupStage::Worktree,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?,
             crate::state::InvocationRoot::Adhoc(_)
         )
     {
-        return invalid_request(
-            "run.worktree",
-            format!(
-                "trait {:?} requires a prepared worktree, which requires a Git repository; run inside a Git checkout",
-                loaded.trait_ref.id
-            ),
+        let message = format!(
+            "trait {:?} requires a prepared worktree, which requires a Git repository; run inside a Git checkout",
+            loaded.trait_ref.id
         );
+        update(
+            StartupStage::Worktree,
+            StartupStageState::Failed,
+            message.clone(),
+        );
+        return invalid_request("run.worktree", message);
     }
 
     // Trait-argument parsing happens before assignment preparation so
     // `port:task` is available downstream.
+    update(
+        StartupStage::Harness,
+        StartupStageState::Running,
+        "validating run inputs".to_string(),
+    );
     let mut initial_values = request.input_values;
     if request.query.is_none() {
-        initial_values.extend(ctx_traits_core::run_info::parse_trait_arguments(
-            &loaded.trait_ref,
-            request.trait_args,
-            request.trait_arg_evidence,
-        )?);
+        initial_values.extend(
+            ctx_traits_core::run_info::parse_trait_arguments(
+                &loaded.trait_ref,
+                request.trait_args,
+                request.trait_arg_evidence,
+            )
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Harness,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?,
+        );
     }
     if let Some(query_selection) = selected_query
         .as_ref()
@@ -467,22 +596,25 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         if let Some(port_id) = value.ref_text.strip_prefix("port:")
             && !declared_input_ports.contains(port_id)
         {
-            return invalid_request(
-                "run.set",
-                format!(
-                    "unknown input port {port_id:?}; trait {} declares input port(s): {}",
-                    loaded.trait_ref.id,
-                    if declared_input_ports.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        declared_input_ports
-                            .iter()
-                            .map(|id| id.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
-                ),
+            let message = format!(
+                "unknown input port {port_id:?}; trait {} declares input port(s): {}",
+                loaded.trait_ref.id,
+                if declared_input_ports.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    declared_input_ports
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             );
+            update(
+                StartupStage::Harness,
+                StartupStageState::Failed,
+                message.clone(),
+            );
+            return invalid_request("run.set", message);
         }
     }
 
@@ -501,13 +633,30 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         &loaded.trait_ref,
         &loaded.trait_root,
         task_value,
-    )? && let Some(standing) =
-        crate::dispatch_preflight::find_standing_wall(&wall_id, task_value.unwrap_or_default())?
-    {
-        return invalid_request(
-            "run.task",
-            crate::dispatch_preflight::refusal_message(&standing),
+    )
+    .inspect_err(|error| {
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            error.to_string(),
         );
+    })? && let Some(standing) =
+        crate::dispatch_preflight::find_standing_wall(&wall_id, task_value.unwrap_or_default())
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Harness,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?
+    {
+        let message = crate::dispatch_preflight::refusal_message(&standing);
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            message.clone(),
+        );
+        return invalid_request("run.task", message);
     }
 
     // Blocked-status pre-flight (0047 mechanism 1's companion layer): refuse
@@ -519,11 +668,21 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         &loaded.trait_ref,
         &loaded.trait_root,
         task_value,
-    )? {
-        return invalid_request(
-            "run.task",
-            crate::dispatch_preflight::blocked_status_refusal_message(&marker),
+    )
+    .inspect_err(|error| {
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            error.to_string(),
         );
+    })? {
+        let message = crate::dispatch_preflight::blocked_status_refusal_message(&marker);
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            message.clone(),
+        );
+        return invalid_request("run.task", message);
     }
 
     // Unrunnable-command pre-flight: a command step's argv lives in the trait,
@@ -541,25 +700,48 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         None => Vec::new(),
     };
     if !unrunnable.is_empty() {
-        return invalid_request(
-            "run.trait",
-            crate::dispatch_preflight::unrunnable_refusal_message(&unrunnable),
+        let message = crate::dispatch_preflight::unrunnable_refusal_message(&unrunnable);
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            message.clone(),
         );
+        return invalid_request("run.trait", message);
     }
 
+    update(
+        StartupStage::Harness,
+        StartupStageState::Running,
+        "probing configured harnesses".to_string(),
+    );
     let prepared_assignments = crate::harness_config::prepare_run_assignments(
         &loaded.trait_ref,
         &loaded.trait_root,
         request.assign_overrides,
-    )?;
+    )
+    .inspect_err(|error| {
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
+    update(
+        StartupStage::Harness,
+        StartupStageState::Done,
+        "ready".to_string(),
+    );
     let agent_assignments = match (request.agent_assignments, prepared_assignments.assignments) {
         (None, assignments) => assignments,
         (assignments @ Some(_), None) => assignments,
         (Some(_), Some(_)) => {
-            return invalid_request(
-                "run.agent-assignments",
-                "agent assignments were supplied by both adapter request and resolved runtime configuration",
+            let message = "agent assignments were supplied by both adapter request and resolved runtime configuration";
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                message.to_string(),
             );
+            return invalid_request("run.agent-assignments", message);
         }
     };
 
@@ -583,13 +765,27 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         ctx_traits_core::digest::Digest::source(&format!("session|{unique_seed}"))
             .as_str()
             .trim_start_matches("sha256:")
-    ))?;
+    ))
+    .inspect_err(|error| {
+        update(
+            StartupStage::Initialization,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
     let run_id = ctx_traits_core::procedure::run::Id::new(format!(
         "run-{}",
         ctx_traits_core::digest::Digest::source(&format!("run|{unique_seed}"))
             .as_str()
             .trim_start_matches("sha256:")
-    ))?;
+    ))
+    .inspect_err(|error| {
+        update(
+            StartupStage::Initialization,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
 
     // Prepare the dedicated worktree (if requested) before any default input
     // or command-frame subprocess runs, so their `exec_dir` is already known.
@@ -606,6 +802,11 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     let mut worktree_env: BTreeMap<String, String> = BTreeMap::new();
     let (execution_dir, worktree_provenance) = match request.worktree {
         Some(requested) => {
+            update(
+                StartupStage::Worktree,
+                StartupStageState::Running,
+                "creating worktree".to_string(),
+            );
             let id = match requested {
                 Some(name) => name.to_string(),
                 None => crate::worktree::derive_worktree_id(session_id.as_str()),
@@ -614,11 +815,25 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             // the id before the worktree exists — so a `{worktree}`-scoped
             // build cache is per-run rather than shared with every concurrent
             // run in the same checkout.
-            let planned_worktree_path = crate::worktree::worktree_path_for(&id)?;
+            let planned_worktree_path =
+                crate::worktree::worktree_path_for(&id).inspect_err(|error| {
+                    update(
+                        StartupStage::Worktree,
+                        StartupStageState::Failed,
+                        error.to_string(),
+                    );
+                })?;
             worktree_env = crate::harness_config::resolve_effective_worktree_env(
                 &prepared_assignments.worktree,
                 Some(planned_worktree_path.as_path()),
-            )?;
+            )
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Worktree,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?;
             // The P551 observer already narrates every phase inside
             // worktree preparation ("creating worktree", "seeding", the warm
             // clone, each setup command); it was simply dropped here as
@@ -626,6 +841,102 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             // output. Same stderr channel as the CLI's own
             // "ctx run · initialization" line, so the story reads as one.
             let narrate = |phase: &str| eprintln!("ctx run · {phase}");
+            let observer = request.startup_observer.clone();
+            let active_stage = Arc::new(Mutex::new(StartupStage::Worktree));
+            let seen_stages = Arc::new(Mutex::new(BTreeSet::new()));
+            let setup_parent_complete = Arc::new(Mutex::new(false));
+            let progress_stage = Arc::clone(&active_stage);
+            let progress_seen = Arc::clone(&seen_stages);
+            let progress_setup_parent_complete = Arc::clone(&setup_parent_complete);
+            let validation_stage = Arc::clone(&active_stage);
+            let startup_warm_validation = |entry: &str| {
+                if let Some(observer) = &observer {
+                    if let Ok(mut active) = validation_stage.lock()
+                        && *active != StartupStage::Warm
+                    {
+                        observer(StartupUpdate {
+                            stage: *active,
+                            state: StartupStageState::Done,
+                            detail: "complete".to_string(),
+                        });
+                        *active = StartupStage::Warm;
+                    }
+                    observer(StartupUpdate {
+                        stage: StartupStage::Warm,
+                        state: StartupStageState::Running,
+                        detail: format!("validating {entry}"),
+                    });
+                }
+            };
+            let startup_progress = |phase: &str| {
+                if let Some(observer) = &observer {
+                    let (stage, detail) = (startup_stage_for_worktree_phase(phase), phase);
+                    if let Ok(mut active) = progress_stage.lock()
+                        && *active != stage
+                    {
+                        // Setup runs after optional seed/warm operations. It
+                        // belongs to the worktree preparation detail but must
+                        // not reopen that already-completed parent row.
+                        if stage == StartupStage::Worktree
+                            && *active != StartupStage::Worktree
+                            && phase.starts_with("setup")
+                        {
+                            // Setup is worktree preparation, but the parent
+                            // row was completed when seeding/warming began.
+                            // Keep it visually complete while making it the
+                            // failure target for a setup command.
+                            observer(StartupUpdate {
+                                stage: *active,
+                                state: StartupStageState::Done,
+                                detail: "complete".to_string(),
+                            });
+                            *active = StartupStage::Worktree;
+                            if let Ok(mut complete) = progress_setup_parent_complete.lock() {
+                                *complete = true;
+                            }
+                            observer(StartupUpdate {
+                                stage: StartupStage::Worktree,
+                                state: StartupStageState::Done,
+                                detail: detail.to_string(),
+                            });
+                            return;
+                        }
+                        observer(StartupUpdate {
+                            stage: *active,
+                            state: StartupStageState::Done,
+                            detail: "complete".to_string(),
+                        });
+                        *active = stage;
+                    }
+                    // Once seed/warm has completed the parent Worktree row,
+                    // later setup callbacks must only refine its detail. A
+                    // Running update here would create a Done-to-Running
+                    // transition in the shared startup pane.
+                    if stage == StartupStage::Worktree
+                        && phase.starts_with("setup")
+                        && progress_setup_parent_complete
+                            .lock()
+                            .is_ok_and(|complete| *complete)
+                    {
+                        observer(StartupUpdate {
+                            stage,
+                            state: StartupStageState::Done,
+                            detail: detail.to_string(),
+                        });
+                        return;
+                    }
+                    if let Ok(mut seen) = progress_seen.lock()
+                        && !phase.starts_with("warm validation ")
+                    {
+                        seen.insert(stage);
+                    }
+                    observer(StartupUpdate {
+                        stage,
+                        state: StartupStageState::Running,
+                        detail: detail.to_string(),
+                    });
+                }
+            };
             let prepared = crate::worktree::prepare_worktree(
                 &id,
                 crate::worktree::WorktreeContents {
@@ -643,11 +954,63 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                     worktree_add_timeout_ms: Some(
                         crate::harness_config::resolve_git_long_timeout_ms(Utf8Path::new(".")),
                     ),
-                    progress: request
-                        .narrate_progress
-                        .then_some(&narrate as &dyn Fn(&str)),
+                    progress: if request.narrate_progress {
+                        Some(&narrate as &dyn Fn(&str))
+                    } else if request.startup_observer.is_some() {
+                        Some(&startup_progress as &dyn Fn(&str))
+                    } else {
+                        None
+                    },
+                    warm_validation: request
+                        .startup_observer
+                        .as_ref()
+                        .map(|_| &startup_warm_validation as &dyn Fn(&str)),
                 },
-            )?;
+            )
+            .inspect_err(|error| {
+                if let Some(observer) = &request.startup_observer {
+                    let stage = active_stage
+                        .lock()
+                        .map(|stage| *stage)
+                        .unwrap_or(StartupStage::Worktree);
+                    observer(StartupUpdate {
+                        stage,
+                        state: StartupStageState::Failed,
+                        detail: error.to_string(),
+                    });
+                }
+            })?;
+            update(
+                StartupStage::Worktree,
+                StartupStageState::Done,
+                "ready".to_string(),
+            );
+            update(
+                StartupStage::Seeding,
+                StartupStageState::Done,
+                if seen_stages
+                    .lock()
+                    .is_ok_and(|seen| seen.contains(&StartupStage::Seeding))
+                {
+                    "complete".to_string()
+                } else {
+                    "not requested".to_string()
+                },
+            );
+            update(
+                StartupStage::Warm,
+                StartupStageState::Done,
+                if seen_stages
+                    .lock()
+                    .is_ok_and(|seen| seen.contains(&StartupStage::Warm))
+                {
+                    "complete".to_string()
+                } else if !prepared_assignments.worktree.warm.is_empty() {
+                    "configured; skipped".to_string()
+                } else {
+                    "not requested".to_string()
+                },
+            );
             worktree_retry_warnings = prepared.retry_warnings;
             let prepared_path = prepared.path.to_string();
             (
@@ -660,15 +1023,41 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 }),
             )
         }
-        None => (None, None),
+        None => {
+            update(
+                StartupStage::Worktree,
+                StartupStageState::Done,
+                "not requested".to_string(),
+            );
+            update(
+                StartupStage::Seeding,
+                StartupStageState::Done,
+                "not requested".to_string(),
+            );
+            update(
+                StartupStage::Warm,
+                StartupStageState::Done,
+                "not requested".to_string(),
+            );
+            (None, None)
+        }
     };
 
-    provider_capability_reports.extend(apply_default_inputs(
-        &loaded.trait_ref,
-        &mut initial_values,
-        execution_dir.as_deref(),
-        &worktree_env,
-    )?);
+    provider_capability_reports.extend(
+        apply_default_inputs(
+            &loaded.trait_ref,
+            &mut initial_values,
+            execution_dir.as_deref(),
+            &worktree_env,
+        )
+        .inspect_err(|error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
+            );
+        })?,
+    );
     initial_values.sort_by(|a, b| a.ref_text.cmp(&b.ref_text));
 
     let resource_evidence = match request.resource_evidence {
@@ -679,21 +1068,48 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             let resource_root = root_override
                 .map(Utf8Path::new)
                 .unwrap_or(loaded.trait_root.as_path());
-            let roots = crate::resource::resolve_resource_roots(
-                resource_root,
-                &loaded.trait_ref.resources,
-            )?;
-            let mut evidence = declared_resource_evidence(&roots, &loaded.trait_ref)?;
-            evidence.extend(declared_dependency_resource_evidence(
-                &loaded.trait_root,
-                roots.invocation_repo_root.as_deref(),
-                &loaded.trait_ref,
-            )?);
+            let roots =
+                crate::resource::resolve_resource_roots(resource_root, &loaded.trait_ref.resources)
+                    .inspect_err(|error| {
+                        update(
+                            StartupStage::Initialization,
+                            StartupStageState::Failed,
+                            error.to_string(),
+                        );
+                    })?;
+            let mut evidence =
+                declared_resource_evidence(&roots, &loaded.trait_ref).inspect_err(|error| {
+                    update(
+                        StartupStage::Initialization,
+                        StartupStageState::Failed,
+                        error.to_string(),
+                    );
+                })?;
+            evidence.extend(
+                declared_dependency_resource_evidence(
+                    &loaded.trait_root,
+                    roots.invocation_repo_root.as_deref(),
+                    &loaded.trait_ref,
+                )
+                .inspect_err(|error| {
+                    update(
+                        StartupStage::Initialization,
+                        StartupStageState::Failed,
+                        error.to_string(),
+                    );
+                })?,
+            );
             evidence.sort_by(|left, right| left.resource_ref.cmp(&right.resource_ref));
             evidence
         }
         ResourceEvidenceMode::Unavailable { reason } => {
-            unavailable_resource_evidence(&loaded.trait_ref, reason)?
+            unavailable_resource_evidence(&loaded.trait_ref, reason).inspect_err(|error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?
         }
     };
 
@@ -702,7 +1118,14 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         request.session_store,
         request.ephemeral,
         session_id.as_str(),
-    )?;
+    )
+    .inspect_err(|error| {
+        update(
+            StartupStage::Initialization,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
     // A relative selected source belongs to the checkout that resolved it,
     // not an arbitrary location chosen for the output ledger.
     let source_repository_root = loaded
@@ -719,36 +1142,65 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     // traversal through a directory symlink changes what a following `..`
     // means, including its package context.
     let persisted_source_path = if loaded.path.is_relative() {
-        let cwd =
-            std::env::current_dir().map_err(|source| crate::environment::Error::Filesystem {
+        let cwd = std::env::current_dir()
+            .map_err(|source| crate::environment::Error::Filesystem {
                 path: loaded.path.to_string(),
                 source,
+            })
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
             })?;
-        let cwd = Utf8PathBuf::from_path_buf(cwd).map_err(|path| {
-            crate::environment::Error::Filesystem {
+        let cwd = Utf8PathBuf::from_path_buf(cwd)
+            .map_err(|path| crate::environment::Error::Filesystem {
                 path: path.display().to_string(),
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "current working directory is not valid UTF-8",
                 ),
-            }
-        })?;
+            })
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?;
         cwd.join(&loaded.path)
     } else {
         loaded.path.clone()
     };
-    let canonical_digest = ctx_traits_core::digest::Digest::parse(&loaded.canonical_digest)?;
+    let canonical_digest = ctx_traits_core::digest::Digest::parse(&loaded.canonical_digest)
+        .inspect_err(|error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
+            );
+        })?;
     let pinned_document = if request.ephemeral {
         None
     } else {
         // Re-read after selection so a file changed during start cannot be
         // pinned under the earlier digest.
-        let text = crate::read::read_text(&loaded.path)?;
-        if ctx_traits_core::digest::Digest::source(&text).as_str() != loaded.source_digest {
-            return invalid_request(
-                "run.trait-source",
-                "trait source changed while starting; retry with stable source bytes",
+        let text = crate::read::read_text(&loaded.path).inspect_err(|error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
             );
+        })?;
+        if ctx_traits_core::digest::Digest::source(&text).as_str() != loaded.source_digest {
+            let message = "trait source changed while starting; retry with stable source bytes";
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                message.to_string(),
+            );
+            return invalid_request("run.trait-source", message);
         }
         Some(text)
     };
@@ -770,12 +1222,28 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             initial_port_values: initial_values,
             resource_evidence,
             provider_capability_reports,
-            source_digest: Some(ctx_traits_core::digest::Digest::parse(
-                &loaded.source_digest,
-            )?),
-            canonical_digest: Some(ctx_traits_core::digest::Digest::parse(
-                &loaded.canonical_digest,
-            )?),
+            source_digest: Some(
+                ctx_traits_core::digest::Digest::parse(&loaded.source_digest).inspect_err(
+                    |error| {
+                        update(
+                            StartupStage::Initialization,
+                            StartupStageState::Failed,
+                            error.to_string(),
+                        );
+                    },
+                )?,
+            ),
+            canonical_digest: Some(
+                ctx_traits_core::digest::Digest::parse(&loaded.canonical_digest).inspect_err(
+                    |error| {
+                        update(
+                            StartupStage::Initialization,
+                            StartupStageState::Failed,
+                            error.to_string(),
+                        );
+                    },
+                )?,
+            ),
             agent_assignments,
             provider_warnings,
             harness_probes,
@@ -802,7 +1270,14 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 session_title: None,
             },
         },
-    )?;
+    )
+    .inspect_err(|error| {
+        update(
+            StartupStage::Initialization,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
     if !request.defer_commands {
         session = advance_command_frames(
             &loaded.trait_ref,
@@ -812,22 +1287,46 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             execution_dir.as_deref(),
             &worktree_env,
             None,
-        )?
+        )
+        .inspect_err(|error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
+            );
+        })?
         .session;
     }
     if let Some(path) = session_path.as_ref() {
-        crate::run_session::write_run_session(path, &session)?;
+        crate::run_session::write_run_session(path, &session).inspect_err(|error| {
+            update(
+                StartupStage::Initialization,
+                StartupStageState::Failed,
+                error.to_string(),
+            );
+        })?;
     }
     // `repos.toml` is operational index evidence, not canonical ledger
     // state, but P426 requires it maintained on every accepted run —
     // ephemeral and explicit-`--out` runs included, not only ones that
     // write a default-path session ledger. An index failure (e.g. no HOME)
     // therefore fails the run rather than silently completing unindexed.
-    crate::state::touch_repo_index()?;
+    crate::state::touch_repo_index().inspect_err(|error| {
+        update(
+            StartupStage::Initialization,
+            StartupStageState::Failed,
+            error.to_string(),
+        );
+    })?;
     let resource_supported =
         ctx_traits_core::procedure::session::declared_resource_evidence_supported(
             &session.resource_evidence,
         );
+    update(
+        StartupStage::Initialization,
+        StartupStageState::Done,
+        "session created".to_string(),
+    );
     Ok(StartOutcome {
         session,
         session_path,
@@ -893,6 +1392,31 @@ pub fn run_info(
             .collect(),
         trait_context: (Box::new(loaded.trait_ref), loaded.trait_root),
     })
+}
+
+#[cfg(test)]
+mod startup_observer_tests {
+    use super::*;
+
+    #[test]
+    fn startup_observer_does_not_classify_setup_text_as_seed_or_warm() {
+        assert_eq!(
+            startup_stage_for_worktree_phase("seeding"),
+            StartupStage::Seeding
+        );
+        assert_eq!(
+            startup_stage_for_worktree_phase("warming target/debug"),
+            StartupStage::Warm
+        );
+        assert_eq!(
+            startup_stage_for_worktree_phase("setup: install seed warmer"),
+            StartupStage::Worktree
+        );
+        assert_eq!(
+            startup_stage_for_worktree_phase("warm validation ../invalid"),
+            StartupStage::Warm
+        );
+    }
 }
 
 pub fn status(request: InspectRequest<'_>) -> crate::Result<InspectOutcome> {
@@ -3145,28 +3669,6 @@ fn unavailable_resource_evidence(
             })
         })
         .collect::<Result<Vec<_>, ctx_traits_core::Error>>()?)
-}
-
-/// Best-effort last commit that touched `trait_root`, for the superseded
-/// refusal's change-commit evidence (P534 review blocker 3). `None` both
-/// outside a Git working tree and when the trait's own history has no
-/// commits yet — either way, the refusal degrades silently rather than
-/// erroring the preflight check.
-fn last_change_commit(trait_root: &Utf8Path) -> Option<String> {
-    let output = crate::git_process::run(crate::git_process::Request {
-        exec_dir: Some(trait_root),
-        cwd: None,
-        args: &["log", "-1", "--format=%h", "--", "."],
-        success_exit_code: &[0],
-        timeout_ms: crate::git_process::PLUMBING_TIMEOUT_MS,
-        capture_limit: 4096,
-    })
-    .ok()?;
-    if !output.success {
-        return None;
-    }
-    let commit = output.stdout.trim();
-    (!commit.is_empty()).then(|| commit.to_string())
 }
 
 fn invalid_request<T>(field_path: &str, message: impl Into<String>) -> crate::Result<T> {

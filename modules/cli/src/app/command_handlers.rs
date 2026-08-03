@@ -5,6 +5,7 @@
 //! exit status.
 
 use std::ffi::OsString;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use ctx_traits_core::response::CommandOutput;
@@ -772,46 +773,49 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 no_drive,
                 ephemeral,
             }) => {
-                // Say something before the slow part starts.
-                //
-                // Everything from here to the first frame — config resolution,
-                // trait load, trust check, worktree creation, seed copy, warm
-                // clone, setup commands — happens before a session exists, and
-                // the run panel cannot be constructed without one. That left
-                // roughly ten seconds of blank terminal whose only honest
-                // reading was "is this hung?". This makes the wait accounted
-                // for rather than faster, which is the difference between a
-                // slow start and an apparently dead one.
-                //
-                // Placed on the shared dispatch, not inside a handler:
-                // `handle_run` serves only `--no-drive`, so a line there would
-                // miss every ordinary driven run — the case that actually waits.
-                //
-                // stderr, never stdout: `--json` callers parse stdout and a
-                // progress line there would corrupt it.
-                if !args.json {
+                let mut progress = crate::app::drive::resolve_progress(
+                    args.progress,
+                    args.json,
+                    args.no_tui,
+                );
+                // Startup owns a pane only with fully interactive stdio. Keep
+                // an explicit TUI mode intact otherwise: drive owns its
+                // established allocation fallback and diagnostic.
+                let interactive_tui = !no_drive
+                    && progress == cli::DriveProgress::Tui
+                    && std::io::stdin().is_terminal()
+                    && std::io::stdout().is_terminal()
+                    && std::io::stderr().is_terminal()
+                    // Match the live run renderer: CI, NO_COLOR, and
+                    // TERM=dumb are status-only even when attached to a PTY.
+                    && crate::app::tui::stderr_supports_live(false);
+                let startup = interactive_tui
+                .then(crate::app::run_startup_view::StartupView::new)
+                .transpose()
+                .unwrap_or_else(|error| {
+                    progress = cli::DriveProgress::Status;
+                    eprintln!("run tui unavailable; falling back to status progress: {error}");
+                    None
+                });
+                if startup.is_none() && !args.json {
                     eprintln!("ctx run · initialization");
                 }
-                // Say something before the slow part starts.
-                //
-                // Everything from here to the first frame — config resolution,
-                // trait load, trust check, worktree creation, seed copy, warm
-                // clone, setup commands — happens before a session exists, and
-                // the run panel cannot be constructed without one. That left
-                // roughly ten seconds of blank terminal whose only honest
-                // reading was "is this hung?". This makes the wait accounted
-                // for rather than faster, which is the difference between a
-                // slow start and an apparently dead one.
-                //
-                // Placed on the shared dispatch, not inside a handler:
-                // `handle_run` serves only `--no-drive`, so a line there would
-                // miss every ordinary driven run — the case that actually waits.
-                //
-                // stderr, never stdout: `--json` callers parse stdout and a
-                // progress line there would corrupt it.
                 let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
                     camino::Utf8Path::new("."),
-                )?;
+                )
+                .inspect_err(|error| {
+                    if let Some(view) = startup.as_ref() {
+                        view.fail(error.to_string());
+                    }
+                })?;
+                if startup
+                    .as_ref()
+                    .is_some_and(crate::app::run_startup_view::StartupView::interrupted)
+                {
+                    return Err(crate::Error::Command {
+                        message: "run startup interrupted".to_string(),
+                    });
+                }
                 let run_config = runtime.run.as_ref();
                 let policy = runtime.effective_run_policy();
                 let budget = resolve_run_budget(
@@ -835,6 +839,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     args.no_worktree,
                 );
                 if ephemeral && !no_drive {
+                    if let Some(view) = startup.as_ref() {
+                        view.fail("--ephemeral requires --no-drive; driven runs persist their ledger");
+                    }
                     return Err(crate::Error::Command {
                         message:
                             "--ephemeral requires --no-drive; driven runs persist their ledger"
@@ -870,15 +877,31 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         // whenever `no_drive` is set, so `--no-drive` never
                         // requests automatic landing.
                         merge_rung: None,
+                        startup_observer: None,
                     })
                 } else {
                     let merge_policy = runtime.effective_merge_policy();
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
                     if merge_rung.is_some() && worktree.is_none() {
+                        if let Some(view) = startup.as_ref() {
+                            view.fail("an effective merge request requires an effective worktree (add --worktree, or configure [run] worktree = true)");
+                        }
                         return Err(crate::Error::Command {
                             message: "an effective merge request requires an effective worktree (add --worktree, or configure [run] worktree = true)".to_string(),
                         });
                     }
+                    let story = resolved_story_level(
+                        policy.story,
+                        args.story
+                            .as_ref()
+                            .map(|value| value.as_ref().map(String::as_str)),
+                        args.no_story,
+                    )
+                    .inspect_err(|error| {
+                        if let Some(view) = startup.as_ref() {
+                            view.fail(error.to_string());
+                        }
+                    })?;
                     crate::app::run::handle_session_start(SessionStartInputs {
                         trait_id: args.trait_id.as_deref(),
                         file: args.file.as_deref(),
@@ -897,11 +920,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         idle_seconds: budget.idle_seconds,
                         max_in_flight: budget.max_in_flight,
                         wait: resolved_run_wait(policy.wait, args.wait, args.no_wait),
-                        progress: crate::app::drive::resolve_progress(
-                            args.progress,
-                            args.json,
-                            args.no_tui,
-                        ),
+                        progress,
                         worktree,
                         strict_loops: resolved_strict_loops(
                             policy.strict_loops,
@@ -912,13 +931,8 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         verbose: args.verbose,
                         trait_args: &args.trait_args,
                         merge_rung,
-                        story: resolved_story_level(
-                            policy.story,
-                            args.story
-                                .as_ref()
-                                .map(|value| value.as_ref().map(String::as_str)),
-                            args.no_story,
-                        )?,
+                        story,
+                        startup,
                     })
                 }
             }
@@ -996,6 +1010,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                                 .map(|value| value.as_ref().map(String::as_str)),
                             args.no_story,
                         )?,
+                        startup: None,
                     })
                 }
                 cli::SessionCommand::State(args) => crate::app::run::handle_run_status(
@@ -1116,6 +1131,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     execution_dir: None,
                     clear_merge_intent: no_merge,
                     panel_handoff: Some(panel_handoff.clone()),
+                    startup: None,
                 })?;
                 let session_path = ctx_traits_io::run_session::resolve_session_path(
                     &session,

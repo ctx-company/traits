@@ -50,6 +50,7 @@ mod report_runtime;
 mod resolve;
 mod run;
 mod run_format;
+mod run_startup_view;
 mod run_view;
 mod running;
 mod schema_synth_build;

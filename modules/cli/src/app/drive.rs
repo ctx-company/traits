@@ -111,7 +111,6 @@ type WaveOutcomes = BTreeMap<usize, crate::Result<ctx_traits_io::harness::Harnes
 /// `parallel_wave_activation_key`).
 type PendingWaveCache = BTreeMap<String, WaveOutcomes>;
 
-#[derive(Debug, Clone)]
 pub struct DriveInputs<'a> {
     pub file: Option<&'a str>,
     pub session: &'a str,
@@ -169,6 +168,9 @@ pub struct DriveInputs<'a> {
     /// caller that hasn't opted in (e.g. `dashboard`'s `d`rive action) —
     /// byte-identical to today's unconditional close.
     pub panel_handoff: Option<PanelHandoff>,
+    /// A startup pane created before session initialization. It is consumed by
+    /// the first live frame rather than allocating a second terminal owner.
+    pub startup: Option<crate::app::run_startup_view::StartupView>,
 }
 
 /// Cheap, cloneable one-shot slot a completed drive's live pane is handed
@@ -812,6 +814,17 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // future daemon mode, or a test harness driving more than one session in
     // one process) must not carry a stale interrupt from a prior drive into
     // this one.
+    // A Ctrl-C received while the startup pane owned the terminal must not be
+    // cleared when the live drive begins.
+    if input
+        .startup
+        .as_ref()
+        .is_some_and(crate::app::run_startup_view::StartupView::interrupted)
+    {
+        return Err(crate::Error::Command {
+            message: "run startup interrupted".to_string(),
+        });
+    }
     crate::app::interrupt::reset();
     crate::app::interrupt::install();
     let session = input.session;
@@ -832,7 +845,11 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // handed this identical budget and share the single `drive_started`
     // anchor, so a waiter that acquires the lease near the deadline receives
     // only the actual remaining budget, never a fresh full one.
-    let mut profile = resolve_drive_profile(&input)?;
+    let mut profile = resolve_drive_profile(&input).inspect_err(|error| {
+        if let Some(startup) = input.startup.as_ref() {
+            startup.fail(error.to_string());
+        }
+    })?;
     let budget = budget_from(&profile.budget, &input);
     // P402 conductor lease: held for the entire remaining scope of this
     // function (both the happy path and every early return below), so no
@@ -840,8 +857,12 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // or sidecars while this one is active. `_conductor_lease` is `None`
     // when this session has never used concurrency (no lease/sidecars ever
     // created) — see `acquire_conductor_lease_if_needed`.
-    let _conductor_lease = match acquire_conductor_lease_if_needed(&input, drive_started, &budget)?
-    {
+    let _conductor_lease = match acquire_conductor_lease_if_needed(&input, drive_started, &budget)
+        .inspect_err(|error| {
+        if let Some(startup) = input.startup.as_ref() {
+            startup.fail(error.to_string());
+        }
+    })? {
         ConductorLeaseOutcome::NotNeeded => None,
         ConductorLeaseOutcome::Acquired(file) => Some(file),
         ConductorLeaseOutcome::Busy(busy_report) => return Ok(*busy_report),
@@ -861,50 +882,72 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // `RunPanelGuard` from here on so every early return between here and
     // `drive_loop` — worktree conflicts, driver-lock-busy — closes it
     // deterministically instead of leaking raw mode/alt-screen state.
-    let early_session = ctx_traits_io::run::read_session(session, session_store)?;
+    let early_session =
+        ctx_traits_io::run::read_session(session, session_store).inspect_err(|error| {
+            if let Some(startup) = input.startup.as_ref() {
+                startup.fail(error.to_string());
+            }
+        })?;
     let mut run_panel = RunPanelGuard(None);
     if input.progress == cli::DriveProgress::Tui {
-        match create_run_panel(&input, &early_session) {
+        match create_run_panel(&mut input, &early_session) {
             Ok(panel) => run_panel.0 = Some(panel),
             Err(err) => {
+                // No live panel will take ownership. Commit the failed startup
+                // rows before the status fallback writes ordinary stderr.
+                if let Some(startup) = input.startup.take() {
+                    startup.fail(err.to_string());
+                }
                 input.progress = cli::DriveProgress::Status;
                 eprintln!("run tui unavailable; falling back to status progress: {err}");
             }
         }
     }
-    let restored_worktree = resolve_resume_worktree(&input)?;
+    let restored_worktree = resolve_resume_worktree(&input).inspect_err(|error| {
+        if let Some(startup) = input.startup.as_ref() {
+            startup.fail(error.to_string());
+        }
+    })?;
     if let Some((path, _, recorded_id)) = restored_worktree.as_ref() {
         if let Some(requested) = input.worktree {
             let requested_id = requested.map(ToString::to_string).unwrap_or(
                 ctx_traits_io::worktree::derive_worktree_id(&worktree_session_id(&input)?),
             );
             if &requested_id != recorded_id {
-                return Err(crate::Error::Command {
-                    message: format!(
-                        "requested worktree {requested_id:?} conflicts with recorded worktree {recorded_id:?}"
-                    ),
-                });
+                let message = format!(
+                    "requested worktree {requested_id:?} conflicts with recorded worktree {recorded_id:?}"
+                );
+                if let Some(startup) = input.startup.as_ref() {
+                    startup.fail(message.clone());
+                }
+                return Err(crate::Error::Command { message });
             }
         }
         if input
             .execution_dir
             .is_some_and(|requested| requested != path)
         {
-            return Err(crate::Error::Command {
-                message: format!(
-                    "execution directory {} conflicts with recorded worktree path {}",
-                    crate::app::presentation::optional(input.execution_dir),
-                    path
-                ),
-            });
+            let message = format!(
+                "execution directory {} conflicts with recorded worktree path {}",
+                crate::app::presentation::optional(input.execution_dir),
+                path
+            );
+            if let Some(startup) = input.startup.as_ref() {
+                startup.fail(message.clone());
+            }
+            return Err(crate::Error::Command { message });
         }
     }
     let prepared_worktree = match (restored_worktree.as_ref(), input.worktree) {
-        (None, Some(requested)) => Some(prepare_standalone_worktree(
-            &input,
-            requested,
-            run_panel.0.as_ref(),
-        )?),
+        (None, Some(requested)) => Some(
+            prepare_standalone_worktree(&input, requested, run_panel.0.as_ref()).inspect_err(
+                |error| {
+                    if let Some(startup) = input.startup.as_ref() {
+                        startup.fail(error.to_string());
+                    }
+                },
+            )?,
+        ),
         _ => None,
     };
     let worktree_retry_warnings = prepared_worktree
@@ -3620,7 +3663,7 @@ fn refresh_run_panel(
 }
 
 fn create_run_panel(
-    input: &DriveInputs<'_>,
+    input: &mut DriveInputs<'_>,
     session: &ctx_traits_core::procedure::session::Session,
 ) -> crate::Result<run_view::RunPanel> {
     let loaded = ctx_traits_io::run::load_trait_for_session(input.file, None, session, "drive")?;
@@ -3628,15 +3671,25 @@ fn create_run_panel(
         &loaded.trait_ref,
         session.run_id.clone(),
     )?;
-    run_view::RunPanel::new(
-        loaded.trait_ref.name.as_str().to_string(),
-        loaded.trait_ref,
-        plan,
-        session.clone(),
-    )
-    .map_err(|source| crate::Error::Command {
-        message: format!("start ratatui run pane: {source}"),
-    })
+    let panel = match input.startup.take().and_then(|view| view.into_pane()) {
+        Some(pane) => run_view::RunPanel::new_with_pane(
+            loaded.trait_ref.name.as_str().to_string(),
+            loaded.trait_ref,
+            plan,
+            session.clone(),
+            pane,
+        ),
+        None => run_view::RunPanel::new(
+            loaded.trait_ref.name.as_str().to_string(),
+            loaded.trait_ref,
+            plan,
+            session.clone(),
+        )
+        .map_err(|source| crate::Error::Command {
+            message: format!("start ratatui run pane: {source}"),
+        })?,
+    };
+    Ok(panel)
 }
 
 /// P552: claim and dispatch the one permitted narrator session-title call for

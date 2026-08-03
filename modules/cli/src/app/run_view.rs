@@ -537,7 +537,22 @@ impl RunPanel {
         plan: ctx_traits_core::procedure::run::Plan,
         session: ctx_traits_core::procedure::session::Session,
     ) -> std::io::Result<Self> {
-        let repaint = RatatuiPane::new_inline()?;
+        Ok(Self::new_with_pane(
+            trait_name,
+            trait_ref,
+            plan,
+            session,
+            RatatuiPane::new_inline()?,
+        ))
+    }
+
+    pub(crate) fn new_with_pane(
+        trait_name: String,
+        trait_ref: ctx_traits_core::Trait,
+        plan: ctx_traits_core::procedure::run::Plan,
+        session: ctx_traits_core::procedure::session::Session,
+        repaint: RatatuiPane,
+    ) -> Self {
         let input_generation = repaint.input_generation();
         let handled_generation = Arc::new(AtomicU64::new(0));
         let cadence = Arc::new(PanelCadence::new(
@@ -635,7 +650,7 @@ impl RunPanel {
         }
         panel.render();
         panel.cadence.painted();
-        Ok(panel)
+        panel
     }
 
     /// Deterministically restore the terminal, regardless of how many other

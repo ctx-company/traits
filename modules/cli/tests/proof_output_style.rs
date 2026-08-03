@@ -31,7 +31,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use ctx_traits_cli::app::presentation::{CommandPresentation, presentation_for};
-use support::{ScratchRoot, git_init, repo_root, require_success, symlink_node_modules};
+use support::{
+    ScratchRoot, controlled_command, ctx_bin, git_init, repo_root, require_success,
+    symlink_node_modules,
+};
 
 /// A dedicated, empty Git repository under `scratch`, matching
 /// `proof_doctor.rs`'s fixture: doctor's cross-tier trust resolution needs a
@@ -622,6 +625,62 @@ fn run_without_progress_flag_defaults_to_status_under_piped_stdio() {
         "no --progress under piped stdio must not open the TUI alternate screen: {stdout}"
     );
     assert_matches_registry_claim("run", "ctx", "run", &stdout);
+}
+
+#[test]
+fn run_progress_modes_remain_line_oriented_when_stdio_is_piped() {
+    let fixture = command_trait_fixture("p551-run-piped-progress");
+    for extra in [
+        vec![],
+        vec!["--progress", "tui"],
+        vec!["--progress", "stream"],
+        vec!["--progress", "status"],
+        vec!["--progress", "none"],
+        vec!["--no-drive"],
+        vec!["--json"],
+    ] {
+        let json = extra == ["--json"];
+        let mut args = vec![
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+        ];
+        args.extend(extra.iter().copied());
+        let output = controlled_command(&ctx_bin(), &args, &fixture.repo, &fixture.home)
+            .output()
+            .unwrap_or_else(|error| panic!("cannot run {args:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "piped run {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if json {
+            assert!(
+                !stderr.contains("ctx run · initialization"),
+                "structured output must not acquire startup narration: {stderr}"
+            );
+        } else {
+            assert!(
+                stderr.contains("ctx run · initialization"),
+                "piped run {args:?} must retain initialization narration: {stderr}"
+            );
+        }
+        if extra == ["--progress", "tui"] {
+            assert!(
+                stderr.contains("run tui unavailable; falling back to status progress"),
+                "explicit piped TUI must retain drive's fallback diagnostic: {stderr}"
+            );
+        }
+        for bytes in [&output.stdout, &output.stderr] {
+            assert!(
+                !bytes.contains(&0x1b),
+                "piped run {args:?} emitted terminal control bytes: {:?}",
+                String::from_utf8_lossy(bytes)
+            );
+        }
+    }
 }
 
 #[test]

@@ -230,6 +230,7 @@ fn ctx_traits_run_start_inner(
         merge_rung: None,
         // An MCP host reads structured responses; stderr narration is noise.
         narrate_progress: false,
+        startup_observer: None,
     })?;
     Ok(mcp_envelope(
         outcome.session,

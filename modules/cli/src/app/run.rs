@@ -42,6 +42,7 @@ pub(crate) struct RunInputs<'a> {
     /// `drive` could observe the ledger. `None` for `handle_run`'s
     /// `--no-drive` path, which rejects `--merge`/`--no-merge` earlier.
     pub(crate) merge_rung: Option<ctx_traits_core::procedure::session::MergeRung>,
+    pub(crate) startup_observer: Option<ctx_traits_io::run::StartupObserver>,
 }
 
 pub(crate) struct SessionStartInputs<'a> {
@@ -84,6 +85,7 @@ pub(crate) struct SessionStartInputs<'a> {
     /// interactive TTY (never under `--json`) and prints the plain story
     /// otherwise.
     pub(crate) story: Option<ctx_traits_core::procedure::story::StoryLevel>,
+    pub(crate) startup: Option<crate::app::run_startup_view::StartupView>,
 }
 
 /// Bounded `ctx traits run --no-drive --json` projection (P421): pairs the
@@ -242,13 +244,39 @@ fn start_run_session(
     let (trait_args, json) = split_trailing_json_flag(input.trait_args, input.json);
     let query = if input.file.is_none() && input.trait_id.is_none() && !trait_args.is_empty() {
         let query = trait_args.join(" ");
-        let context = ctx_traits_io::inventory::InventoryContext::discover()?;
-        let selection = ctx_traits_io::run_query::select(&query, &context)?;
+        let pre_authorization = input.startup_observer.is_some();
+        let report_pre_authorization_failure = |detail: &str| {
+            if let Some(observer) = &input.startup_observer {
+                observer(ctx_traits_io::run::StartupUpdate {
+                    stage: ctx_traits_io::run::StartupStage::Initialization,
+                    state: ctx_traits_io::run::StartupStageState::Failed,
+                    detail: detail.to_string(),
+                });
+            }
+        };
+        let context = ctx_traits_io::inventory::InventoryContext::discover().inspect_err(|_| {
+            report_pre_authorization_failure(
+                "could not inspect trait inventory before authorization",
+            );
+        })?;
+        let selection = ctx_traits_io::run_query::select(&query, &context).inspect_err(|_| {
+            report_pre_authorization_failure("could not select a trait before authorization");
+        })?;
+        // Query inventory decodes every candidate. It is only a preflight;
+        // discard its warnings so an unauthorized candidate cannot leak into
+        // the pane when the selected document is later authorized by start().
+        if pre_authorization {
+            let _ = ctx_traits_io::decode_diagnostics::end_capture();
+            ctx_traits_io::decode_diagnostics::begin_capture();
+        }
         if selection.status != ctx_traits_core::run_info::RunInfoSelectionStatus::Selected {
             if json {
                 print_json_report(&selection.selection, "query run selection")?;
-            } else {
+            } else if !pre_authorization {
                 run_format::print_run_selection("ctx traits run", &selection.selection);
+            }
+            if pre_authorization {
+                report_pre_authorization_failure("query did not select an authorized trait");
             }
             let gate_detail =
                 ctx_traits_core::run_info::selection_refusal_detail(&selection.selection);
@@ -298,7 +326,8 @@ fn start_run_session(
             // Both the driven and --no-drive paths come through here; a
             // machine reader (--json) gets silence, a human gets the init
             // phases named while they run.
-            narrate_progress: !json,
+            narrate_progress: !json && input.startup_observer.is_none(),
+            startup_observer: input.startup_observer,
             state_source: "ctx traits run",
             trait_arg_evidence: "ctx traits run trait args",
             worktree: input.worktree,
@@ -313,6 +342,9 @@ pub(crate) fn handle_session_start(
     input: SessionStartInputs<'_>,
 ) -> crate::Result<CommandOutput<()>> {
     if input.master.is_some() {
+        if let Some(view) = input.startup.as_ref() {
+            view.fail("--master was removed; use --assign default=<harness> instead");
+        }
         return Err(crate::Error::Command {
             message: "--master was removed; use --assign default=<harness>[:transport[:session-mode[:model[:reasoning-effort]]]] instead"
                 .to_string(),
@@ -320,7 +352,9 @@ pub(crate) fn handle_session_start(
     }
     let json = split_trailing_json_flag(input.trait_args, input.json).1;
     let assignment_overrides = input.assignments.to_vec();
-    let outcome = start_run_session(
+    let startup = input.startup;
+    let startup_observer = startup.as_ref().map(|view| view.observer());
+    let outcome = match start_run_session(
         RunInputs {
             trait_id: input.trait_id,
             file: input.file,
@@ -340,11 +374,20 @@ pub(crate) fn handle_session_start(
             // resumed drive lands with this same rung with no window where
             // a globally discoverable ledger carries no intent yet.
             merge_rung: input.merge_rung,
+            startup_observer,
         },
         // Defer leading command frames to the drive loop so the TUI paints
         // the command step as running instead of freezing pre-drive.
         true,
-    )?;
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            if let Some(view) = startup.as_ref() {
+                view.fail(error.to_string());
+            }
+            return Err(error);
+        }
+    };
     let session_path = outcome.session_path.as_ref().map(|path| path.to_string());
     let session_arg = session_path
         .clone()
@@ -376,6 +419,7 @@ pub(crate) fn handle_session_start(
         execution_dir: outcome.execution_dir.as_deref(),
         clear_merge_intent: false,
         panel_handoff: Some(panel_handoff.clone()),
+        startup,
     })?;
 
     // outcome.session is the pre-drive snapshot; re-inspect for the completed
