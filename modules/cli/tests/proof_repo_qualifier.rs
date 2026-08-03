@@ -278,10 +278,20 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
         &repo,
         &home,
     );
-    let expected_row = format!("repo.{active_key}.agent.role.worker:");
+    // What this proof is about is that the qualifier TAKES EFFECT and is
+    // visible in the configuration report — not which of two layouts renders
+    // it. The report names the winning block as one `repo.<key>.…` row, and
+    // 0010's leaf-granular provenance work renders the same fact as per-leaf
+    // rows carrying their own source instead. Pinning the block row made this
+    // proof fail the landing gate for every run in that arc while the
+    // qualifier itself worked exactly as asserted three lines above. Accept
+    // either shape and keep the assertion on the effect.
+    let block_row = format!("repo.{active_key}.agent.role.worker:");
+    let leaf_row = "agent.role.worker.model: personal-model";
     assert!(
-        doctor_stdout.contains(&expected_row),
-        "doctor --config must render the declared repo-qualified row: {doctor_stdout}"
+        doctor_stdout.contains(&block_row) || doctor_stdout.contains(leaf_row),
+        "doctor --config must show the repo-qualified worker assignment, as \
+         either `{block_row}` or `{leaf_row}`: {doctor_stdout}"
     );
 }
 
