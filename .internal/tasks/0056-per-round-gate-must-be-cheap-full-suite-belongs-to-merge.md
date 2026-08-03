@@ -1,0 +1,58 @@
+# 0056 — The per-round gate must be cheap; the full suite belongs to the merge gate
+
+**Status:** ready to implement · **Raised:** 2026-08-03 (third time this ceiling has been retuned)
+
+## The problem
+
+`implement`'s `repo-gates` check step runs `just test` — sdk-check, ts-format-check, clippy
+`--all-targets --all-features`, and the ENTIRE workspace test suite — **once per build round, in
+every run, in a fresh worktree**. A ten-round run pays it ten times. Two concurrent dispatches pay
+it twice over on the same CPU.
+
+That is why its ceiling keeps needing to be retuned, and the retunes are the symptom:
+
+- **2026-07-31** — the step declared no `timeout-ms`, so it inherited the runtime's 120s command
+  default. Every gate reported a false timeout, `alsoRequire` never went true, and otherwise-
+  approved runs parked at exhaustion (run-f60c3ef5, task 0046). Set to 30 min.
+- **2026-08-03** — after three large merges (0009, 0010, 0051) a fresh worktree rebuilds most
+  crates and relinks ~40 proof binaries; under two concurrent dispatches the gate exceeded 30 min
+  and the timed-out `stop-if` parked three of five runs at ROUND 1 (run-d9183ad4 task 0004,
+  run-003644ea task 0051.1, and task 0051). Raised to 90 min.
+
+The ceiling is a trait constant, but what it measures depends on repo size, machine load and how
+many runs are in flight. It will drift out of date again.
+
+## Target
+
+Two gates with different jobs:
+
+- **Per-round gate (in the trait):** the fastest thing that still proves the round did not break
+  the build — build + clippy + the unit tests, single-digit minutes on a warm worktree. This is
+  the signal the loop iterates against, so it must be fast enough to run ten times without
+  dominating the run.
+- **Landing gate (at merge):** the full `just test`, run ONCE, where its cost is proportional to
+  its value. `[merge] gate` in `.ctx/config.toml` already exists as an ordered list of repository
+  commands the merge machinery runs before touching main — that is the natural home, and it means
+  nothing lands unproven even though rounds stop paying for the whole suite.
+
+## Watch
+
+- **The argv is the contract.** P565's rule stands: whatever the check step declares is what the
+  worker is told to re-run, and there must be exactly one source of truth for "what proves this
+  done". Splitting the gates means the trait's argv and the merge gate's list are two DIFFERENT
+  contracts — say so explicitly in the reviewer doctrine, or a reviewer will demand the full suite
+  in a round that never runs it.
+- Keep the timed-out `stop-if`: with a cheap gate a timeout becomes a genuine anomaly worth
+  parking on, rather than the routine outcome it is today.
+- A repo that declares no merge gate must not silently lose the full suite — decide whether the
+  merge gate is required for `--merge` runs, or whether a parked/unmerged branch simply carries
+  the risk.
+- Sibling repos (ctx-gate) declare their own `just test`; whatever shape this takes has to be
+  expressible there too, not hard-coded to this repo's recipes.
+
+## Done when
+
+A build round's gate finishes in single-digit minutes on a warm worktree; the full suite runs once
+at merge and blocks landing when red; the reviewer doctrine states which gate proves what, so no
+round is failed for a check it was never asked to run; and the trait's `timeout-ms` stops being a
+number that has to track the repo's growth.

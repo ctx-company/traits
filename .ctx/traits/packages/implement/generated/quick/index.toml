@@ -372,7 +372,7 @@ argv = [
     "just",
     "test",
 ]
-timeout-ms = 1800000
+timeout-ms = 5400000
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"
@@ -484,10 +484,6 @@ operation = "append"
 [procedure]
 description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
 input = ["port:task"]
-output = [
-    "port:commit-report",
-    "port:park-report",
-]
 
 [[procedure.sequence]]
 id = "draft-writing"

@@ -377,13 +377,28 @@ export const repoGatesStep = sequence.check("repo-gates", {
     // record, so whatever this names is what the worker is told to re-run —
     // there is no second place a gate command can be declared and drift.
     argv: ["just", "test"],
-    // 2026-07-31: the full gate (sdk-check, format-check, clippy, workspace
-    // cargo test) takes ~10 minutes even on a warm worktree clone. With no
-    // declared ceiling the runtime's built-in command default applied and
-    // killed it every round — `ok` could then never be true, and the exit
-    // guard (`alsoRequire`) parked an otherwise-approved run at exhaustion
-    // (run-f60c3ef5, task 0046). Thirty minutes covers a cold first round.
-    timeoutMs: 1_800_000,
+    // This is a PER-COMMAND-STEP ceiling read straight from the canonical
+    // (`run.rs`: `command.timeout_ms`). No config layer overrides it —
+    // `[run] frame-seconds` bounds AGENT frames, not this — and when it is
+    // undeclared the runtime falls back to its 120s command default.
+    //
+    // History, so this stops being rediscovered:
+    //   2026-07-31  undeclared → 120s default → every gate reported a false
+    //               timeout, and `alsoRequire` parked otherwise-approved runs
+    //               (run-f60c3ef5, task 0046). Set to 30 min.
+    //   2026-08-03  30 min too tight: after three large merges a fresh
+    //               worktree rebuilds most crates and relinks ~40 proof
+    //               binaries, and two concurrent dispatches share the CPU.
+    //               Three of five runs died at ROUND 1 on the timed-out
+    //               stop-if (run-d9183ad4 task 0004, run-003644ea task
+    //               0051.1, task 0051). Raised to 90 min.
+    //
+    // A generous ceiling is cheap now that a timed-out gate has its own
+    // stop-if: a genuine hang parks immediately with a repo-condition
+    // reason instead of grinding, so this number only has to be larger than
+    // a healthy worst case, never tuned to it. The real fix is a cheaper
+    // per-round gate (task 0056) — this is the backstop until then.
+    timeoutMs: 5_400_000,
     output: repoGatesPassed,
 });
 

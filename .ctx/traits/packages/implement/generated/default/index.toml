@@ -638,7 +638,7 @@ argv = [
     "just",
     "test",
 ]
-timeout-ms = 1800000
+timeout-ms = 5400000
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"
@@ -839,12 +839,6 @@ output = ["slot:planning-verdict"]
 
 [procedure]
 description = "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation."
-input = ["port:task"]
-output = [
-    "port:commit-report",
-    "port:leftovers",
-    "port:park-report",
-]
 
 [[procedure.sequence]]
 id = "task-extraction"
