@@ -6,7 +6,7 @@
 //! `LiveOutputPanel` for `--progress stream`, and `check`'s line-mode
 //! styling) until P423 retires it.
 
-use std::io::Stderr;
+use std::io::{IsTerminal, Stderr};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once, mpsc};
 use std::time::{Duration, Instant};
@@ -206,6 +206,40 @@ pub(crate) struct RatatuiPane {
     last_inline_resize: Instant,
 }
 
+/// Which screen an inline-preferring pane can actually be built on.
+///
+/// `Viewport::Inline` is the pane we want: it keeps the caller's scrollback
+/// above the run and commits its last frame into it on teardown. Building one
+/// costs a cursor-position query, and crossterm answers that by writing
+/// `ESC [ 6 n` and looping on `poll_internal` (`cursor/sys/unix.rs`). That loop
+/// returns an error on TIMEOUT but SWALLOWS a poll error and retries with no
+/// backoff and no bound:
+///
+/// ```text
+/// Err(_) => {}
+/// ```
+///
+/// So on a terminal whose reply never reaches crossterm's reader the query
+/// never returns. It spins one core at 100% inside `Terminal::with_options`,
+/// before the first frame, with an empty screen and no diagnostic — and it
+/// cannot be bounded from out here, because it never yields.
+///
+/// It reproduces exactly when stdin is not the terminal, which is what `just`
+/// hands every recipe: `ctx traits run --progress tui` completes in ~29s with
+/// inherited stdio and hangs indefinitely behind a pipe. So keep the inline
+/// pane for the interactive case whose scrollback it exists to preserve, and
+/// take the alternate screen otherwise — that path builds from a fullscreen
+/// viewport, which never asks for the cursor, so it renders instead of
+/// hanging. Enabling crossterm's `use-dev-tty` does NOT avoid this; it was
+/// tried and the hang is identical.
+fn inline_capable_screen() -> PaneScreen {
+    if std::io::stdin().is_terminal() {
+        PaneScreen::Inline
+    } else {
+        PaneScreen::Alt
+    }
+}
+
 impl RatatuiPane {
     /// Constructs a pane whose pump forwards ctrl-c as a plain key without
     /// the `request_stop()` side effect — for dashboard/demo/editor contexts
@@ -222,7 +256,7 @@ impl RatatuiPane {
     /// policy matches [`Self::new`]: this is still the live-run pane, with
     /// nothing else ctrl-c could mean there.
     pub(crate) fn new_inline() -> std::io::Result<Self> {
-        Self::new_with_options(PaneScreen::Inline, CtrlCPolicy::RequestStop)
+        Self::new_with_options(inline_capable_screen(), CtrlCPolicy::RequestStop)
     }
 
     fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self> {
