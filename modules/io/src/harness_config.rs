@@ -659,6 +659,42 @@ pub struct RuntimeConfig {
     /// [`resolve_config_report`]).
     #[serde(default)]
     pub repo: BTreeMap<String, RepoOverride>,
+    /// Requirement declarations captured from the authored TOML document.
+    /// Serde defaults erase the distinction between an absent `false`/empty
+    /// value and an explicitly authored one, but repository requirements need
+    /// that distinction when protecting individual leaves from CTX_CONFIG.
+    #[serde(skip)]
+    #[schemars(skip)]
+    authored_requirements: BTreeMap<String, AuthoredConfigLeaf>,
+    /// `$CTX_CONFIG` agent defaults are applied after the matching personal
+    /// qualifier has been flattened. Keeping them transient prevents a
+    /// personal `[repo.*]` assignment from incorrectly beating the explicit
+    /// environment layer.
+    #[serde(skip)]
+    #[schemars(skip)]
+    environment_agent: AgentDefaults,
+    /// Agent defaults before the final environment layer. Assignment
+    /// resolution needs this base to apply repo qualifiers before CTX_CONFIG,
+    /// while the report's public `agent` value remains fully collapsed.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pre_environment_agent: AgentDefaults,
+}
+
+/// The policy assigned to an authored runtime-config leaf. Keeping this next
+/// to parse-time presence prevents serde defaults from turning an explicitly
+/// authored requirement into an ordinary fallback value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigSemantic {
+    Default,
+    Requirement,
+    Additive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthoredConfigLeaf {
+    semantic: ConfigSemantic,
+    value: String,
 }
 
 /// `[git]` process-timeout policy (P489): the long-running side of git
@@ -673,10 +709,8 @@ pub struct GitTable {
 }
 
 /// `[publish] exclude` (P489): directory names never published to the pack
-/// tarball, at any depth. A declared list replaces
-/// [`crate::publish::PACK_DEFAULT_EXCLUDES`] wholesale — never concatenated
-/// across layers — mirroring `[merge] gate`'s "declaration replaces the list"
-/// rule.
+/// tarball, at any depth. Entries combine across configuration layers in
+/// stable first-occurrence order; duplicate entries are ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PublishTable {
@@ -839,10 +873,32 @@ pub enum ConfigLayer {
     Flag,
 }
 
+/// Why a resolved value is effective. This is resolver metadata, rather than
+/// presentation policy, so text and JSON consumers cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigReason {
+    Default,
+    RepoDefault,
+    RepoRequirement,
+    PersonalRepoOverride,
+    EnvironmentOverride,
+    Additive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ConfigContributor {
+    pub layer: ConfigLayer,
+    pub source: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConfigWinner {
     pub layer: ConfigLayer,
     pub source: Option<String>,
+    pub reason: ConfigReason,
+    /// Every document that supplied an additive value, in merge order.
+    pub contributors: Vec<ConfigContributor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -856,7 +912,19 @@ pub struct ConfigReport {
     pub runtime: RuntimeConfig,
     pub winners: BTreeMap<String, ConfigWinner>,
     pub tier_warnings: Vec<String>,
+    /// Non-fatal attempts to override repository-owned requirements. Kept in
+    /// the report so presentation layers, rather than this library, decide
+    /// how and where to display them.
+    pub requirement_conflicts: Vec<ConfigRequirementConflict>,
     pub foreign_config: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfigRequirementConflict {
+    pub field: String,
+    pub rejected_source: String,
+    pub repo_source: String,
 }
 
 /// Runtime defaults after all configuration layers have been classified.
@@ -1104,6 +1172,87 @@ pub struct VariantOverride {
 pub struct RepoOverride {
     #[serde(default)]
     pub agent: AgentDefaults,
+    #[serde(default)]
+    pub harness: BTreeMap<String, HarnessDefinition>,
+    #[serde(default)]
+    pub host: BTreeMap<String, HostOverride>,
+    /// Only additive worktree values are accepted in a personal repo block;
+    /// setup and confinement remain repository-owned requirements.
+    #[serde(default)]
+    pub worktree: RepoWorktreeOverride,
+    #[serde(default)]
+    pub run: RepoRunOverride,
+    #[serde(default)]
+    pub merge: RepoMergeOverride,
+    #[serde(default)]
+    pub git: RepoGitOverride,
+    #[serde(default)]
+    pub registry: RepoRegistryOverride,
+    #[serde(default)]
+    pub publish: RepoPublishOverride,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoWorktreeOverride {
+    #[serde(default)]
+    pub seed: Vec<String>,
+    #[serde(default)]
+    pub warm: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub tripwire: RepoTripwireOverride,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoTripwireOverride {
+    #[serde(default)]
+    pub sentinel: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoRunOverride {
+    #[serde(default)]
+    pub wait: Option<bool>,
+    #[serde(default)]
+    pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
+    #[serde(default)]
+    pub build_cache: BTreeMap<String, BuildCacheConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoMergeOverride {
+    #[serde(default)]
+    pub wait: Option<bool>,
+    #[serde(default)]
+    pub auto: Option<bool>,
+    #[serde(default)]
+    pub deep: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoGitOverride {
+    #[serde(default)]
+    pub long_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoRegistryOverride {
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RepoPublishOverride {
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// The DRIVER seat's role name: `[agent.role.default]`. Renamed from the
@@ -1907,8 +2056,16 @@ fn resolve_runtime_assignments_impl(
             .map(std::borrow::Cow::Owned),
         repo_key: repo_key.map(std::borrow::Cow::Owned),
     };
-    let (agent_defaults, qualifier_by_role) =
-        flatten_agent_defaults(&runtime_config.agent, &runtime_config.repo, &scope);
+    let (mut agent_defaults, qualifier_by_role) = flatten_agent_defaults(
+        &runtime_config.pre_environment_agent,
+        &runtime_config.repo,
+        &scope,
+    );
+    // `$CTX_CONFIG` is the final default layer. Apply it only after the
+    // personal repo qualifier fold so its role and variant leaves win.
+    let (environment_agent, _) =
+        flatten_agent_defaults(&runtime_config.environment_agent, &BTreeMap::new(), &scope);
+    merge_agent_defaults(&mut agent_defaults, environment_agent);
     if !qualifier_by_role.is_empty() {
         validate_role_map(&agent_defaults.role, "agent.role", true)?;
     }
@@ -2557,11 +2714,7 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
         );
     }
     let mut machine = RuntimeConfig::default();
-    for wanted in [
-        ConfigLayer::Repo,
-        ConfigLayer::UserGlobal,
-        ConfigLayer::Environment,
-    ] {
+    for wanted in [ConfigLayer::UserGlobal, ConfigLayer::Repo] {
         for (layer, path, next) in &documents {
             if *layer == wanted {
                 merge_machine_config(
@@ -2576,9 +2729,18 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     }
 
     let mut runtime = project;
+    // Broad project merging preserves historic CTX_CONFIG behavior where a
+    // repository leaves a requirement absent. Re-install only repository
+    // declarations so an explicit repository requirement remains immutable.
+    for (layer, path, document) in &documents {
+        if *layer == ConfigLayer::Repo {
+            install_repo_requirements(&mut runtime, document, Some(path.to_string()), &mut winners);
+        }
+    }
     // Machine tables are authoritative for these facts. Keep project-only
     // fields from the project resolution and then install machine fields.
-    runtime.schema_version = machine.schema_version.or(runtime.schema_version);
+    // Schema compatibility is document-local/repository-owned, not an
+    // environment-overridable runtime knob.
     runtime.harness = machine.harness;
     runtime.agent = machine.agent;
     // P451: `[repo.*]` blocks are machine-scoped (global-file-only) exactly
@@ -2587,6 +2749,62 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     // runtime document, so `resolve_runtime_assignments_impl` (which reads
     // `runtime_config.repo`) and `doctor --config` never see it.
     runtime.repo = machine.repo;
+    runtime.pre_environment_agent = runtime.agent.clone();
+    for (layer, _, document) in &documents {
+        if *layer == ConfigLayer::Environment {
+            merge_agent_defaults(&mut runtime.environment_agent, document.agent.clone());
+        }
+    }
+    // A matching global `[repo."<key>"]` is a personal qualifier. It sits
+    // after repository defaults but before CTX_CONFIG defaults.
+    let active_repo_key = active_repo_qualifier_key();
+    // The carried global paths are a compatibility chain, not alternatives:
+    // merge every matching qualifier in legacy-to-current order.
+    let personal: Vec<_> = documents
+        .iter()
+        .filter_map(|(layer, path, document)| {
+            (*layer == ConfigLayer::UserGlobal)
+                .then(|| {
+                    active_repo_key
+                        .as_ref()
+                        .and_then(|key| document.repo.get(key).map(|value| (path, value)))
+                })
+                .flatten()
+        })
+        .collect();
+    // Rebuild classified additive values from every contributor. These are
+    // deliberately not handled by broad table overlays: list order is stable
+    // first-occurrence order and repository map keys cannot be displaced.
+    apply_additive_values(&mut runtime, &documents, &personal, &mut winners);
+    // A matching global qualifier is a default layer after repository config
+    // and before CTX_CONFIG. Its type cannot express requirements.
+    for (path, qualifier) in &personal {
+        apply_repo_defaults(
+            &mut runtime,
+            qualifier,
+            ConfigLayer::UserGlobal,
+            Some(path.to_string()),
+            &mut winners,
+        );
+    }
+    for (layer, path, document) in &documents {
+        if *layer == ConfigLayer::Environment {
+            apply_environment_defaults(
+                &mut runtime,
+                document,
+                *layer,
+                Some(path.to_string()),
+                &mut winners,
+            );
+        }
+    }
+    // Validate the effective agent map even though the environment tier stays
+    // transient until qualifier flattening. `doctor --config` must reject an
+    // invalid CTX_CONFIG assignment just like run/session resolution does.
+    let mut validation_agent = runtime.agent.clone();
+    merge_agent_defaults(&mut validation_agent, runtime.environment_agent.clone());
+    validate_agent_defaults(&validation_agent)?;
+    let requirement_conflicts = requirement_conflicts(&documents);
     // P568: fold each built-in harness's config table over its compiled-in
     // definition ONCE, here, where the runtime document is finalized. Every
     // consumer reads `runtime.harness` directly — dispatch, narration,
@@ -2627,10 +2845,9 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
         "run.strict-loops",
         "run.inline-prompt-bytes",
     ] {
-        winners.entry(key.to_string()).or_insert(ConfigWinner {
-            layer: ConfigLayer::BuiltIn,
-            source: None,
-        });
+        winners
+            .entry(key.to_string())
+            .or_insert_with(builtin_winner);
     }
     for key in [
         "merge.wait",
@@ -2646,17 +2863,610 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
         "publish.exclude",
         "registry.base",
     ] {
-        winners.entry(key.to_string()).or_insert(ConfigWinner {
-            layer: ConfigLayer::BuiltIn,
-            source: None,
-        });
+        winners
+            .entry(key.to_string())
+            .or_insert_with(builtin_winner);
     }
     Ok(ConfigReport {
         runtime,
         winners,
         tier_warnings,
+        requirement_conflicts,
         foreign_config: foreign_config.map(|path| path.to_string()),
     })
+}
+
+fn install_repo_requirements(
+    runtime: &mut RuntimeConfig,
+    repo: &RuntimeConfig,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    if repo_requirement(repo, "schema-version") {
+        runtime.schema_version = repo.schema_version.clone();
+    }
+    if repo_requirement(repo, "worktree.setup") {
+        runtime.worktree.setup = repo.worktree.setup.clone();
+    }
+    if repo_requirement(repo, "worktree.setup-seconds") {
+        runtime.worktree.setup_seconds = repo.worktree.setup_seconds;
+    }
+    if repo_requirement(repo, "worktree.setup-capture-bytes") {
+        runtime.worktree.setup_capture_bytes = repo.worktree.setup_capture_bytes;
+    }
+    if repo_requirement(repo, "worktree.confinement.enabled") {
+        runtime.worktree.confinement.enabled = repo.worktree.confinement.enabled;
+    }
+    if repo_requirement(repo, "worktree.confinement.sandbox") {
+        runtime.worktree.confinement.sandbox = repo.worktree.confinement.sandbox;
+    }
+    if repo_requirement(repo, "worktree.confinement.allow") {
+        runtime.worktree.confinement.allow = repo.worktree.confinement.allow.clone();
+    }
+    if repo_requirement(repo, "worktree.tripwire.policy") {
+        runtime.worktree.tripwire.policy = repo.worktree.tripwire.policy;
+    }
+    if repo_requirement(repo, "worktree.retention.cheap") {
+        runtime.worktree.retention.cheap = repo.worktree.retention.cheap.clone();
+    }
+    if repo_requirement(repo, "worktree.retention.expensive") {
+        runtime.worktree.retention.expensive = repo.worktree.retention.expensive.clone();
+    }
+    if repo_requirement(repo, "worktree.retention.expensive-grace-days") {
+        runtime.worktree.retention.expensive_grace_days =
+            repo.worktree.retention.expensive_grace_days;
+    }
+    if let Some(source) = &repo.run {
+        let target = runtime.run.get_or_insert_with(RunTable::default);
+        if repo_requirement(repo, "run.worktree") {
+            target.worktree = source.worktree;
+        }
+        if repo_requirement(repo, "run.max-frames") {
+            target.budget.max_frames = source.budget.max_frames;
+        }
+        if repo_requirement(repo, "run.frame-seconds") {
+            target.budget.frame_seconds = source.budget.frame_seconds;
+        }
+        if repo_requirement(repo, "run.total-seconds") {
+            target.budget.total_seconds = source.budget.total_seconds;
+        }
+        if repo_requirement(repo, "run.max-retries") {
+            target.budget.max_retries = source.budget.max_retries;
+        }
+        if repo_requirement(repo, "run.attach-wait-seconds") {
+            target.budget.attach_wait_seconds = source.budget.attach_wait_seconds;
+        }
+        if repo_requirement(repo, "run.idle-seconds") {
+            target.budget.idle_seconds = source.budget.idle_seconds;
+        }
+        if repo_requirement(repo, "run.max-in-flight") {
+            target.max_in_flight = source.max_in_flight;
+        }
+        if repo_requirement(repo, "run.strict-loops") {
+            target.strict_loops = source.strict_loops;
+        }
+        if repo_requirement(repo, "run.inline-prompt-bytes") {
+            target.inline_prompt_bytes = source.inline_prompt_bytes;
+        }
+    }
+    if let Some(source) = &repo.merge {
+        let target = runtime.merge.get_or_insert_with(MergeTable::default);
+        if repo_requirement(repo, "merge.overlap") {
+            target.overlap = source.overlap;
+        }
+        if repo_requirement(repo, "merge.branch") {
+            target.branch = source.branch.clone();
+        }
+        if repo_requirement(repo, "merge.gate") {
+            target.gate = source.gate.clone();
+        }
+        if repo_requirement(repo, "merge.gate-seconds") {
+            target.gate_seconds = source.gate_seconds;
+        }
+        if repo_requirement(repo, "merge.generated") {
+            target.generated = source.generated.clone();
+        }
+        if repo_requirement(repo, "merge.disk-floor-mb") {
+            target.disk_floor_mb = source.disk_floor_mb;
+        }
+    }
+    for field in repo.authored_requirements.keys() {
+        if repo_requirement(repo, field) {
+            record_winner(winners, field, ConfigLayer::Repo, source.clone());
+        }
+    }
+}
+
+fn repo_requirement(config: &RuntimeConfig, field: &str) -> bool {
+    config
+        .authored_requirements
+        .get(field)
+        .is_some_and(|leaf| leaf.semantic == ConfigSemantic::Requirement)
+}
+
+fn push_unique(values: &mut Vec<String>, additions: impl IntoIterator<Item = String>) {
+    for value in additions {
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+}
+
+fn apply_repo_defaults(
+    runtime: &mut RuntimeConfig,
+    qualifier: &RepoOverride,
+    layer: ConfigLayer,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    // Keep the report's runtime document fully collapsed. The repo map remains
+    // for qualifier evidence at dispatch time, but its matching personal
+    // defaults must also be visible to non-dispatch consumers such as doctor.
+    let role_keys: Vec<String> = qualifier.agent.role.keys().cloned().collect();
+    let variant_role_keys = variant_role_keys(&qualifier.agent.variant);
+    let model_tier_present = !qualifier.agent.model_tier.is_empty();
+    merge_agent_defaults(&mut runtime.agent, qualifier.agent.clone());
+    for role in role_keys {
+        record_personal_winner(winners, format!("agent.role.{role}"), source.clone());
+    }
+    for (variant, role) in variant_role_keys {
+        record_personal_winner(
+            winners,
+            format!("agent.variant.{variant}.role.{role}"),
+            source.clone(),
+        );
+    }
+    if model_tier_present {
+        record_personal_winner(winners, "agent.model-tier", source.clone());
+    }
+    for (id, harness) in &qualifier.harness {
+        let merged = runtime
+            .harness
+            .get(id)
+            .map(|base| harness.merged_onto(base))
+            .unwrap_or_else(|| harness.clone());
+        runtime.harness.insert(id.clone(), merged);
+        if layer == ConfigLayer::UserGlobal {
+            record_personal_winner(winners, format!("harness.{id}"), source.clone());
+        } else {
+            record_winner(winners, format!("harness.{id}"), layer, source.clone());
+        }
+    }
+    for (name, host) in &qualifier.host {
+        runtime
+            .host
+            .entry(name.clone())
+            .or_default()
+            .merge(host.clone());
+        if layer == ConfigLayer::UserGlobal {
+            record_personal_winner(winners, format!("host.{name}"), source.clone());
+        } else {
+            record_winner(winners, format!("host.{name}"), layer, source.clone());
+        }
+    }
+    let run = runtime.run.get_or_insert_with(RunTable::default);
+    if qualifier.run.wait.is_some() {
+        run.wait = qualifier.run.wait;
+        record_personal_winner(winners, "run.wait", source.clone());
+    }
+    if qualifier.run.story.is_some() {
+        run.story = qualifier.run.story;
+        record_personal_winner(winners, "run.story", source.clone());
+    }
+    let merge = runtime.merge.get_or_insert_with(MergeTable::default);
+    if qualifier.merge.wait.is_some() {
+        merge.wait = qualifier.merge.wait;
+        record_personal_winner(winners, "merge.wait", source.clone());
+    }
+    if qualifier.merge.auto.is_some() {
+        merge.auto = qualifier.merge.auto;
+        record_personal_winner(winners, "merge.auto", source.clone());
+    }
+    if qualifier.merge.deep.is_some() {
+        merge.deep = qualifier.merge.deep;
+        record_personal_winner(winners, "merge.deep", source.clone());
+    }
+    if qualifier.git.long_seconds.is_some() {
+        runtime
+            .git
+            .get_or_insert_with(GitTable::default)
+            .long_seconds = qualifier.git.long_seconds;
+        record_personal_winner(winners, "git.long-seconds", source.clone());
+    }
+    if qualifier.registry.base.is_some() {
+        runtime
+            .registry
+            .get_or_insert_with(RegistryTable::default)
+            .base = qualifier.registry.base.clone();
+        record_personal_winner(winners, "registry.base", source);
+    }
+}
+
+fn apply_environment_defaults(
+    runtime: &mut RuntimeConfig,
+    document: &RuntimeConfig,
+    layer: ConfigLayer,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    let role_keys: Vec<String> = document.agent.role.keys().cloned().collect();
+    let variant_role_keys = variant_role_keys(&document.agent.variant);
+    let model_tier_present = !document.agent.model_tier.is_empty();
+    merge_agent_defaults(&mut runtime.agent, document.agent.clone());
+    for role in role_keys {
+        record_winner(winners, format!("agent.role.{role}"), layer, source.clone());
+    }
+    for (variant, role) in variant_role_keys {
+        record_winner(
+            winners,
+            format!("agent.variant.{variant}.role.{role}"),
+            layer,
+            source.clone(),
+        );
+    }
+    if model_tier_present {
+        record_winner(winners, "agent.model-tier", layer, source.clone());
+    }
+    for (id, harness) in &document.harness {
+        let merged = runtime
+            .harness
+            .get(id)
+            .map(|base| harness.merged_onto(base))
+            .unwrap_or_else(|| harness.clone());
+        runtime.harness.insert(id.clone(), merged);
+        record_winner(winners, format!("harness.{id}"), layer, source.clone());
+    }
+    for (name, host) in &document.host {
+        runtime
+            .host
+            .entry(name.clone())
+            .or_default()
+            .merge(host.clone());
+        record_winner(winners, format!("host.{name}"), layer, source.clone());
+    }
+    if let Some(next) = &document.run {
+        let run = runtime.run.get_or_insert_with(RunTable::default);
+        if next.wait.is_some() {
+            run.wait = next.wait;
+            record_winner(winners, "run.wait", layer, source.clone());
+        }
+        if next.story.is_some() {
+            run.story = next.story;
+            record_winner(winners, "run.story", layer, source.clone());
+        }
+    }
+    if let Some(next) = &document.merge {
+        let merge = runtime.merge.get_or_insert_with(MergeTable::default);
+        if next.wait.is_some() {
+            merge.wait = next.wait;
+            record_winner(winners, "merge.wait", layer, source.clone());
+        }
+        if next.auto.is_some() {
+            merge.auto = next.auto;
+            record_winner(winners, "merge.auto", layer, source.clone());
+        }
+        if next.deep.is_some() {
+            merge.deep = next.deep;
+            record_winner(winners, "merge.deep", layer, source.clone());
+        }
+    }
+    if let Some(next) = &document.git
+        && next.long_seconds.is_some()
+    {
+        runtime
+            .git
+            .get_or_insert_with(GitTable::default)
+            .long_seconds = next.long_seconds;
+        record_winner(winners, "git.long-seconds", layer, source.clone());
+    }
+    if let Some(next) = &document.registry
+        && next.base.is_some()
+    {
+        runtime
+            .registry
+            .get_or_insert_with(RegistryTable::default)
+            .base = next.base.clone();
+        record_winner(winners, "registry.base", layer, source);
+    }
+}
+
+fn apply_additive_values(
+    runtime: &mut RuntimeConfig,
+    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+    personal: &[(&Utf8PathBuf, &RepoOverride)],
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    runtime.worktree.seed.clear();
+    runtime.worktree.warm.clear();
+    runtime.worktree.env.clear();
+    runtime.worktree.tripwire.sentinel.clear();
+    if let Some(run) = runtime.run.as_mut() {
+        run.build_cache.clear();
+    }
+    if let Some(publish) = runtime.publish.as_mut() {
+        publish.exclude = None;
+    }
+    // Product exclusions are the first additive contribution, not a fallback
+    // that disappears as soon as an author adds one exclusion.
+    let publish = runtime.publish.get_or_insert_with(PublishTable::default);
+    publish.exclude = Some(
+        crate::publish::PACK_DEFAULT_EXCLUDES
+            .iter()
+            .map(|entry| (*entry).to_string())
+            .collect(),
+    );
+    let mut contributors: BTreeMap<String, Vec<ConfigContributor>> = BTreeMap::new();
+    contributors.insert(
+        "publish.exclude".into(),
+        vec![ConfigContributor {
+            layer: ConfigLayer::BuiltIn,
+            source: None,
+        }],
+    );
+    for (layer, path, document) in documents {
+        push_unique(&mut runtime.worktree.seed, document.worktree.seed.clone());
+        push_unique(&mut runtime.worktree.warm, document.worktree.warm.clone());
+        push_unique(
+            &mut runtime.worktree.tripwire.sentinel,
+            document.worktree.tripwire.sentinel.clone(),
+        );
+        for (key, value) in &document.worktree.env {
+            // Repository-owned map entries are retained over personal/env.
+            if *layer == ConfigLayer::Repo || !runtime.worktree.env.contains_key(key) {
+                runtime.worktree.env.insert(key.clone(), value.clone());
+                contributors
+                    .entry(format!("worktree.env.{key}"))
+                    .or_default()
+                    .push(ConfigContributor {
+                        layer: *layer,
+                        source: Some(path.to_string()),
+                    });
+            }
+        }
+        if let Some(run) = &document.run {
+            let target = runtime.run.get_or_insert_with(RunTable::default);
+            for (name, cache) in &run.build_cache {
+                if *layer == ConfigLayer::Repo || !target.build_cache.contains_key(name) {
+                    target.build_cache.insert(name.clone(), cache.clone());
+                    contributors
+                        .entry(format!("run.build-cache.{name}"))
+                        .or_default()
+                        .push(ConfigContributor {
+                            layer: *layer,
+                            source: Some(path.to_string()),
+                        });
+                }
+            }
+        }
+        if let Some(publish) = &document.publish
+            && let Some(exclude) = &publish.exclude
+        {
+            let target = runtime.publish.get_or_insert_with(PublishTable::default);
+            push_unique(target.exclude.get_or_insert_with(Vec::new), exclude.clone());
+        }
+        let contributor = || ConfigContributor {
+            layer: *layer,
+            source: Some(path.to_string()),
+        };
+        if !document.worktree.seed.is_empty() {
+            contributors
+                .entry("worktree.seed".into())
+                .or_default()
+                .push(contributor());
+        }
+        if !document.worktree.warm.is_empty() {
+            contributors
+                .entry("worktree.warm".into())
+                .or_default()
+                .push(contributor());
+        }
+        if !document.worktree.tripwire.sentinel.is_empty() {
+            contributors
+                .entry("worktree.tripwire.sentinel".into())
+                .or_default()
+                .push(contributor());
+        }
+        if document
+            .publish
+            .as_ref()
+            .and_then(|publish| publish.exclude.as_ref())
+            .is_some()
+        {
+            contributors
+                .entry("publish.exclude".into())
+                .or_default()
+                .push(contributor());
+        }
+    }
+    for (path, override_) in personal {
+        push_unique(&mut runtime.worktree.seed, override_.worktree.seed.clone());
+        push_unique(&mut runtime.worktree.warm, override_.worktree.warm.clone());
+        push_unique(
+            &mut runtime.worktree.tripwire.sentinel,
+            override_.worktree.tripwire.sentinel.clone(),
+        );
+        for (key, value) in &override_.worktree.env {
+            let inserted = !runtime.worktree.env.contains_key(key);
+            runtime
+                .worktree
+                .env
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+            if inserted {
+                contributors
+                    .entry(format!("worktree.env.{key}"))
+                    .or_default()
+                    .push(ConfigContributor {
+                        layer: ConfigLayer::UserGlobal,
+                        source: Some(path.to_string()),
+                    });
+            }
+        }
+        let run = runtime.run.get_or_insert_with(RunTable::default);
+        for (name, cache) in &override_.run.build_cache {
+            let inserted = !run.build_cache.contains_key(name);
+            run.build_cache
+                .entry(name.clone())
+                .or_insert_with(|| cache.clone());
+            if inserted {
+                contributors
+                    .entry(format!("run.build-cache.{name}"))
+                    .or_default()
+                    .push(ConfigContributor {
+                        layer: ConfigLayer::UserGlobal,
+                        source: Some(path.to_string()),
+                    });
+            }
+        }
+        if !override_.publish.exclude.is_empty() {
+            let publish = runtime.publish.get_or_insert_with(PublishTable::default);
+            let values = publish.exclude.get_or_insert_with(Vec::new);
+            push_unique(values, override_.publish.exclude.clone());
+        }
+        let contributor = || ConfigContributor {
+            layer: ConfigLayer::UserGlobal,
+            source: Some(path.to_string()),
+        };
+        if !override_.worktree.seed.is_empty() {
+            contributors
+                .entry("worktree.seed".into())
+                .or_default()
+                .push(contributor());
+        }
+        if !override_.worktree.warm.is_empty() {
+            contributors
+                .entry("worktree.warm".into())
+                .or_default()
+                .push(contributor());
+        }
+        if !override_.worktree.tripwire.sentinel.is_empty() {
+            contributors
+                .entry("worktree.tripwire.sentinel".into())
+                .or_default()
+                .push(contributor());
+        }
+        if !override_.publish.exclude.is_empty() {
+            contributors
+                .entry("publish.exclude".into())
+                .or_default()
+                .push(contributor());
+        }
+    }
+    for (key, sources) in contributors {
+        let last = sources
+            .last()
+            .cloned()
+            .expect("additive contributor exists");
+        winners.insert(
+            key,
+            ConfigWinner {
+                layer: last.layer,
+                source: last.source.clone(),
+                reason: ConfigReason::Additive,
+                contributors: sources,
+            },
+        );
+    }
+}
+
+fn requirement_conflicts(
+    documents: &[(ConfigLayer, Utf8PathBuf, RuntimeConfig)],
+) -> Vec<ConfigRequirementConflict> {
+    let mut output = Vec::new();
+    // Repository documents are applied in path order. Keep the effective
+    // declaration for each leaf so one rejected environment value names the
+    // source that actually remains in force.
+    let mut effective = BTreeMap::new();
+    for (layer, path, repo) in documents {
+        if *layer == ConfigLayer::Repo {
+            for (field, leaf) in &repo.authored_requirements {
+                if leaf.semantic == ConfigSemantic::Requirement {
+                    effective.insert(field.as_str(), (path, leaf));
+                }
+            }
+        }
+    }
+    for (layer, path, candidate) in documents
+        .iter()
+        .filter(|(layer, _, _)| *layer == ConfigLayer::Environment)
+    {
+        for (field, rejected) in &candidate.authored_requirements {
+            if let Some((repo_path, required)) = effective.get(field.as_str())
+                && rejected.semantic == ConfigSemantic::Requirement
+                && rejected.value != required.value
+            {
+                output.push(ConfigRequirementConflict {
+                    field: field.clone(),
+                    rejected_source: path.to_string(),
+                    repo_source: repo_path.to_string(),
+                });
+            }
+        }
+        let _ = layer;
+    }
+    // Additive maps merge distinct entries, but a repository-owned entry is a
+    // per-key requirement. Track it separately from document requirements so
+    // rejected personal values are visible instead of silently ignored.
+    let mut repo_env = BTreeMap::new();
+    let mut repo_caches = BTreeMap::new();
+    for (layer, path, document) in documents {
+        if *layer != ConfigLayer::Repo {
+            continue;
+        }
+        for (key, value) in &document.worktree.env {
+            repo_env.insert(key.as_str(), (path, value));
+        }
+        if let Some(run) = &document.run {
+            for (key, value) in &run.build_cache {
+                repo_caches.insert(key.as_str(), (path, value));
+            }
+        }
+    }
+    let mut check_maps = |path: &Utf8Path,
+                          env: &BTreeMap<String, String>,
+                          caches: &BTreeMap<String, BuildCacheConfig>| {
+        for (key, value) in env {
+            if let Some((repo_path, required)) = repo_env.get(key.as_str())
+                && *required != value
+            {
+                output.push(ConfigRequirementConflict {
+                    field: format!("worktree.env.{key}"),
+                    rejected_source: path.to_string(),
+                    repo_source: repo_path.to_string(),
+                });
+            }
+        }
+        for (key, value) in caches {
+            if let Some((repo_path, required)) = repo_caches.get(key.as_str())
+                && *required != value
+            {
+                output.push(ConfigRequirementConflict {
+                    field: format!("run.build-cache.{key}"),
+                    rejected_source: path.to_string(),
+                    repo_source: repo_path.to_string(),
+                });
+            }
+        }
+    };
+    for (layer, path, document) in documents {
+        if *layer == ConfigLayer::Environment {
+            if let Some(run) = &document.run {
+                check_maps(path, &document.worktree.env, &run.build_cache);
+            } else {
+                check_maps(path, &document.worktree.env, &BTreeMap::new());
+            }
+        }
+    }
+    if let Some(key) = active_repo_qualifier_key() {
+        for (layer, path, document) in documents {
+            if *layer == ConfigLayer::UserGlobal
+                && let Some(personal) = document.repo.get(&key)
+            {
+                check_maps(path, &personal.worktree.env, &personal.run.build_cache);
+            }
+        }
+    }
+    output
 }
 
 fn has_tier_declaration(agent: &AgentDefaults) -> bool {
@@ -2725,7 +3535,7 @@ pub fn load_runtime_config(path: &Utf8Path) -> crate::Result<RuntimeConfig> {
     if crate::config_source::is_generated_config_candidate(path) {
         crate::config_source::guard_config_toml(path, &text)?;
     }
-    toml::from_str(&text).map_err(|source| {
+    let mut config: RuntimeConfig = toml::from_str(&text).map_err(|source| {
         if let Some(message) = legacy_agent_key_error(&text) {
             return config_error("agent", message);
         }
@@ -2734,7 +3544,98 @@ pub fn load_runtime_config(path: &Utf8Path) -> crate::Result<RuntimeConfig> {
             source,
         }
         .into()
-    })
+    })?;
+    let document: toml::Value = toml::from_str(&text).expect("decoded runtime TOML is valid");
+    config.authored_requirements = authored_requirement_values(&document);
+    Ok(config)
+}
+
+/// Semantic classification for every non-dynamic RuntimeConfig leaf. Dynamic
+/// map entries inherit the semantic of their enclosing table in
+/// [`config_semantic`]. Keeping defaults here too makes this a coverage list,
+/// rather than a hand-maintained exception list that can silently turn a new
+/// requirement into an overrideable default.
+const CONFIG_FIELD_SEMANTICS: &[(&str, ConfigSemantic)] = &[
+    ("schema-version", ConfigSemantic::Requirement),
+    ("worktree.seed", ConfigSemantic::Additive),
+    ("worktree.warm", ConfigSemantic::Additive),
+    ("worktree.setup", ConfigSemantic::Requirement),
+    ("worktree.setup-seconds", ConfigSemantic::Requirement),
+    ("worktree.setup-capture-bytes", ConfigSemantic::Requirement),
+    ("worktree.confinement.enabled", ConfigSemantic::Requirement),
+    ("worktree.confinement.sandbox", ConfigSemantic::Requirement),
+    ("worktree.confinement.allow", ConfigSemantic::Requirement),
+    ("worktree.env", ConfigSemantic::Additive),
+    ("worktree.tripwire.policy", ConfigSemantic::Requirement),
+    ("worktree.tripwire.sentinel", ConfigSemantic::Additive),
+    ("worktree.retention.cheap", ConfigSemantic::Requirement),
+    ("worktree.retention.expensive", ConfigSemantic::Requirement),
+    (
+        "worktree.retention.expensive-grace-days",
+        ConfigSemantic::Requirement,
+    ),
+    ("run.worktree", ConfigSemantic::Requirement),
+    ("run.max-frames", ConfigSemantic::Requirement),
+    ("run.frame-seconds", ConfigSemantic::Requirement),
+    ("run.total-seconds", ConfigSemantic::Requirement),
+    ("run.max-retries", ConfigSemantic::Requirement),
+    ("run.attach-wait-seconds", ConfigSemantic::Requirement),
+    ("run.idle-seconds", ConfigSemantic::Requirement),
+    ("run.max-in-flight", ConfigSemantic::Requirement),
+    ("run.wait", ConfigSemantic::Default),
+    ("run.strict-loops", ConfigSemantic::Requirement),
+    ("run.build-cache", ConfigSemantic::Additive),
+    ("run.inline-prompt-bytes", ConfigSemantic::Requirement),
+    ("run.story", ConfigSemantic::Default),
+    ("merge.wait", ConfigSemantic::Default),
+    ("merge.overlap", ConfigSemantic::Requirement),
+    ("merge.auto", ConfigSemantic::Default),
+    ("merge.deep", ConfigSemantic::Default),
+    ("merge.branch", ConfigSemantic::Requirement),
+    ("merge.gate", ConfigSemantic::Requirement),
+    ("merge.gate-seconds", ConfigSemantic::Requirement),
+    ("merge.generated", ConfigSemantic::Requirement),
+    ("merge.disk-floor-mb", ConfigSemantic::Requirement),
+    ("git.long-seconds", ConfigSemantic::Default),
+    ("publish.exclude", ConfigSemantic::Additive),
+    ("registry.base", ConfigSemantic::Default),
+];
+
+fn authored_requirement_values(document: &toml::Value) -> BTreeMap<String, AuthoredConfigLeaf> {
+    CONFIG_FIELD_SEMANTICS
+        .iter()
+        .filter_map(|(field, semantic)| {
+            toml_value_at(document, field).map(|value| {
+                (
+                    (*field).into(),
+                    AuthoredConfigLeaf {
+                        semantic: *semantic,
+                        value: value.to_string(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+/// The authoritative semantic classifier for concrete authored paths. Dynamic
+/// map entries are classified by their enclosing table at resolution time.
+fn config_semantic(field: &str) -> ConfigSemantic {
+    CONFIG_FIELD_SEMANTICS
+        .iter()
+        .find_map(|(path, semantic)| (*path == field).then_some(*semantic))
+        .or_else(|| {
+            ["worktree.env.", "run.build-cache."]
+                .iter()
+                .any(|prefix| field.starts_with(prefix))
+                .then_some(ConfigSemantic::Additive)
+        })
+        .unwrap_or(ConfigSemantic::Default)
+}
+
+fn toml_value_at<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Value> {
+    path.split('.')
+        .try_fold(value, |value, segment| value.get(segment))
 }
 
 /// The resolved config-layer paths runtime config resolution itself reads
@@ -3181,7 +4082,48 @@ fn record_winner(
     layer: ConfigLayer,
     source: Option<String>,
 ) {
-    winners.insert(key.into(), ConfigWinner { layer, source });
+    let key = key.into();
+    let reason = match (config_semantic(&key), layer) {
+        (ConfigSemantic::Additive, _) => ConfigReason::Additive,
+        (ConfigSemantic::Requirement, ConfigLayer::Repo) => ConfigReason::RepoRequirement,
+        (_, ConfigLayer::Repo) => ConfigReason::RepoDefault,
+        (_, ConfigLayer::Environment) => ConfigReason::EnvironmentOverride,
+        _ => ConfigReason::Default,
+    };
+    winners.insert(
+        key,
+        ConfigWinner {
+            layer,
+            source,
+            reason,
+            contributors: Vec::new(),
+        },
+    );
+}
+
+fn record_personal_winner(
+    winners: &mut BTreeMap<String, ConfigWinner>,
+    key: impl Into<String>,
+    source: Option<String>,
+) {
+    winners.insert(
+        key.into(),
+        ConfigWinner {
+            layer: ConfigLayer::UserGlobal,
+            source,
+            reason: ConfigReason::PersonalRepoOverride,
+            contributors: Vec::new(),
+        },
+    );
+}
+
+fn builtin_winner() -> ConfigWinner {
+    ConfigWinner {
+        layer: ConfigLayer::BuiltIn,
+        source: None,
+        reason: ConfigReason::Default,
+        contributors: Vec::new(),
+    }
 }
 
 fn merge_project_config(
@@ -3191,6 +4133,13 @@ fn merge_project_config(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
+    let setup_declared = repo_requirement(&next, "worktree.setup");
+    let confinement_enabled = repo_requirement(&next, "worktree.confinement.enabled");
+    let confinement_sandbox = repo_requirement(&next, "worktree.confinement.sandbox");
+    let confinement_allow = repo_requirement(&next, "worktree.confinement.allow");
+    let tripwire_policy = repo_requirement(&next, "worktree.tripwire.policy");
+    let retention_cheap = repo_requirement(&next, "worktree.retention.cheap");
+    let retention_expensive = repo_requirement(&next, "worktree.retention.expensive");
     if next.schema_version.is_some() {
         base.schema_version = next.schema_version;
     }
@@ -3202,7 +4151,7 @@ fn merge_project_config(
         base.worktree.warm = next.worktree.warm;
         record_winner(winners, "worktree.warm", layer, source.clone());
     }
-    if !next.worktree.setup.is_empty() {
+    if setup_declared {
         base.worktree.setup = next.worktree.setup;
         record_winner(winners, "worktree.setup", layer, source.clone());
     }
@@ -3215,13 +4164,34 @@ fn merge_project_config(
             source.clone(),
         );
     }
-    if next.worktree.confinement != crate::confinement::WorktreeConfinementConfig::default() {
-        base.worktree.confinement = next.worktree.confinement;
-        record_winner(winners, "worktree.confinement", layer, source.clone());
+    // These tables have scalar serde defaults, so comparing their decoded
+    // whole values loses whether an author actually supplied each sibling.
+    // Use parse-time presence and overlay only the declared requirement leaf.
+    if confinement_enabled {
+        base.worktree.confinement.enabled = next.worktree.confinement.enabled;
+        record_winner(
+            winners,
+            "worktree.confinement.enabled",
+            layer,
+            source.clone(),
+        );
     }
-    if next.worktree.tripwire != crate::tripwire::WorktreeTripwireConfig::default() {
-        base.worktree.tripwire = next.worktree.tripwire;
-        record_winner(winners, "worktree.tripwire", layer, source.clone());
+    if confinement_sandbox {
+        base.worktree.confinement.sandbox = next.worktree.confinement.sandbox;
+        record_winner(
+            winners,
+            "worktree.confinement.sandbox",
+            layer,
+            source.clone(),
+        );
+    }
+    if confinement_allow {
+        base.worktree.confinement.allow = next.worktree.confinement.allow;
+        record_winner(winners, "worktree.confinement.allow", layer, source.clone());
+    }
+    if tripwire_policy {
+        base.worktree.tripwire.policy = next.worktree.tripwire.policy;
+        record_winner(winners, "worktree.tripwire.policy", layer, source.clone());
     }
     if next.worktree.setup_seconds.is_some() {
         base.worktree.setup_seconds = next.worktree.setup_seconds;
@@ -3236,11 +4206,11 @@ fn merge_project_config(
             source.clone(),
         );
     }
-    if !next.worktree.retention.cheap.is_empty() {
+    if retention_cheap {
         base.worktree.retention.cheap = next.worktree.retention.cheap;
         record_winner(winners, "worktree.retention.cheap", layer, source.clone());
     }
-    if !next.worktree.retention.expensive.is_empty() {
+    if retention_expensive {
         base.worktree.retention.expensive = next.worktree.retention.expensive;
         record_winner(
             winners,
@@ -3392,7 +4362,7 @@ fn overlay_run_table(
         base.build_cache.insert(name.clone(), cache);
         record_winner(
             winners,
-            format!("run.build-cache.{name}.env"),
+            format!("run.build-cache.{name}"),
             layer,
             source.clone(),
         );
@@ -3422,7 +4392,12 @@ fn merge_machine_config(
         base.schema_version = next.schema_version;
     }
     for (name, harness) in next.harness {
-        base.harness.insert(name.clone(), harness);
+        let merged = base
+            .harness
+            .get(&name)
+            .map(|current| harness.merged_onto(current))
+            .unwrap_or(harness);
+        base.harness.insert(name.clone(), merged);
         let prefix = format!("harness.{name}");
         record_winner(winners, prefix.clone(), layer, source.clone());
         for field in ["kind", "bin", "transports", "version-probe", "cli", "mcp"] {
@@ -3535,13 +4510,28 @@ fn variant_role_keys(variant: &BTreeMap<String, VariantOverride>) -> Vec<(String
 
 fn merge_agent_defaults(base: &mut AgentDefaults, next: AgentDefaults) {
     base.model_tier.extend(next.model_tier);
-    base.role.extend(next.role);
+    for (role, next_value) in next.role {
+        match (base.role.get_mut(&role), next_value) {
+            (Some(RoleAssignmentValue::Single(base)), RoleAssignmentValue::Single(next)) => {
+                merge_assignment_fields(base, &next);
+            }
+            (_, next) => {
+                base.role.insert(role, next);
+            }
+        }
+    }
     for (variant, next_variant) in next.variant {
-        base.variant
-            .entry(variant)
-            .or_default()
-            .role
-            .extend(next_variant.role);
+        let target = base.variant.entry(variant).or_default();
+        for (role, next_value) in next_variant.role {
+            match (target.role.get_mut(&role), next_value) {
+                (Some(RoleAssignmentValue::Single(base)), RoleAssignmentValue::Single(next)) => {
+                    merge_assignment_fields(base, &next);
+                }
+                (_, next) => {
+                    target.role.insert(role, next);
+                }
+            }
+        }
     }
 }
 
@@ -3833,7 +4823,9 @@ fn merge_assignment_fields(base: &mut ProfileAssignment, next: &ProfileAssignmen
         base.system_prompt = next.system_prompt.clone();
     }
     if !next.extra_args.is_empty() {
-        base.extra_args.extend(next.extra_args.clone());
+        // argv is ordered command input, not an additive set. A nearer
+        // assignment owns the complete argument vector.
+        base.extra_args = next.extra_args.clone();
     }
     overlay_role_budget(&mut base.budget, &next.budget);
 }
@@ -5351,11 +6343,11 @@ mod config_tests {
         assert_eq!(base.build_cache["cargo"].env, "CARGO_TARGET_DIR");
         assert_eq!(base.build_cache["pnpm"].env, "PNPM_HOME");
         assert_eq!(
-            winners["run.build-cache.cargo.env"].source.as_deref(),
+            winners["run.build-cache.cargo"].source.as_deref(),
             Some("repo")
         );
         assert_eq!(
-            winners["run.build-cache.pnpm.env"].source.as_deref(),
+            winners["run.build-cache.pnpm"].source.as_deref(),
             Some("global")
         );
     }
@@ -5407,6 +6399,22 @@ mod config_tests {
             expensive: vec!["target".to_string()],
             expensive_grace_days: Some(3),
         };
+        configured.authored_requirements = [
+            "worktree.retention.cheap",
+            "worktree.retention.expensive",
+            "worktree.retention.expensive-grace-days",
+        ]
+        .into_iter()
+        .map(|field| {
+            (
+                field.to_string(),
+                AuthoredConfigLeaf {
+                    semantic: ConfigSemantic::Requirement,
+                    value: String::new(),
+                },
+            )
+        })
+        .collect();
         merge_project_config(
             &mut effective,
             configured,
@@ -5500,6 +6508,341 @@ mod config_tests {
         }
         assert_eq!(effective.run.unwrap().max_in_flight, Some(4));
         assert_eq!(winners["run.max-in-flight"].layer, ConfigLayer::Repo);
+    }
+
+    #[test]
+    fn repo_requirements_preserve_explicit_defaults_and_unrelated_fallbacks() {
+        let mut runtime = RuntimeConfig {
+            worktree: WorktreeConfig {
+                confinement: crate::confinement::WorktreeConfinementConfig {
+                    enabled: true,
+                    sandbox: false,
+                    allow: vec!["global-allow".into()],
+                },
+                retention: WorktreeRetentionConfig {
+                    cheap: vec!["global-cheap".into()],
+                    expensive: vec!["global-expensive".into()],
+                    expensive_grace_days: Some(7),
+                },
+                ..WorktreeConfig::default()
+            },
+            ..RuntimeConfig::default()
+        };
+        let repo = RuntimeConfig {
+            worktree: WorktreeConfig {
+                confinement: crate::confinement::WorktreeConfinementConfig {
+                    enabled: false,
+                    ..crate::confinement::WorktreeConfinementConfig::default()
+                },
+                retention: WorktreeRetentionConfig {
+                    cheap: vec!["repo-cheap".into()],
+                    ..WorktreeRetentionConfig::default()
+                },
+                ..WorktreeConfig::default()
+            },
+            authored_requirements: BTreeMap::from([
+                (
+                    "worktree.confinement.enabled".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "false".into(),
+                    },
+                ),
+                (
+                    "worktree.retention.cheap".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "[\"repo-cheap\"]".into(),
+                    },
+                ),
+            ]),
+            ..RuntimeConfig::default()
+        };
+
+        install_repo_requirements(
+            &mut runtime,
+            &repo,
+            Some("repo.toml".into()),
+            &mut BTreeMap::new(),
+        );
+
+        assert!(!runtime.worktree.confinement.enabled);
+        assert!(!runtime.worktree.confinement.sandbox);
+        assert_eq!(runtime.worktree.confinement.allow, vec!["global-allow"]);
+        assert_eq!(runtime.worktree.retention.cheap, vec!["repo-cheap"]);
+        assert_eq!(
+            runtime.worktree.retention.expensive,
+            vec!["global-expensive"]
+        );
+        assert_eq!(runtime.worktree.retention.expensive_grace_days, Some(7));
+    }
+
+    #[test]
+    fn partial_requirement_table_keeps_undeclared_fallback_siblings() {
+        let leaf = |value: &str| AuthoredConfigLeaf {
+            semantic: ConfigSemantic::Requirement,
+            value: value.into(),
+        };
+        let global = RuntimeConfig {
+            worktree: WorktreeConfig {
+                confinement: crate::confinement::WorktreeConfinementConfig {
+                    sandbox: false,
+                    ..crate::confinement::WorktreeConfinementConfig::default()
+                },
+                ..WorktreeConfig::default()
+            },
+            authored_requirements: BTreeMap::from([(
+                "worktree.confinement.sandbox".into(),
+                leaf("false"),
+            )]),
+            ..RuntimeConfig::default()
+        };
+        let repo = RuntimeConfig {
+            worktree: WorktreeConfig {
+                confinement: crate::confinement::WorktreeConfinementConfig {
+                    enabled: false,
+                    ..crate::confinement::WorktreeConfinementConfig::default()
+                },
+                ..WorktreeConfig::default()
+            },
+            authored_requirements: BTreeMap::from([(
+                "worktree.confinement.enabled".into(),
+                leaf("false"),
+            )]),
+            ..RuntimeConfig::default()
+        };
+        let mut runtime = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_project_config(
+            &mut runtime,
+            global,
+            ConfigLayer::UserGlobal,
+            Some("global.toml".into()),
+            &mut winners,
+        );
+        merge_project_config(
+            &mut runtime,
+            repo,
+            ConfigLayer::Repo,
+            Some("repo.toml".into()),
+            &mut winners,
+        );
+
+        assert!(!runtime.worktree.confinement.enabled);
+        assert!(!runtime.worktree.confinement.sandbox);
+    }
+
+    #[test]
+    fn requirement_conflicts_only_report_differing_authored_values() {
+        let repo = RuntimeConfig {
+            authored_requirements: BTreeMap::from([
+                (
+                    "run.strict-loops".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "false".into(),
+                    },
+                ),
+                (
+                    "merge.gate".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "[]".into(),
+                    },
+                ),
+            ]),
+            ..RuntimeConfig::default()
+        };
+        let environment = RuntimeConfig {
+            authored_requirements: BTreeMap::from([
+                (
+                    "run.strict-loops".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "true".into(),
+                    },
+                ),
+                (
+                    "merge.gate".into(),
+                    AuthoredConfigLeaf {
+                        semantic: ConfigSemantic::Requirement,
+                        value: "[]".into(),
+                    },
+                ),
+            ]),
+            ..RuntimeConfig::default()
+        };
+        let conflicts = requirement_conflicts(&[
+            (ConfigLayer::Repo, Utf8PathBuf::from("repo.toml"), repo),
+            (
+                ConfigLayer::Environment,
+                Utf8PathBuf::from("environment.toml"),
+                environment,
+            ),
+        ]);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].field, "run.strict-loops");
+    }
+
+    #[test]
+    fn requirement_conflict_names_only_the_effective_repository_source() {
+        let leaf = |value: &str| AuthoredConfigLeaf {
+            semantic: ConfigSemantic::Requirement,
+            value: value.into(),
+        };
+        let repository = |value| RuntimeConfig {
+            authored_requirements: BTreeMap::from([("merge.gate".into(), leaf(value))]),
+            ..RuntimeConfig::default()
+        };
+        let environment = repository("environment");
+
+        let conflicts = requirement_conflicts(&[
+            (
+                ConfigLayer::Repo,
+                Utf8PathBuf::from("legacy-repo.toml"),
+                repository("legacy"),
+            ),
+            (
+                ConfigLayer::Repo,
+                Utf8PathBuf::from("current-repo.toml"),
+                repository("current"),
+            ),
+            (
+                ConfigLayer::Environment,
+                Utf8PathBuf::from("environment.toml"),
+                environment,
+            ),
+        ]);
+
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].repo_source, "current-repo.toml");
+    }
+
+    #[test]
+    fn config_semantics_classify_requirement_additive_and_default_leaves() {
+        assert_eq!(config_semantic("merge.gate"), ConfigSemantic::Requirement);
+        assert_eq!(config_semantic("publish.exclude"), ConfigSemantic::Additive);
+        assert_eq!(config_semantic("merge.auto"), ConfigSemantic::Default);
+    }
+
+    #[test]
+    fn runtime_config_semantic_catalog_covers_every_authored_static_leaf() {
+        // This list is the RuntimeConfig schema surface that has a stable TOML
+        // path. Maps are classified by their enclosing dynamic-table prefix.
+        let expected = [
+            "schema-version",
+            "worktree.seed",
+            "worktree.warm",
+            "worktree.setup",
+            "worktree.setup-seconds",
+            "worktree.setup-capture-bytes",
+            "worktree.confinement.enabled",
+            "worktree.confinement.sandbox",
+            "worktree.confinement.allow",
+            "worktree.env",
+            "worktree.tripwire.policy",
+            "worktree.tripwire.sentinel",
+            "worktree.retention.cheap",
+            "worktree.retention.expensive",
+            "worktree.retention.expensive-grace-days",
+            "run.worktree",
+            "run.max-frames",
+            "run.frame-seconds",
+            "run.total-seconds",
+            "run.max-retries",
+            "run.attach-wait-seconds",
+            "run.idle-seconds",
+            "run.max-in-flight",
+            "run.wait",
+            "run.strict-loops",
+            "run.build-cache",
+            "run.inline-prompt-bytes",
+            "run.story",
+            "merge.wait",
+            "merge.overlap",
+            "merge.auto",
+            "merge.deep",
+            "merge.branch",
+            "merge.gate",
+            "merge.gate-seconds",
+            "merge.generated",
+            "merge.disk-floor-mb",
+            "git.long-seconds",
+            "publish.exclude",
+            "registry.base",
+        ];
+        assert_eq!(
+            CONFIG_FIELD_SEMANTICS
+                .iter()
+                .map(|(path, _)| *path)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            config_semantic("worktree.env.TOKEN"),
+            ConfigSemantic::Additive
+        );
+        assert_eq!(
+            config_semantic("run.build-cache.target"),
+            ConfigSemantic::Additive
+        );
+    }
+
+    #[test]
+    fn every_requirement_leaf_rejects_a_differing_environment_declaration() {
+        let requirements: BTreeMap<String, AuthoredConfigLeaf> = CONFIG_FIELD_SEMANTICS
+            .iter()
+            .filter(|(_, semantic)| *semantic == ConfigSemantic::Requirement)
+            .map(|(field, semantic)| {
+                (
+                    (*field).to_string(),
+                    AuthoredConfigLeaf {
+                        semantic: *semantic,
+                        value: "repository".into(),
+                    },
+                )
+            })
+            .collect();
+        let environment: BTreeMap<String, AuthoredConfigLeaf> = requirements
+            .iter()
+            .map(|(field, leaf)| {
+                (
+                    field.clone(),
+                    AuthoredConfigLeaf {
+                        semantic: leaf.semantic,
+                        value: "environment".into(),
+                    },
+                )
+            })
+            .collect();
+        let conflicts = requirement_conflicts(&[
+            (
+                ConfigLayer::Repo,
+                Utf8PathBuf::from("repo.toml"),
+                RuntimeConfig {
+                    authored_requirements: requirements,
+                    ..RuntimeConfig::default()
+                },
+            ),
+            (
+                ConfigLayer::Environment,
+                Utf8PathBuf::from("environment.toml"),
+                RuntimeConfig {
+                    authored_requirements: environment,
+                    ..RuntimeConfig::default()
+                },
+            ),
+        ]);
+        assert_eq!(
+            conflicts.len(),
+            CONFIG_FIELD_SEMANTICS
+                .iter()
+                .filter(|(_, semantic)| *semantic == ConfigSemantic::Requirement)
+                .count()
+        );
+        assert!(conflicts.iter().all(|conflict| {
+            conflict.rejected_source == "environment.toml" && conflict.repo_source == "repo.toml"
+        }));
     }
 
     #[test]
@@ -5724,6 +7067,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                ..RepoOverride::default()
             },
         );
 
@@ -5760,6 +7104,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                ..RepoOverride::default()
             },
         );
         let (flattened, winners) =
@@ -5887,6 +7232,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                ..RepoOverride::default()
             },
         );
         merge_machine_config(

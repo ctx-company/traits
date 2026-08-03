@@ -27,6 +27,7 @@ use crate::app::tui::{
 struct ConfigDoctorReport {
     knobs: std::collections::BTreeMap<String, ConfigDoctorValue>,
     tier_warnings: Vec<String>,
+    requirement_conflicts: Vec<ctx_traits_io::harness_config::ConfigRequirementConflict>,
     #[serde(skip_serializing_if = "Option::is_none")]
     foreign_config: Option<String>,
     /// P427 zero-config fallback: one row per compiled-in built-in harness,
@@ -90,6 +91,7 @@ impl From<ctx_traits_io::harness_config::BuiltinHarnessDetection> for BuiltinHar
 struct ConfigDoctorValue {
     value: String,
     winner: ctx_traits_io::harness_config::ConfigWinner,
+    reason: String,
 }
 
 pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()>> {
@@ -110,9 +112,19 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             ctx_traits_io::harness_config::ConfigWinner {
                 layer: ctx_traits_io::harness_config::ConfigLayer::BuiltIn,
                 source: None,
+                reason: ctx_traits_io::harness_config::ConfigReason::Default,
+                contributors: Vec::new(),
             },
         );
-        knobs.insert(name, ConfigDoctorValue { value, winner });
+        let reason = config_reason(&winner).to_string();
+        knobs.insert(
+            name,
+            ConfigDoctorValue {
+                value,
+                winner,
+                reason,
+            },
+        );
     }
     fn add(
         knobs: &mut std::collections::BTreeMap<String, ConfigDoctorValue>,
@@ -324,7 +336,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         &report.winners,
         "worktree.tripwire.policy".into(),
         report.runtime.worktree.tripwire.policy.as_str().to_string(),
-        "worktree.tripwire",
+        "worktree.tripwire.policy",
     );
     add_as(
         &mut knobs,
@@ -335,21 +347,21 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         } else {
             crate::app::presentation::wire_name(&report.runtime.worktree.tripwire.sentinel)
         },
-        "worktree.tripwire",
+        "worktree.tripwire.sentinel",
     );
     add_as(
         &mut knobs,
         &report.winners,
         "worktree.confinement.enabled".into(),
         report.runtime.worktree.confinement.enabled.to_string(),
-        "worktree.confinement",
+        "worktree.confinement.enabled",
     );
     add_as(
         &mut knobs,
         &report.winners,
         "worktree.confinement.sandbox".into(),
         report.runtime.worktree.confinement.sandbox.to_string(),
-        "worktree.confinement",
+        "worktree.confinement.sandbox",
     );
     add_as(
         &mut knobs,
@@ -360,7 +372,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         } else {
             crate::app::presentation::wire_name(&report.runtime.worktree.confinement.allow)
         },
-        "worktree.confinement",
+        "worktree.confinement.allow",
     );
     if let Some(run) = &report.runtime.run {
         // Use the owning checkout for linked worktrees, matching build-cache
@@ -370,13 +382,14 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             Err(error) => Err(error),
         };
         for (name, cache) in &run.build_cache {
-            add(
+            add_as(
                 &mut knobs,
                 &report.winners,
                 format!("run.build-cache.{name}.env"),
                 cache.env.clone(),
+                &format!("run.build-cache.{name}"),
             );
-            add(
+            add_as(
                 &mut knobs,
                 &report.winners,
                 format!("run.build-cache.{name}.dir"),
@@ -386,6 +399,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                     }
                     Err(_) => "unresolved (not a git repository)".to_string(),
                 },
+                &format!("run.build-cache.{name}"),
             );
         }
     }
@@ -456,7 +470,11 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                         winner: ctx_traits_io::harness_config::ConfigWinner {
                             layer: ctx_traits_io::harness_config::ConfigLayer::Environment,
                             source: Some("CTX_TRAITS_REGISTRY_BASE".into()),
+                            reason:
+                                ctx_traits_io::harness_config::ConfigReason::EnvironmentOverride,
+                            contributors: Vec::new(),
                         },
+                        reason: "environment override".into(),
                     },
                 );
             }
@@ -886,6 +904,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     let output = ConfigDoctorReport {
         knobs,
         tier_warnings: report.tier_warnings,
+        requirement_conflicts: report.requirement_conflicts,
         foreign_config: report.foreign_config,
         builtin_harnesses,
         generated,
@@ -897,13 +916,35 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         println!("ctx traits doctor --config");
         for (name, value) in &output.knobs {
             println!(
-                "  {name}: {} [{}]",
+                "  {name}: {} [{}] [{}]",
                 value.value,
-                format_winner(&value.winner)
+                format_winner(&value.winner),
+                value.reason,
             );
+            if !value.winner.contributors.is_empty() {
+                let contributors = value
+                    .winner
+                    .contributors
+                    .iter()
+                    .map(|contributor| match contributor.source.as_deref() {
+                        Some(source) => {
+                            format!("{}: {source}", config_layer_label(contributor.layer))
+                        }
+                        None => config_layer_label(contributor.layer).to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("    contributors: {contributors}");
+            }
         }
         for warning in &output.tier_warnings {
             println!("  warning: {warning}");
+        }
+        for conflict in &output.requirement_conflicts {
+            println!(
+                "  warning: {} rejected from {}; repository requirement from {} remains effective",
+                conflict.field, conflict.rejected_source, conflict.repo_source
+            );
         }
         if let Some(path) = &output.foreign_config {
             println!("  hint: foreign config exists but was not loaded: {path}");
@@ -987,6 +1028,19 @@ fn format_winner(winner: &ctx_traits_io::harness_config::ConfigWinner) -> String
     match winner.source.as_deref() {
         Some(source) => format!("{layer}: {source}"),
         None => layer.to_string(),
+    }
+}
+
+fn config_reason(winner: &ctx_traits_io::harness_config::ConfigWinner) -> &'static str {
+    match winner.reason {
+        ctx_traits_io::harness_config::ConfigReason::Default => "default",
+        ctx_traits_io::harness_config::ConfigReason::RepoDefault => "repo default",
+        ctx_traits_io::harness_config::ConfigReason::RepoRequirement => "repo requirement",
+        ctx_traits_io::harness_config::ConfigReason::PersonalRepoOverride => {
+            "your per-repo override"
+        }
+        ctx_traits_io::harness_config::ConfigReason::EnvironmentOverride => "environment override",
+        ctx_traits_io::harness_config::ConfigReason::Additive => "additive",
     }
 }
 

@@ -11,7 +11,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
+use support::{
+    ScratchRoot, assert_exit_code, controlled_command, ctx_bin, git_init, require_success, run_ctx,
+    utf8,
+};
 
 const TRAIT_CANONICAL: &str = r#"id = "fixture-p451-repo-smart"
 schema-version = "0.2"
@@ -198,14 +201,14 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
     fs::write(
         &global_config,
         format!(
-            "schema-version = \"0.2\"\n\n[repo.\"{active_key}\".agent.role.worker]\nmodel = \"repo-scoped-model\"\n"
+            "schema-version = \"0.2\"\n\n[repo.\"{active_key}\".agent.role.worker]\nmodel = \"personal-model\"\n"
         ),
     )
     .unwrap();
 
     init_fixture_repo(&repo, &home, &script);
 
-    let output = run_ctx(
+    let personal_output = run_ctx(
         &[
             "traits",
             "run",
@@ -220,6 +223,37 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
         &repo,
         &home,
     );
+    assert_exit_code(&personal_output, 0);
+    let personal_row = worker_row(&ledger);
+    assert_eq!(
+        personal_row["model"], "personal-model",
+        "matching personal override must beat the repository default: {personal_row}"
+    );
+
+    let environment_config = home.join("environment.toml");
+    fs::write(
+        &environment_config,
+        "[agent.role.worker]\nmodel = \"environment-model\"\n",
+    )
+    .unwrap();
+    let mut command = controlled_command(
+        &ctx_bin(),
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/fixture-p451-repo-smart/generated/index.toml",
+            "--out",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    command.env("CTX_CONFIG", &environment_config);
+    let output = command.output().unwrap();
     assert_exit_code(&output, 0);
     let envelope = value_json(&output);
     let report = &envelope["value"]["drive"];
@@ -227,8 +261,8 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
 
     let row = worker_row(&ledger);
     assert_eq!(
-        row["model"], "repo-scoped-model",
-        "the repo-qualified table must win over the base [agent.role.worker] table: {row}"
+        row["model"], "environment-model",
+        "repository default < matching personal override < CTX_CONFIG: {row}"
     );
     let evidence = row["evidence"]
         .as_str()

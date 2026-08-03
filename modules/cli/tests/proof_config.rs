@@ -367,7 +367,7 @@ fn config_max_in_flight_is_validated_on_public_path() {
 }
 
 #[test]
-fn doctor_uses_global_machine_facts_and_repo_project_facts() {
+fn doctor_uses_repo_defaults_after_global_defaults() {
     let scratch = ScratchRoot::new("p418-precedence");
     let repo = scratch.home().join("repo");
     let global = scratch.home().join("ctx");
@@ -396,10 +396,10 @@ fn doctor_uses_global_machine_facts_and_repo_project_facts() {
     let (stdout, _) = utf8(&output);
     assert!(stdout.contains("run.max-in-flight: 2 [repo:"), "{stdout}");
     assert!(
-        stdout.contains("agent.role.worker: harness=global-worker"),
+        stdout.contains("agent.role.worker: harness=repo-worker"),
         "{stdout}"
     );
-    assert!(stdout.contains("[user-global:"), "{stdout}");
+    assert!(stdout.contains("[repo default]"), "{stdout}");
 }
 
 /// P477: with no `[merge] gate` declared anywhere, doctor reports the

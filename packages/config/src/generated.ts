@@ -112,8 +112,51 @@ export interface RegistryTable {
   base?: string;
 }
 
+export interface RepoGitOverride {
+  longSeconds?: number;
+}
+
+export interface RepoMergeOverride {
+  auto?: boolean;
+  deep?: boolean;
+  wait?: boolean;
+}
+
 export interface RepoOverride {
   agent?: AgentDefaults;
+  git?: RepoGitOverride;
+  harness?: Record<string, HarnessDefinition>;
+  host?: Record<string, HostOverride>;
+  merge?: RepoMergeOverride;
+  publish?: RepoPublishOverride;
+  registry?: RepoRegistryOverride;
+  run?: RepoRunOverride;
+  worktree?: RepoWorktreeOverride;
+}
+
+export interface RepoPublishOverride {
+  exclude?: string[];
+}
+
+export interface RepoRegistryOverride {
+  base?: string;
+}
+
+export interface RepoRunOverride {
+  buildCache?: Record<string, BuildCacheConfig>;
+  story?: StoryLevel;
+  wait?: boolean;
+}
+
+export interface RepoTripwireOverride {
+  sentinel?: string[];
+}
+
+export interface RepoWorktreeOverride {
+  env?: Record<string, string>;
+  seed?: string[];
+  tripwire?: RepoTripwireOverride;
+  warm?: string[];
 }
 
 export type RoleAssignmentValue = ProfileAssignment | ProfileAssignment[];

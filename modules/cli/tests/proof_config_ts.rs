@@ -438,6 +438,83 @@ export default defineConfig({\n\
     assert!(stderr.contains("p.ts"), "{stderr}");
 }
 
+/// The generated TypeScript shape accepts every narrow personal repo override
+/// family, and `config build` decodes that emitted object through Rust's same
+/// nonrecursive `RuntimeConfig` schema before writing the global TOML.
+#[test]
+fn global_repo_override_shape_builds_and_decodes_through_rust() {
+    let scratch = ScratchRoot::new("p457-global-repo-override-shape");
+    let proj = scaffold_repo(&scratch, "repo");
+    let global_dir = scratch.home().join("ctx");
+    fs::create_dir_all(&global_dir).unwrap();
+    symlink_node_modules(&global_dir);
+    fs::write(
+        global_dir.join("config.ts"),
+        r#"import { defineConfig } from "@ctx-traits/config";
+
+export default defineConfig({
+  repo: {
+    complete: {
+      agent: {
+        modelTier: { fast: { model: "fast-model" } },
+        role: { worker: { model: "worker-model", budget: { frameSeconds: 7 } } },
+        variant: { smart: { role: { worker: { model: "smart-model" } } } },
+      },
+      harness: { custom: { kind: "custom", bin: "tool", transports: ["cli"], cli: { argv: [] } } },
+      host: { codex: { profile: "personal", projectPath: ".codex" } },
+      worktree: { seed: ["seed"], warm: ["warm"], env: { TOKEN: "value" }, tripwire: { sentinel: [".git"] } },
+      run: { wait: true, story: "default", buildCache: { target: { env: "TARGET_DIR" } } },
+      merge: { wait: true, auto: true, deep: false },
+      git: { longSeconds: 9 },
+      registry: { base: "https://example.invalid/" },
+      publish: { exclude: ["scratch"] },
+    },
+  },
+});
+"#,
+    )
+    .unwrap();
+
+    let build = run_ctx(
+        &[
+            "traits",
+            "config",
+            "build",
+            global_dir.join("config.ts").to_str().unwrap(),
+        ],
+        &proj,
+        &scratch.home(),
+    );
+    let (stdout, stderr) = utf8(&build);
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+
+    let generated = fs::read_to_string(global_dir.join("config.toml")).unwrap();
+    assert!(
+        generated.contains("[repo.complete.agent.role.worker]"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("[repo.complete.worktree.tripwire]"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("[repo.complete.run.build-cache.target]"),
+        "{generated}"
+    );
+
+    let decoded = run_ctx(&["traits", "doctor", "--config"], &proj, &scratch.home());
+    let (stdout, stderr) = utf8(&decoded);
+    assert_eq!(
+        decoded.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+}
+
 /// No `# ctx:source` line names a `dist/` build artifact or anything under
 /// `@ctx-traits/config`'s own package tree — only author-owned files ever
 /// enter the manifest.
