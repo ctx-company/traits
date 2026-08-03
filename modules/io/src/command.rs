@@ -265,13 +265,38 @@ fn spawn_piped(
         }
         command.current_dir(Utf8Path::new("."));
     }
-    // P551: own process group, so a live-pane ctrl-c kill during worktree
-    // setup reaches this child (and anything it forks) the same way it does
-    // a harness call.
+    // Own SESSION, not merely an own process group (2026-08-03).
+    //
+    // P551 put every command child in its own process group so a live-pane
+    // ctrl-c kill reaches it and anything it forks. That still left the
+    // child sharing the caller's CONTROLLING TERMINAL, and a `--progress
+    // tui` run holds that terminal's foreground group. Any descendant that
+    // opened `/dev/tty` directly — bypassing the null stdin and piped
+    // stdout/stderr below — was therefore a background job touching the
+    // terminal, and the kernel suspended it with SIGTTIN/SIGTTOU. Measured
+    // 2026-08-03: three concurrent gates sat in state `T` for half an hour,
+    // doing nothing, until SIGCONT released them and they finished in
+    // seconds; before that the same stall read as a gate timeout and parked
+    // three runs at round 1.
+    //
+    // `setsid` creates a new session with NO controlling terminal, so a
+    // `/dev/tty` open fails cleanly instead of stopping the process. The
+    // session leader is also a process-group leader whose pgid equals its
+    // pid, which is exactly what `run_kill`'s `kill(-pgid, …)` needs, so
+    // P551's kill path is unchanged.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        // SAFETY: `setsid` is async-signal-safe and only alters this child's
+        // own session/process-group identity between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
 
     command.spawn().map_err(|e| {
