@@ -1087,6 +1087,15 @@ mod output_token_counter_tests {
     }
 
     #[test]
+    // Timing headroom, deliberately generous (2026-08-03): the tick loop polls
+    // every 20 ms, so a 120 ms child yields ~6 ticks and `>= 3` tolerated only
+    // a 2x slowdown — which a shared macOS runner exceeds routinely, and this
+    // failed there while passing everywhere else. A 500 ms child yields ~25,
+    // so the same assertion now needs an 8x stall to trip. The property under
+    // test is unchanged and if anything sharper: ticks arrive many times
+    // within one second, which is what keeps a 1 s-resolution elapsed clock
+    // moving. The timeout rises with it so a slow spawn cannot turn headroom
+    // into a spurious timeout.
     fn cold_harness_ticks_multiple_times_before_a_second() {
         let ticks = Arc::new(AtomicUsize::new(0));
         let observer = {
@@ -1096,12 +1105,12 @@ mod output_token_counter_tests {
             })
         };
         let outcome = super::run(HarnessRunRequest {
-            argv: vec!["sh".to_string(), "-c".to_string(), "sleep 0.12".to_string()],
+            argv: vec!["sh".to_string(), "-c".to_string(), "sleep 0.5".to_string()],
             env_overlay: BTreeMap::new(),
             env_remove: Vec::new(),
             prompt: String::new(),
             prompt_delivery: PromptDelivery::Arg,
-            timeout_ms: 1_000,
+            timeout_ms: 5_000,
             idle_timeout_ms: None,
             capture_limit: 0,
             stream: false,
@@ -1116,12 +1125,14 @@ mod output_token_counter_tests {
     }
 
     #[test]
+    // Same headroom, same reason as the cold case above: identical shape, so
+    // it is the next one to flake rather than a different risk.
     fn persistent_harness_ticks_multiple_times_before_a_second() {
         let mut session = HarnessSession::spawn(
             vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "while IFS= read -r _; do sleep 0.12; printf '{\"type\":\"result\"}\\n'; done"
+                "while IFS= read -r _; do sleep 0.5; printf '{\"type\":\"result\"}\\n'; done"
                     .to_string(),
             ],
             BTreeMap::new(),
@@ -1140,7 +1151,7 @@ mod output_token_counter_tests {
         let outcome = session
             .prompt(HarnessSessionPrompt {
                 prompt: "hello".to_string(),
-                timeout_ms: 1_000,
+                timeout_ms: 5_000,
                 idle_timeout_ms: None,
                 capture_limit: 0,
                 stream: false,
