@@ -79,10 +79,54 @@ beside `wait` and `gate-seconds`; per-attempt evidence in the merge frames.
   park; `merge_story`'s translation layer needs the attempt count or the story
   will understate what happened.
 
+## Research: a dirty main should not stop a landing
+
+`MAIN_NOT_CLEAN_INFIX` parks when the invocation checkout has uncommitted
+changes. Uncommitted work in the owner's checkout is a normal state, not a
+reason a completed run cannot land. Two findings, both checked rather than
+assumed, and they point at doing the cheap thing first.
+
+**The standing "never `git stash` in this repository" rule does NOT apply to
+`--autostash`.** That rule exists because `refs/stash` is shared repo-wide, so
+a sibling worktree's stash operation can steal another's pop — and this
+product runs many worktrees at once. `git merge --autostash` does not use it.
+It records the entry in `MERGE_AUTOSTASH`, which is a per-worktree ref:
+
+```
+linked worktree   .git/worktrees/<id>/MERGE_AUTOSTASH   ← per-worktree
+refs/stash        .git/refs/stash                       ← shared repo-wide
+```
+
+(git 2.47.1, `git rev-parse --git-path`.) So the usual objection to stashing
+here is answered, and autostash is on the table.
+
+**The real hazard is the pop, and it lands in the owner's tree.** git's own
+manual says the final stash application "might result in non-trivial
+conflicts". A background landing that leaves the owner's uncommitted work
+conflicted is worse than the park it replaced. That outcome is not
+acceptable at any frequency, so it has to be designed for rather than hoped
+against: on a conflicting pop, restore the pre-merge state, keep the landing,
+and say plainly where the stashed work is — the entry survives in
+`MERGE_AUTOSTASH` for exactly this.
+
+**Measure whether a stash is needed at all first.** `is_clean` parks on ANY
+dirt, while git itself only refuses to update files that are BOTH locally
+modified and touched by the merge. A fast-forward that does not touch the
+dirty files succeeds today, unstashed. If that is the common case — and on a
+checkout where the owner is editing one file while a run lands another, it
+will be — then narrowing the check to overlap removes most of these parks with
+no stash, no pop, and no new failure mode. Reach for autostash only for the
+overlap that remains.
+
+Order to work in: measure the overlap case, narrow the check, then decide
+whether autostash is still worth its pop hazard for what is left.
+
 ## Done when
 
 A merge that loses a fast-forward race re-rebases and lands without an owner
-touching it; a red gate still parks on the first failure and is never retried;
+touching it; uncommitted work in the invocation checkout does not stop a
+landing that does not touch it, and never ends up conflicted by one;
+a red gate still parks on the first failure and is never retried;
 retries are bounded, jittered, and recorded per attempt in the merge frames; a
 park after exhausted attempts names the count and the revisions observed; and
 concurrent runs landing continuously all converge rather than starving each
