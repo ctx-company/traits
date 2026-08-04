@@ -328,7 +328,7 @@ pub(crate) fn handle_build(
     out: Option<&str>,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
-    let source_path = if camino::Utf8Path::new(path).extension().is_some() {
+    let source_path = if matches!(camino::Utf8Path::new(path).extension(), Some("ts" | "mjs")) {
         camino::Utf8PathBuf::from(path)
     } else {
         let (trait_path, _) = ctx_traits_io::run::resolve_trait_path(None, Some(path), "build")?;
