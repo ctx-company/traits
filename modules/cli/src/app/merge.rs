@@ -2194,11 +2194,23 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     if let Err(error) =
         ctx_traits_io::worktree::fast_forward_merge(repo_root, &worktree.branch, retry_warnings)
     {
+        let detail = error.to_string();
+        // 0078.4 Phase A: distinguish the dirty-overlap refusal from the
+        // lost-race non-fast-forwardable-history refusal by git's own
+        // wording, so the two tally separately in the ledger instead of
+        // both landing under the generic `FAST_FORWARD_FAILED` reason.
+        // Purely a classification split — the merge attempt above and its
+        // retry disposition are unchanged either way.
+        let reason = if detail.contains("would be overwritten by merge") {
+            reasons::LANDING_DIRTY_OVERLAP.to_string()
+        } else {
+            reasons::FAST_FORWARD_FAILED.to_string()
+        };
         return Ok(retry_candidate(
             input.run_id,
             MergeStage::Landing,
-            reasons::FAST_FORWARD_FAILED.to_string(),
-            Some(error.to_string()),
+            reason,
+            Some(detail),
             landed_evidence,
         ));
     }

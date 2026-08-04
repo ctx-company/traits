@@ -213,6 +213,15 @@ pub(crate) mod reasons {
     pub(crate) const GATE_DISK_FLOOR_PREFIX: &str = "insufficient disk space for post-run gate:";
 
     pub(crate) const FAST_FORWARD_FAILED: &str = "fast-forward failed";
+    /// 0078.4 Phase A: split out of [`FAST_FORWARD_FAILED`] so the two
+    /// distinct `git merge --ff-only` refusals it used to conflate — a
+    /// dirty-overlap refusal (this one) versus a lost-race non-fast-
+    /// forwardable history — tally mechanically from the ledger instead of
+    /// requiring a hand-read of each park frame's git detail. No change to
+    /// the merge itself: `merge.rs` still runs plain `--ff-only` and still
+    /// retries either refusal identically; only the persisted reason differs.
+    pub(crate) const LANDING_DIRTY_OVERLAP: &str =
+        "landing refused: local changes would be overwritten by the merge";
     pub(crate) const TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX: &str =
         "transient git lock/control retry exhausted";
 
@@ -271,6 +280,10 @@ pub(crate) enum ParkClass {
     LandingMainAdvanced,
     LandingMainNotClean,
     LandingFastForwardFailed,
+    /// 0078.4 Phase A: the dirty-overlap slice of what `LandingFastForwardFailed`
+    /// used to conflate — git refused because owner-tree changes overlap the
+    /// landing, not because history diverged. See [`reasons::LANDING_DIRTY_OVERLAP`].
+    LandingDirtyOverlap,
     HarvestConflict,
     LockTimeout,
     LockUnavailable,
@@ -307,7 +320,8 @@ pub(crate) fn park_disposition(reason: &str) -> ParkDisposition {
     match classify_reason(reason) {
         ParkClass::LandingMainAdvanced
         | ParkClass::LandingMainNotClean
-        | ParkClass::LandingFastForwardFailed => ParkDisposition::Race,
+        | ParkClass::LandingFastForwardFailed
+        | ParkClass::LandingDirtyOverlap => ParkDisposition::Race,
         ParkClass::PreflightProbeFailed
             if reason.starts_with(reasons::CHECKOUT_BRANCH_PROBE_FAILED)
                 || reason.starts_with(reasons::CHECKOUT_CLEANLINESS_PROBE_FAILED) =>
@@ -363,6 +377,7 @@ impl ParkClass {
             ParkClass::LandingMainAdvanced,
             ParkClass::LandingMainNotClean,
             ParkClass::LandingFastForwardFailed,
+            ParkClass::LandingDirtyOverlap,
             ParkClass::HarvestConflict,
             ParkClass::LockTimeout,
             ParkClass::LockUnavailable,
@@ -469,6 +484,8 @@ fn classify_reason(reason: &str) -> ParkClass {
         ParkClass::LandingMainAdvanced
     } else if reason.starts_with(MAIN_NOT_CLEAN_RACE_PREFIX) {
         ParkClass::LandingMainNotClean
+    } else if reason == LANDING_DIRTY_OVERLAP {
+        ParkClass::LandingDirtyOverlap
     } else if reason == FAST_FORWARD_FAILED
         || reason
             .strip_prefix(FAST_FORWARD_FAILED)
@@ -515,6 +532,7 @@ fn headline_for(class: ParkClass) -> &'static str {
         ParkClass::LandingMainAdvanced => "target branch moved",
         ParkClass::LandingMainNotClean => "target checkout became dirty",
         ParkClass::LandingFastForwardFailed => "fast-forward failed",
+        ParkClass::LandingDirtyOverlap => "local changes overlap the landing",
         ParkClass::HarvestConflict => "seed harvest conflict",
         ParkClass::LockTimeout => "merge lock timed out",
         ParkClass::LockUnavailable => "merge lock unavailable",
@@ -572,6 +590,9 @@ fn next_action_for(class: ParkClass) -> &'static str {
         ParkClass::LandingMainAdvanced | ParkClass::LandingMainNotClean => "retry the merge",
         ParkClass::LandingFastForwardFailed => {
             "inspect the target branch by hand (a non-fast-forward state is unexpected), then retry"
+        }
+        ParkClass::LandingDirtyOverlap => {
+            "commit, stash, or discard the local changes that overlap the landing, then retry"
         }
         ParkClass::HarvestConflict => {
             "review the seed-harvest conflict in evidence, then decide by hand"
@@ -1003,6 +1024,7 @@ mod tests {
                 format!("{MAIN_NOT_CLEAN_RACE_PREFIX}main not clean"),
             ),
             (MergeStage::Landing, FAST_FORWARD_FAILED.to_string()),
+            (MergeStage::Landing, LANDING_DIRTY_OVERLAP.to_string()),
             (
                 MergeStage::Cleanup,
                 format!("{HARVEST_ADJUDICATION_PARKED_PREFIX} refuse"),
@@ -1380,6 +1402,21 @@ mod tests {
         ));
         assert_eq!(explanation.class, ParkClass::Unknown);
         assert!(explanation.sentence.contains("gates stage"));
+    }
+
+    // 0078.4 Phase A: the two `git merge --ff-only` refusals must tally under
+    // distinct park classes so a ledger scan can count dirty-overlap
+    // refusals mechanically, without conflating them with a lost-race
+    // non-fast-forwardable history.
+    #[test]
+    fn dirty_overlap_and_fast_forward_failed_classify_distinctly() {
+        let overlap = explain_frame(&frame(MergeStage::Landing, reasons::LANDING_DIRTY_OVERLAP));
+        assert_eq!(overlap.class, ParkClass::LandingDirtyOverlap);
+
+        let history_race = explain_frame(&frame(MergeStage::Landing, reasons::FAST_FORWARD_FAILED));
+        assert_eq!(history_race.class, ParkClass::LandingFastForwardFailed);
+
+        assert_ne!(overlap.class, history_race.class);
     }
 
     // Gate events carry the gate command label as `tool` — the P549 gate loop
