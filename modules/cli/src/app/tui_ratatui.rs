@@ -539,6 +539,15 @@ impl RatatuiPane {
         self.pump.resize_size.load(Ordering::SeqCst) != 0
     }
 
+    /// Whether the terminal window currently has focus, as last reported by
+    /// the pump's `FocusGained`/`FocusLost` events. [`Self::draw`] reads this
+    /// to dim an unfocused pane; callers read it to notice that the dim needs
+    /// repainting at all, since a focus change alters what a frame should
+    /// look like without changing any of its content.
+    pub(crate) fn focused(&self) -> bool {
+        self.pump.focused.load(Ordering::SeqCst)
+    }
+
     fn requeue_resize(&self, size: u32) {
         // A newer event wins over a failed/debounced older size.
         let _ = self

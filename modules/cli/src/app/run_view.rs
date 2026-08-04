@@ -224,6 +224,11 @@ struct RunPanelState {
     narrator_tokens: u64,
     run_started: Instant,
     last_timer_paint: Instant,
+    /// Window focus as of the last painted frame. A focus change alters how
+    /// the frame is drawn (the whole buffer is dimmed while unfocused)
+    /// without changing a byte of its content, so it has to be tracked here
+    /// to be recognised as a reason to repaint — see `tick_locked`.
+    last_focus: bool,
     live: tui::LiveLine,
     /// P470: completed steps' P455 finished-step summaries, keyed on the same
     /// `structural_step_key` a story row and its tree row both agree on (see
@@ -637,6 +642,9 @@ impl RunPanel {
             narrator_tokens: 0,
             run_started: now,
             last_timer_paint: now,
+            // Panes start focused, matching `PumpControl`'s own default for a
+            // terminal that never reports focus at all.
+            last_focus: true,
             live: tui::LiveLine::default(),
             step_summaries: BTreeMap::new(),
             step_summary_at: BTreeMap::new(),
@@ -1064,7 +1072,18 @@ fn tick_weak(
 fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
     let consumed_generation = state.input_generation.load(Ordering::Acquire);
     let resized = state.repaint.apply_resize();
-    let changed = poll_and_apply_keys(state) || resized;
+    // A focus change wakes this tick (`set_focus` bumps the input generation)
+    // but used to count as no change at all, because only keys and resizes
+    // did. The tick therefore ran and returned WITHOUT painting, and the dim
+    // appeared only when something else forced a frame: the 1s timer paint,
+    // the 500ms presentation ticker, or the next keystroke. On an idle run it
+    // never appeared, since no running work means no timer paint is
+    // scheduled. Recorded before the early return below so a change is
+    // consumed exactly once whether or not this tick goes on to paint.
+    let focus_now = state.repaint.focused();
+    let focus_changed = focus_now != state.last_focus;
+    state.last_focus = focus_now;
+    let changed = poll_and_apply_keys(state) || resized || focus_changed;
     if state.repaint.detached() {
         return TickOutcome {
             consumed_generation,
@@ -1078,8 +1097,7 @@ fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
     // the ONLY other source — besides an active step — of an elapsed clock
     // that must keep ticking without a discrete event to trigger it.
     let has_running_work = has_running_work(state);
-    if !changed && (!has_running_work || state.last_timer_paint.elapsed() < Duration::from_secs(1))
-    {
+    if !tick_must_paint(changed, has_running_work, state.last_timer_paint.elapsed()) {
         return TickOutcome {
             consumed_generation,
             resize_retry,
@@ -1095,6 +1113,20 @@ fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
         resize_retry,
         ..TickOutcome::default()
     }
+}
+
+/// Whether a tick has to paint. Stated once, and as a free function so it can
+/// be tested without a terminal.
+///
+/// `changed` is anything that alters what the frame should look like: a key,
+/// a resize, and — the case this was extracted for — a window focus change,
+/// which alters the whole frame's styling without altering a byte of its
+/// content. Everything else rides the once-a-second clock refresh, and only
+/// while work is actually running; an idle pane schedules no timer paint at
+/// all, which is why a change it does not recognise can go unpainted
+/// indefinitely rather than merely late.
+fn tick_must_paint(changed: bool, has_running_work: bool, since_timer_paint: Duration) -> bool {
+    changed || (has_running_work && since_timer_paint >= Duration::from_secs(1))
 }
 
 fn has_running_work(state: &RunPanelState) -> bool {
@@ -6306,6 +6338,30 @@ mod tests {
 
         follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(58)), 60, 20);
         assert_eq!(scroll.window(20), 39..59);
+    }
+
+    /// The regression this exists for: a window focus change alters the whole
+    /// frame's styling without changing its content, so it has to count as a
+    /// change. It used not to, and the dim then waited for the once-a-second
+    /// clock refresh — or forever on an idle pane, which schedules no timer
+    /// paint at all.
+    #[test]
+    fn a_focus_change_paints_immediately_even_when_nothing_is_running() {
+        assert!(tick_must_paint(true, false, Duration::ZERO));
+        assert!(tick_must_paint(true, true, Duration::ZERO));
+    }
+
+    #[test]
+    fn an_unchanged_idle_tick_never_paints() {
+        assert!(!tick_must_paint(false, false, Duration::ZERO));
+        // Idle schedules no timer paint, so even a long wait must not force one.
+        assert!(!tick_must_paint(false, false, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn an_unchanged_running_tick_paints_only_on_the_one_second_clock() {
+        assert!(!tick_must_paint(false, true, Duration::from_millis(999)));
+        assert!(tick_must_paint(false, true, Duration::from_secs(1)));
     }
 
     #[test]
