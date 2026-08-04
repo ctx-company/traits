@@ -7421,6 +7421,149 @@ mod config_tests {
     }
 
     #[test]
+    fn additive_maps_keep_repository_keys_and_report_personal_and_environment_conflicts() {
+        let active_key = active_repo_qualifier_key()
+            .expect("the in-repository test process has an active repository qualifier");
+        let cache = |env: &str| BuildCacheConfig {
+            env: env.to_string(),
+        };
+        let global_path = Utf8PathBuf::from("global.toml");
+        let repo_path = Utf8PathBuf::from("repo.toml");
+        let environment_path = Utf8PathBuf::from("environment.toml");
+        let personal = RepoOverride {
+            worktree: RepoWorktreeOverride {
+                env: BTreeMap::from([
+                    ("CONFLICT".into(), "personal".into()),
+                    ("PERSONAL_ONLY".into(), "personal".into()),
+                ]),
+                ..RepoWorktreeOverride::default()
+            },
+            run: RepoRunOverride {
+                build_cache: BTreeMap::from([
+                    ("shared".into(), cache("PERSONAL_CACHE")),
+                    ("personal-only".into(), cache("PERSONAL_ONLY_CACHE")),
+                ]),
+                ..RepoRunOverride::default()
+            },
+            ..RepoOverride::default()
+        };
+        let global = RuntimeConfig {
+            worktree: WorktreeConfig {
+                env: BTreeMap::from([("GLOBAL_ONLY".into(), "global".into())]),
+                ..WorktreeConfig::default()
+            },
+            run: Some(RunTable {
+                build_cache: BTreeMap::from([("global-only".into(), cache("GLOBAL_ONLY_CACHE"))]),
+                ..RunTable::default()
+            }),
+            repo: BTreeMap::from([(active_key, personal)]),
+            ..RuntimeConfig::default()
+        };
+        let repo = RuntimeConfig {
+            worktree: WorktreeConfig {
+                env: BTreeMap::from([
+                    ("CONFLICT".into(), "repo".into()),
+                    ("REPO_ONLY".into(), "repo".into()),
+                ]),
+                ..WorktreeConfig::default()
+            },
+            run: Some(RunTable {
+                build_cache: BTreeMap::from([
+                    ("shared".into(), cache("REPO_CACHE")),
+                    ("repo-only".into(), cache("REPO_ONLY_CACHE")),
+                ]),
+                ..RunTable::default()
+            }),
+            ..RuntimeConfig::default()
+        };
+        let environment = RuntimeConfig {
+            worktree: WorktreeConfig {
+                env: BTreeMap::from([
+                    ("CONFLICT".into(), "environment".into()),
+                    ("ENV_ONLY".into(), "environment".into()),
+                ]),
+                ..WorktreeConfig::default()
+            },
+            run: Some(RunTable {
+                build_cache: BTreeMap::from([
+                    ("shared".into(), cache("ENV_CACHE")),
+                    ("environment-only".into(), cache("ENV_ONLY_CACHE")),
+                ]),
+                ..RunTable::default()
+            }),
+            ..RuntimeConfig::default()
+        };
+        let documents = vec![
+            (ConfigLayer::UserGlobal, global_path.clone(), global),
+            (ConfigLayer::Repo, repo_path.clone(), repo),
+            (
+                ConfigLayer::Environment,
+                environment_path.clone(),
+                environment,
+            ),
+        ];
+        let personal = documents[0].2.repo.values().next().unwrap();
+        let mut runtime = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        apply_additive_values(
+            &mut runtime,
+            &documents,
+            &[(&global_path, personal)],
+            &mut winners,
+        );
+
+        assert_eq!(
+            runtime.worktree.env,
+            BTreeMap::from([
+                ("CONFLICT".into(), "repo".into()),
+                ("ENV_ONLY".into(), "environment".into()),
+                ("GLOBAL_ONLY".into(), "global".into()),
+                ("PERSONAL_ONLY".into(), "personal".into()),
+                ("REPO_ONLY".into(), "repo".into()),
+            ])
+        );
+        assert_eq!(
+            runtime.run.unwrap().build_cache,
+            BTreeMap::from([
+                ("environment-only".into(), cache("ENV_ONLY_CACHE")),
+                ("global-only".into(), cache("GLOBAL_ONLY_CACHE")),
+                ("personal-only".into(), cache("PERSONAL_ONLY_CACHE")),
+                ("repo-only".into(), cache("REPO_ONLY_CACHE")),
+                ("shared".into(), cache("REPO_CACHE")),
+            ])
+        );
+        assert_eq!(
+            winners["worktree.env.CONFLICT"].source.as_deref(),
+            Some("repo.toml")
+        );
+        assert_eq!(
+            winners["run.build-cache.shared"].source.as_deref(),
+            Some("repo.toml")
+        );
+
+        let conflicts = requirement_conflicts(&documents);
+        let actual: BTreeSet<_> = conflicts
+            .iter()
+            .map(|conflict| {
+                (
+                    conflict.field.as_str(),
+                    conflict.rejected_source.as_str(),
+                    conflict.repo_source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            BTreeSet::from([
+                ("worktree.env.CONFLICT", "global.toml", "repo.toml"),
+                ("worktree.env.CONFLICT", "environment.toml", "repo.toml"),
+                ("run.build-cache.shared", "global.toml", "repo.toml"),
+                ("run.build-cache.shared", "environment.toml", "repo.toml"),
+            ])
+        );
+    }
+
+    #[test]
     fn config_semantics_classify_requirement_additive_and_default_leaves() {
         assert_eq!(config_semantic("merge.gate"), ConfigSemantic::Requirement);
         assert_eq!(config_semantic("publish.exclude"), ConfigSemantic::Additive);

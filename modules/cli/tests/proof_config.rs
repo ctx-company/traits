@@ -125,8 +125,9 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [repo.\"{active_key}\".host.layered]\nprofile = 'personal-profile'\n\
 [repo.\"{active_key}\".agent.role.worker]\nmodel = 'personal-model'\n\
 [repo.\"{active_key}\".publish]\nexclude = ['personal-exclude', 'duplicate-exclude']\n\
-[repo.\"{active_key}\".worktree.env]\nCONFLICT = 'personal'\n\
-[repo.\"{active_key}\".run.build-cache.shared]\nenv = 'PERSONAL_CACHE'\n"
+[repo.\"{active_key}\".worktree.env]\nCONFLICT = 'personal'\nPERSONAL_ONLY = 'personal'\n\
+[repo.\"{active_key}\".run.build-cache.shared]\nenv = 'PERSONAL_CACHE'\n\
+[repo.\"{active_key}\".run.build-cache.personal-only]\nenv = 'PERSONAL_ONLY_CACHE'\n"
         ),
     )
     .unwrap();
@@ -139,6 +140,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [[agent.role.worker]]\nharness = 'repo-worker'\n\
 [publish]\nexclude = ['repo-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nREPO_ONLY = 'repo'\nCONFLICT = 'repo'\n\
+[run.build-cache.repo-only]\nenv = 'REPO_ONLY_CACHE'\n\
 [run.build-cache.shared]\nenv = 'REPO_CACHE'\n",
     )
     .unwrap();
@@ -149,6 +151,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [[agent.role.worker]]\nharness = 'environment-worker'\n\
 [publish]\nexclude = ['environment-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nENV_ONLY = 'environment'\nCONFLICT = 'environment'\n\
+[run.build-cache.environment-only]\nenv = 'ENV_ONLY_CACHE'\n\
 [run.build-cache.shared]\nenv = 'ENV_CACHE'\n",
     )
     .unwrap();
@@ -181,8 +184,19 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         format!("agent.role.worker.1.harness: environment-worker [environment: {environment_source}] [environment override]"),
         format!("run.max-frames: 7 [repo: {repo_source}] [repo requirement]"),
         "publish.exclude: [\".git\",\"node_modules\",\"target\",\".turbo\",\"global-exclude\",\"duplicate-exclude\",\"repo-exclude\",\"environment-exclude\",\"personal-exclude\"]".to_string(),
+        format!("worktree.env.GLOBAL_ONLY: global [user-global: {global_source}] [additive]"),
+        format!("worktree.env.PERSONAL_ONLY: personal [user-global: {global_source}] [additive]"),
+        format!("worktree.env.REPO_ONLY: repo [repo: {repo_source}] [additive]"),
+        format!("worktree.env.ENV_ONLY: environment [environment: {environment_source}] [additive]"),
         format!("worktree.env.CONFLICT: repo [repo: {repo_source}] [additive]"),
         format!("run.build-cache.shared.env: REPO_CACHE [repo: {repo_source}] [additive]"),
+        format!("run.build-cache.personal-only.env: PERSONAL_ONLY_CACHE [user-global: {global_source}] [additive]"),
+        format!("run.build-cache.repo-only.env: REPO_ONLY_CACHE [repo: {repo_source}] [additive]"),
+        format!("run.build-cache.environment-only.env: ENV_ONLY_CACHE [environment: {environment_source}] [additive]"),
+        format!("warning: worktree.env.CONFLICT rejected from {global_source}; repository requirement from {repo_source} remains effective"),
+        format!("warning: worktree.env.CONFLICT rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
+        format!("warning: run.build-cache.shared rejected from {global_source}; repository requirement from {repo_source} remains effective"),
+        format!("warning: run.build-cache.shared rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
     ] {
         assert!(text.contains(&expected), "missing {expected:?}: {text}");
     }
@@ -303,6 +317,37 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         knobs["run.build-cache.shared.env"]["winner"]["reason"],
         "additive"
     );
+    for (key, value) in [
+        ("worktree.env.GLOBAL_ONLY", "global"),
+        ("worktree.env.PERSONAL_ONLY", "personal"),
+        ("worktree.env.REPO_ONLY", "repo"),
+        ("worktree.env.ENV_ONLY", "environment"),
+        ("run.build-cache.personal-only.env", "PERSONAL_ONLY_CACHE"),
+        ("run.build-cache.repo-only.env", "REPO_ONLY_CACHE"),
+        ("run.build-cache.environment-only.env", "ENV_ONLY_CACHE"),
+    ] {
+        assert_eq!(knobs[key]["value"], value, "{key}: {report}");
+    }
+    let conflicts = report["requirement-conflicts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("missing requirement conflicts: {report}"));
+    let expected_conflicts = [
+        ("worktree.env.CONFLICT", &global_source, &repo_source),
+        ("worktree.env.CONFLICT", &environment_source, &repo_source),
+        ("run.build-cache.shared", &global_source, &repo_source),
+        ("run.build-cache.shared", &environment_source, &repo_source),
+    ];
+    assert_eq!(conflicts.len(), expected_conflicts.len(), "{report}");
+    for (field, rejected_source, repo_source) in expected_conflicts {
+        assert!(
+            conflicts.iter().any(|conflict| {
+                conflict["field"] == field
+                    && conflict["rejected-source"] == rejected_source.as_str()
+                    && conflict["repo-source"] == repo_source.as_str()
+            }),
+            "missing {field} conflict from {rejected_source}: {report}"
+        );
+    }
     let contributors = knobs["publish.exclude"]["winner"]["contributors"]
         .as_array()
         .unwrap_or_else(|| panic!("missing publish contributors: {report}"));
