@@ -108,6 +108,56 @@ fn make_delayed_config_fifo(fixture: &Fixture) {
     assert!(status.success(), "could not create delayed config FIFO");
 }
 
+/// Strips ANSI escape sequences (CSI, OSC, and two-byte ESC forms) from a
+/// raw PTY stream, leaving only the printable payload. The pane renderer's
+/// cell diff may skip any cell whose content and style already match the
+/// screen — a plain-styled space over blank ground — so adjacent words can
+/// arrive split by a cursor move ("Run\x1b[1;6Hstartup"). Text assertions
+/// therefore run against this stripped form via [`saw_startup_pane`], never
+/// against the raw byte layout, which would freeze the diff accident of the
+/// moment (2026-08-04: dropping BOLD from focused pane titles made the
+/// title's space cell identical to blank ground and turned four of these
+/// proofs red).
+fn strip_escapes(raw: &str) -> String {
+    let mut text = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            text.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for follow in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&follow) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(follow) = chars.next() {
+                    if follow == '\u{7}' {
+                        break;
+                    }
+                    if follow == '\u{1b}' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+/// True once the startup pane's title reached the PTY — whether or not the
+/// cell diff skipped the space between its words (see [`strip_escapes`]).
+fn saw_startup_pane(raw: &str) -> bool {
+    let text = strip_escapes(raw);
+    text.contains("Run startup") || text.contains("Runstartup")
+}
+
 fn failed_startup_pty(
     fixture: &Fixture,
     command: &str,
@@ -309,7 +359,7 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
     assert!(output.status.success(), "startup PTY failed: {output:?}");
     let output = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.contains("Run startup"),
+        saw_startup_pane(&output),
         "sized PTY did not allocate the startup pane: {output:?}"
     );
     assert!(
@@ -324,8 +374,12 @@ fn startup_pty_uses_the_inline_pane_when_the_pty_has_a_size() {
         output.contains("__STARTUP_HANDOFF_COMPLETE__"),
         "post-exit shell marker was not visible after startup handoff: {output:?}"
     );
+    let visible = strip_escapes(&output);
     assert!(
-        output.find("Run startup") < output.find("information"),
+        visible
+            .find("Runstartup")
+            .or_else(|| visible.find("Run startup"))
+            < visible.find("information"),
         "startup content did not precede the live run content: {output:?}"
     );
     let termios = fs::read_to_string(fixture.repo.join(".ctx/startup-success-termios")).unwrap();
@@ -354,7 +408,7 @@ fn startup_pty_redraws_after_resize_while_configuration_is_delayed() {
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml"
                 expect {
                     -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
-                    "Run startup" {
+                    -re {Run(\x1b\[[0-9;]*H)? ?startup} {
                         incr startup_frames
                         if {$startup_frames == 1} {
                             stty rows 30 columns 90 < $spawn_id
@@ -384,7 +438,7 @@ fn startup_pty_redraws_after_resize_while_configuration_is_delayed() {
     assert!(output.status.success(), "resize PTY failed: {output:?}");
     let output = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.contains("Run startup"),
+        saw_startup_pane(&output),
         "resize did not render startup: {output:?}"
     );
 }
@@ -421,7 +475,7 @@ fn startup_pty_uses_status_narration_when_live_tui_is_environment_ineligible() {
             "{name} did not retain status initialization narration: {output:?}"
         );
         assert!(
-            !output.contains("Run startup"),
+            !saw_startup_pane(&output),
             "{name} unexpectedly allocated the startup pane: {output:?}"
         );
     }
@@ -443,7 +497,7 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; exec $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml"
                 expect {
                     -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
-                    "Run startup" {
+                    -re {Run(\x1b\[[0-9;]*H)? ?startup} {
                         exit 0
                     }
                     timeout { exit 1 }
@@ -466,7 +520,7 @@ fn startup_pty_is_visible_before_delayed_config_resolution() {
     );
     let output = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.contains("Run startup"),
+        saw_startup_pane(&output),
         "startup pane was not visible while delayed configuration was pending: {output:?}"
     );
 }
@@ -485,7 +539,7 @@ fn startup_pty_ctrl_c_preserves_interrupted_scrollback_before_live_handoff() {
                 spawn -noecho /bin/sh -c "stty cols 120 rows 40; $env(CTX_STARTUP_BIN) traits run --file .ctx/traits/demo/generated/index.toml; status=\$?; stty -a > .ctx/startup-termios; exit \$status"
                 expect {
                     -re {\x1b\[6n} { send -- "\033\[40;120R"; exp_continue }
-                    "Run startup" {
+                    -re {Run(\x1b\[[0-9;]*H)? ?startup} {
                         if {!$interrupted} {
                             set interrupted 1
                             send -- "\003"
