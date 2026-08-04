@@ -919,8 +919,9 @@ impl RunPanel {
             return None;
         };
         let active_key = active_key(session);
+        let active_changed = state.active_key != active_key;
         let mut completed = None;
-        if state.active_key != active_key {
+        if active_changed {
             if let Some((key, started)) = state.active_started.take() {
                 let elapsed = started.elapsed();
                 // Credit every loop this key's item was running inside, using
@@ -978,6 +979,9 @@ impl RunPanel {
             current.label.clone_from(&previous.label);
         }
         rebuild_view(&mut state, narration);
+        if active_changed && let Some(text) = entered_step_text(&state.view, "Initialization") {
+            push_stream_row(&mut state, StreamRowKind::Narration, text);
+        }
         render_locked(&mut state);
         mark_timer_painted(&mut state);
         completed
@@ -1568,6 +1572,18 @@ fn push_stream_row(state: &mut RunPanelState, kind: StreamRowKind, text: String)
     while state.current_stream.len() > CURRENT_STREAM_CAP {
         state.current_stream.pop_front();
     }
+}
+
+/// The boundary marker names the step from the rebuilt ledger view, while the
+/// activity phase describes the freshly entered stream state.
+fn entered_step_text(view: &RunView, phase: &str) -> Option<String> {
+    let step = view.steps.iter().find(|step| step.active)?;
+    let phase = phase.trim();
+    Some(if phase.is_empty() {
+        format!("[{}]", step.label)
+    } else {
+        format!("[{}] ({phase})", step.label)
+    })
 }
 
 fn render_locked(state: &mut RunPanelState) {
@@ -2357,7 +2373,7 @@ impl EventRow {
 /// the truthful facts fallback `<label> · elapsed · tokens` — never a
 /// placeholder. `at` is when the row itself was stamped (the summary's own
 /// landing time, or the step's own elapsed for the fallback). Render through
-/// [`event_row_line`] for the fixed P552 `HH:MM:SS  ·  ` prefix.
+/// [`event_row_line`] for the fixed `HH:MM:SS ` prefix.
 fn story_history_lines(view: &RunView) -> Vec<EventRow> {
     view.history.iter().map(story_row_line).collect()
 }
@@ -2429,13 +2445,13 @@ fn story_row_line(step: &HistoryStep) -> EventRow {
 }
 
 /// P552 shared one-row event formatter for history and current-activity
-/// panes: a fixed `HH:MM:SS  ·  ` prefix (never truncated — a terminal
+/// panes: a fixed `HH:MM:SS ` prefix (never truncated — a terminal
 /// narrower than the prefix itself is left to clip it, per the P552
 /// contract) followed by a cleaned tail, truncated by display width only in
 /// whatever budget remains after the prefix. Each call produces exactly one
 /// physical row; callers must not pass the result through
 /// `tui_panes::wrapped_lines`.
-const EVENT_PREFIX_SEP: &str = "  \u{b7}  ";
+const EVENT_PREFIX_SEP: &str = " ";
 
 fn event_row_line(row: &EventRow, width: u16) -> tui::Line {
     let prefix = row
@@ -6077,7 +6093,7 @@ mod tests {
                 .segments()
                 .map(|(text, _)| text)
                 .collect::<String>()
-                .starts_with("00:00:10  \u{b7}  ")
+                .starts_with("00:00:10 ")
         );
     }
 
@@ -6272,7 +6288,7 @@ mod tests {
             assert!(row.tail.contains(&format!("{output_tokens} tok")));
             let line = event_row_line(&row, 80);
             let text = line.segments().map(|(text, _)| text).collect::<String>();
-            assert!(text.starts_with(&format!("00:00:{elapsed_seconds:02}  \u{b7}  {title}")));
+            assert!(text.starts_with(&format!("00:00:{elapsed_seconds:02} {title}")));
         }
     }
 
@@ -6313,8 +6329,45 @@ mod tests {
         assert_eq!(model_text.tone, tui::Tone::Muted);
     }
 
+    #[test]
+    fn entered_step_text_uses_the_active_ledger_step_and_initialization_phase() {
+        let mut entered = step("stale", StepState::Done, None);
+        entered.label = "Stale step".to_string();
+        let mut active = step("build:iteration:2", StepState::Running, None);
+        active.label = "Build artifact".to_string();
+        active.active = true;
+        let view = view_with(vec![entered, active]);
+
+        assert_eq!(
+            entered_step_text(&view, "Initialization").as_deref(),
+            Some("[Build artifact] (Initialization)")
+        );
+    }
+
+    #[test]
+    fn entered_step_text_omits_an_empty_phase_and_uses_each_loop_iteration_key() {
+        let mut first_round = step("work:iteration:0", StepState::Running, None);
+        first_round.label = "Repeat work".to_string();
+        first_round.active = true;
+        let mut second_round = step("work:iteration:1", StepState::Running, None);
+        second_round.label = "Repeat work".to_string();
+        second_round.active = true;
+
+        let first = view_with(vec![first_round]);
+        let second = view_with(vec![second_round]);
+        assert_ne!(first.steps[0].key, second.steps[0].key);
+        assert_eq!(
+            entered_step_text(&first, "").as_deref(),
+            Some("[Repeat work]")
+        );
+        assert_eq!(
+            entered_step_text(&second, "Initialization").as_deref(),
+            Some("[Repeat work] (Initialization)")
+        );
+    }
+
     // P552: every history/current-activity row shares one formatter
-    // (`event_row_line`) that reserves the fixed `HH:MM:SS  ·  ` prefix and
+    // (`event_row_line`) that reserves the fixed `HH:MM:SS ` prefix and
     // truncates only the tail, by display width, so wide/combining Unicode
     // never desyncs the truncation point from a plain byte/char count.
     #[test]
@@ -6326,7 +6379,7 @@ mod tests {
         };
         let line = event_row_line(&row, 20);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
-        assert!(rendered.starts_with("00:00:05  \u{b7}  "));
+        assert!(rendered.starts_with("00:00:05 "));
         assert!(rendered.ends_with("..."));
         assert!(tui::display_width(&rendered) <= 20);
     }
@@ -6355,7 +6408,7 @@ mod tests {
         };
         let line = event_row_line(&row, 80);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
-        assert!(rendered.starts_with("00:00:09  \u{b7}  short"));
+        assert!(rendered.starts_with("00:00:09 short"));
         assert!(!rendered.ends_with("..."));
     }
 
@@ -6505,7 +6558,7 @@ summary = "A test trait."
         assert!(row.tail.starts_with("narrator: "));
         let line = event_row_line(&row, 25);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
-        assert!(rendered.starts_with("00:01:05  \u{b7}  "));
+        assert!(rendered.starts_with("00:01:05 "));
         assert!(tui::display_width(&rendered) <= 25);
         assert!(rendered.ends_with("..."));
     }
