@@ -163,7 +163,7 @@ schema-version = "0.1.0"
 # harness = "opencode"            # a built-in id: claude-code, opencode, pi, codex
 # model = "openai/gpt-5.6-terra"
 # reasoning-effort = "medium"     # low | medium | high  (mapped per harness)
-# session-mode = "per-frame"      # per-frame | persistent
+# session-mode = "per-frame"      # per-frame | persistent; persistent restates each turn's output contract inline and cannot use per-frame json-schema-flag enforcement
 # budget = { frame-seconds = 1800 }
 
 # --- Run budgets --------------------------------------------------------------
