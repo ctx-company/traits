@@ -1,4 +1,4 @@
-# 0080 — Panes earn their space: drop an empty history, drop startup's detail column, keep machinery out of history
+# 0080 — Panes earn their space: drop an empty history, drop startup's detail column, give command rows a verdict
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner)
 
@@ -18,33 +18,44 @@ Three small ones. Each is screen space spent on something that says nothing.
 - **Empty means nothing to show, not zero rows yet.** A pane that will fill a
   moment later should not flicker in and out — decide on whether the run has
   produced that kind of content at all, not on the current row count.
-- **History is the narrative, not the machinery.** Command steps — staging,
-  committing, capturing a diff — are how the run does its work, not what
-  happened in it. They belong in the ledger and the story, not in the pane an
-  owner watches. Drop them.
+- **Command and check rows STAY, and say what they did.** They were nearly
+  dropped for being noise, but the noise is the rendering, not their presence.
+  A check that ran and passed is worth a line; a check that ran and FAILED is
+  one of the most important lines in the pane. What is worthless is
+  `git-stage · 00:00:00`.
+- **A check row shows its verdict: passed or failed.** The verdict is NOT the
+  step's status. A check whose command exits non-zero is still `Accepted`,
+  because the step succeeded at producing a verdict of "false" —
+  `SequenceStatusKind` (`state.rs:238`) is about acceptance and nothing else,
+  so reading it here would report every check as fine. The verdict is in the
+  step's own output: a check writes a pass/fail value, and the repository
+  gate's carries `ok` and `exit-code` beside it. Read that.
+- **Colour it with the two tones already in use.** Passed is unremarkable and
+  stays muted; failed is the thing to see. No third state, no new palette —
+  the CLI's existing pass/fail colouring is the whole vocabulary.
+- **A command row shows outcome, not a duration it does not have.** That it
+  ran, and whether it succeeded. Where a failure carries an exit code worth
+  naming, name it.
 - **`00:00:00` is a symptom, and it gets fixed on its own terms too.**
   `story_row_line` (`run_view.rs:2181`) computes
   `summary_at.or(elapsed).unwrap_or_default()`, so a step with neither prints a
-  fabricated zero timestamp. Filtering commands out removes today's instance;
-  it does not stop the next kind of row from doing the same. A row with no
-  time should render without one rather than inventing midnight.
-- **A check step's verdict stays.** The repository gate is a check, and a red
-  gate is exactly what history is for. "Command" here means command-kind
-  steps, not everything that runs a process. If that reads wrong in practice,
-  the rule to reach for is "did it produce a verdict the owner cares about",
-  not a longer list of exempt ids.
+  fabricated zero timestamp. Giving these rows a verdict removes today's
+  instance; it does not stop the next kind of row from doing the same. A row
+  with no time should render without one rather than inventing midnight.
 
 ## Scope
 
 The history arm of `pane_tree`; the startup pane tree in
 `run_startup_view.rs::render`; and the history row source.
 
-`HistoryStep` (`run_view.rs:402`) has no kind, and neither does the
-`SequenceStatus` it is built from (`item_id`, `title`, `status`, `reason`,
-`position_path` — `state.rs:253`). The kind lives on the procedure item, which
-the panel already holds via its trait and plan, so this needs the kind carried
-onto `HistoryStep` at construction in `history_step_from_status` — not a
-guess from the label text.
+`HistoryStep` (`run_view.rs:402`) carries label, elapsed, tokens and summary —
+no kind and no verdict. Neither does the `SequenceStatus` it is built from
+(`item_id`, `title`, `status`, `reason`, `position_path` — `state.rs:253`).
+Both have to be carried onto `HistoryStep` at construction in
+`history_step_from_status`: the kind from the procedure item, and the verdict
+from the step's accepted output value. The panel already holds the trait, the
+plan and the session, so both are reachable — neither may be guessed from the
+label text.
 
 ## Watch
 
@@ -59,16 +70,21 @@ guess from the label text.
   stage row itself, which is where `startup_pty_commits_each_failed_stage_
   before_restoring_the_terminal` will hold it.
 
-- Dropping command rows makes an all-command stretch of a run produce an EMPTY
-  history — which is now a hidden pane, by the first decision above. The two
-  interact, and a run whose first minutes are setup commands should not flash
-  the pane in and out as it goes.
+- A verdict is only available once the step has produced one. A check still
+  running has no `ok` to show, and must not render as failed while it is
+  merely unfinished — absent and false are different, and conflating them
+  turns a working gate into an alarm.
+- Every history row is one physical row through `event_row_line`'s shared
+  formatter, with a fixed timestamp prefix and a width-truncated tail. A
+  verdict has to fit that budget on a narrow terminal, which argues for a
+  short token beside the label rather than a sentence.
 
 ## Done when
 
 A run with no history renders no history pane and its width goes to the panes
 that have content; a run that gains history gains the pane; run startup renders
 its stages full width with no detail column; a failing startup stage still
-shows why it failed; command steps do not appear in history while a check
-step's verdict still does; and no history row prints a timestamp it does not
-have.
+shows why it failed; a check row in history reads as passed or failed with the
+failure visibly the louder of the two; a command row says whether it succeeded
+instead of showing a duration it never had; a check still running reads as
+neither; and no history row prints a timestamp it does not have.
