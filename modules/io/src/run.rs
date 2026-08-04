@@ -1462,15 +1462,24 @@ mod startup_observer_tests {
             return true;
         }
 
+        // The timestamp alone is not unique: macOS quantizes `SystemTime::now()`
+        // to microseconds, and every parent test here shares one pid, so two
+        // test threads sampling the clock in the same tick once shared a root —
+        // the faster child's cleanup deleted the slower child's fixtures
+        // mid-test. The thread id makes the root unique within this process,
+        // and `create_dir` turns any residual collision into a loud failure
+        // instead of a silently shared directory.
         let root = std::env::temp_dir().join(format!(
-            "ctx-traits-startup-observer-{}-{}",
+            "ctx-traits-startup-observer-{}-{:?}-{}",
             std::process::id(),
+            std::thread::current().id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
         let home = root.join("home");
+        std::fs::create_dir(&root).unwrap();
         std::fs::create_dir_all(&home).unwrap();
         let test_name = std::thread::current().name().unwrap().to_string();
         let status = Command::new(std::env::current_exe().unwrap())
