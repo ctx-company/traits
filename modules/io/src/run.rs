@@ -1101,6 +1101,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         apply_default_inputs(
             &loaded.trait_ref,
             &mut initial_values,
+            &prepared_assignments.port_defaults,
             execution_dir.as_deref(),
             &worktree_env,
         )
@@ -1507,7 +1508,7 @@ mod startup_observer_tests {
             let trait_path = generated.join("index.toml");
             std::fs::write(
                 &trait_path,
-                "id = \"startup-fixture\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Startup fixture\"\nsummary = \"startup observer fixture\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+                "id = \"startup-fixture\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Startup fixture\"\nsummary = \"startup observer fixture\"\n\n[[port]]\nid = \"plan\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Plan path\"\n[port.default]\nvalue = \".plans/DECLARED.md\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
             )
             .unwrap();
             std::fs::write(
@@ -1578,6 +1579,38 @@ mod startup_observer_tests {
                 assert!(result.is_err());
             }
             updates.lock().unwrap().clone()
+        }
+
+        fn start_with_inputs(
+            &self,
+            input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
+        ) -> StartOutcome {
+            start(StartRequest {
+                trait_file: Some(&self.trait_path),
+                trait_id: None,
+                query: None,
+                trait_args: &[],
+                input_values,
+                out: None,
+                session_store: None,
+                ephemeral: true,
+                resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+                assign_overrides: &[],
+                agent_assignments: None,
+                provider_capability_reports: Vec::new(),
+                provider_warnings: Vec::new(),
+                harness_probes: Vec::new(),
+                caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+                state_source: "test",
+                trait_arg_evidence: "test",
+                worktree: None,
+                defer_commands: false,
+                narrate_progress: false,
+                startup_observer: None,
+                strict_loops: false,
+                merge_rung: None,
+            })
+            .expect("startup fixture starts")
         }
     }
 
@@ -1805,6 +1838,271 @@ mod startup_observer_tests {
             "configured worktree stages were not ordered Worktree -> Seeding -> Warm: {updates:?}"
         );
         assert_terminal_states_are_monotonic(&updates);
+    }
+
+    #[test]
+    fn static_and_config_input_defaults_preserve_precedence_and_evidence() {
+        let trait_ref = ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            "id = \"default-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Default fixture\"\nsummary = \"fixture\"\n\n[[port]]\nid = \"plan\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Plan path\"\n[port.default]\nvalue = \".plans/EXECUTION_PLAN.md\"\n",
+        )
+        .expect("fixture trait decodes");
+        let mut values = Vec::new();
+        apply_default_inputs(
+            &trait_ref,
+            &mut values,
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect("declared default applies");
+        assert_eq!(
+            values[0].value,
+            Value::String(".plans/EXECUTION_PLAN.md".to_string())
+        );
+        assert_eq!(
+            values[0].source,
+            Some(ctx_traits_core::procedure::runtime::ValueSource::DeclaredDefault)
+        );
+        assert_eq!(
+            values[0].producer_evidence.as_deref(),
+            Some("port[plan].default.value")
+        );
+
+        let config = BTreeMap::from([(
+            "plan".to_string(),
+            crate::harness_config::ConfiguredPortDefault {
+                value: ".plans/OVERRIDE.md".to_string(),
+                layer: crate::harness_config::ConfigLayer::Repo,
+                evidence: ".ctx/config.toml:trait.default-fixture.defaults.port.plan".to_string(),
+            },
+        )]);
+        values.clear();
+        apply_default_inputs(&trait_ref, &mut values, &config, None, &BTreeMap::new())
+            .expect("config default applies");
+        assert_eq!(
+            values[0].value,
+            Value::String(".plans/OVERRIDE.md".to_string())
+        );
+        assert_eq!(
+            values[0].source,
+            Some(ctx_traits_core::procedure::runtime::ValueSource::TraitConfig)
+        );
+        assert_eq!(
+            values[0].producer_evidence.as_deref(),
+            Some(".ctx/config.toml:trait.default-fixture.defaults.port.plan")
+        );
+
+        values = parse_initial_sets(&["plan=.plans/EXPLICIT.md".to_string()]).unwrap();
+        apply_default_inputs(&trait_ref, &mut values, &config, None, &BTreeMap::new())
+            .expect("explicit input remains authoritative");
+        assert_eq!(values.len(), 1);
+        assert_eq!(
+            values[0].value,
+            Value::String(".plans/EXPLICIT.md".to_string())
+        );
+        assert_eq!(
+            values[0].source,
+            Some(ctx_traits_core::procedure::runtime::ValueSource::CliSet)
+        );
+        assert_eq!(
+            values[0].producer_evidence.as_deref(),
+            Some("ctx traits run --set")
+        );
+    }
+
+    #[test]
+    fn startup_records_port_default_precedence_and_ledger_evidence() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let fixture = StartupFixture::approved();
+        let accepted = |outcome: StartOutcome| {
+            outcome
+                .session
+                .accepted_port_values
+                .into_iter()
+                .find(|value| value.ref_text == "port:plan")
+                .expect("plan is accepted")
+        };
+
+        let declared = accepted(fixture.start_with_inputs(Vec::new()));
+        assert_eq!(declared.value, Value::String(".plans/DECLARED.md".into()));
+        assert_eq!(
+            declared.source,
+            ctx_traits_core::procedure::runtime::ValueSource::DeclaredDefault
+        );
+        assert_eq!(
+            declared.producer_evidence.as_deref(),
+            Some("port[plan].default.value")
+        );
+
+        std::fs::write(
+            fixture.root.join(".ctx/traits/startup-fixture/config.toml"),
+            "[defaults.port]\nplan = \".plans/SIDECAR.md\"\n",
+        )
+        .unwrap();
+        let sidecar = accepted(fixture.start_with_inputs(Vec::new()));
+        assert_eq!(sidecar.value, Value::String(".plans/SIDECAR.md".into()));
+        assert_eq!(
+            sidecar.source,
+            ctx_traits_core::procedure::runtime::ValueSource::TraitConfig
+        );
+        assert!(
+            sidecar
+                .producer_evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.ends_with(":defaults.port.plan"))
+        );
+
+        std::fs::create_dir_all(fixture.root.join(".ctx")).unwrap();
+        std::fs::write(
+            fixture.root.join(".ctx/config.toml"),
+            "[trait.startup-fixture.defaults.port]\nplan = \".plans/SCOPED.md\"\n",
+        )
+        .unwrap();
+        let scoped = accepted(fixture.start_with_inputs(Vec::new()));
+        assert_eq!(scoped.value, Value::String(".plans/SCOPED.md".into()));
+        assert_eq!(
+            scoped.source,
+            ctx_traits_core::procedure::runtime::ValueSource::TraitConfig
+        );
+        assert!(scoped.producer_evidence.as_deref().is_some_and(|evidence| {
+            evidence.ends_with(".ctx/config.toml:trait.startup-fixture.defaults.port.plan")
+        }));
+
+        let explicit = accepted(fixture.start_with_inputs(
+            parse_initial_sets(&["plan=.plans/EXPLICIT.md".to_string()]).unwrap(),
+        ));
+        assert_eq!(explicit.value, Value::String(".plans/EXPLICIT.md".into()));
+        assert_eq!(
+            explicit.source,
+            ctx_traits_core::procedure::runtime::ValueSource::CliSet
+        );
+        assert_eq!(
+            explicit.producer_evidence.as_deref(),
+            Some("ctx traits run --set")
+        );
+    }
+
+    #[test]
+    fn set_preserves_existing_input_port_provenance() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let trait_root = root.join(".ctx/traits/awaiting-fixture");
+        let generated = trait_root.join("generated");
+        std::fs::create_dir_all(&generated).unwrap();
+        let trait_path = generated.join("index.toml");
+        std::fs::write(
+            &trait_path,
+            "id = \"awaiting-fixture\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Awaiting fixture\"\nsummary = \"set provenance fixture\"\n\n[[port]]\nid = \"declared\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Declared default\"\n[port.default]\nvalue = \".plans/DECLARED.md\"\n\n[[port]]\nid = \"configured\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Configured default\"\n\n[[port]]\nid = \"cli\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"CLI input\"\n\n[[port]]\nid = \"missing\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Later input\"\n\n[procedure]\ndescription = \"Await inputs\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\ninput = [\"port:missing\"]\noutput = [\"slot:notified\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            trait_root.join("trait.toml"),
+            "[package]\nid = \"awaiting-fixture\"\nversion = \"0.1.0\"\nname = \"Awaiting fixture\"\nstatus = \"ready\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            trait_root.join("config.toml"),
+            "[defaults.port]\nconfigured = \".plans/CONFIGURED.md\"\n",
+        )
+        .unwrap();
+        let trait_path = trait_path.to_string_lossy().into_owned();
+        let loaded = load_trait_source(Some(&trait_path), None, "test").unwrap();
+        crate::trust::update_named_digest(
+            "awaiting-fixture",
+            &loaded.canonical_digest,
+            crate::trust::TrustState::Verified,
+            Some("set provenance fixture".to_string()),
+        )
+        .unwrap();
+        let session_store = root.join("sessions");
+        let session_store_text = session_store.to_string_lossy().into_owned();
+        let start = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: parse_initial_sets(&["cli=.plans/CLI.md".to_string()]).unwrap(),
+            out: None,
+            session_store: Some(&session_store_text),
+            ephemeral: false,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            merge_rung: None,
+        })
+        .expect("awaiting fixture starts");
+        assert!(start.session.next_frame.is_none());
+        let session_path = start.session_path.expect("session is persisted");
+        let outcome = set(SetRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            session: session_path.as_str(),
+            session_store: None,
+            target: "missing",
+            value: Value::String(".plans/SUPPLIED.md".to_string()),
+            out: None,
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            existing_input_evidence: "must not replace existing evidence",
+        })
+        .expect("missing input is accepted");
+        let SetOutcome::Session { session, .. } = outcome else {
+            panic!("awaiting input set rebuilds the session");
+        };
+        let accepted: BTreeMap<_, _> = session
+            .accepted_port_values
+            .iter()
+            .map(|value| (value.ref_text.as_str(), value))
+            .collect();
+        let configured_evidence = format!(
+            "{}:defaults.port.configured",
+            trait_root.join("config.toml").display()
+        );
+        for (port, source, evidence) in [
+            (
+                "port:declared",
+                ctx_traits_core::procedure::runtime::ValueSource::DeclaredDefault,
+                "port[declared].default.value",
+            ),
+            (
+                "port:configured",
+                ctx_traits_core::procedure::runtime::ValueSource::TraitConfig,
+                configured_evidence.as_str(),
+            ),
+            (
+                "port:cli",
+                ctx_traits_core::procedure::runtime::ValueSource::CliSet,
+                "ctx traits run --set",
+            ),
+            (
+                "port:missing",
+                ctx_traits_core::procedure::runtime::ValueSource::HostInput,
+                "cli:ctx traits set",
+            ),
+        ] {
+            let value = accepted.get(port).expect("port value is accepted");
+            assert_eq!(value.source, source, "{port} source");
+            assert_eq!(
+                value.producer_evidence.as_deref(),
+                Some(evidence),
+                "{port} evidence"
+            );
+        }
     }
 
     fn assert_terminal_states_are_monotonic(updates: &[StartupUpdate]) {
@@ -2064,10 +2362,8 @@ pub fn set(request: SetRequest<'_>) -> crate::Result<SetOutcome> {
                         |value| ctx_traits_core::procedure::runtime::StepSlotOutput {
                             ref_text: value.ref_text.clone(),
                             value: value.value.clone(),
-                            source: Some(
-                                ctx_traits_core::procedure::runtime::ValueSource::HostInput,
-                            ),
-                            producer_evidence: Some(request.existing_input_evidence.to_string()),
+                            source: Some(value.source.clone()),
+                            producer_evidence: value.producer_evidence.clone(),
                             command_execution: None,
                             producer_agent: value.producer_agent.clone(),
                             producer_harness: value.producer_harness.clone(),
@@ -2971,9 +3267,9 @@ pub fn parse_initial_sets(
             format!("port:{target}")
         };
         values.push(ctx_traits_core::procedure::runtime::StepSlotOutput {
-            ref_text,
+            ref_text: ref_text.clone(),
             value: Value::String(value.to_string()),
-            source: Some(ctx_traits_core::procedure::runtime::ValueSource::HostInput),
+            source: Some(ctx_traits_core::procedure::runtime::ValueSource::CliSet),
             producer_evidence: Some("ctx traits run --set".to_string()),
             command_execution: None,
             producer_agent: None,
@@ -3060,11 +3356,12 @@ fn write_output_path(out: Option<&str>, fallback: &Utf8Path) -> crate::Result<Ut
 fn apply_default_inputs(
     trait_ref: &ctx_traits_core::Trait,
     initial_values: &mut Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
+    config_defaults: &BTreeMap<String, crate::harness_config::ConfiguredPortDefault>,
     exec_dir: Option<&Utf8Path>,
     env_overlay: &BTreeMap<String, String>,
 ) -> crate::Result<Vec<ctx_traits_core::response::CapabilityReport>> {
     let mut reports = Vec::new();
-    let existing: std::collections::BTreeSet<String> = initial_values
+    let mut existing: std::collections::BTreeSet<String> = initial_values
         .iter()
         .map(|value| value.ref_text.clone())
         .collect();
@@ -3072,10 +3369,40 @@ fn apply_default_inputs(
         matches!(
             port.direction,
             ctx_traits_core::r#trait::PortDirection::Input
-        ) && !port.optional
+        )
     }) {
         let ref_text = format!("port:{}", port.id);
         if existing.contains(&ref_text) {
+            continue;
+        }
+        if let Some(default) = config_defaults.get(&port.id) {
+            initial_values.push(ctx_traits_core::procedure::runtime::StepSlotOutput {
+                ref_text: ref_text.clone(),
+                value: Value::String(default.value.clone()),
+                source: Some(ctx_traits_core::procedure::runtime::ValueSource::TraitConfig),
+                producer_evidence: Some(default.evidence.clone()),
+                command_execution: None,
+                producer_agent: None,
+                producer_harness: None,
+            });
+            existing.insert(ref_text);
+            continue;
+        }
+        if let Some(value) = port
+            .default
+            .as_ref()
+            .and_then(|default| default.value.as_ref())
+        {
+            initial_values.push(ctx_traits_core::procedure::runtime::StepSlotOutput {
+                ref_text: ref_text.clone(),
+                value: Value::String(value.clone()),
+                source: Some(ctx_traits_core::procedure::runtime::ValueSource::DeclaredDefault),
+                producer_evidence: Some(format!("port[{}].default.value", port.id)),
+                command_execution: None,
+                producer_agent: None,
+                producer_harness: None,
+            });
+            existing.insert(ref_text);
             continue;
         }
         let Some(default) = port
@@ -3124,7 +3451,7 @@ fn apply_default_inputs(
         // of "hard frame error" for a pre-frame phase, not a scope narrowing.
         outcome.refuse_if_truncated(&format!("{ref_text} default command {command_text:?}"))?;
         initial_values.push(ctx_traits_core::procedure::runtime::StepSlotOutput {
-            ref_text,
+            ref_text: ref_text.clone(),
             value: Value::String(outcome.stdout),
             source: Some(ctx_traits_core::procedure::runtime::ValueSource::CommandOutput),
             producer_evidence: Some(format!("default command: {}", command_text)),
@@ -3132,6 +3459,7 @@ fn apply_default_inputs(
             producer_agent: None,
             producer_harness: None,
         });
+        existing.insert(ref_text);
     }
     reports.sort();
     reports.dedup();

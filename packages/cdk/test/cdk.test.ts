@@ -68,6 +68,28 @@ import { prRiskTriage } from "./fixtures/readme-draft.js";
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 
 describe("draft synthesis", () => {
+  it("lowers a static input port default through the existing port builder", () => {
+    const plan = port.input.text({
+      id: "plan",
+      description: "Path to the execution plan.",
+      default: { value: ".plans/EXECUTION_PLAN.md" },
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "port-default",
+        name: "Port Default",
+        description: "Static input default fixture.",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        port: plan,
+      }),
+    ) as { readonly port?: readonly Record<string, unknown>[]; };
+
+    expect(draft.port).toContainEqual(expect.objectContaining({
+      id: "plan",
+      default: { value: ".plans/EXECUTION_PLAN.md" },
+    }));
+  });
+
   it("resolves native family leaves without changing ordinary trait emission", async () => {
     const ordinary = trait("ordinary", { name: "Ordinary", summary: "Unchanged." });
     expect(toDraftJson(ordinary).id).toBe("ordinary");

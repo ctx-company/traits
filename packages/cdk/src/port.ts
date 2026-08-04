@@ -27,7 +27,9 @@ export interface PortFields {
   readonly optional?: boolean;
   readonly title?: string;
   readonly format?: string | readonly string[];
-  readonly default?: { readonly command?: PortDefaultCommand; } | { readonly cmd: string; };
+  readonly default?: { readonly value: string; } | { readonly command?: PortDefaultCommand; } | {
+    readonly cmd: string;
+  };
 }
 
 /**

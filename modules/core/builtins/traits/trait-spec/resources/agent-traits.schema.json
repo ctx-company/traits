@@ -724,7 +724,7 @@
           ]
         },
         "present": {
-          "description": "Presence-aware leaf (schema-version `\"0.3\"` only). Bare form is a local\noptional input `port:*`; with `field`, a declared optional field of a\nlocal `port:*`/`slot:*` object container. See §1/§4 of the conditional\nsystem v2 design doc. Yields `Matched`/`NotMatched`/`Unmeasurable`\ntri-state internally; only `Matched` routes `true`.",
+          "description": "Presence-aware leaf (schema-version `\"0.3\"` only). Bare form is a local\noptional input `port:*`; with `field`, a declared optional field of a\nlocal `port:*`/`slot:*` object container. Yields `Matched`/`NotMatched`/`Unmeasurable`\ntri-state internally; only `Matched` routes `true`.",
           "type": [
             "string",
             "null"
@@ -1056,6 +1056,12 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
@@ -2460,6 +2466,13 @@
     },
     "summary": {
       "$ref": "#/$defs/Summary"
+    },
+    "variant": {
+      "description": "Native family leaf identity. This is deliberately absent from 0.2\ndocuments, preserving their encoded bytes and digest semantics.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "version": {
       "$ref": "#/$defs/SemanticVersion"

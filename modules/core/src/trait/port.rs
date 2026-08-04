@@ -31,6 +31,8 @@ pub enum PortDirection {
 #[schemars(rename_all = "kebab-case")]
 pub struct PortDefault {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<PortDefaultCommand>,
 }
 
@@ -150,7 +152,7 @@ pub fn validate_ports(ports: &[Port]) -> crate::Result<()> {
                     .into());
                 }
                 if let Some(default) = port.default.as_ref() {
-                    validate_port_default(default, &base)?;
+                    validate_port_default(default, port, &base)?;
                 }
             }
             PortDirection::Output => {
@@ -191,14 +193,33 @@ pub fn validate_ports(ports: &[Port]) -> crate::Result<()> {
     Ok(())
 }
 
-fn validate_port_default(default: &PortDefault, base: &str) -> crate::Result<()> {
-    let Some(command) = default.command.as_ref() else {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{base}.default"),
-            message: "input port default must declare a command source".to_string(),
+fn validate_port_default(default: &PortDefault, port: &Port, base: &str) -> crate::Result<()> {
+    match (&default.value, &default.command) {
+        (Some(_), None) => {
+            if port.schema != "schema:text" {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{base}.default.value"),
+                    message: "static input defaults require schema:text".to_string(),
+                }
+                .into());
+            }
+            Ok(())
         }
-        .into());
-    };
+        (Some(_), Some(_)) => Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.default"),
+            message: "input port default must declare exactly one source".to_string(),
+        }
+        .into()),
+        (None, None) => Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.default"),
+            message: "input port default must declare exactly one source".to_string(),
+        }
+        .into()),
+        (None, Some(command)) => validate_port_default_command(command, base),
+    }
+}
+
+fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> crate::Result<()> {
     match (command.cmd.as_deref(), command.argv.is_empty()) {
         (Some(cmd), true) => {
             crate::r#trait::procedure::parse_command_shorthand(
@@ -350,4 +371,66 @@ pub fn validate_port_cross_refs(
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(default: Option<PortDefault>) -> Port {
+        Port {
+            id: "path".to_string(),
+            direction: PortDirection::Input,
+            schema: "schema:text".to_string(),
+            optional: false,
+            description: "A path.".to_string(),
+            title: None,
+            format: SlugList::default(),
+            value: None,
+            default,
+        }
+    }
+
+    #[test]
+    fn accepts_static_text_input_default() {
+        assert!(
+            validate_ports(&[input(Some(PortDefault {
+                value: Some(".plans/EXECUTION_PLAN.md".to_string()),
+                command: None,
+            }))])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_default_sources() {
+        let error = validate_ports(&[input(Some(PortDefault {
+            value: Some("path".to_string()),
+            command: Some(PortDefaultCommand {
+                cmd: Some("printf path".to_string()),
+                argv: Vec::new(),
+                cwd: None,
+                capture: None,
+                timeout_ms: None,
+                capture_bytes: None,
+            }),
+        }))])
+        .expect_err("two default sources must be rejected");
+        assert!(error.to_string().contains("exactly one source"));
+    }
+
+    #[test]
+    fn rejects_static_default_for_non_text_input() {
+        let mut port = input(Some(PortDefault {
+            value: Some("path".to_string()),
+            command: None,
+        }));
+        port.schema = "schema:number".to_string();
+        assert!(
+            validate_ports(&[port])
+                .expect_err("static defaults are text-only")
+                .to_string()
+                .contains("schema:text")
+        );
+    }
 }

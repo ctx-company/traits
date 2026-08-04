@@ -16,24 +16,24 @@ resource-manifest = "sha256:48e5bc4ea68c7b8291897b43fc1f2d9f22b8efdf409afd80f0f2
 
 [[trait.export]]
 target = "agent-skills"
-path = ".agents/skills/trait-spec/SKILL.md"
-digest = "sha256:e869e18570ed22ba43d4284a8b52745d4390bd9874525e74160ff7a3a79b91de"
+path = "modules/core/builtins/traits/trait-spec/.agents/skills/trait-spec/SKILL.md"
+digest = "sha256:5f700cddfcf4fe92dceb4d57bfe1bc3c7a95b97db110329ad572743b1211325f"
 
 [[trait.projection]]
 target-profile = "agent-skills"
-renderer-version = "0.1.0"
+renderer-version = "0.1.0-alpha.1"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
 source = "sha256:2e679fed106ad0d7ba791d5a88b74a03d48c1cf84fe0d8786fbc971689db7f59"
 canonical = "sha256:6b6dabf47b2ff4f583405fca4e6a4cf87fea7aa8efa6b7298e28a15e126b3ff7"
-model-visible = "sha256:16efa105137138e4466db43f274ea2509cbe208008d1b370df730d83459bd30d"
-render = "sha256:aed39921cc631dfe511ebc4697ad88fd866fc3c58408e5189d6ab2d6901651a1"
-generated-markdown = "sha256:e869e18570ed22ba43d4284a8b52745d4390bd9874525e74160ff7a3a79b91de"
+model-visible = "sha256:c7e0924daf30353315673442679403041f0eacd01246cbabf73b91c1ef825180"
+render = "sha256:c8cff6da0be05324ad7ad1e57d6ebeb0d8a078ded14c44b6b1bc5d2d62d4bda5"
+generated-markdown = "sha256:5f700cddfcf4fe92dceb4d57bfe1bc3c7a95b97db110329ad572743b1211325f"
 
 [trait.projection.static-output]
 drift-status = "in-sync"
-path = ".agents/skills/trait-spec/SKILL.md"
+path = "modules/core/builtins/traits/trait-spec/.agents/skills/trait-spec/SKILL.md"
 
 [trait.projection.provenance]
 command = "ctx traits export --update-skill-lock"

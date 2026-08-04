@@ -98,6 +98,9 @@ pub enum AcceptanceStatus {
 #[schemars(rename_all = "kebab-case")]
 pub enum ValueSource {
     HostInput,
+    CliSet,
+    DeclaredDefault,
+    TraitConfig,
     Binding,
     CommandOutput,
     ModelOutput,

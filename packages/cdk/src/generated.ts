@@ -1014,6 +1014,7 @@ export type CanonicalPort = {
  */
 export type CanonicalPortDefault = {
   readonly "command"?: CanonicalPortDefaultCommand | undefined;
+  readonly "value"?: string | undefined;
 };
 
 /**

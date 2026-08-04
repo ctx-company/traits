@@ -12,6 +12,7 @@ export interface CtxConfig {
   repo?: Record<string, RepoOverride>;
   run?: RunTable;
   schemaVersion?: string;
+  trait?: Record<string, TraitDefaults>;
   worktree?: WorktreeConfig;
 }
 
@@ -89,6 +90,10 @@ export interface MergeTable {
   generated?: GeneratedArtifact[];
   overlap?: MergeOverlap;
   wait?: boolean;
+}
+
+export interface PortDefaults {
+  port?: Record<string, string>;
 }
 
 export interface ProfileAssignment {
@@ -192,6 +197,10 @@ export interface RunTable {
 export type RunTransport = "cli" | "mcp";
 
 export type StoryLevel = "default" | "detailed" | "assisted";
+
+export interface TraitDefaults {
+  defaults?: PortDefaults;
+}
 
 export type TripwirePolicy = "park" | "warn";
 

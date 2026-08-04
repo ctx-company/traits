@@ -622,6 +622,22 @@ pub struct TraitRunConfig {
     pub schema_version: Option<String>,
     #[serde(default)]
     pub budget: RunProfileBudget,
+    #[serde(default)]
+    pub defaults: PortDefaults,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PortDefaults {
+    #[serde(default)]
+    pub port: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TraitDefaults {
+    #[serde(default)]
+    pub defaults: PortDefaults,
 }
 
 /// Narrow caller-selected runtime profile for `ctx traits import
@@ -695,6 +711,8 @@ pub struct RuntimeConfig {
     pub harness: BTreeMap<String, HarnessDefinition>,
     #[serde(default)]
     pub agent: AgentDefaults,
+    #[serde(default, rename = "trait")]
+    pub trait_defaults: BTreeMap<String, TraitDefaults>,
     /// P342 worktree preparation: gitignored seed roots, ordered literal-argv
     /// setup commands, and the environment overlay applied inside a run
     /// worktree. `.ctx/config.toml [worktree]` is the single source for
@@ -776,6 +794,7 @@ impl Eq for AuthoredConfigLeaf {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ConfigLeaf {
     SchemaVersion,
+    TraitDynamic,
     WorktreeSeed,
     WorktreeWarm,
     WorktreeSetup,
@@ -828,6 +847,7 @@ enum ConfigLeaf {
 impl ConfigLeaf {
     const ALL: &[Self] = &[
         Self::SchemaVersion,
+        Self::TraitDynamic,
         Self::WorktreeSeed,
         Self::WorktreeWarm,
         Self::WorktreeSetup,
@@ -878,6 +898,7 @@ impl ConfigLeaf {
     fn path(self) -> &'static str {
         match self {
             Self::SchemaVersion => "schema-version",
+            Self::TraitDynamic => "trait",
             Self::WorktreeSeed => "worktree.seed",
             Self::WorktreeWarm => "worktree.warm",
             Self::WorktreeSetup => "worktree.setup",
@@ -946,7 +967,8 @@ impl ConfigLeaf {
             | Self::HarnessDynamic
             | Self::AgentDynamic
             | Self::HostDynamic
-            | Self::RepoDynamic => ConfigSemantic::Default,
+            | Self::RepoDynamic
+            | Self::TraitDynamic => ConfigSemantic::Default,
             Self::SchemaVersion
             | Self::WorktreeSetup
             | Self::WorktreeSetupSeconds
@@ -1860,6 +1882,18 @@ pub struct PreparedRunAssignments {
     pub warnings: Vec<String>,
     pub capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
     pub worktree: WorktreeConfig,
+    pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
+}
+
+/// A selected trait-config port default with the exact file and TOML field
+/// that supplied it. This provenance is persisted with the accepted port value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredPortDefault {
+    pub value: String,
+    /// The configuration layer that supplied the winning leaf. Kept separate
+    /// from the rendered receipt so callers can retain structured provenance.
+    pub layer: ConfigLayer,
+    pub evidence: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1879,6 +1913,7 @@ pub struct ResolvedRuntimeAssignments {
     pub qualifier_by_role: BTreeMap<String, String>,
     pub budget: RunProfileBudget,
     pub worktree: WorktreeConfig,
+    pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
     model_catalogs: BTreeMap<String, ModelCatalogState>,
     model_catalog_capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
     /// P427 zero-config fallback: one cached PATH-detection pass over the
@@ -2382,7 +2417,8 @@ fn resolve_runtime_assignments_impl(
     trait_root: Option<&Utf8Path>,
     overrides: &[String],
 ) -> crate::Result<ResolvedRuntimeAssignments> {
-    let runtime_config = resolve_runtime_config(Utf8Path::new("."))?;
+    let config_report = resolve_config_report(Utf8Path::new("."))?;
+    let runtime_config = config_report.runtime;
     let registry = HarnessRegistry {
         schema_version: runtime_config.schema_version,
         harness: runtime_config.harness,
@@ -2398,9 +2434,35 @@ fn resolve_runtime_assignments_impl(
     // `resolve_runtime_config` (via `resolve_config_report`) already folded
     // declared named build caches into `worktree.build_cache` (P428).
     let worktree = runtime_config.worktree;
+    let mut port_defaults = BTreeMap::new();
+    if let Some(defaults) =
+        trait_ref.and_then(|trait_ref| runtime_config.trait_defaults.get(trait_ref.id.as_str()))
+    {
+        for (port, value) in &defaults.defaults.port {
+            let field = format!(
+                "trait.{}.defaults.port.{port}",
+                trait_ref.expect("trait exists").id
+            );
+            let winner = config_report.winners.get(&field);
+            let source = winner
+                .and_then(|winner| winner.source.as_deref())
+                .unwrap_or("runtime config");
+            port_defaults.insert(
+                port.clone(),
+                ConfiguredPortDefault {
+                    value: value.clone(),
+                    layer: winner
+                        .map(|winner| winner.layer)
+                        .unwrap_or(ConfigLayer::Repo),
+                    evidence: format!("{source}:{field}"),
+                },
+            );
+        }
+    }
 
     if let Some(trait_root) = trait_root
-        && let Some(sidecar) = load_selected_trait_run_config(trait_ref, trait_root)?
+        && let Some((sidecar, sidecar_path)) =
+            load_selected_trait_run_config(trait_ref, trait_root)?
     {
         // The package sidecar remains a compatibility fallback. Project
         // `[run]` values are nearer and therefore win over it.
@@ -2408,6 +2470,20 @@ fn resolve_runtime_assignments_impl(
         let mut sidecar_budget = sidecar.budget;
         overlay_budget(&mut sidecar_budget, &configured);
         budget = sidecar_budget;
+        // Package sidecars are the lowest config layer. Runtime trait-scoped
+        // values above remain authoritative.
+        for (port, value) in sidecar.defaults.port {
+            port_defaults
+                .entry(port.clone())
+                .or_insert(ConfiguredPortDefault {
+                    value,
+                    layer: ConfigLayer::BuiltIn,
+                    evidence: format!("{}:defaults.port.{port}", sidecar_path),
+                });
+        }
+    }
+    if let Some(trait_ref) = trait_ref {
+        validate_port_defaults(trait_ref, &port_defaults)?;
     }
 
     // P451: fold the declared variant/repo qualifier tables into one
@@ -2467,6 +2543,7 @@ fn resolve_runtime_assignments_impl(
         qualifier_by_role,
         budget,
         worktree,
+        port_defaults,
         model_catalogs: BTreeMap::new(),
         model_catalog_capability_reports: Vec::new(),
         builtin_detection: None,
@@ -2736,6 +2813,36 @@ fn validate_seat_overrides(
 /// Overlay one `RunProfileBudget` onto another: only fields present on
 /// `next` replace `base`, so a profile/CLI budget that sets only some fields
 /// does not erase the rest of a sidecar's budget.
+fn validate_port_defaults(
+    trait_ref: &ctx_traits_core::Trait,
+    defaults: &BTreeMap<String, ConfiguredPortDefault>,
+) -> crate::Result<()> {
+    for (port_id, default) in defaults {
+        let Some(port) = trait_ref.ports.iter().find(|port| port.id == *port_id) else {
+            return invalid_config(
+                default.evidence.clone(),
+                format!("unknown input port {port_id:?}"),
+            );
+        };
+        if !matches!(
+            port.direction,
+            ctx_traits_core::r#trait::PortDirection::Input
+        ) {
+            return invalid_config(
+                default.evidence.clone(),
+                format!("port {port_id:?} is not an input port"),
+            );
+        }
+        if port.schema != "schema:text" {
+            return invalid_config(
+                default.evidence.clone(),
+                format!("port {port_id:?} must use schema:text for a static config default"),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
     if next.max_frames.is_some() {
         base.max_frames = next.max_frames;
@@ -2780,7 +2887,7 @@ pub fn load_trait_run_config(trait_root: &Utf8Path) -> crate::Result<Option<Trai
 fn load_selected_trait_run_config(
     trait_ref: Option<&ctx_traits_core::Trait>,
     trait_root: &Utf8Path,
-) -> crate::Result<Option<TraitRunConfig>> {
+) -> crate::Result<Option<(TraitRunConfig, Utf8PathBuf)>> {
     let selected = if let Some(variant) = trait_ref.and_then(|trait_ref| trait_ref.variant.as_ref())
     {
         crate::family_manifest::read_family_table(&crate::layout::package_manifest_path(
@@ -2807,9 +2914,12 @@ fn load_selected_trait_run_config(
                 context: path.to_string(),
                 source,
             })?;
-        return Ok(Some(config));
+        return Ok(Some((config, path)));
     }
-    load_trait_run_config(trait_root)
+    Ok(load_trait_run_config(trait_root)?.map(|config| {
+        let path = crate::layout::package_run_config_path(trait_root);
+        (config, path)
+    }))
 }
 
 /// Load and validate a caller-selected narrow runtime profile from an
@@ -2886,6 +2996,7 @@ pub fn prepare_run_assignments(
             warnings: Vec::new(),
             capability_reports: Vec::new(),
             worktree: resolved.worktree,
+            port_defaults: resolved.port_defaults,
         });
     }
 
@@ -3033,6 +3144,7 @@ pub fn prepare_run_assignments(
         warnings,
         capability_reports,
         worktree: resolved.worktree,
+        port_defaults: resolved.port_defaults,
     })
 }
 
@@ -3472,7 +3584,8 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::HarnessDynamic
         | ConfigLeaf::AgentDynamic
         | ConfigLeaf::HostDynamic
-        | ConfigLeaf::RepoDynamic => {
+        | ConfigLeaf::RepoDynamic
+        | ConfigLeaf::TraitDynamic => {
             unreachable!("only requirement leaves are applied directly")
         }
     }
@@ -3612,6 +3725,18 @@ fn apply_environment_defaults(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
+    for (trait_id, defaults) in &document.trait_defaults {
+        let target = runtime.trait_defaults.entry(trait_id.clone()).or_default();
+        for (port, value) in &defaults.defaults.port {
+            target.defaults.port.insert(port.clone(), value.clone());
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.defaults.port.{port}"),
+                layer,
+                source.clone(),
+            );
+        }
+    }
     let role_keys: Vec<_> = document.agent.role.iter().collect();
     let variant_role_keys = variant_role_assignments(&document.agent.variant);
     let model_tier_present = !document.agent.model_tier.is_empty();
@@ -4625,6 +4750,18 @@ fn merge_project_config(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
+    for (trait_id, defaults) in &next.trait_defaults {
+        let target = base.trait_defaults.entry(trait_id.clone()).or_default();
+        for (port, value) in &defaults.defaults.port {
+            target.defaults.port.insert(port.clone(), value.clone());
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.defaults.port.{port}"),
+                layer,
+                source.clone(),
+            );
+        }
+    }
     let setup_declared = repo_requirement(&next, ConfigLeaf::WorktreeSetup);
     let confinement_enabled = repo_requirement(&next, ConfigLeaf::WorktreeConfinementEnabled);
     let confinement_sandbox = repo_requirement(&next, ConfigLeaf::WorktreeConfinementSandbox);
@@ -4880,6 +5017,18 @@ fn merge_machine_config(
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
+    for (trait_id, defaults) in next.trait_defaults {
+        let target = base.trait_defaults.entry(trait_id.clone()).or_default();
+        for (port, value) in defaults.defaults.port {
+            target.defaults.port.insert(port.clone(), value);
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.defaults.port.{port}"),
+                layer,
+                source.clone(),
+            );
+        }
+    }
     if next.schema_version.is_some() {
         base.schema_version = next.schema_version;
     }
@@ -8414,6 +8563,146 @@ mod config_tests {
     }
 
     #[test]
+    fn decodes_port_defaults_in_authorized_runtime_and_sidecar_shapes() {
+        let runtime: RuntimeConfig =
+            toml::from_str("[trait.example.defaults.port]\nplan = \"scoped\"\n")
+                .expect("runtime defaults decode");
+        assert_eq!(
+            runtime
+                .trait_defaults
+                .get("example")
+                .and_then(|value| value.defaults.port.get("plan")),
+            Some(&"scoped".to_string())
+        );
+        let sidecar: TraitRunConfig = toml::from_str("[defaults.port]\nplan = \"sidecar\"\n")
+            .expect("sidecar defaults decode");
+        assert_eq!(
+            sidecar.defaults.port.get("plan"),
+            Some(&"sidecar".to_string())
+        );
+        assert!(toml::from_str::<RuntimeConfig>("[defaults.port]\nplan = \"base\"\n").is_err());
+        assert!(
+            toml::from_str::<RuntimeConfig>("[trait.example.defaults.port]\nplan = 42\n").is_err()
+        );
+        assert!(toml::from_str::<TraitRunConfig>("[defaults.port]\nplan = 42\n").is_err());
+    }
+
+    #[test]
+    fn selected_runtime_port_defaults_override_sidecar_defaults() {
+        let runtime: RuntimeConfig = toml::from_str(
+            "[trait.example.defaults.port]\nplan = \"runtime-plan\"\nnotes = \"runtime-notes\"\n",
+        )
+        .expect("runtime defaults decode");
+        let sidecar: TraitRunConfig =
+            toml::from_str("[defaults.port]\nplan = \"sidecar-plan\"\nrule = \"sidecar-rule\"\n")
+                .expect("sidecar defaults decode");
+        let mut defaults = BTreeMap::new();
+        for (port, value) in &runtime.trait_defaults["example"].defaults.port {
+            defaults.insert(
+                port.clone(),
+                ConfiguredPortDefault {
+                    value: value.clone(),
+                    layer: ConfigLayer::Repo,
+                    evidence: format!(".ctx/config.toml:trait.example.defaults.port.{port}"),
+                },
+            );
+        }
+        for (port, value) in sidecar.defaults.port {
+            defaults
+                .entry(port.clone())
+                .or_insert(ConfiguredPortDefault {
+                    value,
+                    layer: ConfigLayer::BuiltIn,
+                    evidence: format!("package/config.toml:defaults.port.{port}"),
+                });
+        }
+
+        assert_eq!(defaults["plan"].value, "runtime-plan");
+        assert_eq!(defaults["plan"].layer, ConfigLayer::Repo);
+        assert_eq!(defaults["notes"].value, "runtime-notes");
+        assert_eq!(defaults["rule"].value, "sidecar-rule");
+        assert_eq!(defaults["rule"].layer, ConfigLayer::BuiltIn);
+    }
+
+    #[test]
+    fn configured_port_defaults_reject_unknown_ports_with_origin() {
+        let trait_ref = ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            "id = \"example\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Fixture.\"\n\n[[port]]\nid = \"plan\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Plan path\"\n",
+        )
+        .expect("trait decodes");
+        let defaults = BTreeMap::from([(
+            "missing".to_string(),
+            ConfiguredPortDefault {
+                value: ".plans/MISSING.md".to_string(),
+                layer: ConfigLayer::Environment,
+                evidence: "$CTX_CONFIG:trait.example.defaults.port.missing".to_string(),
+            },
+        )]);
+
+        let error =
+            validate_port_defaults(&trait_ref, &defaults).expect_err("unknown port rejects");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("$CTX_CONFIG:trait.example.defaults.port.missing"));
+        assert!(rendered.contains("unknown input port \"missing\""));
+    }
+
+    #[test]
+    fn runtime_budget_overlay_preserves_unspecified_sidecar_leaves() {
+        let sidecar: TraitRunConfig =
+            toml::from_str("[budget]\nmax-frames = 3\nframe-seconds = 60\n")
+                .expect("sidecar budget decodes");
+        let runtime: RuntimeConfig =
+            toml::from_str("[run]\nframe-seconds = 15\n").expect("runtime budget decodes");
+        let mut effective = sidecar.budget;
+        overlay_budget(&mut effective, &runtime.run.expect("run table").budget);
+
+        assert_eq!(effective.max_frames, Some(3));
+        assert_eq!(effective.frame_seconds, Some(15));
+    }
+
+    #[test]
+    fn trait_port_defaults_merge_leafwise_and_environment_wins_with_provenance() {
+        let parse = |text: &str| toml::from_str::<RuntimeConfig>(text).expect("config decodes");
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_machine_config(
+            &mut effective,
+            parse(
+                "[trait.example.defaults.port]\nplan = \"global-plan\"\nnotes = \"global-notes\"\n",
+            ),
+            ConfigLayer::UserGlobal,
+            Some("global.toml".into()),
+            &mut winners,
+        );
+        merge_machine_config(
+            &mut effective,
+            parse("[trait.example.defaults.port]\nplan = \"repo-plan\"\n"),
+            ConfigLayer::Repo,
+            Some(".ctx/config.toml".into()),
+            &mut winners,
+        );
+        apply_environment_defaults(
+            &mut effective,
+            &parse("[trait.example.defaults.port]\nplan = \"environment-plan\"\n"),
+            ConfigLayer::Environment,
+            Some("$CTX_CONFIG".into()),
+            &mut winners,
+        );
+
+        let ports = &effective.trait_defaults["example"].defaults.port;
+        assert_eq!(ports["plan"], "environment-plan");
+        assert_eq!(ports["notes"], "global-notes");
+        let winner = &winners["trait.example.defaults.port.plan"];
+        assert_eq!(winner.layer, ConfigLayer::Environment);
+        assert_eq!(winner.source.as_deref(), Some("$CTX_CONFIG"));
+        assert_eq!(
+            winners["trait.example.defaults.port.notes"].layer,
+            ConfigLayer::UserGlobal
+        );
+    }
+
+    #[test]
     fn guide_requires_its_own_config_table_before_an_override_can_apply() {
         let mut profile = ResolvedRuntimeAssignments {
             registry: HarnessRegistry::default(),
@@ -8429,6 +8718,7 @@ mod config_tests {
             qualifier_by_role: BTreeMap::new(),
             budget: RunProfileBudget::default(),
             worktree: WorktreeConfig::default(),
+            port_defaults: BTreeMap::new(),
             model_catalogs: BTreeMap::new(),
             model_catalog_capability_reports: Vec::new(),
             builtin_detection: None,
