@@ -71,8 +71,14 @@ matters: **the guide does not know what the run is about.**
   `tui_kit` already carries `Modifier::DIM` styling in several spots
   (`tui_kit.rs:728`, `:748`, `:866`). One helper, used by all three.
 
-### Two smaller ones
+### Three smaller ones
 
+- **It is the guide everywhere, and stops being "ask".** The seat, the modal
+  and this task already say guide; only the labels, hints and the
+  `AskPane`/`AskPhase` types still say ask (0054). Rename them. The word is
+  wanted for the opposite direction — 0087 makes `ask` a trait-authoring verb
+  for a run asking outward, and two opposite meanings of one word across the
+  ledger and the UI is a collision worth spending an afternoon to avoid.
 - **Clearing the chat.** A conversation that can only grow is one you abandon
   rather than reuse. It is in-memory (`4926b24d`), so clearing is local — no
   ledger involvement.

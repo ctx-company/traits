@@ -35,7 +35,7 @@ elegant interface for it"* — and it turns out to be park plus a typed hole.
   channels are routed — a Slack card, a PR comment, the local view — carrying the exact command to
   answer it. Answers come back through `ctx`, never up a channel, so 0069's no-read-back contract is
   untouched.
-- **Resuming fills the slot and continues; it does not re-consult.** The answer is the accepted value
+- **Resuming fills the slot and continues; it does not re-ask.** The answer is the accepted value
   for that execution. Re-asking on resume would make every park a fresh question and make a
   long-running decision impossible to conclude.
 
@@ -65,7 +65,7 @@ call; resume wiring the accepted value into the parked execution and advancing.
 
 ## Done when
 
-A consult against a person peer parks the run immediately with an open question rather than a
+An ask against a person peer parks the run immediately with an open question rather than a
 blocker; the park report and the routed handoff surfaces show the question, its evidence and its
 choices; `ctx traits answer` and the dashboard both resolve it through one code path; a reply that
 does not match the declared schema is refused with a readable reason; resume fills the slot and

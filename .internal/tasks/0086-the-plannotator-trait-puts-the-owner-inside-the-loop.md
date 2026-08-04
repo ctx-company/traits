@@ -76,6 +76,9 @@ recording — what to type, what to annotate, and what the viewer is meant to no
 - A missing `plannotator` on PATH must fail before the first frame. Discovering it at the plan gate
   means the demo dies after the run has already spent a model call drafting.
 - Never rebuild the package while a run is live.
+- The hand-wiring here is deliberate and temporary. 0087/0088 generalise exactly this shape — a run
+  that stops and asks a person — and 0097 is the migration onto it. Ship this version as written; do
+  not wait for the interface, and do not pre-emptively bend the trait toward it.
 
 ## Done when
 

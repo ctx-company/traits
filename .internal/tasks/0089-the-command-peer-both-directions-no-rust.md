@@ -29,7 +29,7 @@ subprocess a correspondent a run can talk to and hear from.
 ## Scope
 
 The `command` peer variant reusing 0073's executor and versioned envelope/receipt schemas with a
-`consult` payload added; config-declared direction and shape with required fields; `resolve()`
+`ask` payload added; config-declared direction and shape with required fields; `resolve()`
 checking the program exists and is executable; bounds via 0084; `--dry-run` printing argv,
 environment keys and the stdin payload while executing nothing.
 
@@ -40,7 +40,7 @@ environment keys and the stdin payload while executing nothing.
   ingress (0088).
 - The payload schema becomes a public contract the moment someone writes a script against it. Version
   it from the first commit — 0073 already says this, and now two payload types share the versioning.
-- `--dry-run` must not execute the program, in either direction. A dry run that consults production is
+- `--dry-run` must not execute the program, in either direction. A dry run that asks production is
   the exact failure `--dry-run` exists to prevent.
 - Do not pass another peer's secrets into the environment.
 

@@ -21,9 +21,10 @@ else's, without us shipping a plugin runtime to do it.
 - **No templating language.** The temptation is `template = "run {{id}} is {{status}}"`, and it ends
   as a half-language with no types and no errors. The script receives the full typed `RunState` JSON
   and composes text in a real language. Config selects fidelity and wire; it does not author prose.
-- **`Upsert` works here too.** The receipt's `reference` round-trips: a script that returns one gets
-  it back on the next delivery and can edit whatever it created. Nothing about updating is reserved
-  for first-party channels.
+- **Updating in place works here too.** The receipt's `reference` round-trips: a script that returns
+  one gets it back on the next delivery and can edit whatever it created. Nothing about updating is
+  reserved for first-party channels, and the script decides what a repeat means with no core enum
+  standing in its way (0069).
 - **It runs with the user's privileges and we say so.** A configured command is arbitrary code from
   the repository's config, running outside any sandbox with the environment we hand it. That is the
   honest trade for zero-friction extensibility, it is stated in the docs and in `doctor` output, and

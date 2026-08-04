@@ -8,9 +8,10 @@ of Slack deliberately: it needs no secrets of our own, it lands where reviewers 
 
 ## Decisions
 
-- **It is the canonical `Upsert` channel**, keyed on the branch. A second delivery is an update, not
-  a duplicate, so a run that lands three more commits refreshes its PR body without any other channel
-  re-firing. This is the case that proves `Repeat` is a real property and not a Slack special case.
+- **It always updates in place**, keyed on the branch — that is simply what a PR body is, and it is
+  why this channel needs no option to choose otherwise. A second delivery refreshes the body rather
+  than duplicating it, so a run that lands three more commits updates without any other channel
+  re-firing. It is the channel that proves the router only has to hand back a prior reference (0069).
 - **Adoption on first delivery.** With no stored reference, the channel asks `gh` whether a PR
   already exists for this branch and adopts it rather than opening a second. A PR opened by hand is
   the common case and must not produce a duplicate.
@@ -27,7 +28,7 @@ of Slack deliberately: it needs no secrets of our own, it lands where reviewers 
 
 ## Scope
 
-The `github-pr` channel with `Upsert` + branch key + adoption; `Document`/`Markdown` capabilities
+The `github-pr` channel with update-in-place + branch key + adoption; `Document`/`Markdown` capabilities
 with no budget; the fenced body block with preserve-around semantics; `resolve()` covering `gh`
 presence, auth and remote; draft-open behaviour; `--dry-run` printing the exact body and target.
 

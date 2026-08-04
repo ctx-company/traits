@@ -1,0 +1,127 @@
+# 0087 — The peer interface: a run tells and asks, and the host performs the effect
+
+**Status:** ready to implement · **Depends on:** 0069 (Spec, renderer, delivery log), 0084 (the wait bound) · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+
+First slice of the peer arc, and the whole design. Everything after it is a transport.
+
+0069 gives the *host* a way to report about a run it may have outlived. This gives the *run* a way to
+speak while it is alive, and to ask something and use the answer. 0086 already does exactly this, by
+hand, with one hardcoded binary; this is what makes it a property of the system rather than of one
+trait.
+
+## What an `ask` is for
+
+It is not a better way to fetch information. For open-ended lookup — a worker reading docs while it
+codes — an ambient tool grant (0092) is strictly better, because the model knows when it needs
+something and an author cannot predict it. Declaring a docs-fetch step would be worse.
+
+An `ask` exists for the four cases an ambient tool cannot serve:
+
+1. **The run has to stop.** A model cannot hold "ask the owner" as a tool, because a tool call happens
+   inside a turn and a turn cannot park. Asking a person is a different lifecycle, not a slower call.
+2. **The answer feeds control flow.** 0086's loop is
+   `until: all([verdict.status == approved, ownerDecision.decision == approved])`. That is unwritable
+   against a tool result, which lives in a transcript; `until:` needs a typed slot.
+3. **The question must always be asked.** With an ambient tool the model *usually* checks the freeze
+   calendar. With a step, the run checked. That gap is the difference between probable and provable.
+4. **It has to be in the record.** The request is inspectable before its effect fires and the reply is
+   digested, so "what did this run reach out to, and what came back" has an exact answer.
+
+Short version: an `ask` is the mechanism for answers that must be **structural**.
+
+## Decisions
+
+- **Two verbs, one interface: `tell` and `ask`.** Direction is a declared property of a peer, not a
+  second abstraction. A peer that can only be told things and one that can only answer are the same
+  trait with different capability flags.
+- **The UI pane gives up the word.** 0009/0054/0096 use `ask` for the owner questioning a live run;
+  that surface is already the *guide* everywhere else, so it is renamed to match and the authoring
+  verb keeps `ask`. Renaming a user-facing label is cheaper than renaming an authoring primitive.
+- **No model runs an ask.** It is a step: the author places it, the frame reaches it, the host
+  performs it. Nothing decides *whether* to ask. If the question text must be composed, that is an
+  ordinary prompt step before it writing a typed slot — two declared steps, both in the graph. The
+  property being protected is that you can read a procedure and see every question it can ever ask.
+- **The run never performs the effect.** A step emits a typed request; the host observes it in the
+  drive path, performs it with its own credentials outside the sandbox, and writes the result back as
+  an accepted slot value. No network in the worktree, no token in the sandbox, one delivery path
+  shared with 0069. Every other property here follows from this one move.
+- **The request record exists and is inspectable before the effect fires.** That ordering is what
+  makes mediation possible at all — a policy layer decides on a typed record rather than intercepting
+  a socket, and a denial is a recorded first-class outcome rather than a network error nobody can
+  attribute. Free now, expensive to retrofit.
+- **An `ask` is a step, with everything that implies.** Round 2 of a loop asks again and gets its own
+  entry and its own digest; it never reuses round 1's answer. Caching is keyed by execution, never by
+  declaration site. Replaying a *recorded* run replays recorded answers — the same rule, not an
+  exception to it.
+- **An `ask` declares both shapes, request and reply.** Checking one direction catches half the
+  mismatches, and the half it misses is the one that fails mid-run.
+- **`evidence` is references, never prose.** An ask points at slots and ports the run already holds;
+  it does not author a description of them. The host dereferences and renders them to the peer's
+  `Spec`, so a question surface is 0068's brief narrowed to a subset. A prose summary would be a model
+  output that can drift from the state it claims to describe.
+- **The trait declares a role, the repo declares the binding, `doctor` matches them.** Trait source
+  names `"owner"` and a reply shape; `[[peer]]` says what answers. Same split 0069 set for ports and
+  routing, and the third instance of it. A trait asking a peer that cannot answer, or whose schema
+  does not fit, fails at `doctor` — before a run, before spend.
+- **Two plain fields, no taxonomy: `wait-ms` and `deferred`.** How long to hold, and what an
+  unanswered ask *means*: a fault (park with a blocker, like any failed command step) or an open
+  question (park with something still answerable). Latency was never the real property. `wait-ms`
+  reuses 0084's per-step budget rather than inventing a third notion of a bound.
+- **The core declares only what the core consumes.** `Spec` stays, because the renderer reads
+  fidelity, wire and budget to produce bytes. Repeat behaviour does not: the core's only stake is
+  whether a prior reference exists for this key and whether the peer wants it handed back. Everything
+  past that — Slack's `mode = "send" | "update" | "thread"`, a file's `append` — is the peer's own
+  vocabulary. 0069's `Repeat` enum is deleted rather than widened; guessing a shared vocabulary for
+  transports nobody has written yet is how it would go wrong.
+- **Each peer publishes an options schema, and `doctor` validates config against it.** That is what
+  keeps per-peer freedom from becoming unchecked free-form config: a typo'd `mode = "thred"` fails at
+  `doctor` because the Slack peer declared the enum. An options schema is data, so a WASM guest can
+  export one later (0074) exactly as it exports `Spec`.
+- **Unbound roles: required fails, optional degrades.** A required role with no `[[peer]]` fails at
+  `doctor`. An optional one falls back to the `local` peer, visibly, in `doctor` and in the run
+  record — so a fresh clone with no token still shows the messages instead of swallowing them.
+- **It reuses 0069 wholesale.** Same `Spec`, same `render(&State, &Spec)`, same backend
+  implementations, same append-only delivery log — widened from `(session, channel)` to
+  `(session, peer, site)`.
+- **The `local` peer ships first.** Messages and questions appear in the live view and the dashboard:
+  no network, no secrets, no config, and it exercises request → host → effect → ledger row → replay
+  end to end before any transport exists. Same move as 0069's file channel and 0060's files backend.
+- **Policy stays in the trait.** 0086's escalation ladder — the owner is summoned only on a round the
+  machine reviewer already approved, so the run *earns* the right to ask — is a `when` guard in a
+  procedure. The interface supplies mechanism and takes no position on when it is used.
+
+## Scope
+
+The `Peer` trait and its verbs; `tell` / `ask` as CDK authoring surfaces with typed request and reply
+schemas and reference-only `evidence`; the request record and the host's perform-and-write-back path
+in the drive loop; `wait-ms` and `deferred` per peer; per-peer options schemas validated at `doctor`;
+`[[peer]]` config with `resolve()` and role-to-binding matching against declared capabilities; the
+delivery log widened to `(session, peer, site)` and handing back a prior reference; the `local` peer;
+`--dry-run` covering both verbs.
+
+## Watch
+
+- **The perform-and-write-back path runs while a frame is open.** It is the first thing in the drive
+  loop that blocks on something outside the machine, so it must be bounded, cancellable and visible in
+  the live view — a silent hold is indistinguishable from a hang (0084's whole subject).
+- A `tell` always renders *its own* content; the peer's options decide disposition. The "full current
+  picture" case is the handoff report (0070), derived from the ledger. Otherwise an appending peer
+  would need deltas and an editing one would need state, and a tell would have to know which it was.
+- Do not let `tell` grow a template language. 0073 refused this and the reasoning is unchanged: config
+  selects shape and options, it never authors prose.
+- Widening the delivery log's key touches 0069's rows and 0070 adds sequence numbers to the same ones.
+  One migration, not two.
+- Keep the request record out of the session ledger's contract-validated surface. 0050 is the standing
+  lesson, and this adds a third producer to exactly the shape that failed.
+- A denied or failed `tell` is not a failed run (0069). A failed `ask` *is* a failed step, because the
+  run's next frame depends on it. The asymmetry is deliberate; do not flatten it.
+
+## Done when
+
+A trait can `tell` and `ask` a named role with typed shapes and no model deciding either; the run
+emits requests and never performs an effect itself; the host performs, records, and writes replies
+back as accepted slot values; a request record is inspectable before its effect fires; an ask inside a
+loop asks again each round; `wait-ms` bounds the hold and `deferred` decides whether an unanswered ask
+parks as a fault or as an open question; a peer's options are validated at `doctor` against the schema
+it publishes; a required unbound role fails at `doctor` and an optional one degrades to `local`
+visibly; and the `local` peer proves the whole path with no network.

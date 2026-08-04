@@ -17,10 +17,19 @@ PR body, a Slack card — through one interface, without any of them being speci
 - **Verbs: `resolve · capabilities · deliver`.** No `list`, no `history`, no `read`. Read-back means
   an inbox, an inbox is state, and state already has a provider. A reply path (approving from Slack)
   is ingress — untrusted input with an authorization question — and is out of this interface by name.
-- **Heterogeneity is captured by exactly two declared properties.** A channel differs from another
-  only in what shape it accepts (`Spec { fidelity, wire, budget_bytes, attachments }`) and how a
-  repeat behaves (`Repeat { Once, Upsert, Overwrite }`). The router asks `capabilities()`, renders to
-  that spec, and delivers. No channel renders; no renderer knows about channels.
+- **The core declares only what the core consumes.** A channel declares the shape it accepts
+  (`Spec { fidelity, wire, budget_bytes, attachments }`) because the renderer reads it: the router
+  asks `capabilities()`, renders to that spec, and delivers. No channel renders; no renderer knows
+  about channels.
+- **Repeat behaviour is NOT core.** The router's only stake in a second delivery is whether a prior
+  reference exists for this key and whether the channel wants it handed back. What the channel then
+  does — Slack's `mode = "send" | "update" | "thread"`, a file's `append`, a PR body's fenced
+  rewrite — is the channel's own vocabulary. There is no `Repeat` enum: guessing a shared repeat
+  language for transports nobody has written yet constrains authors for no gain.
+- **Each channel publishes an options schema and `doctor` validates config against it.** That is what
+  keeps per-channel freedom from decaying into unchecked free-form config — a typo'd
+  `mode = "thred"` fails at `doctor` because the Slack channel declared the enum. An options schema
+  is data, so a WASM guest can export one later (0074) exactly as it exports `Spec`.
 - **Delivery is a host act, never an in-run step.** The runs most worth hearing about are the ones
   that died hard — killed at a bound, crashed, parked at round 1 — and an in-run step cannot fire on
   any of them. It also keeps secrets out of the worktree and the network away from the sandbox, and
@@ -47,15 +56,16 @@ PR body, a Slack card — through one interface, without any of them being speci
 
 ## Scope
 
-The `Channel` trait and its three verbs; `Spec` / `Rendered` / `Repeat` / `Envelope` / `Receipt`;
+The `Channel` trait and its three verbs; `Spec` / `Rendered` / `Envelope` / `Receipt` and the
+per-channel options schema;
 the append-only delivery log in the run store; the `[handoff.channel]` and `[handoff.route]` config
 tables with `doctor --config` provenance and `resolve()` validation; the `file` channel;
 `ctx traits handoff <session> [--channel …] [--dry-run]` running the same code path the host runs.
 
 ## Watch
 
-- **`Upsert` requires the channel to consult its own destination** (does a PR already exist for this
-  branch). That is a channel reading the world, not the interface exposing read-back to callers —
+- **Updating in place requires the channel to read its own destination** (does a PR already exist for
+  this branch). That is a channel reading the world, not the interface exposing read-back to callers —
   `deliver` stays the only verb. Do not let this leak upward into a fourth verb.
 - Secrets: env-var *reference* in config, resolved in the host, never printed. `doctor` reports
   whether a token resolves without echoing it, and `--dry-run` output must be safe to paste.

@@ -7,10 +7,17 @@ it is the one that proves capability-driven rendering actually works.
 
 ## Decisions
 
-- **One card per run, updated — not a stream.** `Upsert` keyed `(session, channel)` with the stored
-  message `ts`. A run posts once and then edits itself as rounds land, gates report and it parks or
-  completes. A channel that posts per milestone gets muted within a week, and a muted channel is
-  worse than no channel.
+- **One card per run, updated — not a stream, by default.** Keyed `(session, channel)` with the
+  stored message `ts`. A run posts once and then edits itself as rounds land, gates report and it
+  parks or completes. A channel that posts per milestone gets muted within a week, and a muted
+  channel is worse than no channel.
+- **The channel publishes `mode = "update" | "thread" | "send"` and the repo picks.** These are
+  Slack's own three dispositions, so they are declared here in Slack's vocabulary rather than mapped
+  onto a core enum (0069), and `doctor` validates the value against the schema this channel declares.
+  `update` is the default for the reason above; `thread` keeps the card and replies beneath it;
+  `send` posts each time and is the honest choice for a log channel. This supersedes the original
+  "threading is out" ruling, on that ruling's own terms — it asked for evidence that one edited
+  message is insufficient, and the evidence arrived before implementation rather than after.
 - **`Card` fidelity, `SlackBlocks` wire, hard budget.** The renderer degrades deterministically —
   a twelve-blocker park report becomes a count, the top blockers and a link to the full brief. The
   channel declares the budget; it never truncates. Truncation mid-structure is how a park report
@@ -26,12 +33,14 @@ it is the one that proves capability-driven rendering actually works.
   channel exists, at `doctor` time.
 - **Delivery is at-most-once with a bounded retry, then a recorded failure.** No infinite retry, no
   silent drop. A miss you can see beats a duplicate you cannot recall.
-- **Threading is out.** No per-round replies, no thread of updates. One message, edited. Anything
-  richer belongs to a future task with evidence that this is insufficient.
+- **Whatever the mode, the run gets one anchor.** `thread` replies beneath the original card rather
+  than starting a new root, and `send` still records its latest reference. A mode is a choice about
+  disposition, never a licence to lose track of which message belongs to which run.
 
 ## Scope
 
-The `slack` channel with `Upsert` + stored `ts` + `chat.update`; `SlackBlocks` rendering from the
+The `slack` channel with stored `ts` + `chat.update`; its published `mode` options schema validated at
+`doctor`; `SlackBlocks` rendering from the
 `Card` fidelity with declared budget and deterministic degrade; env-referenced token resolution;
 `resolve()` covering token and channel existence; bounded retry with recorded failure;
 `--dry-run` printing the rendered blocks and destination.

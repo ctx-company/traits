@@ -10,9 +10,9 @@ rather than re-posted, which is why this is in the arc at all and why "progress 
 ## Decisions
 
 - **Update is not a new mechanism.** It is the same pipeline fired again: snapshot `RunState` →
-  `render(spec)` → `deliver` with `Repeat::Upsert`. If the log holds a reference for
-  `(session, channel)`, the channel edits in place; if not, it creates and stores one. There is no
-  second code path and no "update" verb.
+  `render(spec)` → `deliver`, with the prior reference for `(session, channel)` handed back if the
+  log holds one. What the channel does with it is the channel's business (0069) — edit, append,
+  thread, repost. There is no second code path and no "update" verb.
 - **Cadence is declared per channel, not globally**, in `capabilities()`:
   `Update { Terminal, OnMilestone { debounce_seconds } }`. A file channel updates freely because it
   is free; a Slack card wants a debounce; a PR body wants a longer one. The host debounces — a
@@ -23,8 +23,9 @@ rather than re-posted, which is why this is in the arc at all and why "progress 
 - **The delivery log carries a monotonic sequence and refuses out-of-order writes.** A late milestone
   arriving after the terminal update must not repaint a finished run as `running`. This is cheap now
   and unpleasant to retrofit once three channels exist.
-- **`Once` channels never participate.** A pager-style alert is `Once` and is emitted at one phase
-  only. Only `Upsert` and `Overwrite` channels join the milestone loop.
+- **Routing decides who participates, not a channel property.** A pager-style alert is routed
+  `on = ["failed"]` and is therefore never delivered at a milestone. This is why 0069 needs no `Once`
+  variant: "fire at one phase only" was always a routing statement wearing a capability costume.
 - **A vanished target is not recreated.** If an update fails because a human deleted the message or
   closed the PR, record the failure and stop. They deleted it deliberately; reposting is both rude
   and unrecallable.
@@ -35,8 +36,8 @@ rather than re-posted, which is why this is in the arc at all and why "progress 
 ## Scope
 
 `Update` in `capabilities()`; a milestone hook in the host's drive path; host-side debouncing;
-sequence numbers on delivery-log rows with an out-of-order refusal; `Repeat::Upsert` wired to the
-stored reference; the file channel re-rendering on milestones as the offline proof of the loop.
+sequence numbers on delivery-log rows with an out-of-order refusal; the stored reference handed back
+on every repeat delivery; the file channel re-rendering on milestones as the offline proof of the loop.
 
 ## Watch
 
@@ -54,7 +55,8 @@ stored reference; the file channel re-rendering on milestones as the offline pro
 
 ## Done when
 
-A routed `Upsert` channel shows one surface per run that changes as the run progresses; a resumed or
+A channel routed on milestones shows one surface per run that changes as the run progresses; a resumed or
 re-driven session edits the existing surface rather than creating a second; a late milestone cannot
 repaint a terminal run; a deleted target records a failure without reposting; debouncing coalesces
-bursts to the latest snapshot; and `Once` channels are provably untouched by the milestone loop.
+bursts to the latest snapshot; and a channel routed only on a terminal phase is provably untouched by
+the milestone loop.
