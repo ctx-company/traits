@@ -101,10 +101,41 @@ integration (no wrapper) and `teamclaude run --` both support ctx's headless
 spawn shape fully; env-only stays the recommendation because it adds no binary
 between the harness and claude, and the harness registry owns argv anyway.
 
+### CONFIGURED on this repo, 2026-08-04 — Level 1 is live
+
+`[worktree.env]` in this machine's `.ctx/traits/runtime.toml` (machine-local,
+gitignored — deliberately NOT a committed product default, per the risks
+section) now carries:
+
+```toml
+ANTHROPIC_BASE_URL = "http://localhost:3456"
+```
+
+The base-URL form and never the MITM form, on purpose: `HTTPS_PROXY` would
+also funnel the opencode seats' openrouter/openai traffic through the proxy,
+while `ANTHROPIC_BASE_URL` is read only by anthropic-API clients and is inert
+for every current seat until one is assigned claude-code. `doctor --config`
+shows it resolving with repo provenance, additively beside the existing
+overlay entries.
+
+**Step 2's end-to-end ran and passed**: a real `--worktree` run with
+`--assign 'narrator=claude-code:cli:per-frame:claude-haiku-4-5-20251001'`
+(per-invocation override — no shared config touched while four owner runs
+were live) dispatched its session-title call from inside the run, under
+confinement, and the proxy served it — the rotated account's request counter
+moved with `lastUsed` at that second, while the machine's own logged-in
+account stayed untouched. That closes the confinement question too, which was
+already closed statically: the seatbelt profile is `(allow default)` +
+`(deny file-write*)`, no network rules.
+
+Also noted while wiring: no per-harness env exists in ctx (`[worktree.env]`
+base + repo override are the only env sites), which means host-side
+`--no-worktree` runs do NOT get the proxy — worktree runs only. Fine for the
+dogfood loop, which is always `--worktree`; worth remembering for one-off
+host-side claude seats.
+
 Still unverified, deliberately: a rotation crossing mid-run without a failed
-frame (needs a real quota approach, not worth forcing), and loopback egress
-from inside ctx's sandbox-exec confinement — the tests above ran unconfined,
-so step 2 below should confirm a confined frame reaches `localhost:3456`.
+frame (needs a real quota approach, not worth forcing).
 
 ## The integration point, and it is smaller than expected
 
