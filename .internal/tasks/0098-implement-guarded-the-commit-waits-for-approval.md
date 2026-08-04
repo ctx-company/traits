@@ -11,7 +11,9 @@ run's side it is just a command that takes a while and then exits 0 or not.
 
 - **The gate is the command, not a new concept.** The commit step's command changes from
   `git commit -m <message>` to `ctx-gate run -- git commit -m <message>`. Nothing else in the
-  procedure changes, and the trait system learns nothing new.
+  procedure changes, and the trait system learns nothing new. The invocation is exactly that —
+  no action name, no extra flags (owner ruling 2026-08-04). Approval can happen from anywhere;
+  how the gate runs the command is ctx-gate's business, never the trait's.
 - **Three small additive edits.** `commitTail` gets an optional field — words to put in front of
   the commit command, plus a step timeout. `familyProcedure` passes it through. A new
   `variants/guarded.ts` sets it. Every other variant's generated output stays byte-identical.
@@ -22,9 +24,10 @@ run's side it is just a command that takes a while and then exits 0 or not.
   ruling 2026-08-04: demo-only, make it never fire). An undeclared timeout defaults low and would
   kill the hold mid-decision — declare it on this one step, per the standing rule that a step's
   ceiling lives in the trait.
-- **Silence is already covered.** ctx-gate may print nothing while it polls; the repo's existing
-  600-second idle budget is enough, because no demo waits longer than that on a held commit (owner
-  ruling, same day). No heartbeat work on either side.
+- **Silence is already covered.** ctx-gate prints its checkpoint card once, then polls silently
+  and never gives up on its own — so the trait's budgets are the only ceilings, and the repo's
+  existing `command-idle-seconds = 600` (`.ctx/traits/runtime.toml`) gives the demo a ten-minute
+  approval window, which is enough (owner ruling, same day). No heartbeat work on either side.
 - **The step says what it is doing.** Title it "Commit the work (awaiting ctx-gate approval)" so
   the live run view narrates the hold by itself.
 - **Approve → normal completion; deny → the run parks with the refusal on record.** The approval
@@ -51,11 +54,15 @@ shared procedure.
 - **The commit message is what the approver reads.** The scribe's message sits inside the command
   line ctx-gate shows, so the approval prompt describes itself. Free — do not add wiring to
   "provide context".
-- **Exit codes.** Any nonzero parks. If ctx-gate later distinguishes denied / errored /
-  gave-up-waiting, the park evidence can say "denied by owner" instead of "command failed" — nice,
-  not needed now.
+- **Exit codes.** Denial exits 1 (owner-verified live); any nonzero parks. If ctx-gate later
+  distinguishes denied from errored, the park evidence can say "denied by owner" instead of
+  "command failed" — nice, not needed now.
+- **Do not pass `--json`.** It suppresses the waiting card, and that card — printed into the held
+  step's live output — names the checkpoint and the exact `ctx-gate checkpoint allow <id>` /
+  `deny <id>` commands. The demo narrates itself.
 - **A missing `ctx-gate` binary is discovered only after the whole build loop ran.** The runbook
-  preflights `ctx-gate --version` before dispatch; no doctor machinery for one demo.
+  preflights `ctx-gate --help` before dispatch (there is no `--version` flag); no doctor machinery
+  for one demo.
 - **Dry-run can never trigger an approval request** — it executes nothing. Stated so nobody
   worries.
 
