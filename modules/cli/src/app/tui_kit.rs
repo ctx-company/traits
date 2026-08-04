@@ -933,6 +933,124 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
     }
 }
 
+/// Renders a persistent, single-line conversation modal. The caller owns the
+/// exchange data and dispatch lifecycle; this reusable shape owns only modal
+/// geometry, wrapping, viewport clamping, and input cursor placement.
+pub(crate) fn render_conversation_modal(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    title: &str,
+    rows: &[String],
+    input: &TextInput,
+    scroll: &mut ViewportScroll,
+    follow: bool,
+) {
+    let width = area.width.clamp(1, 70);
+    let height = area.height.clamp(1, 18);
+    let rect = centered_rect(area, width, height);
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().add_modifier(Modifier::DIM))
+        .title(title.to_string());
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+    let body_height = conversation_body_rows(area) as u16;
+    let mut wrapped = Vec::new();
+    for row in rows {
+        wrapped.extend(wrap_text_lines(row, inner.width));
+    }
+    scroll.set_len(wrapped.len());
+    if follow {
+        scroll.apply(ScrollDelta::End, body_height as usize);
+    } else {
+        scroll.clamp(body_height as usize);
+    }
+    let visible = scroll.window(body_height as usize);
+    if body_height > 0 {
+        frame.render_widget(
+            Paragraph::new(
+                wrapped[visible]
+                    .iter()
+                    .map(|line| RLine::from(line.clone()))
+                    .collect::<Vec<_>>(),
+            ),
+            Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: body_height,
+            },
+        );
+    }
+    let input_y = inner.y + inner.height.saturating_sub(2);
+    let (visible_input, input_cursor_col) = conversation_input_window(input, inner.width);
+    frame.render_widget(
+        Paragraph::new(vec![
+            RLine::from(format!("Ask: {visible_input}")),
+            RLine::from(Span::styled(
+                "enter send  esc/q close  arrows/pg scroll",
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+        ]),
+        Rect {
+            x: inner.x,
+            y: input_y,
+            width: inner.width,
+            height: inner.height.saturating_sub(body_height),
+        },
+    );
+    frame.set_cursor_position((
+        inner.x + (5u16.saturating_add(input_cursor_col as u16)).min(inner.width.saturating_sub(1)),
+        input_y,
+    ));
+}
+
+/// Returns the input window and the cursor's terminal-column offset within it.
+/// `TextInput` indexes chars, while terminals position cursors in display cells.
+fn conversation_input_window(input: &TextInput, width: u16) -> (String, usize) {
+    let available = width.saturating_sub(5) as usize;
+    let chars: Vec<char> = input.text().chars().collect();
+    let cursor = input.cursor().min(chars.len());
+    let char_width = |ch: char| {
+        let mut buf = [0u8; 4];
+        Span::raw(ch.encode_utf8(&mut buf) as &str).width()
+    };
+    // Keep one terminal cell after the cursor. `Frame` cannot place a cursor
+    // at the right edge, and clamping there can land inside a wide glyph.
+    let cursor_available = available.saturating_sub(1);
+    let mut start = cursor;
+    let mut used = 0;
+    while start > 0 {
+        let next = char_width(chars[start - 1]);
+        if used + next > cursor_available {
+            break;
+        }
+        start -= 1;
+        used += next;
+    }
+    let cursor_col = used;
+    let mut end = cursor;
+    while end < chars.len() {
+        let next = char_width(chars[end]);
+        if used + next > available {
+            break;
+        }
+        used += next;
+        end += 1;
+    }
+    (chars[start..end].iter().collect(), cursor_col)
+}
+
+/// The history viewport shared by conversation key reducers and rendering.
+pub(crate) fn conversation_body_rows(area: Rect) -> usize {
+    let height = area.height.clamp(1, 18);
+    height.saturating_sub(2).saturating_sub(2) as usize
+}
+
 /// Suspends the pane and runs `$EDITOR` on `path` in place, returning
 /// whether it exited zero. Moved from `dashboard::edit_selected_trait_source`
 /// and generalized over the path.
@@ -1095,6 +1213,53 @@ mod tests {
     fn viewport_scroll_is_at_bottom_holds_for_empty_content() {
         let viewport = ViewportScroll::new();
         assert!(viewport.is_at_bottom(10));
+    }
+
+    #[test]
+    fn guide_conversation_modal_places_unicode_cursor_by_display_width() {
+        let mut input = TextInput::new("a界b");
+        input.handle_key(false, &key(KeyCode::End));
+        assert_eq!(
+            conversation_input_window(&input, 20),
+            ("a界b".to_string(), 4)
+        );
+
+        // The input window follows the edited cursor instead of clipping the
+        // suffix and leaving the cursor at an unrelated terminal column.
+        let input = TextInput::new("abcdefgh界");
+        assert_eq!(conversation_input_window(&input, 9), ("h界".to_string(), 3));
+
+        use ratatui::{Terminal, backend::TestBackend, layout::Position};
+        let mut terminal = Terminal::new(TestBackend::new(11, 6)).expect("terminal");
+        let mut scroll = ViewportScroll::new();
+        terminal
+            .draw(|frame| {
+                render_conversation_modal(
+                    frame,
+                    frame.area(),
+                    "Guide",
+                    &[],
+                    &input,
+                    &mut scroll,
+                    true,
+                );
+            })
+            .expect("draw");
+        let rendered: String = (0..11)
+            .map(|x| {
+                terminal
+                    .backend()
+                    .buffer()
+                    .cell((x, 3))
+                    .expect("cell")
+                    .symbol()
+            })
+            .collect();
+        assert!(rendered.contains("h界"));
+        assert_eq!(
+            terminal.get_cursor_position().expect("cursor"),
+            Position::new(9, 3)
+        );
     }
 
     // Exercises the trait editor's master-detail width policy independently of

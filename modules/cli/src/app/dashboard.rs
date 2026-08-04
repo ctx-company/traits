@@ -788,6 +788,13 @@ struct State {
     /// Always empty while the SESSIONS list is visible; `Tab`/`BackTab`
     /// switch dashboard screens in that state instead.
     pending_keys: Vec<crossterm::event::KeyEvent>,
+    /// Process-local guide state received only from a live-view handoff.
+    guide_chat: Option<run_view::GuideChatHandle>,
+    /// The only attached session allowed to use the process-local handoff.
+    /// Retaining this across detach permits an explicit reattach, but never
+    /// leaks the originating run's context into the list or another session.
+    guide_chat_session_id: Option<String>,
+    guide_body_rows: usize,
 }
 
 /// P550 dashboard `S`-key state: a snapshot of one session's story, built
@@ -835,8 +842,12 @@ impl State {
         state
     }
 
-    fn new_for_session(session_id: String) -> Self {
-        let mut state = Self::new_without_worker_for_session(Some(session_id));
+    fn new_for_session_with_guide(
+        session_id: String,
+        guide_chat: Option<run_view::GuideChatHandle>,
+    ) -> Self {
+        let mut state =
+            Self::new_without_worker_for_session_with_guide(Some(session_id), guide_chat);
         state.worker = Some(worker::Handle::new());
         state
     }
@@ -848,6 +859,13 @@ impl State {
     }
 
     fn new_without_worker_for_session(initial_session_id: Option<String>) -> Self {
+        Self::new_without_worker_for_session_with_guide(initial_session_id, None)
+    }
+
+    fn new_without_worker_for_session_with_guide(
+        initial_session_id: Option<String>,
+        guide_chat: Option<run_view::GuideChatHandle>,
+    ) -> Self {
         // Everything except `live` starts collapsed: the one section that
         // means "moving right now" is the one worth opening on arrival.
         let mut collapsed_groups = HashSet::new();
@@ -856,6 +874,7 @@ impl State {
             SessionGroup::Failed,
             SessionGroup::Completed,
         ]);
+        let guide_chat_session_id = guide_chat.as_ref().and_then(|_| initial_session_id.clone());
         Self {
             screen: Screen::Sessions,
             sessions: Vec::new(),
@@ -899,6 +918,9 @@ impl State {
             refresh_error: None,
             story_view: None,
             pending_keys: Vec::new(),
+            guide_chat,
+            guide_chat_session_id,
+            guide_body_rows: 10,
         }
     }
 
@@ -2162,16 +2184,22 @@ fn sort_trust_rows(rows: &mut [TrustRow]) {
 /// every path (quit key, panic-safe teardown via `RatatuiPane`); dashboard
 /// exit never signals or otherwise touches any listed run.
 pub(crate) fn run() -> crate::Result<()> {
-    run_with_initial_session(None)
+    run_with_initial_session(None, None)
 }
 
 /// Opens SESSIONS with this identity selected once its first inventory snapshot
 /// arrives. Used by the live run pane after it has restored terminal ownership.
-pub(crate) fn run_for_session(session_id: String) -> crate::Result<()> {
-    run_with_initial_session(Some(session_id))
+pub(crate) fn run_for_session(
+    session_id: String,
+    guide_chat: Option<run_view::GuideChatHandle>,
+) -> crate::Result<()> {
+    run_with_initial_session(Some(session_id), guide_chat)
 }
 
-fn run_with_initial_session(initial_session_id: Option<String>) -> crate::Result<()> {
+fn run_with_initial_session(
+    initial_session_id: Option<String>,
+    guide_chat: Option<run_view::GuideChatHandle>,
+) -> crate::Result<()> {
     let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
         ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
             path: "<tty>".to_string(),
@@ -2179,7 +2207,7 @@ fn run_with_initial_session(initial_session_id: Option<String>) -> crate::Result
         })
     })?;
     let mut state = match initial_session_id {
-        Some(session_id) => State::new_for_session(session_id),
+        Some(session_id) => State::new_for_session_with_guide(session_id, guide_chat),
         None => State::new(),
     };
     state.reload();
@@ -2188,6 +2216,9 @@ fn run_with_initial_session(initial_session_id: Option<String>) -> crate::Result
     // first `draw_screen` call reconciles it against the real tree.
     let mut last_reload = std::time::Instant::now();
     while !state.quit && !pane.detached() {
+        if let Some(guide_chat) = state.guide_chat.as_ref() {
+            guide_chat.poll_results();
+        }
         state.apply_snapshots();
         draw_screen(&mut pane, &mut state).map_err(|source| {
             ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
@@ -2202,6 +2233,9 @@ fn run_with_initial_session(initial_session_id: Option<String>) -> crate::Result
             })
         })?;
         let Some(key) = key else {
+            if let Some(guide_chat) = state.guide_chat.as_ref() {
+                guide_chat.poll_results();
+            }
             state.apply_snapshots();
             // Timed out waiting for a key: on a bounded interval, reload the
             // list screens' stores so an externally started/completed drive
@@ -2239,6 +2273,9 @@ fn handle_key(
         // keystroke (`ModalOutcome::Pending`) — every other key routes
         // through it exclusively (the focus trap), never falling through to
         // screen-level handling below.
+        return Ok(());
+    }
+    if handle_guide_chat_key(state, &key) {
         return Ok(());
     }
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -2356,6 +2393,23 @@ fn handle_key(
         _ => {}
     }
     Ok(())
+}
+
+/// Attached dashboards get guide capability only from a live handoff. This
+/// router is deliberately ahead of dashboard actions so printable input never
+/// activates an identically named dashboard shortcut.
+fn handle_guide_chat_key(state: &State, key: &crossterm::event::KeyEvent) -> bool {
+    if state.attached_session_id.as_deref() != state.guide_chat_session_id.as_deref() {
+        return false;
+    }
+    let Some(guide_chat) = state.guide_chat.as_ref() else {
+        return false;
+    };
+    if guide_chat.is_open() || key.code == KeyCode::Char('?') {
+        guide_chat.handle_key(key, state.guide_body_rows);
+        return true;
+    }
+    false
 }
 
 /// Focus transitions are local state changes, kept apart from action routing
@@ -5148,6 +5202,8 @@ fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()>
             frame.render_widget(footer_line(state), regions[2]);
             if let Some(modal) = state.modal_host.modal() {
                 tui_kit::render_modal(frame, area, modal);
+            } else if let Some(guide_chat) = active_guide_chat(state) {
+                guide_chat.render(frame, area);
             }
             return;
         }
@@ -5161,10 +5217,13 @@ fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()>
         // different one.
         if state.attached_session_id.is_some() {
             let regions = tui_panes::screen_regions(area);
+            state.guide_body_rows = tui_kit::conversation_body_rows(area);
             render_attached_session_body(frame, regions[1], state);
             frame.render_widget(footer_line(state), regions[2]);
             if let Some(modal) = state.modal_host.modal() {
                 tui_kit::render_modal(frame, area, modal);
+            } else if let Some(guide_chat) = active_guide_chat(state) {
+                guide_chat.render(frame, area);
             }
             return;
         }
@@ -5227,6 +5286,12 @@ fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()>
             tui_kit::render_modal(frame, area, modal);
         }
     })
+}
+
+fn active_guide_chat(state: &State) -> Option<&run_view::GuideChatHandle> {
+    (state.attached_session_id.as_deref() == state.guide_chat_session_id.as_deref())
+        .then_some(())
+        .and(state.guide_chat.as_ref())
 }
 
 /// The pane tree for `state.screen`, at `width` columns (P506 §3.2). Below
@@ -5986,6 +6051,101 @@ fn explanation_task_text(message: &str, elapsed: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dashboard_guide_chat_is_scoped_to_handoff_session() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let chat = run_view::GuideChatHandle::test_handle();
+        let mut attached = State::new_without_worker_for_session_with_guide(
+            Some("s1".to_string()),
+            Some(chat.clone()),
+        );
+        attached.attached_session_id = Some("s1".to_string());
+        attached.guide_body_rows = 4;
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+        assert!(chat.is_open());
+        for key in [KeyCode::Char('d'), KeyCode::Up, KeyCode::PageDown] {
+            assert!(handle_guide_chat_key(
+                &attached,
+                &crossterm::event::KeyEvent::from(key)
+            ));
+        }
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Enter)
+        ));
+        let settled = (0..100).any(|_| {
+            if chat.poll_results() {
+                true
+            } else {
+                std::thread::yield_now();
+                false
+            }
+        });
+        assert!(settled, "shared guide result did not settle");
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
+        terminal
+            .draw(|frame| chat.render(frame, frame.area()))
+            .expect("draw shared chat");
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        assert!(rendered.contains("You: d"));
+        assert!(rendered.contains("Guide: test answer"));
+
+        // `q`/Esc are modal-close keys, never dashboard quit/detach actions.
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('q'))
+        ));
+        assert!(!chat.is_open());
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+        assert!(chat.is_open());
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Esc)
+        ));
+        assert!(!chat.is_open());
+
+        // Leaving the source pane or attaching another session removes both
+        // the invisible input trap and the stale source-run overlay.
+        attached.attached_session_id = None;
+        assert!(!handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+        assert!(active_guide_chat(&attached).is_none());
+        attached.attached_session_id = Some("s2".to_string());
+        assert!(!handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+        assert!(active_guide_chat(&attached).is_none());
+
+        attached.attached_session_id = Some("s1".to_string());
+        assert!(handle_guide_chat_key(
+            &attached,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+        assert!(chat.is_open());
+        let standalone = State::new_without_worker();
+        assert!(standalone.guide_chat.is_none());
+        assert!(!handle_guide_chat_key(
+            &standalone,
+            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
+        ));
+    }
 
     fn row(class: SessionClass) -> SessionRow {
         row_with_id("s1", class)

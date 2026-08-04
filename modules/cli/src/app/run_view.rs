@@ -22,28 +22,177 @@ use crate::app::tui_panes::{
 };
 use crate::app::tui_ratatui::{self, RatatuiPane};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::widgets::Paragraph;
 
 type GuideDispatch = Arc<dyn Fn(String, String) -> crate::Result<String> + Send + Sync>;
 
 #[derive(Default)]
 struct AskPane {
     input: tui_kit::TextInput,
-    answer: Option<String>,
-    phase: AskPhase,
+    exchanges: Vec<GuideExchange>,
+    open: bool,
+    scroll: tui_kit::ViewportScroll,
+    follow: bool,
+    body_rows: usize,
     /// Authoritative request state. Presentation may collapse while this stays
     /// true, preventing a second paid call until the worker settles.
     in_flight: bool,
     generation: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum AskPhase {
-    #[default]
-    Collapsed,
-    Editing,
-    Waiting,
-    Answered,
+struct GuideChat {
+    ask: AskPane,
+    dispatch: GuideDispatch,
+    tokens: crate::app::harness_stream::OneShotTokenTracker,
+    results: Option<mpsc::Receiver<(u64, Result<String, String>)>>,
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    // This is refreshed by the live surface and intentionally remains the last
+    // bounded snapshot when terminal ownership moves to the dashboard.
+    context: String,
+}
+
+struct GuideExchange {
+    question: String,
+    generation: u64,
+    answer: Option<String>,
+}
+
+/// Process-local conversation state which may move from a live run to its
+/// dashboard. Dispatch configuration remains with the live run; a separately
+/// launched dashboard never receives this handle.
+#[derive(Clone)]
+pub(crate) struct GuideChatHandle(Arc<Mutex<GuideChat>>);
+
+impl GuideChatHandle {
+    pub(crate) fn new(
+        dispatch: GuideDispatch,
+        tokens: crate::app::harness_stream::OneShotTokenTracker,
+    ) -> Self {
+        Self(Arc::new(Mutex::new(GuideChat {
+            ask: AskPane::default(),
+            dispatch,
+            tokens,
+            results: None,
+            wake: None,
+            context: String::new(),
+        })))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_handle() -> Self {
+        Self::new(
+            Arc::new(|_, _| Ok("test answer".to_string())),
+            Default::default(),
+        )
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, GuideChat> {
+        self.0.lock().expect("guide chat lock poisoned")
+    }
+
+    pub(crate) fn poll_results(&self) -> bool {
+        let mut chat = self.lock();
+        let result = chat
+            .results
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some((generation, result)) = result {
+            let changed = apply_ask_result(&mut chat.ask, generation, result);
+            chat.results = None;
+            return changed;
+        }
+        false
+    }
+
+    fn set_context(&self, context: String) {
+        self.lock().context = context;
+    }
+
+    fn set_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.lock().wake = Some(wake);
+    }
+
+    fn guide_tokens(&self) -> u64 {
+        self.lock().tokens.snapshot().tokens.unwrap_or(0)
+    }
+
+    pub(crate) fn handle_key(&self, key: &KeyEvent, body_rows: usize) -> bool {
+        let mut chat = self.lock();
+        if let Some(consumed) = apply_ask_presentation_key(&mut chat.ask, key) {
+            return consumed;
+        }
+        if matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown
+        ) && let Some(delta) = tui_kit::scroll_key(key)
+        {
+            chat.ask.scroll.apply(delta, body_rows);
+            chat.ask.follow = chat.ask.scroll.is_at_bottom(body_rows);
+            return true;
+        }
+        match key.code {
+            KeyCode::Enter => {
+                if chat.ask.in_flight {
+                    return true;
+                }
+                let question = chat.ask.input.text().trim().to_string();
+                if question.is_empty() {
+                    return true;
+                }
+                chat.tokens.begin_call();
+                chat.ask.in_flight = true;
+                chat.ask.generation = chat.ask.generation.wrapping_add(1);
+                let generation = chat.ask.generation;
+                chat.ask.exchanges.push(GuideExchange {
+                    question: question.clone(),
+                    generation,
+                    answer: None,
+                });
+                chat.ask.input.reset();
+                chat.ask.follow = true;
+                let dispatch = Arc::clone(&chat.dispatch);
+                let context = chat.context.clone();
+                let wake = chat.wake.clone();
+                let (sender, receiver) = mpsc::channel();
+                chat.results = Some(receiver);
+                std::thread::spawn(move || {
+                    let result = dispatch(question, context).map_err(|error| error.to_string());
+                    let _ = sender.send((generation, result));
+                    if let Some(wake) = wake {
+                        wake();
+                    }
+                });
+                true
+            }
+            _ => matches!(
+                chat.ask.input.handle_key(false, key),
+                tui_kit::ModalOutcome::Pending
+            ),
+        }
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.lock().ask.open
+    }
+
+    pub(crate) fn render(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let mut chat = self.lock();
+        let ask = &mut chat.ask;
+        if ask.open {
+            let lines = ask_lines(ask);
+            let input = ask.input.clone();
+            let follow = ask.follow;
+            ask.body_rows = tui_kit::conversation_body_rows(area);
+            tui_kit::render_conversation_modal(
+                frame,
+                area,
+                "Guide",
+                &lines,
+                &input,
+                &mut ask.scroll,
+                follow,
+            );
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -62,43 +211,43 @@ struct DashboardHandoff {
 
 #[derive(Default)]
 struct DashboardHandoffState {
-    pending_session: Option<String>,
+    pending_session: Option<(String, Option<GuideChatHandle>)>,
     dashboard: Option<JoinHandle<()>>,
     closing: bool,
 }
 
 impl DashboardHandoff {
-    fn request(&self, session_id: String) {
+    fn request(&self, session_id: String, guide_chat: Option<GuideChatHandle>) {
         if let Ok(mut state) = self.state.lock()
             && !state.closing
             && state.pending_session.is_none()
             && state.dashboard.is_none()
         {
-            state.pending_session = Some(session_id);
+            state.pending_session = Some((session_id, guide_chat));
         }
     }
 
     fn drive(&self) {
-        self.drive_with(|session_id| {
+        self.drive_with(|session_id, guide_chat| {
             std::thread::spawn(move || {
-                if let Err(error) = crate::app::dashboard::run_for_session(session_id) {
+                if let Err(error) = crate::app::dashboard::run_for_session(session_id, guide_chat) {
                     eprintln!("dashboard: {error}");
                 }
             })
         });
     }
 
-    fn drive_with(&self, launch: impl FnOnce(String) -> JoinHandle<()>) {
+    fn drive_with(&self, launch: impl FnOnce(String, Option<GuideChatHandle>) -> JoinHandle<()>) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let Some(session_id) = (!state.closing && state.dashboard.is_none())
+        let Some((session_id, guide_chat)) = (!state.closing && state.dashboard.is_none())
             .then(|| state.pending_session.take())
             .flatten()
         else {
             return;
         };
-        state.dashboard = Some(launch(session_id));
+        state.dashboard = Some(launch(session_id, guide_chat));
     }
 
     fn close(&self) {
@@ -281,11 +430,8 @@ struct RunPanelState {
     /// arrives seconds into a run rather than before it, so the row has to say
     /// which state it is in instead of being blank and looking stuck.
     title_pending: bool,
-    ask: Option<AskPane>,
-    guide_dispatch: Option<GuideDispatch>,
-    guide_tokens: Option<crate::app::harness_stream::OneShotTokenTracker>,
+    ask: Option<GuideChatHandle>,
     guide_ledger_path: Option<camino::Utf8PathBuf>,
-    ask_results: Option<mpsc::Receiver<(u64, Result<String, String>)>>,
     /// Detached guide workers wake through this non-owning handle after they
     /// queue a result, so a completed answer does not wait for another event.
     wake_state: Weak<Mutex<RunPanelState>>,
@@ -664,10 +810,7 @@ impl RunPanel {
             merge_rows: Vec::new(),
             title,
             ask: None,
-            guide_dispatch: None,
-            guide_tokens: None,
             guide_ledger_path: None,
-            ask_results: None,
             wake_state: Weak::new(),
             handoff: Arc::clone(&handoff),
         }));
@@ -722,9 +865,16 @@ impl RunPanel {
         ledger_path: camino::Utf8PathBuf,
     ) {
         if let Ok(mut state) = self.state.lock() {
-            state.ask = Some(AskPane::default());
-            state.guide_dispatch = Some(dispatch);
-            state.guide_tokens = Some(tokens);
+            let chat = GuideChatHandle::new(dispatch, tokens);
+            let weak_state = state.wake_state.clone();
+            let cadence = Arc::clone(&state.cadence);
+            let handoff = Arc::clone(&state.handoff);
+            let input_generation = Arc::clone(&state.input_generation);
+            chat.set_wake(Arc::new(move || {
+                input_generation.fetch_add(1, Ordering::Release);
+                tick_weak(&weak_state, &cadence, &handoff);
+            }));
+            state.ask = Some(chat);
             state.guide_ledger_path = Some(ledger_path);
             render_locked(&mut state);
         }
@@ -1133,7 +1283,7 @@ fn has_running_work(state: &RunPanelState) -> bool {
     state.active_started.is_some()
         // Presentation may be collapsed or reopened while the detached
         // request remains authoritative; keep polling until it settles.
-        || state.ask.as_ref().is_some_and(|ask| ask.in_flight)
+        || state.ask.as_ref().is_some_and(|ask| ask.lock().ask.in_flight)
         || state
             .merge_rows
             .iter()
@@ -1160,11 +1310,7 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
             step_summaries: &state.step_summaries,
             step_summary_at: &state.step_summary_at,
             narrator_tokens: state.narrator_tokens,
-            guide_tokens: state
-                .guide_tokens
-                .as_ref()
-                .and_then(|tracker| tracker.snapshot().tokens)
-                .unwrap_or(0),
+            guide_tokens: state.ask.as_ref().map_or(0, GuideChatHandle::guide_tokens),
             run_started: state.run_started,
         },
     );
@@ -1198,14 +1344,8 @@ fn live_view_key_action(key: &KeyEvent) -> Option<LiveViewKeyAction> {
 
 fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     let mut changed = false;
-    if let Some(receiver) = state.ask_results.as_ref()
-        && let Ok((generation, result)) = receiver.try_recv()
-    {
-        if let Some(ask) = state.ask.as_mut() {
-            apply_ask_result(ask, generation, result);
-        }
-        state.ask_results = None;
-        changed = true;
+    if let Some(ask) = state.ask.as_ref() {
+        changed |= ask.poll_results();
     }
     let keys = state.repaint.poll_detach();
     for key in keys {
@@ -1239,9 +1379,10 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             Some(LiveViewKeyAction::OpenDashboard) => {
                 state.repaint.quit();
                 state.cadence.inactive();
-                state
-                    .handoff
-                    .request(state.session.session_id.as_str().to_string());
+                state.handoff.request(
+                    state.session.session_id.as_str().to_string(),
+                    state.ask.clone(),
+                );
                 changed = true;
                 continue;
             }
@@ -1268,70 +1409,19 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
 }
 
 fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
-    let Some(ask) = state.ask.as_mut() else {
+    let Some(ask) = state.ask.as_ref() else {
         return false;
     };
-    if let Some(consumed) = apply_ask_presentation_key(ask, &key) {
-        return consumed;
-    }
-    // While composing, the input owns Home/End for cursor movement and
-    // PageUp/PageDown are consumed rather than scrolling a pane. Waiting also
-    // consumes every non-Escape key. The stable footer still advertises pane
-    // navigation, which resumes after the ask pane is collapsed.
-    match key.code {
-        KeyCode::Enter => {
-            let question = ask.input.text().trim().to_string();
-            if question.is_empty() {
-                return true;
-            }
-            let Some(dispatch) = state.guide_dispatch.clone() else {
-                return true;
-            };
-            let Some(tokens) = state.guide_tokens.clone() else {
-                return true;
-            };
-            // Reserve before spawning so a terminal snapshot cannot miss a
-            // accepted request that has not yet been scheduled.
-            tokens.begin_call();
-            ask.phase = AskPhase::Waiting;
-            ask.in_flight = true;
-            ask.answer = None;
-            ask.generation = ask.generation.wrapping_add(1);
-            let generation = ask.generation;
-            let (current_step, statuses) = guide_snapshot(&state.view);
-            let session = state.session.clone();
-            let plan = state.plan.clone();
-            let ledger_path = state.guide_ledger_path.clone();
-            let (sender, receiver) = mpsc::channel();
-            state.ask_results = Some(receiver);
-            let weak_state = state.wake_state.clone();
-            let cadence = Arc::clone(&state.cadence);
-            let handoff = Arc::clone(&state.handoff);
-            let input_generation = Arc::clone(&state.input_generation);
-            // The worker owns neither panel nor session: a late message is
-            // simply discarded after close or a newer generation.
-            std::thread::spawn(move || {
-                let context = crate::app::guide::evidence(
-                    &session,
-                    &plan,
-                    ledger_path.as_deref(),
-                    &current_step,
-                    &statuses,
-                );
-                let result = dispatch(question, context).map_err(|error| error.to_string());
-                let _ = sender.send((generation, result));
-                // Results are not terminal input, so explicitly wake the
-                // panel's cadence. The weak handle cannot retain a closed TUI.
-                input_generation.fetch_add(1, Ordering::Release);
-                tick_weak(&weak_state, &cadence, &handoff);
-            });
-            true
-        }
-        _ => matches!(
-            ask.input.handle_key(false, &key),
-            tui_kit::ModalOutcome::Pending
-        ),
-    }
+    let (current_step, statuses) = guide_snapshot(&state.view);
+    ask.set_context(crate::app::guide::evidence(
+        &state.session,
+        &state.plan,
+        state.guide_ledger_path.as_deref(),
+        &current_step,
+        &statuses,
+    ));
+    let body_rows = ask.lock().ask.body_rows;
+    ask.handle_key(&key, body_rows)
 }
 
 /// Handle presentation-only keys before dispatch. Keeping this reducer small
@@ -1339,39 +1429,36 @@ fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
 /// in particular, Waiting consumes pane-navigation keys until Escape collapses
 /// the ask pane.
 fn apply_ask_presentation_key(ask: &mut AskPane, key: &KeyEvent) -> Option<bool> {
-    if ask.phase == AskPhase::Collapsed {
+    if !ask.open {
         if key.code == KeyCode::Char('?') {
-            ask.input.reset();
-            ask.answer = None;
-            ask.phase = AskPhase::Editing;
+            ask.open = true;
             return Some(true);
         }
         return Some(false);
     }
-    if key.code == KeyCode::Esc {
-        ask.input.reset();
-        ask.answer = None;
-        ask.phase = AskPhase::Collapsed;
-        ask.generation = ask.generation.wrapping_add(1);
-        return Some(true);
-    }
-    if ask.phase == AskPhase::Waiting || ask.in_flight {
+    if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+        ask.open = false;
         return Some(true);
     }
     None
 }
 
 fn apply_ask_result(ask: &mut AskPane, generation: u64, result: Result<String, String>) -> bool {
-    if ask.generation != generation {
-        ask.in_flight = false;
+    if !ask.in_flight || generation != ask.generation {
         return false;
     }
+    let Some(exchange) = ask
+        .exchanges
+        .iter_mut()
+        .find(|exchange| exchange.generation == generation && exchange.answer.is_none())
+    else {
+        return false;
+    };
     ask.in_flight = false;
-    ask.answer =
+    exchange.answer =
         Some(displayable_guide_answer(&result.unwrap_or_else(|error| {
             format!("Guide unavailable: {error}")
         })));
-    ask.phase = AskPhase::Answered;
     true
 }
 
@@ -1510,11 +1597,6 @@ fn render_locked(state: &mut RunPanelState) {
         )),
         (None, false) => None,
     };
-    let ask_lines = state.ask.as_ref().map(ask_lines);
-    let ask_cursor = state
-        .ask
-        .as_ref()
-        .and_then(|ask| (ask.phase == AskPhase::Editing).then_some(ask.input.cursor()));
     let RunPanelState {
         repaint,
         scrolls,
@@ -1525,6 +1607,7 @@ fn render_locked(state: &mut RunPanelState) {
         focus,
         pending_keys,
         modal,
+        ask,
         ..
     } = state;
     let modal = modal.as_ref();
@@ -1546,8 +1629,7 @@ fn render_locked(state: &mut RunPanelState) {
                 focus,
                 pending_keys,
                 modal,
-                ask_lines: ask_lines.as_deref(),
-                ask_cursor,
+                ask: ask.as_ref(),
             },
         );
     });
@@ -1755,22 +1837,20 @@ struct LiveFrame<'a> {
     focus: &'a mut FocusRing,
     pending_keys: &'a mut Vec<KeyEvent>,
     modal: Option<&'a tui_kit::Modal>,
-    ask_lines: Option<&'a [String]>,
-    ask_cursor: Option<usize>,
+    ask: Option<&'a GuideChatHandle>,
 }
 
 fn ask_lines(ask: &AskPane) -> Vec<String> {
-    if ask.phase == AskPhase::Collapsed {
-        return Vec::new();
-    }
-    let mut lines = vec![format!("Ask: {}", ask.input.text())];
-    if ask.phase == AskPhase::Waiting {
-        lines.push("Guide: thinking...".to_string());
-    }
-    if let Some(answer) = &ask.answer {
-        lines.push(format!("Guide: {answer}"));
-    }
-    lines
+    ask.exchanges
+        .iter()
+        .flat_map(|exchange| {
+            let answer = exchange.answer.as_deref().unwrap_or("thinking...");
+            [
+                format!("You: {}", exchange.question),
+                format!("Guide: {answer}"),
+            ]
+        })
+        .collect()
 }
 
 fn drawable_pane_ids(tree: &PaneTree, layout: &PaneLayoutResult) -> Vec<PaneId> {
@@ -1811,36 +1891,21 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         focus,
         pending_keys,
         modal,
-        ask_lines,
-        ask_cursor,
+        ask,
     } = state;
     let full_area = frame.area();
-    // `Some([])` marks the run as ask-capable for its footer while allocating
-    // no ask rows. Expanded states consume only the rows they visibly render.
-    let ask_height = ask_lines.map_or(0, |lines| lines.len() as u16);
-    let regions = live_frame_regions(full_area, ask_height);
+    let regions = live_frame_regions(full_area);
     frame.render_widget(
         tui_kit::keymap_footer(
-            if ask_lines.is_some() {
+            if ask.is_some() {
                 ASK_FOOTER_HINT
             } else {
                 "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane"
             },
             None,
         ),
-        regions[2],
+        regions[1],
     );
-    if let Some(lines) = ask_lines {
-        frame.render_widget(Paragraph::new(lines.join("\n")), regions[1]);
-        if let Some(cursor) = ask_cursor {
-            // "Ask: " is ASCII, while the input cursor is a character index.
-            frame.set_cursor_position((
-                regions[1].x
-                    + (5u16.saturating_add(cursor as u16)).min(regions[1].width.saturating_sub(1)),
-                regions[1].y,
-            ));
-        }
-    }
     let data = PaneData {
         progress: Some(progress_lines),
         journey: Some(journey_rows),
@@ -1870,19 +1935,15 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     );
     if let Some(modal) = modal {
         tui_kit::render_modal(frame, full_area, modal);
+    } else if let Some(ask) = ask.filter(|ask| ask.is_open()) {
+        ask.render(frame, full_area);
     }
 }
 
-fn live_frame_regions(full_area: Rect, ask_height: u16) -> std::rc::Rc<[Rect]> {
+fn live_frame_regions(full_area: Rect) -> std::rc::Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            // Leave a real body row even in a six-row terminal with the
-            // two-row expanded ask strip and footer present.
-            Constraint::Min(3),
-            Constraint::Length(ask_height),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
         .split(full_area)
 }
 
@@ -4586,10 +4647,10 @@ mod tests {
 
         // This models a render draining `d`: it records the request while the
         // panel lock is held, then the post-unlock driver observes it.
-        handoff.request("session".to_string());
+        handoff.request("session".to_string(), None);
         for _ in 0..2 {
             let launches = Arc::clone(&launches);
-            handoff.drive_with(move |_| {
+            handoff.drive_with(move |_, _| {
                 launches.fetch_add(1, Ordering::SeqCst);
                 std::thread::spawn(|| {})
             });
@@ -4606,8 +4667,8 @@ mod tests {
         });
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
-        handoff.request("session".to_string());
-        handoff.drive_with(move |_| {
+        handoff.request("session".to_string(), None);
+        handoff.drive_with(move |_, _| {
             std::thread::spawn(move || {
                 started_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
@@ -4636,11 +4697,11 @@ mod tests {
         let (close_entered_tx, close_entered_rx) = std::sync::mpsc::channel();
         let (dashboard_started_tx, dashboard_started_rx) = std::sync::mpsc::channel();
         let (release_dashboard_tx, release_dashboard_rx) = std::sync::mpsc::channel();
-        handoff.request("session".to_string());
+        handoff.request("session".to_string(), None);
 
         let driving = Arc::clone(&handoff);
         let drive = std::thread::spawn(move || {
-            driving.drive_with(move |_| {
+            driving.drive_with(move |_, _| {
                 launch_entered_tx.send(()).unwrap();
                 allow_publication_rx.recv().unwrap();
                 std::thread::spawn(move || {
@@ -5743,8 +5804,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -5773,8 +5833,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -5825,8 +5884,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -5908,8 +5966,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -5982,8 +6039,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 )
             })
@@ -6034,8 +6090,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -6065,8 +6120,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask_lines: None,
-                        ask_cursor: None,
+                        ask: None,
                     },
                 );
             })
@@ -6464,38 +6518,37 @@ mod tests {
             apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?'))),
             Some(true)
         );
-        assert_eq!(ask.phase, AskPhase::Editing);
+        assert!(ask.open);
         assert!(matches!(
             ask.input
                 .handle_key(false, &KeyEvent::from(KeyCode::Char('é'))),
             tui_kit::ModalOutcome::Pending
         ));
-        assert_eq!(ask_lines(&ask), ["Ask: é"]);
         assert_eq!(ask.input.cursor(), 1);
-        ask.phase = AskPhase::Waiting;
-        assert_eq!(ask_lines(&ask), ["Ask: é", "Guide: thinking..."]);
-        ask.phase = AskPhase::Editing;
         assert!(matches!(
             ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
             tui_kit::ModalOutcome::Pending
         ));
         assert_eq!(ask.input.cursor(), 0);
-        let generation = ask.generation;
-        assert!(apply_ask_result(
-            &mut ask,
-            generation,
-            Ok("answer".to_string())
-        ));
-        assert_eq!(ask_lines(&ask), ["Ask: é", "Guide: answer"]);
+        ask.generation = 1;
+        ask.in_flight = true;
+        ask.exchanges.push(GuideExchange {
+            question: "é".to_string(),
+            generation: 1,
+            answer: None,
+        });
+        assert!(apply_ask_result(&mut ask, 1, Ok("answer".to_string())));
+        assert_eq!(ask_lines(&ask), ["You: é", "Guide: answer"]);
         assert_eq!(
             apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc)),
             Some(true)
         );
-        assert!(ask_lines(&ask).is_empty());
+        assert!(!ask.open);
+        assert_eq!(ask_lines(&ask), ["You: é", "Guide: answer"]);
     }
 
     #[test]
-    fn text_input_inline_ask_unicode_editing_resets_after_collapse_and_reopen() {
+    fn text_input_inline_ask_unicode_editing_survives_close_and_reopen() {
         let mut ask = AskPane::default();
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
         for key in ['文', 'é'] {
@@ -6517,36 +6570,22 @@ mod tests {
         assert_eq!(ask.input.text(), "é");
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
-        assert_eq!(ask.input.text(), "");
+        assert_eq!(ask.input.text(), "é");
         assert_eq!(ask.input.cursor(), 0);
     }
 
     #[test]
     fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
-        let collapsed = live_frame_regions(Rect::new(0, 0, 70, 7), 0);
-        let expanded = live_frame_regions(Rect::new(0, 0, 70, 7), 2);
-        assert_eq!(collapsed[1].height, 0, "collapsed ask uses no rows");
-        assert_eq!(
-            collapsed[0].height,
-            expanded[0].height + 2,
-            "the body reclaims collapsed ask rows"
-        );
         for area in [
             Rect::new(0, 0, 160, 40),
             Rect::new(0, 0, 70, 20),
-            // Six rows is the smallest viewport that can contain the usable
-            // three-row body, expanded two-row ask strip, and footer.
             Rect::new(0, 0, 70, 6),
         ] {
-            // Waiting and answered panes use input plus response. This is the
-            // largest ask footprint.
-            let regions = live_frame_regions(area, 2);
+            let regions = live_frame_regions(area);
             assert_eq!(regions[1].width, area.width);
             assert!(regions[0].height >= 3, "body must retain usable rows");
-            assert_eq!(regions[1].height, 2);
-            assert_eq!(regions[2].height, 1);
+            assert_eq!(regions[1].height, 1);
             assert!(regions[0].bottom() <= regions[1].y);
-            assert!(regions[1].bottom() <= regions[2].y);
         }
     }
 
@@ -6564,6 +6603,7 @@ mod tests {
             let mut current_follow = true;
             let mut focus = FocusRing::new(vec![CURRENT_PANE]);
             let mut keys = Vec::new();
+            let ask = AskPane::default();
             terminal
                 .draw(|frame| {
                     render_live_panes(
@@ -6583,8 +6623,14 @@ mod tests {
                             focus: &mut focus,
                             pending_keys: &mut keys,
                             modal: None,
-                            ask_lines: Some(&[]),
-                            ask_cursor: None,
+                            ask: Some(&GuideChatHandle(Arc::new(Mutex::new(GuideChat {
+                                ask,
+                                dispatch: Arc::new(|_, _| Ok(String::new())),
+                                tokens: Default::default(),
+                                results: None,
+                                wake: None,
+                                context: String::new(),
+                            })))),
                         },
                     );
                 })
@@ -6660,41 +6706,117 @@ mod tests {
     }
 
     #[test]
-    fn guide_call_lifecycle_discards_stale_results_after_collapse() {
+    fn guide_call_lifecycle_retains_hidden_completion_and_rejects_unknown_generation() {
         let mut ask = AskPane {
-            phase: AskPhase::Waiting,
+            open: true,
             in_flight: true,
             generation: 7,
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 7,
+                answer: None,
+            }],
             ..AskPane::default()
         };
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
         assert!(ask.in_flight, "collapsing must not permit another call");
-        assert!(!apply_ask_result(&mut ask, 7, Ok("stale".to_string())));
-        assert_eq!(ask.phase, AskPhase::Collapsed);
-        assert!(ask.answer.is_none());
+        assert!(apply_ask_result(&mut ask, 7, Ok("settled".to_string())));
+        assert!(!ask.open);
+        assert_eq!(ask.exchanges[0].answer.as_deref(), Some("settled"));
         assert!(!ask.in_flight);
+        assert!(!apply_ask_result(&mut ask, 8, Ok("stale".to_string())));
+    }
+
+    #[test]
+    fn stale_guide_result_does_not_clear_current_in_flight() {
+        let mut ask = AskPane {
+            in_flight: true,
+            generation: 2,
+            exchanges: vec![
+                GuideExchange {
+                    question: "first".to_string(),
+                    generation: 1,
+                    answer: Some("answered".to_string()),
+                },
+                GuideExchange {
+                    question: "second".to_string(),
+                    generation: 2,
+                    answer: None,
+                },
+            ],
+            ..AskPane::default()
+        };
+        assert!(!apply_ask_result(&mut ask, 1, Ok("stale".to_string())));
+        assert_eq!(ask.exchanges[0].answer.as_deref(), Some("answered"));
+        assert!(ask.exchanges[1].answer.is_none());
+        assert!(ask.in_flight);
+    }
+
+    #[test]
+    fn pending_guide_exchange_has_single_label() {
+        let ask = AskPane {
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 1,
+                answer: None,
+            }],
+            ..AskPane::default()
+        };
+        assert_eq!(ask_lines(&ask), ["You: question", "Guide: thinking..."]);
     }
 
     #[test]
     fn guide_call_lifecycle_blocks_reopen_submission_until_the_reserved_call_settles() {
         let mut ask = AskPane {
-            phase: AskPhase::Waiting,
+            open: true,
             in_flight: true,
             generation: 3,
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 3,
+                answer: None,
+            }],
             ..AskPane::default()
         };
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
         apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
-        assert_eq!(ask.phase, AskPhase::Editing);
+        assert!(ask.open);
         assert!(ask.in_flight);
         // The presentation router consumes Enter while the reservation is
         // live, so reopening cannot launch another call.
-        assert_eq!(
-            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Enter)),
-            Some(true)
-        );
-        assert!(!apply_ask_result(&mut ask, 3, Ok("settled".to_string())));
+        // A live router checks this guard before it can reserve another call.
+        assert!(ask.in_flight);
+        assert!(apply_ask_result(&mut ask, 3, Ok("settled".to_string())));
         assert!(!ask.in_flight);
+    }
+
+    #[test]
+    fn guide_chat_scroll_uses_rendered_viewport_rows() {
+        let chat = GuideChatHandle::test_handle();
+        {
+            let mut state = chat.lock();
+            state.ask.open = true;
+            state.ask.scroll.set_len(30);
+            state.ask.body_rows = 3;
+            state.ask.scroll.apply(tui_kit::ScrollDelta::End, 3);
+            state.ask.follow = true;
+        }
+        chat.handle_key(&KeyEvent::from(KeyCode::Up), 3);
+        {
+            let state = chat.lock();
+            assert_eq!(state.ask.scroll.window(3), 26..29);
+            assert!(!state.ask.follow);
+        }
+        chat.handle_key(&KeyEvent::from(KeyCode::Down), 3);
+        assert!(chat.lock().ask.follow);
+
+        // A resize changes both the clamp and the tail position; the same one
+        // row key must use the new rendered body height, not a fixed value.
+        chat.lock().ask.scroll.apply(tui_kit::ScrollDelta::End, 7);
+        chat.handle_key(&KeyEvent::from(KeyCode::Up), 7);
+        let state = chat.lock();
+        assert_eq!(state.ask.scroll.window(7), 22..29);
+        assert!(!state.ask.follow);
     }
 
     #[test]
