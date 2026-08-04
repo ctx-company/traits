@@ -1,4 +1,4 @@
-# 0083 — A loop may declare no iteration bound
+# 0093 — A loop may declare no iteration bound
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
 

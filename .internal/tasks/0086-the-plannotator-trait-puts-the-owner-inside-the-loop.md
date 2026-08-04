@@ -1,9 +1,9 @@
 # 0086 — The plannotator trait puts the owner inside the loop
 
-**Status:** ready to implement · **Depends on:** 0083, 0084, 0085 · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
+**Status:** ready to implement · **Depends on:** 0093, 0084, 0085 · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
 
 The deliverable the three component slices exist for, and the reason they were sized the way they
-were. 0083, 0084 and 0085 are each defensible on their own, but none of them was found by reading
+were. 0093, 0084 and 0085 are each defensible on their own, but none of them was found by reading
 the code — each was found by trying to author this trait and hitting a wall.
 
 Every demo of an agent loop shows a human at the ends: type a prompt, read a result. This one puts
@@ -37,7 +37,7 @@ every round; it earns the right to ask.
 - **The loop spells out both conditions** — `until: all([verdict.status == approved,
   ownerDecision.decision == approved])` — even though the reviewer's is implied by the gate that
   produces the owner's. The source is the demo; an implied condition is one a viewer has to be told.
-- **No `iterations`, no `on-exhausted`** (0083). This loop ends when the work is right. A bound
+- **No `iterations`, no `on-exhausted`** (0093). This loop ends when the work is right. A bound
   chosen to approximate "never" would be the one dishonest line in a trait whose subject is honesty.
 - **plannotator is used exactly as shipped**, in two deliberately different ways: plan mode over
   stdin (hook JSON, no intermediate file) for `plan-owner-review`, and `annotate <file> --gate
