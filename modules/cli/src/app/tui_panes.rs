@@ -159,9 +159,11 @@ impl PaneLayoutResult {
 
 /// Draws a bordered pane with `title` in the border's top-left, styled per
 /// `focused` — default-fg border + BOLD title when focused, DIM border + DIM
-/// title otherwise — and returns the inner content rect, so a consumer never
-/// computes `block.inner()` itself (the single call every second-copy chrome
-/// bug in this kit has been about).
+/// title otherwise. An unfocused pane also seeds `DIM` across its full
+/// rectangle, so subsequently rendered content inherits the same secondary
+/// treatment. Returns the inner content rect, so a consumer never computes
+/// `block.inner()` itself (the single call every second-copy chrome bug in
+/// this kit has been about).
 pub(crate) fn render_pane(
     frame: &mut ratatui::Frame<'_>,
     rect: Rect,
@@ -179,6 +181,7 @@ pub(crate) fn render_pane(
         Style::default().add_modifier(Modifier::DIM)
     };
     let block = Block::bordered()
+        .style(border_style)
         .border_style(border_style)
         .title_top(RLine::from(Span::styled(title.to_string(), title_style)));
     let inner = block.inner(rect);

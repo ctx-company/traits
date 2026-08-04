@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex, Once, mpsc};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyEvent, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -136,6 +138,7 @@ fn install_panic_hook() {
 /// leave capture stuck on, silently swallowing every later decode warning
 /// for the rest of the process.
 fn restore_terminal(screen: PaneScreen) {
+    let _ = execute!(std::io::stderr(), DisableFocusChange);
     let _ = disable_raw_mode();
     match screen {
         PaneScreen::Alt => {
@@ -171,6 +174,9 @@ pub(crate) enum CtrlCPolicy {
 struct PumpControl {
     stop: AtomicBool,
     paused: AtomicBool,
+    /// Focus reporting is optional terminal protocol support. Start focused so
+    /// terminals that never send DEC ?1004 events retain the normal view.
+    focused: AtomicBool,
     /// Latest terminal dimensions observed by the input pump. A single atomic
     /// coalesces drag-resize bursts; the render tick consumes it once.
     resize_size: AtomicU32,
@@ -308,11 +314,16 @@ impl RatatuiPane {
         adopt_controlling_terminal();
         install_panic_hook();
         enable_raw_mode()?;
+        if let Err(err) = execute!(std::io::stderr(), EnableFocusChange) {
+            let _ = execute!(std::io::stderr(), DisableFocusChange);
+            let _ = disable_raw_mode();
+            return Err(err);
+        }
         let mut inline_size = None;
         let terminal = match screen {
             PaneScreen::Alt => {
                 if let Err(err) = execute!(std::io::stderr(), EnterAlternateScreen) {
-                    let _ = disable_raw_mode();
+                    restore_terminal(PaneScreen::Alt);
                     return Err(err);
                 }
                 match Terminal::new(CrosstermBackend::new(std::io::stderr())) {
@@ -322,8 +333,7 @@ impl RatatuiPane {
                         // propagating — otherwise a `Terminal::new` failure
                         // leaves the caller's terminal stuck in
                         // raw/alternate-screen mode.
-                        let _ = execute!(std::io::stderr(), LeaveAlternateScreen, Show);
-                        let _ = disable_raw_mode();
+                        restore_terminal(PaneScreen::Alt);
                         return Err(err);
                     }
                 }
@@ -332,14 +342,14 @@ impl RatatuiPane {
                 let (columns, rows) = match crossterm::terminal::size() {
                     Ok(size) => size,
                     Err(err) => {
-                        let _ = disable_raw_mode();
+                        restore_terminal(PaneScreen::Inline);
                         return Err(err);
                     }
                 };
                 let terminal = match inline_terminal(rows) {
                     Ok(terminal) => terminal,
                     Err(err) => {
-                        let _ = disable_raw_mode();
+                        restore_terminal(PaneScreen::Inline);
                         return Err(err);
                     }
                 };
@@ -362,6 +372,7 @@ impl RatatuiPane {
         let pump = Arc::new(PumpControl {
             stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
             resize_size: AtomicU32::new(0),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(None),
@@ -407,6 +418,8 @@ impl RatatuiPane {
                                 .store(pack_terminal_size(columns, rows), Ordering::SeqCst);
                             notify_input(&pump);
                         }
+                        Event::FocusLost => set_focus(&pump, false),
+                        Event::FocusGained => set_focus(&pump, true),
                         Event::Key(key) => {
                             if key.kind != crossterm::event::KeyEventKind::Press {
                                 continue;
@@ -588,7 +601,16 @@ impl RatatuiPane {
         let Some(terminal) = self.terminal.as_mut() else {
             return Ok(());
         };
-        terminal.draw(widget)?;
+        let focused = &self.pump.focused;
+        terminal.draw(|frame| {
+            widget(frame);
+            if !focused.load(Ordering::SeqCst) {
+                let area = frame.area();
+                frame
+                    .buffer_mut()
+                    .set_style(area, Style::default().add_modifier(Modifier::DIM));
+            }
+        })?;
         Ok(())
     }
 
@@ -708,13 +730,21 @@ impl RatatuiPane {
                     return;
                 }
                 let raw_ok = enable_raw_mode().is_ok();
-                let screen_ok = match self.screen {
-                    PaneScreen::Alt => execute!(std::io::stderr(), EnterAlternateScreen).is_ok(),
-                    // Inline never left the alternate screen (it was never
-                    // in one) — only raw mode needs re-entering.
-                    PaneScreen::Inline => true,
-                };
-                self.reentry_ok.set(raw_ok && screen_ok);
+                let focus_ok = raw_ok && execute!(std::io::stderr(), EnableFocusChange).is_ok();
+                let screen_ok = focus_ok
+                    && match self.screen {
+                        PaneScreen::Alt => {
+                            execute!(std::io::stderr(), EnterAlternateScreen).is_ok()
+                        }
+                        // Inline never left the alternate screen (it was never
+                        // in one) — only raw mode needs re-entering.
+                        PaneScreen::Inline => true,
+                    };
+                let reentry_ok = raw_ok && focus_ok && screen_ok;
+                if !reentry_ok {
+                    restore_terminal(self.screen);
+                }
+                self.reentry_ok.set(reentry_ok);
             }
         }
         let guard = ReenterGuard {
@@ -726,6 +756,7 @@ impl RatatuiPane {
         // would steal keystrokes from the interactive program (`$EDITOR`)
         // that owns the tty for the duration of `body`.
         self.pump.paused.store(true, Ordering::SeqCst);
+        let _ = execute!(std::io::stderr(), DisableFocusChange);
         disable_raw_mode()?;
         match screen {
             PaneScreen::Alt => {
@@ -789,6 +820,12 @@ fn notify_input(pump: &PumpControl) {
     }
 }
 
+fn set_focus(pump: &PumpControl, focused: bool) {
+    if pump.focused.swap(focused, Ordering::SeqCst) != focused {
+        notify_input(pump);
+    }
+}
+
 impl Drop for RatatuiPane {
     fn drop(&mut self) {
         self.leave();
@@ -829,6 +866,7 @@ mod tests {
         let control = PumpControl {
             stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
             resize_size: AtomicU32::new(0),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(Some({
@@ -841,6 +879,34 @@ mod tests {
         };
         notify_input(&control);
         notify_input(&control);
+        assert_eq!(control.input_generation.load(Ordering::SeqCst), 2);
+        assert_eq!(wakes.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn focus_transitions_default_to_focused_and_notify_only_on_change() {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let control = PumpControl {
+            stop: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
+            resize_size: AtomicU32::new(0),
+            input_generation: Arc::new(AtomicU64::new(0)),
+            wake: Mutex::new(Some({
+                let wakes = Arc::clone(&wakes);
+                Arc::new(move || {
+                    wakes.fetch_add(1, Ordering::SeqCst);
+                })
+            })),
+            ctrl_c_policy: CtrlCPolicy::RequestStop,
+        };
+
+        assert!(control.focused.load(Ordering::SeqCst));
+        set_focus(&control, false);
+        assert!(!control.focused.load(Ordering::SeqCst));
+        set_focus(&control, false);
+        set_focus(&control, true);
+        assert!(control.focused.load(Ordering::SeqCst));
         assert_eq!(control.input_generation.load(Ordering::SeqCst), 2);
         assert_eq!(wakes.load(Ordering::SeqCst), 2);
     }
