@@ -15,7 +15,9 @@ else's, without us shipping a plugin runtime to do it.
   its `[[handoff.channel]]` table states `wire`, `fidelity`, `budget-bytes` and `repeat` itself.
   First-party channels ship compiled-in defaults that a table merges over; a `command` channel has no
   defaults, so the table is required. This is the same doctrine as the harness registry, and it makes
-  config the single declaration of channel shape across all kinds.
+  config the single declaration of channel shape across all variants. The selector field is
+  `variant = "command"` — never `kind`, which is not this project's word (`variants/quick`,
+  `variants/default`, and 0026).
 - **No templating language.** The temptation is `template = "run {{id}} is {{status}}"`, and it ends
   as a half-language with no types and no errors. The script receives the full typed `RunState` JSON
   and composes text in a real language. Config selects fidelity and wire; it does not author prose.
@@ -32,8 +34,8 @@ else's, without us shipping a plugin runtime to do it.
 
 ## Scope
 
-The `command` channel kind; the stdin/stdout envelope and receipt contract with a versioned schema;
-config-declared capabilities with required fields for this kind; `resolve()` checking the program
+The `command` channel variant; the stdin/stdout envelope and receipt contract with a versioned schema;
+config-declared capabilities with required fields for this variant; `resolve()` checking the program
 exists and is executable; timeout and output-size bounds; `--dry-run` printing the argv, the
 environment keys and the stdin payload without executing.
 

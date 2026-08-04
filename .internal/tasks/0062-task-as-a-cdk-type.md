@@ -24,7 +24,9 @@ Fourth slice of the task-interface arc, and the largest. Dispatch nothing else a
   is the worst possible outcome, so this must fail loudly at dispatch.
 - **Commit per step** (owner call: it does not hurt, and history/bisect get better).
 - **A failed step parks the run by default.** Skipping silently produces a "done" task with a hole
-  in it. A call-for-help path may soften this later, once there is an elegant interface for it.
+  in it. A call-for-help path may soften this later, once there is an elegant interface for it —
+  0088 is that interface: park with an *open question* rather than a blocker, answered through
+  `ctx traits answer`, resuming the same execution.
 
 ## Scope
 

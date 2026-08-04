@@ -65,6 +65,9 @@ tables with `doctor --config` provenance and `resolve()` validation; the `file` 
   thing you can debug is not the thing that runs at 3am.
 - Keep the delivery log out of the session ledger. The ledger is contract-validated on every
   transition (0050); adding an append-only side log to it invites exactly that class of failure.
+- The log's key widens to `(session, peer, site)` when 0087 lands, and 0070 adds sequence numbers to
+  the same rows. Two migrations of one table is avoidable if the row shape is chosen with both in
+  view now.
 
 ## Done when
 
