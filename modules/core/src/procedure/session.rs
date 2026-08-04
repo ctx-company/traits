@@ -4366,3 +4366,236 @@ equals = "revise"
         }
     }
 }
+
+/// Proves task 0085's ledger-contract Done-when clause: a `project` step
+/// lifts a nested field into a slot, a later step's `when` guard reads the
+/// same nested field, and the recorded operand agrees with the re-derived
+/// one across every transition and a serialize/deserialize resume cycle —
+/// mirroring plannotator's real `hookSpecificOutput.decision.behavior`.
+#[cfg(test)]
+mod nested_field_path_session_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"
+id = "nested-field-path-session-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Nested Field Path Session Fixture"
+summary = "0085 regression fixture: project and guard over a three-level field path."
+
+[[agent]]
+id = "worker"
+description = "Produces the hook output and the gated follow-up."
+summary = "Fixture worker role."
+
+[[slot]]
+id = "hook-output"
+schema = "schema:hook-specific-output"
+description = "Nested tool output; mirrors plannotator's hookSpecificOutput."
+
+[[slot]]
+id = "behavior"
+schema = "schema:text"
+description = "Nested field lifted out by the project step."
+
+[[slot]]
+id = "final"
+schema = "schema:text"
+description = "Only reachable when the nested field equals approve."
+
+[[schema]]
+id = "decision"
+[schema.fields.behavior]
+schema = "schema:text"
+required = false
+
+[[schema]]
+id = "hook-specific-output"
+[schema.fields.decision]
+schema = "schema:decision"
+required = false
+
+[prompt.produce]
+text = "Produce the hook output."
+
+[prompt.gated]
+text = "Only reachable when behavior is approve."
+
+[procedure]
+description = "Produce a nested hook output, project a nested field, then gate a step on it."
+
+[[procedure.sequence]]
+id = "produce-hook-output"
+title = "Produce hook output"
+agent = "agent:worker"
+prompt = "prompt:produce"
+output = ["slot:hook-output"]
+
+[[procedure.sequence]]
+id = "lift-behavior"
+title = "Lift nested behavior field"
+kind = "project"
+output = ["slot:behavior"]
+
+[[procedure.sequence.projection]]
+source = "slot:hook-output"
+field = "decision.behavior"
+destination = "slot:behavior"
+
+[[procedure.sequence]]
+id = "gated-step"
+title = "Gated step"
+agent = "agent:worker"
+prompt = "prompt:gated"
+output = ["slot:final"]
+
+[[procedure.sequence.when.all]]
+slot = "slot:hook-output"
+field = "decision.behavior"
+equals = "approve"
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn start_session(trait_ref: &crate::r#trait::Trait) -> Session {
+        let request = StartRequest {
+            session_id: SessionId::new("session-0085-nested-field-path".to_string())
+                .expect("session id"),
+            run_id: Id::new("run-0085-nested-field-path".to_string()).expect("run id"),
+            initial_port_values: Vec::new(),
+            resource_evidence: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            source_digest: None,
+            canonical_digest: None,
+            agent_assignments: None,
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            strict_loops: false,
+            provenance: Provenance {
+                started_by: CallerProvenance {
+                    surface: "test".to_string(),
+                    caller: "0085-nested-field-path".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                state_source: "test".to_string(),
+                agent_assignments: None,
+                harness_probes: Vec::new(),
+                warnings: Vec::new(),
+                trait_source: None,
+                query_selection: None,
+                worktree: None,
+                merge_frames: Vec::new(),
+                merge_intent: None,
+                out_of_tree_mutations: Vec::new(),
+                started_at_epoch: None,
+                trust_approval: None,
+                session_title: None,
+            },
+        };
+        start_run_session(
+            trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    fn submit_current(
+        trait_ref: &crate::r#trait::Trait,
+        session: Session,
+        slot_ref: &str,
+        value: serde_json::Value,
+    ) -> CallResponse {
+        let frame = session.next_frame.clone().expect("a current frame exists");
+        let template = frame.call_template.clone().expect("call template attached");
+        let submission = CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots: [(slot_ref.to_string(), value)].into_iter().collect(),
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: Some(CallerProvenance {
+                surface: "test".to_string(),
+                caller: "0085-nested-field-path".to_string(),
+                agent: Some("worker".to_string()),
+                harness: None,
+            }),
+        };
+        submit_run_call(trait_ref, session, submission).expect("call is accepted")
+    }
+
+    #[test]
+    fn project_lifts_a_nested_field_and_a_nested_guard_gates_the_following_step() {
+        let trait_ref = fixture_trait();
+        let session = start_session(&trait_ref);
+
+        let after_produce = submit_current(
+            &trait_ref,
+            session,
+            "slot:hook-output",
+            serde_json::json!({ "decision": { "behavior": "approve" } }),
+        );
+        assert_eq!(
+            after_produce.response_kind,
+            CallResponseKind::AcceptedNextFrame
+        );
+
+        let lifted = after_produce
+            .session
+            .ledger
+            .accepted_slot_values
+            .iter()
+            .find(|value| value.ref_text == "slot:behavior")
+            .expect("project step lifted the nested field")
+            .value
+            .clone();
+        assert_eq!(lifted, serde_json::json!("approve"));
+
+        let completed = submit_current(
+            &trait_ref,
+            after_produce.session,
+            "slot:final",
+            serde_json::json!("done"),
+        );
+        assert_eq!(completed.response_kind, CallResponseKind::AcceptedCompleted);
+        assert_eq!(completed.session.status, Status::Completed);
+
+        // Every transition re-derived the recorded nested-field operand and
+        // agreed with it (`build_session` runs this on every call already);
+        // re-run it explicitly here as the task's named check.
+        let report = crate::procedure::runtime::validate_run_ledger_contract(
+            &trait_ref,
+            &completed.session.ledger,
+        )
+        .expect("ledger contract check runs");
+        assert!(
+            report.diagnostics.is_empty(),
+            "recorded and re-derived nested-field operands must agree: {:?}",
+            report.diagnostics
+        );
+
+        // Serialize/resume cycle: the ledger round-trips through JSON and
+        // the nested-field operand still re-derives cleanly afterward.
+        let serialized = serde_json::to_string(&completed.session.ledger).expect("serialize");
+        let resumed: crate::procedure::runtime::State =
+            serde_json::from_str(&serialized).expect("deserialize");
+        let resumed_report =
+            crate::procedure::runtime::validate_run_ledger_contract(&trait_ref, &resumed)
+                .expect("ledger contract check runs after resume");
+        assert!(
+            resumed_report.diagnostics.is_empty(),
+            "nested-field operand must still re-derive cleanly after a resume: {:?}",
+            resumed_report.diagnostics
+        );
+    }
+}

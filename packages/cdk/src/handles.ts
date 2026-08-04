@@ -32,8 +32,21 @@ export type FieldRef<Value = unknown> = CdkObject & { readonly [FIELD_REF_BRAND]
 /**
  * Maps an inferred object-schema value type to the field-ref proxy an
  * object-schema slot exposes: one `FieldRef<Value[K]>` per declared field.
+ * When a field's own value is itself an object (not a list), the field ref
+ * recurses and re-exposes `ObjectFieldRefs<Value[K]>` too, so `slot.a.b.c`
+ * typechecks — mirroring `slot.a` minting a dotted `fieldRef.field` instead
+ * of a plain name. Lists stop the recursion: a path is a sequence of object
+ * field names only (task 0085's decision), no list indexing/wildcards.
  */
-export type ObjectFieldRefs<Value> = { readonly [K in keyof Value]-?: FieldRef<Value[K]>; };
+export type ObjectFieldRefs<Value> = {
+  readonly [K in keyof Value]-?:
+    & FieldRef<Value[K]>
+    & (
+      Value[K] extends readonly unknown[] ? unknown
+        : Value[K] extends object ? ObjectFieldRefs<Value[K]>
+        : unknown
+    );
+};
 
 /** A typed opaque reference emitted by a CDK builder. */
 export type Handle<K extends RefKind, Value = unknown> = CdkHandle<K, Value>;

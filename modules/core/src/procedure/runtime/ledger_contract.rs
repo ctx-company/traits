@@ -1517,7 +1517,7 @@ fn validate_slot_projection_revision(
             .ok()
         });
     let selected = match (source_value.as_ref(), provenance.field.as_deref()) {
-        (Some(value), Some(field)) => value.as_object().and_then(|object| object.get(field)),
+        (Some(value), Some(field)) => crate::shared::resolve_field_path(value, field),
         (Some(value), None) => Some(value),
         _ => None,
     };
@@ -3506,7 +3506,7 @@ fn comparison_operand_slot_order(operand: &ComparisonOperandEvidence) -> Option<
 
 fn select_json_value<'a>(value: &'a JsonValue, field: Option<&str>) -> Option<&'a JsonValue> {
     match field {
-        Some(field) => value.as_object()?.get(field),
+        Some(field) => crate::shared::resolve_field_path(value, field),
         None => Some(value),
     }
 }

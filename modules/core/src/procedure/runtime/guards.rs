@@ -874,7 +874,9 @@ fn measured_count(
     let stale = accepted.is_some() && stale_repeated_slot(state, slot_ref, evidence.repeated_scope);
     let count = (!stale).then(|| accepted.and_then(|value| value.value.as_array())).flatten().map(|items| {
         items.iter().filter(|item| match (field, field_equals) {
-            (Some(field), Some(expected)) => item.get(field).is_some_and(|actual| actual == expected),
+            (Some(field), Some(expected)) => {
+                crate::shared::resolve_field_path(item, field).is_some_and(|actual| actual == expected)
+            }
             _ => true,
         }).count()
     }).and_then(|count| u64::try_from(count).ok());
@@ -967,7 +969,7 @@ fn evaluate_present_predicate(
             ),
             (Some(_), None) => (GuardOutcome::Matched, "subject is present"),
             (Some(value), Some(field_name)) => {
-                if value.value.as_object().is_some_and(|object| object.contains_key(field_name)) {
+                if crate::shared::resolve_field_path(&value.value, field_name).is_some() {
                     (GuardOutcome::Matched, "declared field is present")
                 } else {
                     (GuardOutcome::NotMatched, "declared field is not present")
@@ -1147,11 +1149,7 @@ fn comparison_ref_operand(
         };
     };
     let selected_value = match field {
-        Some(field) => accepted
-            .value
-            .as_object()
-            .and_then(|object| object.get(field))
-            .cloned(),
+        Some(field) => crate::shared::resolve_field_path(&accepted.value, field).cloned(),
         None => Some(accepted.value.clone()),
     };
     let slot_revision_acceptance_order = Reference::parse(ref_text)
@@ -1765,5 +1763,163 @@ mod p434_keep_guard_tests {
             .find(|evaluation| evaluation.predicate == "present(slot:evaluator-result).cost-microusd")
             .expect("inner present leaf evidence recorded");
         assert_eq!(inner_present.outcome, Some(GuardOutcome::Unmeasurable));
+    }
+}
+
+/// Proves task 0085's "condition.equals over a three-level path" and
+/// "missing intermediate evaluates false, never errors" Done-when clauses,
+/// against a fixture mirroring plannotator's real
+/// `hookSpecificOutput.decision.behavior` shape.
+#[cfg(test)]
+mod nested_field_path_tests {
+    use super::*;
+
+    const NESTED_FIELD_TRAIT_JSON: &str = r#"{
+        "id": "nested-field-path-fixture",
+        "schema-version": "0.3",
+        "version": "0.1.0",
+        "name": "Nested field path fixture",
+        "summary": "Proves a three-level field path typechecks and evaluates.",
+        "schema": [
+            {
+                "id": "decision",
+                "fields": {
+                    "behavior": { "schema": "schema:text", "required": false }
+                }
+            },
+            {
+                "id": "hook-specific-output",
+                "fields": {
+                    "decision": { "schema": "schema:decision", "required": false }
+                }
+            }
+        ],
+        "slot": [
+            { "id": "hook-output", "schema": "schema:hook-specific-output" }
+        ],
+        "condition": {
+            "approved": {
+                "slot": "slot:hook-output",
+                "field": "decision.behavior",
+                "equals": "approve"
+            }
+        }
+    }"#;
+
+    fn accepted_slot(ref_text: &str, value: JsonValue) -> Value {
+        Value {
+            ref_text: ref_text.to_string(),
+            value_digest: crate::digest::canonical_digest(&value).expect("digest"),
+            value,
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    fn state(slots: Vec<Value>) -> State {
+        State {
+            run_id: Id::new("run-nested-field-path-test").expect("id"),
+            trait_id: "nested-field-path-fixture".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: slots,
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn evaluate_approved_guard(trait_ref: &crate::r#trait::Trait, run_state: &State) -> GuardOutcome {
+        let guard = trait_ref
+            .conditions
+            .get("approved")
+            .expect("approved condition declared")
+            .as_guard();
+        let evidence = GuardEvidence { repeated_scope: &[], current_outputs: &[] };
+        let (outcome, _) = evaluate_guard_expr_with_seen(
+            trait_ref,
+            run_state,
+            &guard,
+            &LoopContext { loop_id: String::new(), sequence_id: None, iteration_index: 0, max_iterations: 1 },
+            &evidence,
+            0,
+            &mut BTreeSet::new(),
+        )
+        .expect("approved guard evaluates");
+        outcome
+    }
+
+    #[test]
+    fn fixture_decodes_and_validates() {
+        crate::encoding::decode_trait(crate::encoding::Encoding::Json, NESTED_FIELD_TRAIT_JSON)
+            .expect("nested field path fixture validates");
+    }
+
+    #[test]
+    fn three_level_path_matches_when_value_is_nested() {
+        let trait_ref =
+            crate::encoding::decode_trait(crate::encoding::Encoding::Json, NESTED_FIELD_TRAIT_JSON)
+                .expect("fixture decodes");
+        let run_state = state(vec![accepted_slot(
+            "slot:hook-output",
+            serde_json::json!({ "decision": { "behavior": "approve" } }),
+        )]);
+        let outcome = evaluate_approved_guard(&trait_ref, &run_state);
+        assert_eq!(outcome, GuardOutcome::Matched);
+        assert!(outcome.routes_true());
+    }
+
+    #[test]
+    fn three_level_path_does_not_match_a_different_value() {
+        let trait_ref =
+            crate::encoding::decode_trait(crate::encoding::Encoding::Json, NESTED_FIELD_TRAIT_JSON)
+                .expect("fixture decodes");
+        let run_state = state(vec![accepted_slot(
+            "slot:hook-output",
+            serde_json::json!({ "decision": { "behavior": "deny" } }),
+        )]);
+        let outcome = evaluate_approved_guard(&trait_ref, &run_state);
+        assert_eq!(outcome, GuardOutcome::NotMatched);
+        assert!(!outcome.routes_true());
+    }
+
+    #[test]
+    fn missing_intermediate_evaluates_false_without_erroring() {
+        let trait_ref =
+            crate::encoding::decode_trait(crate::encoding::Encoding::Json, NESTED_FIELD_TRAIT_JSON)
+                .expect("fixture decodes");
+        let run_state = state(vec![accepted_slot(
+            "slot:hook-output",
+            serde_json::json!({}),
+        )]);
+        let outcome = evaluate_approved_guard(&trait_ref, &run_state);
+        assert_eq!(outcome, GuardOutcome::NotMatched);
+        assert!(!outcome.routes_true());
     }
 }

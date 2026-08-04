@@ -1292,43 +1292,8 @@ fn validate_present_field(
         }
         .into());
     };
-    let parsed =
-        Reference::parse(schema_ref).map_err(|_| crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.field"),
-            message: format!("invalid schema ref {schema_ref:?}"),
-        })?;
-    if parsed.kind() != Kind::Schema || parsed.is_qualified() {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.field"),
-            message: "present field requires a local object schema container".to_string(),
-        }
-        .into());
-    }
-    let Some(schema) = trait_ref
-        .schemas
-        .iter()
-        .find(|schema| schema.id == parsed.id())
-    else {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.field"),
-            message: format!("schema {schema_ref:?} is not declared"),
-        }
-        .into());
-    };
-    let Some(fields) = schema.fields.as_ref() else {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.field"),
-            message: "present field requires inline object schema fields".to_string(),
-        }
-        .into());
-    };
-    let Some(field_schema) = fields.get(field_name) else {
-        return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{field_path}.field"),
-            message: format!("unknown schema field {field_name:?}"),
-        }
-        .into());
-    };
+    let field_schema =
+        resolve_object_field_path_schema(trait_ref, schema_ref, field_name, field_path)?;
     if field_schema.required {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{field_path}.field"),
@@ -1715,18 +1680,91 @@ fn validate_elapsed_predicate(
 }
 
 fn numeric_object_field_schema(trait_ref: &Trait, schema_ref: &str, field: &str) -> Option<String> {
-    let parsed = Reference::parse(schema_ref).ok()?;
-    if parsed.kind() != Kind::Schema || parsed.is_qualified() {
-        return None;
+    resolve_object_field_path_schema(trait_ref, schema_ref, field, "")
+        .ok()
+        .map(|field_schema| field_schema.schema.clone())
+}
+
+/// Walk a dot-joined field path against a chain of locally declared inline
+/// object schemas, one hop per segment: each intermediate segment's field
+/// must itself declare a local object schema with inline fields, and the
+/// final segment's field schema is returned.
+///
+/// Refuses an empty path segment, and refuses outright if any container
+/// schema on the path declares a literal field name containing `'.'`
+/// (unreachable for slug-validated inline schemas —
+/// [`crate::shared::validate_slug_shape`] admits no dot — but defended here
+/// for any schema source that bypasses slug validation), naming the schema
+/// and the offending field.
+pub(crate) fn resolve_object_field_path_schema<'a>(
+    trait_ref: &'a Trait,
+    schema_ref: &str,
+    path: &str,
+    field_path: &str,
+) -> crate::Result<&'a crate::r#trait::schema::SchemaField> {
+    let segments: Vec<&str> = path.split('.').collect();
+    let mut current_schema_ref = schema_ref.to_string();
+    let mut resolved_field: Option<&'a crate::r#trait::schema::SchemaField> = None;
+    for (index, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("{field_path}.field"),
+                message: format!("field path {path:?} has an empty segment"),
+            }
+            .into());
+        }
+        let parsed = Reference::parse(&current_schema_ref).map_err(|_| {
+            crate::manifest::Error::InvalidField {
+                field_path: format!("{field_path}.field"),
+                message: format!("invalid schema ref {current_schema_ref:?}"),
+            }
+        })?;
+        if parsed.kind() != Kind::Schema || parsed.is_qualified() {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("{field_path}.field"),
+                message: "field path requires a local object schema".to_string(),
+            }
+            .into());
+        }
+        let schema = trait_ref
+            .schemas
+            .iter()
+            .find(|schema| schema.id == parsed.id())
+            .ok_or_else(|| crate::manifest::Error::InvalidField {
+                field_path: format!("{field_path}.field"),
+                message: format!("schema {current_schema_ref:?} is not declared"),
+            })?;
+        let fields =
+            schema
+                .fields
+                .as_ref()
+                .ok_or_else(|| crate::manifest::Error::InvalidField {
+                    field_path: format!("{field_path}.field"),
+                    message: "field path requires inline object schema fields".to_string(),
+                })?;
+        if let Some(dotted) = fields.keys().find(|name| name.contains('.')) {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("{field_path}.field"),
+                message: format!(
+                    "schema {:?} declares field {dotted:?} containing '.', which is ambiguous in a dotted field path",
+                    schema.id
+                ),
+            }
+            .into());
+        }
+        let field_schema =
+            fields
+                .get(*segment)
+                .ok_or_else(|| crate::manifest::Error::InvalidField {
+                    field_path: format!("{field_path}.field"),
+                    message: format!("unknown schema field {segment:?}"),
+                })?;
+        resolved_field = Some(field_schema);
+        if index + 1 < segments.len() {
+            current_schema_ref = field_schema.schema.clone();
+        }
     }
-    trait_ref
-        .schemas
-        .iter()
-        .find(|schema| schema.id == parsed.id())?
-        .fields
-        .as_ref()?
-        .get(field)
-        .map(|field| field.schema.clone())
+    Ok(resolved_field.expect("path always has at least one segment"))
 }
 
 /// Return the sole `ref` member of a tagged numeric comparison RHS.
@@ -1786,43 +1824,8 @@ fn validate_literal_for_schema(
         .into());
     }
     if let Some(field_name) = field {
-        let parsed =
-            Reference::parse(schema_ref).map_err(|_| crate::manifest::Error::InvalidField {
-                field_path: format!("{field_path}.slot"),
-                message: format!("invalid schema ref {schema_ref:?}"),
-            })?;
-        if parsed.kind() != Kind::Schema || parsed.is_qualified() {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{field_path}.field"),
-                message: "field equality requires a local object schema".to_string(),
-            }
-            .into());
-        }
-        let Some(schema) = trait_ref
-            .schemas
-            .iter()
-            .find(|schema| schema.id == parsed.id())
-        else {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{field_path}.field"),
-                message: format!("schema {schema_ref:?} is not declared"),
-            }
-            .into());
-        };
-        let Some(fields) = schema.fields.as_ref() else {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{field_path}.field"),
-                message: "field equality requires inline object schema fields".to_string(),
-            }
-            .into());
-        };
-        let Some(field_schema) = fields.get(field_name) else {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{field_path}.field"),
-                message: format!("unknown schema field {field_name:?}"),
-            }
-            .into());
-        };
+        let field_schema =
+            resolve_object_field_path_schema(trait_ref, schema_ref, field_name, field_path)?;
         return validate_literal_for_schema_field(trait_ref, field_schema, literal, field_path);
     }
 
@@ -2087,6 +2090,130 @@ summary = "Present validation fixture."
         assert_eq!(
             GuardOutcome::NotMatched.or(GuardOutcome::Unmeasurable),
             GuardOutcome::Unmeasurable
+        );
+    }
+}
+
+/// Proves task 0085's build-time Done-when clauses: a dotted path validates
+/// through `condition.equals`, an unknown segment is refused by name, and a
+/// literal field name containing `'.'` is refused by name.
+#[cfg(test)]
+mod nested_field_path_validation_tests {
+    use crate::encoding::{Encoding, decode_trait};
+
+    const HEADER: &str = r#"
+id = "nested-field-path-validate"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Nested field path validate"
+summary = "Nested field path validation fixture."
+"#;
+
+    const NESTED_SCHEMAS: &str = r#"
+[[schema]]
+id = "decision"
+
+[schema.fields.behavior]
+schema = "schema:text"
+required = false
+
+[[schema]]
+id = "hook-specific-output"
+
+[schema.fields.decision]
+schema = "schema:decision"
+required = false
+
+[[slot]]
+id = "hook-output"
+schema = "schema:hook-specific-output"
+"#;
+
+    #[test]
+    fn accepts_a_dotted_path_over_a_declared_nested_field() {
+        let text = format!(
+            "{HEADER}\n{NESTED_SCHEMAS}\n[condition.approved]\nslot = \"slot:hook-output\"\nfield = \"decision.behavior\"\nequals = \"approve\"\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect("dotted field path over a nested schema accepted");
+    }
+
+    #[test]
+    fn rejects_an_unknown_segment_naming_it() {
+        let text = format!(
+            "{HEADER}\n{NESTED_SCHEMAS}\n[condition.approved]\nslot = \"slot:hook-output\"\nfield = \"decision.unknown-field\"\nequals = \"approve\"\n"
+        );
+        let err = decode_trait(Encoding::Toml, &text).expect_err("unknown nested segment rejected");
+        assert!(
+            err.to_string().contains("unknown-field"),
+            "error must name the offending segment: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_intermediate_segment_that_is_not_an_object_schema() {
+        let text = format!(
+            "{HEADER}\n{NESTED_SCHEMAS}\n[condition.approved]\nslot = \"slot:hook-output\"\nfield = \"decision.behavior.bogus\"\nequals = \"approve\"\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect_err("walking past a scalar leaf field must be rejected");
+    }
+
+    /// Inline object-schema field ids are slug-validated at decode time
+    /// (`validate_slug_shape` admits no `'.'`), so a dotted literal field
+    /// name can never reach `resolve_object_field_path_schema` through
+    /// normal decoding — this defends any schema source that bypasses that
+    /// validation, so the test bypasses it too: decode a valid fixture, then
+    /// mutate the decoded schema's field map directly.
+    #[test]
+    fn rejects_a_literal_field_name_containing_a_dot_naming_the_schema_and_field() {
+        let text = format!(
+            "{HEADER}\n[[schema]]\nid = \"malformed\"\n\n[schema.fields.placeholder]\nschema = \"schema:text\"\nrequired = false\n\n[[slot]]\nid = \"scratch\"\nschema = \"schema:malformed\"\n"
+        );
+        let mut trait_ref = decode_trait(Encoding::Toml, &text).expect("fixture decodes");
+        let schema = trait_ref
+            .schemas
+            .iter_mut()
+            .find(|schema| schema.id == "malformed")
+            .expect("malformed schema declared");
+        let fields = schema.fields.as_mut().expect("inline fields declared");
+        let placeholder = fields
+            .remove("placeholder")
+            .expect("placeholder field declared");
+        fields.insert("a.b".to_string(), placeholder);
+
+        let err = super::resolve_object_field_path_schema(
+            &trait_ref,
+            "schema:malformed",
+            "a.b",
+            "condition.approved",
+        )
+        .expect_err("a literal field name containing a dot must be refused");
+        let message = err.to_string();
+        assert!(
+            message.contains("malformed") && message.contains("a.b"),
+            "error must name the schema and the offending field: {message}"
+        );
+    }
+
+    #[test]
+    fn present_field_validates_through_the_same_dotted_path() {
+        let text = format!(
+            "{HEADER}\n{NESTED_SCHEMAS}\n[condition.has-behavior]\npresent = \"slot:hook-output\"\nfield = \"decision.behavior\"\n"
+        );
+        decode_trait(Encoding::Toml, &text).expect("present over a dotted field path accepted");
+    }
+
+    #[test]
+    fn one_level_field_ref_still_emits_the_exact_bytes_it_always_has() {
+        let text = format!(
+            "{HEADER}\n[[schema]]\nid = \"cap-report\"\n\n[schema.fields.cost-microusd]\nschema = \"schema:integer\"\nrequired = false\n\n[[slot]]\nid = \"cap\"\nschema = \"schema:cap-report\"\n\n[condition.under-cap]\nslot = \"slot:cap\"\nfield = \"cost-microusd\"\nat-most = 5\n"
+        );
+        let trait_ref = decode_trait(Encoding::Toml, &text).expect("one-level field ref accepted");
+        let canonical = crate::digest::canonical_json(&trait_ref).expect("trait canonicalizes");
+        assert!(
+            canonical.contains("\"field\":\"cost-microusd\""),
+            "one-level field must still serialize as a bare name, not a path: {canonical}"
         );
     }
 }

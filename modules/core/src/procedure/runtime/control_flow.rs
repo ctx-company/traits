@@ -912,10 +912,7 @@ fn execute_project_item(
                     )
                 })?;
                 let submitted = match projection.field.as_deref() {
-                    Some(field) => source
-                        .value
-                        .as_object()
-                        .and_then(|object| object.get(field))
+                    Some(field) => crate::shared::resolve_field_path(&source.value, field)
                         .cloned()
                         .ok_or_else(|| {
                             crate::procedure::invalid_field(

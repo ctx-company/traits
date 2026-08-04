@@ -1944,15 +1944,19 @@ fn validate_project_item(
                     }
                 })?;
                 let selected_schema = if let Some(field) = projection.field.as_deref() {
-                    object_schema_fields(trait_ref, &source_schema)
-                        .and_then(|fields| fields.get(field))
-                        .map(|field| field.schema.clone())
-                        .ok_or_else(|| crate::manifest::Error::InvalidField {
-                            field_path: format!("{projection_path}.field"),
-                            message: format!(
-                                "project source field {field:?} is not declared by an inline object schema"
-                            ),
-                        })?
+                    crate::r#trait::condition::resolve_object_field_path_schema(
+                        trait_ref,
+                        &source_schema,
+                        field,
+                        &projection_path,
+                    )
+                    .map(|field_schema| field_schema.schema.clone())
+                    .map_err(|_| crate::manifest::Error::InvalidField {
+                        field_path: format!("{projection_path}.field"),
+                        message: format!(
+                            "project source field {field:?} is not declared by an inline object schema"
+                        ),
+                    })?
                 } else {
                     source_schema
                 };

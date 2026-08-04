@@ -445,3 +445,67 @@ pub fn desugar_variant_ref(value: &str, field_path: &str) -> crate::Result<Optio
         Ok(Some(format!("{family}-{variant}")))
     }
 }
+
+/// Resolve a dot-joined field path against a JSON value, one object hop per
+/// segment.
+///
+/// Inline object-schema field ids are slug-validated
+/// ([`validate_slug_shape`]), so a segment can never itself contain a dot:
+/// `split('.')` / `join(".")` is a bijection between the dotted string and
+/// its segments, and a one-segment path (no dot) behaves exactly like the
+/// flat `object.get(field)` lookup it replaces.
+///
+/// A missing or non-object intermediate yields `None`, never an error. Each
+/// caller maps that to its own historical absence policy (guards: the
+/// comparison evaluates false; `project`: source-field-absent error) — this
+/// resolver deliberately has no opinion.
+///
+/// `pub(crate)` and dependency-free so other path-walking call sites (task
+/// 0062's task-node `content` paths) can reuse it rather than growing a
+/// second walker.
+pub(crate) fn resolve_field_path<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in field.split('.') {
+        current = current.as_object()?.get(segment)?;
+    }
+    Some(current)
+}
+
+#[cfg(test)]
+mod resolve_field_path_tests {
+    use super::resolve_field_path;
+    use serde_json::json;
+
+    #[test]
+    fn resolves_one_level() {
+        let value = json!({"foo": "bar"});
+        assert_eq!(resolve_field_path(&value, "foo"), Some(&json!("bar")));
+    }
+
+    #[test]
+    fn resolves_nested_hit() {
+        let value = json!({"a": {"b": {"c": 1}}});
+        assert_eq!(resolve_field_path(&value, "a.b.c"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn missing_intermediate_is_none() {
+        let value = json!({"a": {}});
+        assert_eq!(resolve_field_path(&value, "a.b.c"), None);
+    }
+
+    #[test]
+    fn non_object_intermediate_is_none() {
+        let value = json!({"a": 1});
+        assert_eq!(resolve_field_path(&value, "a.b"), None);
+    }
+
+    #[test]
+    fn missing_top_level_is_none() {
+        let value = json!({});
+        assert_eq!(resolve_field_path(&value, "a.b"), None);
+    }
+}

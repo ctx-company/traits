@@ -246,10 +246,11 @@ function slotOf(fields: SlotFields): SlotHandle {
   const handle = withDeclaration("slot", `slot:${fields.id}`, declaration, {} as JsonObject, {
     declarations: collectMany([fields.schema]),
   });
-  const fieldIds = objectSchemaFieldIds(fields.schema);
-  const resolved = fieldIds === undefined
+  const objectFields = objectSchemaFields(fields.schema);
+  const declarations = collectMany([handle]);
+  const resolved = objectFields === undefined
     ? handle as SlotHandle
-    : objectSlotFieldProxy(handle as SlotHandle, fields.id, fieldIds);
+    : fieldRefProxy(handle as SlotHandle, fields.id, `slot:${fields.id}`, [], objectFields, declarations) as SlotHandle;
   // `.optional()` is the per-SITE optionality wrapper, identical in output to
   // `input.optional(slot)` — optionality has never been a property of the slot
   // itself, so the same slot stays required at one step and optional at
@@ -259,50 +260,96 @@ function slotOf(fields: SlotFields): SlotHandle {
   return withHiddenField(resolved, "optional", () => optionalSlotInput(resolved));
 }
 
-/**
- * The declared field ids of an object schema (`schema.object`/`extend`/
- * `template`), or `undefined` when `schemaValue` isn't a declared object
- * schema (a built-in, list, union, or enum schema has no per-field access).
- */
-function objectSchemaFieldIds(schemaValue: SchemaValue): readonly string[] | undefined {
-  const fields = (metaOf(schemaValue)?.declaration as { readonly fields?: JsonObject; } | undefined)?.fields;
-  return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
-    ? undefined
-    : Object.keys(fields);
+/** One declared object-schema field's canonical shape, as it appears in `declaration.fields`. */
+interface SchemaFieldSummary {
+  readonly schema: string;
 }
 
 /**
- * Wraps an object-schema slot handle in a proxy exposing one `FieldRef` per
- * declared field (`slot.foo`, `slot["exit-code"]`) alongside the slot's
- * normal surface. Uses own-field lookup — so a name like `constructor`
- * cannot resolve through `Object.prototype` — and throws, naming the slot
- * and field, on any other unknown string access; symbol access (CDK
+ * The declared fields of an object schema (`schema.object`/`extend`/
+ * `template`), keyed by field id, or `undefined` when `schemaValue` isn't a
+ * declared object schema (a built-in, list, union, or enum schema has no
+ * per-field access).
+ */
+function objectSchemaFields(schemaValue: SchemaValue): Record<string, SchemaFieldSummary> | undefined {
+  const fields = (metaOf(schemaValue)?.declaration as { readonly fields?: JsonObject; } | undefined)?.fields;
+  return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
+    ? undefined
+    : fields as unknown as Record<string, SchemaFieldSummary>;
+}
+
+/**
+ * The declared fields of the local object schema `ref` points at, looked up
+ * in an already-collected declaration set — or `undefined` when `ref` isn't
+ * a local schema ref, isn't declared, or declares no inline fields (a
+ * resource-backed or scalar-enum schema has no per-field access, and a
+ * field pointing at one is a recursion leaf).
+ */
+function objectSchemaFieldsByRef(
+  ref: string,
+  declarations: ReturnType<typeof collectMany>,
+): Record<string, SchemaFieldSummary> | undefined {
+  if (!ref.startsWith("schema:") || ref.includes(":", "schema:".length)) return undefined;
+  const id = ref.slice("schema:".length);
+  const declaration = declarations.schema?.find((candidate) => (candidate as { readonly id?: string; }).id === id) as
+    | { readonly fields?: JsonObject; }
+    | undefined;
+  const fields = declaration?.fields;
+  return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
+    ? undefined
+    : fields as unknown as Record<string, SchemaFieldSummary>;
+}
+
+/**
+ * Wraps an object-schema slot handle (or, recursively, an object-schema
+ * `FieldRef`) in a proxy exposing one `FieldRef` per declared field
+ * (`slot.foo`, `slot["exit-code"]`) alongside the base value's normal
+ * surface. When an accessed field's own declared schema is itself a local
+ * object schema, the returned `FieldRef` recurses the same way, so
+ * `slot.a.b.c` mints `fieldRef: { slotRef, field: "a.b.c" }` — task 0085's
+ * dot-joined path encoding. Lists and scalar leaves stop the recursion.
+ *
+ * Uses own-field lookup — so a name like `constructor` cannot resolve
+ * through `Object.prototype` — and throws, naming the slot and the full
+ * dotted path, on any other unknown string access; symbol access (CDK
  * metadata, `Symbol.toPrimitive`, ...) always passes through untouched.
  *
- * Each `FieldRef` carries the parent slot's own declarations (its slot
- * declaration plus the transitively-collected schema declarations) as
- * `Meta.declarations`, so `condition.equals(slot.foo, value)` collects
- * exactly what `condition.fieldEquals(slot, "foo", value)` does — omitting
- * this would let a trait authored through field access silently drop the
- * slot/schema declarations from the built trait.
+ * Every minted `FieldRef`, at any depth, carries the same parent
+ * `declarations` (the slot declaration plus every transitively-collected
+ * schema declaration reachable from it), so `condition.equals(slot.a.b,
+ * value)` collects exactly what a hand-written `{ slot, field: "a.b",
+ * equals }` guard would — omitting this would let a trait authored through
+ * field access silently drop the slot/schema declarations from the built
+ * trait.
  */
-function objectSlotFieldProxy(handle: SlotHandle, slotId: string, fieldIds: readonly string[]): SlotHandle {
-  const slotRef = `slot:${slotId}`;
-  const fieldIdSet = new Set(fieldIds);
+function fieldRefProxy(
+  base: object,
+  slotId: string,
+  slotRef: string,
+  fieldPath: readonly string[],
+  fields: Record<string, SchemaFieldSummary>,
+  declarations: ReturnType<typeof collectMany>,
+): SlotHandle | FieldRef {
   const fieldRefCache = new Map<string, FieldRef>();
-  const declarations = collectMany([handle]);
-  return new Proxy(handle, {
+  return new Proxy(base, {
     get(target, prop, receiver) {
       if (typeof prop === "symbol" || Object.hasOwn(target, prop)) return Reflect.get(target, prop, receiver);
-      if (!fieldIdSet.has(prop)) {
-        throw new Error(`slot ${JSON.stringify(slotId)} has no field ${JSON.stringify(prop)}`);
+      const field = Object.hasOwn(fields, prop) ? fields[prop] : undefined;
+      if (field === undefined) {
+        const fullPath = [...fieldPath, prop].join(".");
+        throw new Error(`slot ${JSON.stringify(slotId)} has no field ${JSON.stringify(fullPath)}`);
       }
       let fieldRef = fieldRefCache.get(prop);
       if (fieldRef === undefined) {
-        fieldRef = attachMeta({}, { fieldRef: { slotRef, field: prop }, declarations });
+        const nextPath = [...fieldPath, prop];
+        const leaf = attachMeta({}, { fieldRef: { slotRef, field: nextPath.join(".") }, declarations });
+        const nestedFields = objectSchemaFieldsByRef(field.schema, declarations);
+        fieldRef = nestedFields === undefined
+          ? leaf
+          : fieldRefProxy(leaf, slotId, slotRef, nextPath, nestedFields, declarations) as FieldRef;
         fieldRefCache.set(prop, fieldRef);
       }
       return fieldRef;
     },
-  }) as SlotHandle;
+  }) as SlotHandle | FieldRef;
 }

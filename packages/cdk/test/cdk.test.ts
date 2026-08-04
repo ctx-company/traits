@@ -441,6 +441,74 @@ describe("schema authoring sugar", () => {
     expect(() => noteSlot.nope).toThrow(/nope/);
   });
 
+  it("recurses field refs through nested object schemas so slot.a.b.c typechecks and lowers to a dotted field", () => {
+    const decisionSchema = schema.object("sugar-0085-decision", { behavior: schema.text() });
+    const hookOutputSchema = schema.object("sugar-0085-hook-output", { decision: decisionSchema });
+    const hookSlot = slot({ id: "sugar-0085-hook-slot", schema: hookOutputSchema });
+
+    const fieldRef = hookSlot.decision.behavior;
+    expectTypeOf(fieldRef).toMatchTypeOf<FieldRef<string>>();
+
+    const guard = condition.equals(fieldRef, "approve");
+    expect(JSON.parse(JSON.stringify(guard))).toEqual({
+      slot: "slot:sugar-0085-hook-slot",
+      field: "decision.behavior",
+      equals: "approve",
+    });
+
+    // @ts-expect-error 1 is not assignable to the field's inferred `string` value type.
+    condition.equals(fieldRef, 1);
+  });
+
+  it("does not re-expose fields on a scalar leaf", () => {
+    // A scalar leaf `FieldRef` is a plain (non-proxied) object — like every
+    // one-level field ref before this change — so an unknown property reads
+    // as `undefined` rather than throwing; only the slot/proxy layers throw
+    // on unknown access.
+    const decisionSchema = schema.object("sugar-0085-scalar-leaf-decision", { behavior: schema.text() });
+    const hookOutputSchema = schema.object("sugar-0085-scalar-leaf-hook-output", { decision: decisionSchema });
+    const hookSlot = slot({ id: "sugar-0085-scalar-leaf-slot", schema: hookOutputSchema }) as unknown as {
+      readonly decision: { readonly behavior: { readonly nope: unknown; }; };
+    };
+
+    expect(hookSlot.decision.behavior.nope).toBeUndefined();
+  });
+
+  it("stops recursion at a list field", () => {
+    const itemSchema = schema.object("sugar-0085-list-item", { value: schema.text() });
+    const containerSchema = schema.object("sugar-0085-list-container", { items: schema.list(itemSchema) });
+    const containerSlot = slot({ id: "sugar-0085-list-slot", schema: containerSchema }) as unknown as {
+      readonly items: { readonly value: unknown; };
+    };
+
+    expect(containerSlot.items.value).toBeUndefined();
+  });
+
+  it("throws naming the slot and the full dotted path on an unknown nested field", () => {
+    const decisionSchema = schema.object("sugar-0085-unknown-nested-decision", { behavior: schema.text() });
+    const hookOutputSchema = schema.object("sugar-0085-unknown-nested-hook-output", { decision: decisionSchema });
+    const hookSlot = slot({ id: "sugar-0085-unknown-nested-slot", schema: hookOutputSchema }) as unknown as {
+      readonly decision: { readonly nope: unknown; };
+    };
+
+    expect(() => hookSlot.decision.nope).toThrow(/sugar-0085-unknown-nested-slot/);
+    expect(() => hookSlot.decision.nope).toThrow(/decision\.nope/);
+  });
+
+  it("emits one-level field refs byte-identically to before this change", () => {
+    const noteSchema = schema.object("sugar-0085-one-level-note", { status: schema.text() });
+    const noteSlot = slot({ id: "sugar-0085-one-level-slot", schema: noteSchema });
+
+    const guardViaFieldRef = condition.equals(noteSlot.status, "approved");
+    const guardViaFieldEquals = condition.fieldEquals(noteSlot, "status", "approved");
+    expect(JSON.parse(JSON.stringify(guardViaFieldRef))).toEqual({
+      slot: "slot:sugar-0085-one-level-slot",
+      field: "status",
+      equals: "approved",
+    });
+    expect(JSON.stringify(guardViaFieldRef)).toBe(JSON.stringify(guardViaFieldEquals));
+  });
+
   it("flattens a union of unions into one flat ref and still rejects a duplicate after flattening", () => {
     const a = schema.object("sugar-union-a", { value: schema.text() });
     const b = schema.object("sugar-union-b", { value: schema.text() });
