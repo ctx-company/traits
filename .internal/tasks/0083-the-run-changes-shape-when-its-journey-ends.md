@@ -2,8 +2,9 @@
 
 **Status:** ready to implement · **Depends on:** nothing; overlaps 0080 (both touch the journey/current-activity panes) and 0082 (journey follow) — coordinate rather than land blind · **Raised:** 2026-08-04 (owner)
 
-Four changes to what happens after a run's own steps finish. Three are layout,
-one is a name.
+Three changes to what happens after a run's own steps finish: two layout, one a
+name. (A fourth — dropping the per-step `in`/`out` lines — landed separately as
+`9e08fc07`.)
 
 ## Where things are today
 
@@ -33,11 +34,10 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
   processing" is the owner's suggestion and is fine; the requirement is that
   it stops sounding like machinery and stays a phase name rather than a
   sentence.
-- **A finished journey drops its `in`/`out` port lines.** `RunStep` carries
-  `inputs`/`outputs` (`run_view.rs:474`) and renders them per step. While a
-  run is moving they say what each step consumes and produces; once it is done
-  they are noise between the reader and the shape of what happened. Show the
-  completed steps, nothing else.
+- ~~A finished journey drops its `in`/`out` port lines.~~ **DONE ELSEWHERE**:
+  `9e08fc07` collapsed the three-row step display to one width-aware row and
+  took the `in`/`out` lines out of the journey entirely, for every step rather
+  than only finished ones. Nothing left to do here.
 - **The journey does not move.** It stays exactly where the reader has been
   looking at it for the whole run. Nothing about finishing is a reason to
   relocate the one pane they have been tracking.
@@ -61,9 +61,8 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
 ## Scope
 
 `journey_lines_with_active_row`'s landing section; the pane tree's completed
-arm; the `in`/`out` rendering on a done step; the page-key end/start
-resolution; and the `landing` wording in `run_view`, `MergeStage` and
-`merge_story`.
+arm; the page-key end/start resolution; and the `landing` wording in
+`run_view` and `merge_story`.
 
 ## Watch
 
@@ -87,17 +86,21 @@ resolution; and the `landing` wording in `run_view`, `MergeStage` and
 - P552's one-renderer contract: live, preview and attached surfaces share this
   renderer — and 0081 makes the attached surface the same view — so check both
   width breakpoints and the narrow single-leaf tree.
-- Renaming a phase touches recorded park reasons and their translations.
-  `merge_story` maps `ParkClass::Landing*` to owner-facing text; the internal
-  identifiers can stay as they are, but any string a person reads should not
-  be half-renamed.
+- **The rename is of displayed words only — and one of them is load-bearing.**
+  Rust identifiers (`MergeStage::Landing`, `ParkClass::Landing*`) stay: they
+  are never displayed and renaming them buys nothing. But
+  `merge_story` translates already-recorded park reasons by matching their
+  TEXT — `reason.starts_with(GATE_FAILED_PREFIX)` where that prefix is the
+  literal `"pre-landing gate "`. Change that string and every reason already
+  written into a ledger stops matching, and loses its plain-language
+  rendering. Either keep the stored prefix and rename only what is printed, or
+  match both spellings. Do not rename it and move on.
 
 ## Done when
 
 `End` and `Home` reach the true end and start of the journey including its
 landing rows; the phase has one non-mechanical name everywhere a person reads
-it; a completed journey shows its done steps with no `in`/`out` lines; the
-the journey stays where it was and post-processing replaces the whole right
+it; the journey stays where it was and post-processing replaces the whole right
 column, current activity and history together, at full height; the morph
 happens once, only when the journey is done AND a next phase is running; and a
 run that ends with nothing after it simply stays as it was.
