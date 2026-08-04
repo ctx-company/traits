@@ -8,19 +8,20 @@ mod assisted;
 
 use camino::Utf8PathBuf;
 
+use std::collections::BTreeMap;
+
+use ctx_traits_core::procedure::activity::ActivityKind;
 use ctx_traits_core::procedure::runtime::FinalState;
 use ctx_traits_core::procedure::runtime::PathSegment;
 use ctx_traits_core::procedure::session::{MergeFrame, MergeStatus, Session};
-use ctx_traits_core::procedure::story::{
-    self, StoryBeat, StoryLevel, StoryReport, StorySpine, ValueGloss,
-};
+use ctx_traits_core::procedure::story::{self, StoryBeat, StoryLevel, StoryReport};
 use ctx_traits_core::response::CommandOutput;
 
 use crate::app::command_handlers::print_json_report;
 use crate::app::merge_story::{Explanation, GateRow, explain_frame, gate_rows, stage_sentence};
 use crate::app::run_format::render_runtime_path;
 use crate::app::run_view::{session_status, stop_reason_summary};
-use crate::app::tui::{self, Line, Tone, labeled_line, write_plain_line as w};
+use crate::app::tui::{self, Line, Tone, write_plain_line as w};
 
 /// Formats a persisted step title for human-facing output. Only loop control
 /// segments own round numbers; item and other control segments may repeat an
@@ -237,100 +238,8 @@ pub(crate) fn load_plan(session: &Session) -> Option<ctx_traits_core::procedure:
         .ok()
 }
 
-fn spine_text(spine: StorySpine) -> &'static str {
-    match spine {
-        StorySpine::SlotRevisions => "slot-revisions",
-        // Deliberately does not claim "legacy ledger": an empty
-        // `slot-revisions` also occurs on a current-schema ledger that has
-        // simply accepted nothing yet, and that is not a legacy fact (P383
-        // review round 1, blocker
-        // `status-fallback-fabricates-unexecuted-beats`).
-        StorySpine::SequenceStatuses => "sequence-statuses (no slot-revision evidence)",
-    }
-}
-
-fn final_state_text(state: &ctx_traits_core::procedure::runtime::FinalState) -> &'static str {
-    use ctx_traits_core::procedure::runtime::FinalState;
-    match state {
-        FinalState::Running => "running",
-        FinalState::Blocked => "blocked",
-        FinalState::Completed => "completed",
-        FinalState::Failed => "failed",
-        FinalState::Rejected => "rejected",
-    }
-}
-
-fn summary_source_text(source: Option<story::SummaryLineSource>) -> &'static str {
-    match source {
-        Some(story::SummaryLineSource::StepSummary) => "step-summary",
-        Some(story::SummaryLineSource::TypedOutput) => "typed-output",
-        Some(story::SummaryLineSource::Derived) => "derived",
-        None => "unrecorded",
-    }
-}
-
-fn gloss_text(gloss: &ValueGloss) -> String {
-    let mut parts = Vec::new();
-    if let Some(status) = &gloss.status {
-        parts.push(format!("status={status}"));
-    }
-    if !gloss.blockers.is_empty() {
-        parts.push(format!("blockers=[{}]", gloss.blockers.join(", ")));
-    }
-    if let Some(escalation) = &gloss.escalation {
-        parts.push(format!("escalation={escalation}"));
-    }
-    if let Some(advisory) = &gloss.advisory {
-        parts.push(format!("advisory={advisory:?}"));
-    }
-    if let Some(generic) = &gloss.generic {
-        if let Some(preview) = &generic.preview {
-            parts.push(format!("preview={preview:?}"));
-        }
-        parts.push(format!("bytes={}", generic.byte_len));
-        if let Some(count) = generic.element_count {
-            parts.push(format!("elements={count}"));
-        }
-    }
-    if parts.is_empty() {
-        "(empty)".to_string()
-    } else {
-        parts.join(" ")
-    }
-}
-
-/// One line of `$ argv — exit evidence`. `argv` is bounded through the same
-/// [`story::bounded`]/[`story::GLOSS_CHAR_BOUND`] rule every value gloss
-/// already uses — a `git commit -m <message>` beat's argv can otherwise
-/// carry an entire multi-paragraph commit body, wrapping one "line" across
-/// the terminal (styled) or breaking a `|`-delimited table row (markdown)
-/// (P383 review round 1, blocker `unbounded-command-argv-in-render`).
-/// `--json` is unaffected — it serializes `beat.command` directly, never
-/// this rendered text.
-fn beat_command_text(beat: &StoryBeat) -> Option<String> {
-    let command = beat.command.as_ref()?;
-    let result = match command.exit_code {
-        Some(0) => "pass".to_string(),
-        Some(code) => format!("fail exit={code}"),
-        None => "fail (no exit code)".to_string(),
-    };
-    let timed_out = if command.timed_out { " timed-out" } else { "" };
-    let argv = command.argv.join(" ").replace(['\n', '\r'], " ");
-    Some(format!("$ {} — {result}{timed_out}", story::bounded(&argv)))
-}
-
-/// One merge frame as it should render in every mode: the terminal
-/// (`Merged`/`Parked`/the two non-park terminal failures) frame gets its
-/// full [`Explanation`]; every other, necessarily non-terminal, frame gets a
-/// plain progression row instead — `explain_frame` is only ever meant to be
-/// called on the last terminal frame (see its own doc), so calling it on
-/// `LockAcquired`/`GatesPassed`/`Reconciled` made every landed run's story
-/// falsely claim "this merge attempt is still running" for stages that had
-/// long since completed (P383 review round 1, blocker
-/// `merge-explainer-applied-to-nonterminal-frames`). Built once and shared
-/// by all three renderers so a field present in one mode cannot silently be
-/// absent from another (P383 review round 1, blocker
-/// `landing-commit-and-commands-missing-from-styled-and-markdown`).
+/// The landing evidence is projected once with the rest of the story. The
+/// terminal frame gets its own explanation; progress frames remain facts.
 struct LandingFrame<'a> {
     frame: &'a MergeFrame,
     outcome: Option<Explanation>,
@@ -362,103 +271,464 @@ fn merge_status_word(status: MergeStatus) -> &'static str {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Plain (non-styled) rendering
-// ---------------------------------------------------------------------------
-
-/// Non-TTY sibling of [`story_view::run`](super::story_view::run): prints the
-/// plain story block after a driven run's final output, so `--story` still
-/// means something in CI logs without any terminal takeover (P550).
-pub(crate) fn print_plain_story(
-    session: &Session,
-    report: &StoryReport,
-    level: StoryLevel,
-) -> crate::Result<()> {
-    render_plain(session, report, level)
+#[derive(Debug, Clone)]
+struct HumanSection {
+    heading: &'static str,
+    rows: Vec<String>,
 }
 
-fn render_plain(session: &Session, report: &StoryReport, level: StoryLevel) -> crate::Result<()> {
-    w(disposition_sentence(session, report))?;
+#[derive(Debug, Clone)]
+struct HumanStory {
+    header: Vec<String>,
+    sections: Vec<HumanSection>,
+    diagnostics: Vec<HumanSection>,
+}
+
+fn human_story(session: &Session, report: &StoryReport, level: StoryLevel) -> HumanStory {
+    project_human_story(report, level, disposition_sentence(session, report))
+}
+
+fn project_human_story(report: &StoryReport, level: StoryLevel, disposition: String) -> HumanStory {
+    let mut header = vec![
+        disposition.clone(),
+        format!(
+            "{} | elapsed {}",
+            report.trait_id,
+            tui::elapsed_text(std::time::Duration::from_secs(report.elapsed_seconds))
+        ),
+    ];
     if let Some(notice) = degrade_notice(level, report) {
-        w(format!("  ({notice})"))?;
+        header.push(format!("({notice})"));
     }
-    w(format!("ctx traits story {}", report.run_id))?;
-    w(format!("  trait: {}", report.trait_id))?;
-    w(format!("  spine: {}", spine_text(report.spine)))?;
-    w(format!(
-        "  enrichment: {}",
-        match report.enrichment {
-            ctx_traits_core::procedure::story::StoryEnrichment::Trait => "trait",
-            ctx_traits_core::procedure::story::StoryEnrichment::LedgerOnly => "ledger-only",
-        }
-    ))?;
-    w(format!("  status: {}", session_status(&report.status)))?;
-    w(format!(
-        "  final-state: {}",
-        final_state_text(&report.final_state)
-    ))?;
-    w(format!(
-        "  elapsed: {}",
-        tui::elapsed_text(std::time::Duration::from_secs(report.elapsed_seconds))
-    ))?;
-    if let Some(summary) = stop_reason_summary(session) {
-        w(format!("  stop-reason: {summary}"))?;
+    let sections = vec![
+        HumanSection {
+            heading: "JOURNEY",
+            rows: journey_rows(report, level),
+        },
+        HumanSection {
+            heading: "BLOCKERS RAISED",
+            rows: blocker_rows(report),
+        },
+        HumanSection {
+            heading: "COMMANDS",
+            rows: command_rows(report),
+        },
+        HumanSection {
+            heading: "OUTCOME",
+            rows: outcome_rows(report, &disposition),
+        },
+    ];
+    HumanStory {
+        header,
+        sections,
+        diagnostics: if level == StoryLevel::Detailed {
+            diagnostic_sections(report)
+        } else {
+            Vec::new()
+        },
     }
+}
 
-    w(format!("  beats: {}", report.beats.len()))?;
+fn loop_key(beat: &StoryBeat) -> Vec<(String, usize)> {
+    beat.position_path
+        .iter()
+        .filter(|part| part.kind == "loop")
+        .filter_map(|part| {
+            part.iteration.map(|iteration| {
+                (
+                    part.id.clone().unwrap_or_else(|| "loop".to_string()),
+                    iteration,
+                )
+            })
+        })
+        .collect()
+}
+
+fn round_label(key: &[(String, usize)]) -> String {
+    let rounds = key
+        .iter()
+        .map(|(id, iteration)| format!("{} {}", humanize_loop_id(id), iteration + 1))
+        .collect::<Vec<_>>()
+        .join(" / ");
+    format!("Round {rounds}")
+}
+
+fn humanize_loop_id(id: &str) -> String {
+    let words = id.replace(['-', '_'], " ");
+    let mut chars = words.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => "Loop".to_string(),
+    }
+}
+
+struct ActiveLoop {
+    key: Vec<(String, usize)>,
+    rows: Vec<String>,
+}
+
+fn journey_rows(report: &StoryReport, level: StoryLevel) -> Vec<String> {
     if report.beats.is_empty() {
-        w("    (no accepted outputs yet)")?;
+        return vec!["No accepted outputs recorded.".to_string()];
     }
+    let mut rows = Vec::new();
+    let mut active_loop: Option<ActiveLoop> = None;
     for beat in &report.beats {
-        w(format!(
-            "    [{}] {} — {}",
-            beat.acceptance_order,
-            render_runtime_path(&beat.position_path),
-            format_step_title(
-                beat.title.as_deref().unwrap_or("(untitled)"),
-                &beat.position_path
-            )
-        ))?;
-        if !beat.reason.is_empty() {
-            w(format!("        reason: {}", beat.reason))?;
-        }
-        if !beat.ref_text.is_empty() {
-            w(format!(
-                "        {} by {} ({})",
-                beat.ref_text,
-                beat.actor,
-                beat.operation
-                    .clone()
-                    .map(|op| format!("{op:?}"))
-                    .unwrap_or_default()
-            ))?;
-            w(format!("        {}", gloss_text(&beat.gloss)))?;
-        }
-        if let Some(command) = beat_command_text(beat) {
-            w(format!("        {command}"))?;
-        }
-        if let Some(summary) = &beat.summary_line {
-            w(format!(
-                "        summary ({}): {summary}",
-                summary_source_text(beat.summary_source)
-            ))?;
-        }
-        for bullet in &beat.bullets {
-            w(format!("        - {bullet}"))?;
-        }
-        if let Some(prose) = &beat.assisted_prose {
-            w(format!("        assisted: {prose}"))?;
+        let next_key = loop_key(beat);
+        if next_key.is_empty() {
+            if let Some(ActiveLoop {
+                key,
+                rows: loop_rows,
+            }) = active_loop.take()
+            {
+                rows.push(round_label(&key));
+                rows.extend(loop_rows.into_iter().map(|row| format!("  - {row}")));
+            }
+            rows.push(format!("- {}", journey_row(beat, report, level)));
+        } else if active_loop
+            .as_ref()
+            .is_some_and(|active| active.key == next_key)
+        {
+            active_loop
+                .as_mut()
+                .expect("active loop just matched")
+                .rows
+                .push(journey_row(beat, report, level));
+        } else {
+            if let Some(ActiveLoop {
+                key,
+                rows: loop_rows,
+            }) = active_loop.take()
+            {
+                rows.push(round_label(&key));
+                rows.extend(loop_rows.into_iter().map(|row| format!("  - {row}")));
+            }
+            active_loop = Some(ActiveLoop {
+                key: next_key,
+                rows: vec![journey_row(beat, report, level)],
+            });
         }
     }
+    if let Some(ActiveLoop {
+        key,
+        rows: loop_rows,
+    }) = active_loop
+    {
+        rows.push(round_label(&key));
+        rows.extend(loop_rows.into_iter().map(|row| format!("  - {row}")));
+    }
+    rows
+}
 
-    if level == StoryLevel::Detailed || level == StoryLevel::Assisted {
-        w(format!(
-            "  detailed-timeline: {} event(s)",
-            report.detailed_timeline.len()
-        ))?;
-        for timed in &report.detailed_timeline {
-            w(format!(
-                "    [{}] {} {:?}{}",
+fn journey_row(beat: &StoryBeat, report: &StoryReport, level: StoryLevel) -> String {
+    let title = beat.title.as_deref().unwrap_or("Untitled step");
+    let mut parts = vec![title.to_string()];
+    if beat.actor != "unrecorded" && !beat.actor.is_empty() {
+        parts.push(format!("by {}", beat.actor));
+    }
+    if let Some(duration) = beat_duration(beat, report) {
+        parts.push(duration);
+    }
+    let summary = if level == StoryLevel::Assisted {
+        beat.assisted_prose.as_ref().or(beat.summary_line.as_ref())
+    } else {
+        beat.summary_line.as_ref()
+    };
+    if let Some(summary) = summary.filter(|summary| !summary.is_empty()) {
+        parts.push(summary.clone());
+    } else if let Some(status) = beat
+        .gloss
+        .status
+        .as_deref()
+        .filter(|status| !matches!(*status, "approved" | "accepted" | "completed"))
+    {
+        parts.push(status.to_string());
+    } else if let Some(advisory) = &beat.gloss.advisory {
+        parts.push(advisory.clone());
+    } else if beat.command.is_some() {
+        parts.push("command recorded".to_string());
+    }
+    format!("{} {}", beat_mark(beat), parts.join(" | "))
+}
+
+fn beat_mark(beat: &StoryBeat) -> &'static str {
+    match beat.gloss.status.as_deref() {
+        Some("approved" | "accepted" | "completed" | "passed" | "pass" | "ok") => "[ok]",
+        Some("revise" | "blocked" | "rejected" | "failed" | "fail") => "[!]",
+        Some(_) => "[-]",
+        None => match beat.command.as_ref() {
+            Some(command) if command.timed_out => "[!]",
+            Some(command) => match command.exit_code {
+                Some(0) => "[ok]",
+                Some(_) => "[!]",
+                None => "[-]",
+            },
+            None => "[-]",
+        },
+    }
+}
+
+fn beat_duration(beat: &StoryBeat, report: &StoryReport) -> Option<String> {
+    let key = beat.frame_key.as_deref()?;
+    if report
+        .beats
+        .iter()
+        .filter(|other| other.frame_key.as_deref() == Some(key))
+        .nth(1)
+        .is_some()
+    {
+        return None;
+    }
+    let mut times = report
+        .detailed_timeline
+        .iter()
+        .filter(|event| event.event.frame_id == key)
+        .map(|event| event.at_epoch_ms);
+    let first = times.next()?;
+    let last = times.next_back().unwrap_or(first);
+    (last > first).then(|| tui::elapsed_text(std::time::Duration::from_millis(last - first)))
+}
+
+fn blocker_rows(report: &StoryReport) -> Vec<String> {
+    blocker_rows_for_beats(&report.beats)
+}
+
+fn blocker_rows_for_beats(beats: &[StoryBeat]) -> Vec<String> {
+    #[derive(Clone)]
+    struct Blocker {
+        id: String,
+        first_round: Option<String>,
+        active: bool,
+    }
+    let mut by_ref: BTreeMap<&str, Vec<Blocker>> = BTreeMap::new();
+    for beat in beats {
+        if beat.ref_text.is_empty() {
+            continue;
+        }
+        let entries = by_ref.entry(&beat.ref_text).or_default();
+        for blocker in entries.iter_mut() {
+            if !beat.gloss.blockers.contains(&blocker.id) {
+                blocker.active = false;
+            }
+        }
+        for id in &beat.gloss.blockers {
+            if let Some(blocker) = entries.iter_mut().find(|blocker| blocker.id == *id) {
+                blocker.active = true;
+            } else {
+                entries.push(Blocker {
+                    id: id.clone(),
+                    first_round: (!loop_key(beat).is_empty()).then(|| round_label(&loop_key(beat))),
+                    active: true,
+                });
+            }
+        }
+    }
+    let rows = by_ref
+        .into_values()
+        .flatten()
+        .map(|blocker| {
+            format!(
+                "{}: {}{}",
+                blocker.id,
+                if blocker.active {
+                    "never cleared"
+                } else {
+                    "cleared"
+                },
+                blocker
+                    .first_round
+                    .map(|round| format!(" (first raised {round})"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        vec!["No blockers raised.".to_string()]
+    } else {
+        rows
+    }
+}
+
+#[derive(Default)]
+struct CommandSummary {
+    count: usize,
+    pass: usize,
+    fail: usize,
+    unknown: usize,
+    activity: usize,
+}
+
+fn command_rows(report: &StoryReport) -> Vec<String> {
+    enum CommandKey {
+        Structured(Vec<String>),
+        Activity(String),
+    }
+    impl Ord for CommandKey {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            match (self, other) {
+                (Self::Structured(left), Self::Structured(right)) => left.cmp(right),
+                (Self::Activity(left), Self::Activity(right)) => left.cmp(right),
+                (Self::Structured(_), Self::Activity(_)) => std::cmp::Ordering::Less,
+                (Self::Activity(_), Self::Structured(_)) => std::cmp::Ordering::Greater,
+            }
+        }
+    }
+    impl PartialOrd for CommandKey {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl PartialEq for CommandKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.cmp(other).is_eq()
+        }
+    }
+    impl Eq for CommandKey {}
+
+    let mut commands: BTreeMap<CommandKey, CommandSummary> = BTreeMap::new();
+    for beat in &report.beats {
+        if let Some(command) = &beat.command {
+            let entry = commands
+                .entry(CommandKey::Structured(command.argv.clone()))
+                .or_default();
+            entry.count += 1;
+            match (command.timed_out, command.exit_code) {
+                (true, _) => entry.fail += 1,
+                (false, Some(0)) => entry.pass += 1,
+                (false, Some(_)) => entry.fail += 1,
+                (false, None) => entry.unknown += 1,
+            }
+        }
+    }
+    for timed in &report.detailed_timeline {
+        if timed.event.kind == ActivityKind::RunningTool
+            && timed.event.tool.as_deref().is_some_and(is_shell_tool)
+            && let Some(command) = timed.event.text.as_deref().and_then(shell_command)
+        {
+            commands
+                .entry(CommandKey::Activity(command))
+                .or_default()
+                .activity += 1;
+        }
+    }
+    let rows = commands
+        .into_iter()
+        .map(|(key, summary)| {
+            let command = match key {
+                CommandKey::Structured(argv) => argv_display(&argv),
+                CommandKey::Activity(command) => command,
+            };
+            let mut facts = vec![format!("{} recorded", summary.count + summary.activity)];
+            if summary.pass > 0 {
+                facts.push(format!("{} passed", summary.pass));
+            }
+            if summary.fail > 0 {
+                facts.push(format!("{} failed", summary.fail));
+            }
+            if summary.unknown > 0 {
+                facts.push(format!("{} unknown", summary.unknown));
+            }
+            if summary.activity > 0 {
+                facts.push(format!("{} activity only", summary.activity));
+            }
+            format!("$ {} ({})", story::bounded(&command), facts.join(", "))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        vec!["No commands recorded.".to_string()]
+    } else {
+        rows
+    }
+}
+
+fn is_shell_tool(tool: &str) -> bool {
+    matches!(
+        tool.to_ascii_lowercase().as_str(),
+        "bash" | "sh" | "zsh" | "shell" | "command" | "run_command" | "shell_command"
+    )
+}
+
+fn argv_display(argv: &[String]) -> String {
+    argv.iter()
+        .map(|argument| {
+            if argument.contains(char::is_whitespace) {
+                format!("{:?}", argument)
+            } else {
+                argument.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Sidecar tool text is provider-normalized and often lossy. Accept only an
+/// exact single command field, not prose that merely happens to contain one.
+fn shell_command(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let object = value.as_object()?;
+    (object.len() == 1)
+        .then(|| object.get("command"))
+        .flatten()?
+        .as_str()
+        .filter(|command| !command.is_empty() && !command.contains(['\n', '\r']))
+        .map(str::to_string)
+}
+
+fn outcome_rows(report: &StoryReport, disposition: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    for landing in landing_frames(&report.merge_frames) {
+        rows.push(match landing.outcome {
+            Some(explanation) => explanation.sentence,
+            None => format!(
+                "{}: {}",
+                stage_sentence(landing.frame.stage),
+                merge_status_word(landing.frame.status)
+            ),
+        });
+        rows.extend(
+            landing
+                .rows
+                .into_iter()
+                .map(|row| format!("{}: {}", row.label, row.value)),
+        );
+    }
+    if rows.is_empty()
+        && let Some(completion) = &report.completion
+    {
+        rows.push(format!(
+            "Completion: {} ({}, {} final output(s))",
+            session_status(&completion.status),
+            completion.event_code,
+            completion.final_outputs.len()
+        ));
+    }
+    if rows.is_empty() {
+        rows.push(disposition.to_string());
+    }
+    rows
+}
+
+fn diagnostic_sections(report: &StoryReport) -> Vec<HumanSection> {
+    let mut rows = report
+        .beats
+        .iter()
+        .map(|beat| {
+            format!(
+                "{}: {}",
+                beat.title.as_deref().unwrap_or("(untitled)"),
+                render_runtime_path(&beat.position_path)
+            )
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        rows.push("No beat paths recorded.".to_string());
+    }
+    let timeline = report
+        .detailed_timeline
+        .iter()
+        .map(|timed| {
+            format!(
+                "[{}] {} {:?}{}",
                 timed.at_epoch_ms,
                 timed.event.frame_id,
                 timed.event.kind,
@@ -468,461 +738,246 @@ fn render_plain(session: &Session, report: &StoryReport, level: StoryLevel) -> c
                     .as_deref()
                     .map(|text| format!(": {}", story::bounded(text)))
                     .unwrap_or_default()
-            ))?;
-        }
-    }
-    if level == StoryLevel::Assisted
-        && let Some(tokens) = report.assisted_narrator_tokens
-    {
-        w(format!("  assisted-narrator-tokens: {tokens}"))?;
-    }
-
-    if !report.branch_decisions.is_empty() {
-        w("  branch-decisions:")?;
-        for decision in &report.branch_decisions {
-            w(format!(
-                "    {} matched={} arm={}",
-                render_runtime_path(&decision.position_path),
-                decision.matched,
-                decision.selected_arm
-            ))?;
-        }
-    }
-    if !report.failure_routes.is_empty() {
-        w("  failure-routes:")?;
-        for route in &report.failure_routes {
-            w(format!(
-                "    {} -> {} (signal={})",
-                route.source_step_id,
-                route.target_step_id,
-                route.signal.as_deref().unwrap_or("none")
-            ))?;
-        }
-    }
-    if !report.parallel_panels.is_empty() {
-        w(format!(
-            "  parallel-panels: {}",
-            report.parallel_panels.len()
-        ))?;
-    }
-    if !report.guard_evaluations.is_empty() {
-        w(format!(
-            "  guard-evaluations: {}",
-            report.guard_evaluations.len()
-        ))?;
-    }
-
-    w(format!("  emitted-signals: {}", report.emitted_signals))?;
-    w(format!(
-        "  rejected-submissions: {}",
+            )
+        })
+        .collect();
+    let mut control_rows = Vec::new();
+    control_rows.extend(report.branch_decisions.iter().map(|decision| {
+        format!(
+            "branch {} matched={} arm={} at {}",
+            decision.branch_id,
+            decision.matched,
+            decision.selected_arm,
+            render_runtime_path(&decision.position_path)
+        )
+    }));
+    control_rows.extend(report.conditional_input_decisions.iter().map(|decision| {
+        format!(
+            "input {} matched={} at {}",
+            decision.ref_text,
+            decision.matched,
+            render_runtime_path(&decision.position_path)
+        )
+    }));
+    control_rows.extend(report.failure_routes.iter().map(|route| {
+        format!(
+            "route {} -> {} signal={} at {}",
+            route.source_step_id,
+            route.target_step_id,
+            route.signal.as_deref().unwrap_or("none"),
+            render_runtime_path(&route.position_path)
+        )
+    }));
+    control_rows.extend(report.guard_evaluations.iter().map(|guard| {
+        format!(
+            "guard {} matched={}: {}",
+            guard.predicate, guard.matched, guard.reason
+        )
+    }));
+    control_rows.extend(report.parallel_panels.iter().map(|panel| {
+        format!(
+            "parallel {} join={} disposition={:?} at {}",
+            panel.control_item_id.as_deref().unwrap_or("<unnamed>"),
+            panel.join_policy,
+            panel.disposition,
+            render_runtime_path(&panel.position_path)
+        )
+    }));
+    control_rows.push(format!("emitted signals: {}", report.emitted_signals));
+    control_rows.push(format!(
+        "rejected submissions: {}",
         report.rejected_submissions
-    ))?;
-
+    ));
     if let Some(drive) = &report.last_drive {
-        w(format!(
-            "  last-drive: outcome={} recorded-at-epoch={}",
+        control_rows.push(format!(
+            "last drive: {} at {}",
             drive.outcome, drive.recorded_at_epoch
-        ))?;
+        ));
     }
     if let Some(completion) = &report.completion {
-        w(format!(
-            "  completion: status={} outputs={}",
+        control_rows.push(format!(
+            "completion: {} ({}, {} final output(s))",
             session_status(&completion.status),
+            completion.event_code,
             completion.final_outputs.len()
-        ))?;
+        ));
     }
+    vec![
+        HumanSection {
+            heading: "DIAGNOSTIC PATHS",
+            rows,
+        },
+        HumanSection {
+            heading: "DETAILED TIMELINE",
+            rows: timeline,
+        },
+        HumanSection {
+            heading: "CONTROL EVIDENCE",
+            rows: control_rows,
+        },
+    ]
+}
 
-    if !report.merge_frames.is_empty() {
-        w("  landing:")?;
-        for landing in landing_frames(&report.merge_frames) {
-            match &landing.outcome {
-                Some(explanation) => w(format!(
-                    "    {} — {}",
-                    stage_sentence(landing.frame.stage),
-                    explanation.sentence
-                ))?,
-                None => w(format!(
-                    "    {}: {}",
-                    stage_sentence(landing.frame.stage),
-                    merge_status_word(landing.frame.status)
-                ))?,
-            }
-            for row in landing.rows {
-                w(format!("        {}: {}", row.label, row.value))?;
-            }
-        }
+pub(crate) fn print_plain_story(
+    session: &Session,
+    report: &StoryReport,
+    level: StoryLevel,
+) -> crate::Result<()> {
+    render_plain(session, report, level)
+}
+
+fn render_plain(session: &Session, report: &StoryReport, level: StoryLevel) -> crate::Result<()> {
+    for line in human_lines(&human_story(session, report, level)) {
+        w(line)?;
     }
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Styled (TTY) rendering
-// ---------------------------------------------------------------------------
+fn human_lines(story: &HumanStory) -> Vec<String> {
+    let mut lines = story.header.clone();
+    for section in story.sections.iter().chain(&story.diagnostics) {
+        lines.push(String::new());
+        lines.push(section.heading.to_string());
+        lines.extend(section.rows.iter().cloned());
+    }
+    lines
+}
 
-/// The shared styled-line document every P550 surface renders from: the
-/// standalone `ctx traits story` command (via [`tui::emit_report`]) and the
-/// `--story` pane / dashboard `S` viewer (`story_view.rs`). Building it once
-/// here means a field present in one surface cannot silently be absent from
-/// another.
 pub(crate) fn story_document(
     session: &Session,
     report: &StoryReport,
     level: StoryLevel,
 ) -> Vec<Line> {
-    let mut disposition = Line::blank();
-    let disposition_tone = match report.final_state {
-        FinalState::Completed => Tone::Pass,
-        FinalState::Blocked | FinalState::Failed | FinalState::Rejected => Tone::Fail,
-        FinalState::Running => Tone::Default,
-    };
-    disposition.push(disposition_sentence(session, report), disposition_tone);
-    let mut lines = vec![disposition];
-    if let Some(notice) = degrade_notice(level, report) {
-        let mut notice_line = Line::blank();
-        notice_line.push(format!("  ({notice})"), Tone::Muted);
-        lines.push(notice_line);
-    }
-    lines.push(Line::blank());
-    lines.extend([
-        labeled_line("story ", &report.run_id),
-        labeled_line("trait: ", &report.trait_id),
-        labeled_line("spine: ", spine_text(report.spine)),
-        labeled_line(
-            "enrichment: ",
-            match report.enrichment {
-                ctx_traits_core::procedure::story::StoryEnrichment::Trait => "trait",
-                ctx_traits_core::procedure::story::StoryEnrichment::LedgerOnly => "ledger-only",
-            },
-        ),
-    ]);
-
-    let mut status_line = Line::blank();
-    status_line.push("status: ", Tone::Muted);
-    let status_tone = match report.status {
-        ctx_traits_core::procedure::session::Status::Completed => Tone::Pass,
-        ctx_traits_core::procedure::session::Status::Blocked
-        | ctx_traits_core::procedure::session::Status::BlockedAgentUnassigned
-        | ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
-        | ctx_traits_core::procedure::session::Status::Rejected
-        | ctx_traits_core::procedure::session::Status::Failed => Tone::Fail,
-        _ => Tone::Default,
-    };
-    status_line.push(session_status(&report.status), status_tone);
-    lines.push(status_line);
-    lines.push(labeled_line(
-        "final-state: ",
-        final_state_text(&report.final_state),
-    ));
-    lines.push(labeled_line(
-        "elapsed: ",
-        &tui::elapsed_text(std::time::Duration::from_secs(report.elapsed_seconds)),
-    ));
-
-    if let Some(summary) = stop_reason_summary(session) {
-        lines.push(labeled_line("stop-reason: ", &summary));
-    }
-
-    lines.push(Line::blank());
-    let mut beats_header = Line::blank();
-    beats_header.push(format!("beats ({}):", report.beats.len()), Tone::Muted);
-    lines.push(beats_header);
-    if report.beats.is_empty() {
-        let mut empty_line = Line::blank();
-        empty_line.push("  (no accepted outputs yet)", Tone::Muted);
-        lines.push(empty_line);
-    }
-
-    for beat in &report.beats {
-        let mut header = Line::blank();
-        header.push(
-            format!(
-                "  [{}] {} ",
-                beat.acceptance_order,
-                render_runtime_path(&beat.position_path)
-            ),
-            Tone::Muted,
-        );
-        header.push(
-            format_step_title(
-                beat.title.as_deref().unwrap_or("(untitled)"),
-                &beat.position_path,
-            ),
-            Tone::Default,
-        );
-        lines.push(header);
-
-        if !beat.reason.is_empty() {
-            let mut reason_line = Line::blank();
-            reason_line.push("      ", Tone::Muted);
-            reason_line.push(beat.reason.clone(), Tone::Muted);
-            lines.push(reason_line);
-        }
-
-        if !beat.ref_text.is_empty() {
-            let mut detail = Line::blank();
-            detail.push("      ", Tone::Muted);
-            detail.push(beat.ref_text.clone(), Tone::Default);
-            detail.push(" by ", Tone::Muted);
-            detail.push(beat.actor.clone(), Tone::Default);
-            lines.push(detail);
-
-            let mut gloss = Line::blank();
-            gloss.push("      ", Tone::Muted);
-            let gloss_tone = match beat.gloss.status.as_deref() {
-                Some("approved") | Some("accepted") | Some("completed") => Tone::Pass,
-                Some("revise") | Some("blocked") | Some("rejected") => Tone::Fail,
-                _ => Tone::Default,
-            };
-            gloss.push(gloss_text(&beat.gloss), gloss_tone);
-            lines.push(gloss);
-        }
-
-        if let Some(command_text) = beat_command_text(beat) {
-            let mut command_line = Line::blank();
-            command_line.push("      ", Tone::Muted);
-            let tone = if command_text.contains("pass") {
-                Tone::Pass
+    human_lines(&human_story(session, report, level))
+        .into_iter()
+        .map(|text| {
+            let mut line = Line::blank();
+            let tone = if matches!(
+                text.as_str(),
+                "JOURNEY" | "BLOCKERS RAISED" | "COMMANDS" | "OUTCOME"
+            ) {
+                Tone::Muted
             } else {
-                Tone::Fail
+                Tone::Default
             };
-            command_line.push(command_text, tone);
-            lines.push(command_line);
-        }
-
-        if let Some(summary) = &beat.summary_line {
-            let mut summary_line = Line::blank();
-            summary_line.push("      summary: ", Tone::Muted);
-            summary_line.push(summary.clone(), Tone::Default);
-            summary_line.push(
-                format!(" ({})", summary_source_text(beat.summary_source)),
-                Tone::Muted,
-            );
-            lines.push(summary_line);
-        }
-        for bullet in &beat.bullets {
-            let mut bullet_line = Line::blank();
-            bullet_line.push("      - ", Tone::Muted);
-            bullet_line.push(bullet.clone(), Tone::Default);
-            lines.push(bullet_line);
-        }
-        if let Some(prose) = &beat.assisted_prose {
-            let mut prose_line = Line::blank();
-            prose_line.push("      assisted: ", Tone::Muted);
-            prose_line.push(prose.clone(), Tone::Default);
-            lines.push(prose_line);
-        }
-    }
-
-    if level == StoryLevel::Detailed || level == StoryLevel::Assisted {
-        lines.push(Line::blank());
-        let mut timeline_header = Line::blank();
-        timeline_header.push(
-            format!(
-                "detailed timeline ({} event(s)):",
-                report.detailed_timeline.len()
-            ),
-            Tone::Muted,
-        );
-        lines.push(timeline_header);
-        for timed in &report.detailed_timeline {
-            let mut line = Line::blank();
-            line.push(
-                format!(
-                    "  [{}] {} {:?}",
-                    timed.at_epoch_ms, timed.event.frame_id, timed.event.kind
-                ),
-                Tone::Muted,
-            );
-            if let Some(text) = &timed.event.text {
-                line.push(format!(": {}", story::bounded(text)), Tone::Default);
-            }
-            lines.push(line);
-        }
-    }
-    if level == StoryLevel::Assisted
-        && let Some(tokens) = report.assisted_narrator_tokens
-    {
-        lines.push(labeled_line(
-            "assisted-narrator-tokens: ",
-            &tokens.to_string(),
-        ));
-    }
-
-    if !report.merge_frames.is_empty() {
-        lines.push(Line::blank());
-        lines.push(labeled_line("landing:", ""));
-        for landing in landing_frames(&report.merge_frames) {
-            let mut line = Line::blank();
-            line.push("  ", Tone::Muted);
-            match &landing.outcome {
-                Some(explanation) => {
-                    let tone = match landing.frame.status {
-                        MergeStatus::Merged => Tone::Pass,
-                        MergeStatus::Parked
-                        | MergeStatus::PostMergeCleanupFailure
-                        | MergeStatus::RecoveryFailure => Tone::Fail,
-                        MergeStatus::LockAcquired
-                        | MergeStatus::GatesPassed
-                        | MergeStatus::Reconciled => Tone::Default,
-                    };
-                    line.push(explanation.sentence.clone(), tone);
-                }
-                None => {
-                    line.push(
-                        format!(
-                            "{}: {}",
-                            stage_sentence(landing.frame.stage),
-                            merge_status_word(landing.frame.status)
-                        ),
-                        Tone::Muted,
-                    );
-                }
-            }
-            lines.push(line);
-            for row in &landing.rows {
-                let mut row_line = Line::blank();
-                row_line.push("    ", Tone::Muted);
-                row_line.push(format!("{}: ", row.label), Tone::Muted);
-                row_line.push(row.value.clone(), Tone::Default);
-                lines.push(row_line);
-            }
-        }
-    }
-
-    lines
-}
-
-// ---------------------------------------------------------------------------
-// Markdown rendering — PR-comment-ready, no ANSI, no terminal-width
-// dependence, byte-stable.
-// ---------------------------------------------------------------------------
-
-/// Neutralize a value before it enters a `--markdown` table cell: collapse
-/// any embedded newline/carriage return to a space (a raw one would render
-/// as if it belonged to the next row) and escape the reserved `|` as `\|`,
-/// the standard GFM table escape (an unescaped one splits the row into an
-/// extra column and misaligns every field after it). Applied to every
-/// column a row is built from, not only the ones a given real ledger
-/// happened to trip — cell safety is a property of how a row is
-/// constructed, not of which field is remembered (P383 review round 2,
-/// blocker `markdown-cell-not-escaped`).
-fn markdown_cell(text: &str) -> String {
-    text.replace(['\n', '\r'], " ").replace('|', "\\|")
+            line.push(text, tone);
+            line
+        })
+        .collect()
 }
 
 fn render_markdown(session: &Session, report: &StoryReport, level: StoryLevel) -> Vec<String> {
-    let mut out = Vec::new();
-    out.push(format!("**{}**", disposition_sentence(session, report)));
-    if let Some(notice) = degrade_notice(level, report) {
-        out.push(format!("_({notice})_"));
-    }
-    out.push(String::new());
-    out.push(format!("## Run story: {}", report.run_id));
-    out.push(String::new());
-    out.push(format!(
-        "- **trait**: {}\n- **status**: {}\n- **final-state**: {}\n- **elapsed**: {}",
-        report.trait_id,
-        session_status(&report.status),
-        final_state_text(&report.final_state),
-        tui::elapsed_text(std::time::Duration::from_secs(report.elapsed_seconds))
-    ));
-    if let Some(summary) = stop_reason_summary(session) {
-        out.push(format!("- **stop-reason**: {summary}"));
-    }
-    out.push(String::new());
+    markdown_lines(&human_story(session, report, level))
+}
 
-    out.push("### Arc".to_string());
-    out.push(String::new());
-    if report.beats.is_empty() {
-        out.push("_(no accepted outputs yet)_".to_string());
-    } else {
-        out.push("| # | position | title | actor | detail | command | summary |".to_string());
-        out.push("| --- | --- | --- | --- | --- | --- | --- |".to_string());
-        for beat in &report.beats {
-            let detail = if beat.ref_text.is_empty() {
-                String::new()
+fn markdown_lines(story: &HumanStory) -> Vec<String> {
+    let mut lines = story
+        .header
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if index == 0 {
+                format!("**{line}**")
             } else {
-                format!("`{}` — {}", beat.ref_text, gloss_text(&beat.gloss))
-            };
-            let command = beat_command_text(beat).unwrap_or_default();
-            let mut summary = beat.summary_line.clone().unwrap_or_default();
-            if let Some(prose) = &beat.assisted_prose {
-                summary = format!("{summary} {prose}").trim().to_string();
+                line.clone()
             }
-            out.push(format!(
-                "| {} | {} | {} | {} | {} | {} | {} |",
-                beat.acceptance_order,
-                markdown_cell(&render_runtime_path(&beat.position_path)),
-                markdown_cell(&format_step_title(
-                    beat.title.as_deref().unwrap_or(""),
-                    &beat.position_path
-                )),
-                markdown_cell(&beat.actor),
-                markdown_cell(&detail),
-                markdown_cell(&command),
-                markdown_cell(&summary)
-            ));
-            for bullet in &beat.bullets {
-                out.push(format!("  - {}", markdown_cell(bullet)));
-            }
-        }
+        })
+        .collect::<Vec<_>>();
+    for section in story.sections.iter().chain(&story.diagnostics) {
+        lines.push(String::new());
+        lines.push(format!("## {}", section.heading));
+        lines.extend(section.rows.iter().map(|row| markdown_row(row)));
     }
+    lines
+}
 
-    if level == StoryLevel::Detailed || level == StoryLevel::Assisted {
-        out.push(String::new());
-        out.push(format!(
-            "### Detailed timeline ({} event(s))",
-            report.detailed_timeline.len()
-        ));
-        out.push(String::new());
-        for timed in &report.detailed_timeline {
-            let text = timed
-                .event
-                .text
-                .as_deref()
-                .map(story::bounded)
-                .unwrap_or_default();
-            out.push(format!(
-                "- `{}` [{}] {:?} {}",
-                timed.at_epoch_ms,
-                markdown_cell(&timed.event.frame_id),
-                timed.event.kind,
-                markdown_cell(&text)
-            ));
-        }
+fn markdown_row(row: &str) -> String {
+    if let Some(row) = row.strip_prefix("  - ") {
+        format!("  - {}", markdown_text(row))
+    } else if let Some(row) = row.strip_prefix("- ") {
+        format!("- {}", markdown_text(row))
+    } else {
+        format!("- {}", markdown_text(row))
     }
-    if level == StoryLevel::Assisted
-        && let Some(tokens) = report.assisted_narrator_tokens
-    {
-        out.push(String::new());
-        out.push(format!("_assisted-narrator-tokens: {tokens}_"));
-    }
+}
 
-    if !report.merge_frames.is_empty() {
-        out.push(String::new());
-        out.push("### Landing".to_string());
-        out.push(String::new());
-        for landing in landing_frames(&report.merge_frames) {
-            match &landing.outcome {
-                Some(explanation) => out.push(format!("- {}", explanation.sentence)),
-                None => out.push(format!(
-                    "- {}: {}",
-                    stage_sentence(landing.frame.stage),
-                    merge_status_word(landing.frame.status)
-                )),
-            }
-            for row in &landing.rows {
-                out.push(format!("  - {}: {}", row.label, row.value));
-            }
-        }
-    }
-
-    out
+fn markdown_text(text: &str) -> String {
+    text.split(['\r', '\n'])
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ctx_traits_core::procedure::activity::ActivityEvent;
+    use ctx_traits_core::procedure::runtime::{BranchDecision, CommandExecutionEvidence};
+    use ctx_traits_core::procedure::session::{CompletionNotification, MergeStage, Status};
+    use ctx_traits_core::procedure::story::{
+        ActivityProvenance, StoryEnrichment, StorySpine, TimedActivityEvent,
+    };
+
+    fn report(beats: Vec<StoryBeat>) -> StoryReport {
+        StoryReport {
+            schema_version: "1".to_string(),
+            run_id: "run".to_string(),
+            trait_id: "trait".to_string(),
+            spine: StorySpine::SlotRevisions,
+            enrichment: StoryEnrichment::LedgerOnly,
+            status: Status::Completed,
+            final_state: FinalState::Completed,
+            elapsed_seconds: 0,
+            stop_reason: None,
+            beats,
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panels: Vec::new(),
+            emitted_signals: 0,
+            rejected_submissions: 0,
+            last_drive: None,
+            completion: None,
+            merge_frames: Vec::new(),
+            activity_provenance: ActivityProvenance::Recorded,
+            detailed_timeline: Vec::new(),
+            assisted_narrator_tokens: None,
+            assisted_unavailable: None,
+        }
+    }
+
+    fn command(argv: &[&str], exit_code: Option<i32>, timed_out: bool) -> CommandExecutionEvidence {
+        CommandExecutionEvidence {
+            argv: argv.iter().map(|value| (*value).to_string()).collect(),
+            output_slot: "slot:result".to_string(),
+            executable_digest: None,
+            exit_code,
+            timed_out,
+            output_tail: None,
+        }
+    }
+
+    fn activity(
+        frame_id: &str,
+        at_epoch_ms: u64,
+        tool: Option<&str>,
+        text: Option<&str>,
+    ) -> TimedActivityEvent {
+        TimedActivityEvent {
+            at_epoch_ms,
+            event: ActivityEvent {
+                sequence: at_epoch_ms,
+                frame_id: frame_id.to_string(),
+                kind: ActivityKind::RunningTool,
+                text: text.map(str::to_string),
+                tool: tool.map(str::to_string),
+                tokens: None,
+            },
+        }
+    }
 
     fn segment(kind: &str, iteration: Option<usize>) -> PathSegment {
         PathSegment {
@@ -931,6 +986,30 @@ mod tests {
             index: 0,
             iteration,
             item_index: None,
+        }
+    }
+
+    fn beat(ref_text: &str, path: Vec<PathSegment>, blockers: &[&str]) -> StoryBeat {
+        StoryBeat {
+            acceptance_order: 0,
+            position_path: path,
+            title: Some("step".to_string()),
+            reason: "all declared outputs accepted".to_string(),
+            actor: "unrecorded".to_string(),
+            ref_text: ref_text.to_string(),
+            value_digest: None,
+            operation: None,
+            source: None,
+            gloss: ctx_traits_core::procedure::story::ValueGloss {
+                blockers: blockers.iter().map(|id| (*id).to_string()).collect(),
+                ..Default::default()
+            },
+            command: None,
+            summary_line: None,
+            summary_source: None,
+            frame_key: None,
+            bullets: Vec::new(),
+            assisted_prose: None,
         }
     }
 
@@ -957,5 +1036,263 @@ mod tests {
             ),
             "build (2/3)"
         );
+    }
+
+    #[test]
+    fn loop_round_labels_use_recorded_non_contiguous_nested_iterations() {
+        let mut outer = segment("loop", Some(2));
+        outer.id = Some("outer-review".to_string());
+        let mut inner = segment("loop", Some(0));
+        inner.id = Some("inner-fix".to_string());
+        let first = beat("output", vec![outer, inner], &[]);
+        let mut other = segment("loop", Some(2));
+        other.id = Some("other-review".to_string());
+        assert_eq!(
+            round_label(&loop_key(&first)),
+            "Round Outer review 3 / Inner fix 1"
+        );
+        assert_eq!(
+            round_label(&loop_key(&beat("output", vec![other], &[]))),
+            "Round Other review 3"
+        );
+    }
+
+    #[test]
+    fn journey_preserves_acceptance_order_around_loop_groups() {
+        let mut setup = beat("setup", Vec::new(), &[]);
+        setup.title = Some("setup".to_string());
+        let mut loop_beat = beat("loop", vec![segment("loop", Some(2))], &[]);
+        loop_beat.title = Some("loop work".to_string());
+        let mut nested = beat(
+            "nested",
+            vec![segment("loop", Some(2)), segment("loop", Some(1))],
+            &[],
+        );
+        nested.title = Some("nested work".to_string());
+        let mut finish = beat("finish", Vec::new(), &[]);
+        finish.title = Some("finish".to_string());
+        let rows = journey_rows(
+            &report(vec![setup, loop_beat, nested, finish]),
+            StoryLevel::Default,
+        );
+        assert_eq!(rows[0], "- [-] setup");
+        assert!(rows[1].starts_with("Round Loop 3"));
+        assert!(rows[3].starts_with("Round Loop 3 / Loop 2"));
+        assert_eq!(rows[5], "- [-] finish");
+    }
+
+    #[test]
+    fn blockers_clear_only_on_a_later_revision_of_the_same_ref() {
+        let rows = blocker_rows_for_beats(&[
+            beat("review", vec![segment("loop", Some(0))], &["missing-test"]),
+            beat("other-review", vec![segment("loop", Some(1))], &[]),
+            beat("review", vec![segment("loop", Some(2))], &[]),
+            beat("never", Vec::new(), &["still-open"]),
+        ]);
+        assert!(rows.iter().any(|row| row.contains("missing-test: cleared")));
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("still-open: never cleared"))
+        );
+    }
+
+    #[test]
+    fn shell_activity_requires_an_unambiguous_command_object() {
+        assert_eq!(
+            shell_command(r#"{"command":"cargo test"}"#).as_deref(),
+            Some("cargo test")
+        );
+        assert!(shell_command(r#"{"command":"cargo test","cwd":"/tmp"}"#).is_none());
+        assert!(shell_command("command=cargo test").is_none());
+    }
+
+    #[test]
+    fn shared_frame_duration_is_omitted_but_unique_frame_duration_is_recorded() {
+        let mut first = beat("one", vec![segment("loop", Some(0))], &[]);
+        first.frame_key = Some("shared".to_string());
+        let mut second = beat("two", vec![segment("loop", Some(1))], &[]);
+        second.frame_key = Some("shared".to_string());
+        let mut unique = beat("three", Vec::new(), &[]);
+        unique.frame_key = Some("unique".to_string());
+        let mut story = report(vec![first.clone(), second, unique.clone()]);
+        story.detailed_timeline = vec![
+            activity("shared", 1, None, None),
+            activity("shared", 9_001, None, None),
+            activity("unique", 1, None, None),
+            activity("unique", 2_001, None, None),
+        ];
+        assert!(beat_duration(&first, &story).is_none());
+        assert_eq!(beat_duration(&unique, &story).as_deref(), Some("00:00:02"));
+    }
+
+    #[test]
+    fn command_rows_keep_exact_argv_and_timeout_is_failure() {
+        let mut first = beat("one", Vec::new(), &[]);
+        first.command = Some(command(&["a b", "c"], Some(0), false));
+        let mut second = beat("two", Vec::new(), &[]);
+        second.command = Some(command(&["a", "b c"], None, true));
+        let mut story = report(vec![first, second]);
+        story.detailed_timeline = vec![
+            activity("tool", 1, Some("Bash"), Some(r#"{"command":"cargo test"}"#)),
+            activity(
+                "tool",
+                2,
+                Some("bash"),
+                Some(r#"{"command":"cargo test","cwd":"."}"#),
+            ),
+        ];
+        let rows = command_rows(&story);
+        assert_eq!(rows.len(), 3);
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("\"a b\" c") && row.contains("1 passed"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("a \"b c\"") && row.contains("1 failed"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("cargo test") && row.contains("activity only"))
+        );
+    }
+
+    #[test]
+    fn unknown_and_nonterminal_statuses_are_neutral() {
+        let mut beat = beat("one", Vec::new(), &[]);
+        for status in ["needs-discussion", "pending"] {
+            beat.gloss.status = Some(status.to_string());
+            assert_eq!(beat_mark(&beat), "[-]");
+        }
+        beat.gloss.status = Some("approved".to_string());
+        assert_eq!(beat_mark(&beat), "[ok]");
+        beat.gloss.status = Some("failed".to_string());
+        assert_eq!(beat_mark(&beat), "[!]");
+    }
+
+    #[test]
+    fn detailed_diagnostics_retain_control_evidence_only_in_diagnostic_sections() {
+        let mut story = report(Vec::new());
+        story.branch_decisions.push(BranchDecision {
+            parent_run_index: 0,
+            branch_id: "choose-path".to_string(),
+            position_path: vec![segment("procedure", None)],
+            matched: true,
+            when: None,
+            guard_evaluation_start_index: None,
+            slot_revision_watermark: None,
+            guard_evaluation_index: 0,
+            selected_arm: "then".to_string(),
+            sequence_id: None,
+        });
+        story.emitted_signals = 2;
+        story.rejected_submissions = 1;
+        let detailed = human_lines(&project_human_story(
+            &story,
+            StoryLevel::Detailed,
+            "disposition".to_string(),
+        ))
+        .join("\n");
+        let default = human_lines(&project_human_story(
+            &story,
+            StoryLevel::Default,
+            "disposition".to_string(),
+        ))
+        .join("\n");
+        let assisted = human_lines(&project_human_story(
+            &story,
+            StoryLevel::Assisted,
+            "disposition".to_string(),
+        ))
+        .join("\n");
+        assert!(detailed.contains("branch choose-path matched=true arm=then"));
+        assert!(detailed.contains("emitted signals: 2"));
+        assert!(detailed.contains("procedure[0]"));
+        assert!(!default.contains("choose-path"));
+        assert!(!assisted.contains("choose-path"));
+    }
+
+    #[test]
+    fn outcome_prefers_specific_evidence_and_falls_back_to_disposition() {
+        let mut story = report(Vec::new());
+        assert_eq!(
+            outcome_rows(&story, "This run is blocked."),
+            vec!["This run is blocked."]
+        );
+        story.completion = Some(CompletionNotification {
+            status: Status::Completed,
+            event_code: "completed".to_string(),
+            final_outputs: Vec::new(),
+            final_session_digest: ctx_traits_core::digest::Digest::from_bytes(b"session"),
+        });
+        assert_eq!(
+            outcome_rows(&story, "unused"),
+            vec!["Completion: completed (completed, 0 final output(s))"]
+        );
+        story.completion = None;
+        story.merge_frames = vec![MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Parked,
+            reason: Some("branch mismatch".to_string()),
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        }];
+        assert_ne!(
+            outcome_rows(&story, "This run is blocked."),
+            vec!["This run is blocked."]
+        );
+        story.merge_frames[0].status = MergeStatus::Merged;
+        assert!(
+            outcome_rows(&story, "This run is blocked.")
+                .iter()
+                .any(|row| row.contains("landed"))
+        );
+    }
+
+    #[test]
+    fn markdown_projection_is_line_safe_and_equivalent_for_default_and_assisted() {
+        let mut beat = beat("output", Vec::new(), &[]);
+        beat.summary_line = Some("default\rsummary | value".to_string());
+        beat.assisted_prose = Some("assisted\nsummary | value".to_string());
+        let report = report(vec![beat]);
+        let default = project_human_story(&report, StoryLevel::Default, "disposition".to_string());
+        let assisted =
+            project_human_story(&report, StoryLevel::Assisted, "disposition".to_string());
+        let default_markdown = markdown_lines(&default);
+        let assisted_markdown = markdown_lines(&assisted);
+        let headings = |lines: &[String]| {
+            lines
+                .iter()
+                .filter(|line| line.starts_with("## "))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(headings(&default_markdown), headings(&assisted_markdown));
+        assert_eq!(
+            headings(&default_markdown),
+            [
+                "## JOURNEY",
+                "## BLOCKERS RAISED",
+                "## COMMANDS",
+                "## OUTCOME"
+            ]
+        );
+        assert!(
+            default_markdown
+                .iter()
+                .any(|line| line.contains("default summary \\| value"))
+        );
+        assert!(
+            assisted_markdown
+                .iter()
+                .any(|line| line.contains("assisted summary \\| value"))
+        );
+        assert!(default_markdown.iter().all(|line| !line.contains('\r')));
+        assert_eq!(
+            markdown_row("  - [ok] step | prose\rnext"),
+            "  - [ok] step \\| prose next"
+        );
+        assert_eq!(markdown_row("Round Loop 1"), "- Round Loop 1");
     }
 }
