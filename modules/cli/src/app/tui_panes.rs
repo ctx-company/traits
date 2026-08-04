@@ -161,7 +161,11 @@ impl PaneLayoutResult {
 /// `focused` — default-fg border + BOLD title when focused, DIM border + DIM
 /// title otherwise. An unfocused pane also seeds `DIM` across its full
 /// rectangle, so subsequently rendered content inherits the same secondary
-/// treatment. Returns the inner content rect, so a consumer never computes
+/// treatment. Terminal-window focus is deliberately NOT an input here: when
+/// the window itself is unfocused, `tui_ratatui`'s draw pass dims the whole
+/// frame buffer and strips BOLD, so this chrome dims with everything else
+/// without tracking window state. Returns the inner content rect, so a
+/// consumer never computes
 /// `block.inner()` itself (the single call every second-copy chrome bug in
 /// this kit has been about).
 pub(crate) fn render_pane(

@@ -796,9 +796,20 @@ impl RatatuiPane {
             widget(frame);
             if !focused.load(Ordering::SeqCst) {
                 let area = frame.area();
-                frame
-                    .buffer_mut()
-                    .set_style(area, Style::default().add_modifier(Modifier::DIM));
+                // BOLD must come OFF, not merely gain DIM: terminals resolve
+                // bold+faint in their own favor (bold usually wins), so the
+                // focused pane's BOLD title and the active tab would hold
+                // full lightness while everything around them dimmed. With
+                // BOLD stripped the whole frame — borders, titles, content —
+                // dims uniformly, and no renderer needs to know about window
+                // focus; the next focused frame redraws from the widgets and
+                // restores full styling.
+                frame.buffer_mut().set_style(
+                    area,
+                    Style::default()
+                        .add_modifier(Modifier::DIM)
+                        .remove_modifier(Modifier::BOLD),
+                );
             }
             if selecting {
                 let area = frame.area();
