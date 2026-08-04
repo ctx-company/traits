@@ -12,9 +12,11 @@ appends a `landing` label and the merge rows to the END of the journey pane's
 line list, deliberately — the comment there says it makes "the landing one
 continuous journey rather than a separate section" (P549).
 
-**Items 3 and 4 reverse that decision.** That is the point of them, but the
-implementer should know it is a recorded choice being overturned, not an
-oversight being corrected.
+**Items 3 and 4 reverse that decision, deliberately** (owner, 2026-08-04,
+after living with it): the UI should MORPH in response to what is happening
+rather than accumulate one long scroll, and that reads better across the
+different harnesses than the continuous journey does. P549's choice is not
+wrong so much as superseded — do not treat it as a constraint to preserve.
 
 ## Decisions
 
@@ -45,6 +47,12 @@ oversight being corrected.
 - **This is one transition, at one moment.** Both swaps happen together when
   the journey completes, not as two independent conditions that can disagree
   and produce a layout with no journey and no landing.
+- **The trigger is journey-done AND something still running** (owner call).
+  Journey done with nothing after it: stop where it is, no morph — the
+  finished journey stays where the reader last saw it. Journey done with a
+  merge or post-gate underway: morph. So the condition is not "the journey
+  finished" alone; it is "the journey finished and there is a next phase to
+  give the space to".
 
 ## Scope
 
@@ -55,13 +63,13 @@ resolution; and the `landing` wording in `run_view`, `MergeStage` and
 
 ## Watch
 
-- **A run can complete without landing at all** — `--no-merge`, a park, a
-  merge that never starts. The vacated-journey pane must not become an empty
-  box titled after a phase that will never run; decide what that pane is when
-  there is no landing to show.
-- **And landing can start before the journey looks done**, since a completed
-  run whose merge is still going renders both today. Whatever triggers the
-  swap has to be the journey's own completion, not the presence of merge rows.
+- **The empty-pane case is answered by the trigger, not by a placeholder.**
+  A run that never lands — dispatched without `--merge`, or with `--no-merge`
+  clearing the intent (`drive.rs:158`) — simply never satisfies "something
+  still running", so no morph happens and there is no pane to fill. Nothing
+  needs an "operation not applicable" box. This is worth stating because the
+  obvious reading of items 3 and 4 ("swap when the journey is done") produces
+  exactly that box, and it is wrong.
 - 0080 hides an empty history and gives command rows verdicts, and 0082
   changes journey follow. All three edit the same panes; landing them
   independently will conflict.
@@ -78,6 +86,7 @@ resolution; and the `landing` wording in `run_view`, `MergeStage` and
 `End` and `Home` reach the true end and start of the journey including its
 landing rows; the phase has one non-mechanical name everywhere a person reads
 it; a completed journey shows its done steps with no `in`/`out` lines; the
-completed journey occupies the current-activity pane and landing occupies the
-journey's; the swap happens once, on journey completion; and a run that never
-lands does not leave an empty pane behind.
+completed journey occupies the current-activity pane and post-processing
+occupies the journey's; the morph happens once, only when the journey is done
+AND a next phase is running; and a run that ends with nothing after it simply
+stays as it was.
