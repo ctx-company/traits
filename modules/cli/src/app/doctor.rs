@@ -677,7 +677,24 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             }
         }
     }
+    // 0025: the resolved view keeps showing the expanded seats — a
+    // `count`/list-form role's seat aliases (`<role>-1` … `<role>-N`) are
+    // what an actual run resolves, and this is the same expansion drive
+    // dispatch uses, not a second reimplementation of the rule.
+    let mut expanded_agent = report.runtime.agent.clone();
+    ctx_traits_io::harness_config::expand_role_seats(&mut expanded_agent);
     for (name, assignment) in &report.runtime.agent.role {
+        add_assignment_rows(
+            &mut knobs,
+            &report.winners,
+            &format!("agent.role.{name}"),
+            assignment,
+        );
+    }
+    for (name, assignment) in &expanded_agent.role {
+        if report.runtime.agent.role.contains_key(name) {
+            continue;
+        }
         add_assignment_rows(
             &mut knobs,
             &report.winners,
@@ -733,8 +750,11 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     // budget fields and replacement seats report their actual source.
     {
         let profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[])?;
+        // 0025: iterate the expanded map so a `count`/list-form role's seat
+        // aliases each get their own budget row, matching what
+        // `budget_for_seat` actually resolves for them at dispatch time.
         let mut roles: std::collections::BTreeSet<String> =
-            report.runtime.agent.role.keys().cloned().collect();
+            expanded_agent.role.keys().cloned().collect();
         for seat in ctx_traits_io::harness_config::standing_seat_names() {
             roles.insert(seat.to_string());
         }

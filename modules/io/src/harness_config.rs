@@ -724,6 +724,7 @@ impl RunProfileAssignment {
             extra_args: Vec::new(),
             budget: RoleBudget::default(),
             api: Box::default(),
+            count: None,
         }
     }
 }
@@ -1821,6 +1822,13 @@ pub struct ProfileAssignment {
     /// assignments.
     #[serde(flatten)]
     pub api: Box<ApiEndpoint>,
+    /// 0025: a `Single`-form role table declaring `count = N` expands to `N`
+    /// addressable seats (`<role>-1` … `<role>-N`) in [`expand_role_seats`],
+    /// run after scope merging so a trait-scoped override (0034) can still
+    /// narrow it. `None` (un-authored) never expands, keeping every existing
+    /// config byte-identical through this enum's untagged round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
 }
 
 /// See [`ProfileAssignment::api`].
@@ -1885,6 +1893,8 @@ impl<'de> Deserialize<'de> for ProfileAssignment {
             read_timeout_ms: Option<u64>,
             #[serde(default)]
             retries: Option<u32>,
+            #[serde(default)]
+            count: Option<u32>,
         }
 
         let raw = WireAssignment::deserialize(deserializer)?;
@@ -1911,6 +1921,7 @@ impl<'de> Deserialize<'de> for ProfileAssignment {
                 read_timeout_ms: raw.read_timeout_ms,
                 retries: raw.retries,
             }),
+            count: raw.count,
         })
     }
 }
@@ -2627,6 +2638,11 @@ fn resolve_runtime_assignments_impl(
     let (environment_agent, _) =
         flatten_agent_defaults(&runtime_config.environment_agent, &BTreeMap::new(), &scope);
     merge_agent_defaults(&mut agent_defaults, environment_agent);
+    // 0025: expand `count`/list-form roles into stable seat aliases now that
+    // every scope layer (variant, repo, $CTX_CONFIG) has folded in — the
+    // exact point 0034's trait-scope fold must land before, or a
+    // trait-scoped `count` would arrive too late to change the expansion.
+    expand_role_seats(&mut agent_defaults);
     if !qualifier_by_role.is_empty() {
         validate_role_map(&agent_defaults.role, "agent.role", true)?;
     }
@@ -3080,6 +3096,39 @@ pub fn unassigned_role_remediation(role: &str) -> String {
     format!("pass --assign {role}=<harness-id> or add it to .ctx/config.toml [agent.role.{role}]")
 }
 
+/// 0025: guard against a trait agent id that looks like an expansion seat
+/// alias (`<base>-<digits>`) but names a seat past the base role's
+/// configured `count`/list length — e.g. `smart-3` when `[agent.role.smart]`
+/// only declares `count = 2`. Without this check the id would silently fall
+/// through to `[agent.role.default]` (the ordinary no-table-of-its-own
+/// fallback), degrading a seat-identity typo/mismatch into a quietly wrong
+/// assignment instead of a loud one. `None` for any id that already has its
+/// own table (including a seat expansion already produced) or whose base is
+/// not expansion-shaped — the ordinary resolution path handles both.
+fn expansion_seat_out_of_range(defaults: &AgentDefaults, agent_id: &str) -> Option<crate::Error> {
+    if defaults.role.contains_key(agent_id) {
+        return None;
+    }
+    let (base, suffix) = agent_id.rsplit_once('-')?;
+    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let seat_count = match defaults.role.get(base)? {
+        RoleAssignmentValue::Single(assignment) => assignment.count?,
+        RoleAssignmentValue::List(entries) => u32::try_from(entries.len()).ok()?,
+    };
+    let requested: u32 = suffix.parse().ok()?;
+    if (1..=seat_count).contains(&requested) {
+        return None;
+    }
+    Some(config_error(
+        format!("run.assign.{agent_id}"),
+        format!(
+            "declared agent role {agent_id:?} has no runtime assignment; role {base:?} expands to only {seat_count} seat(s) — add [[agent.role.{base}]] entries or count = {requested} to cover seat {requested}"
+        ),
+    ))
+}
+
 pub fn prepare_run_assignments(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
@@ -3109,6 +3158,9 @@ pub fn prepare_run_assignments(
     let mut prepared = Vec::new();
     let mut harness_ids = BTreeSet::new();
     for agent in &trait_ref.agents {
+        if let Some(err) = expansion_seat_out_of_range(&resolved.agent_defaults, &agent.id) {
+            return Err(err);
+        }
         let seats = resolved.resolved_seats_for_role(&agent.id)?;
         if seats.is_empty() {
             // `resolved_seats_for_role` already attempted the P427 built-in
@@ -5464,6 +5516,57 @@ fn merge_agent_defaults(base: &mut AgentDefaults, next: AgentDefaults) {
     }
 }
 
+/// 0025: expand every expansion-shaped `[agent.role.<role>]` entry into
+/// stable per-seat aliases (`<role>-1` … `<role>-N`) so a trait declaring
+/// those as distinct `[[agent]]` ids resolves them through the existing
+/// exact-name lookup unchanged. A role is expansion-shaped as a `Single`
+/// table with `count = N` (N identical seats, `count` cleared on each) or as
+/// a `List` with N entries (each entry may differ). An authored exact table
+/// already occupying a seat alias wins wholesale — expansion never
+/// overwrites an existing key — and the base role key is always kept, so a
+/// trait agent id equal to the role name itself keeps resolving to it (P456
+/// rotation for `List`, single-seat behaviour for `Single`+`count`).
+///
+/// Must run immediately after scope merging
+/// ([`merge_agent_defaults`]/`flatten_agent_defaults`) and before override
+/// parsing/validation: this is the exact point 0034's trait-scope fold must
+/// land BEFORE, or a trait-scoped `count` would arrive too late to change
+/// the expansion.
+///
+/// `pub` so `doctor --config` (P475's per-seat row convention) can show the
+/// expanded seats an actual run would resolve without reimplementing this
+/// rule — the resolved view must match what dispatch uses.
+pub fn expand_role_seats(defaults: &mut AgentDefaults) {
+    let mut seats: Vec<(String, ProfileAssignment)> = Vec::new();
+    for (role, value) in &defaults.role {
+        match value {
+            RoleAssignmentValue::Single(assignment) => {
+                let Some(count) = assignment.count else {
+                    continue;
+                };
+                for index in 1..=count {
+                    let mut seat = assignment.clone();
+                    seat.count = None;
+                    seats.push((format!("{role}-{index}"), seat));
+                }
+            }
+            RoleAssignmentValue::List(entries) => {
+                for (offset, entry) in entries.iter().enumerate() {
+                    let mut seat = entry.clone();
+                    seat.count = None;
+                    seats.push((format!("{role}-{}", offset + 1), seat));
+                }
+            }
+        }
+    }
+    for (seat_role, seat) in seats {
+        defaults
+            .role
+            .entry(seat_role)
+            .or_insert(RoleAssignmentValue::Single(seat));
+    }
+}
+
 /// The whole-role (`--assign reviewer=...`) and per-seat
 /// (`--assign reviewer.2=...`) override layers parsed from repeated
 /// `--assign` flags. Kept as two maps rather than one so
@@ -5618,6 +5721,7 @@ pub fn parse_assignment_overrides(overrides: &[String]) -> crate::Result<Assignm
             extra_args: Vec::new(),
             budget: RoleBudget::default(),
             api: Box::default(),
+            count: None,
         };
         match seat {
             Some(seat) => {
@@ -5752,6 +5856,9 @@ fn merge_assignment_fields(base: &mut ProfileAssignment, next: &ProfileAssignmen
     }
     if next.model_tier.is_some() {
         base.model_tier = next.model_tier;
+    }
+    if next.count.is_some() {
+        base.count = next.count;
     }
     if next.reasoning_effort.is_some() {
         base.reasoning_effort = next.reasoning_effort.clone();
@@ -6141,6 +6248,31 @@ fn validate_role_map(
             };
             if is_standing_seat(role) {
                 validate_special_assignment(assignment, &format!("{path_prefix}.{path}"))?;
+            }
+            // 0025: `count` only means "N seats of this Single table" — a
+            // list's own length is already its seat count, and a standing
+            // seat is restricted to exactly one seat by definition.
+            if let Some(count) = assignment.count {
+                if value.is_list() {
+                    return invalid_config(
+                        format!("{path_prefix}.{path}.count"),
+                        "count is not allowed inside a [[...]] seat list; the list length is the seat count",
+                    );
+                }
+                if is_standing_seat(role) {
+                    return invalid_config(
+                        format!("{path_prefix}.{path}.count"),
+                        format!(
+                            "role {role:?} is a standing agent and accepts exactly one seat; count is not allowed"
+                        ),
+                    );
+                }
+                if count == 0 {
+                    return invalid_config(
+                        format!("{path_prefix}.{path}.count"),
+                        "count must be at least 1",
+                    );
+                }
             }
             if full && standing_seat_requires_full_declaration(role) {
                 if assignment.mode != RunAssignmentMode::Harness || assignment.harness.is_none() {
@@ -8984,6 +9116,87 @@ mod config_tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // 0025: role-array seat expansion
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn expand_role_seats_count_form_expands_and_keeps_base() {
+        let mut defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(2),
+                    ..single("shared-harness")
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        expand_role_seats(&mut defaults);
+
+        assert!(defaults.role.contains_key("smart"), "base key retained");
+        let seat_1 = defaults.role["smart-1"].entries()[0].clone();
+        let seat_2 = defaults.role["smart-2"].entries()[0].clone();
+        assert_eq!(seat_1.harness.as_deref(), Some("shared-harness"));
+        assert_eq!(seat_2.harness.as_deref(), Some("shared-harness"));
+        assert_eq!(seat_1.count, None, "count cleared on the expanded seat");
+        assert!(!defaults.role["smart-1"].is_list());
+        assert!(!defaults.role.contains_key("smart-3"));
+    }
+
+    #[test]
+    fn expand_role_seats_list_form_expands_with_differing_entries() {
+        let mut defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::List(vec![single("harness-a"), single("harness-b")]),
+            )]),
+            ..AgentDefaults::default()
+        };
+        expand_role_seats(&mut defaults);
+
+        assert_eq!(
+            defaults.role["smart-1"].entries()[0].harness.as_deref(),
+            Some("harness-a")
+        );
+        assert_eq!(
+            defaults.role["smart-2"].entries()[0].harness.as_deref(),
+            Some("harness-b")
+        );
+        assert!(defaults.role.contains_key("smart"), "base key retained");
+    }
+
+    #[test]
+    fn expand_role_seats_never_overwrites_an_authored_exact_table() {
+        let mut defaults = AgentDefaults {
+            role: BTreeMap::from([
+                (
+                    "smart".into(),
+                    RoleAssignmentValue::Single(ProfileAssignment {
+                        count: Some(2),
+                        ..single("shared-harness")
+                    }),
+                ),
+                (
+                    "smart-1".into(),
+                    RoleAssignmentValue::Single(single("authored-harness")),
+                ),
+            ]),
+            ..AgentDefaults::default()
+        };
+        expand_role_seats(&mut defaults);
+
+        assert_eq!(
+            defaults.role["smart-1"].entries()[0].harness.as_deref(),
+            Some("authored-harness"),
+            "authored exact table wins wholesale"
+        );
+        assert_eq!(
+            defaults.role["smart-2"].entries()[0].harness.as_deref(),
+            Some("shared-harness")
+        );
+    }
+
     #[test]
     fn transport_api_round_trips_through_serialize() {
         let mut assignment = ProfileAssignment {
@@ -9117,5 +9330,154 @@ mod config_tests {
         // Fields `next` left unset survive from `base` untouched.
         assert_eq!(base.model.as_deref(), Some("base-model"));
         assert_eq!(base.api.wire, Some(ProviderWire::OpenaiCompat));
+    }
+
+    #[test]
+    fn expand_role_seats_runs_after_scope_merge_so_a_qualifier_count_wins() {
+        // Regression for the ordering contract: `expand_role_seats` must be
+        // called on the flattened (post-merge) result, or a nearer scope's
+        // `count` would arrive too late to change the expansion.
+        let mut base = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(2),
+                    ..single("base-harness")
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        let nearer = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(1),
+                    ..ProfileAssignment::default()
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        merge_agent_defaults(&mut base, nearer);
+        expand_role_seats(&mut base);
+
+        assert!(base.role.contains_key("smart-1"));
+        assert!(
+            !base.role.contains_key("smart-2"),
+            "the merged count = 1 must have already won before expansion runs"
+        );
+    }
+
+    #[test]
+    fn expand_role_seats_zero_count_expands_no_seats() {
+        let mut defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(0),
+                    ..single("shared-harness")
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        expand_role_seats(&mut defaults);
+        assert!(!defaults.role.contains_key("smart-1"));
+    }
+
+    #[test]
+    fn expansion_seat_out_of_range_errors_naming_base_and_seat_count() {
+        let mut defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(2),
+                    ..single("shared-harness")
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        expand_role_seats(&mut defaults);
+
+        assert!(expansion_seat_out_of_range(&defaults, "smart-1").is_none());
+        assert!(expansion_seat_out_of_range(&defaults, "smart-2").is_none());
+        let err = expansion_seat_out_of_range(&defaults, "smart-3")
+            .expect("seat 3 exceeds the configured count of 2");
+        let message = err.to_string();
+        assert!(message.contains("smart"), "names the base role: {message}");
+        assert!(message.contains('2'), "names the seat count: {message}");
+    }
+
+    #[test]
+    fn expansion_seat_out_of_range_is_none_for_a_non_expansion_shaped_role() {
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "worker".into(),
+                RoleAssignmentValue::Single(single("shared-harness")),
+            )]),
+            ..AgentDefaults::default()
+        };
+        assert!(expansion_seat_out_of_range(&defaults, "worker-1").is_none());
+        assert!(expansion_seat_out_of_range(&defaults, "unrelated").is_none());
+    }
+
+    #[test]
+    fn validate_role_map_rejects_count_on_a_standing_seat() {
+        let role = BTreeMap::from([(
+            "narrator".into(),
+            RoleAssignmentValue::Single(ProfileAssignment {
+                count: Some(2),
+                ..ProfileAssignment::default()
+            }),
+        )]);
+        let err = validate_role_map(&role, "agent.role", true)
+            .expect_err("count on a standing seat must be rejected");
+        assert!(err.to_string().contains("count"));
+    }
+
+    #[test]
+    fn validate_role_map_rejects_count_inside_a_list_entry() {
+        let role = BTreeMap::from([(
+            "smart".into(),
+            RoleAssignmentValue::List(vec![ProfileAssignment {
+                count: Some(1),
+                ..single("a")
+            }]),
+        )]);
+        let err = validate_role_map(&role, "agent.role", true)
+            .expect_err("count inside a [[...]] seat is rejected; the list length is the count");
+        assert!(err.to_string().contains("count"));
+    }
+
+    #[test]
+    fn validate_role_map_rejects_zero_count() {
+        let role = BTreeMap::from([(
+            "smart".into(),
+            RoleAssignmentValue::Single(ProfileAssignment {
+                count: Some(0),
+                ..single("a")
+            }),
+        )]);
+        let err =
+            validate_role_map(&role, "agent.role", true).expect_err("count must be at least 1");
+        assert!(err.to_string().contains("count"));
+    }
+
+    #[test]
+    fn profile_assignment_count_round_trips_and_stays_absent_when_unauthored() {
+        let without_count = single("harness-only");
+        let serialized = toml::to_string(&without_count).expect("serializes");
+        assert!(
+            !serialized.contains("count"),
+            "un-authored count must not appear on the wire: {serialized}"
+        );
+
+        let with_count = ProfileAssignment {
+            count: Some(3),
+            ..single("harness-only")
+        };
+        let serialized = toml::to_string(&with_count).expect("serializes");
+        assert!(serialized.contains("count = 3"));
+        let decoded: ProfileAssignment =
+            toml::from_str(&serialized).expect("round-trips through TOML");
+        assert_eq!(decoded.count, Some(3));
     }
 }

@@ -103,6 +103,7 @@ export interface ProfileAssignment {
   baseUrl?: string;
   budget?: RoleBudget;
   connectTimeoutMs?: number;
+  count?: number;
   extraArgs?: string[];
   harness?: string;
   mode?: RunAssignmentMode;
