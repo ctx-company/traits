@@ -225,19 +225,62 @@ pub(crate) struct RatatuiPane {
 /// cannot be bounded from out here, because it never yields.
 ///
 /// It reproduces exactly when stdin is not the terminal, which is what `just`
-/// hands every recipe: `ctx traits run --progress tui` completes in ~29s with
-/// inherited stdio and hangs indefinitely behind a pipe. So keep the inline
-/// pane for the interactive case whose scrollback it exists to preserve, and
-/// take the alternate screen otherwise — that path builds from a fullscreen
-/// viewport, which never asks for the cursor, so it renders instead of
-/// hanging. Enabling crossterm's `use-dev-tty` does NOT avoid this; it was
-/// tried and the hang is identical.
+/// hands every recipe. Enabling crossterm's `use-dev-tty` does NOT avoid it;
+/// that was tried and the hang is identical.
+///
+/// [`adopt_controlling_terminal`] removes the cause rather than working around
+/// it, so this only picks the fallback when even that could not produce a
+/// terminal — a genuinely headless invocation, where the alternate screen at
+/// least renders (fullscreen viewport, no cursor query) instead of hanging.
 fn inline_capable_screen() -> PaneScreen {
     if std::io::stdin().is_terminal() {
         PaneScreen::Inline
     } else {
         PaneScreen::Alt
     }
+}
+
+/// Put a real terminal on stdin when the process was handed something else.
+///
+/// crossterm reads terminal replies — cursor position, and every key event —
+/// through one event source anchored to stdin. Given a pipe there, that source
+/// answers `Err` forever, and both of crossterm's consumers spin on it rather
+/// than failing: the cursor query in `cursor/sys/unix.rs` and our own input
+/// pump both discard the error and retry immediately. The visible result is a
+/// pane that never draws, or draws and then ignores every key at 100% CPU.
+///
+/// `just` hands every recipe a pipe on stdin, so `just implement` got exactly
+/// that. The fix is not to detect the condition and degrade — it is to stop
+/// being in it. A process with a controlling terminal can open `/dev/tty` and
+/// put it on fd 0, after which stdin IS a terminal and every downstream
+/// consumer, crossterm included, simply works. The inline pane comes back with
+/// it, because the cursor query it needs can now be answered.
+///
+/// Idempotent, and a no-op when stdin is already a terminal or when no
+/// controlling terminal exists (CI, a daemon, a detached spawn) — those keep
+/// today's behaviour and fall to the alternate screen or to status progress.
+pub(crate) fn adopt_controlling_terminal() {
+    use std::os::fd::AsRawFd;
+
+    static ADOPTED: Once = Once::new();
+    ADOPTED.call_once(|| {
+        if std::io::stdin().is_terminal() {
+            return;
+        }
+        let Ok(tty) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+        else {
+            return;
+        };
+        // `dup2` duplicates onto fd 0; the borrowed handle is closed on drop
+        // and fd 0 stays valid. A failure leaves the original stdin in place,
+        // which is exactly the no-op we want.
+        unsafe {
+            libc::dup2(tty.as_raw_fd(), libc::STDIN_FILENO);
+        }
+    });
 }
 
 impl RatatuiPane {
@@ -260,6 +303,9 @@ impl RatatuiPane {
     }
 
     fn new_with_options(screen: PaneScreen, ctrl_c_policy: CtrlCPolicy) -> std::io::Result<Self> {
+        // Before anything asks crossterm a question: make sure stdin is a
+        // terminal it can actually read the answer from.
+        adopt_controlling_terminal();
         install_panic_hook();
         enable_raw_mode()?;
         let mut inline_size = None;
@@ -337,8 +383,19 @@ impl RatatuiPane {
                     // promptly; the stop check runs again before `read` so a
                     // leave() that raced the poll window still wins before
                     // any byte is consumed off the tty.
-                    if !event::poll(Duration::from_millis(100)).unwrap_or(false) {
-                        continue;
+                    // A timeout (`Ok(false)`) is the normal quiet tick. An
+                    // ERROR is the input source itself being unreadable, and
+                    // it does not heal: retrying it immediately is an
+                    // unbounded busy loop that reads no keys and burns a core
+                    // — which is exactly what a piped stdin produced, a live
+                    // view that rendered and then ignored every keystroke at
+                    // ~46% CPU. `adopt_controlling_terminal` should prevent
+                    // ever getting here; if it could not, stop the pump
+                    // instead of spinning on a source that will never answer.
+                    match event::poll(Duration::from_millis(100)) {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(_) => return,
                     }
                     if pump.stop.load(Ordering::SeqCst) || pump.paused.load(Ordering::SeqCst) {
                         continue;
