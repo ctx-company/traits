@@ -2,8 +2,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use ratatui::layout::{Constraint, Direction};
-
 use crate::app::tui::{Line, Tone};
 use crate::app::tui_panes::{self, PaneTree};
 use crate::app::tui_ratatui::{self, RatatuiPane};
@@ -138,33 +136,11 @@ impl StartupView {
 
     fn render(inner: &mut Inner) {
         let rows = Self::lines(&inner.rows);
-        let detail = inner
-            .rows
-            .iter()
-            .rev()
-            .find(|row| row.state == State::Running || row.state == State::Failed)
-            .map(|row| row.detail.clone())
-            .unwrap_or_else(|| "Preparing run".to_string());
         if let Some(pane) = inner.pane.as_mut() {
             let _ = pane.draw(|frame| {
-                let tree = PaneTree::Split {
-                    dir: Direction::Horizontal,
-                    children: vec![
-                        (
-                            Constraint::Percentage(70),
-                            PaneTree::Leaf {
-                                id: "startup-stages",
-                                title: "Run startup".to_string(),
-                            },
-                        ),
-                        (
-                            Constraint::Percentage(30),
-                            PaneTree::Leaf {
-                                id: "startup-detail",
-                                title: "Detail".to_string(),
-                            },
-                        ),
-                    ],
+                let tree = PaneTree::Leaf {
+                    id: "startup-stages",
+                    title: "Run startup".to_string(),
                 };
                 let layout = tree.resolve(frame.area());
                 for id in tree.leaf_ids() {
@@ -175,15 +151,7 @@ impl StartupView {
                             tree.title(id).unwrap_or(""),
                             id == "startup-stages",
                         );
-                        let lines = if id == "startup-stages" {
-                            rows.iter().map(tui_ratatui::render_line).collect()
-                        } else {
-                            vec![tui_ratatui::render_line(&{
-                                let mut line = Line::blank();
-                                line.push(detail.clone(), Tone::Default);
-                                line
-                            })]
-                        };
+                        let lines: Vec<_> = rows.iter().map(tui_ratatui::render_line).collect();
                         tui_panes::render_lines_pane(frame, area, &lines, Default::default());
                     }
                 }

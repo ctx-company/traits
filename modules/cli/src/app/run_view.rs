@@ -566,10 +566,24 @@ struct RunView {
 #[derive(Debug, Clone)]
 struct HistoryStep {
     label: String,
+    kind: Option<ctx_traits_core::procedure::run::PlannedSequenceKind>,
+    outcome: Option<HistoryOutcome>,
     elapsed: Option<Duration>,
     output_tokens: Option<u64>,
     summary: Option<String>,
     summary_at: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoryOutcome {
+    Check {
+        ok: bool,
+        exit_code: Option<i64>,
+    },
+    Command {
+        succeeded: bool,
+        exit_code: Option<i32>,
+    },
 }
 
 /// One folded row of merge stage progress, keyed by the P504
@@ -1892,7 +1906,9 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     let data = PaneData {
         progress: Some(progress_lines),
         journey: Some(journey_rows),
-        history: Some(history_rows),
+        // Accepted statuses are durable ledger evidence. Do not reserve a pane
+        // merely because the live projection currently has an empty row list.
+        history: (!history_rows.is_empty()).then_some(history_rows),
         current: Some(current_rows),
         post_run: post_run_lines,
         title: PaneTitleRow::Visible(title_line),
@@ -2320,13 +2336,13 @@ fn align_scroll_start(scroll: &mut tui_kit::ViewportScroll, desired_start: usize
 /// live rows use — never a second event shape.
 #[derive(Clone)]
 pub(crate) struct EventRow {
-    at: Duration,
+    at: Option<Duration>,
     tail: String,
     tone: tui::Tone,
 }
 
 impl EventRow {
-    pub(crate) fn new(at: Duration, tail: String, tone: tui::Tone) -> Self {
+    pub(crate) fn new(at: Option<Duration>, tail: String, tone: tui::Tone) -> Self {
         Self { at, tail, tone }
     }
 
@@ -2347,10 +2363,56 @@ fn story_history_lines(view: &RunView) -> Vec<EventRow> {
 }
 
 fn story_row_line(step: &HistoryStep) -> EventRow {
-    let at = step.summary_at.or(step.elapsed).unwrap_or_default();
-    let (tail, tone) = match &step.summary {
-        Some(summary) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
-        None => {
+    let at = step.summary_at.or(step.elapsed);
+    let (tail, tone) = match (&step.summary, step.kind.as_ref(), step.outcome) {
+        (
+            _,
+            Some(ctx_traits_core::procedure::run::PlannedSequenceKind::Check),
+            Some(HistoryOutcome::Check { ok, exit_code }),
+        ) => {
+            let mut tail = format!("{} · {}", step.label, if ok { "passed" } else { "failed" });
+            if !ok && let Some(code) = exit_code {
+                tail.push_str(&format!(" (exit {code})"));
+            }
+            (
+                tail,
+                if ok {
+                    tui::Tone::Muted
+                } else {
+                    tui::Tone::Fail
+                },
+            )
+        }
+        (
+            _,
+            Some(ctx_traits_core::procedure::run::PlannedSequenceKind::Command),
+            Some(HistoryOutcome::Command {
+                succeeded,
+                exit_code,
+            }),
+        ) => {
+            let mut tail = format!(
+                "{} · {}",
+                step.label,
+                if succeeded { "succeeded" } else { "failed" }
+            );
+            if !succeeded && let Some(code) = exit_code {
+                tail.push_str(&format!(" (exit {code})"));
+            }
+            (
+                tail,
+                if succeeded {
+                    tui::Tone::Muted
+                } else {
+                    tui::Tone::Fail
+                },
+            )
+        }
+        (_, Some(ctx_traits_core::procedure::run::PlannedSequenceKind::Command), None) => {
+            (step.label.clone(), tui::Tone::Muted)
+        }
+        (Some(summary), _, _) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
+        (None, _, _) => {
             let mut tail = step.label.clone();
             if let Some(elapsed) = step.elapsed {
                 tail.push_str(" \u{b7} ");
@@ -2376,7 +2438,10 @@ fn story_row_line(step: &HistoryStep) -> EventRow {
 const EVENT_PREFIX_SEP: &str = "  \u{b7}  ";
 
 fn event_row_line(row: &EventRow, width: u16) -> tui::Line {
-    let prefix = format!("{}{EVENT_PREFIX_SEP}", tui::elapsed_text(row.at));
+    let prefix = row
+        .at
+        .map(|at| format!("{}{EVENT_PREFIX_SEP}", tui::elapsed_text(at)))
+        .unwrap_or_default();
     let prefix_width = tui::display_width(&prefix);
     let mut line = tui::Line::blank();
     line.push(prefix, tui::Tone::Muted);
@@ -2436,7 +2501,11 @@ fn overlay_event_row(
     } else {
         tui::Tone::Default
     };
-    Some(EventRow { at, tail, tone })
+    Some(EventRow {
+        at: Some(at),
+        tail,
+        tone,
+    })
 }
 
 fn stream_row_line(row: &StreamRow) -> EventRow {
@@ -2445,7 +2514,7 @@ fn stream_row_line(row: &StreamRow) -> EventRow {
         StreamRowKind::ModelText => tui::Tone::Muted,
     };
     EventRow {
-        at: row.at,
+        at: Some(row.at),
         tail: row.text.clone(),
         tone,
     }
@@ -2642,7 +2711,7 @@ fn run_view(
         .filter(|status| {
             status.status == ctx_traits_core::procedure::runtime::SequenceStatusKind::Accepted
         })
-        .map(|status| history_step_from_status(status, &presentation))
+        .map(|status| history_step_from_status(status, Some(plan), Some(session), &presentation))
         .collect();
     RunView {
         header,
@@ -2663,12 +2732,19 @@ fn run_view(
 /// longer render the branch that produced an earlier accepted status.
 fn history_step_from_status(
     status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+    plan: Option<&ctx_traits_core::procedure::run::Plan>,
+    session: Option<&ctx_traits_core::procedure::session::Session>,
     presentation: &PresentationState<'_>,
 ) -> HistoryStep {
     let key = history_presentation_key(status, presentation);
     let loop_key = history_loop_container_key(status);
+    let planned = plan.and_then(|plan| planned_item_for_status(plan, status));
     HistoryStep {
         label: super::story::format_step_title(&status.title, &status.position_path),
+        kind: planned.as_ref().map(|(item, _)| item.kind.clone()),
+        outcome: planned.and_then(|(item, _)| {
+            session.and_then(|session| history_outcome(item, status, session))
+        }),
         elapsed: key
             .as_ref()
             .and_then(|key| presentation.finished_durations.get(key).copied())
@@ -2692,6 +2768,170 @@ fn history_step_from_status(
             .as_ref()
             .and_then(|key| presentation.step_summary_at.get(key).copied()),
     }
+}
+
+fn planned_item_for_status<'a>(
+    plan: &'a ctx_traits_core::procedure::run::Plan,
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+) -> Option<(
+    &'a ctx_traits_core::procedure::run::PlannedSequenceItem,
+    PlannedItemLocation,
+)> {
+    fn visit<'a>(
+        item: &'a ctx_traits_core::procedure::run::PlannedSequenceItem,
+        location: &PlannedItemLocation,
+        status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+    ) -> Option<(
+        &'a ctx_traits_core::procedure::run::PlannedSequenceItem,
+        PlannedItemLocation,
+    )> {
+        let status_path = canonical_status_path(status);
+        let matches = structural_path_matches(&status_path, &location.position_path);
+        if matches {
+            return Some((item, location.clone()));
+        }
+        for child in &item.children {
+            if let Some(found) = visit(child, &child_location(location, item, false, child), status)
+            {
+                return Some(found);
+            }
+        }
+        for child in &item.otherwise_children {
+            if let Some(found) = visit(child, &child_location(location, item, true, child), status)
+            {
+                return Some(found);
+            }
+        }
+        for branch in &item.parallel_branches {
+            for child in &branch.children {
+                if let Some(found) = visit(
+                    child,
+                    &parallel_child_location(location, item, branch.sequence_ref.id(), child),
+                    status,
+                ) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    plan.sequence_items
+        .iter()
+        .find_map(|item| visit(item, &PlannedItemLocation::root(item), status))
+}
+
+/// Ledger statuses omit the root segment while revisions retain it. This is
+/// the execution identity used for every historical join below.
+fn canonical_status_path(
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+) -> Vec<ctx_traits_core::procedure::runtime::PathSegment> {
+    if !status.position_path.is_empty() {
+        return status.position_path.clone();
+    }
+    vec![ctx_traits_core::procedure::runtime::PathSegment {
+        kind: "procedure".to_string(),
+        id: status.item_id.clone(),
+        index: status.run_index,
+        iteration: None,
+        item_index: None,
+    }]
+}
+
+fn history_outcome(
+    item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
+    status: &ctx_traits_core::procedure::runtime::SequenceStatus,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<HistoryOutcome> {
+    if !matches!(
+        item.kind,
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Check
+            | ctx_traits_core::procedure::run::PlannedSequenceKind::Command
+    ) {
+        return None;
+    }
+    let execution_path = canonical_status_path(status);
+    let revision = historical_slot_revisions(session)
+        .into_iter()
+        .rev()
+        .find(|revision| {
+            item.output_refs
+                .iter()
+                .any(|output| output.as_str() == revision.slot_ref.as_str())
+                && revision.position_path == execution_path
+        })?;
+    let value = revision
+        .submitted_payload
+        .as_ref()
+        .map(|value| &value.value)
+        .or_else(|| {
+            session
+                .accepted_slot_values
+                .iter()
+                .chain(session.accepted_output_port_values.iter())
+                .find(|value| {
+                    value.ref_text == revision.slot_ref.as_str()
+                        && value.value_digest == revision.value_digest
+                })
+                .map(|value| &value.value)
+        });
+    match item.kind {
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Check => {
+            let object = value?.as_object()?;
+            let ok = object.get("ok")?.as_bool()?;
+            let exit_code = object.get("exit-code").and_then(serde_json::Value::as_i64);
+            Some(HistoryOutcome::Check { ok, exit_code })
+        }
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Command => {
+            let evidence = revision.command_execution.as_ref().or_else(|| {
+                session
+                    .accepted_slot_values
+                    .iter()
+                    .chain(session.accepted_output_port_values.iter())
+                    .find(|value| {
+                        value.ref_text == revision.slot_ref.as_str()
+                            && value.value_digest == revision.value_digest
+                    })
+                    .and_then(|value| value.command_execution.as_ref())
+            })?;
+            let succeeded = command_succeeded(item, evidence.exit_code, evidence.timed_out);
+            Some(HistoryOutcome::Command {
+                succeeded,
+                exit_code: evidence.exit_code,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Historical status rows must see evidence still isolated behind a parallel
+/// barrier. Keep this traversal aligned with the runtime's recorded-revision
+/// view, then use acceptance order rather than buffer traversal order.
+fn historical_slot_revisions(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Vec<&ctx_traits_core::procedure::runtime::SlotRevision> {
+    let mut revisions: Vec<_> = session.slot_revisions.iter().collect();
+    for frame in &session.ledger.control_stack {
+        revisions.extend(frame.parallel_buffer.slot_revisions.iter());
+        for branch in &frame.parallel_committed_branches {
+            revisions.extend(branch.slot_revisions.iter());
+        }
+    }
+    revisions.sort_by_key(|revision| revision.acceptance_order);
+    revisions
+}
+
+fn command_succeeded(
+    item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
+    exit_code: Option<i32>,
+    timed_out: bool,
+) -> bool {
+    let success_codes = item
+        .command_plan
+        .as_ref()
+        .map(|plan| plan.success_exit_code.as_slice())
+        .filter(|codes| !codes.is_empty())
+        .unwrap_or(&[0]);
+    !timed_out && exit_code.is_some_and(|code| success_codes.contains(&code))
 }
 
 /// Control completion statuses record the root item's ordinary status path,
@@ -3151,7 +3391,8 @@ fn sidecar_history_lines(
             .into_iter()
             .map(|entry| {
                 EventRow::new(
-                    epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
+                    (entry.at_epoch_ms > 0)
+                        .then(|| epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms)),
                     format!("{}: {}", entry.key, entry.text),
                     tui::Tone::Default,
                 )
@@ -3178,7 +3419,6 @@ fn sidecar_history_lines(
                 .step_summaries
                 .iter()
                 .find(|entry| entry.key.starts_with(&key_prefix));
-            let at_epoch_ms = summary.map_or(0, |entry| entry.at_epoch_ms);
             let tail = match summary {
                 Some(summary) => format!(
                     "{}: {}",
@@ -3188,7 +3428,10 @@ fn sidecar_history_lines(
                 None => super::story::format_step_title(&status.title, &status.position_path),
             };
             EventRow::new(
-                epoch_ms_to_duration(started_at_epoch, at_epoch_ms),
+                summary.and_then(|entry| {
+                    (entry.at_epoch_ms > 0)
+                        .then(|| epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms))
+                }),
                 tail,
                 summary.map_or(tui::Tone::Muted, |_| tui::Tone::Default),
             )
@@ -3232,10 +3475,12 @@ fn sidecar_step_summary_maps(
     let mut at = BTreeMap::new();
     for entry in &activity.step_summaries {
         summaries.insert(entry.key.clone(), entry.text.clone());
-        at.insert(
-            entry.key.clone(),
-            epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
-        );
+        if entry.at_epoch_ms > 0 {
+            at.insert(
+                entry.key.clone(),
+                epoch_ms_to_duration(started_at_epoch, entry.at_epoch_ms),
+            );
+        }
     }
     (summaries, at)
 }
@@ -3260,7 +3505,7 @@ fn latest_frame_event_rows(
         .filter(|event| event.event.frame_id == latest_frame_id)
         .map(|event| {
             EventRow::new(
-                epoch_ms_to_duration(started_at_epoch, event.at_epoch_ms),
+                Some(epoch_ms_to_duration(started_at_epoch, event.at_epoch_ms)),
                 activity_event_tail(&event.event),
                 activity_event_tone(&event.event.kind),
             )
@@ -3752,6 +3997,36 @@ fn child_location(
     position_path.push(ctx_traits_core::procedure::runtime::PathSegment {
         kind: planned_control_kind(parent.kind.clone()).to_string(),
         id: sequence_id,
+        index: child.sequence_index,
+        iteration: None,
+        item_index: None,
+    });
+    position_path.push(ctx_traits_core::procedure::runtime::PathSegment {
+        kind: "item".to_string(),
+        id: child.item_id.clone(),
+        index: child.sequence_index,
+        iteration: None,
+        item_index: None,
+    });
+    PlannedItemLocation { position_path }
+}
+
+fn parallel_child_location(
+    parent_location: &PlannedItemLocation,
+    parent: &ctx_traits_core::procedure::run::PlannedSequenceItem,
+    sequence_id: &str,
+    child: &ctx_traits_core::procedure::run::PlannedSequenceItem,
+) -> PlannedItemLocation {
+    let mut position_path = parent_location.position_path.clone();
+    if position_path
+        .last()
+        .is_some_and(|segment| segment.kind == "item")
+    {
+        position_path.pop();
+    }
+    position_path.push(ctx_traits_core::procedure::runtime::PathSegment {
+        kind: planned_control_kind(parent.kind.clone()).to_string(),
+        id: Some(sequence_id.to_string()),
         index: child.sequence_index,
         iteration: None,
         item_index: None,
@@ -4959,11 +5234,634 @@ mod tests {
     fn history_step(label: &str, elapsed: Option<Duration>, summary: Option<&str>) -> HistoryStep {
         HistoryStep {
             label: label.to_string(),
+            kind: None,
+            outcome: None,
             elapsed,
             output_tokens: Some(1_200),
             summary: summary.map(str::to_string),
             summary_at: summary.map(|_| Duration::from_secs(7)),
         }
+    }
+
+    fn planned_item(
+        title: &str,
+        kind: ctx_traits_core::procedure::run::PlannedSequenceKind,
+        run_index: usize,
+        sequence_index: usize,
+    ) -> ctx_traits_core::procedure::run::PlannedSequenceItem {
+        ctx_traits_core::procedure::run::PlannedSequenceItem {
+            sequence_index,
+            run_index,
+            item_id: Some(title.to_string()),
+            title: title.to_string(),
+            input_refs: Vec::new(),
+            output_refs: Vec::new(),
+            kind,
+            agent_ref: None,
+            structural_seat: None,
+            sequence_ref: None,
+            otherwise_sequence_ref: None,
+            prompt_source: None,
+            command_plan: None,
+            children: Vec::new(),
+            otherwise_children: Vec::new(),
+            parallel_branches: Vec::new(),
+            max_branches: None,
+            join: None,
+            branch_failure: Vec::new(),
+            concurrent: false,
+            status: ctx_traits_core::procedure::run::SequenceItemStatus::Planned,
+        }
+    }
+
+    fn attribution_plan(
+        items: Vec<ctx_traits_core::procedure::run::PlannedSequenceItem>,
+    ) -> ctx_traits_core::procedure::run::Plan {
+        ctx_traits_core::procedure::run::Plan {
+            run_id: ctx_traits_core::procedure::run::Id::new("test-run").unwrap(),
+            trait_id: "test".to_string(),
+            worktree_required: false,
+            sequence_items: items,
+            slots: Vec::new(),
+            producer_edges: Vec::new(),
+            port_requirements: Vec::new(),
+            output_ports: Vec::new(),
+            acceptance: ctx_traits_core::procedure::run::AcceptanceState::Pending,
+        }
+    }
+
+    fn session_with_history_revisions(
+        revisions: Vec<ctx_traits_core::procedure::runtime::SlotRevision>,
+        control_stack: Vec<ctx_traits_core::procedure::runtime::ControlFrame>,
+    ) -> ctx_traits_core::procedure::session::Session {
+        use ctx_traits_core::digest::Digest;
+        use ctx_traits_core::procedure::runtime::FinalState;
+        ctx_traits_core::procedure::session::Session {
+            schema_version: "1".to_string(),
+            session_id: ctx_traits_core::procedure::session::SessionId::new("session-test")
+                .unwrap(),
+            run_id: ctx_traits_core::procedure::run::Id::new("test-run").unwrap(),
+            trait_id: "test".to_string(),
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            current_source_index: None,
+            current_sequence_item_id: None,
+            current_sequence_title: None,
+            current_agent: None,
+            status: ctx_traits_core::procedure::session::Status::AwaitingAgentOutput,
+            warnings: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: revisions.clone(),
+            emitted_signals: Vec::new(),
+            rejected_submissions: Vec::new(),
+            unresolved_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: control_stack.clone(),
+            stop_reason: None,
+            final_output_summary: Vec::new(),
+            next_frame: None,
+            last_validation_report: None,
+            completion: None,
+            last_drive_outcome: None,
+            provenance: ctx_traits_core::procedure::session::Provenance {
+                started_by: ctx_traits_core::procedure::session::CallerProvenance {
+                    surface: "test".to_string(),
+                    caller: "test".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                state_source: "test".to_string(),
+                agent_assignments: None,
+                harness_probes: Vec::new(),
+                warnings: Vec::new(),
+                trait_source: None,
+                query_selection: None,
+                worktree: None,
+                merge_frames: Vec::new(),
+                merge_intent: None,
+                out_of_tree_mutations: Vec::new(),
+                started_at_epoch: None,
+                trust_approval: None,
+                session_title: None,
+            },
+            ledger: ctx_traits_core::procedure::runtime::State {
+                run_id: ctx_traits_core::procedure::run::Id::new("test-run").unwrap(),
+                trait_id: "test".to_string(),
+                strict_loops: false,
+                source_digest: None,
+                canonical_digest: None,
+                current_run_index: 0,
+                sequence_statuses: Vec::new(),
+                accepted_port_values: Vec::new(),
+                accepted_slot_values: Vec::new(),
+                accepted_output_port_values: Vec::new(),
+                slot_revisions: revisions,
+                resource_evidence: Vec::new(),
+                emitted_signals: Vec::new(),
+                rejected_attempts: Vec::new(),
+                provider_capability_reports: Vec::new(),
+                output_ports: Vec::new(),
+                active_path: Vec::new(),
+                control_stack,
+                branch_decisions: Vec::new(),
+                conditional_input_decisions: Vec::new(),
+                ask_decisions: Vec::new(),
+                failure_routes: Vec::new(),
+                guard_evaluations: Vec::new(),
+                parallel_panel_records: Vec::new(),
+                stop_reason: None,
+                elapsed_seconds: 0,
+                final_state: FinalState::Running,
+            },
+            state_digest: Digest::source("test"),
+        }
+    }
+
+    fn revision(
+        slot: &str,
+        path: Vec<ctx_traits_core::procedure::runtime::PathSegment>,
+        order: usize,
+        value: serde_json::Value,
+    ) -> ctx_traits_core::procedure::runtime::SlotRevision {
+        use ctx_traits_core::digest::Digest;
+        use ctx_traits_core::reference::Reference;
+        ctx_traits_core::procedure::runtime::SlotRevision {
+            slot_ref: Reference::parse(slot).unwrap(),
+            value_digest: Digest::source(&format!("{slot}-{order}")),
+            acceptance_order: order,
+            operation: None,
+            submitted_payload: Some(ctx_traits_core::procedure::runtime::RevisionValue { value }),
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: path,
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    fn parallel_control_frame(
+        parallel_buffer: ctx_traits_core::procedure::runtime::EffectBuffer,
+    ) -> ctx_traits_core::procedure::runtime::ControlFrame {
+        use ctx_traits_core::procedure::runtime::ControlKind;
+        ctx_traits_core::procedure::runtime::ControlFrame {
+            kind: ControlKind::Parallel,
+            parent_run_index: 0,
+            control_item_id: Some("parallel".to_string()),
+            sequence_id: "parallel".to_string(),
+            next_index: 0,
+            iteration_index: Some(0),
+            max_iterations: None,
+            max_items: None,
+            item_index: None,
+            item_total: None,
+            over_slot: None,
+            item_slot: None,
+            list_digest: None,
+            concurrent: false,
+            until: None,
+            stop_if: None,
+            on_exhausted: None,
+            on_stop: None,
+            on_complete: None,
+            on_failure: None,
+            parallel_branch_sequence_ids: vec!["branch-a".to_string()],
+            parallel_buffer,
+            parallel_committed_branches: Vec::new(),
+            branch_decisions_watermark: 0,
+            guard_evaluations_watermark: 0,
+            join: None,
+            branch_failure: Vec::new(),
+            parallel_branch_refs: Vec::new(),
+            parallel_branch_outcomes: Vec::new(),
+        }
+    }
+
+    fn accepted_status(
+        title: &str,
+        run_index: usize,
+        position_path: Vec<ctx_traits_core::procedure::runtime::PathSegment>,
+    ) -> ctx_traits_core::procedure::runtime::SequenceStatus {
+        ctx_traits_core::procedure::runtime::SequenceStatus {
+            sequence_index: run_index,
+            run_index,
+            item_id: Some(title.to_string()),
+            title: title.to_string(),
+            status: ctx_traits_core::procedure::runtime::SequenceStatusKind::Accepted,
+            reason: String::new(),
+            position_path,
+        }
+    }
+
+    #[test]
+    fn history_outcome_execution_attribution_preserves_root_repeated_and_parallel_paths() {
+        use ctx_traits_core::procedure::run::{PlannedParallelBranch, PlannedSequenceKind};
+        use ctx_traits_core::procedure::runtime::PathSegment;
+        use ctx_traits_core::reference::Reference;
+
+        let mut root = planned_item("root-check", PlannedSequenceKind::Check, 0, 0);
+        root.output_refs = vec![Reference::parse("slot:root").unwrap()];
+        let mut loop_item = planned_item("repeat", PlannedSequenceKind::Loop, 1, 1);
+        loop_item.sequence_ref = Some(Reference::parse("sequence:repeat-body").unwrap());
+        let mut repeated_check = planned_item("repeated-check", PlannedSequenceKind::Check, 1, 0);
+        repeated_check.output_refs = vec![Reference::parse("slot:repeat").unwrap()];
+        loop_item.children = vec![repeated_check];
+        let mut parallel = planned_item("parallel", PlannedSequenceKind::Parallel, 2, 2);
+        let mut branch_command = planned_item("branch-command", PlannedSequenceKind::Command, 2, 0);
+        branch_command.output_refs = vec![Reference::parse("slot:branch").unwrap()];
+        parallel.parallel_branches = vec![PlannedParallelBranch {
+            sequence_ref: Reference::parse("sequence:branch-a").unwrap(),
+            children: vec![branch_command],
+        }];
+        let plan = attribution_plan(vec![root, loop_item, parallel]);
+
+        let root = accepted_status("root-check", 0, Vec::new());
+        assert_eq!(
+            planned_item_for_status(&plan, &root).unwrap().0.title,
+            "root-check"
+        );
+
+        let mut repeated_statuses = Vec::new();
+        for iteration in [0, 1] {
+            let repeated = accepted_status(
+                "repeated-check",
+                1,
+                vec![
+                    PathSegment {
+                        kind: "procedure".to_string(),
+                        id: Some("repeat".to_string()),
+                        index: 1,
+                        iteration: None,
+                        item_index: None,
+                    },
+                    PathSegment {
+                        kind: "loop".to_string(),
+                        id: Some("repeat-body".to_string()),
+                        index: 0,
+                        iteration: Some(iteration),
+                        item_index: None,
+                    },
+                    PathSegment {
+                        kind: "item".to_string(),
+                        id: Some("repeated-check".to_string()),
+                        index: 0,
+                        iteration: Some(iteration),
+                        item_index: None,
+                    },
+                ],
+            );
+            assert_eq!(
+                planned_item_for_status(&plan, &repeated).unwrap().0.title,
+                "repeated-check"
+            );
+            repeated_statuses.push(repeated);
+        }
+
+        let parallel = accepted_status(
+            "branch-command",
+            2,
+            vec![
+                PathSegment {
+                    kind: "procedure".to_string(),
+                    id: Some("parallel".to_string()),
+                    index: 2,
+                    iteration: None,
+                    item_index: None,
+                },
+                PathSegment {
+                    kind: "parallel".to_string(),
+                    id: Some("branch-a".to_string()),
+                    index: 0,
+                    iteration: None,
+                    item_index: None,
+                },
+                PathSegment {
+                    kind: "item".to_string(),
+                    id: Some("branch-command".to_string()),
+                    index: 0,
+                    iteration: None,
+                    item_index: None,
+                },
+            ],
+        );
+        assert_eq!(
+            planned_item_for_status(&plan, &parallel).unwrap().0.title,
+            "branch-command"
+        );
+
+        let root_path = canonical_status_path(&root);
+        let repeated_paths = repeated_statuses
+            .iter()
+            .map(canonical_status_path)
+            .collect::<Vec<_>>();
+        let revisions = vec![
+            revision("slot:root", root_path, 1, serde_json::json!({"ok": true})),
+            revision(
+                "slot:repeat",
+                repeated_paths[0].clone(),
+                2,
+                serde_json::json!({"ok": false, "exit-code": 4}),
+            ),
+            revision(
+                "slot:repeat",
+                repeated_paths[1].clone(),
+                3,
+                serde_json::json!({"ok": true}),
+            ),
+        ];
+        let mut branch_revision = revision(
+            "slot:branch",
+            canonical_status_path(&parallel),
+            4,
+            serde_json::Value::Null,
+        );
+        branch_revision.command_execution = Some(
+            ctx_traits_core::procedure::runtime::CommandExecutionEvidence {
+                argv: vec!["true".to_string()],
+                output_slot: "slot:branch".to_string(),
+                executable_digest: None,
+                exit_code: Some(0),
+                timed_out: false,
+                output_tail: None,
+            },
+        );
+        let parallel_frame =
+            parallel_control_frame(ctx_traits_core::procedure::runtime::EffectBuffer {
+                slot_revisions: vec![branch_revision.clone()],
+                ..Default::default()
+            });
+        let session = session_with_history_revisions(revisions.clone(), vec![parallel_frame]);
+        let outcome =
+            |item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
+             status: &ctx_traits_core::procedure::runtime::SequenceStatus| {
+                history_outcome(item, status, &session)
+            };
+        assert_eq!(
+            outcome(planned_item_for_status(&plan, &root).unwrap().0, &root),
+            Some(HistoryOutcome::Check {
+                ok: true,
+                exit_code: None
+            })
+        );
+        assert_eq!(
+            outcome(
+                planned_item_for_status(&plan, &repeated_statuses[0])
+                    .unwrap()
+                    .0,
+                &repeated_statuses[0],
+            ),
+            Some(HistoryOutcome::Check {
+                ok: false,
+                exit_code: Some(4)
+            })
+        );
+        assert_eq!(
+            outcome(
+                planned_item_for_status(&plan, &repeated_statuses[1])
+                    .unwrap()
+                    .0,
+                &repeated_statuses[1],
+            ),
+            Some(HistoryOutcome::Check {
+                ok: true,
+                exit_code: None
+            })
+        );
+        assert_eq!(
+            outcome(
+                planned_item_for_status(&plan, &parallel).unwrap().0,
+                &parallel
+            ),
+            Some(HistoryOutcome::Command {
+                succeeded: true,
+                exit_code: Some(0)
+            })
+        );
+
+        let mut committed_revision = branch_revision;
+        committed_revision.acceptance_order = 5;
+        committed_revision
+            .command_execution
+            .as_mut()
+            .unwrap()
+            .exit_code = Some(2);
+        let mut committed_frame = parallel_control_frame(Default::default());
+        committed_frame.parallel_committed_branches =
+            vec![ctx_traits_core::procedure::runtime::EffectBuffer {
+                slot_revisions: vec![committed_revision],
+                ..Default::default()
+            }];
+        let committed_session = session_with_history_revisions(revisions, vec![committed_frame]);
+        assert_eq!(
+            history_outcome(
+                planned_item_for_status(&plan, &parallel).unwrap().0,
+                &parallel,
+                &committed_session,
+            ),
+            Some(HistoryOutcome::Command {
+                succeeded: false,
+                exit_code: Some(2)
+            })
+        );
+    }
+
+    #[test]
+    fn history_outcome_attributes_a_top_level_command_to_its_revision() {
+        use ctx_traits_core::procedure::run::PlannedSequenceKind;
+        use ctx_traits_core::reference::Reference;
+
+        let mut command = planned_item("root-command", PlannedSequenceKind::Command, 0, 0);
+        command.output_refs = vec![Reference::parse("slot:command").unwrap()];
+        let plan = attribution_plan(vec![command]);
+        let status = accepted_status("root-command", 0, Vec::new());
+        let mut command_revision = revision(
+            "slot:command",
+            canonical_status_path(&status),
+            1,
+            serde_json::Value::Null,
+        );
+        command_revision.command_execution = Some(
+            ctx_traits_core::procedure::runtime::CommandExecutionEvidence {
+                argv: vec!["false".to_string()],
+                output_slot: "slot:command".to_string(),
+                executable_digest: None,
+                exit_code: Some(7),
+                timed_out: false,
+                output_tail: None,
+            },
+        );
+        let session = session_with_history_revisions(vec![command_revision], Vec::new());
+
+        assert_eq!(
+            history_outcome(
+                planned_item_for_status(&plan, &status).unwrap().0,
+                &status,
+                &session,
+            ),
+            Some(HistoryOutcome::Command {
+                succeeded: false,
+                exit_code: Some(7),
+            })
+        );
+    }
+
+    #[test]
+    fn command_history_success_semantics_honor_configured_codes_and_timeouts() {
+        use ctx_traits_core::procedure::run::PlannedSequenceKind;
+        use ctx_traits_core::r#trait::procedure::CommandPlan;
+
+        let mut command = planned_item("command", PlannedSequenceKind::Command, 0, 0);
+        assert!(command_succeeded(&command, Some(0), false));
+        assert!(!command_succeeded(&command, Some(1), false));
+        command.command_plan = Some(CommandPlan {
+            argv: vec!["test".to_string()],
+            argv_from: None,
+            executable_digest_from: None,
+            cwd: None,
+            timeout_ms: None,
+            capture_bytes: None,
+            success_exit_code: vec![3],
+        });
+        assert!(command_succeeded(&command, Some(3), false));
+        assert!(!command_succeeded(&command, Some(1), false));
+        assert!(!command_succeeded(&command, Some(3), true));
+
+        let row = |succeeded, exit_code| {
+            story_row_line(&HistoryStep {
+                label: "command".to_string(),
+                kind: Some(PlannedSequenceKind::Command),
+                outcome: Some(HistoryOutcome::Command {
+                    succeeded,
+                    exit_code,
+                }),
+                elapsed: Some(Duration::from_secs(8)),
+                output_tokens: None,
+                summary: Some("summary".to_string()),
+                summary_at: Some(Duration::from_secs(2)),
+            })
+        };
+        assert!(
+            row(
+                command_succeeded(
+                    &planned_item("command", PlannedSequenceKind::Command, 0, 0),
+                    Some(0),
+                    false
+                ),
+                Some(0)
+            )
+            .tail
+            .contains("succeeded")
+        );
+        assert!(
+            row(command_succeeded(&command, Some(3), false), Some(3))
+                .tail
+                .contains("succeeded")
+        );
+        let failed = row(command_succeeded(&command, Some(1), false), Some(1));
+        assert_eq!(failed.tone, tui::Tone::Fail);
+        assert!(failed.tail.contains("failed (exit 1)"));
+        let timed_out = row(command_succeeded(&command, Some(3), true), Some(3));
+        assert_eq!(timed_out.tone, tui::Tone::Fail);
+        assert!(timed_out.tail.contains("failed (exit 3)"));
+    }
+
+    #[test]
+    fn story_row_line_keeps_typed_verdicts_and_omits_unknown_command_facts() {
+        use ctx_traits_core::procedure::run::PlannedSequenceKind;
+
+        let check = HistoryStep {
+            label: "check".to_string(),
+            kind: Some(PlannedSequenceKind::Check),
+            outcome: Some(HistoryOutcome::Check {
+                ok: false,
+                exit_code: Some(7),
+            }),
+            elapsed: Some(Duration::from_secs(5)),
+            output_tokens: Some(10),
+            summary: Some("summary must not suppress verdict".to_string()),
+            summary_at: Some(Duration::from_secs(9)),
+        };
+        let rendered = story_row_line(&check);
+        assert_eq!(rendered.tone, tui::Tone::Fail);
+        assert!(rendered.tail.contains("failed (exit 7)"));
+        assert!(!rendered.tail.contains("summary"));
+
+        let command = HistoryStep {
+            label: "command".to_string(),
+            kind: Some(PlannedSequenceKind::Command),
+            outcome: None,
+            elapsed: Some(Duration::from_secs(5)),
+            output_tokens: Some(10),
+            summary: None,
+            summary_at: None,
+        };
+        let rendered = story_row_line(&command);
+        assert_eq!(rendered.tail, "command");
+        assert!(!rendered.tail.contains("00:00:05"));
+
+        let check = |ok, exit_code, summary: Option<&str>| {
+            story_row_line(&HistoryStep {
+                label: "check".to_string(),
+                kind: Some(PlannedSequenceKind::Check),
+                outcome: Some(HistoryOutcome::Check { ok, exit_code }),
+                elapsed: Some(Duration::from_secs(5)),
+                output_tokens: Some(10),
+                summary: summary.map(str::to_string),
+                summary_at: None,
+            })
+        };
+        let passed = check(true, Some(0), None);
+        assert_eq!(passed.tone, tui::Tone::Muted);
+        assert!(passed.tail.contains("passed"));
+        assert!(!passed.tail.contains("exit"));
+        let failed = check(false, Some(9), Some("must not replace verdict"));
+        assert_eq!(failed.tone, tui::Tone::Fail);
+        assert!(failed.tail.contains("failed (exit 9)"));
+        assert!(!failed.tail.contains("replace verdict"));
+
+        let unknown_check = story_row_line(&HistoryStep {
+            label: "check".to_string(),
+            kind: Some(PlannedSequenceKind::Check),
+            outcome: None,
+            elapsed: None,
+            output_tokens: None,
+            summary: None,
+            summary_at: None,
+        });
+        assert_eq!(unknown_check.tone, tui::Tone::Muted);
+        assert_eq!(unknown_check.tail, "check");
+
+        let command = |succeeded, exit_code| {
+            story_row_line(&HistoryStep {
+                label: "command".to_string(),
+                kind: Some(PlannedSequenceKind::Command),
+                outcome: Some(HistoryOutcome::Command {
+                    succeeded,
+                    exit_code,
+                }),
+                elapsed: Some(Duration::from_secs(5)),
+                output_tokens: Some(10),
+                summary: Some("summary".to_string()),
+                summary_at: None,
+            })
+        };
+        let succeeded = command(true, Some(0));
+        assert_eq!(succeeded.tone, tui::Tone::Muted);
+        assert!(succeeded.tail.contains("succeeded"));
+        let failed = command(false, Some(2));
+        assert_eq!(failed.tone, tui::Tone::Fail);
+        assert!(failed.tail.contains("failed (exit 2)"));
     }
 
     fn view_with(steps: Vec<RunStep>) -> RunView {
@@ -5161,8 +6059,8 @@ mod tests {
             run_started: Instant::now(),
         };
 
-        let top_history = history_step_from_status(&top_level, &presentation);
-        let loop_history = history_step_from_status(&resumed_loop, &presentation);
+        let top_history = history_step_from_status(&top_level, None, None, &presentation);
+        let loop_history = history_step_from_status(&resumed_loop, None, None, &presentation);
         assert_eq!(top_history.label, "Prepare workspace");
         assert_eq!(top_history.elapsed, Some(Duration::from_secs(4)));
         assert_eq!(top_history.output_tokens, Some(120));
@@ -5281,7 +6179,7 @@ mod tests {
             run_started: Instant::now(),
         };
         assert_eq!(
-            history_step_from_status(&status, &presentation).label,
+            history_step_from_status(&status, None, None, &presentation).label,
             "Execute work (1)"
         );
     }
@@ -5363,7 +6261,7 @@ mod tests {
                 reason: reason.to_string(),
                 position_path: Vec::new(),
             };
-            let history = history_step_from_status(&status, &presentation);
+            let history = history_step_from_status(&status, None, None, &presentation);
             assert_eq!(history.elapsed, Some(Duration::from_secs(elapsed_seconds)));
             assert_eq!(history.output_tokens, Some(output_tokens));
             let row = story_row_line(&history);
@@ -5387,12 +6285,12 @@ mod tests {
             Some(Duration::from_secs(5)),
             Some("did the thing"),
         ));
-        assert_eq!(with_summary.at, Duration::from_secs(7));
+        assert_eq!(with_summary.at, Some(Duration::from_secs(7)));
         assert!(with_summary.tail.contains("did the thing"));
 
         let without_summary =
             story_row_line(&history_step("b", Some(Duration::from_secs(5)), None));
-        assert_eq!(without_summary.at, Duration::from_secs(5));
+        assert_eq!(without_summary.at, Some(Duration::from_secs(5)));
         assert!(without_summary.tail.contains('5')); // elapsed
         assert!(without_summary.tail.contains("tok")); // tokens
     }
@@ -5409,8 +6307,8 @@ mod tests {
             kind: StreamRowKind::ModelText,
             text: "raw delta".to_string(),
         });
-        assert_eq!(narration.at, Duration::from_secs(3));
-        assert_eq!(model_text.at, Duration::from_secs(3));
+        assert_eq!(narration.at, Some(Duration::from_secs(3)));
+        assert_eq!(model_text.at, Some(Duration::from_secs(3)));
         assert_eq!(narration.tone, tui::Tone::Default);
         assert_eq!(model_text.tone, tui::Tone::Muted);
     }
@@ -5422,7 +6320,7 @@ mod tests {
     #[test]
     fn event_row_line_truncates_only_the_tail_by_display_width() {
         let row = EventRow {
-            at: Duration::from_secs(5),
+            at: Some(Duration::from_secs(5)),
             tail: "a".repeat(50),
             tone: tui::Tone::Default,
         };
@@ -5438,7 +6336,7 @@ mod tests {
         // Each "文" is 2 display columns; a char-count truncation would
         // overflow the requested width, a display-width one will not.
         let row = EventRow {
-            at: Duration::from_secs(1),
+            at: Some(Duration::from_secs(1)),
             tail: "文".repeat(30),
             tone: tui::Tone::Default,
         };
@@ -5451,7 +6349,7 @@ mod tests {
     #[test]
     fn event_row_line_leaves_a_short_tail_unmarked() {
         let row = EventRow {
-            at: Duration::from_secs(9),
+            at: Some(Duration::from_secs(9)),
             tail: "short".to_string(),
             tone: tui::Tone::Default,
         };
@@ -5459,6 +6357,134 @@ mod tests {
         let rendered: String = line.segments().map(|(text, _)| text).collect();
         assert!(rendered.starts_with("00:00:09  \u{b7}  short"));
         assert!(!rendered.ends_with("..."));
+    }
+
+    #[test]
+    fn event_row_line_without_timestamp_uses_the_full_tail_budget() {
+        let row = EventRow {
+            at: None,
+            tail: "a".repeat(30),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 20);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(!rendered.contains("00:00:00"));
+        assert!(!rendered.starts_with(EVENT_PREFIX_SEP));
+        assert_eq!(rendered, "a".repeat(17) + "...");
+        assert_eq!(tui::display_width(&rendered), 20);
+    }
+
+    #[test]
+    fn latest_frame_current_activity_keeps_a_known_zero_timestamp() {
+        let activity = ctx_traits_core::procedure::story::ActivityInput {
+            events: vec![ctx_traits_core::procedure::story::TimedActivityEvent {
+                at_epoch_ms: 0,
+                event: activity_event("frame", ActivityKind::RunningTool, Some("working")),
+            }],
+            step_summaries: Vec::new(),
+            skipped_lines: 0,
+        };
+        let rows = latest_frame_event_rows(&activity, None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].at, Some(Duration::ZERO));
+        let rendered = line_text(&event_row_line(&rows[0], 80));
+        assert!(rendered.starts_with("00:00:00  \u{b7}  working"));
+    }
+
+    #[test]
+    fn reconstructed_untimed_sidecar_summary_has_no_timestamp_prefix() {
+        let activity = ctx_traits_core::procedure::story::ActivityInput {
+            events: Vec::new(),
+            step_summaries: vec![ctx_traits_core::procedure::story::TimedStepSummary {
+                at_epoch_ms: 0,
+                key: "0:check:worker".to_string(),
+                role: "worker".to_string(),
+                text: "completed".to_string(),
+            }],
+            skipped_lines: 0,
+        };
+        let (summaries, summary_at) = sidecar_step_summary_maps(&activity, None);
+        let status = accepted_status("check", 0, Vec::new());
+        let none = None;
+        let empty_durations = BTreeMap::new();
+        let empty_tokens = BTreeMap::new();
+        let presentation = PresentationState {
+            active_started: &none,
+            finished_durations: &empty_durations,
+            output_tokens: &empty_tokens,
+            loop_elapsed: &empty_durations,
+            loop_output_tokens: &empty_tokens,
+            step_summaries: &summaries,
+            step_summary_at: &summary_at,
+            narrator_tokens: 0,
+            guide_tokens: 0,
+            run_started: Instant::now(),
+        };
+        let row = story_row_line(&history_step_from_status(
+            &status,
+            None,
+            None,
+            &presentation,
+        ));
+        assert_eq!(row.at, None);
+        let rendered = line_text(&event_row_line(&row, 20));
+        assert_eq!(rendered, "check: completed");
+        assert!(!rendered.contains("00:00:00"));
+        assert!(!rendered.contains(EVENT_PREFIX_SEP));
+    }
+
+    #[test]
+    fn render_ledger_run_view_keeps_an_untimed_sidecar_summary_untimed() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "history-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "History Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let mut session = session_with_history_revisions(Vec::new(), Vec::new());
+        session.ledger.sequence_statuses = vec![accepted_status("check", 0, Vec::new())];
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let ledger_path = camino::Utf8PathBuf::from(format!(
+            "/tmp/ctx-traits-run-view-{}-{nonce}.json",
+            std::process::id(),
+        ));
+        let sidecar_path = ctx_traits_io::activity_sidecar::activity_path(&ledger_path);
+        let summary = ctx_traits_io::activity_sidecar::ActivityRecord::StepSummary {
+            at_epoch_ms: 0,
+            key: "0:check:worker".to_string(),
+            role: "worker".to_string(),
+            text: "completed".to_string(),
+        };
+        std::fs::write(
+            sidecar_path.as_std_path(),
+            format!("{}\n", serde_json::to_string(&summary).unwrap()),
+        )
+        .expect("write activity sidecar");
+
+        let projection = render_ledger_run_view(&trait_ref, &plan, &session, &ledger_path);
+        let row = projection.history.first().expect("one reconstructed row");
+        assert_eq!(row.at, None);
+        let rendered = line_text(&event_row_line(row, 20));
+        assert_eq!(rendered, "check: completed");
+        assert!(!rendered.contains("00:00:00"));
+        assert!(!rendered.contains(EVENT_PREFIX_SEP));
+
+        let _ = std::fs::remove_file(sidecar_path.as_std_path());
     }
 
     // P552: the CURRENT pane's in-flight line is not a special overlay
@@ -5475,7 +6501,7 @@ mod tests {
         };
         let row = overlay_event_row(&narration, None, Duration::from_secs(65))
             .expect("narration text differs from last recorded row");
-        assert_eq!(row.at, Duration::from_secs(65));
+        assert_eq!(row.at, Some(Duration::from_secs(65)));
         assert!(row.tail.starts_with("narrator: "));
         let line = event_row_line(&row, 25);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
@@ -5501,12 +6527,12 @@ mod tests {
     fn event_row_lines_produces_exactly_one_row_per_input() {
         let rows = vec![
             EventRow {
-                at: Duration::from_secs(1),
+                at: Some(Duration::from_secs(1)),
                 tail: "one".to_string(),
                 tone: tui::Tone::Default,
             },
             EventRow {
-                at: Duration::from_secs(2),
+                at: Some(Duration::from_secs(2)),
                 tail: "x".repeat(200),
                 tone: tui::Tone::Default,
             },
@@ -5638,7 +6664,7 @@ mod tests {
         (0..n)
             .map(|index| {
                 EventRow::new(
-                    Duration::from_secs(index as u64),
+                    Some(Duration::from_secs(index as u64)),
                     format!("event{index}"),
                     tui::Tone::Default,
                 )
@@ -6276,7 +7302,7 @@ mod tests {
         let progress = sample_lines(3);
         let journey = sample_journey_rows(3);
         let current = vec![EventRow {
-            at: Duration::ZERO,
+            at: Some(Duration::ZERO),
             tail: "suppressed current activity".to_string(),
             tone: tui::Tone::Default,
         }];
@@ -6366,7 +7392,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let overlay = EventRow {
-            at: Duration::from_secs(0),
+            at: Some(Duration::from_secs(0)),
             tail: "unique current activity".to_string(),
             tone: tui::Tone::Default,
         };

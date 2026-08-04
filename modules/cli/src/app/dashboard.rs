@@ -552,6 +552,8 @@ struct AttachedView {
     /// fallback with no sidecar read at all must not be conflated with
     /// "sidecar exists but is partially corrupt").
     activity_available: bool,
+    /// Durable history evidence is distinct from a current-only sidecar.
+    history_available: bool,
     /// P552 review `dashboard-attach-contract-absent`: true once the
     /// ledger's own persisted `Status` reports a finished drive
     /// (`Completed`/`Failed`) — the signal `apply_snapshot` uses to swap an
@@ -2820,6 +2822,7 @@ fn build_attached_view(
             let title = persisted_session_title(&session);
             let terminal = session_is_terminal(&session, ledger_path);
             let reconstruction = reconstruct_panes(&session, ledger_path);
+            let history_available = !reconstruction.history.is_empty();
             AttachedView {
                 session_id: session_id.to_string(),
                 ledger_path: ledger_path.clone(),
@@ -2837,6 +2840,7 @@ fn build_attached_view(
                 trait_degraded: reconstruction.trait_degraded,
                 activity_degraded: reconstruction.activity_degraded,
                 activity_available: reconstruction.activity_available,
+                history_available,
                 terminal,
             }
         }
@@ -2857,6 +2861,7 @@ fn build_attached_view(
             trait_degraded: Some(error.to_string()),
             activity_degraded: None,
             activity_available: false,
+            history_available: false,
             terminal: false,
         },
     }
@@ -2892,6 +2897,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
                 view.current = summary.current;
                 view.activity_degraded = summary.activity_degraded;
                 view.activity_available = summary.activity_available;
+                view.history_available = !view.history.is_empty();
                 view.post_run = run_view::post_run_lines_from_frames(
                     session.status == ctx_traits_core::procedure::session::Status::Completed,
                     &session.provenance.merge_frames,
@@ -2909,6 +2915,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
             view.trait_degraded = reconstruction.trait_degraded;
             view.activity_degraded = reconstruction.activity_degraded;
             view.activity_available = reconstruction.activity_available;
+            view.history_available = !view.history.is_empty();
             view.trait_name = reconstruction.trait_name;
             view.started_at_epoch = reconstruction.started_at_epoch;
         }
@@ -5406,7 +5413,7 @@ fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
     let data = run_view::PaneData {
         progress: Some(&progress_lines),
         journey: Some(&preview.journey_lines),
-        history: has_activity.then_some(preview.history.as_slice()),
+        history: (has_activity && preview.history_available).then_some(preview.history.as_slice()),
         current: has_activity.then_some(preview.current.as_slice()),
         post_run: (!preview.post_run.is_empty()).then_some(preview.post_run.as_slice()),
         title: run_view::PaneTitleRow::Visible(&title_line),
@@ -6600,6 +6607,7 @@ mod tests {
             trait_degraded: None,
             activity_degraded: None,
             activity_available: true,
+            history_available: false,
             terminal: false,
         }
     }
