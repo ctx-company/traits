@@ -86,15 +86,15 @@ test:
 # .ctx/traits/runtime.toml, so nothing lands unproven even though rounds stop
 # paying for the whole suite.
 test-full:
-	# #!/usr/bin/env bash
-	# set -euo pipefail
-	# export CARGO_TARGET_DIR="{{gate_target_dir}}"
-	# target_dir="$CARGO_TARGET_DIR"
-	# just sdk-check
-	# just ts-format-check
-	# just lint
-	# cargo build --workspace --bins
-	# cargo test --workspace
+	#!/usr/bin/env bash
+	set -euo pipefail
+	export CARGO_TARGET_DIR="{{gate_target_dir}}"
+	target_dir="$CARGO_TARGET_DIR"
+	just sdk-check
+	just ts-format-check
+	just lint
+	cargo build --workspace --bins
+	cargo test --workspace
 
 deep-research topic quality="standard" depth="standard":
 	ctx traits run deep-research --worktree --progress tui -- --topic={{quote(topic)}} --quality={{quote(quality)}} --depth={{quote(depth)}}
