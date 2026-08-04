@@ -101,38 +101,54 @@ integration (no wrapper) and `teamclaude run --` both support ctx's headless
 spawn shape fully; env-only stays the recommendation because it adds no binary
 between the harness and claude, and the harness registry owns argv anyway.
 
-### CONFIGURED on this repo, 2026-08-04 — Level 1 is live
+### CONFIGURED on this repo, 2026-08-04 — the harness spawns `teamclaude run`
 
-`[worktree.env]` in this machine's `.ctx/traits/runtime.toml` (machine-local,
-gitignored — deliberately NOT a committed product default, per the risks
-section) now carries:
+**Correction (owner call, same day): the first configuration attempt set
+`ANTHROPIC_BASE_URL` in `[worktree.env]`, and that was the wrong shape.** The
+chosen integration is the harness registry: `[harness.claude-code]` in this
+machine's `runtime.toml` (machine-local, gitignored — deliberately NOT a
+committed product default, per the risks section) swaps the binary:
 
 ```toml
-ANTHROPIC_BASE_URL = "http://localhost:3456"
+[harness.claude-code]
+bin = "teamclaude"
+
+[harness.claude-code.cli]
+argv = ["run", "--", "-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--include-partial-messages", "--verbose", "--disallowedTools", "Agent"]
+narrator-argv = ["run", "--", "-p"]
 ```
 
-The base-URL form and never the MITM form, on purpose: `HTTPS_PROXY` would
-also funnel the opencode seats' openrouter/openai traffic through the proxy,
-while `ANTHROPIC_BASE_URL` is read only by anthropic-API clients and is inert
-for every current seat until one is assigned claude-code. `doctor --config`
-shows it resolving with repo provenance, additively beside the existing
-overlay entries.
+Why the bin swap beats the env var, concretely:
 
-**Step 2's end-to-end ran and passed**: a real `--worktree` run with
+- **It covers `--no-worktree` runs.** `[worktree.env]` only reaches worktree
+  spawns; the harness bin applies to every claude-code spawn, period.
+- **A down proxy fails FAST.** `teamclaude run` refuses with exit 1 and a
+  stderr message when the server is not up; the env approach left claude
+  hanging on a dead port until the frame timeout.
+- The explicit `--` disables even teamclaude's three-flag filtering, so the
+  `--model`/`--effort`/prompt that ctx appends AFTER `cli.argv` reach claude
+  verbatim (argv is composed `[bin] + cli.argv + model + effort + prompt`,
+  `drive.rs:4451`). A table argv replaces the compiled-in one wholesale, which
+  is why the built-in claude argv is reproduced behind the prefix.
+- All teamclaude output is stderr-only, so stream-json stdout stays clean.
+
+`doctor --config` shows `bin: teamclaude` with repo provenance. **Step 2's
+end-to-end ran and passed on this exact shape**: a `--no-worktree` run with
 `--assign 'narrator=claude-code:cli:per-frame:claude-haiku-4-5-20251001'`
-(per-invocation override — no shared config touched while four owner runs
-were live) dispatched its session-title call from inside the run, under
-confinement, and the proxy served it — the rotated account's request counter
-moved with `lastUsed` at that second, while the machine's own logged-in
-account stayed untouched. That closes the confinement question too, which was
-already closed statically: the seatbelt profile is `(allow default)` +
+(per-invocation override; five owner runs were live and untouched) dispatched
+its title call through `teamclaude run` in MITM-default mode, and the rotated
+account served it — its request counter moved with `lastUsed` at that second
+while the machine's own logged-in account stayed at zero. Confinement is a
+non-issue by construction: the seatbelt profile is `(allow default)` +
 `(deny file-write*)`, no network rules.
 
-Also noted while wiring: no per-harness env exists in ctx (`[worktree.env]`
-base + repo override are the only env sites), which means host-side
-`--no-worktree` runs do NOT get the proxy — worktree runs only. Fine for the
-dogfood loop, which is always `--worktree`; worth remembering for one-off
-host-side claude seats.
+Residual notes: warm/persistent claude sessions (`warm-argv`) are not
+reproduced behind the prefix — this repo runs per-frame everywhere and 0022 is
+blocked on persistent sessions anyway; add `warm-argv = ["run", "--", …]` if
+that ever changes. Per-seat pinning is P557: `TC_ACCT` cannot be used from
+here (it is read by `teamclaude run` from ITS environment — a per-seat env
+mechanism is exactly what ctx lacks), so pinning waits for P557 or uses
+per-seat base URLs at that point.
 
 Still unverified, deliberately: a rotation crossing mid-run without a failed
 frame (needs a real quota approach, not worth forcing).
