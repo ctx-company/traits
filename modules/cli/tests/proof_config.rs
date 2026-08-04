@@ -905,6 +905,106 @@ fn merge_gate_defaults_to_empty_and_default_ceiling() {
         stdout.contains("merge.gate-seconds: 1800 [built-in]"),
         "{stdout}"
     );
+    assert!(
+        stdout.contains("merge.retry-attempts: 5 [built-in]"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("merge.retry-backoff-ms: 100 [built-in]"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn merge_retry_policy_uses_nearest_values_and_reports_provenance() {
+    let scratch = ScratchRoot::new("p478-merge-retry-policy");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    git_init(&repo);
+    let config = scratch.home().join("retry.toml");
+    fs::write(
+        &config,
+        "[merge]\nretry-attempts = 9\nretry-backoff-ms = 500\n",
+    )
+    .unwrap();
+    let mut command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    );
+    command.env("CTX_CONFIG", &config);
+    let output = command.output().unwrap();
+    assert_exit_code(&output, 0);
+    let (stdout, _) = utf8(&output);
+    assert!(
+        stdout.contains("merge.retry-attempts: 9 [environment:"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("merge.retry-backoff-ms: 500 [environment:"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn merge_retry_policy_repository_requirements_win_over_environment() {
+    let scratch = ScratchRoot::new("p478-merge-retry-requirement-precedence");
+    let repo = scratch.home().join("repo");
+    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    git_init(&repo);
+    fs::write(
+        repo.join(".ctx/config.toml"),
+        "[merge]\nretry-attempts = 3\nretry-backoff-ms = 25\n",
+    )
+    .unwrap();
+    let config = scratch.home().join("retry.toml");
+    fs::write(
+        &config,
+        "[merge]\nretry-attempts = 9\nretry-backoff-ms = 500\n",
+    )
+    .unwrap();
+    let mut command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    );
+    command.env("CTX_CONFIG", &config);
+    let output = command.output().unwrap();
+    assert_exit_code(&output, 0);
+    let (stdout, _) = utf8(&output);
+    assert!(
+        stdout.contains("merge.retry-attempts: 3 [repo:"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("merge.retry-backoff-ms: 25 [repo:"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn merge_retry_policy_rejects_zero_values_on_public_path() {
+    for (key, value) in [("retry-attempts", 0), ("retry-backoff-ms", 0)] {
+        let scratch = ScratchRoot::new(&format!("p478-{key}-zero"));
+        let repo = scratch.home().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git_init(&repo);
+        let config = scratch.home().join("invalid.toml");
+        fs::write(&config, format!("[merge]\n{key} = {value}\n")).unwrap();
+        let mut command = support::controlled_command(
+            &support::ctx_bin(),
+            &["traits", "doctor", "--config"],
+            &repo,
+            &scratch.home(),
+        );
+        command.env("CTX_CONFIG", &config);
+        let output = command.output().unwrap();
+        assert_ne!(output.status.code(), Some(0), "{key} accepted zero");
+        let (_, stderr) = utf8(&output);
+        assert!(stderr.contains(key), "{stderr}");
+    }
 }
 
 /// P477: a nearer (repo) layer's explicit `gate = []` must clear a farther

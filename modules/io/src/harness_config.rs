@@ -835,6 +835,8 @@ enum ConfigLeaf {
     MergeGateSeconds,
     MergeGenerated,
     MergeDiskFloorMb,
+    MergeRetryAttempts,
+    MergeRetryBackoffMs,
     GitLongSeconds,
     PublishExclude,
     RegistryBase,
@@ -886,6 +888,8 @@ impl ConfigLeaf {
         Self::MergeGateSeconds,
         Self::MergeGenerated,
         Self::MergeDiskFloorMb,
+        Self::MergeRetryAttempts,
+        Self::MergeRetryBackoffMs,
         Self::GitLongSeconds,
         Self::PublishExclude,
         Self::RegistryBase,
@@ -937,6 +941,8 @@ impl ConfigLeaf {
             Self::MergeGateSeconds => "merge.gate-seconds",
             Self::MergeGenerated => "merge.generated",
             Self::MergeDiskFloorMb => "merge.disk-floor-mb",
+            Self::MergeRetryAttempts => "merge.retry-attempts",
+            Self::MergeRetryBackoffMs => "merge.retry-backoff-ms",
             Self::GitLongSeconds => "git.long-seconds",
             Self::PublishExclude => "publish.exclude",
             Self::RegistryBase => "registry.base",
@@ -998,6 +1004,7 @@ impl ConfigLeaf {
             | Self::MergeGateSeconds
             | Self::MergeGenerated
             | Self::MergeDiskFloorMb => ConfigSemantic::Requirement,
+            Self::MergeRetryAttempts | Self::MergeRetryBackoffMs => ConfigSemantic::Requirement,
         }
     }
 }
@@ -1146,6 +1153,13 @@ pub struct MergeTable {
     /// refuses to parse a config that sets it (see risks in P462's draft).
     #[serde(default)]
     pub disk_floor_mb: Option<u64>,
+    /// Total mechanical landing attempts permitted for a merge race. The
+    /// first attempt counts toward this bound.
+    #[serde(default)]
+    pub retry_attempts: Option<u64>,
+    /// Base delay in milliseconds for exponential merge-race backoff.
+    #[serde(default)]
+    pub retry_backoff_ms: Option<u64>,
 }
 
 /// One `[[merge.generated]]` declaration (P463): a set of repository-relative
@@ -1176,6 +1190,10 @@ pub const DEFAULT_MERGE_GATE_SECONDS: u64 = 1_800;
 /// call: high enough to catch an ENOSPC-class failure before it wastes a
 /// build, low enough to not false-park a small VM. Config always wins.
 pub const DEFAULT_MERGE_DISK_FLOOR_MB: u64 = 2_048;
+/// Default total number of attempts for a retryable merge race.
+pub const DEFAULT_MERGE_RETRY_ATTEMPTS: u64 = 5;
+/// Default base delay for exponential merge-race backoff.
+pub const DEFAULT_MERGE_RETRY_BACKOFF_MS: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1309,6 +1327,8 @@ pub struct EffectiveMergePolicy {
     /// in MiB, required before a declared gate command runs. `0` disables
     /// the preflight probe.
     pub disk_floor_mb: u64,
+    pub retry_attempts: u64,
+    pub retry_backoff_ms: u64,
 }
 
 impl RuntimeConfig {
@@ -1355,6 +1375,12 @@ impl RuntimeConfig {
             disk_floor_mb: merge
                 .and_then(|value| value.disk_floor_mb)
                 .unwrap_or(DEFAULT_MERGE_DISK_FLOOR_MB),
+            retry_attempts: merge
+                .and_then(|value| value.retry_attempts)
+                .unwrap_or(DEFAULT_MERGE_RETRY_ATTEMPTS),
+            retry_backoff_ms: merge
+                .and_then(|value| value.retry_backoff_ms)
+                .unwrap_or(DEFAULT_MERGE_RETRY_BACKOFF_MS),
         }
     }
 
@@ -3331,6 +3357,7 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
         runtime.worktree.build_cache = run.build_cache.clone();
     }
     validate_merge_gate(&runtime.effective_merge_policy())?;
+    validate_merge_retries(&runtime.effective_merge_policy())?;
     validate_merge_generated(&runtime.effective_merge_policy())?;
     for key in [
         "run.worktree",
@@ -3567,6 +3594,21 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
                 .merge
                 .get_or_insert_with(MergeTable::default)
                 .disk_floor_mb = source.merge.as_ref().and_then(|merge| merge.disk_floor_mb)
+        }
+        ConfigLeaf::MergeRetryAttempts => {
+            target
+                .merge
+                .get_or_insert_with(MergeTable::default)
+                .retry_attempts = source.merge.as_ref().and_then(|merge| merge.retry_attempts)
+        }
+        ConfigLeaf::MergeRetryBackoffMs => {
+            target
+                .merge
+                .get_or_insert_with(MergeTable::default)
+                .retry_backoff_ms = source
+                .merge
+                .as_ref()
+                .and_then(|merge| merge.retry_backoff_ms)
         }
         ConfigLeaf::WorktreeSeed
         | ConfigLeaf::WorktreeWarm
@@ -4925,6 +4967,14 @@ fn merge_project_config(
             target.disk_floor_mb = merge.disk_floor_mb;
             record_winner(winners, "merge.disk-floor-mb", layer, source.clone());
         }
+        if merge.retry_attempts.is_some() {
+            target.retry_attempts = merge.retry_attempts;
+            record_winner(winners, "merge.retry-attempts", layer, source.clone());
+        }
+        if merge.retry_backoff_ms.is_some() {
+            target.retry_backoff_ms = merge.retry_backoff_ms;
+            record_winner(winners, "merge.retry-backoff-ms", layer, source.clone());
+        }
     }
     if let Some(git) = next.git {
         let target = base.git.get_or_insert_with(GitTable::default);
@@ -5715,6 +5765,16 @@ fn validate_merge_gate(policy: &EffectiveMergePolicy) -> crate::Result<()> {
                 "declares too many commands for its per-command ceiling to be summed",
             )
         })?;
+    Ok(())
+}
+
+fn validate_merge_retries(policy: &EffectiveMergePolicy) -> crate::Result<()> {
+    if policy.retry_attempts == 0 {
+        return invalid_config("merge.retry-attempts", "must be at least 1");
+    }
+    if policy.retry_backoff_ms == 0 {
+        return invalid_config("merge.retry-backoff-ms", "must be at least 1");
+    }
     Ok(())
 }
 
@@ -7909,6 +7969,8 @@ mod config_tests {
                 "[{ paths = [\"environment\"], rebuild = [[\"echo\", \"environment\"]] }]",
             ),
             (ConfigLeaf::MergeDiskFloorMb, "0", "2"),
+            (ConfigLeaf::MergeRetryAttempts, "1", "2"),
+            (ConfigLeaf::MergeRetryBackoffMs, "1", "2"),
         ];
 
         assert_eq!(

@@ -295,6 +295,18 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     add(
         &mut knobs,
         &report.winners,
+        "merge.retry-attempts".into(),
+        merge.retry_attempts.to_string(),
+    );
+    add(
+        &mut knobs,
+        &report.winners,
+        "merge.retry-backoff-ms".into(),
+        merge.retry_backoff_ms.to_string(),
+    );
+    add(
+        &mut knobs,
+        &report.winners,
         "merge.generated".into(),
         if merge.generated.is_empty() {
             "absent (empty)".to_string()

@@ -89,6 +89,8 @@ export interface MergeTable {
   gateSeconds?: number;
   generated?: GeneratedArtifact[];
   overlap?: MergeOverlap;
+  retryAttempts?: number;
+  retryBackoffMs?: number;
   wait?: boolean;
 }
 

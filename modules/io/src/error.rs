@@ -9,6 +9,14 @@ use thiserror::Error;
 /// IO errors composed from IO product-domain error enums.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// A Git operation exhausted only the narrowly classified repository
+    /// lock/control retry policy. Callers that own a larger operation can
+    /// safely consume this typed race without parsing Git diagnostics.
+    #[error("transient git lock/control retry exhausted: {reason:?}")]
+    TransientGitLock {
+        reason: crate::worktree::TransientLockReason,
+    },
+
     #[error(transparent)]
     Environment(#[from] crate::environment::Error),
 

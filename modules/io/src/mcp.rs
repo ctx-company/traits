@@ -496,6 +496,11 @@ fn unsupported_envelope<T>(capability: &str, message: &str, call_payload: bool) 
 
 fn mcp_error_envelope<T>(error: &crate::Error, call_payload: bool) -> Envelope<T> {
     let response_error = match error {
+        crate::Error::TransientGitLock { reason } => ResponseError::new(
+            "io.transient-git-lock",
+            "transient git lock retry exhausted",
+        )
+        .with_detail("reason", reason.code().to_string()),
         crate::Error::Core(core) => ResponseError::from_core_error(core),
         crate::Error::Environment(environment) => match environment {
             crate::environment::Error::Filesystem { path, source } => {

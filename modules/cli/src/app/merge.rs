@@ -19,7 +19,7 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::Serialize;
@@ -135,6 +135,17 @@ const DEFAULT_BRANCH_FALLBACK_ADVISORY: &str = "default branch assumed \"main\":
 /// `--json` command output, not only in persisted ledger evidence.
 const EMPTY_GATE_ADVISORY: &str =
     "no [merge] gate declared; post-run without running a repository command";
+
+fn persist_terminal_frame(
+    session_path: &Utf8Path,
+    live: Option<&MergeLive>,
+    frame: MergeFrame,
+) -> crate::Result<()> {
+    if let Some(live) = live {
+        live.emit(&MergeProgress::FrameRecorded(&frame));
+    }
+    Ok(ctx_traits_io::run_session::append_merge_frame(session_path, frame).map(|_| ())?)
+}
 /// Built-in default wall-clock budget for ONE merger harness call (standard
 /// and deep alike), when neither `[agent.role.merger].budget.frame-seconds`
 /// nor `[agent.role.merger-deep].budget.frame-seconds` is declared (P475).
@@ -319,6 +330,61 @@ pub(crate) struct MergeReport {
     /// "parked"`, with its own ledger frame).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) stale_base_overlap: Vec<String>,
+    /// An internal, non-terminal attempt result. Race-producing paths return
+    /// this to the controller instead of writing a parked ledger frame.
+    #[serde(skip)]
+    pub(crate) retry_candidate: Option<RetryCandidate>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RetryCandidate {
+    stage: MergeStage,
+    reason: String,
+    detail: Option<String>,
+    evidence: Vec<String>,
+}
+
+fn retry_candidate(
+    run_id: &str,
+    stage: MergeStage,
+    reason: String,
+    detail: Option<String>,
+    evidence: Vec<String>,
+) -> MergeReport {
+    debug_assert_eq!(
+        merge_story::park_disposition(&reason),
+        merge_story::ParkDisposition::Race,
+        "only explicitly classified races may retry"
+    );
+    MergeReport {
+        status: "retry-candidate".to_string(),
+        run_id: run_id.to_string(),
+        reason: Some(reason.clone()),
+        retry_candidate: Some(RetryCandidate {
+            stage,
+            reason,
+            detail,
+            evidence,
+        }),
+        ..Default::default()
+    }
+}
+
+fn finalize_retry_candidate(
+    candidate: RetryCandidate,
+    target: ParkTarget<'_>,
+    retry_warnings: &ctx_traits_io::worktree::RetryWarnings,
+    live: Option<&MergeLive>,
+) -> crate::Result<MergeReport> {
+    park_with_detail(
+        target,
+        candidate.stage,
+        candidate.reason,
+        candidate.detail,
+        candidate.evidence,
+        retry_warnings,
+        live,
+    )
 }
 
 enum MergerDecision {
@@ -494,18 +560,7 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
     // retry after `git remote set-head` repair (or an `[merge] branch` edit)
     // picks up the fix, but within this one attempt the name is frozen.
     let mut retry_warnings = ctx_traits_io::worktree::RetryWarnings::new();
-    let (default_branch, default_branch_source) = ctx_traits_io::worktree::resolve_default_branch(
-        &repo_root,
-        merge_policy.branch.as_deref(),
-        &mut retry_warnings,
-    )?;
     let mut default_branch_warnings: Vec<String> = Vec::new();
-    if matches!(
-        default_branch_source,
-        ctx_traits_io::worktree::DefaultBranchSource::Fallback
-    ) {
-        default_branch_warnings.push(DEFAULT_BRANCH_FALLBACK_ADVISORY.to_string());
-    }
     let no_wait = !input.force_wait && (input.no_wait || !merge_policy.wait);
     let park_on_overlap = !input.force_land_on_overlap
         && (input.park_on_overlap
@@ -522,91 +577,12 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
     // a `ResolvedRuntimeAssignments` before the fast-forward/divergent
     // determination happens inside `merge_locked`.
 
-    // --- Acquire the cross-process merge lock before touching Git state:
-    // serializes concurrent `ctx traits merge` invocations across batches so
-    // mechanical races queue instead of parking. Held through every
-    // subsequent stage via RAII (`_lock_guard` stays alive until this
-    // function returns, on every exit path). ---
     let merger_role_budget = resolved_merger_role_budget(&runtime_config.agent, input.deep);
     let merger_timeout_ms = merger_role_budget
         .frame_seconds
         .map(|seconds| seconds.saturating_mul(1_000))
         .unwrap_or(DEFAULT_MERGER_TIMEOUT_MS);
-    let wait = if no_wait {
-        ctx_traits_io::merge_lock::Wait::NoWait
-    } else {
-        ctx_traits_io::merge_lock::Wait::Bounded(std::time::Duration::from_millis(
-            merge_lock_wait_timeout_ms(&merge_policy, merger_timeout_ms),
-        ))
-    };
-    if let Some(live) = input.live.as_ref() {
-        live.emit(&MergeProgress::LockWaiting);
-    }
-    let (_lock_guard, lock_evidence) =
-        match ctx_traits_io::merge_lock::acquire(&repo_root, input.run_id, wait)? {
-            ctx_traits_io::merge_lock::AcquireOutcome::Acquired { guard, evidence } => {
-                (guard, evidence)
-            }
-            ctx_traits_io::merge_lock::AcquireOutcome::Busy { holder } => {
-                let holder_evidence = holder.as_ref().map(format_holder);
-                return Ok(MergeReport {
-                    status: "lock-unavailable".to_string(),
-                    run_id: input.run_id.to_string(),
-                    reason: Some(match &holder_evidence {
-                        Some(holder) => format!("{} {holder}", reasons::LOCK_HELD_BY_PREFIX),
-                        None => reasons::LOCK_UNAVAILABLE_PREFIX.to_string(),
-                    }),
-                    lock_wait_ms: Some(0),
-                    lock_holder: holder_evidence,
-                    lock_stale_holder_reclaimed: None,
-                    ..Default::default()
-                });
-            }
-            ctx_traits_io::merge_lock::AcquireOutcome::TimedOut { waited_ms, holder } => {
-                let holder_evidence = holder.as_ref().map(format_holder);
-                return Ok(MergeReport {
-                    status: "lock-timeout".to_string(),
-                    run_id: input.run_id.to_string(),
-                    reason: Some(format!(
-                        "{} {waited_ms}ms waiting for merge lock{}",
-                        reasons::LOCK_TIMEOUT_PREFIX,
-                        holder_evidence
-                            .as_ref()
-                            .map(|holder| format!(" held by {holder}"))
-                            .unwrap_or_default()
-                    )),
-                    lock_wait_ms: Some(waited_ms),
-                    lock_holder: holder_evidence,
-                    lock_stale_holder_reclaimed: None,
-                    ..Default::default()
-                });
-            }
-        };
-    let stale_holder_evidence = lock_evidence
-        .stale_holder_reclaimed
-        .as_ref()
-        .map(format_holder);
-    let mut lock_frame_evidence = vec![format!("wait-ms={}", lock_evidence.wait_ms)];
-    if let Some(holder) = lock_evidence.queued_behind.as_ref().map(format_holder) {
-        lock_frame_evidence.push(format!("queued-behind={holder}"));
-    }
-    let lock_frame = MergeFrame {
-        stage: MergeStage::Lock,
-        status: MergeStatus::LockAcquired,
-        reason: stale_holder_evidence
-            .as_ref()
-            .map(|holder| format!("stale merge-lock holder reclaimed: {holder}")),
-        evidence: lock_frame_evidence,
-        park_reason: None,
-        deep_decisions: Vec::new(),
-    };
-    if let Some(live) = input.live.as_ref() {
-        live.emit(&MergeProgress::LockAcquired);
-        live.emit(&MergeProgress::FrameRecorded(&lock_frame));
-        live.emit(&MergeProgress::StageEntered(MergeStage::Preflight));
-    }
-    ctx_traits_io::run_session::append_merge_frame(&session_path, lock_frame)?;
-
+    let lock_wait_ms = merge_lock_wait_timeout_ms(&merge_policy, merger_timeout_ms);
     // --- Every outcome from here on is decorated once, at the bottom of this
     // function, with the lock evidence captured above — no individual
     // park/parked_on_error/recovery_failure call site (or the merged/cleanup-
@@ -623,21 +599,226 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
     // not only the persisted `Gates`-frame ledger evidence.
     let mut gate_warnings: Vec<String> = Vec::new();
     let mut confinement_warnings: Vec<String> = Vec::new();
-    let mut report = merge_locked(MergeLockedInputs {
-        repo_root: &repo_root,
-        worktree: &worktree,
-        session_path: &session_path,
-        session: &session,
-        input: &input,
-        park_on_overlap,
-        gate_policy: &merge_policy,
-        default_branch: &default_branch,
-        default_branch_source,
-        retry_warnings: &mut retry_warnings,
-        overlap_evidence: &mut overlap_evidence,
-        confinement_warnings: &mut confinement_warnings,
-        gate_warnings: &mut gate_warnings,
-    })?;
+    let mut attempt = 1_u64;
+    // This records an actual harness dispatch, rather than inferring it from
+    // a retryable outcome. Retried attempts are mechanical-only regardless.
+    let mut merger_path_entered = false;
+    let mut entered_merger = false;
+    let final_lock_evidence;
+    let mut report;
+    loop {
+        // Record a common attempt envelope before any probe can fail. The
+        // branch probe has no captured revision, but it must not become an
+        // evidence-shaped exception to the retry policy.
+        retry_warnings.push(format!(
+            "merge-race-attempt={attempt}/{}",
+            merge_policy.retry_attempts
+        ));
+        if let Some(live) = input.live.as_ref() {
+            live.emit(&MergeProgress::LockWaiting);
+        }
+        let wait = if no_wait {
+            ctx_traits_io::merge_lock::Wait::NoWait
+        } else {
+            ctx_traits_io::merge_lock::Wait::Bounded(Duration::from_millis(lock_wait_ms))
+        };
+        let (lock_guard, lock_evidence) =
+            match ctx_traits_io::merge_lock::acquire(&repo_root, input.run_id, wait)? {
+                ctx_traits_io::merge_lock::AcquireOutcome::Acquired { guard, evidence } => {
+                    (guard, evidence)
+                }
+                ctx_traits_io::merge_lock::AcquireOutcome::Busy { holder } => {
+                    let holder_evidence = holder.as_ref().map(format_holder);
+                    return Ok(MergeReport {
+                        status: "lock-unavailable".to_string(),
+                        run_id: input.run_id.to_string(),
+                        reason: Some(match &holder_evidence {
+                            Some(holder) => format!("{} {holder}", reasons::LOCK_HELD_BY_PREFIX),
+                            None => reasons::LOCK_UNAVAILABLE_PREFIX.to_string(),
+                        }),
+                        lock_wait_ms: Some(0),
+                        lock_holder: holder_evidence,
+                        lock_stale_holder_reclaimed: None,
+                        ..Default::default()
+                    });
+                }
+                ctx_traits_io::merge_lock::AcquireOutcome::TimedOut { waited_ms, holder } => {
+                    let holder_evidence = holder.as_ref().map(format_holder);
+                    return Ok(MergeReport {
+                        status: "lock-timeout".to_string(),
+                        run_id: input.run_id.to_string(),
+                        reason: Some(format!(
+                            "{} {waited_ms}ms waiting for merge lock{}",
+                            reasons::LOCK_TIMEOUT_PREFIX,
+                            holder_evidence
+                                .as_ref()
+                                .map(|holder| format!(" held by {holder}"))
+                                .unwrap_or_default()
+                        )),
+                        lock_wait_ms: Some(waited_ms),
+                        lock_holder: holder_evidence,
+                        lock_stale_holder_reclaimed: None,
+                        ..Default::default()
+                    });
+                }
+            };
+        let stale_holder_evidence = lock_evidence
+            .stale_holder_reclaimed
+            .as_ref()
+            .map(format_holder);
+        let mut lock_frame_evidence = vec![format!("wait-ms={}", lock_evidence.wait_ms)];
+        if let Some(holder) = lock_evidence.queued_behind.as_ref().map(format_holder) {
+            lock_frame_evidence.push(format!("queued-behind={holder}"));
+        }
+        let lock_frame = MergeFrame {
+            stage: MergeStage::Lock,
+            status: MergeStatus::LockAcquired,
+            reason: stale_holder_evidence
+                .as_ref()
+                .map(|holder| format!("stale merge-lock holder reclaimed: {holder}")),
+            evidence: lock_frame_evidence,
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        };
+        if let Some(live) = input.live.as_ref() {
+            live.emit(&MergeProgress::LockAcquired);
+            live.emit(&MergeProgress::FrameRecorded(&lock_frame));
+            live.emit(&MergeProgress::StageEntered(MergeStage::Preflight));
+        }
+        ctx_traits_io::run_session::append_merge_frame(&session_path, lock_frame)?;
+        let (default_branch, default_branch_source) =
+            match ctx_traits_io::worktree::resolve_default_branch(
+                &repo_root,
+                merge_policy.branch.as_deref(),
+                &mut retry_warnings,
+            ) {
+                Ok(branch) => branch,
+                Err(error) => {
+                    let outcome = retry_candidate(
+                        input.run_id,
+                        MergeStage::Preflight,
+                        reasons::CHECKOUT_BRANCH_PROBE_FAILED.to_string(),
+                        Some(error.to_string()),
+                        Vec::new(),
+                    );
+                    let retryable = true;
+                    retry_warnings.push(format!(
+                        "merge-race-class={}",
+                        reasons::CHECKOUT_BRANCH_PROBE_FAILED
+                    ));
+                    if !retryable || no_wait || attempt >= merge_policy.retry_attempts {
+                        if retryable && !no_wait && attempt >= merge_policy.retry_attempts {
+                            retry_warnings.push(format!(
+                                "merge-race-exhausted attempts={attempt}/{}",
+                                merge_policy.retry_attempts
+                            ));
+                        }
+                        report = finalize_retry_candidate(
+                            outcome.retry_candidate.expect("retry candidate"),
+                            ParkTarget {
+                                session_path: &session_path,
+                                run_id: input.run_id,
+                            },
+                            &retry_warnings,
+                            input.live.as_ref(),
+                        )?;
+                        final_lock_evidence = lock_evidence;
+                        break;
+                    }
+                    // This probe failure is also a race candidate: release the
+                    // attempt hold before even calculating its delay.
+                    drop(lock_guard);
+                    let base_backoff_ms = merge_policy
+                        .retry_backoff_ms
+                        .saturating_mul(1_u64 << (attempt - 1).min(63));
+                    let jitter_ms = bounded_retry_jitter_ms(base_backoff_ms);
+                    let backoff_ms = base_backoff_ms.saturating_add(jitter_ms);
+                    entered_merger = true;
+                    retry_warnings.push(format!("merge-race-retry attempt={}/{} base-backoff-ms={base_backoff_ms} jitter-ms={jitter_ms} backoff-ms={backoff_ms}", attempt + 1, merge_policy.retry_attempts));
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                    attempt += 1;
+                    continue;
+                }
+            };
+        if matches!(
+            default_branch_source,
+            ctx_traits_io::worktree::DefaultBranchSource::Fallback
+        ) {
+            default_branch_warnings.push(DEFAULT_BRANCH_FALLBACK_ADVISORY.to_string());
+        }
+        retry_warnings.push(format!(
+            "merge-race-target-branch attempt={attempt}/{} target={default_branch}",
+            merge_policy.retry_attempts
+        ));
+        let outcome = merge_locked(MergeLockedInputs {
+            repo_root: &repo_root,
+            worktree: &worktree,
+            session_path: &session_path,
+            session: &session,
+            input: &input,
+            park_on_overlap,
+            gate_policy: &merge_policy,
+            default_branch: &default_branch,
+            default_branch_source,
+            retry_warnings: &mut retry_warnings,
+            overlap_evidence: &mut overlap_evidence,
+            confinement_warnings: &mut confinement_warnings,
+            gate_warnings: &mut gate_warnings,
+            attempt,
+            mechanical_only: entered_merger,
+            merger_path_entered: &mut merger_path_entered,
+        })?;
+        drop(lock_guard);
+        let retryable = outcome.retry_candidate.is_some();
+        if let Some(candidate) = outcome.retry_candidate.as_ref() {
+            retry_warnings.push(format!("merge-race-class={}", candidate.reason));
+        }
+        if !retryable || no_wait || attempt >= merge_policy.retry_attempts {
+            if retryable && !no_wait && attempt >= merge_policy.retry_attempts {
+                retry_warnings.push(format!(
+                    "merge-race-exhausted attempts={attempt}/{}",
+                    merge_policy.retry_attempts
+                ));
+            }
+            report = match outcome.retry_candidate {
+                Some(candidate) => finalize_retry_candidate(
+                    candidate,
+                    ParkTarget {
+                        session_path: &session_path,
+                        run_id: input.run_id,
+                    },
+                    &retry_warnings,
+                    input.live.as_ref(),
+                )?,
+                None => outcome,
+            };
+            final_lock_evidence = lock_evidence;
+            break;
+        }
+        // A retry is deliberately mechanical-only. This conservative mode also
+        // covers a first-attempt fast path: it may do unnecessary mechanical
+        // work, but can never spend a merger after a race.
+        // Every retry is reconciliation-free, even when the preceding attempt
+        // took the clean fast-forward path. This prevents a race from buying a
+        // later merger dispatch.
+        entered_merger = true;
+        let base_backoff_ms = merge_policy
+            .retry_backoff_ms
+            .saturating_mul(1_u64 << (attempt - 1).min(63));
+        let jitter_ms = bounded_retry_jitter_ms(base_backoff_ms);
+        let backoff_ms = base_backoff_ms.saturating_add(jitter_ms);
+        retry_warnings.push(format!(
+            "merge-race-retry attempt={}/{} base-backoff-ms={base_backoff_ms} jitter-ms={jitter_ms} backoff-ms={backoff_ms}",
+            attempt + 1,
+            merge_policy.retry_attempts
+        ));
+        if merger_path_entered {
+            retry_warnings.push("merge-race-merger-dispatched-on-first-attempt=true".to_string());
+        }
+        // The attempt guard is dropped above: queued landings can acquire it while we back off.
+        std::thread::sleep(Duration::from_millis(backoff_ms));
+        attempt += 1;
+    }
     // P462: every park class (including a standalone `ctx traits merge`
     // with no drive in flight) leaves the worktree parked for triage, but
     // the park promise never covered declared regenerable artifacts — prune
@@ -702,7 +883,7 @@ pub(crate) fn merge(input: MergeInputs<'_>) -> crate::Result<MergeReport> {
     if report.stale_base_overlap.is_empty() {
         report.stale_base_overlap = overlap_evidence;
     }
-    Ok(decorate_with_lock(report, &lock_evidence))
+    Ok(decorate_with_lock(report, &final_lock_evidence))
 }
 
 /// Bundled arguments for [`merge_locked`] — kept as a struct rather than
@@ -751,6 +932,9 @@ struct MergeLockedInputs<'a> {
     /// is user-visible in plain AND `--json` output, not only in the
     /// persisted `Gates`-frame ledger evidence.
     gate_warnings: &'a mut Vec<String>,
+    attempt: u64,
+    mechanical_only: bool,
+    merger_path_entered: &'a mut bool,
 }
 
 /// Decorate a `merge_locked` result with the operational lock evidence
@@ -789,6 +973,9 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
         overlap_evidence,
         confinement_warnings,
         gate_warnings,
+        attempt,
+        mechanical_only,
+        merger_path_entered,
     } = args;
 
     // --- Preflight: clean main, registered clean worktree, no rebase in progress. ---
@@ -801,6 +988,15 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     ) {
         Ok(path) => path,
         Err((reason, detail)) => {
+            if merge_story::park_disposition(&reason) == merge_story::ParkDisposition::Race {
+                return Ok(retry_candidate(
+                    input.run_id,
+                    MergeStage::Preflight,
+                    reason,
+                    detail,
+                    Vec::new(),
+                ));
+            }
             return park_with_detail(
                 ParkTarget {
                     session_path,
@@ -834,8 +1030,46 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
         return park_out_of_tree_mutation(session_path, input.run_id, finding, input.live.as_ref());
     }
 
-    let main_rev = ctx_traits_io::worktree::rev_parse(repo_root, default_branch, retry_warnings)?;
-    let branch_rev = ctx_traits_io::worktree::rev_parse(&worktree_path, "HEAD", retry_warnings)?;
+    let main_rev =
+        match ctx_traits_io::worktree::rev_parse(repo_root, default_branch, retry_warnings) {
+            Ok(rev) => rev,
+            Err(error) => {
+                return parked_on_error(
+                    &worktree_path,
+                    ParkTarget {
+                        session_path,
+                        run_id: input.run_id,
+                    },
+                    MergeStage::Preflight,
+                    Vec::new(),
+                    error.into(),
+                    retry_warnings,
+                    input.live.as_ref(),
+                );
+            }
+        };
+    retry_warnings.push(format!(
+        "merge-race-captured-target attempt={attempt}/{} {default_branch}@{main_rev}",
+        gate_policy.retry_attempts,
+    ));
+    let branch_rev =
+        match ctx_traits_io::worktree::rev_parse(&worktree_path, "HEAD", retry_warnings) {
+            Ok(rev) => rev,
+            Err(error) => {
+                return parked_on_error(
+                    &worktree_path,
+                    ParkTarget {
+                        session_path,
+                        run_id: input.run_id,
+                    },
+                    MergeStage::Preflight,
+                    Vec::new(),
+                    error.into(),
+                    retry_warnings,
+                    input.live.as_ref(),
+                );
+            }
+        };
     let revision_evidence = vec![
         format!("target={default_branch}@{main_rev}"),
         format!("branch={}@{branch_rev}", worktree.branch),
@@ -873,7 +1107,75 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     };
     let is_true_fast_forward = base_rev == main_rev;
 
-    let (landed_rev, merger_evidence_tag) = if is_true_fast_forward && !input.force_merger {
+    let (landed_rev, merger_evidence_tag) = if mechanical_only {
+        if let Some(live) = input.live.as_ref() {
+            live.emit(&MergeProgress::StageEntered(MergeStage::Rebase));
+        }
+        match ctx_traits_io::worktree::rebase(
+            &worktree_path,
+            default_branch,
+            retry_warnings,
+            resolve_git_long_timeout_ms(),
+        ) {
+            Ok(ctx_traits_io::worktree::RebaseOutcome::Clean) => {}
+            Ok(ctx_traits_io::worktree::RebaseOutcome::Conflicts { .. })
+            | Ok(ctx_traits_io::worktree::RebaseOutcome::Failed { .. }) => {
+                if let Some(result) = ensure_rebase_aborted(
+                    &worktree_path,
+                    session_path,
+                    input.run_id,
+                    MergeStage::Rebase,
+                    &revision_evidence,
+                    retry_warnings,
+                    input.live.as_ref(),
+                ) {
+                    return result;
+                }
+                return park(
+                    session_path,
+                    input.run_id,
+                    MergeStage::Rebase,
+                    reasons::REBASE_FAILED.to_string(),
+                    revision_evidence,
+                    retry_warnings,
+                    input.live.as_ref(),
+                );
+            }
+            Err(error) => {
+                return parked_on_error(
+                    &worktree_path,
+                    ParkTarget {
+                        session_path,
+                        run_id: input.run_id,
+                    },
+                    MergeStage::Rebase,
+                    revision_evidence,
+                    error.into(),
+                    retry_warnings,
+                    input.live.as_ref(),
+                );
+            }
+        }
+        let landed_rev =
+            match ctx_traits_io::worktree::rev_parse(&worktree_path, "HEAD", retry_warnings) {
+                Ok(rev) => rev,
+                Err(error) => {
+                    return parked_on_error(
+                        &worktree_path,
+                        ParkTarget {
+                            session_path,
+                            run_id: input.run_id,
+                        },
+                        MergeStage::Rebase,
+                        revision_evidence,
+                        error.into(),
+                        retry_warnings,
+                        input.live.as_ref(),
+                    );
+                }
+            };
+        (landed_rev, "merger=skipped-mechanical-retry".to_string())
+    } else if is_true_fast_forward && !input.force_merger {
         // --- Fast path: no assignment/merger resolution, no rebase. Nothing
         // above this point has constructed a `ResolvedRuntimeAssignments` or
         // touched `[agent.role.merger]` at all, so an invalid/unprobeable
@@ -1182,6 +1484,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                     None => source_conflicted_paths.push(path.clone()),
                 }
             }
+            *merger_path_entered = true;
             let (decision, call_evidence) = match dispatch_merger(MergerCall {
                 harness: &merger.harness,
                 harness_id: &merger.harness_id,
@@ -1710,7 +2013,9 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
         // either case), and a mixed set parks entirely rather than
         // adjudicating a partial subset (mirrors `plan_harvest_seeds`'s own
         // all-or-nothing conflict invariant).
-        if input.deep && !ancestor_unavailable && !ancestor_digest_mismatch {
+        // A retry is reconciliation-free. In particular, a seed conflict
+        // cannot spend another deep-merger dispatch after a landing race.
+        if input.deep && !mechanical_only && !ancestor_unavailable && !ancestor_digest_mismatch {
             match adjudicate_harvest_conflicts(HarvestAdjudicationInputs {
                 repo_root,
                 worktree_path: &worktree_path,
@@ -1863,69 +2168,39 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                 );
             }
         };
+    retry_warnings.push(format!(
+        "merge-race-observed-target attempt={attempt}/{} {default_branch}@{current_main_rev}",
+        gate_policy.retry_attempts,
+    ));
     if current_main_rev != main_rev {
-        return park(
-            session_path,
+        return Ok(retry_candidate(
             input.run_id,
             MergeStage::Landing,
             format!(
-                "{default_branch} {} {main_rev} to {current_main_rev} since the rebase revision was captured; retry the merge",
-                reasons::MAIN_ADVANCED_INFIX
+                "{}{} advanced from {main_rev} to {current_main_rev} since the rebase revision was captured; retry the merge",
+                merge_story::MAIN_ADVANCED_RACE_PREFIX,
+                default_branch,
             ),
+            None,
             vec![
                 format!("{default_branch}-at-capture={main_rev}"),
                 format!("{default_branch}-now={current_main_rev}"),
             ],
-            retry_warnings,
-            input.live.as_ref(),
-        );
+        ));
     }
-    match ctx_traits_io::worktree::is_clean_for_landing(repo_root) {
-        Ok(true) => {}
-        Ok(false) => {
-            return park(
-                session_path,
-                input.run_id,
-                MergeStage::Landing,
-                format!(
-                    "{default_branch} {}; retry the merge",
-                    reasons::MAIN_NOT_CLEAN_INFIX
-                ),
-                vec![format!("{default_branch}-at-capture={main_rev}")],
-                retry_warnings,
-                input.live.as_ref(),
-            );
-        }
-        Err(error) => {
-            return parked_on_error(
-                &worktree_path,
-                ParkTarget {
-                    session_path,
-                    run_id: input.run_id,
-                },
-                MergeStage::Landing,
-                landed_evidence,
-                error.into(),
-                retry_warnings,
-                input.live.as_ref(),
-            );
-        }
-    }
+    // `git merge --ff-only` is the atomic dirty-overlap boundary. It permits
+    // owner changes disjoint from this landing and refuses an overlap without
+    // staging, stashing, or otherwise mutating owner work.
     if let Err(error) =
         ctx_traits_io::worktree::fast_forward_merge(repo_root, &worktree.branch, retry_warnings)
     {
-        return park_with_detail(
-            ParkTarget {
-                session_path,
-                run_id: input.run_id,
-            },
+        return Ok(retry_candidate(
+            input.run_id,
             MergeStage::Landing,
             reasons::FAST_FORWARD_FAILED.to_string(),
             Some(error.to_string()),
             landed_evidence,
-            retry_warnings,
-            input.live.as_ref(),
-        );
+        ));
     }
 
     // --- Cleanup: a failure here is a distinct terminal outcome — main has
@@ -2502,8 +2777,27 @@ fn with_retry_evidence(
     mut evidence: Vec<String>,
     retry_warnings: &ctx_traits_io::worktree::RetryWarnings,
 ) -> Vec<String> {
-    evidence.extend(retry_warnings.as_slice().iter().cloned());
+    // Terminal construction can combine per-stage and lifecycle evidence, so
+    // retain only the first occurrence without disturbing evidence order.
+    for warning in retry_warnings.as_slice() {
+        if !evidence.contains(warning) {
+            evidence.push(warning.clone());
+        }
+    }
     evidence
+}
+
+/// Bound wake-up jitter to the exponential base delay so contenders that race
+/// together do not queue for the next lock hold in lock-step.
+fn bounded_retry_jitter_ms(base_backoff_ms: u64) -> u64 {
+    if base_backoff_ms == 0 {
+        return 0;
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64;
+    nanos % base_backoff_ms.saturating_add(1)
 }
 
 /// P549: fan one merger call's stdout out to every present observer — the
@@ -2560,11 +2854,30 @@ fn parked_on_error(
     ) {
         return result;
     }
+    let transient_lock = match &error {
+        crate::Error::Io(error) => ctx_traits_io::worktree::exhausted_transient_lock_reason(error),
+        _ => None,
+    };
+    if let Some(transient_lock) = transient_lock {
+        let reason = format!(
+            "{}: {}",
+            reasons::TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX,
+            transient_lock.code()
+        );
+        return Ok(retry_candidate(
+            target.run_id,
+            stage,
+            reason,
+            Some(format!("unexpected failure during merge: {error}")),
+            evidence,
+        ));
+    }
+    let reason = reasons::UNEXPECTED_FAILURE_PREFIX.to_string();
     let report = park(
         target.session_path,
         target.run_id,
         stage,
-        reasons::UNEXPECTED_FAILURE_PREFIX.to_string(),
+        reason,
         evidence,
         retry_warnings,
         live,
@@ -2631,10 +2944,7 @@ fn recovery_failure(
         park_reason: None,
         deep_decisions: Vec::new(),
     };
-    if let Some(live) = live {
-        live.emit(&MergeProgress::FrameRecorded(&frame));
-    }
-    ctx_traits_io::run_session::append_merge_frame(session_path, frame)?;
+    persist_terminal_frame(session_path, live, frame)?;
     Ok(MergeReport {
         status: "recovery-failure".to_string(),
         run_id: run_id.to_string(),
@@ -2700,10 +3010,7 @@ fn park_with_detail(
         park_reason: None,
         deep_decisions: Vec::new(),
     };
-    if let Some(live) = live {
-        live.emit(&MergeProgress::FrameRecorded(&frame));
-    }
-    ctx_traits_io::run_session::append_merge_frame(target.session_path, frame)?;
+    persist_terminal_frame(target.session_path, live, frame)?;
     let cli_reason = match detail {
         Some(detail) => format!("{reason}: {detail}"),
         None => reason,
@@ -2749,10 +3056,7 @@ fn park_with_deep_decisions(
         park_reason: None,
         deep_decisions,
     };
-    if let Some(live) = live {
-        live.emit(&MergeProgress::FrameRecorded(&frame));
-    }
-    ctx_traits_io::run_session::append_merge_frame(target.session_path, frame)?;
+    persist_terminal_frame(target.session_path, live, frame)?;
     Ok(MergeReport {
         status: "parked".to_string(),
         run_id: target.run_id.to_string(),
@@ -3066,30 +3370,22 @@ fn preflight(
             None,
         ));
     }
-    if !ctx_traits_io::worktree::is_clean_for_landing(repo_root).map_err(|e| {
-        (
-            reasons::CHECKOUT_CLEANLINESS_PROBE_FAILED.to_string(),
-            Some(e.to_string()),
-        )
-    })? {
-        return Err((
-            format!(
-                "{}{default_branch}) is not clean",
-                reasons::INVOCATION_CHECKOUT_DIRTY_PREFIX
-            ),
-            None,
-        ));
-    }
     let worktree_path = ctx_traits_io::worktree::verify_worktree_registration(
         &worktree.id,
         &worktree.branch,
         retry_warnings,
     )
-    .map_err(|e| {
-        (
-            reasons::WORKTREE_UNREGISTERED.to_string(),
-            Some(e.to_string()),
-        )
+    .map_err(|error| {
+        let reason = ctx_traits_io::worktree::exhausted_transient_lock_reason(&error)
+            .map(|transient_lock| {
+                format!(
+                    "{}: {}",
+                    reasons::TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX,
+                    transient_lock.code()
+                )
+            })
+            .unwrap_or_else(|| reasons::WORKTREE_UNREGISTERED.to_string());
+        (reason, Some(error.to_string()))
     })?;
     if !ctx_traits_io::worktree::is_clean(&worktree_path).map_err(|e| {
         (
@@ -4405,8 +4701,9 @@ fn deep_decision_trailer_value(decision: &DeepMergeDecision) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MergeLive, ParkTarget, deep_hunk_id, gate_command_label, generated_artifact_index_for_path,
-        park, park_with_detail, path_is_under_seed_root, trimmed_stderr_tail,
+        MergeLive, ParkTarget, bounded_retry_jitter_ms, deep_hunk_id, gate_command_label,
+        generated_artifact_index_for_path, park, park_with_detail, path_is_under_seed_root,
+        trimmed_stderr_tail,
     };
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::activity::ActivityEvent;
@@ -4414,6 +4711,14 @@ mod tests {
     use ctx_traits_core::procedure::session::MergeStage;
     use ctx_traits_io::harness_config::GeneratedArtifact;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn retry_jitter_is_bounded_by_the_exponential_base_delay() {
+        assert_eq!(bounded_retry_jitter_ms(0), 0);
+        for _ in 0..32 {
+            assert!(bounded_retry_jitter_ms(100) <= 100);
+        }
+    }
 
     /// Minimal-but-valid [`Session`] for the park-helper tests below — every
     /// field the type requires (no `#[serde(default)]`), with every other

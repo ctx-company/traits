@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::thread;
 
 use support::{ScratchRoot, assert_exit_code, git_init_on_branch, require_success, run_ctx, utf8};
 
@@ -149,6 +150,64 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
     };
     serde_json::from_str(&json_text)
         .unwrap_or_else(|error| panic!("stdout was not a JSON envelope: {error}\n{stdout}"))
+}
+
+/// Install a deliberately tiny custom merger that records every real harness
+/// dispatch. The probe is separate so assertions count model-spend, not setup.
+fn install_counting_merger(repo: &Path, marker: &Path) {
+    let script = repo.join("counting-merger.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\nprintf call >> '{}'\nprintf '{{\\\"result\\\":\\\"proceed\\\"}}\\n'\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fs::write(
+        repo.join("ctx.toml"),
+        format!(
+            r#"schema-version = "0.2"
+
+[harness.counter]
+kind = "custom"
+bin = "{}"
+transports = ["cli"]
+version-probe = ["--probe"]
+
+[harness.counter.cli]
+argv = []
+output = "raw-json"
+model-flag = "--model"
+reasoning-effort-flag = "--reasoning-effort"
+
+[agent.role.merger]
+harness = "counter"
+model = "fixture"
+reasoning-effort = "low"
+
+[worktree.confinement]
+sandbox = false
+"#,
+            script.display()
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "ctx.toml"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "configure counting merger"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
 }
 
 #[test]
@@ -672,7 +731,7 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
     );
 }
 
-/// P477: a declared `[merge] gate = [["false"]]` must park before the
+/// P477: a declared failing gate must park before the
 /// default branch advances, retaining the run's branch/worktree and
 /// recording the declared argv and captured-output path — exactly like a
 /// failing `just test` did under the pre-P477 hardcoded chain.
@@ -683,7 +742,7 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
             repo.join(".ctx/config.toml"),
-            "[merge]\ngate = [[\"false\"]]\n",
+            "[merge]\ngate = [[\"sh\", \"-c\", \"echo gate >> gate-count; exit 1\"]]\n",
         )
         .unwrap();
     });
@@ -729,10 +788,25 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
         main_rev_before, main_rev_after,
         "a parked gate must never advance main"
     );
-    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
+    let worktree_root = repo.join(".ctx/traits/worktrees");
+    let worktrees = fs::read_dir(&worktree_root).unwrap();
     assert!(
         worktrees.count() > 0,
         "a parked gate must leave its branch and worktree intact"
+    );
+    let worktree = fs::read_dir(&worktree_root)
+        .unwrap()
+        .next()
+        .expect("parked run retains one worktree")
+        .unwrap()
+        .path();
+    assert_eq!(
+        fs::read_to_string(worktree.join("gate-count"))
+            .unwrap()
+            .lines()
+            .count(),
+        1,
+        "a gate verdict must park on its first invocation instead of spending retry attempts"
     );
     let session_path = envelope["value"]["session-path"]
         .as_str()
@@ -740,13 +814,478 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
         .to_string();
     let ledger_text = fs::read_to_string(&session_path).unwrap();
     assert!(
-        ledger_text.contains("gate=false") && ledger_text.contains("argv="),
+        ledger_text.contains("gate=sh-c-") && ledger_text.contains("argv="),
         "the declared argv must be recorded in the parked evidence: {ledger_text}"
     );
     assert!(
         ledger_text.contains("gate-output="),
         "the captured-output path must be recorded in the parked evidence: {ledger_text}"
     );
+}
+
+/// A target movement after the first gate is a mechanical race: the next
+/// attempt rebases against the new target and reruns the declared gate without
+/// asking an owner to intervene.
+#[test]
+fn target_advance_retries_mechanically_and_reruns_the_gate() {
+    let scratch = ScratchRoot::new("p478-mechanical-race");
+    let repo = scratch.home().join("repo");
+    let raced = repo.join("raced");
+    let gate_count = repo.join("gate-count");
+    let repo_text = repo.to_string_lossy();
+    let raced_text = raced.to_string_lossy();
+    let gate_count_text = gate_count.to_string_lossy();
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            format!(
+                "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"echo gate >> '{gate_count_text}'; if [ ! -f '{raced_text}' ]; then touch '{raced_text}'; echo target-race > '{repo_text}/target-race'; git -C '{repo_text}' add target-race; git -C '{repo_text}' commit -qm target-race; fi\"]]\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, 0);
+    let envelope = value_json(&output);
+    assert_eq!(envelope["value"]["merge"]["status"], "merged");
+    assert_eq!(
+        fs::read_to_string(&gate_count).unwrap().lines().count(),
+        2,
+        "each real landing attempt must rerun the declared gate"
+    );
+    assert!(
+        repo.join("target-race").is_file(),
+        "the target-side commit made during the first gate must survive landing"
+    );
+    let warnings = envelope["value"]["merge"]["warnings"]
+        .as_array()
+        .expect("retry evidence is returned as warnings");
+    assert!(
+        warnings.iter().any(|warning| warning
+            .as_str()
+            .is_some_and(|warning| warning.starts_with("merge-race-captured-target attempt=2/2"))),
+        "a retry must recapture its target revision: {envelope}"
+    );
+}
+
+/// A race after the paid confirmation must not buy another harness dispatch.
+/// The retry's rebase conflicts with the new target, so it parks mechanically
+/// rather than returning to reconciliation or spending another model call.
+#[test]
+fn race_retry_conflict_parks_without_a_second_merger_dispatch() {
+    let scratch = ScratchRoot::new("p478-mechanical-conflict-no-merger");
+    let repo = scratch.home().join("repo");
+    let marker = repo.join("merger-calls");
+    let raced = repo.join("raced");
+    let repo_text = repo.to_string_lossy();
+    let raced_text = raced.to_string_lossy();
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            format!(
+                "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"if [ ! -f '{raced_text}' ]; then touch '{raced_text}'; echo target > '{repo_text}/conflict'; git -C '{repo_text}' add conflict; git -C '{repo_text}' commit -qm target-race; fi\"]]\n"
+            ),
+        )
+        .unwrap();
+    });
+    install_counting_merger(&repo, &marker);
+
+    let run_output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&run_output, 0);
+    let run = value_json(&run_output);
+    let run_id = run["value"]["session"]["run-id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let worktree = Path::new(
+        run["value"]["session"]["provenance"]["worktree"]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    fs::write(worktree.join("conflict"), "run\n").unwrap();
+    Command::new("git")
+        .args(["add", "conflict"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "run conflict"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+
+    let output = run_ctx(
+        &["traits", "merge", &run_id, "--force-merger", "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, EXIT_MERGE_PARKED);
+    let ledger = fs::read_to_string(run["value"]["session-path"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        fs::read_to_string(marker)
+            .unwrap_or_default()
+            .lines()
+            .count(),
+        1,
+        "a retry requiring reconciliation must park without a second merger dispatch: {ledger}"
+    );
+    assert!(
+        ledger.contains("\"stage\": \"rebase\"") && ledger.contains("\"status\": \"parked\""),
+        "the mechanical retry must park at rebase rather than reenter reconciliation: {ledger}"
+    );
+}
+
+/// Independent completed runs contend for the merge lock and converge without
+/// starving either run. Their commits touch distinct paths, so serializing the
+/// lock holders is sufficient for both public-path landings to succeed.
+#[test]
+fn concurrent_disjoint_runs_eventually_land() {
+    let scratch = ScratchRoot::new("p478-concurrent-convergence");
+    let repo = scratch.home().join("repo");
+    init_fixture_repo_without_gate(&repo, &scratch.home(), "true");
+    install_counting_merger(&repo, &repo.join("concurrent-merger-calls"));
+    let mut run_ids = Vec::new();
+    for name in ["a", "b"] {
+        let output = run_ctx(
+            &[
+                "traits",
+                "run",
+                "--file",
+                ".ctx/traits/demo/generated/index.toml",
+                "--worktree",
+                "--json",
+                "--progress",
+                "none",
+            ],
+            &repo,
+            &scratch.home(),
+        );
+        assert_exit_code(&output, 0);
+        let run = value_json(&output);
+        let worktree = Path::new(
+            run["value"]["session"]["provenance"]["worktree"]["path"]
+                .as_str()
+                .unwrap(),
+        );
+        fs::write(
+            worktree.join(format!("landing-{name}")),
+            format!("{name}\n"),
+        )
+        .unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(worktree)
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", &format!("landing {name}")])
+            .current_dir(worktree)
+            .status()
+            .unwrap();
+        run_ids.push(
+            run["value"]["session"]["run-id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    let handles: Vec<_> = run_ids
+        .into_iter()
+        .map(|run_id| {
+            let repo = repo.clone();
+            let home = scratch.home().to_path_buf();
+            thread::spawn(move || run_ctx(&["traits", "merge", &run_id, "--json"], &repo, &home))
+        })
+        .collect();
+    for handle in handles {
+        assert_exit_code(&handle.join().unwrap(), 0);
+    }
+    assert!(repo.join("landing-a").is_file());
+    assert!(repo.join("landing-b").is_file());
+}
+
+/// Git's `--ff-only` check is the safety boundary for owner work: unrelated
+/// staged, unstaged, and untracked files must remain untouched while landing.
+#[test]
+fn disjoint_dirty_checkout_survives_a_successful_landing() {
+    let scratch = ScratchRoot::new("p478-disjoint-dirty");
+    let repo = scratch.home().join("repo");
+    init_fixture_repo(&repo, &scratch.home(), "true", "true");
+    fs::write(repo.join("owner-staged"), "staged owner work\n").unwrap();
+    Command::new("git")
+        .args(["add", "owner-staged"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    fs::write(repo.join("owner-unstaged"), "unstaged owner work\n").unwrap();
+    fs::write(repo.join("owner-untracked"), "untracked owner work\n").unwrap();
+
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, 0);
+    assert_eq!(value_json(&output)["value"]["merge"]["status"], "merged");
+    assert_eq!(
+        fs::read_to_string(repo.join("owner-staged")).unwrap(),
+        "staged owner work\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("owner-unstaged")).unwrap(),
+        "unstaged owner work\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("owner-untracked")).unwrap(),
+        "untracked owner work\n"
+    );
+}
+
+/// Persistent target movement consumes the configured bound, then writes one
+/// terminal park with evidence for every real attempt rather than parking an
+/// intermediate race.
+#[test]
+fn exhausted_target_races_record_all_attempts_in_one_terminal_park() {
+    let scratch = ScratchRoot::new("p478-exhausted-races");
+    let repo = scratch.home().join("repo");
+    let repo_text = repo.to_string_lossy();
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            format!(
+                "[merge]\ngate = [[\"sh\", \"-c\", \"git -C '{repo_text}' commit --allow-empty -qm target-race\"]]\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--merge",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, EXIT_MERGE_PARKED);
+    let envelope = value_json(&output);
+    let session_path = envelope["value"]["session-path"]
+        .as_str()
+        .expect("parked merge reports its session path");
+    let ledger = fs::read_to_string(session_path).unwrap();
+    let terminal = ledger
+        .rsplit_once("\"stage\": \"landing\"")
+        .expect("the final parked landing frame is present")
+        .1;
+    assert!(
+        terminal.contains("merge-race-exhausted attempts=5/5"),
+        "{terminal}"
+    );
+    assert_eq!(
+        terminal
+            .matches("merge-race-captured-target attempt=")
+            .count(),
+        5,
+        "{terminal}"
+    );
+    assert_eq!(
+        terminal
+            .matches("merge-race-observed-target attempt=")
+            .count(),
+        5,
+        "{terminal}"
+    );
+    assert_eq!(
+        ledger.matches("\"status\": \"parked\"").count(),
+        1,
+        "{ledger}"
+    );
+}
+
+/// `--no-wait` is intentionally an operator escape hatch, not a smaller retry
+/// budget: a retryable target race parks after its one real landing attempt.
+#[test]
+fn no_wait_stops_after_one_retryable_attempt_without_exhaustion() {
+    let scratch = ScratchRoot::new("p478-no-wait");
+    let repo = scratch.home().join("repo");
+    let repo_text = repo.to_string_lossy();
+    let gate_count = repo.join("gate-count");
+    let gate_count_text = gate_count.to_string_lossy();
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            format!(
+                "[merge]\nretry-attempts = 5\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"echo gate >> '{gate_count_text}'; git -C '{repo_text}' commit --allow-empty -qm target-race\"]]\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    let run_output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&run_output, 0);
+    let run_id = value_json(&run_output)["value"]["session"]["run-id"]
+        .as_str()
+        .expect("completed run reports its run id")
+        .to_string();
+    let output = run_ctx(
+        &["traits", "merge", &run_id, "--no-wait", "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, EXIT_MERGE_PARKED);
+    assert_eq!(
+        fs::read_to_string(&gate_count).unwrap().lines().count(),
+        1,
+        "--no-wait must not make a second landing attempt"
+    );
+    let session_path = value_json(&run_output)["value"]["session-path"]
+        .as_str()
+        .expect("completed run reports its session path")
+        .to_string();
+    let ledger = fs::read_to_string(session_path).unwrap();
+    assert!(
+        !ledger.contains("merge-race-retry") && !ledger.contains("merge-race-exhausted"),
+        "--no-wait must neither back off nor claim exhaustion: {ledger}"
+    );
+}
+
+/// `git merge --ff-only` is the final atomic owner-work safety boundary. It
+/// must refuse an overlapping checkout path regardless of Git's index state,
+/// leaving the owner's bytes alone rather than stashing or touching them.
+#[test]
+fn overlapping_dirty_checkout_work_is_refused_without_mutation() {
+    for mode in ["staged", "unstaged", "untracked"] {
+        let scratch = ScratchRoot::new(&format!("p478-overlap-{mode}"));
+        let repo = scratch.home().join("repo");
+        init_fixture_repo(&repo, &scratch.home(), "true", "true");
+        if mode != "untracked" {
+            fs::write(repo.join("owner-overlap"), "base\n").unwrap();
+            Command::new("git")
+                .args(["add", "owner-overlap"])
+                .current_dir(&repo)
+                .status()
+                .unwrap();
+            Command::new("git")
+                .args(["commit", "-qm", "owner base"])
+                .current_dir(&repo)
+                .status()
+                .unwrap();
+        }
+        let run_output = run_ctx(
+            &[
+                "traits",
+                "run",
+                "--file",
+                ".ctx/traits/demo/generated/index.toml",
+                "--worktree",
+                "--json",
+                "--progress",
+                "none",
+            ],
+            &repo,
+            &scratch.home(),
+        );
+        assert_exit_code(&run_output, 0);
+        let run = value_json(&run_output);
+        let run_id = run["value"]["session"]["run-id"]
+            .as_str()
+            .expect("completed run reports its run id")
+            .to_string();
+        let worktree = Path::new(
+            run["value"]["session"]["provenance"]["worktree"]["path"]
+                .as_str()
+                .expect("completed worktree run reports its checkout"),
+        );
+        fs::write(worktree.join("owner-overlap"), "landing change\n").unwrap();
+        Command::new("git")
+            .args(["add", "owner-overlap"])
+            .current_dir(worktree)
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "landing overlap"])
+            .current_dir(worktree)
+            .status()
+            .unwrap();
+        let owner_contents = format!("owner {mode} work\n");
+        fs::write(repo.join("owner-overlap"), &owner_contents).unwrap();
+        if mode == "staged" {
+            Command::new("git")
+                .args(["add", "owner-overlap"])
+                .current_dir(&repo)
+                .status()
+                .unwrap();
+        }
+        let output = run_ctx(
+            &["traits", "merge", &run_id, "--json"],
+            &repo,
+            &scratch.home(),
+        );
+        assert_exit_code(&output, EXIT_MERGE_PARKED);
+        assert_eq!(
+            fs::read_to_string(repo.join("owner-overlap")).unwrap(),
+            owner_contents,
+            "{mode} owner work must survive an overlapping fast-forward refusal"
+        );
+    }
 }
 
 /// Clone `upstream` (a fixture repo already on `branch`) into a fresh

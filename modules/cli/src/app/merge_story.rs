@@ -212,10 +212,9 @@ pub(crate) mod reasons {
     /// ever produced, since one couldn't safely be attempted.
     pub(crate) const GATE_DISK_FLOOR_PREFIX: &str = "insufficient disk space for post-run gate:";
 
-    pub(crate) const MAIN_ADVANCED_INFIX: &str = "advanced from";
-    pub(crate) const MAIN_NOT_CLEAN_INFIX: &str =
-        "is no longer clean since the rebase revision was captured";
     pub(crate) const FAST_FORWARD_FAILED: &str = "fast-forward failed";
+    pub(crate) const TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX: &str =
+        "transient git lock/control retry exhausted";
 
     pub(crate) const HARVEST_ADJUDICATION_PARKED_PREFIX: &str = "seed harvest adjudication parked:";
     pub(crate) const HARVEST_DIGEST_MISMATCH: &str = "seed harvest parked: seed ancestor digest mismatch (baseline may have raced or been tampered with)";
@@ -295,6 +294,43 @@ pub(crate) enum ParkClass {
     InProgress,
     Unknown,
 }
+
+/// Whether a parked reason is safe to retry mechanically. This is deliberately
+/// fail-closed: adding a new park class cannot create an automatic retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParkDisposition {
+    Race,
+    Verdict,
+}
+
+pub(crate) fn park_disposition(reason: &str) -> ParkDisposition {
+    match classify_reason(reason) {
+        ParkClass::LandingMainAdvanced
+        | ParkClass::LandingMainNotClean
+        | ParkClass::LandingFastForwardFailed => ParkDisposition::Race,
+        ParkClass::PreflightProbeFailed
+            if reason.starts_with(reasons::CHECKOUT_BRANCH_PROBE_FAILED)
+                || reason.starts_with(reasons::CHECKOUT_CLEANLINESS_PROBE_FAILED) =>
+        {
+            ParkDisposition::Race
+        }
+        _ if ["index-lock", "shallow-lock", "another-process"]
+            .iter()
+            .any(|code| {
+                reason == format!("{}: {code}", reasons::TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX)
+            }) =>
+        {
+            ParkDisposition::Race
+        }
+        _ => ParkDisposition::Verdict,
+    }
+}
+
+/// Stable landing-race reasons are deliberately shaped here rather than
+/// inferred from arbitrary merger prose. A merger may quote these words, but
+/// only merge orchestration emits this exact prefix.
+pub(crate) const MAIN_ADVANCED_RACE_PREFIX: &str = "merge-race-main-advanced: ";
+pub(crate) const MAIN_NOT_CLEAN_RACE_PREFIX: &str = "merge-race-main-not-clean: ";
 
 impl ParkClass {
     /// Every variant, for the match-exhaustive translator coverage test — a
@@ -376,7 +412,13 @@ pub(crate) fn stage_sentence(stage: MergeStage) -> &'static str {
 fn classify_reason(reason: &str) -> ParkClass {
     use reasons::*;
     if reason == CHECKOUT_BRANCH_PROBE_FAILED
+        || reason
+            .strip_prefix(CHECKOUT_BRANCH_PROBE_FAILED)
+            .is_some_and(|detail| detail.starts_with(": "))
         || reason == CHECKOUT_CLEANLINESS_PROBE_FAILED
+        || reason
+            .strip_prefix(CHECKOUT_CLEANLINESS_PROBE_FAILED)
+            .is_some_and(|detail| detail.starts_with(": "))
         || reason == WORKTREE_CLEANLINESS_PROBE_FAILED
         || reason == WORKTREE_REBASE_STATE_PROBE_FAILED
     {
@@ -423,11 +465,15 @@ fn classify_reason(reason: &str) -> ParkClass {
         ParkClass::GateDiskFloor
     } else if reason.starts_with(GATE_FAILED_PREFIX) {
         ParkClass::GateFailed
-    } else if reason.contains(MAIN_ADVANCED_INFIX) {
+    } else if reason.starts_with(MAIN_ADVANCED_RACE_PREFIX) {
         ParkClass::LandingMainAdvanced
-    } else if reason.contains(MAIN_NOT_CLEAN_INFIX) {
+    } else if reason.starts_with(MAIN_NOT_CLEAN_RACE_PREFIX) {
         ParkClass::LandingMainNotClean
-    } else if reason == FAST_FORWARD_FAILED {
+    } else if reason == FAST_FORWARD_FAILED
+        || reason
+            .strip_prefix(FAST_FORWARD_FAILED)
+            .is_some_and(|detail| detail.starts_with(": "))
+    {
         ParkClass::LandingFastForwardFailed
     } else if reason.starts_with(HARVEST_ADJUDICATION_PARKED_PREFIX)
         || reason == HARVEST_DIGEST_MISMATCH
@@ -670,9 +716,31 @@ pub(crate) fn explain_frame(frame: &MergeFrame) -> Explanation {
     }
     let reason = frame.reason.as_deref().unwrap_or("no reason recorded");
     let class = classify_reason(reason);
+    let mut sentence = sentence_for(class, frame.stage, reason);
+    if let Some(exhausted) = frame
+        .evidence
+        .iter()
+        .find(|evidence| evidence.starts_with("merge-race-exhausted "))
+    {
+        let revisions: Vec<_> = frame
+            .evidence
+            .iter()
+            .filter(|evidence| {
+                evidence.starts_with("merge-race-captured-target attempt=")
+                    || evidence.starts_with("merge-race-observed-target attempt=")
+            })
+            .map(String::as_str)
+            .collect();
+        sentence.push_str(&format!(
+            "; automatic merge-race retries were exhausted ({exhausted})"
+        ));
+        if !revisions.is_empty() {
+            sentence.push_str(&format!(" after observing {}", revisions.join(", ")));
+        }
+    }
     Explanation {
         headline: headline_for(class).to_string(),
-        sentence: sentence_for(class, frame.stage, reason),
+        sentence,
         next_action: next_action_for(class).to_string(),
         class,
     }
@@ -928,9 +996,12 @@ mod tests {
             (MergeStage::Gates, GATE_LEFT_DIRTY.to_string()),
             (
                 MergeStage::Landing,
-                format!("main {MAIN_ADVANCED_INFIX} deadbeef to cafebabe"),
+                format!("{MAIN_ADVANCED_RACE_PREFIX}main advanced from deadbeef to cafebabe"),
             ),
-            (MergeStage::Landing, format!("main {MAIN_NOT_CLEAN_INFIX}")),
+            (
+                MergeStage::Landing,
+                format!("{MAIN_NOT_CLEAN_RACE_PREFIX}main not clean"),
+            ),
             (MergeStage::Landing, FAST_FORWARD_FAILED.to_string()),
             (
                 MergeStage::Cleanup,
@@ -1120,6 +1191,58 @@ mod tests {
         assert_eq!(explanation.class, ParkClass::Unknown);
         assert!(explanation.sentence.contains("gates"));
         assert!(!explanation.next_action.is_empty());
+    }
+
+    #[test]
+    fn retry_disposition_is_limited_to_named_mechanical_races() {
+        use reasons::*;
+        for reason in [
+            format!("{MAIN_ADVANCED_RACE_PREFIX}main advanced from old to new"),
+            format!("{MAIN_NOT_CLEAN_RACE_PREFIX}main not clean"),
+            FAST_FORWARD_FAILED.to_string(),
+            format!("{FAST_FORWARD_FAILED}: git diagnostic"),
+            CHECKOUT_BRANCH_PROBE_FAILED.to_string(),
+            format!("{CHECKOUT_BRANCH_PROBE_FAILED}: git diagnostic"),
+            CHECKOUT_CLEANLINESS_PROBE_FAILED.to_string(),
+            format!("{CHECKOUT_CLEANLINESS_PROBE_FAILED}: git diagnostic"),
+            format!("{TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX}: index-lock"),
+            format!("{TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX}: shallow-lock"),
+            format!("{TRANSIENT_LOCK_RETRY_EXHAUSTED_PREFIX}: another-process"),
+        ] {
+            assert_eq!(park_disposition(&reason), ParkDisposition::Race, "{reason}");
+        }
+        for reason in [
+            "fast-forward failed promptly".to_string(),
+            "merger verdict: main advanced from old to new".to_string(),
+            "merger verdict: main is not clean for landing".to_string(),
+            "new unclassified reason".to_string(),
+            format!("{GATE_FAILED_PREFIX}test failed"),
+            HARVEST_CHANGED_BOTH_SIDES.to_string(),
+            format!("{DEEP_REFUSE_REGRESSION_PREFIX} regression"),
+            format!("{BRANCH_MISMATCH_PREFIX} \"other\""),
+            WORKTREE_CLEANLINESS_PROBE_FAILED.to_string(),
+            "transient git lock/control retry exhausted-ish: unknown-lock".to_string(),
+        ] {
+            assert_eq!(
+                park_disposition(&reason),
+                ParkDisposition::Verdict,
+                "{reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn exhausted_retry_story_includes_attempt_tagged_revisions() {
+        let mut frame = frame(MergeStage::Landing, reasons::FAST_FORWARD_FAILED);
+        frame.evidence = vec![
+            "merge-race-exhausted attempts=5/5".to_string(),
+            "merge-race-captured-target attempt=1/5 revision=first".to_string(),
+            "merge-race-observed-target attempt=1/5 revision=second".to_string(),
+        ];
+        let explanation = explain_frame(&frame);
+        assert!(explanation.sentence.contains("attempts=5/5"));
+        assert!(explanation.sentence.contains("revision=first"));
+        assert!(explanation.sentence.contains("revision=second"));
     }
 
     #[test]

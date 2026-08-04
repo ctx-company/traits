@@ -56,19 +56,29 @@ const SEED_BASELINE_SCRATCH_SUBDIR: &str = "scratch";
 /// Stable reason code for a Git failure classified as short-lived repository
 /// lock contention. See [`classify_transient_lock`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TransientLockReason {
+pub enum TransientLockReason {
     IndexLock,
     ShallowLock,
     AnotherProcess,
 }
 
 impl TransientLockReason {
-    fn code(self) -> &'static str {
+    pub fn code(self) -> &'static str {
         match self {
             Self::IndexLock => "index-lock",
             Self::ShallowLock => "shallow-lock",
             Self::AnotherProcess => "another-process",
         }
+    }
+}
+
+/// Return the typed cause for an exhausted narrow Git lock/control retry.
+/// This is intentionally the only worktree retry internals merge orchestration
+/// consumes; arbitrary Git errors remain ordinary verdicts.
+pub fn exhausted_transient_lock_reason(error: &crate::Error) -> Option<TransientLockReason> {
+    match error {
+        crate::Error::TransientGitLock { reason } => Some(*reason),
+        _ => None,
     }
 }
 
@@ -114,7 +124,7 @@ impl RetryWarnings {
         self.0
     }
 
-    fn push(&mut self, warning: String) {
+    pub fn push(&mut self, warning: String) {
         self.0.push(warning);
     }
 }
@@ -161,10 +171,7 @@ fn run_git_retrying_with_timeout(
             return Ok(output);
         };
         if attempt >= MAX_LOCK_RETRY_ATTEMPTS {
-            let command = format!("git {}", args.join(" "));
-            return Err(git_error_with_retry_context(
-                &command, &output, attempt, reason,
-            ));
+            return Err(crate::Error::TransientGitLock { reason });
         }
         let backoff_ms = LOCK_RETRY_BACKOFF_MS[(attempt - 1) as usize];
         warnings.push(format!(
@@ -174,37 +181,6 @@ fn run_git_retrying_with_timeout(
         ));
         std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
         attempt += 1;
-    }
-}
-
-/// Augment the typed Git error `git_error` would produce with the exhausted
-/// retry budget's attempt count and classified reason, so the CLI-facing
-/// error names why a fifth classified lock failure was not retried again.
-fn git_error_with_retry_context(
-    command: &str,
-    output: &crate::command::RunOutput,
-    attempts: u32,
-    reason: TransientLockReason,
-) -> crate::Error {
-    match git_error(command, output) {
-        crate::Error::Environment(crate::environment::Error::Git {
-            command,
-            path,
-            exit_status,
-            timed_out,
-            message,
-        }) => crate::environment::Error::Git {
-            command,
-            path,
-            exit_status,
-            timed_out,
-            message: format!(
-                "{message} (git-lock-retry exhausted: attempts={attempts}/{MAX_LOCK_RETRY_ATTEMPTS} reason={})",
-                reason.code()
-            ),
-        }
-        .into(),
-        other => other,
     }
 }
 
