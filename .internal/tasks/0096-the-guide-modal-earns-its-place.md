@@ -24,6 +24,31 @@ matters: **the guide does not know what the run is about.**
   to what the seat can actually take, and if something must be dropped, drop
   routine activity before verdicts and blockers — the existing sort already
   knows that order.
+- **The context is the state at the moment the question is SENT, and the
+  answer is attributable to it.** A run moves while the guide thinks; an
+  answer about a step that finished thirty seconds ago is wrong even though it
+  was right when asked. Two thirds of this already works and the remaining
+  third is the real gap:
+  - Already right: `apply_ask_key` (`run_view.rs:1387`) recomputes
+    `guide::evidence` on EVERY key the ask pane handles — including the Enter
+    that sends — and the worker captures `chat.context.clone()` at dispatch.
+    So the evidence is not from when the modal opened. Do not "fix" this.
+  - Still wrong: that evidence is built from `state.view`, which is rebuilt in
+    `tick_locked` when the panel paints. Between paints the view lags the
+    ledger, so "fresh" can mean "as of the last repaint". Rebuild, or read
+    through to current state, before composing evidence for a send.
+  - Still wrong: nothing tells the reader WHICH state an answer describes. An
+    answer should carry the step it was composed against, so an answer that
+    has been overtaken is visibly an answer about the past rather than a wrong
+    answer about the present.
+- **Each question is currently answered with no memory of the previous one.**
+  `guide_prompt` (`guide.rs:158`) is instructions + question + evidence;
+  `dispatch(question, context)` never receives the transcript. The modal
+  renders a conversation the model is not having. Decide deliberately: either
+  send prior exchanges so follow-ups like "why?" work, or make it plain that
+  each question stands alone. Silently looking like a chat while behaving like
+  single-shot lookups is the one option to reject — and it interacts with the
+  budget above, since a transcript competes with evidence for the same room.
 - **Keep the honesty instruction.** The prompt tells the guide to say unknown
   rather than guess. That is right and stays; it is currently just saying
   unknown to almost everything, which is a context problem wearing an honesty
@@ -78,7 +103,10 @@ and its hint; the guide's hint line.
 
 Asking "what is this run about?" gets an answer drawn from the trait and the
 run's assignment; verdicts and blockers survive alongside it rather than being
-evicted; the modal opens at roughly 3:2 and about 1.5× its current size,
+evicted; a question sent after the run advances is answered against the state
+at send time rather than the last repaint, and its answer says which state that
+was; a follow-up question either sees the previous exchange or is plainly not a
+follow-up; the modal opens at roughly 3:2 and about 1.5× its current size,
 capped by the terminal; the content behind it is dimmed and still readable,
 through one helper the other two dim sites also use; the chat can be cleared;
 and the hints read like the main view's.
