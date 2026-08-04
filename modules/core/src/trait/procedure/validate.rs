@@ -1026,7 +1026,9 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
     let has_prompt = !item.prompt.trim().is_empty();
     let has_command = item.cmd.is_some() || item.command.is_some();
     let has_projection = !item.projection.is_empty();
-    let has_command_options = item.timeout_ms.is_some() || !item.success_exit_code.is_empty();
+    let has_command_options = item.timeout_ms.is_some()
+        || item.idle_timeout_ms.is_some()
+        || !item.success_exit_code.is_empty();
     let has_sequence_control = item.sequence.is_some()
         || item.when.is_some()
         || item.otherwise.is_some()
@@ -3780,6 +3782,35 @@ mod tests {
         );
         validate_item_shape(&item, SequenceKind::Sequence, "procedure.sequence[0]")
             .expect_err("on-exhausted is loop-only");
+    }
+
+    #[test]
+    fn prompt_item_rejects_idle_timeout_ms_like_its_sibling_timeout_ms() {
+        let item = item_from_toml(
+            "id = \"review\"\ntitle = \"Review\"\nkind = \"prompt\"\nprompt = \"prompt:review\"\nidle-timeout-ms = 5000\n",
+        );
+        validate_item_shape(&item, SequenceKind::Prompt, "procedure.sequence[0]")
+            .expect_err("idle-timeout-ms is command-only, same as timeout-ms");
+    }
+
+    #[test]
+    fn idle_timeout_ms_round_trips_through_command_declaration_and_shorthand() {
+        let declaration = item_from_toml(
+            "id = \"gate\"\ntitle = \"Gate\"\nkind = \"command\"\n[command]\nargv = [\"true\"]\nidle-timeout-ms = 5000\n",
+        );
+        assert_eq!(
+            declaration.command.as_ref().and_then(|command| command.idle_timeout_ms),
+            Some(5000)
+        );
+        let toml_out = toml::to_string(&declaration).expect("declaration serializes");
+        assert!(toml_out.contains("idle-timeout-ms = 5000"));
+
+        let shorthand = item_from_toml(
+            "id = \"gate\"\ntitle = \"Gate\"\nkind = \"command\"\ncmd = \"true\"\nidle-timeout-ms = 5000\n",
+        );
+        assert_eq!(shorthand.idle_timeout_ms, Some(5000));
+        let toml_out = toml::to_string(&shorthand).expect("shorthand serializes");
+        assert!(toml_out.contains("idle-timeout-ms = 5000"));
     }
 
     #[test]

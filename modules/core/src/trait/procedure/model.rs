@@ -569,6 +569,14 @@ pub struct CommandPlan {
     )]
     pub timeout_ms: Option<u64>,
 
+    /// Runtime idle timeout in milliseconds.
+    #[serde(
+        default,
+        rename = "idle-timeout-ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub idle_timeout_ms: Option<u64>,
+
     /// Runtime stdout capture ceiling in bytes. A capture that exceeds this
     /// fails the step rather than landing a truncated value in the slot
     /// ledger (IO/CLI adapters own the actual refusal; core only carries the
@@ -624,6 +632,14 @@ pub struct CommandDeclaration {
         skip_serializing_if = "Option::is_none"
     )]
     pub timeout_ms: Option<u64>,
+
+    /// Runtime idle timeout in milliseconds.
+    #[serde(
+        default,
+        rename = "idle-timeout-ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub idle_timeout_ms: Option<u64>,
 
     /// See [`CommandPlan::capture_bytes`].
     #[serde(
@@ -888,6 +904,14 @@ pub struct SequenceItem {
         skip_serializing_if = "Option::is_none"
     )]
     pub timeout_ms: Option<u64>,
+
+    /// Runtime idle timeout in milliseconds, for simple `cmd` shorthand.
+    #[serde(
+        default,
+        rename = "idle-timeout-ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub idle_timeout_ms: Option<u64>,
 
     /// See [`CommandPlan::capture_bytes`], for simple `cmd` shorthand.
     #[serde(

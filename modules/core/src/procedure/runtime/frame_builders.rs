@@ -708,6 +708,7 @@ fn command_frame(
         resource_argv,
         cwd: plan.cwd.clone(),
         timeout_ms: plan.timeout_ms,
+        idle_timeout_ms: plan.idle_timeout_ms,
         capture_bytes: plan.capture_bytes,
         success_exit_code: plan.success_exit_code.clone(),
         output_slot: item

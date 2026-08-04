@@ -105,6 +105,7 @@ interface SequenceCommonFields {
   readonly input?: SequenceInputValue | readonly SequenceInputValue[];
   readonly output?: SequenceOutputValue | readonly SequenceOutputValue[];
   readonly timeoutMs?: number;
+  readonly idleTimeoutMs?: number;
   readonly timeout?: number;
   readonly successExitCode?: number | readonly number[];
   readonly format?: string | readonly string[];
@@ -254,6 +255,7 @@ export type ProjectSequenceFields = {
   readonly input?: never;
   readonly output?: never;
   readonly timeoutMs?: never;
+  readonly idleTimeoutMs?: never;
   readonly timeout?: never;
   readonly successExitCode?: never;
   readonly format?: never;
@@ -406,7 +408,16 @@ export type ParallelOptions = {
 export type ParallelSequenceFields =
   & Omit<
     SequenceCommonFields,
-    "agent" | "input" | "output" | "timeoutMs" | "timeout" | "successExitCode" | "format" | "emits" | "onFailure"
+    | "agent"
+    | "input"
+    | "output"
+    | "timeoutMs"
+    | "idleTimeoutMs"
+    | "timeout"
+    | "successExitCode"
+    | "format"
+    | "emits"
+    | "onFailure"
   >
   & {
     readonly kind: "parallel";
@@ -423,6 +434,7 @@ export type ParallelSequenceFields =
     readonly input?: never;
     readonly output?: never;
     readonly timeoutMs?: never;
+    readonly idleTimeoutMs?: never;
     readonly timeout?: never;
     readonly successExitCode?: never;
     readonly format?: never;
@@ -431,7 +443,16 @@ export type ParallelSequenceFields =
 export type BranchSequenceFields =
   & Omit<
     SequenceCommonFields,
-    "agent" | "input" | "output" | "timeoutMs" | "timeout" | "successExitCode" | "format" | "emits" | "onFailure"
+    | "agent"
+    | "input"
+    | "output"
+    | "timeoutMs"
+    | "idleTimeoutMs"
+    | "timeout"
+    | "successExitCode"
+    | "format"
+    | "emits"
+    | "onFailure"
   >
   & {
     readonly kind: "branch";
@@ -447,6 +468,7 @@ export type BranchSequenceFields =
     readonly input?: never;
     readonly output?: never;
     readonly timeoutMs?: never;
+    readonly idleTimeoutMs?: never;
     readonly timeout?: never;
     readonly successExitCode?: never;
     readonly format?: never;
@@ -1235,6 +1257,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
         ? undefined
         : refText(commandFields.executableDigestFrom, `sequence.${fields.id}.executableDigestFrom`),
       "timeout-ms": fields.timeoutMs ?? fields.timeout,
+      "idle-timeout-ms": fields.idleTimeoutMs,
       "success-exit-code": fields.successExitCode === undefined
         ? undefined
         : typeof fields.successExitCode === "number"

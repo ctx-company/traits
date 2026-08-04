@@ -757,6 +757,33 @@ mod tests {
         assert_eq!(output.stdout.len(), 100);
     }
 
+    /// 0084: idle and wall are enforced independently, so a request with a
+    /// generous idle window but a tight wall-clock ceiling must still be
+    /// killed by the wall and report `TimeoutKind::Wall`'s reason — a
+    /// silent-but-hung child is not the only way to overrun, and the wall
+    /// stays the backstop regardless of how idle-forgiving a step is.
+    #[test]
+    fn a_small_wall_fires_before_a_large_idle_window_and_names_the_wall() {
+        let argv = vec!["sleep".to_string(), "5".to_string()];
+        let request = RunRequest {
+            argv: &argv,
+            cwd: None,
+            exec_dir: None,
+            success_exit_code: &[0],
+            timeout_ms: Some(50),
+            idle_timeout_ms: Some(10_000),
+            capture_limit: 1024,
+            tick_observer: None,
+        };
+        let output = run_with_env(request, &EMPTY_ENV_OVERLAY).expect("sleep runs");
+        assert!(output.timed_out);
+        assert_eq!(
+            output.timeout_reason,
+            Some(TimeoutKind::Wall.reason()),
+            "a tight wall under a generous idle window must be named as the wall bound"
+        );
+    }
+
     /// [`RunOutput::refuse_if_truncated`] fires on a genuinely truncated
     /// capture and names the real applied cap (`self.capture_limit`) in the
     /// error, never a value the caller would have to restate.

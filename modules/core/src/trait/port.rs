@@ -234,6 +234,7 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 executable_digest_from: None,
                 cwd: command.cwd.clone(),
                 timeout_ms: command.timeout_ms,
+                idle_timeout_ms: None,
                 capture_bytes: command.capture_bytes,
                 success_exit_code: Vec::new(),
             };
@@ -247,6 +248,7 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 command: Some(plan),
                 projection: Vec::new(),
                 timeout_ms: None,
+                idle_timeout_ms: None,
                 capture_bytes: None,
                 success_exit_code: Vec::new(),
                 input: crate::r#trait::procedure::SequenceInputList::default(),

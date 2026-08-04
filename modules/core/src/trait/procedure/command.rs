@@ -19,6 +19,7 @@ pub fn command_plan_for_item(
                 executable_digest_from: None,
                 cwd: None,
                 timeout_ms: item.timeout_ms,
+                idle_timeout_ms: item.idle_timeout_ms,
                 capture_bytes: item.capture_bytes,
                 success_exit_code: success_exit_codes(&item.success_exit_code),
             }))
@@ -52,6 +53,7 @@ pub fn command_plan_for_item(
                 executable_digest_from: command.executable_digest_from.clone(),
                 cwd: command.cwd.clone(),
                 timeout_ms: command.timeout_ms,
+                idle_timeout_ms: command.idle_timeout_ms,
                 capture_bytes: command.capture_bytes,
                 success_exit_code: success_exit_codes(&command.success_exit_code),
             }))

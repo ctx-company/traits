@@ -1243,6 +1243,26 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     expect(viaBranch).toEqual(viaWhen);
   });
 
+  it("emits idle-timeout-ms on a command step that declares it, and omits it otherwise", () => {
+    const draftFor = (idleTimeoutMs: number | undefined) =>
+      toDraftJson(
+        trait("idle-timeout", {
+          version: "0.1.0",
+          name: "Idle Timeout",
+          procedure: procedure({
+            description: "One command step.",
+            sequence: [
+              sequence.command("gate", { cmd: "true", ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }) }),
+            ],
+          }),
+        }),
+      ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+
+    expect(draftFor(5_000).procedure?.sequence?.[0]).toMatchObject({ command: { "idle-timeout-ms": 5_000 } });
+    const withoutIdle = draftFor(undefined).procedure?.sequence?.[0] as { readonly command?: Record<string, unknown>; };
+    expect(withoutIdle?.command).not.toHaveProperty("idle-timeout-ms");
+  });
+
   it("auto-names an inline loop body <step-id>-body", () => {
     const bodyStep = sequence.prompt("refine", { text: prompt.text`Refine the work.` });
     const draft = toDraftJson(

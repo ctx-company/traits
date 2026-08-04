@@ -3020,6 +3020,7 @@ mod check_output_tests {
             resource_argv: Vec::new(),
             cwd: None,
             timeout_ms: None,
+            idle_timeout_ms: None,
             capture_bytes: None,
             success_exit_code: Vec::new(),
             output_slot: "slot:gate".to_string(),

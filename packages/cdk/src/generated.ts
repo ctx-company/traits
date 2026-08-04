@@ -563,6 +563,10 @@ export type CanonicalCommandDeclaration = {
   readonly "cwd"?: string | undefined;
   readonly "executable-digest-from"?: string | undefined;
   /**
+   * Runtime idle timeout in milliseconds.
+   */
+  readonly "idle-timeout-ms"?: number | undefined;
+  /**
    * Exit codes treated as success. Defaults to `[0]` semantically.
    */
   readonly "success-exit-code"?: readonly number[] | undefined;
@@ -1519,6 +1523,10 @@ export type CanonicalSequenceItem = {
    * Optional stable identifier for sequence-order references.
    */
   readonly "id"?: string | undefined;
+  /**
+   * Runtime idle timeout in milliseconds, for simple `cmd` shorthand.
+   */
+  readonly "idle-timeout-ms"?: number | undefined;
   /**
    * Input refs (e.g. `port:user-prompt`, `slot:scope`, `resource:data`).
    * A resource entry may additionally be authored as a guarded table

@@ -3566,6 +3566,110 @@ fn run_call_response_kind(
     }
 }
 
+/// 0084: resolve the effective wall/idle bounds for a command step. A step
+/// that declares a bound owns it; otherwise the repository's configured
+/// bound applies, and a step with neither gets `None` (the runner's own
+/// defaults). Extracted so the precedence is unit-testable independent of
+/// the config-loading and spawn machinery around it.
+fn resolve_command_bounds(
+    policy: Option<&crate::harness_config::EffectiveRunPolicy>,
+    command: &ctx_traits_core::procedure::runtime::CommandFrame,
+) -> (Option<u64>, Option<u64>) {
+    let timeout_ms = command.timeout_ms.or_else(|| {
+        policy
+            .and_then(|policy| policy.command_seconds)
+            .map(|seconds| seconds.saturating_mul(1_000))
+    });
+    let idle_timeout_ms = command.idle_timeout_ms.or_else(|| {
+        policy
+            .and_then(|policy| policy.command_idle_seconds)
+            .map(|seconds| seconds.saturating_mul(1_000))
+    });
+    (timeout_ms, idle_timeout_ms)
+}
+
+#[cfg(test)]
+mod resolve_command_bounds_tests {
+    use super::*;
+
+    fn command_frame(
+        timeout_ms: Option<u64>,
+        idle_timeout_ms: Option<u64>,
+    ) -> ctx_traits_core::procedure::runtime::CommandFrame {
+        ctx_traits_core::procedure::runtime::CommandFrame {
+            cmd: None,
+            argv: vec!["true".to_string()],
+            executable_digest: None,
+            resource_argv: Vec::new(),
+            cwd: None,
+            timeout_ms,
+            idle_timeout_ms,
+            capture_bytes: None,
+            success_exit_code: Vec::new(),
+            output_slot: "slot:gate".to_string(),
+            permission_code: "permission".to_string(),
+            reason: "reason".to_string(),
+        }
+    }
+
+    fn policy(
+        command_seconds: Option<u64>,
+        command_idle_seconds: Option<u64>,
+    ) -> crate::harness_config::EffectiveRunPolicy {
+        crate::harness_config::EffectiveRunPolicy {
+            worktree: false,
+            max_frames: None,
+            frame_seconds: None,
+            total_seconds: None,
+            max_retries: None,
+            attach_wait_seconds: None,
+            idle_seconds: None,
+            command_seconds,
+            command_idle_seconds,
+            max_in_flight: 1,
+            wait: false,
+            strict_loops: false,
+            inline_prompt_bytes: None,
+            story: None,
+        }
+    }
+
+    #[test]
+    fn step_only_wins_over_absent_config() {
+        let command = command_frame(Some(60_000), Some(5_000));
+        let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(None, &command);
+        assert_eq!(timeout_ms, Some(60_000));
+        assert_eq!(idle_timeout_ms, Some(5_000));
+    }
+
+    #[test]
+    fn config_only_applies_when_step_declares_nothing() {
+        let command = command_frame(None, None);
+        let policy = policy(Some(120), Some(10));
+        let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
+        assert_eq!(timeout_ms, Some(120_000));
+        assert_eq!(idle_timeout_ms, Some(10_000));
+    }
+
+    #[test]
+    fn step_wins_over_config_when_both_declare() {
+        let command = command_frame(Some(3_600_000), Some(30_000));
+        let policy = policy(Some(120), Some(10));
+        let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
+        assert_eq!(timeout_ms, Some(3_600_000));
+        assert_eq!(idle_timeout_ms, Some(30_000));
+    }
+
+    #[test]
+    fn neither_declares_yields_none_for_runner_defaults() {
+        let command = command_frame(None, None);
+        let policy = policy(None, None);
+        let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
+        assert_eq!(timeout_ms, None);
+        assert_eq!(idle_timeout_ms, None);
+    }
+}
+
 struct CommandAdvance {
     session: ctx_traits_core::procedure::session::Session,
     failure: Option<CommandStepFailure>,
@@ -3630,25 +3734,23 @@ fn advance_command_frames(
             resolve_resource_argv_for_spawn(&resource_roots, trait_ref, &argv, &resource_argv)?;
         let cwd = command.cwd.clone();
         let success_exit_code = command.success_exit_code.clone();
-        // 0058: how long a command step may take is a property of the machine
-        // and the project, not of the recipe, so the repository's own config
-        // owns both bounds and a trait-declared `timeout-ms` is only the
-        // fallback for a repo that declares neither. Resolved here rather
-        // than threaded from the caller because a command step is the only
-        // consumer, and this runs once per gate.
+        // 0058/0084: how long a command step may take is a property of the
+        // machine and the project by default, so the repository's own
+        // config governs the silent majority of steps that declare neither
+        // bound. A step that authors `timeout-ms`/`idle-timeout-ms` is the
+        // one exception: it knows its own workload better than the repo's
+        // blanket policy, so its declared bound wins over config for that
+        // step alone. The wall stays the backstop regardless — it is
+        // enforced independently of idle in the runner loop, so a step with
+        // a long idle budget still dies on an unrelated, shorter wall.
+        // Resolved here rather than threaded from the caller because a
+        // command step is the only consumer, and this runs once per gate.
         let command_policy = exec_dir
             .or(Some(Utf8Path::new(".")))
             .and_then(|dir| crate::harness_config::resolve_runtime_config(dir).ok())
             .map(|config| config.effective_run_policy());
-        let timeout_ms = command_policy
-            .as_ref()
-            .and_then(|policy| policy.command_seconds)
-            .map(|seconds| seconds.saturating_mul(1_000))
-            .or(command.timeout_ms);
-        let idle_timeout_ms = command_policy
-            .as_ref()
-            .and_then(|policy| policy.command_idle_seconds)
-            .map(|seconds| seconds.saturating_mul(1_000));
+        let (timeout_ms, idle_timeout_ms) =
+            resolve_command_bounds(command_policy.as_ref(), command);
         let capture_limit = command
             .capture_bytes
             .map_or(COMMAND_CAPTURE_LIMIT, |bytes| bytes as usize);

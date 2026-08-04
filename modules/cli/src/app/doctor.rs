@@ -45,6 +45,25 @@ struct ConfigDoctorReport {
     /// shipped, self-updating surface a README pointer names instead of a
     /// second hand-maintained list.
     environment: Vec<EnvVarDoctorRow>,
+    /// 0084: one row per installed command/check step that authors
+    /// `timeout-ms` and/or `idle-timeout-ms`, with the effective wall/idle
+    /// bound and which side (the step or the repository config) won. Every
+    /// step this list omits is silently governed by the two `run.command-*`
+    /// rows above. Empty when trait inventory cannot be resolved (e.g. an
+    /// ad-hoc, non-repository invocation) rather than failing doctor.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    command_step_bounds: Vec<CommandStepBoundDoctorRow>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct CommandStepBoundDoctorRow {
+    trait_id: String,
+    step_id: String,
+    wall_ms: u64,
+    wall_source: &'static str,
+    idle_ms: u64,
+    idle_source: &'static str,
 }
 
 #[derive(serde::Serialize)]
@@ -175,6 +194,20 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                 .inline_prompt_bytes
                 .unwrap_or(crate::app::frame_prompt::DEFAULT_MAX_INLINE_PROMPT_BYTES)
                 .to_string(),
+        ),
+        (
+            "run.command-seconds",
+            format!(
+                "{} (authored step timeout-ms wins over this)",
+                policy.command_seconds.unwrap_or(14_400)
+            ),
+        ),
+        (
+            "run.command-idle-seconds",
+            format!(
+                "{} (authored step idle-timeout-ms wins over this)",
+                policy.command_idle_seconds.unwrap_or(600)
+            ),
         ),
     ] {
         add(&mut knobs, &report.winners, name.into(), value);
@@ -896,6 +929,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             set: std::env::var_os(doc.name).is_some(),
         })
         .collect();
+    let command_step_bounds = command_step_bound_doctor_rows(&policy);
     let output = ConfigDoctorReport {
         knobs,
         tier_warnings: report.tier_warnings,
@@ -904,6 +938,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         builtin_harnesses,
         generated,
         environment,
+        command_step_bounds,
     };
     if json {
         print_json_report(&output, "doctor config report")?;
@@ -972,8 +1007,107 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                 row.contract
             );
         }
+        if !output.command_step_bounds.is_empty() {
+            println!("  command-step-bounds:");
+            for row in &output.command_step_bounds {
+                println!(
+                    "    {}: {} — wall={}ms [{}] idle={}ms [{}]",
+                    safe(&row.trait_id),
+                    safe(&row.step_id),
+                    row.wall_ms,
+                    row.wall_source,
+                    row.idle_ms,
+                    row.idle_source,
+                );
+            }
+        }
     }
     Ok(CommandOutput::new(()))
+}
+
+/// 0084: one row per installed command/check step that authors
+/// `timeout-ms` and/or `idle-timeout-ms`, resolved against `policy` with the
+/// same step-over-config precedence the IO runner applies
+/// (`ctx_traits_io::run`'s `resolve_command_bounds`). Listing only authoring
+/// steps keeps the output bounded — the `run.command-seconds`/
+/// `run.command-idle-seconds` rows already describe every silent step.
+/// Degrades to an empty list rather than failing doctor when inventory
+/// discovery is unavailable (e.g. an ad-hoc, non-repository invocation).
+fn command_step_bound_doctor_rows(
+    policy: &ctx_traits_io::harness_config::EffectiveRunPolicy,
+) -> Vec<CommandStepBoundDoctorRow> {
+    let Ok(context) = ctx_traits_io::inventory::InventoryContext::discover() else {
+        return Vec::new();
+    };
+    let Ok(ids) = context.candidate_ids() else {
+        return Vec::new();
+    };
+    let default_wall_ms = policy
+        .command_seconds
+        .unwrap_or(14_400)
+        .saturating_mul(1_000);
+    let default_idle_ms = policy
+        .command_idle_seconds
+        .unwrap_or(600)
+        .saturating_mul(1_000);
+    let mut rows = Vec::new();
+    for id in ids {
+        let Ok(Some(resolution)) = context.resolve_tiers(&id) else {
+            continue;
+        };
+        let Ok((trait_ref, ..)) = ctx_traits_io::run::load_trait(resolution.winner.path.as_str())
+        else {
+            continue;
+        };
+        let mut items: Vec<&ctx_traits_core::r#trait::procedure::SequenceItem> = Vec::new();
+        if let Some(procedure) = &trait_ref.procedure {
+            items.extend(procedure.sequence.iter());
+        }
+        for (_, named) in trait_ref.sequences.iter() {
+            items.extend(named.sequence.iter());
+        }
+        for item in items {
+            if !matches!(
+                item.effective_kind(),
+                ctx_traits_core::r#trait::procedure::SequenceKind::Command
+                    | ctx_traits_core::r#trait::procedure::SequenceKind::Check
+            ) {
+                continue;
+            }
+            let declared_timeout_ms = item
+                .timeout_ms
+                .or_else(|| item.command.as_ref().and_then(|command| command.timeout_ms));
+            let declared_idle_timeout_ms = item.idle_timeout_ms.or_else(|| {
+                item.command
+                    .as_ref()
+                    .and_then(|command| command.idle_timeout_ms)
+            });
+            if declared_timeout_ms.is_none() && declared_idle_timeout_ms.is_none() {
+                continue;
+            }
+            let step_id = item
+                .id
+                .clone()
+                .unwrap_or_else(|| "(unnamed step)".to_string());
+            rows.push(CommandStepBoundDoctorRow {
+                trait_id: trait_ref.id.as_str().to_string(),
+                step_id,
+                wall_ms: declared_timeout_ms.unwrap_or(default_wall_ms),
+                wall_source: if declared_timeout_ms.is_some() {
+                    "step"
+                } else {
+                    "config"
+                },
+                idle_ms: declared_idle_timeout_ms.unwrap_or(default_idle_ms),
+                idle_source: if declared_idle_timeout_ms.is_some() {
+                    "step"
+                } else {
+                    "config"
+                },
+            });
+        }
+    }
+    rows
 }
 
 fn format_env_var_kind(kind: ctx_traits_io::env_reference::EnvVarKind) -> &'static str {

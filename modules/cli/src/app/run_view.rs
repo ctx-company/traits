@@ -5746,6 +5746,7 @@ mod tests {
             executable_digest_from: None,
             cwd: None,
             timeout_ms: None,
+            idle_timeout_ms: None,
             capture_bytes: None,
             success_exit_code: vec![3],
         });

@@ -54,6 +54,12 @@ pub struct CommandFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub timeout_ms: Option<u64>,
+    #[serde(
+        default,
+        rename = "idle-timeout-ms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub idle_timeout_ms: Option<u64>,
     /// See [`crate::r#trait::procedure::CommandPlan::capture_bytes`].
     #[serde(
         default,
