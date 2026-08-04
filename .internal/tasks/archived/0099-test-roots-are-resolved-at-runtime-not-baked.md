@@ -1,8 +1,38 @@
 # 0099 — Test roots are resolved at runtime, never baked at compile time
 
-**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner call after
-this failure class killed two runs' gates in one day; decisions in this file are the contract —
-they were settled deliberately, do not re-open them without a concrete contradiction)
+**Status:** done · **Landed:** `c4813f26` (test: resolve CARGO_MANIFEST_DIR at runtime instead of
+baking at compile time), confirmed ancestor of `HEAD` (`6ccd5c3a`) · **Depends on:** nothing ·
+**Raised:** 2026-08-04 (owner call after this failure class killed two runs' gates in one day;
+decisions in this file are the contract — they were settled deliberately, do not re-open them
+without a concrete contradiction)
+
+## Evidence
+
+All four sites read `std::env::var("CARGO_MANIFEST_DIR")` at runtime with a landmark probe
+(`modules/cli/tests/support/src/lib.rs:47`, `modules/wasm-core/tests/native_wasm_parity.rs:47`,
+`modules/core/src/model_view/compile.rs:1335`, `modules/io/src/confinement.rs:1467`); a repo-wide
+grep for the live `env!("CARGO_MANIFEST_DIR")` / `option_env!(...)` tokens under `modules/**`
+returns zero hits outside a doc comment and the guard proof's own assembled-needle machinery. The
+guard proof `modules/cli/tests/proof_compile_time_paths.rs` exists with an empty `ALLOWLIST`.
+
+Verified this close-out round:
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_compile_time_paths` — 3/3
+  green.
+- Mutation test: added a throwaway `env!("CARGO_MANIFEST_DIR")` to `modules/cli/src/lib.rs`, reran
+  the proof — `no_unjustified_compile_time_manifest_dir_bakes` failed red, naming the exact
+  file:line; reverted (`git checkout -- modules/cli/src/lib.rs`).
+- Shared-slot regression, reproduced directly: built `proof_compile_time_paths` from a second git
+  worktree (`git worktree add`) at the same commit with `CARGO_TARGET_DIR` pointed at a shared
+  slot, ran it green there, then `git worktree remove --force`d that worktree (source now gone),
+  then reran the *same* `CARGO_TARGET_DIR` from this worktree — cargo relinked the identical cached
+  binary (0.14s, same artifact hash) rather than rebuilding, and it still passed: the runtime
+  `CARGO_MANIFEST_DIR` re-resolved to this worktree's own path on the shared binary rather than
+  carrying the deleted worktree's stale root. This is the exact run-4de40dda kill mechanism,
+  confirmed non-regressing.
+- `CARGO_TARGET_DIR=target just test` (the per-round gate) — exit 0, all suites green.
+
+No gap found against the Done-when below; no code changes were needed, only validation and this
+close-out.
 
 Gate builds share build-slot target dirs (`CARGO_TARGET_DIR=…/build-slots/slot-N`) across run
 worktrees. Any test code that bakes a filesystem path at compile time — `env!("CARGO_MANIFEST_DIR")`
