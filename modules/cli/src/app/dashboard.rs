@@ -5331,7 +5331,7 @@ fn render_sessions_preview_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
         area,
         &SESSIONS_PREVIEW_PANE_IDS,
         &data,
-        None,
+        &[],
         None,
         run_view::PaneRenderState {
             scrolls: &mut state.pane_scrolls,

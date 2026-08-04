@@ -667,6 +667,12 @@ struct RunStep {
     /// container; its elapsed/tokens are populated from the presentation
     /// loop aggregates instead of the generic per-step maps.
     loop_key: Option<String>,
+    /// `true` when this step is a container currently on the active path
+    /// (`Activity::Ancestor` — a loop mid-iteration, say), from
+    /// [`item_activity`]. Drives the journey pane's ladder follow target
+    /// (0082): the ladder is exactly the rows with this flag set, outermost
+    /// first, with the active row itself appended.
+    on_active_path: bool,
     position_path: Vec<ctx_traits_core::procedure::runtime::PathSegment>,
     run_index: usize,
     structured_count: usize,
@@ -1664,21 +1670,42 @@ fn guide_snapshot(view: &RunView) -> (String, String) {
     (step, statuses)
 }
 
+/// 0082: `Ladder` replaces the old bottom-pinned `ActiveRow` alignment.
+/// `rows` is the ladder from [`journey_lines_with_active_row`] — every row on
+/// the active path, outermost first, with the active row itself appended as
+/// the last (innermost) element; empty when there is no active row. A slice
+/// ref (not an owned `Vec`) keeps this `Copy`, since its lifetime never
+/// outlives the render pass that resolved it.
 #[derive(Clone, Copy)]
-enum FollowTarget {
+enum FollowTarget<'a> {
     Tail,
-    ActiveRow(Option<usize>),
+    Ladder(&'a [usize]),
 }
 
-impl FollowTarget {
+impl FollowTarget<'_> {
     /// The viewport start which puts this target at its follow alignment,
     /// clamped using the same bounds as `ViewportScroll`.
     fn viewport_start(self, len: usize, rows: usize) -> usize {
         let desired_start = match self {
             Self::Tail => len.saturating_sub(rows),
-            Self::ActiveRow(active_row) => active_row
-                .unwrap_or_else(|| len.saturating_sub(1))
-                .saturating_sub(rows.saturating_sub(1)),
+            // Empty ladder: no active row, so there is nothing to pin to the
+            // top — this must equal the old `ActiveRow(None)` bottom-pin
+            // exactly, for parity on the anchor-less preview surface.
+            Self::Ladder([]) => len.saturating_sub(rows),
+            Self::Ladder(ladder) => {
+                let (&anchor, ancestors) = ladder
+                    .split_last()
+                    .expect("non-empty ladder has a last element");
+                // Outermost enclosing row that still leaves the anchor
+                // visible — the first (outermost) ladder row whose header-to-
+                // anchor span fits within `rows`; the anchor itself is the
+                // floor when none do.
+                ancestors
+                    .iter()
+                    .copied()
+                    .find(|&row| anchor.saturating_sub(row) <= rows.saturating_sub(1))
+                    .unwrap_or(anchor)
+            }
         };
         desired_start.min(len.saturating_sub(rows.min(len)))
     }
@@ -1689,8 +1716,8 @@ impl FollowTarget {
             // `window(0)` is always empty, so its start cannot describe the
             // persisted offset. At zero height, bottom remains the only
             // observable follow alignment.
-            Self::ActiveRow(_) if rows == 0 => scroll.is_at_bottom(rows),
-            Self::ActiveRow(_) => scroll.window(rows).start == self.viewport_start(len, rows),
+            Self::Ladder(_) if rows == 0 => scroll.is_at_bottom(rows),
+            Self::Ladder(_) => scroll.window(rows).start == self.viewport_start(len, rows),
         }
     }
 }
@@ -1704,7 +1731,7 @@ fn apply_scroll_and_derive_follow(
     delta: tui_kit::ScrollDelta,
     budget: usize,
     len: usize,
-    target: FollowTarget,
+    target: FollowTarget<'_>,
 ) {
     scroll.apply(delta, budget);
     *follow = target.is_following(scroll, len, budget);
@@ -1762,7 +1789,7 @@ fn render_locked(state: &mut RunPanelState) {
     state.repaint.apply_resize();
     poll_and_apply_keys(state);
     let progress_lines = progress_lines(&state.view);
-    let (journey_lines, active_row) = journey_lines_with_active_row(&state.view);
+    let (journey_lines, _active_row, journey_ladder) = journey_lines_with_active_row(&state.view);
     let post_run_lines = post_run_lines(&state.view);
     let history_rows = story_history_lines(&state.view);
     let mut current_rows = story_stream_lines(state);
@@ -1799,7 +1826,7 @@ fn render_locked(state: &mut RunPanelState) {
                 title_line: &title_line,
                 progress_lines: &progress_lines,
                 journey_lines: &journey_lines,
-                active_row,
+                journey_ladder: &journey_ladder,
                 history_rows: &history_rows,
                 current_rows: &current_rows,
                 post_run_lines: post_run_lines.as_deref(),
@@ -1997,7 +2024,8 @@ struct LiveFrame<'a> {
     progress_lines: &'a [tui::Line],
     /// The JOURNEY pane's full content — [`journey_lines_with_active_row`].
     journey_lines: &'a [JourneyRow],
-    active_row: Option<usize>,
+    /// The JOURNEY pane's follow ladder — [`journey_lines_with_active_row`].
+    journey_ladder: &'a [usize],
     /// Untruncated history/current-activity events — [`event_row_line`]
     /// truncates each to a single physical row only once this pane's inner
     /// width is known, inside [`render_pane_body`] itself.
@@ -2061,7 +2089,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         title_line,
         progress_lines,
         journey_lines: journey_rows,
-        active_row,
+        journey_ladder,
         history_rows,
         current_rows,
         post_run_lines,
@@ -2103,7 +2131,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         regions[0],
         &LIVE_PANE_IDS,
         &data,
-        active_row,
+        journey_ladder,
         Some(CURRENT_PANE),
         PaneRenderState {
             scrolls,
@@ -2221,7 +2249,7 @@ pub(crate) fn render_pane_body(
     area: Rect,
     ids: &PaneIds,
     data: &PaneData<'_>,
-    journey_active_row: Option<usize>,
+    journey_ladder: &[usize],
     reconcile_default: Option<PaneId>,
     state: PaneRenderState<'_>,
 ) {
@@ -2355,7 +2383,7 @@ pub(crate) fn render_pane_body(
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
                 journey.len(),
-                FollowTarget::ActiveRow(journey_active_row),
+                FollowTarget::Ladder(journey_ladder),
             );
         } else if id == ids.history
             && let (Some(history), Some(inner)) = (&history, history_inner)
@@ -2446,7 +2474,7 @@ pub(crate) fn render_pane_body(
         follow_target(
             scrolls.get_mut(ids.journey),
             *journey_follow,
-            FollowTarget::ActiveRow(journey_active_row),
+            FollowTarget::Ladder(journey_ladder),
             journey.len(),
             inner.height as usize,
         );
@@ -2487,7 +2515,7 @@ pub(crate) fn render_pane_body(
 fn follow_target(
     scroll: &mut tui_kit::ViewportScroll,
     follow: bool,
-    target: FollowTarget,
+    target: FollowTarget<'_>,
     len: usize,
     rows: usize,
 ) {
@@ -3196,21 +3224,37 @@ fn journey_lines(view: &RunView) -> Vec<JourneyRow> {
 }
 
 /// Same output as [`journey_lines`], plus the rendered row index of the
-/// ACTIVE step's [`render_step_summary`] line — the one true source of that
-/// mapping, since this is the only place that knows how many rows each step
-/// group emits. Follow-mode anchoring must derive from this row index, never
-/// from `view.steps`' own item index (a different coordinate space: each
-/// step group is 3 rows, `render_step_summary` + two `render_port_line`
-/// calls, under a multi-row header the caller must not hand-count either).
-fn journey_lines_with_active_row(view: &RunView) -> (Vec<JourneyRow>, Option<usize>) {
+/// ACTIVE step's [`render_step_summary`] line, and the follow ladder (0082)
+/// — the one true source of the step→row mapping, since this is the only
+/// place that knows how many rows each step group emits. Follow-mode
+/// anchoring must derive from these row indices, never from `view.steps`'
+/// own item index (a different coordinate space: each step group is 3 rows,
+/// `render_step_summary` + two `render_port_line` calls, under a multi-row
+/// header the caller must not hand-count either).
+///
+/// The ladder is the row indices of every step on the active path
+/// (`RunStep::on_active_path`, e.g. an enclosing loop mid-iteration),
+/// outermost first — already true of pre-order flatten order — with the
+/// active row itself appended as the last (innermost) element. Empty when
+/// there is no active row.
+fn journey_lines_with_active_row(view: &RunView) -> (Vec<JourneyRow>, Option<usize>, Vec<usize>) {
     let mut lines = Vec::new();
     let target_step = active_step_index(view);
     let mut active_row = None;
+    let mut ladder = Vec::new();
     for (index, step) in view.steps.iter().enumerate() {
+        if step.on_active_path {
+            ladder.push(lines.len());
+        }
         if Some(index) == target_step {
             active_row = Some(lines.len());
         }
         lines.push(JourneyRow(JourneyRowKind::Step(Box::new(step.clone()))));
+    }
+    if let Some(row) = active_row {
+        ladder.push(row);
+    } else {
+        ladder.clear();
     }
     if let Some(narration) = completed_narration(view) {
         lines.push(JourneyRow(JourneyRowKind::Line(narration_line(narration))));
@@ -3230,7 +3274,7 @@ fn journey_lines_with_active_row(view: &RunView) -> (Vec<JourneyRow>, Option<usi
                 .map(|line| JourneyRow(JourneyRowKind::Line(line))),
         );
     }
-    (lines, active_row)
+    (lines, active_row, ladder)
 }
 
 /// The completed-run morph requires both a completed journey and actual,
@@ -4729,6 +4773,7 @@ fn step_from_item(
         elapsed: None,
         output_tokens: None,
         loop_key,
+        on_active_path: activity == Activity::Ancestor,
         position_path: stamped_path,
         run_index: item.run_index,
         structured_count: 0,
@@ -5490,6 +5535,7 @@ mod tests {
             elapsed: Some(Duration::from_secs(5)),
             output_tokens: Some(1_200),
             loop_key: None,
+            on_active_path: false,
             position_path: Vec::new(),
             run_index: 0,
             structured_count: 0,
@@ -7060,7 +7106,7 @@ summary = "A test trait."
             active_step,
             step("d", StepState::Pending, None),
         ]);
-        let (lines, active_row) = journey_lines_with_active_row(&view);
+        let (lines, active_row, _ladder) = journey_lines_with_active_row(&view);
         let active_row = active_row.expect("an active step must yield a row anchor");
         assert_eq!(active_row, 2, "each preceding step contributes one row");
         let rendered = journey_row_lines(&lines, 120);
@@ -7142,8 +7188,12 @@ summary = "A test trait."
 
     #[test]
     fn render_tree_lines_with_active_row_is_none_when_no_step_is_selectable() {
-        let (_, active_row) = journey_lines_with_active_row(&view_with(Vec::new()));
+        let (_, active_row, ladder) = journey_lines_with_active_row(&view_with(Vec::new()));
         assert_eq!(active_row, None);
+        assert!(
+            ladder.is_empty(),
+            "no active step must yield an empty ladder"
+        );
     }
 
     fn sample_lines(n: usize) -> Vec<tui::Line> {
@@ -7559,7 +7609,7 @@ summary = "A test trait."
                         title_line: &tui::Line::blank(),
                         progress_lines: &progress_sample_lines,
                         journey_lines: &tree_lines,
-                        active_row: Some(0),
+                        journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -7589,7 +7639,7 @@ summary = "A test trait."
                         title_line: &tui::Line::blank(),
                         progress_lines: &progress_sample_lines,
                         journey_lines: &tree_lines,
-                        active_row: Some(0),
+                        journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -7641,7 +7691,7 @@ summary = "A test trait."
                         title_line: &tui::Line::blank(),
                         progress_lines: &progress,
                         journey_lines: &journey,
-                        active_row: Some(0),
+                        journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -7746,7 +7796,7 @@ summary = "A test trait."
                         title_line: &tui::Line::blank(),
                         progress_lines: &progress,
                         journey_lines: &journey,
-                        active_row: Some(0),
+                        journey_ladder: &[0],
                         history_rows: &history,
                         current_rows: &[],
                         post_run_lines: None,
@@ -7833,7 +7883,7 @@ summary = "A test trait."
                             title_line: &tui::Line::blank(),
                             progress_lines: &progress,
                             journey_lines: &journey,
-                            active_row: None,
+                            journey_ladder: &[],
                             history_rows: &[],
                             current_rows: &current,
                             post_run_lines: Some(&post_run),
@@ -7920,7 +7970,7 @@ summary = "A test trait."
                         title_line: &tui::Line::blank(),
                         progress_lines: &[],
                         journey_lines: &[],
-                        active_row: None,
+                        journey_ladder: &[],
                         history_rows: &[],
                         current_rows: std::slice::from_ref(&overlay),
                         post_run_lines: None,
@@ -7972,7 +8022,7 @@ summary = "A test trait."
                         title_line: &pending_title_line,
                         progress_lines: &[],
                         journey_lines: &[],
-                        active_row: None,
+                        journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -8010,7 +8060,7 @@ summary = "A test trait."
                         title_line: &title_line,
                         progress_lines: &[],
                         journey_lines: &[],
-                        active_row: None,
+                        journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -8057,7 +8107,7 @@ summary = "A test trait."
                         title_line: &title_line,
                         progress_lines: &[],
                         journey_lines: &[],
-                        active_row: None,
+                        journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
                         post_run_lines: None,
@@ -8181,11 +8231,11 @@ summary = "A test trait."
     }
 
     #[test]
-    fn zero_height_follow_active_row_reengages_at_end_only() {
+    fn zero_height_follow_ladder_reengages_at_end_only() {
         let mut scroll = tui_kit::ViewportScroll::new();
         scroll.set_len(30);
         let mut follow = false;
-        let target = FollowTarget::ActiveRow(Some(12));
+        let target = FollowTarget::Ladder(&[12]);
 
         apply_scroll_and_derive_follow(
             &mut scroll,
@@ -8195,10 +8245,7 @@ summary = "A test trait."
             30,
             target,
         );
-        assert!(
-            follow,
-            "end must reengage active-row following at zero height"
-        );
+        assert!(follow, "end must reengage ladder following at zero height");
 
         apply_scroll_and_derive_follow(
             &mut scroll,
@@ -8210,7 +8257,7 @@ summary = "A test trait."
         );
         assert!(
             !follow,
-            "a non-bottom position must release active-row following at zero height"
+            "a non-bottom position must release ladder following at zero height"
         );
     }
 
@@ -8249,11 +8296,11 @@ summary = "A test trait."
     }
 
     #[test]
-    fn journey_tail_does_not_reengage_active_row_follow() {
+    fn journey_tail_does_not_reengage_ladder_follow() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        let target = FollowTarget::ActiveRow(Some(12));
+        let target = FollowTarget::Ladder(&[12]);
         follow_target(&mut scroll, true, target, 40, 10);
-        assert_eq!(scroll.window(10), 3..13, "active row stays at the bottom");
+        assert_eq!(scroll.window(10), 12..22, "the anchor row is the top line");
 
         let mut follow = true;
         apply_scroll_and_derive_follow(
@@ -8264,7 +8311,7 @@ summary = "A test trait."
             40,
             target,
         );
-        assert!(!follow, "the final window is not the active-row alignment");
+        assert!(!follow, "the final window is not the ladder alignment");
         assert_eq!(scroll.window(10), 30..40);
 
         // A render while released must leave the user at the pending tail.
@@ -8273,9 +8320,9 @@ summary = "A test trait."
     }
 
     #[test]
-    fn journey_reengages_only_at_active_row_alignment() {
+    fn journey_reengages_only_at_ladder_alignment() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        let target = FollowTarget::ActiveRow(Some(12));
+        let target = FollowTarget::Ladder(&[12]);
         follow_target(&mut scroll, true, target, 40, 10);
         let mut follow = true;
 
@@ -8289,9 +8336,9 @@ summary = "A test trait."
         );
         assert!(
             !follow,
-            "a nearby active row must not be enough to reengage"
+            "a nearby ladder alignment must not be enough to reengage"
         );
-        assert_eq!(scroll.window(10), 5..15);
+        assert_eq!(scroll.window(10), 14..24);
 
         apply_scroll_and_derive_follow(
             &mut scroll,
@@ -8302,36 +8349,99 @@ summary = "A test trait."
             target,
         );
         assert!(follow, "returning to the exact alignment resumes following");
-        assert_eq!(scroll.window(10), 3..13);
+        assert_eq!(scroll.window(10), 12..22);
     }
 
     #[test]
     fn journey_follow_target_falls_back_to_tail_and_handles_tail_alignment() {
-        assert_eq!(FollowTarget::ActiveRow(None).viewport_start(40, 10), 30);
-        assert_eq!(FollowTarget::ActiveRow(Some(39)).viewport_start(40, 10), 30);
+        assert_eq!(FollowTarget::Ladder(&[]).viewport_start(40, 10), 30);
+        assert_eq!(FollowTarget::Ladder(&[39]).viewport_start(40, 10), 30);
     }
 
     #[test]
-    fn progress_follow_aligns_each_active_rendered_row_without_overshoot() {
+    fn journey_follow_pins_the_anchor_row_to_the_top_without_overshoot() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(12)), 40, 10);
-        assert_eq!(scroll.window(10), 3..13);
-
-        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(21)), 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::Ladder(&[12]), 40, 10);
         assert_eq!(scroll.window(10), 12..22);
 
-        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(30)), 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::Ladder(&[21]), 40, 10);
         assert_eq!(scroll.window(10), 21..31);
+
+        follow_target(&mut scroll, true, FollowTarget::Ladder(&[30]), 40, 10);
+        assert_eq!(
+            scroll.window(10),
+            30..40,
+            "clamped: 30 is the last valid start"
+        );
     }
 
     #[test]
-    fn progress_follow_keeps_the_active_row_at_bottom_after_resize() {
+    fn journey_follow_keeps_the_anchor_visible_after_resize_near_the_end() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(58)), 60, 10);
-        assert_eq!(scroll.window(10), 49..59);
+        follow_target(&mut scroll, true, FollowTarget::Ladder(&[58]), 60, 10);
+        assert_eq!(
+            scroll.window(10),
+            50..60,
+            "clamped, but the anchor stays visible"
+        );
 
-        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(58)), 60, 20);
-        assert_eq!(scroll.window(20), 39..59);
+        follow_target(&mut scroll, true, FollowTarget::Ladder(&[58]), 60, 20);
+        assert_eq!(
+            scroll.window(20),
+            40..60,
+            "clamped, but the anchor stays visible"
+        );
+    }
+
+    // 0082: `journey_lines_with_active_row` resolves the ladder from
+    // `RunStep::on_active_path`, pre-order (outermost first), with the
+    // active row appended as the floor.
+    #[test]
+    fn journey_ladder_resolves_outermost_first_with_the_active_row_as_the_floor() {
+        let mut outer_loop = step("outer loop", StepState::Running, None);
+        outer_loop.on_active_path = true;
+        let mut inner_loop = step("inner loop", StepState::Running, None);
+        inner_loop.on_active_path = true;
+        let mut active_step = step("body", StepState::Running, None);
+        active_step.active = true;
+        let view = view_with(vec![outer_loop, inner_loop, active_step]);
+        let (_, active_row, ladder) = journey_lines_with_active_row(&view);
+        assert_eq!(active_row, Some(2));
+        assert_eq!(
+            ladder,
+            vec![0, 1, 2],
+            "outermost container first, active row last"
+        );
+    }
+
+    #[test]
+    fn journey_ladder_is_empty_when_no_step_is_active() {
+        let view = view_with(vec![step("a", StepState::Pending, None)]);
+        let (_, active_row, ladder) = journey_lines_with_active_row(&view);
+        assert_eq!(active_row, None);
+        assert!(ladder.is_empty());
+    }
+
+    #[test]
+    fn ladder_viewport_start_prefers_the_outermost_row_that_fits() {
+        let ladder = [0usize, 5, 12];
+        // Tall viewport: the outer loop header (row 0) fits above the anchor.
+        assert_eq!(FollowTarget::Ladder(&ladder).viewport_start(40, 15), 0);
+        // Shrink until only the inner header still fits.
+        assert_eq!(FollowTarget::Ladder(&ladder).viewport_start(40, 8), 5);
+        // Shrink below that: the step itself is the top line, never scrolled out.
+        assert_eq!(FollowTarget::Ladder(&ladder).viewport_start(40, 5), 12);
+    }
+
+    #[test]
+    fn ladder_viewport_start_clamps_near_the_end_of_the_list_but_keeps_the_anchor_visible() {
+        let ladder = [0usize, 5, 38];
+        let start = FollowTarget::Ladder(&ladder).viewport_start(40, 10);
+        assert_eq!(start, 30);
+        assert!(
+            (start..start + 10).contains(&38),
+            "the anchor must stay visible"
+        );
     }
 
     /// The regression this exists for: a window focus change alters the whole
@@ -8552,7 +8662,7 @@ summary = "A test trait."
                             title_line: &tui::Line::blank(),
                             progress_lines: &[],
                             journey_lines: &[],
-                            active_row: None,
+                            journey_ladder: &[],
                             history_rows: &[],
                             current_rows: &[],
                             post_run_lines: None,
