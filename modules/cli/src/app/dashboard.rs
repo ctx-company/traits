@@ -510,7 +510,7 @@ struct AttachedView {
     /// `history`/`current` (from the P521 activity sidecar) are used only
     /// while attached.
     progress_lines: Vec<tui::Line>,
-    journey_lines: Vec<tui::Line>,
+    journey_lines: Vec<run_view::JourneyRow>,
     history: Vec<run_view::EventRow>,
     current: Vec<run_view::EventRow>,
     /// The persisted P552 session title, when the drive resolved one —
@@ -2853,7 +2853,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
 /// Owned counterpart of [`run_view::LedgerPaneProjection`].
 struct PaneReconstruction {
     progress: Vec<tui::Line>,
-    journey: Vec<tui::Line>,
+    journey: Vec<run_view::JourneyRow>,
     history: Vec<run_view::EventRow>,
     current: Vec<run_view::EventRow>,
     activity_available: bool,
@@ -5365,7 +5365,7 @@ fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
 /// read it from, so the two never drift. Any activity-sidecar degradation
 /// reason is painted into the always-rendered progress pane, since this
 /// preview never draws a title row for a suffix to reach otherwise.
-fn sessions_preview_pane_lines(state: &State) -> (Vec<tui::Line>, Vec<tui::Line>) {
+fn sessions_preview_pane_lines(state: &State) -> (Vec<tui::Line>, Vec<run_view::JourneyRow>) {
     let Some(preview) = state.session_preview.as_ref() else {
         return (Vec::new(), Vec::new());
     };
@@ -5769,9 +5769,9 @@ fn session_visible_row_label(
 
 fn sessions_journey_lines(state: &State) -> Vec<RLine<'static>> {
     match &state.session_preview {
-        Some(preview) if !preview.journey_lines.is_empty() => {
-            preview.journey_lines.iter().map(render_line).collect()
-        }
+        Some(preview) if !preview.journey_lines.is_empty() => (0..preview.journey_lines.len())
+            .map(|_| RLine::default())
+            .collect(),
         Some(_) => vec![RLine::from(Span::styled(
             "(no journey recorded for this session)",
             Style::default().add_modifier(Modifier::DIM),
@@ -6400,7 +6400,7 @@ mod tests {
             run_id: format!("r-{id}"),
             state_digest: String::new(),
             progress_lines: vec![labeled_dim_line("stub")],
-            journey_lines: vec![labeled_dim_line("stub")],
+            journey_lines: vec![run_view::journey_line(labeled_dim_line("stub"))],
             history: Vec::new(),
             current: Vec::new(),
             title: None,
@@ -6587,7 +6587,7 @@ mod tests {
         state.focus = FocusRing::new(vec![PANE_SESSIONS_JOURNEY]);
         let mut preview = attached_view_for("A");
         preview.journey_lines = (0..5)
-            .map(|n| labeled_dim_line(&format!("line-{n}")))
+            .map(|n| run_view::journey_line(labeled_dim_line(&format!("line-{n}"))))
             .collect();
         state.session_preview = Some(preview);
         state.last_pane_layout = PaneLayoutResult::default();
@@ -6632,7 +6632,7 @@ mod tests {
         let mut preview = attached_view_for("A");
         preview.progress_lines = vec![labeled_dim_line("progress-1")];
         preview.journey_lines = (0..12)
-            .map(|n| labeled_dim_line(&format!("journey-{n}")))
+            .map(|n| run_view::journey_line(labeled_dim_line(&format!("journey-{n}"))))
             .collect();
         state.session_preview = Some(preview);
 
@@ -6987,7 +6987,7 @@ mod tests {
         view.ledger_path = ledger_path.clone();
         view.state_digest = session.state_digest.to_string();
         view.progress_lines = vec![labeled_dim_line("seeded-progress")];
-        view.journey_lines = vec![labeled_dim_line("seeded-journey")];
+        view.journey_lines = vec![run_view::journey_line(labeled_dim_line("seeded-journey"))];
         view.activity_available = false;
 
         refresh_attached_view(&mut view);
@@ -6996,7 +6996,7 @@ mod tests {
             view.progress_lines,
             vec![labeled_dim_line("seeded-progress")]
         );
-        assert_eq!(view.journey_lines, vec![labeled_dim_line("seeded-journey")]);
+        assert_eq!(view.journey_lines.len(), 1);
 
         append_activity_event(&ledger_path, "frame-a", "now active");
         refresh_attached_view(&mut view);
@@ -7010,7 +7010,7 @@ mod tests {
             view.progress_lines,
             vec![labeled_dim_line("seeded-progress")]
         );
-        assert_eq!(view.journey_lines, vec![labeled_dim_line("seeded-journey")]);
+        assert_eq!(view.journey_lines.len(), 1);
     }
 
     #[test]

@@ -347,7 +347,7 @@ pub(crate) const LIVE_PANE_IDS: PaneIds = PaneIds {
 /// `history`/`current` rather than fabricating them.
 pub(crate) struct PaneData<'a> {
     pub(crate) progress: Option<&'a [tui::Line]>,
-    pub(crate) journey: Option<&'a [tui::Line]>,
+    pub(crate) journey: Option<&'a [JourneyRow]>,
     pub(crate) history: Option<&'a [EventRow]>,
     pub(crate) current: Option<&'a [EventRow]>,
     /// P552: the title row this pane set's own body sits under — [`PaneTitleRow::None`]
@@ -465,6 +465,7 @@ struct RunStep {
     state: StepState,
     active: bool,
     counts_progress: bool,
+    #[allow(dead_code)] // Retained plan facts; compact journey rows no longer render ports.
     inputs: Vec<PortSlug>,
     outputs: Vec<PortSlug>,
     elapsed: Option<Duration>,
@@ -484,6 +485,20 @@ struct RunStep {
     summary: Option<String>,
     /// Elapsed-since-pane-start stamp for `summary`, `None` alongside it.
     summary_at: Option<Duration>,
+}
+
+#[derive(Clone)]
+pub(crate) struct JourneyRow(JourneyRowKind);
+
+#[allow(dead_code)] // Used by dashboard fixtures; production rows originate here.
+pub(crate) fn journey_line(line: tui::Line) -> JourneyRow {
+    JourneyRow(JourneyRowKind::Line(line))
+}
+
+#[derive(Clone)]
+enum JourneyRowKind {
+    Step(Box<RunStep>),
+    Line(tui::Line),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -510,6 +525,7 @@ enum Activity {
 #[derive(Debug, Clone)]
 struct PortSlug {
     slug: String,
+    #[allow(dead_code)] // Retained port satisfaction fact; no longer rendered in journey rows.
     satisfied: bool,
 }
 
@@ -1503,7 +1519,7 @@ fn render_locked(state: &mut RunPanelState) {
             },
         );
     });
-    state.last_tree_lines = journey_lines;
+    state.last_tree_lines = journey_row_lines(&journey_lines, 80);
     state
         .handled_generation
         .fetch_max(input_generation, Ordering::Release);
@@ -1686,7 +1702,7 @@ struct LiveFrame<'a> {
     /// The PROGRESS pane's bounded standing facts — [`progress_lines`].
     progress_lines: &'a [tui::Line],
     /// The JOURNEY pane's full content — [`journey_lines_with_active_row`].
-    journey_lines: &'a [tui::Line],
+    journey_lines: &'a [JourneyRow],
     active_row: Option<usize>,
     /// Untruncated history/current-activity events — [`event_row_line`]
     /// truncates each to a single physical row only once this pane's inner
@@ -1751,7 +1767,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     let LiveFrame {
         title_line,
         progress_lines,
-        journey_lines,
+        journey_lines: journey_rows,
         active_row,
         history_rows,
         current_rows,
@@ -1795,7 +1811,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
     }
     let data = PaneData {
         progress: Some(progress_lines),
-        journey: Some(journey_lines),
+        journey: Some(journey_rows),
         history: Some(history_rows),
         current: Some(current_rows),
         title: PaneTitleRow::Reserved(title_line),
@@ -1972,8 +1988,8 @@ pub(crate) fn render_pane_body(
             .map(tui_ratatui::render_line)
             .collect::<Vec<_>>()
     });
-    let journey = data.journey.map(|lines| {
-        lines
+    let journey = data.journey.map(|rows| {
+        journey_row_lines(rows, journey_inner.map_or(0, |rect| rect.width))
             .iter()
             .map(tui_ratatui::render_line)
             .collect::<Vec<_>>()
@@ -2631,7 +2647,7 @@ fn progress_lines(view: &RunView) -> Vec<tui::Line> {
 /// Convenience wrapper over [`journey_lines_with_active_row`] for callers
 /// that don't need the active row (e.g. [`render_ledger_run_view`], whose
 /// ledger-only view never has an active step to anchor on).
-fn journey_lines(view: &RunView) -> Vec<tui::Line> {
+fn journey_lines(view: &RunView) -> Vec<JourneyRow> {
     journey_lines_with_active_row(view).0
 }
 
@@ -2642,7 +2658,7 @@ fn journey_lines(view: &RunView) -> Vec<tui::Line> {
 /// from `view.steps`' own item index (a different coordinate space: each
 /// step group is 3 rows, `render_step_summary` + two `render_port_line`
 /// calls, under a multi-row header the caller must not hand-count either).
-fn journey_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<usize>) {
+fn journey_lines_with_active_row(view: &RunView) -> (Vec<JourneyRow>, Option<usize>) {
     let mut lines = Vec::new();
     let target_step = active_step_index(view);
     let mut active_row = None;
@@ -2650,30 +2666,48 @@ fn journey_lines_with_active_row(view: &RunView) -> (Vec<tui::Line>, Option<usiz
         if Some(index) == target_step {
             active_row = Some(lines.len());
         }
-        render_step_group(&mut lines, step);
+        lines.push(JourneyRow(JourneyRowKind::Step(Box::new(step.clone()))));
     }
     if let Some(narration) = completed_narration(view) {
-        lines.push(narration_line(narration));
+        lines.push(JourneyRow(JourneyRowKind::Line(narration_line(narration))));
     }
     // P549: merge stage rows land directly after the run's own steps, so the
     // landing is one continuous journey rather than a separate section —
     // rendered before the completed-outputs box so a completed run whose
     // merge is still landing shows both.
     if !view.merge_rows.is_empty() {
-        lines.push(tui::Line::blank());
-        muted_line(&mut lines, "landing");
+        lines.push(JourneyRow(JourneyRowKind::Line(tui::Line::blank())));
+        let mut landing = Vec::new();
+        muted_line(&mut landing, "landing");
+        lines.extend(
+            landing
+                .into_iter()
+                .map(|line| JourneyRow(JourneyRowKind::Line(line))),
+        );
         for row in &view.merge_rows {
-            render_merge_row(&mut lines, row);
+            let mut rendered = Vec::new();
+            render_merge_row(&mut rendered, row);
+            lines.extend(
+                rendered
+                    .into_iter()
+                    .map(|line| JourneyRow(JourneyRowKind::Line(line))),
+            );
         }
     }
     if view.header.completed {
-        lines.push(tui::Line::blank());
+        lines.push(JourneyRow(JourneyRowKind::Line(tui::Line::blank())));
         let mut line = tui::Line::blank();
         line.push("digest-stamped ", tui::Tone::Muted);
         line.push(view.header.state_digest.clone(), tui::Tone::Default);
-        lines.push(line);
-        lines.push(tui::Line::blank());
-        render_outputs_box(&mut lines, &view.outputs);
+        lines.push(JourneyRow(JourneyRowKind::Line(line)));
+        lines.push(JourneyRow(JourneyRowKind::Line(tui::Line::blank())));
+        let mut outputs = Vec::new();
+        render_outputs_box(&mut outputs, &view.outputs);
+        lines.extend(
+            outputs
+                .into_iter()
+                .map(|line| JourneyRow(JourneyRowKind::Line(line))),
+        );
     }
     (lines, active_row)
 }
@@ -2772,7 +2806,7 @@ fn render_merge_row(lines: &mut Vec<tui::Line>, row: &MergeRowView) {
 /// [`render_pane_body`] renderer, never a second flat-line reconstruction.
 pub(crate) struct LedgerPaneProjection {
     pub(crate) progress: Vec<tui::Line>,
-    pub(crate) journey: Vec<tui::Line>,
+    pub(crate) journey: Vec<JourneyRow>,
     pub(crate) history: Vec<EventRow>,
     pub(crate) current: Vec<EventRow>,
     /// `true` only when `ledger_path` has an activity sidecar at all (a
@@ -3270,15 +3304,6 @@ fn compact_identifier(id: &str, prefix: &str) -> String {
         .collect()
 }
 
-/// P470: the tree's per-step group is now facts-only (mark, ports) — the
-/// active step's live narration moved to the story column's CURRENT stream
-/// (see [`story_stream_lines`]) and is never inlined here.
-fn render_step_group(lines: &mut Vec<tui::Line>, step: &RunStep) {
-    render_step_summary(lines, step);
-    render_port_line(lines, "in", &step.inputs);
-    render_port_line(lines, "out", &step.outputs);
-}
-
 fn narration_line(narration: &RunNarration) -> tui::Line {
     let mut line = tui::Line::blank();
     line.push("    ", tui::Tone::Muted);
@@ -3304,64 +3329,115 @@ fn narration_line(narration: &RunNarration) -> tui::Line {
     line
 }
 
-fn render_step_summary(lines: &mut Vec<tui::Line>, step: &RunStep) {
+fn journey_row_lines(rows: &[JourneyRow], width: u16) -> Vec<tui::Line> {
+    rows.iter()
+        .map(|row| match &row.0 {
+            JourneyRowKind::Step(step) => journey_step_line(step, width),
+            JourneyRowKind::Line(line) => line.clone(),
+        })
+        .collect()
+}
+
+fn journey_step_line(step: &RunStep, width: u16) -> tui::Line {
     let (mark, tone) = match step.state {
         StepState::Done => ("✓", tui::Tone::Pass),
         StepState::Running => ("~", tui::Tone::Warn),
         StepState::Pending => ("○", tui::Tone::Muted),
         StepState::Failed => ("×", tui::Tone::Fail),
     };
+    let agent = step.harness.as_deref().map_or_else(
+        || step.role.clone(),
+        |harness| format!("{}@{harness}", step.role),
+    );
+    let variant = step.tags.join(" ∙ ");
+    let state = step.status.clone();
+    let mut suffixes = Vec::new();
+    if step.structured_count > 0 {
+        suffixes.push(format!("({} open)", step.structured_count));
+    }
+    let metrics = step.elapsed.map(|elapsed| {
+        let mut text = tui::elapsed_text(elapsed);
+        if let Some(tokens) = step.output_tokens {
+            text.push_str(" · ");
+            text.push_str(&tui::token_text(tokens));
+        }
+        text
+    });
+    let elapsed_only = step.elapsed.map(tui::elapsed_text);
+    let full = [
+        Some(format!("[agent] {agent}")),
+        (!variant.is_empty()).then(|| format!("[variant] {variant}")),
+        Some(state.clone()),
+        metrics.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(suffixes.iter().cloned())
+    .collect::<Vec<_>>();
+    let compact = [
+        Some(agent.clone()),
+        (!variant.is_empty()).then_some(variant.clone()),
+        Some(state.clone()),
+        elapsed_only,
+    ]
+    .into_iter()
+    .flatten()
+    .chain(suffixes.iter().cloned())
+    .collect::<Vec<_>>();
+    let without_variant_or_metrics = std::iter::once(agent.clone())
+        .chain(std::iter::once(state.clone()))
+        .chain(suffixes.iter().cloned())
+        .collect::<Vec<_>>();
+    let without_agent = std::iter::once(state.clone())
+        .chain(suffixes.iter().cloned())
+        .collect::<Vec<_>>();
+    let candidates = [
+        full,
+        compact,
+        without_variant_or_metrics,
+        without_agent.clone(),
+    ];
+    let (label, fields) = candidates
+        .into_iter()
+        .find(|fields| journey_text_width(mark, &step.label, fields) <= width as usize)
+        .map(|fields| (step.label.clone(), fields))
+        .unwrap_or_else(|| {
+            let tail = without_agent;
+            let tail_width = tail
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let budget = (width as usize)
+                .saturating_sub(tui::display_width(mark) + 1 + 3 + tui::display_width(&tail_width));
+            (tui::truncate_display_width_end(&step.label, budget), tail)
+        });
     let mut line = tui::Line::blank();
     line.push(mark, tone);
     line.push(" ", tui::Tone::Muted);
-    line.push(step.label.clone(), tone);
-    line.push("   ", tui::Tone::Muted);
-    line.push(role_harness_text(step), tui::Tone::Muted);
-    if !step.tags.is_empty() {
-        line.push("   ", tui::Tone::Muted);
-        line.push(step.tags.join(" ∙ "), tui::Tone::Muted);
+    line.push(label, tone);
+    for field in fields {
+        line.push(" · ", tui::Tone::Muted);
+        let field_tone = if field == step.status {
+            status_tone(step)
+        } else if field.starts_with('(') && field.ends_with(" open)") {
+            tui::Tone::Default
+        } else {
+            tui::Tone::Muted
+        };
+        line.push(field, field_tone);
     }
-    line.push("   ", tui::Tone::Muted);
-    line.push(step.status.clone(), status_tone(step));
-    if let Some(elapsed) = step.elapsed {
-        line.push(" (", tui::Tone::Muted);
-        line.push(tui::elapsed_text(elapsed), tui::Tone::Muted);
-        if let Some(tokens) = step.output_tokens {
-            line.push(format!(" · {}", tui::token_text(tokens)), tui::Tone::Muted);
-        }
-        line.push(")", tui::Tone::Muted);
-    }
-    if step.structured_count > 0 {
-        line.push(" ", tui::Tone::Muted);
-        line.push(
-            format!("({} open)", step.structured_count),
-            tui::Tone::Default,
-        );
-    }
-    lines.push(line);
+    line
 }
 
-fn render_port_line(lines: &mut Vec<tui::Line>, label: &str, ports: &[PortSlug]) {
-    let mut line = tui::Line::blank();
-    line.push(format!("    {label} "), tui::Tone::Muted);
-    if ports.is_empty() {
-        line.push("none", tui::Tone::Muted);
-    } else {
-        for (index, port) in ports.iter().enumerate() {
-            if index > 0 {
-                line.push(" ", tui::Tone::Muted);
-            }
-            line.push(
-                port.slug.clone(),
-                if port.satisfied {
-                    tui::Tone::Pass
-                } else {
-                    tui::Tone::Muted
-                },
-            );
-        }
-    }
-    lines.push(line);
+fn journey_text_width(mark: &str, label: &str, fields: &[String]) -> usize {
+    tui::display_width(mark)
+        + 1
+        + tui::display_width(label)
+        + fields
+            .iter()
+            .map(|field| 3 + tui::display_width(field))
+            .sum::<usize>()
 }
 
 fn render_outputs_box(lines: &mut Vec<tui::Line>, outputs: &[RunOutput]) {
@@ -4137,6 +4213,7 @@ fn step_key(step: &RunStep) -> String {
     step.key.clone()
 }
 
+#[allow(dead_code)] // Retained helper for presentation callers outside compact rows.
 fn role_harness_text(step: &RunStep) -> String {
     match step.harness.as_deref() {
         Some(harness) => format!("{}·{}", step.role, harness),
@@ -5245,13 +5322,9 @@ mod tests {
         ]);
         let (lines, active_row) = journey_lines_with_active_row(&view);
         let active_row = active_row.expect("an active step must yield a row anchor");
-        // The active step's own `view.steps` index is 2; its row can never
-        // be that small once two 3-row `Done` step groups precede it.
-        assert_ne!(
-            active_row, 2,
-            "the anchor must be a rendered row index, not the step's item index"
-        );
-        let label = lines[active_row]
+        assert_eq!(active_row, 2, "each preceding step contributes one row");
+        let rendered = journey_row_lines(&lines, 120);
+        let label = rendered[active_row]
             .segments()
             .nth(2)
             .map(|(text, _)| text.to_string());
@@ -5266,9 +5339,65 @@ mod tests {
     fn journey_content_omits_the_pane_title() {
         let lines = journey_lines(&view_with(vec![step("work", StepState::Running, None)]));
         assert!(
-            lines.iter().all(|line| line_text(line) != "journey"),
+            journey_row_lines(&lines, 120)
+                .iter()
+                .all(|line| line_text(line) != "journey"),
             "the pane border is the only journey title"
         );
+    }
+
+    #[test]
+    fn journey_step_full_line_labels_agent_variant_and_facts() {
+        let mut step = step("deploy", StepState::Running, None);
+        step.role = "reviewer".to_string();
+        step.harness = Some("codex".to_string());
+        step.tags = vec!["fast".to_string(), "branch-a".to_string()];
+        step.status = "running".to_string();
+        step.structured_count = 2;
+        assert_eq!(
+            line_text(&journey_step_line(&step, 120)),
+            "~ deploy · [agent] reviewer@codex · [variant] fast ∙ branch-a · running · 00:00:05 · 1.2k tok · (2 open)"
+        );
+    }
+
+    #[test]
+    fn journey_step_degrades_by_display_width_without_losing_state() {
+        let mut step = step("文文 deploy", StepState::Running, None);
+        step.harness = Some("codex".to_string());
+        step.tags = vec!["fast".to_string(), "branch-a".to_string()];
+        step.status = "running".to_string();
+        step.structured_count = 2;
+        for (width, absent) in [
+            (120, ""),
+            (65, "[agent]"),
+            (45, "branch-a"),
+            (30, "worker@codex"),
+            (25, "文文 deploy"),
+        ] {
+            let rendered = line_text(&journey_step_line(&step, width));
+            assert!(rendered.contains('~'));
+            assert!(rendered.contains("running"));
+            assert!(rendered.contains("(2 open)"));
+            assert!(tui::display_width(&rendered) <= width as usize);
+            if !absent.is_empty() {
+                assert!(!rendered.contains(absent), "{rendered}");
+            }
+        }
+    }
+
+    #[test]
+    fn journey_steps_are_one_row_and_never_render_ports() {
+        let view = view_with(vec![
+            step("first", StepState::Done, None),
+            step("second", StepState::Pending, None),
+        ]);
+        let rows = journey_lines(&view);
+        let rendered = journey_row_lines(&rows, 120);
+        assert_eq!(rendered.len(), 2);
+        assert!(rendered.iter().all(|line| {
+            let text = line_text(line);
+            !text.starts_with("    in ") && !text.starts_with("    out ")
+        }));
     }
 
     #[test]
@@ -5284,6 +5413,13 @@ mod tests {
                 line.push(format!("line{index}"), tui::Tone::Default);
                 line
             })
+            .collect()
+    }
+
+    fn sample_journey_rows(n: usize) -> Vec<JourneyRow> {
+        sample_lines(n)
+            .into_iter()
+            .map(|line| JourneyRow(JourneyRowKind::Line(line)))
             .collect()
     }
 
@@ -5306,7 +5442,7 @@ mod tests {
     #[test]
     fn narrow_full_data_stacks_every_pane_without_omission() {
         let progress = sample_lines(3);
-        let journey = sample_lines(5);
+        let journey = sample_journey_rows(5);
         let history = sample_event_rows(10);
         let current = sample_event_rows(4);
         let data = PaneData {
@@ -5330,7 +5466,7 @@ mod tests {
     #[test]
     fn wide_full_data_produces_bounded_progress_2x2_grid() {
         let progress = sample_lines(3);
-        let journey = sample_lines(50);
+        let journey = sample_journey_rows(50);
         let history = sample_event_rows(100);
         let current = sample_event_rows(4);
         let data = PaneData {
@@ -5376,7 +5512,7 @@ mod tests {
     #[test]
     fn preview_data_produces_exactly_progress_and_journey() {
         let progress = sample_lines(3);
-        let journey = sample_lines(5);
+        let journey = sample_journey_rows(5);
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),
@@ -5394,7 +5530,7 @@ mod tests {
     #[test]
     fn information_title_and_pane_ids_survive_the_narrow_breakpoint() {
         let progress = sample_lines(5);
-        let journey = sample_lines(5);
+        let journey = sample_journey_rows(5);
         let history = sample_event_rows(5);
         let current = sample_event_rows(5);
         let data = PaneData {
@@ -5426,7 +5562,7 @@ mod tests {
     #[test]
     fn narrow_full_data_tiles_the_supplied_area_to_its_edges() {
         let progress = sample_lines(3);
-        let journey = sample_lines(5);
+        let journey = sample_journey_rows(5);
         let history = sample_event_rows(10);
         let current = sample_event_rows(4);
         let data = PaneData {
@@ -5460,7 +5596,7 @@ mod tests {
     #[test]
     fn source_omission_drops_only_the_missing_pane_leaving_focus_valid() {
         let progress = sample_lines(3);
-        let journey = sample_lines(5);
+        let journey = sample_journey_rows(5);
         let current = sample_event_rows(4);
         let data = PaneData {
             progress: Some(&progress),
@@ -5485,7 +5621,7 @@ mod tests {
     #[test]
     fn focus_ring_contains_only_drawable_panes_at_small_sizes() {
         let progress = sample_lines(3);
-        let journey = sample_lines(50);
+        let journey = sample_journey_rows(50);
         let history = sample_event_rows(100);
         let current = sample_event_rows(4);
         let data = PaneData {
@@ -5540,13 +5676,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let tree_lines = (0..20)
-            .map(|index| {
-                let mut line = tui::Line::blank();
-                line.push(format!("progress {index}"), tui::Tone::Default);
-                line
-            })
-            .collect::<Vec<_>>();
+        let tree_lines = sample_journey_rows(20);
         let progress_sample_lines = sample_lines(3);
         let mut scrolls = PaneScrolls::new();
         let mut progress_follow = true;
@@ -5626,7 +5756,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let journey = sample_lines(100);
+        let journey = sample_journey_rows(100);
         let progress = sample_lines(3);
         let mut scrolls = PaneScrolls::new();
         let mut progress_follow = true;
@@ -5702,7 +5832,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let journey = sample_lines(100);
+        let journey = sample_journey_rows(100);
         let history = sample_event_rows(100);
         let progress = sample_lines(3);
         let mut scrolls = PaneScrolls::new();
