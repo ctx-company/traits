@@ -1,0 +1,88 @@
+# 0077 — "Live" must mean a driver is holding the lock, not a status left behind
+
+**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner observation: 235 sessions under the dashboard's `live` section with 2 runs actually running)
+
+The dashboard's SESSIONS list shows **235 rows under `live`** while exactly **two**
+runs are being driven. Everything else is a run that stopped mid-frame, months
+of them, all still claiming to be live.
+
+## Where it comes from
+
+`session_group` (`dashboard.rs:1415-1442`) decides the bucket. Its first
+branch is right:
+
+```rust
+if class == SessionClass::Live {          // a driver genuinely holds the lock
+    return SessionGroup::Live;
+}
+```
+
+Its last is not:
+
+```rust
+match status {
+    Status::AwaitingAgentOutput => SessionGroup::Live,
+```
+
+That branch is only reached when `class != Live` — that is, when the driver
+lock probe already said *nobody is driving this*. `awaiting-agent-output` is
+the status every run sits in while a frame is out, and it is the status every
+abandoned run is frozen in forever, because nothing rewrites a ledger after
+its driver dies. So the bucket fills with the entire history of interrupted
+runs.
+
+The liveness probe itself is sound and is not the problem: `run_control::probe`
+uses a real `flock`, so a dead holder's lock file reads as `Unheld`, and the
+`ProbeBudget` fallback for unprobed rows is `Unheld` too. Both are correct.
+The grouping simply ignores the answer.
+
+## Decisions
+
+- **Live is a probe result, never a status.** One definition: a driver holds
+  the lock. `class == SessionClass::Live` is already that definition, and it
+  is the only thing that may put a row under `live`.
+- **A run whose driver is gone is not live, whatever its ledger last said.**
+  Every status-based branch is downstream of "nobody is driving this", and no
+  status can promote a row back.
+- **The four buckets are the real defect.** The existing doc comment names it:
+  *"the owner's four buckets have no home for a row that will never progress on
+  its own, and hiding it inside `Pending` would be dishonest."* That is true,
+  and routing those rows to `live` instead is worse — it corrupts the one
+  bucket that had a precise meaning. Give the stopped-mid-frame rows their own
+  home rather than borrowing one.
+- **Owner call, and the reason this is filed rather than patched:** whether
+  that home is a fifth bucket (`stopped`, `resumable`) or a redefinition of
+  `Pending` to mean "not progressing, needs you" is a product decision about
+  what the four sections are for. Both fix the count; they say different things
+  to the person reading the screen.
+- **The count is the acceptance test.** With two runs driving, `live` shows two.
+
+## Scope
+
+`session_group` in `modules/cli/src/app/dashboard.rs`, its bucket set, and the
+section headers that render it. No change to `run_control::probe`,
+`ProbeBudget`, `classify_session`, or `SessionState::derive` — all four are
+already correct.
+
+## Watch
+
+- **This is newly landed code**, from `5e97161a` (2026-08-03, "Group session
+  list into collapsible live/pending/failed/completed sections"). The grouping
+  is the new part; the probe it ignores predates it.
+- A row in `awaiting-agent-output` with **no** live driver is exactly the
+  resumable case the dashboard already models as `SessionClass::Resumable`.
+  Whatever bucket is chosen, it should agree with that classification rather
+  than invent a parallel notion of "in progress".
+- Do not fix this by making the probe stricter or the budget wider. The probe
+  is right and probing more ledgers per tick costs reads on a 2s cadence for
+  no gain — the answer is already available and simply discarded.
+- The same rows are what makes the list unreadable at 235 entries. Fixing the
+  bucket does not prune anything; the dead sessions are still there, and
+  `doctor --apply` remains the tool for that.
+
+## Done when
+
+The `live` section contains exactly the sessions whose driver lock is held; a
+run whose driver died appears under a section that says so and never under
+`live`; a run driven right now appears under `live` within one refresh; and the
+count with two live runs is two.
