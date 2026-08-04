@@ -1,6 +1,29 @@
 # 0052 — Repo-local runtime directories move under `.ctx/traits/`
 
-**Status:** ready to implement · **Raised:** 2026-08-02 (owner)
+**Status:** IMPLEMENTED 2026-08-04 · **Raised:** 2026-08-02 (owner)
+
+## What landed, and one correction to the Today section below
+
+Four of the five roots listed below were already gone: P426 moved
+`.ctx/cache/traits`, `.ctx/cache/builtin-traits`, `.ctx/runs` and `.ctx/debug`
+OUT of the repository entirely, to the global per-repository state root, and
+they survive only as legacy fallbacks. `WORKTREE_ROOT` was the one still live.
+So the change is `.ctx/worktrees/` → `.ctx/traits/worktrees/`, plus the
+gitignore and tripwire that follow it.
+
+**Nothing is moved, and no migration command was added.** The first Watch item
+below forbids relocating a directory under a live run, and a worktree's
+absolute path is recorded in both its session ledger and
+`.git/worktrees/*/gitdir`. Rather than build a migration that must refuse
+while runs are live, `resolve_worktree_location` dual-reads: an existing
+worktree keeps resolving under the old root for its whole life, new ones are
+created under the new root, and the old ones drain as their runs land. That
+satisfies "dual-read, one release" with no window in which a run is at risk,
+and it makes the `git worktree repair` hazard moot. `doctor --apply` still
+prunes whatever never drains.
+
+The managed gitignore keeps the old entry alongside the new one, so a checkout
+holding pre-0052 worktrees does not start showing them as untracked.
 
 ## Today
 
