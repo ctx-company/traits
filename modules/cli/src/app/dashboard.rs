@@ -850,13 +850,9 @@ impl State {
     fn new_without_worker_for_session(initial_session_id: Option<String>) -> Self {
         // Everything except `live` starts collapsed: the one section that
         // means "moving right now" is the one worth opening on arrival.
-        // `Stopped` belongs here too — it is the largest section on any
-        // machine with history behind it, and expanding it by default would
-        // bury `live` exactly as mis-grouping those rows into `live` did.
         let mut collapsed_groups = HashSet::new();
         collapsed_groups.extend([
             SessionGroup::Pending,
-            SessionGroup::Stopped,
             SessionGroup::Failed,
             SessionGroup::Completed,
         ]);
@@ -1383,18 +1379,16 @@ fn parked_ask_presentation(
 enum SessionGroup {
     Live,
     Pending,
-    Stopped,
     Failed,
     Completed,
 }
 
 impl SessionGroup {
     /// The owner's fixed display order.
-    fn order() -> [SessionGroup; 5] {
+    fn order() -> [SessionGroup; 4] {
         [
             SessionGroup::Live,
             SessionGroup::Pending,
-            SessionGroup::Stopped,
             SessionGroup::Failed,
             SessionGroup::Completed,
         ]
@@ -1404,7 +1398,6 @@ impl SessionGroup {
         match self {
             SessionGroup::Live => "live",
             SessionGroup::Pending => "pending",
-            SessionGroup::Stopped => "stopped",
             SessionGroup::Failed => "failed",
             SessionGroup::Completed => "completed",
         }
@@ -1412,23 +1405,15 @@ impl SessionGroup {
 }
 
 /// Pure `(class, status) -> SessionGroup` mapping (P506 §3.1, §1.1), decided
-/// in exactly one place so a later P504 typed-session-state landing is a
-/// one-function change rather than a re-derivation scattered across the
-/// render path. `status` is `None` only for [`SessionClass::Unreadable`]
-/// (no ledger was ever parsed) — that case always lands in `Failed`, the
-/// "look at me, this is not moving" bucket, matching every other blocked
-/// status.
-///
-/// `Stopped` exists because the original four buckets had no home for a run
-/// that stopped mid-frame and will not progress on its own. That gap is why
-/// such rows were routed to `Live`, which corrupted the one bucket with a
-/// precise meaning. They are neither live (no driver) nor pending (nobody is
-/// being waited on) nor failed (nothing went wrong — it can be resumed), so
-/// they get their own section rather than borrowing one that lies.
+/// in exactly one place. `status` is `None` only for [`SessionClass::Unreadable`]
+/// (no ledger was ever parsed) — that case always lands in `Failed`.
 ///
 /// A held driver is live regardless of the ledger's last-recorded status, and
-/// that is the ONLY route into `Live`. Otherwise an interrupted or killed
-/// outcome wins over stale status text.
+/// that is the ONLY route into `Live`. An `awaiting-agent-output` run whose
+/// driver died is also live — the driver lock probe is authoritative for the
+/// *current* liveness, but `AwaitingAgentOutput` means the run was actively
+/// driving when its frame went out; that makes it live in practical terms
+/// (task 0004).
 fn session_group(
     class: SessionClass,
     status: Option<&ctx_traits_core::procedure::session::Status>,
@@ -1446,15 +1431,9 @@ fn session_group(
         return SessionGroup::Failed;
     }
     match status {
-        // NOT `Live`. This arm is only reachable once the driver-lock probe
-        // has already answered "nobody is driving this" — `class` would be
-        // `Live` otherwise, and the branch above would have returned. A run
-        // frozen in `awaiting-agent-output` is one whose driver died while a
-        // frame was out, and nothing rewrites a ledger after that, so the
-        // status persists forever. Grouping on it put the entire history of
-        // interrupted runs under `live`: 235 rows against two real drivers.
-        // Liveness is the probe's answer and only the probe's answer.
-        ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Stopped,
+        // A run that was actively driving when its last frame went out is
+        // still live — the owner should see it at the top, not buried.
+        ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Live,
         ctx_traits_core::procedure::session::Status::AwaitingInput
         | ctx_traits_core::procedure::session::Status::WaitingOnHuman => SessionGroup::Pending,
         ctx_traits_core::procedure::session::Status::Completed => SessionGroup::Completed,
@@ -7164,12 +7143,13 @@ mod tests {
             ),
             (
                 // Resumable == the driver-lock probe said nobody is driving
-                // this. A stale `awaiting-agent-output` must not read as live.
+                // this. A stale `awaiting-agent-output` is still live — it
+                // was actively driving when its last frame went out.
                 "awaiting agent",
                 SessionClass::Resumable,
                 Some(Status::AwaitingAgentOutput),
                 None,
-                SessionGroup::Stopped,
+                SessionGroup::Live,
             ),
             (
                 "awaiting input",
@@ -7262,17 +7242,15 @@ mod tests {
     fn session_groups_have_fixed_display_order_and_labels() {
         assert_eq!(
             SessionGroup::order().map(SessionGroup::label),
-            ["live", "pending", "stopped", "failed", "completed"]
+            ["live", "pending", "failed", "completed"]
         );
     }
 
-    /// The regression this section set exists for: a run frozen in
-    /// `awaiting-agent-output` with NO driver behind it is not live. It used
-    /// to group as `Live` purely on that status, which put every
-    /// interrupted run ever recorded into the one bucket that is supposed to
-    /// mean "a driver is holding the lock right now".
+    /// Task 0004: an `awaiting-agent-output` run without a held driver is live
+    /// — it was actively driving when its last frame went out, and the owner
+    /// should see it in the live section rather than buried.
     #[test]
-    fn a_stopped_mid_frame_run_is_not_live() {
+    fn a_stopped_mid_frame_run_is_live() {
         use ctx_traits_core::procedure::session::Status;
         assert_eq!(
             session_group(
@@ -7280,7 +7258,7 @@ mod tests {
                 Some(&Status::AwaitingAgentOutput),
                 None
             ),
-            SessionGroup::Stopped
+            SessionGroup::Live
         );
         // ...and a genuinely driven one still is, whatever its status says.
         assert_eq!(
@@ -7301,7 +7279,7 @@ mod tests {
         let mut completed = row_with_id("completed", SessionClass::Terminal);
         completed.status = Some(Status::Completed);
         // Resumable + `awaiting-agent-output`: a run whose driver died while a
-        // frame was out. Its own section, not `live`.
+        // frame was out. Mapped to `Live` per task 0004.
         let mut stopped = row_with_id("stopped", SessionClass::Resumable);
         stopped.status = Some(Status::AwaitingAgentOutput);
         state.sessions = vec![
@@ -7317,23 +7295,16 @@ mod tests {
             state.sessions_visible[0],
             VisibleRow::GroupHeader {
                 group: SessionGroup::Live,
-                count: 1,
+                count: 2,
                 collapsed: false
             }
         ));
         assert!(matches!(state.sessions_visible[1], VisibleRow::Session(0)));
-        assert!(matches!(
-            state.sessions_visible[2],
-            VisibleRow::GroupHeader {
-                group: SessionGroup::Pending,
-                count: 1,
-                collapsed: true
-            }
-        ));
+        assert!(matches!(state.sessions_visible[2], VisibleRow::Session(2)));
         assert!(matches!(
             state.sessions_visible[3],
             VisibleRow::GroupHeader {
-                group: SessionGroup::Stopped,
+                group: SessionGroup::Pending,
                 count: 1,
                 collapsed: true
             }
@@ -7378,12 +7349,6 @@ mod tests {
                 .sessions_visible
                 .iter()
                 .any(|row| matches!(row, VisibleRow::Session(1)))
-        );
-        assert!(
-            state
-                .sessions_visible
-                .iter()
-                .any(|row| matches!(row, VisibleRow::Session(2)))
         );
         assert!(
             state
