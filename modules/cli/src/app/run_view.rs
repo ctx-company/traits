@@ -1354,18 +1354,50 @@ fn guide_snapshot(view: &RunView) -> (String, String) {
     (step, statuses)
 }
 
-/// P470 blocker fix (`down-key-forces-follow-jump`): applies one scroll
-/// delta and then derives `follow` from the RESULTING position, never from
-/// the key's own direction — downward stepping through a scrolled region
-/// only re-engages follow once the window actually reaches the tail.
+#[derive(Clone, Copy)]
+enum FollowTarget {
+    Tail,
+    ActiveRow(Option<usize>),
+}
+
+impl FollowTarget {
+    /// The viewport start which puts this target at its follow alignment,
+    /// clamped using the same bounds as `ViewportScroll`.
+    fn viewport_start(self, len: usize, rows: usize) -> usize {
+        let desired_start = match self {
+            Self::Tail => len.saturating_sub(rows),
+            Self::ActiveRow(active_row) => active_row
+                .unwrap_or_else(|| len.saturating_sub(1))
+                .saturating_sub(rows.saturating_sub(1)),
+        };
+        desired_start.min(len.saturating_sub(rows.min(len)))
+    }
+
+    fn is_following(self, scroll: &tui_kit::ViewportScroll, len: usize, rows: usize) -> bool {
+        match self {
+            Self::Tail => scroll.is_at_bottom(rows),
+            // `window(0)` is always empty, so its start cannot describe the
+            // persisted offset. At zero height, bottom remains the only
+            // observable follow alignment.
+            Self::ActiveRow(_) if rows == 0 => scroll.is_at_bottom(rows),
+            Self::ActiveRow(_) => scroll.window(rows).start == self.viewport_start(len, rows),
+        }
+    }
+}
+
+/// Applies one scroll delta and derives `follow` from the resulting viewport,
+/// never from the key direction. A journey only resumes active-row following
+/// at its exact active-row alignment; append-only panes resume at their tail.
 fn apply_scroll_and_derive_follow(
     scroll: &mut tui_kit::ViewportScroll,
     follow: &mut bool,
     delta: tui_kit::ScrollDelta,
     budget: usize,
+    len: usize,
+    target: FollowTarget,
 ) {
     scroll.apply(delta, budget);
-    *follow = scroll.is_at_bottom(budget);
+    *follow = target.is_following(scroll, len, budget);
 }
 
 /// Only row-at-a-time scroll keys are safe to fold. Page and jump keys share
@@ -1996,6 +2028,8 @@ pub(crate) fn render_pane_body(
                 progress_follow,
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
+                progress.len(),
+                FollowTarget::Tail,
             );
         } else if id == ids.journey
             && let (Some(journey), Some(inner)) = (&journey, journey_inner)
@@ -2007,6 +2041,8 @@ pub(crate) fn render_pane_body(
                 journey_follow,
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
+                journey.len(),
+                FollowTarget::ActiveRow(journey_active_row),
             );
         } else if id == ids.history
             && let (Some(history), Some(inner)) = (&history, history_inner)
@@ -2018,6 +2054,8 @@ pub(crate) fn render_pane_body(
                 history_follow,
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
+                history.len(),
+                FollowTarget::Tail,
             );
         } else if id == ids.current
             && let (Some(current), Some(inner)) = (&current, current_inner)
@@ -2029,6 +2067,8 @@ pub(crate) fn render_pane_body(
                 current_follow,
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
+                current.len(),
+                FollowTarget::Tail,
             );
         }
     }
@@ -2067,37 +2107,40 @@ pub(crate) fn render_pane_body(
     }
 
     if let (Some(progress), Some(inner)) = (&progress, progress_inner) {
-        follow_tail(
+        follow_target(
             scrolls.get_mut(ids.progress),
             *progress_follow,
+            FollowTarget::Tail,
             progress.len(),
             inner.height as usize,
         );
         tui_panes::render_wrapped_lines_pane(frame, inner, progress, scrolls.get_mut(ids.progress));
     }
     if let (Some(journey), Some(inner)) = (&journey, journey_inner) {
-        follow_progress(
+        follow_target(
             scrolls.get_mut(ids.journey),
             *journey_follow,
-            journey_active_row,
+            FollowTarget::ActiveRow(journey_active_row),
             journey.len(),
             inner.height as usize,
         );
         tui_panes::render_wrapped_lines_pane(frame, inner, journey, scrolls.get_mut(ids.journey));
     }
     if let (Some(history), Some(inner)) = (&history, history_inner) {
-        follow_tail(
+        follow_target(
             scrolls.get_mut(ids.history),
             *history_follow,
+            FollowTarget::Tail,
             history.len(),
             inner.height as usize,
         );
         tui_panes::render_wrapped_lines_pane(frame, inner, history, scrolls.get_mut(ids.history));
     }
     if let (Some(current), Some(inner)) = (&current, current_inner) {
-        follow_tail(
+        follow_target(
             scrolls.get_mut(ids.current),
             *current_follow,
+            FollowTarget::Tail,
             current.len(),
             inner.height as usize,
         );
@@ -2105,26 +2148,17 @@ pub(crate) fn render_pane_body(
     }
 }
 
-fn follow_progress(
+fn follow_target(
     scroll: &mut tui_kit::ViewportScroll,
     follow: bool,
-    active_row: Option<usize>,
+    target: FollowTarget,
     len: usize,
     rows: usize,
 ) {
     scroll.set_len(len);
     scroll.clamp(rows);
     if follow {
-        let target = active_row.unwrap_or_else(|| len.saturating_sub(1));
-        align_scroll_start(scroll, target.saturating_sub(rows.saturating_sub(1)), rows);
-    }
-}
-
-fn follow_tail(scroll: &mut tui_kit::ViewportScroll, follow: bool, len: usize, rows: usize) {
-    scroll.set_len(len);
-    scroll.clamp(rows);
-    if follow {
-        align_scroll_start(scroll, len.saturating_sub(rows), rows);
+        align_scroll_start(scroll, target.viewport_start(len, rows), rows);
     }
 }
 
@@ -5914,11 +5948,20 @@ mod tests {
             &mut follow,
             tui_kit::ScrollDelta::Down(100),
             rows,
+            30,
+            FollowTarget::Tail,
         );
         assert!(follow);
         let tail_window = scroll.window(rows);
 
-        apply_scroll_and_derive_follow(&mut scroll, &mut follow, tui_kit::ScrollDelta::Up(3), rows);
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Up(3),
+            rows,
+            30,
+            FollowTarget::Tail,
+        );
         assert!(!follow, "scrolling up must release follow");
         let scrolled_up_window = scroll.window(rows);
         assert_ne!(scrolled_up_window, tail_window);
@@ -5928,6 +5971,8 @@ mod tests {
             &mut follow,
             tui_kit::ScrollDelta::Down(1),
             rows,
+            30,
+            FollowTarget::Tail,
         );
         assert!(
             !follow,
@@ -5945,58 +5990,191 @@ mod tests {
             &mut follow,
             tui_kit::ScrollDelta::Down(2),
             rows,
+            30,
+            FollowTarget::Tail,
         );
         assert!(follow, "reaching the tail edge must re-engage follow");
         assert_eq!(scroll.window(rows), tail_window);
     }
 
     #[test]
+    fn zero_height_follow_tail_reengages_at_end_only() {
+        let mut scroll = tui_kit::ViewportScroll::new();
+        scroll.set_len(30);
+        let mut follow = false;
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::End,
+            0,
+            30,
+            FollowTarget::Tail,
+        );
+        assert!(follow, "end must reengage tail following at zero height");
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Start,
+            0,
+            30,
+            FollowTarget::Tail,
+        );
+        assert!(!follow, "a non-bottom position must release tail following");
+    }
+
+    #[test]
+    fn zero_height_follow_active_row_reengages_at_end_only() {
+        let mut scroll = tui_kit::ViewportScroll::new();
+        scroll.set_len(30);
+        let mut follow = false;
+        let target = FollowTarget::ActiveRow(Some(12));
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::End,
+            0,
+            30,
+            target,
+        );
+        assert!(
+            follow,
+            "end must reengage active-row following at zero height"
+        );
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Start,
+            0,
+            30,
+            target,
+        );
+        assert!(
+            !follow,
+            "a non-bottom position must release active-row following at zero height"
+        );
+    }
+
+    #[test]
     fn tail_follow_advances_without_reset_and_stays_pinned_after_resize() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_tail(&mut scroll, true, 30, 10);
+        follow_target(&mut scroll, true, FollowTarget::Tail, 30, 10);
         assert_eq!(scroll.window(10), 20..30);
 
-        follow_tail(&mut scroll, true, 35, 10);
+        follow_target(&mut scroll, true, FollowTarget::Tail, 35, 10);
         assert_eq!(scroll.window(10), 25..35);
         assert_ne!(scroll.window(10).start, 0);
 
-        follow_tail(&mut scroll, true, 35, 15);
+        follow_target(&mut scroll, true, FollowTarget::Tail, 35, 15);
         assert_eq!(scroll.window(15), 20..35);
     }
 
     #[test]
     fn non_following_tail_keeps_its_window_when_stream_grows() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_tail(&mut scroll, true, 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::Tail, 40, 10);
         let mut follow = false;
-        apply_scroll_and_derive_follow(&mut scroll, &mut follow, tui_kit::ScrollDelta::Up(12), 10);
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Up(12),
+            10,
+            40,
+            FollowTarget::Tail,
+        );
         assert!(!follow);
         let stationary = scroll.window(10);
 
-        follow_tail(&mut scroll, false, 55, 10);
+        follow_target(&mut scroll, false, FollowTarget::Tail, 55, 10);
         assert_eq!(scroll.window(10), stationary);
+    }
+
+    #[test]
+    fn journey_tail_does_not_reengage_active_row_follow() {
+        let mut scroll = tui_kit::ViewportScroll::new();
+        let target = FollowTarget::ActiveRow(Some(12));
+        follow_target(&mut scroll, true, target, 40, 10);
+        assert_eq!(scroll.window(10), 3..13, "active row stays at the bottom");
+
+        let mut follow = true;
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::End,
+            10,
+            40,
+            target,
+        );
+        assert!(!follow, "the final window is not the active-row alignment");
+        assert_eq!(scroll.window(10), 30..40);
+
+        // A render while released must leave the user at the pending tail.
+        follow_target(&mut scroll, follow, target, 40, 10);
+        assert_eq!(scroll.window(10), 30..40);
+    }
+
+    #[test]
+    fn journey_reengages_only_at_active_row_alignment() {
+        let mut scroll = tui_kit::ViewportScroll::new();
+        let target = FollowTarget::ActiveRow(Some(12));
+        follow_target(&mut scroll, true, target, 40, 10);
+        let mut follow = true;
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Down(2),
+            10,
+            40,
+            target,
+        );
+        assert!(
+            !follow,
+            "a nearby active row must not be enough to reengage"
+        );
+        assert_eq!(scroll.window(10), 5..15);
+
+        apply_scroll_and_derive_follow(
+            &mut scroll,
+            &mut follow,
+            tui_kit::ScrollDelta::Up(2),
+            10,
+            40,
+            target,
+        );
+        assert!(follow, "returning to the exact alignment resumes following");
+        assert_eq!(scroll.window(10), 3..13);
+    }
+
+    #[test]
+    fn journey_follow_target_falls_back_to_tail_and_handles_tail_alignment() {
+        assert_eq!(FollowTarget::ActiveRow(None).viewport_start(40, 10), 30);
+        assert_eq!(FollowTarget::ActiveRow(Some(39)).viewport_start(40, 10), 30);
     }
 
     #[test]
     fn progress_follow_aligns_each_active_rendered_row_without_overshoot() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_progress(&mut scroll, true, Some(12), 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(12)), 40, 10);
         assert_eq!(scroll.window(10), 3..13);
 
-        follow_progress(&mut scroll, true, Some(21), 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(21)), 40, 10);
         assert_eq!(scroll.window(10), 12..22);
 
-        follow_progress(&mut scroll, true, Some(30), 40, 10);
+        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(30)), 40, 10);
         assert_eq!(scroll.window(10), 21..31);
     }
 
     #[test]
     fn progress_follow_keeps_the_active_row_at_bottom_after_resize() {
         let mut scroll = tui_kit::ViewportScroll::new();
-        follow_progress(&mut scroll, true, Some(58), 60, 10);
+        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(58)), 60, 10);
         assert_eq!(scroll.window(10), 49..59);
 
-        follow_progress(&mut scroll, true, Some(58), 60, 20);
+        follow_target(&mut scroll, true, FollowTarget::ActiveRow(Some(58)), 60, 20);
         assert_eq!(scroll.window(20), 39..59);
     }
 
