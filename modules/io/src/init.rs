@@ -205,10 +205,10 @@ schema-version = "0.1.0"
 # [harness.claude-code.cli]
 # reasoning-effort-flag = "--effort"
 
-# --- Pre-landing merge gate ---------------------------------------------------
+# --- Post-run merge gate ------------------------------------------------------
 # [merge]
 # deep = false                    # use a judgment-capable merger
-# gate = []                       # e.g. [["just", "test"]] — run before landing
+# gate = []                       # e.g. [["just", "test"]] — runs during post-run
 "#;
 
 fn ensure_dir(path: &Utf8Path, label: &str) -> crate::Result<InitEntry> {

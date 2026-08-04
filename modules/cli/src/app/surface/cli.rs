@@ -2108,7 +2108,7 @@ pub struct SessionStartArgs {
     #[arg(long = "no-worktree", conflicts_with = "worktree")]
     pub no_worktree: bool,
 
-    /// Request automatic landing (`ctx traits merge`) once this run
+    /// Request automatic post-run merge work (`ctx traits merge`) once this run
     /// completes, requiring an effective `--worktree`. Bare `--merge` uses
     /// `[merge].deep` (falling back to standard); `--merge=standard` or
     /// `--merge=deep` pins the rung explicitly, overriding config. `[merge]

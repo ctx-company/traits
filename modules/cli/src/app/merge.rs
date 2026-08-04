@@ -134,7 +134,7 @@ const DEFAULT_BRANCH_FALLBACK_ADVISORY: &str = "default branch assumed \"main\":
 /// into `MergeReport::warnings` so it is user-visible in both the plain and
 /// `--json` command output, not only in persisted ledger evidence.
 const EMPTY_GATE_ADVISORY: &str =
-    "no [merge] gate declared; landing without running a repository command";
+    "no [merge] gate declared; post-run without running a repository command";
 /// Built-in default wall-clock budget for ONE merger harness call (standard
 /// and deep alike), when neither `[agent.role.merger].budget.frame-seconds`
 /// nor `[agent.role.merger-deep].budget.frame-seconds` is declared (P475).
@@ -4541,7 +4541,7 @@ mod tests {
             &path,
             "run-live-park",
             MergeStage::Gates,
-            "pre-landing gate just-test failed: exit=Some(1)".to_string(),
+            "post-run gate just-test failed: exit=Some(1)".to_string(),
             Vec::new(),
             &ctx_traits_io::worktree::RetryWarnings::new(),
             Some(&live),

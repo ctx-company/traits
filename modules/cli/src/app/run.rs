@@ -663,7 +663,7 @@ impl CompletionOutcome {
             }),
             CompletionDisposition::Failed => Err(crate::Error::AlreadyReported {
                 message: format!(
-                    "run {run_id:?} completed but its automatic merge did not reach a landing or a park{reason_suffix}"
+                    "run {run_id:?} completed but its automatic merge did not reach post-run completion or a park{reason_suffix}"
                 ),
                 exit_code: crate::app::error::EXIT_MERGE_FAILED,
             }),

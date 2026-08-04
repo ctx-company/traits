@@ -511,6 +511,7 @@ struct AttachedView {
     /// while attached.
     progress_lines: Vec<tui::Line>,
     journey_lines: Vec<run_view::JourneyRow>,
+    post_run: Vec<tui::Line>,
     history: Vec<run_view::EventRow>,
     current: Vec<run_view::EventRow>,
     /// The persisted P552 session title, when the drive resolved one —
@@ -2826,6 +2827,7 @@ fn build_attached_view(
                 state_digest,
                 progress_lines: reconstruction.progress,
                 journey_lines: reconstruction.journey,
+                post_run: reconstruction.post_run,
                 history: reconstruction.history,
                 current: reconstruction.current,
                 title,
@@ -2845,6 +2847,7 @@ fn build_attached_view(
             state_digest: String::new(),
             progress_lines: vec![labeled_dim_line(&format!("(unreadable: {error})"))],
             journey_lines: Vec::new(),
+            post_run: Vec::new(),
             history: Vec::new(),
             current: Vec::new(),
             title: None,
@@ -2889,6 +2892,10 @@ fn refresh_attached_view(view: &mut AttachedView) {
                 view.current = summary.current;
                 view.activity_degraded = summary.activity_degraded;
                 view.activity_available = summary.activity_available;
+                view.post_run = run_view::post_run_lines_from_frames(
+                    session.status == ctx_traits_core::procedure::session::Status::Completed,
+                    &session.provenance.merge_frames,
+                );
                 return;
             }
             view.state_digest = state_digest;
@@ -2896,6 +2903,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
             let reconstruction = reconstruct_panes(&session, &view.ledger_path);
             view.progress_lines = reconstruction.progress;
             view.journey_lines = reconstruction.journey;
+            view.post_run = reconstruction.post_run;
             view.history = reconstruction.history;
             view.current = reconstruction.current;
             view.trait_degraded = reconstruction.trait_degraded;
@@ -2914,6 +2922,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
 struct PaneReconstruction {
     progress: Vec<tui::Line>,
     journey: Vec<run_view::JourneyRow>,
+    post_run: Vec<tui::Line>,
     history: Vec<run_view::EventRow>,
     current: Vec<run_view::EventRow>,
     activity_available: bool,
@@ -2941,6 +2950,7 @@ fn reconstruct_panes(
         Ok(projection) => PaneReconstruction {
             progress: projection.progress,
             journey: projection.journey,
+            post_run: projection.post_run,
             history: projection.history,
             current: projection.current,
             activity_available: projection.activity_available,
@@ -2963,6 +2973,10 @@ fn reconstruct_panes(
             PaneReconstruction {
                 progress: fallback_lines(session, &error.to_string()),
                 journey: Vec::new(),
+                post_run: run_view::post_run_lines_from_frames(
+                    session.status == ctx_traits_core::procedure::session::Status::Completed,
+                    &session.provenance.merge_frames,
+                ),
                 history: summary.history,
                 current: summary.current,
                 activity_available: summary.activity_available,
@@ -5393,6 +5407,7 @@ fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
         journey: Some(&preview.journey_lines),
         history: has_activity.then_some(preview.history.as_slice()),
         current: has_activity.then_some(preview.current.as_slice()),
+        post_run: (!preview.post_run.is_empty()).then_some(preview.post_run.as_slice()),
         title: run_view::PaneTitleRow::Visible(&title_line),
     };
     // `state.last_pane_layout` backs the generic ALT+arrow/page-key scroll
@@ -5474,6 +5489,7 @@ fn render_sessions_preview_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
         journey: Some(&journey_lines),
         history: None,
         current: None,
+        post_run: None,
         title: run_view::PaneTitleRow::None,
     };
     // Merged into `state.last_pane_layout` (never replacing it — the list
@@ -5530,6 +5546,7 @@ fn sessions_focus_leaf_ids(state: &State, resolved: &PaneLayoutResult) -> Vec<Pa
             journey: Some(&journey_lines),
             history: None,
             current: None,
+            post_run: None,
             title: run_view::PaneTitleRow::None,
         };
         ids.extend(run_view::pane_tree(&SESSIONS_ATTACH_PANE_IDS, region, &data).leaf_ids());
@@ -6566,6 +6583,7 @@ mod tests {
             state_digest: String::new(),
             progress_lines: vec![labeled_dim_line("stub")],
             journey_lines: vec![run_view::journey_line(labeled_dim_line("stub"))],
+            post_run: Vec::new(),
             history: Vec::new(),
             current: Vec::new(),
             title: None,
@@ -7056,6 +7074,68 @@ mod tests {
             .expect("corrupt line degrades the sidecar");
         assert!(activity_reason.contains("unparseable"));
         assert_ne!(view.trait_degraded, view.activity_degraded);
+    }
+
+    #[test]
+    fn unchanged_digest_refresh_observes_post_run_frames_without_trait_reconstruction() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus, Status};
+
+        let ledger_path = scratch_ledger_path("post-run-unchanged-digest");
+        let mut session = unresolvable_trait_session_fixture("run-post-run-refresh", Some(0));
+        session.status = Status::Completed;
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write initial session");
+        let mut view = build_attached_view(
+            "post-run-unchanged-digest",
+            &ledger_path,
+            "run-post-run-refresh",
+        );
+        assert!(view.post_run.is_empty());
+        let digest = view.state_digest.clone();
+
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Gates,
+            status: MergeStatus::Parked,
+            reason: Some("post-run gate failed".to_string()),
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("append merge frame");
+        refresh_attached_view(&mut view);
+
+        assert_eq!(
+            view.state_digest, digest,
+            "merge frames do not affect digest"
+        );
+        assert_eq!(view.post_run.len(), 1);
+        let text: String = view.post_run[0].segments().map(|(text, _)| text).collect();
+        assert!(text.starts_with("× gates"));
+        assert!(
+            view.trait_degraded.is_some(),
+            "refresh did not reconstruct trait"
+        );
+    }
+
+    #[test]
+    fn trait_reconstruction_failure_keeps_persisted_post_run_frames() {
+        use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus, Status};
+
+        let mut session = unresolvable_trait_session_fixture("run-post-run-fallback", Some(0));
+        session.status = Status::Completed;
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: Vec::new(),
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        let ledger_path = scratch_ledger_path("post-run-fallback");
+        let reconstruction = reconstruct_panes(&session, &ledger_path);
+        assert!(reconstruction.trait_degraded.is_some());
+        assert_eq!(reconstruction.post_run.len(), 1);
     }
 
     /// P552 review `terminal-attach-story-identity-lost`: two ledgers can
@@ -7623,7 +7703,7 @@ mod tests {
         let parked_frame = MergeFrame {
             stage: MergeStage::Gates,
             status: MergeStatus::Parked,
-            reason: Some("pre-landing gate just-test failed: exit=Some(1)".to_string()),
+            reason: Some("post-run gate just-test failed: exit=Some(1)".to_string()),
             evidence: Vec::new(),
             park_reason: None,
             deep_decisions: Vec::new(),

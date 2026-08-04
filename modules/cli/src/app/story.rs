@@ -103,14 +103,14 @@ pub(crate) fn disposition_sentence(session: &Session, report: &StoryReport) -> S
         return match landing.frame.status {
             MergeStatus::Merged => "This run completed and merged to main.".to_string(),
             MergeStatus::Parked => {
-                format!("This run parked while landing: {}", explanation.sentence)
+                format!("This run parked during post-run: {}", explanation.sentence)
             }
             MergeStatus::PostMergeCleanupFailure => format!(
                 "This run's merge landed, but cleanup afterward failed: {}",
                 explanation.sentence
             ),
             MergeStatus::RecoveryFailure => format!(
-                "This run's landing could not be confirmed: {}",
+                "This run's post-run could not be confirmed: {}",
                 explanation.sentence
             ),
             MergeStatus::LockAcquired | MergeStatus::GatesPassed | MergeStatus::Reconciled => {
