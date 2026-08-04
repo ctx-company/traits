@@ -183,7 +183,7 @@ const parkReportPort = port.output.of(schema.list(verdictSchema), {
 export default variant({
     name: "Implement Phase",
     summary:
-        "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
+        "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit.",
     metadata: {
         tag: ["dogfood", "implementation", "review", "multi-agent"],
     },

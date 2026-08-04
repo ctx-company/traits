@@ -49,6 +49,11 @@ fn effective_max_inline_prompt_bytes() -> usize {
 pub(crate) struct ResolvedFramePrompt {
     pub(crate) prompt_section: String,
     pub(crate) input_section: String,
+    /// The frame-level `<information>` element: identity, title,
+    /// description, prompt, and (when the trait declares them) intent and
+    /// behavior guidance. Built once in [`resolved_frame_prompt`] so every
+    /// CLI-transport composer reads the same text.
+    pub(crate) information_section: String,
 }
 
 /// One declared-but-unaccepted input, carrying both the human-readable reason
@@ -96,7 +101,6 @@ pub(crate) fn mcp_frame_prompt(
 
 pub(crate) fn frame_prompt(
     context: &ResolvedFramePrompt,
-    contract: &str,
     schema: &Value,
     correction: Option<&str>,
 ) -> String {
@@ -116,15 +120,15 @@ pub(crate) fn frame_prompt(
     // repeated in full — 5.7k chars of runtime bookkeeping a model cannot act
     // on. Digests are gone from the model's view too: the ledger holds
     // provenance, the model does not need it.
+    //
+    // P019: `<input>` now collapses to operands only — `<data>` plus the
+    // retry `<correction>` — everything else the model needs to know about
+    // itself (identity, title, description, prompt, intent, behavior) moved
+    // into the frame-level `<information>` element built in
+    // `resolved_frame_prompt`.
     format!(
-        "{}<input>\n  <prompt>\n{}\n  </prompt>\n\n  <data>\n{}  </data>\n{correction}</input>\n\n{}",
-        // P563: the seat's identity and its one-step boundary lead the frame
-        // as a single line. The standing cross-frame discipline (submit through
-        // the ctx channel, do not invent loop control) lives in the system
-        // prompt — it is stable for a whole run and paying for it per frame is
-        // the cache-hostile half of the split.
-        contract,
-        indent_block(&context.prompt_section, 4),
+        "{}\n\n<input>\n  <data>\n{}  </data>\n{correction}</input>\n\n{}",
+        context.information_section,
         context.input_section,
         requested_output_contract_section(schema)
     )
@@ -146,6 +150,22 @@ fn indent_block(text: &str, spaces: usize) -> String {
         .join("\n")
 }
 
+/// Conservative margin applied to `COMMAND_CAPTURE_LIMIT` when stating the
+/// `<budget>` byte ceiling: harness JSON framing (escaping, envelope keys)
+/// grows a response beyond its raw text length, so the stated figure leaves
+/// headroom rather than naming the binding limit itself.
+const RESPONSE_BUDGET_MARGIN_NUM: usize = 9;
+const RESPONSE_BUDGET_MARGIN_DEN: usize = 10;
+
+/// The `<budget>` byte ceiling stated to the model: a conservative margin
+/// under [`ctx_traits_io::run::COMMAND_CAPTURE_LIMIT`], the runtime constant
+/// that actually enforces the response ceiling (P535 truncation) — computed
+/// here, never a hand-copied literal.
+fn response_byte_budget() -> usize {
+    ctx_traits_io::run::COMMAND_CAPTURE_LIMIT * RESPONSE_BUDGET_MARGIN_NUM
+        / RESPONSE_BUDGET_MARGIN_DEN
+}
+
 /// Render only the requested-output schema and response instruction. This is
 /// intentionally separate from the full per-step contract: a resumed reshape
 /// already has its input contract in conversation context and needs only the
@@ -157,8 +177,9 @@ pub(crate) fn requested_output_contract_section(schema: &Value) -> String {
     } else {
         format!("\n  <schema>\n{}\n  </schema>\n", indent_block(&named, 4))
     };
+    let budget = response_byte_budget();
     format!(
-        "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <response>\n    Return ONLY one JSON object matching <format> — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.\n  </response>\n</output>\n",
+        "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    Return ONLY one JSON object matching <format> — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.\n  </response>\n</output>\n",
         indent_block(&sketch, 4)
     )
 }
@@ -312,9 +333,13 @@ pub(crate) fn resolved_frame_prompt(
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
 ) -> crate::Result<ResolvedFramePrompt> {
+    let prompt_section = resolved_prompt_section(loaded, session, frame, pending_inputs)?;
+    let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
+    let information_section = frame_information_section(loaded, frame, &prompt_section);
     Ok(ResolvedFramePrompt {
-        prompt_section: resolved_prompt_section(loaded, session, frame, pending_inputs)?,
-        input_section: resolved_input_section(loaded, session, frame, pending_inputs)?,
+        prompt_section,
+        input_section,
+        information_section,
     })
 }
 
@@ -1363,36 +1388,63 @@ fn declared_json_schema(
     root
 }
 
-/// The explicit per-frame contract: who the agent is, what input types it
-/// receives, and (rendered separately) the output schema it must return —
-/// stated directly so no frame relies on the model inferring its role.
+/// The `<identity>`/`<title>` pair that opens every frame's `<information>`
+/// element: who the agent is and its one-step boundary, then the step's own
+/// title — stated directly so no frame relies on the model inferring its
+/// role.
 ///
-/// `pending_inputs` is the same [`PendingInput`] view `resolved_input_section`
-/// renders into `Resolved input values` — a pending ref still has a declared
-/// schema even though no value is inlined yet, so it belongs in this section
-/// too; passing the same slice both places is what keeps the two sections
-/// from disagreeing about which refs are pending. Live dispatch passes `&[]`,
-/// same as `resolved_frame_prompt`, so its section stays byte-identical.
-pub(crate) fn frame_contract_section(
-    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-) -> String {
+/// P560 (2026-07-28): the input JSON Schema enumeration is GONE. It listed
+/// the full nested schema — descriptions included — of every available and
+/// pending input on every frame: 4,725 chars on a measured worker frame,
+/// describing the types of values the model has already been handed and
+/// will never emit. Nothing consumed it. A description that genuinely
+/// matters to a step belongs in that step's authored prompt text, not
+/// auto-dumped for every input on every round.
+fn frame_contract_section(frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String {
     let role = frame
         .assigned_agent
         .as_ref()
         .map_or(ctx_traits_io::harness_config::DEFAULT_SEAT, |agent| {
             agent.role.as_str()
         });
-    // P560 (2026-07-28): the input JSON Schema enumeration is GONE. It listed
-    // the full nested schema — descriptions included — of every available and
-    // pending input on every frame: 4,725 chars on a measured worker frame,
-    // describing the types of values the model has already been handed and
-    // will never emit. Nothing consumed it. A description that genuinely
-    // matters to a step belongs in that step's authored prompt text, not
-    // auto-dumped for every input on every round.
-    let section = format!(
-        "You are agent:{role}, serving one step: \"{}\". Do only this step's work.\n\n",
+    format!(
+        "  <identity>You are agent:{role}. Do only this step's work.</identity>\n  <title>{}</title>\n",
         frame.title
-    );
+    )
+}
+
+/// The frame-level `<information>` element: identity, title, description
+/// (the trait's own summary — `SequenceItem` has no per-step description
+/// field today), the resolved prompt body, and — when the trait declares
+/// them — intent/behavior guidance sourced from the same directive registry
+/// `ctx traits explain` and the static model view already use
+/// ([`ctx_traits_core::model_view::frame_guidance`]).
+fn frame_information_section(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+    prompt_section: &str,
+) -> String {
+    let mut section = String::new();
+    section.push_str("<information>\n");
+    section.push_str(&frame_contract_section(frame));
+    section.push_str(&format!(
+        "  <description>{}</description>\n",
+        loaded.trait_ref.summary
+    ));
+    section.push_str("  <prompt>\n");
+    section.push_str(&indent_block(prompt_section, 4));
+    section.push_str("\n  </prompt>\n");
+    if let Some(guidance) = ctx_traits_core::model_view::frame_guidance(&loaded.trait_ref) {
+        if !guidance.intent.is_empty() {
+            section.push_str(&guidance.intent);
+            section.push('\n');
+        }
+        if !guidance.behavior.is_empty() {
+            section.push_str(&guidance.behavior);
+            section.push('\n');
+        }
+    }
+    section.push_str("</information>");
     section
 }
 

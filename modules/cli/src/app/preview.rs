@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use crate::app::command_handlers::print_json_report;
 use crate::app::frame_prompt::{
-    PendingInput, frame_contract_section, frame_prompt, human_frame_prompt, mcp_frame_prompt,
-    requested_output_schema, requested_outputs, resolved_frame_prompt,
+    PendingInput, frame_prompt, human_frame_prompt, mcp_frame_prompt, requested_output_schema,
+    requested_outputs, resolved_frame_prompt,
 };
 use ctx_traits_core::response::CommandOutput;
 
@@ -331,8 +331,7 @@ fn build_static_frame(
     let context = resolved_frame_prompt(loaded, session, frame, &pending_inputs)?;
     let requested = requested_outputs(frame)?;
     let schema = requested_output_schema(&requested, loaded);
-    let contract = frame_contract_section(frame);
-    let prompt = frame_prompt(&context, &contract, &schema, None);
+    let prompt = frame_prompt(&context, &schema, None);
     Ok(PreviewFrame {
         step: frame_step_label(frame),
         title: frame.title.clone(),
@@ -494,8 +493,7 @@ fn build_session_frame(
         _ => {
             let requested = requested_outputs(frame)?;
             let schema = requested_output_schema(&requested, loaded);
-            let contract = frame_contract_section(frame);
-            let prompt = frame_prompt(&context, &contract, &schema, None);
+            let prompt = frame_prompt(&context, &schema, None);
             Ok(PreviewFrame {
                 step,
                 title: frame.title.clone(),

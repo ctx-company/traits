@@ -76,7 +76,7 @@ const DEFAULT_INPUT_CAPTURE_LIMIT: usize = 262_144;
 /// caps the assembled prompt, and a capture that fits here can still overflow
 /// there. Truncation on a slot-feeding command is a typed failure, never a
 /// silent trim (see `stdout_truncated` handling below).
-const COMMAND_CAPTURE_LIMIT: usize = 327_680;
+pub const COMMAND_CAPTURE_LIMIT: usize = 327_680;
 
 /// Entropy for clean-run session/run ids: wall clock + pid + an in-process
 /// counter, so concurrent and rapid starts never collide.

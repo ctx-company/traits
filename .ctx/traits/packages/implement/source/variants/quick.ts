@@ -52,7 +52,7 @@ const draftStep = sequence.prompt("draft-writing", {
     text: prompt.text`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
-        Take the leanest correct approach. Reuse what exists rather than re-implementing beside it. Reference files by path. Do not implement anything.`,
+        Reference files by path. Do not implement anything.`,
     output: slot.draft,
 });
 

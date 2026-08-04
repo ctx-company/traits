@@ -124,6 +124,32 @@ twice, with and without the block, and diffing the verdicts would answer it.
 prompt."** The first is verifiable today; the second is a claim we cannot yet
 support.
 
+## Measured (implementation round)
+
+Real `ctx traits preview implement --step building-produce --json` frame, byte length
+of the `prompt` field, before vs. after this change (before = HEAD `c2432f23` in a
+scratch worktree, same trait, same step, no session so all data ports render pending):
+
+- Before: 5,192 bytes (~1,298 token estimate at 4 bytes/token)
+- After: 7,718 bytes (~1,930 token estimate at 4 bytes/token)
+- Delta: +2,526 bytes (~+632 tokens), driven by the 7 intent + 4 behavior
+  directive elements added to `<information>`; partially offset by deleting the
+  longhand duplicate sentence from the produce prompt.
+- `leanness` occurred once before this change too (inside the now-deleted
+  longhand prose) and still occurs once after (now solely from the declared
+  `<intent group="require" id="leanness">` element) — the fact moved to a
+  single source, it did not newly appear. `over-engineering` and `tone`: 0
+  occurrences before, 1 and 2 after respectively (both `direct` and `technical`
+  behaviors carry `axis="tone"`) — these genuinely reached the model for the
+  first time.
+- `<budget>Your entire response must fit in 294912 bytes.</budget>` present
+  after, computed as `COMMAND_CAPTURE_LIMIT * 9 / 10` (327,680 × 9 ÷ 10 =
+  294,912) — not a hand-copied literal.
+
+This confirms the frame carries the declared guidance and the duplicate prose
+is gone, on a real frame, not an estimate. Behavioral benefit remains
+unmeasured per the note above; P503 is still the instrument for that.
+
 ## Done when
 
 A frame carries one `<information>` with identity, title, description, prompt,

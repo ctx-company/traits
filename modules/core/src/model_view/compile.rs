@@ -384,6 +384,41 @@ fn format_behavior(
     elements.join("\n")
 }
 
+/// Frame-level intent/behavior guidance, rendered through the same
+/// resolution chain and `sanitize_model_text` coverage as the static model
+/// view — the single source `frame_prompt.rs`'s `<information>` block reuses
+/// rather than re-deriving.
+pub struct FrameGuidance {
+    pub intent: String,
+    pub behavior: String,
+}
+
+/// Resolve a trait's intent/behavior guidance for frame dispatch. Returns
+/// `None` if the trait declares neither, mirroring the static model view's
+/// `Some(intent)`/`Some(behavior)` gating.
+pub fn frame_guidance(trait_ref: &Trait) -> Option<FrameGuidance> {
+    let trait_id = trait_ref.id.as_str();
+    let mut warnings = Vec::new();
+    let mut normalizations = Vec::new();
+    let mut findings = Vec::new();
+
+    let intent = trait_ref
+        .intent
+        .as_ref()
+        .map(|intent| format_intent(intent, trait_id, &mut warnings, &mut normalizations, &mut findings))
+        .unwrap_or_default();
+    let behavior = trait_ref
+        .behavior
+        .as_ref()
+        .map(|behavior| format_behavior(behavior, trait_id, &mut warnings, &mut normalizations, &mut findings))
+        .unwrap_or_default();
+
+    if intent.is_empty() && behavior.is_empty() {
+        return None;
+    }
+    Some(FrameGuidance { intent, behavior })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn format_guidance_group<'a>(
     tag: &str,

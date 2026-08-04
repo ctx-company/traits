@@ -37,6 +37,9 @@ id = "review-before-final"
 [[intent.require]]
 id = "bounded-refinement"
 
+[[intent.require]]
+id = "verbatim-execution"
+
 [[intent.avoid]]
 id = "accretion"
 
@@ -57,6 +60,9 @@ id = "unbounded-loop"
 
 [[intent.avoid]]
 id = "rubber-stamp-review"
+
+[[intent.avoid]]
+id = "silent-deviation"
 
 [[behavior.tone]]
 id = "direct"
@@ -590,7 +596,7 @@ Create an implementation draft for {port:task}.
             FIRST verify the contract is implementable: it states a falsifiable Done-when (not a one-line placeholder or a file marked "detail pending"), it is not marked superseded or cancelled, every prerequisite task it names is already landed in this tree, and the scope honestly fits one run. If any of these fail, open the draft with "CONTRACT PROBLEM:" naming exactly what is missing or conflicting — reviewers escalate on that evidence in round 1 instead of round 10 — then still draft whatever subset is honestly implementable.
             Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the task into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the task reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.
             After the SCOPE SPLIT, the draft must cover: scope (exactly what the task asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
-            Favor the leanest correct approach: the minimal, robust, elegant change that satisfies the task — no speculative generality, no gold-plating, no defensive armor for states that cannot occur. Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
+            Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
     "port:task",
@@ -885,6 +891,12 @@ output = ["slot:planning-verdict"]
 
 [procedure]
 description = "Implement one task from the task board end to end with verbatim draft execution: extract its contract, draft the approach, implement it exactly as written with a typed deviation record, refine against two independent reviewers, commit — blocking rather than adapting when the draft is unsatisfiable."
+input = ["port:task"]
+output = [
+    "port:commit-report",
+    "port:leftovers",
+    "port:park-report",
+]
 
 [[procedure.sequence]]
 id = "task-extraction"

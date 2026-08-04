@@ -621,7 +621,7 @@ fn content_rejection_resumed_retry_then_stale_identity_abandons_at_frame_boundar
         retry_prompt.contains("<output>")
             && retry_prompt.contains("\"answer\": boolean")
             && retry_prompt.contains("Return ONLY one JSON object")
-            && !retry_prompt.contains("serving one step:")
+            && !retry_prompt.contains("<identity>")
             && !retry_prompt.contains("Input types (JSON Schema):")
             && !retry_prompt.contains("Resolved input values:")
             && !retry_prompt.contains("Resolved prompt instructions:"),
@@ -742,9 +742,9 @@ fn content_rejection_then_same_frame_stale_identity_recovers_and_completes() {
     assert!(
         !retry_prompt_1.contains("<input>")
             && retry_prompt_1.contains("<output>")
-            && retry_prompt_2.contains("serving one step: \"Produce fixture answer\"")
+            && retry_prompt_2.contains("<title>Produce fixture answer</title>")
             && retry_prompt_2.contains("<data>")
-            && retry_prompt_2.contains("serving one step:")
+            && retry_prompt_2.contains("<identity>You are agent:")
             && retry_prompt_2.contains("<output>"),
         "only the first resumed retry may be compact: {retry_prompt_1:?} / {retry_prompt_2:?}"
     );
@@ -808,7 +808,7 @@ fn stale_truncation_content_incident_spends_only_two_model_retry_charges() {
     let truncation_prompt = prompt_text(&outcome.log_dir, 2);
     assert!(
         truncation_prompt.contains("<input>")
-            && truncation_prompt.contains("serving one step:")
+            && truncation_prompt.contains("<identity>You are agent:")
             && truncation_prompt.contains("response ended before a complete JSON object"),
         "truncation retry must carry the complete frame: {truncation_prompt}"
     );

@@ -29,7 +29,7 @@ const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 export default variant({
     name: "Implement (Default)",
     summary:
-        "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop tuned for pragmatism, robustness, elegance, correctness, leanness, and reuse — then summarize and commit.",
+        "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
     behavior: {
         tone: [tone.Direct, tone.Technical],

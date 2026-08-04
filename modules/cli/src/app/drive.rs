@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::app::agent_dispatch;
 use crate::app::frame_prompt::{
-    RequestedSlotKey, ResolvedFramePrompt, frame_contract_section, frame_prompt, mcp_frame_prompt,
+    RequestedSlotKey, ResolvedFramePrompt, frame_prompt, mcp_frame_prompt,
     requested_output_contract_section, requested_output_schema, requested_outputs,
     resolved_frame_prompt,
 };
@@ -2119,8 +2119,7 @@ fn drive_loop(
         let output_id = cli.output.as_deref().unwrap_or("raw-json");
         let mut requested = requested_outputs(&frame)?;
         let mut schema = requested_output_schema(&requested, &loaded_trait);
-        let mut contract = frame_contract_section(&frame);
-        let mut prompt = frame_prompt(&prompt_context, &contract, &schema, None);
+        let mut prompt = frame_prompt(&prompt_context, &schema, None);
         // Standing instructions declared on the trait's `[[agent]]`. Delivered
         // through the harness system channel when the convention has one, and
         // folded into the prompt body when it does not (see below). Owned for
@@ -2709,7 +2708,6 @@ fn drive_loop(
                 let preparation = match prepare_correction_retry(
                     CorrectionRetryContext {
                         prompt_context: &prompt_context,
-                        contract: &contract,
                         schema: &schema,
                         harness: &harness,
                         cli,
@@ -2840,7 +2838,6 @@ fn drive_loop(
                     let preparation = match prepare_correction_retry(
                         CorrectionRetryContext {
                             prompt_context: &prompt_context,
-                            contract: &contract,
                             schema: &schema,
                             harness: &harness,
                             cli,
@@ -2912,7 +2909,6 @@ fn drive_loop(
                     let preparation = match prepare_correction_retry(
                         CorrectionRetryContext {
                             prompt_context: &prompt_context,
-                            contract: &contract,
                             schema: &schema,
                             harness: &harness,
                             cli,
@@ -3240,7 +3236,6 @@ fn drive_loop(
             prompt_context = resolved_frame_prompt(&loaded_trait, &refreshed_session, &frame, &[])?;
             requested = requested_outputs(&frame)?;
             schema = requested_output_schema(&requested, &loaded_trait);
-            contract = frame_contract_section(&frame);
             refresh_existing_run_panel(run_panel.0.as_ref(), &refreshed_session);
             let observed_session_id = parsed.harness_session_id.clone();
             if class.handling() == RejectionHandling::RuntimeRedispatch {
@@ -3274,7 +3269,7 @@ fn drive_loop(
                         )
                     })
                     .flatten();
-                prompt = frame_prompt(&prompt_context, &contract, &schema, None);
+                prompt = frame_prompt(&prompt_context, &schema, None);
                 if let Some(system) = agent_system.filter(|_| cli.system_prompt_flag.is_none()) {
                     prompt = format!("{system}\n\n{prompt}");
                 }
@@ -3322,7 +3317,6 @@ fn drive_loop(
             let preparation = match prepare_correction_retry(
                 CorrectionRetryContext {
                     prompt_context: &prompt_context,
-                    contract: &contract,
                     schema: &schema,
                     harness: &harness,
                     cli,
@@ -4764,7 +4758,6 @@ fn truncate_name(name: &str) -> String {
 /// needs the identical set.
 struct CorrectionRetryContext<'a> {
     prompt_context: &'a ResolvedFramePrompt,
-    contract: &'a str,
     schema: &'a Value,
     harness: &'a ctx_traits_io::harness_config::HarnessDefinition,
     cli: &'a ctx_traits_io::harness_config::HarnessCliConvention,
@@ -4893,12 +4886,9 @@ fn prepare_correction_retry(
             },
         );
         let prompt = match rung {
-            CorrectionRung::CompleteFrame => frame_prompt(
-                ctx.prompt_context,
-                ctx.contract,
-                ctx.schema,
-                Some(correction),
-            ),
+            CorrectionRung::CompleteFrame => {
+                frame_prompt(ctx.prompt_context, ctx.schema, Some(correction))
+            }
             CorrectionRung::ResumedReshape => match schema_delivery {
                 SchemaDelivery::Flag => correction.to_string(),
                 SchemaDelivery::Inline => format!("{correction}\n\n{}", inline_output_contract),
@@ -4924,12 +4914,7 @@ fn prepare_correction_retry(
     // instructions on its first turn; only a cold start (a fresh
     // conversation, or one degraded to the prompt body because the harness
     // has no system-prompt flag) needs them composed in again.
-    let mut prompt = frame_prompt(
-        ctx.prompt_context,
-        ctx.contract,
-        ctx.schema,
-        Some(correction),
-    );
+    let mut prompt = frame_prompt(ctx.prompt_context, ctx.schema, Some(correction));
     if let Some(system) = ctx
         .agent_system
         .filter(|_| ctx.cli.system_prompt_flag.is_none())
@@ -5904,7 +5889,6 @@ fn attempt_concurrent_wave(
         };
         let sibling = &sibling_assignments[index];
         let schema = requested_output_schema(&requested, request.loaded_trait);
-        let contract = frame_contract_section(frame);
         let peeked_session = bound_states[index]
             .as_ref()
             .map(|state| session_with_bound_state(request.session, state));
@@ -5914,7 +5898,7 @@ fn attempt_concurrent_wave(
         else {
             return Err(WaveIneligible::SiblingUnresolvable);
         };
-        let mut prompt = frame_prompt(&prompt_context, &contract, &schema, None);
+        let mut prompt = frame_prompt(&prompt_context, &schema, None);
         if let Some(system) = sibling
             .agent_system
             .as_deref()
