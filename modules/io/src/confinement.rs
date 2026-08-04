@@ -1455,13 +1455,28 @@ mod tests {
     /// git-ignored) so nothing outside the test's own lifetime is touched.
     #[cfg(target_os = "macos")]
     fn non_tmp_scratch_root(tag: &str) -> ScratchRoot {
-        let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!(
-                "ctx-confinement-live-test-{tag}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
+        // Resolved at runtime (task 0099), not baked via `env!`: a
+        // compile-time CARGO_MANIFEST_DIR survives inside a shared
+        // build-slot's cached test binary after the worktree that produced
+        // it is pruned. Cargo sets it as a real process env var for this
+        // crate's own unit-test binary (`modules/io`). `target/` here is
+        // this crate's own scratch subdirectory (self-contained,
+        // git-ignored), not the shared `CARGO_TARGET_DIR` — under a shared
+        // target dir it may not pre-exist, which `create_dir_all` below
+        // already handles.
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("cargo test sets CARGO_MANIFEST_DIR for ctx-traits-io's unit tests");
+        assert!(
+            Utf8PathBuf::from(&manifest_dir)
+                .join("Cargo.toml")
+                .is_file(),
+            "CARGO_MANIFEST_DIR {manifest_dir} has no Cargo.toml landmark"
+        );
+        let path = Utf8PathBuf::from(manifest_dir).join("target").join(format!(
+            "ctx-confinement-live-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
         if path.exists() {
             std::fs::remove_dir_all(path.as_std_path()).expect("clear stale scratch dir");
         }

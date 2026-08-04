@@ -32,16 +32,33 @@ pub fn ctx_bin() -> PathBuf {
     )
 }
 
-/// Absolute path to the repository root, four levels above this crate's own
-/// manifest directory (`modules/cli/tests/support`).
+/// Absolute path to the repository root, resolved at runtime (P477 rule,
+/// task 0099): a baked `env!("CARGO_MANIFEST_DIR")` here would freeze
+/// whatever worktree happened to compile this crate, which then survives as
+/// a stale path inside a shared build-slot's cached `.rlib`/test binary long
+/// after that worktree is pruned. Cargo sets `CARGO_MANIFEST_DIR` as a real
+/// process env var at run time for the *package under test* linking this
+/// crate in — `modules/cli`, not `modules/cli/tests/support` itself — so the
+/// hop count from that runtime root is two levels, not the four a
+/// compile-time bake from `support`'s own manifest dir would need. The
+/// landmark probe (`Cargo.toml` + `modules/` at the candidate) turns a wrong
+/// hop count into a loud panic naming the resolved path instead of a silent
+/// bad root.
 pub fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("cargo test sets CARGO_MANIFEST_DIR for ctx-traits-cli's integration tests");
+    let candidate = PathBuf::from(manifest_dir)
         .parent()
         .and_then(Path::parent)
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .expect("modules/cli/tests/support/Cargo.toml has a repo root four levels up")
-        .to_path_buf()
+        .expect("modules/cli's CARGO_MANIFEST_DIR has a repo root two levels up")
+        .to_path_buf();
+    assert!(
+        candidate.join("Cargo.toml").is_file() && candidate.join("modules").is_dir(),
+        "repo_root() resolved {} but it has no Cargo.toml/modules landmark — the runtime \
+         CARGO_MANIFEST_DIR hop count is wrong",
+        candidate.display()
+    );
+    candidate
 }
 
 /// Absolute path to `ctx-fixture-agent` (P461), the dev-only multi-role
@@ -321,7 +338,12 @@ pub fn git_init(dir: &Path) {
 /// default branch is something other than `main` (e.g. `trunk`).
 /// Recursively collect every `.rs` file under `dir`. Shared by the
 /// repo-wide source-scan proofs (`proof_branch_literals`,
-/// `proof_identity_scrub`) so the walk is written once (P490).
+/// `proof_identity_scrub`, `proof_compile_time_paths`) so the walk is
+/// written once (P490). `target/` directories are skipped: they hold build
+/// artifacts and crate-local scratch output (task 0099's
+/// `non_tmp_scratch_root`), never source, and walking a shared
+/// `CARGO_TARGET_DIR`'s contents would be both slow and liable to surface
+/// generated `.rs` files that are not this repository's own source.
 pub fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -333,6 +355,9 @@ pub fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
             .file_type()
             .unwrap_or_else(|error| panic!("cannot stat {}: {error}", path.display()));
         if file_type.is_dir() {
+            if path.file_name().is_some_and(|name| name == "target") {
+                continue;
+            }
             collect_rs_files(&path, out);
         } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
             out.push(path);

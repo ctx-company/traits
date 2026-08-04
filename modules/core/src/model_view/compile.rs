@@ -1325,9 +1325,25 @@ mod render_v2_shape_tests {
     #[test]
     fn directive_resolves_for_every_guidance_id_used_by_repo_traits() {
         fn manifest_paths() -> Vec<std::path::PathBuf> {
-            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            // Resolved at runtime (task 0099), not baked via `env!`: a
+            // compile-time CARGO_MANIFEST_DIR survives inside a shared
+            // build-slot's cached test binary after the worktree that
+            // produced it is pruned. Cargo sets it as a real process env var
+            // for this crate's own unit-test binary (`modules/core`), so the
+            // parent-hop count to the repo root is unchanged from the baked
+            // form.
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+                .expect("cargo test sets CARGO_MANIFEST_DIR for ctx-traits-core's unit tests");
+            let root = std::path::PathBuf::from(manifest_dir);
+            let root = root.as_path();
             let mut roots = vec![root.join("builtins/traits")];
             if let Some(repo_root) = root.parent().and_then(|p| p.parent()) {
+                assert!(
+                    repo_root.join("Cargo.toml").is_file() && repo_root.join("modules").is_dir(),
+                    "derived repo root {} has no Cargo.toml/modules landmark — the runtime \
+                     CARGO_MANIFEST_DIR hop count is wrong",
+                    repo_root.display()
+                );
                 // P569 moved packages under `packages/`; the pre-move root is
                 // still swept so a checkout that has not migrated is covered.
                 roots.push(repo_root.join(".ctx/traits/packages"));

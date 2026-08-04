@@ -36,8 +36,24 @@ const TEST_ERROR_CODES: JsonAbiErrorCodes = JsonAbiErrorCodes {
     serialize_message: "native parity test could not serialize its expected envelope",
 };
 
+/// Resolved at runtime (task 0099), not baked via `env!`: a compile-time
+/// `CARGO_MANIFEST_DIR` survives inside a shared build-slot's cached test
+/// binary after the worktree that produced it is pruned. Cargo sets it as a
+/// real process env var for this integration test's own package
+/// (`modules/wasm-core`), so the `../..` hop count to the repo root is
+/// unchanged from the baked form — only the read moves to run time, and a
+/// landmark probe replaces trusting the hop count blindly.
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("cargo test sets CARGO_MANIFEST_DIR for ctx-traits-wasm-core's integration tests");
+    let root = Path::new(&manifest_dir).join("..").join("..");
+    assert!(
+        root.join("Cargo.toml").is_file() && root.join("modules").is_dir(),
+        "repo_root() resolved {} but it has no Cargo.toml/modules landmark — the runtime \
+         CARGO_MANIFEST_DIR hop count is wrong",
+        root.display()
+    );
+    root
 }
 
 /// Canonical trait documents already committed as `ctx.traits` builtins.
