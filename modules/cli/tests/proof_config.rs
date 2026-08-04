@@ -287,8 +287,8 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         "replaced list seat retained a stale global model winner: {report}"
     );
     assert_eq!(
-        knobs["harness.layered.mcp.allowed-tools"]["winner"]["layer"], "built-in",
-        "the global MCP table was replaced rather than retaining its stale winner"
+        knobs["harness.layered.mcp.allowed-tools"]["winner"]["layer"], "user-global",
+        "a partial repo MCP table must retain the global allowed-tools winner"
     );
     assert_eq!(knobs["run.build-cache.shared.env"]["value"], "REPO_CACHE");
     assert_eq!(
@@ -331,6 +331,140 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
             { "layer": "repo", "source": repo_source },
             { "layer": "environment", "source": environment_source },
         ])
+    );
+}
+
+#[test]
+fn layered_single_assignment_and_harness_leaves_keep_each_winner() {
+    let scratch = ScratchRoot::new("p1010-single-table-leaves");
+    let repo = scratch.home().join("repo");
+    let global = scratch.home().join("ctx/config.toml");
+    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(global.parent().unwrap()).unwrap();
+    git_init(&repo);
+
+    let active_key = require_success(
+        "discover active repository qualifier",
+        &["traits", "doctor", "--config"],
+        &repo,
+        &scratch.home(),
+    )
+    .lines()
+    .find(|line| line.trim_start().starts_with("repo.active-key:"))
+    .and_then(|line| line.split_once(':'))
+    .map(|(_, value)| value.split('[').next().unwrap_or(value).trim().to_string())
+    .unwrap();
+
+    fs::write(
+        &global,
+        format!(
+            "[harness.layered]\nbin = 'global-bin'\ntransports = ['cli', 'mcp']\nversion-probe = ['--version']\n\
+             [harness.layered.cli]\nargv = []\nprompt-via = 'stdin'\noutput = 'raw-json'\n\
+             [harness.layered.mcp]\nmcp-config-flag = '--global-mcp'\n\
+             [agent.role.worker]\nmode = 'attach'\n\
+             [agent.role.reviewer]\nmodel = 'global-model'\n\
+             [repo.\"{active_key}\".harness.layered.mcp]\nallowed-tools-flag = '--personal-tools'\n\
+             [repo.\"{active_key}\".agent.role.reviewer]\nsystem-prompt = 'personal-prompt'\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".ctx/config.toml"),
+        "[harness.layered]\nbin = 'repo-bin'\n\
+         [harness.layered.mcp]\nallowed-tools = ['repo-tool']\n\
+          [agent.role.reviewer]\nreasoning-effort = 'medium'\n",
+    )
+    .unwrap();
+    let environment = scratch.home().join("environment.toml");
+    fs::write(
+        &environment,
+        "[harness.layered.mcp]\nconfig-via = 'environment-file'\n\
+          [agent.role.reviewer]\nextra-args = ['--environment']\n",
+    )
+    .unwrap();
+
+    let global_source = fs::canonicalize(&global).unwrap().display().to_string();
+    let repo_source = fs::canonicalize(&repo)
+        .unwrap()
+        .join(".")
+        .join(".ctx/config.toml")
+        .display()
+        .to_string();
+    let environment_source = environment.display().to_string();
+    let mut command = support::controlled_command(
+        &support::ctx_bin(),
+        &["traits", "doctor", "--config", "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    command.env("CTX_CONFIG", &environment);
+    let output = command.output().unwrap();
+    assert_exit_code(&output, 0);
+    let (json, _) = utf8(&output);
+    let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let knobs = &report["knobs"];
+    for (key, value, layer, source) in [
+        ("harness.layered.bin", "repo-bin", "repo", &repo_source),
+        (
+            "harness.layered.cli.prompt-via",
+            "stdin",
+            "user-global",
+            &global_source,
+        ),
+        (
+            "harness.layered.mcp.mcp-config-flag",
+            "--global-mcp",
+            "user-global",
+            &global_source,
+        ),
+        (
+            "harness.layered.mcp.allowed-tools-flag",
+            "--personal-tools",
+            "user-global",
+            &global_source,
+        ),
+        (
+            "harness.layered.mcp.config-via",
+            "environment-file",
+            "environment",
+            &environment_source,
+        ),
+        (
+            "agent.role.reviewer.model",
+            "global-model",
+            "user-global",
+            &global_source,
+        ),
+        (
+            "agent.role.reviewer.reasoning-effort",
+            "medium",
+            "repo",
+            &repo_source,
+        ),
+        (
+            "agent.role.reviewer.system-prompt",
+            "present",
+            "user-global",
+            &global_source,
+        ),
+        (
+            "agent.role.reviewer.extra-args",
+            "[\"--environment\"]",
+            "environment",
+            &environment_source,
+        ),
+    ] {
+        assert_eq!(knobs[key]["value"], value, "{key}: {report}");
+        assert_eq!(knobs[key]["winner"]["layer"], layer, "{key}: {report}");
+        assert_eq!(
+            knobs[key]["winner"]["source"],
+            source.as_str(),
+            "{key}: {report}"
+        );
+    }
+    assert_eq!(
+        knobs["agent.role.reviewer.system-prompt"]["winner"]["reason"],
+        "personal-repo-override"
     );
 }
 

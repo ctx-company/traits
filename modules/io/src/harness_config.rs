@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// The one registry-adjacent mapping from configured harness kind to its
 /// native activity adapter. Custom harnesses intentionally have no guessed
@@ -107,7 +107,11 @@ impl HarnessDefinition {
                 (Some(over), None) => Some(over.clone()),
                 (None, under) => under.cloned(),
             },
-            mcp: self.mcp.clone().or_else(|| base.mcp.clone()),
+            mcp: match (self.mcp.as_ref(), base.mcp.as_ref()) {
+                (Some(over), Some(under)) => Some(over.merged_onto(under)),
+                (Some(over), None) => Some(over.clone()),
+                (None, under) => under.cloned(),
+            },
         }
     }
 }
@@ -224,6 +228,28 @@ pub struct HarnessMcpConvention {
     pub reasoning_effort_flag: Option<String>,
     #[serde(default)]
     pub config_via: Option<String>,
+}
+
+impl HarnessMcpConvention {
+    /// Ordered tool lists replace as a complete declaration while omitted
+    /// scalar leaves inherit from the farther convention.
+    fn merged_onto(&self, base: &HarnessMcpConvention) -> HarnessMcpConvention {
+        HarnessMcpConvention {
+            mcp_config_flag: merge_flag(&self.mcp_config_flag, &base.mcp_config_flag),
+            allowed_tools_flag: merge_flag(&self.allowed_tools_flag, &base.allowed_tools_flag),
+            allowed_tools: if self.allowed_tools.is_empty() {
+                base.allowed_tools.clone()
+            } else {
+                self.allowed_tools.clone()
+            },
+            system_prompt_flag: merge_flag(&self.system_prompt_flag, &base.system_prompt_flag),
+            reasoning_effort_flag: merge_flag(
+                &self.reasoning_effort_flag,
+                &base.reasoning_effort_flag,
+            ),
+            config_via: merge_flag(&self.config_via, &base.config_via),
+        }
+    }
 }
 
 #[derive(
@@ -646,6 +672,7 @@ impl RunProfileAssignment {
             model_selector: None,
             model_resolution_reason: None,
             mode: RunAssignmentMode::Harness,
+            mode_authored: true,
             harness: self.harness,
             transport: self.transport,
             session_mode: self.session_mode,
@@ -1666,9 +1693,7 @@ pub struct SeatInfo {
     pub list_length: u32,
 }
 
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ProfileAssignment {
     /// JSON overrides emitted from an already resolved assignment replace the
@@ -1684,6 +1709,11 @@ pub struct ProfileAssignment {
     model_resolution_reason: Option<ctx_traits_core::agent_model::ResolutionReason>,
     #[serde(default)]
     pub mode: RunAssignmentMode,
+    /// Kept private so authored presence survives deserialization without
+    /// changing the public resolved `mode` shape.
+    #[serde(skip)]
+    #[schemars(skip)]
+    mode_authored: bool,
     #[serde(default)]
     pub harness: Option<String>,
     #[serde(default)]
@@ -1705,6 +1735,56 @@ pub struct ProfileAssignment {
     /// bytes are unaffected until an operator actually declares one.
     #[serde(default, skip_serializing_if = "RoleBudget::is_empty")]
     pub budget: RoleBudget,
+}
+
+impl<'de> Deserialize<'de> for ProfileAssignment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+        struct WireAssignment {
+            #[serde(default)]
+            mode: Option<RunAssignmentMode>,
+            #[serde(default)]
+            harness: Option<String>,
+            #[serde(default)]
+            transport: Option<RunTransport>,
+            #[serde(default)]
+            session_mode: Option<RunSessionMode>,
+            #[serde(default)]
+            model: Option<String>,
+            #[serde(default)]
+            model_tier: Option<ctx_traits_core::r#trait::AgentModelTier>,
+            #[serde(default)]
+            reasoning_effort: Option<String>,
+            #[serde(default)]
+            system_prompt: Option<String>,
+            #[serde(default)]
+            extra_args: Vec<String>,
+            #[serde(default)]
+            budget: RoleBudget,
+        }
+
+        let wire = WireAssignment::deserialize(deserializer)?;
+        Ok(Self {
+            replace_inherited: false,
+            model_selector: None,
+            model_resolution_reason: None,
+            mode: wire.mode.unwrap_or_default(),
+            mode_authored: wire.mode.is_some(),
+            harness: wire.harness,
+            transport: wire.transport,
+            session_mode: wire.session_mode,
+            model: wire.model,
+            model_tier: wire.model_tier,
+            reasoning_effort: wire.reasoning_effort,
+            system_prompt: wire.system_prompt,
+            extra_args: wire.extra_args,
+            budget: wire.budget,
+        })
+    }
 }
 
 impl ProfileAssignment {
@@ -3457,9 +3537,6 @@ fn apply_repo_defaults(
         record_personal_winner(winners, "agent.model-tier", source.clone());
     }
     for (id, harness) in &qualifier.harness {
-        if harness.mcp.is_some() {
-            remove_winner_subtree(winners, &format!("harness.{id}.mcp"));
-        }
         let merged = runtime
             .harness
             .get(id)
@@ -3562,9 +3639,6 @@ fn apply_environment_defaults(
         record_winner(winners, "agent.model-tier", layer, source.clone());
     }
     for (id, harness) in &document.harness {
-        if harness.mcp.is_some() {
-            remove_winner_subtree(winners, &format!("harness.{id}.mcp"));
-        }
         let merged = runtime
             .harness
             .get(id)
@@ -4810,9 +4884,6 @@ fn merge_machine_config(
         base.schema_version = next.schema_version;
     }
     for (name, harness) in next.harness {
-        if harness.mcp.is_some() {
-            remove_winner_subtree(winners, &format!("harness.{name}.mcp"));
-        }
         record_harness_winners(winners, &name, &harness, layer, source.clone(), false);
         let merged = base
             .harness
@@ -4951,6 +5022,7 @@ fn record_assignment_winners(
             prefix.to_string()
         };
         for (field, present) in [
+            ("mode", assignment.mode_authored),
             ("harness", assignment.harness.is_some()),
             ("transport", assignment.transport.is_some()),
             ("session-mode", assignment.session_mode.is_some()),
@@ -5253,6 +5325,7 @@ pub fn parse_assignment_overrides(overrides: &[String]) -> crate::Result<Assignm
             model_selector: None,
             model_resolution_reason: None,
             mode: RunAssignmentMode::Harness,
+            mode_authored: true,
             harness: Some(harness.to_string()),
             transport,
             session_mode,
@@ -5378,7 +5451,10 @@ fn merge_assignment(base: &mut ProfileAssignment, next: &ProfileAssignment) {
 /// `--assign`/profile entry over `.ctx/config.toml` role/tier defaults: only
 /// fields `next` actually sets replace the corresponding field on `base`.
 fn merge_assignment_fields(base: &mut ProfileAssignment, next: &ProfileAssignment) {
-    base.mode = next.mode;
+    if next.mode_authored {
+        base.mode = next.mode;
+        base.mode_authored = true;
+    }
     if next.harness.is_some() {
         base.harness = next.harness.clone();
     }
@@ -7740,6 +7816,112 @@ mod config_tests {
             ConfigLayer::UserGlobal
         );
         assert!(!winners.contains_key("agent.role.worker.1.model"));
+    }
+
+    #[test]
+    fn parsed_single_tables_overlay_leaves_without_resetting_attach_mode() {
+        let parse =
+            |text: &str| toml::from_str::<RuntimeConfig>(text).expect("test config decodes");
+        let global = parse(
+            "[harness.layered]\nbin = 'global-bin'\nversion-probe = ['global-version']\n\
+             [harness.layered.cli]\nprompt-via = 'stdin'\nargv = ['global-argv']\n\
+             [harness.layered.mcp]\nmcp-config-flag = '--global-mcp'\nallowed-tools = ['global-tool']\n\
+             [agent.role.worker]\nmode = 'attach'\nmodel = 'global-model'\nextra-args = ['--global']\n\
+             [agent.variant.smart.role.worker]\nreasoning-effort = 'low'\n\
+             [repo.key.agent.role.worker]\nsystem-prompt = 'personal-prompt'\n",
+        );
+        let repo = parse(
+            "[harness.layered]\nbin = 'repo-bin'\nversion-probe = ['repo-version']\n\
+             [harness.layered.cli]\nargv = ['repo-argv']\n\
+             [harness.layered.mcp]\nallowed-tools-flag = '--repo-tools'\nallowed-tools = ['repo-tool']\n\
+             [agent.role.worker]\nreasoning-effort = 'medium'\n\
+             [agent.variant.smart.role.worker]\nsystem-prompt = 'variant-prompt'\n",
+        );
+        let environment = parse(
+            "[harness.layered.mcp]\nmcp-config-flag = ''\nconfig-via = 'environment-file'\n\
+             [agent.role.worker]\nextra-args = ['--environment']\n",
+        );
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_machine_config(
+            &mut effective,
+            global,
+            ConfigLayer::UserGlobal,
+            Some("global".into()),
+            &mut winners,
+        );
+        merge_machine_config(
+            &mut effective,
+            repo,
+            ConfigLayer::Repo,
+            Some("repo".into()),
+            &mut winners,
+        );
+        let personal = effective.repo["key"].clone();
+        apply_repo_defaults(
+            &mut effective,
+            &personal,
+            ConfigLayer::UserGlobal,
+            Some("global".into()),
+            &mut winners,
+        );
+        apply_environment_defaults(
+            &mut effective,
+            &environment,
+            ConfigLayer::Environment,
+            Some("environment".into()),
+            &mut winners,
+        );
+
+        let harness = &effective.harness["layered"];
+        assert_eq!(harness.bin(), "repo-bin");
+        assert_eq!(harness.version_probe, ["repo-version"]);
+        assert_eq!(harness.cli.as_ref().unwrap().argv, ["repo-argv"]);
+        let mcp = harness.mcp.as_ref().unwrap();
+        assert_eq!(mcp.mcp_config_flag, None);
+        assert_eq!(mcp.allowed_tools_flag.as_deref(), Some("--repo-tools"));
+        assert_eq!(mcp.allowed_tools, ["repo-tool"]);
+        assert_eq!(mcp.config_via.as_deref(), Some("environment-file"));
+        assert_eq!(
+            winners["harness.layered.mcp.mcp-config-flag"].layer,
+            ConfigLayer::Environment
+        );
+        assert_eq!(
+            winners["harness.layered.mcp.allowed-tools-flag"].layer,
+            ConfigLayer::Repo
+        );
+        assert_eq!(
+            winners["harness.layered.mcp.config-via"].layer,
+            ConfigLayer::Environment
+        );
+
+        let RoleAssignmentValue::Single(worker) = &effective.agent.role["worker"] else {
+            panic!("expected single-table worker assignment");
+        };
+        assert_eq!(worker.mode, RunAssignmentMode::Attach);
+        assert_eq!(worker.model.as_deref(), Some("global-model"));
+        assert_eq!(worker.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(worker.system_prompt.as_deref(), Some("personal-prompt"));
+        assert_eq!(worker.extra_args, ["--environment"]);
+        assert_eq!(
+            winners["agent.role.worker.mode"].layer,
+            ConfigLayer::UserGlobal
+        );
+        assert_eq!(
+            winners["agent.role.worker.system-prompt"].reason,
+            ConfigReason::PersonalRepoOverride
+        );
+        assert_eq!(
+            winners["agent.role.worker.extra-args"].layer,
+            ConfigLayer::Environment
+        );
+
+        let RoleAssignmentValue::Single(variant) = &effective.agent.variant["smart"].role["worker"]
+        else {
+            panic!("expected single-table variant assignment");
+        };
+        assert_eq!(variant.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(variant.system_prompt.as_deref(), Some("variant-prompt"));
     }
 
     #[test]
