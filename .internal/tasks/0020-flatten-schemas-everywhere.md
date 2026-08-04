@@ -1,6 +1,16 @@
 # 0020 — Flatten schemas at emit: compose in authoring, never in the payload
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** superseded — implemented and reviewer-approved by run-7b9d29ff, landing split to 0020.1; do not dispatch this file · **Raised:** 2026-07-29
+
+## Split (2026-08-04)
+
+Run-7b9d29ff (`wt-415567ef26c4`) implemented everything below and its reviewer approved with zero
+blockers on round 1; the tree stayed byte-identical for eleven more rounds while the repo gate
+failed on a stale leased build-slot binary (0099's failure class) until max-iterations. The diff is
+harvested verbatim as `.internal/tasks/assets/0020-flatten-core.patch`; **0020.1** lands it. There
+are no other children — the task was not oversized, its gate environment was broken. Reviewer-carried
+minor notes (manual union-arm bracket-stripping, union-cycle unit test) ride with future union emit
+work, not with a child here. The sections below stay as the decision record 0020.1 inherits.
 
 ## Decision
 
