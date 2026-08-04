@@ -2,7 +2,7 @@
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
 
-Second of three component slices the plannotator trait needs. Land it after 0083.
+Second of three component slices the plannotator trait (0086) needs. Land it after 0083.
 
 0058 was right that silence means stuck — for a gate. A build still printing is working however long
 it takes; one that has gone quiet is hung. That reasoning is exactly inverted for a step whose job

@@ -2,7 +2,7 @@
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
 
-First of three component slices the plannotator trait needs. Land it first: it is the smallest
+First of three component slices the plannotator trait (0086) needs. Land it first: it is the smallest
 and the only one that blocks that trait from building at all.
 
 Some loops genuinely have no iteration count. A build loop that ends when the reviewer *and* the

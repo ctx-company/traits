@@ -2,7 +2,7 @@
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner design session; decisions in this file are the contract — they were settled deliberately, do not re-open them without a concrete contradiction)
 
-Third of three component slices the plannotator trait needs, and the only one with real contract
+Third of three component slices the plannotator trait (0086) needs, and the only one with real contract
 risk. Land it last.
 
 Object-schema slots already expose one typed `FieldRef` per declared field (`handles.d.ts:37`,
