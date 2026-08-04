@@ -1,6 +1,6 @@
 # 0030 — Narrate through the provider API directly, not a harness
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** ready to implement, but do NOT build the transport here — 0079 (2026-08-04) generalises it to any one-shot seat and this becomes its first consumer. Keep this file as the statement of *why* for the narrator specifically; close it against 0079 rather than implementing it separately. · **Raised:** 2026-07-29
 
 Narration currently spawns a whole coding-agent CLI per tick. That is enormous
 overhead for a task that is: take a few lines of recent activity, return one

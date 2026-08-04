@@ -1,0 +1,86 @@
+# 0079 — A native provider transport: one HTTP call instead of a whole harness
+
+**Status:** ready to implement · **Depends on:** nothing · **Supersedes the transport half of:** 0030, which becomes its first consumer · **Raised:** 2026-08-04 (owner call, after the session-title work in 0076 made the cost impossible to ignore)
+
+Some seats do not need an agent. They need one request and one response: a
+status line, a commit message, a session title. Today every one of them spawns
+a coding-agent CLI, boots its server, snapshots a workspace, and tears it all
+down to produce eighty characters.
+
+The measurements are not marginal. 0030 clocked an opencode narrator tick at
+**~0.1s of model time against ~14s of spawn overhead**. 0076 found the session
+title hitting its 20s bound in **44 of 58 traced runs** on this machine — the
+typical outcome was the timeout, not an answer. That is the harness, not the
+model.
+
+## Decisions
+
+- **This is a TRANSPORT, not a harness and not a new seat concept.**
+  `RunTransport` already has `Cli` and `Mcp`; this adds a third beside them.
+  Seats keep being declared as `[agent.role.<role>]` exactly as now — only
+  `transport` changes.
+- **No new dependency.** `ureq = "3"` is already a workspace dependency and is
+  already used for network calls (`modules/io/src/registry.rs`). This is one
+  more caller of a client that ships today, not a reason to pull in an async
+  runtime.
+- **OpenAI-compatible chat completions is the baseline wire format**, with
+  Anthropic Messages as the second shape. Those two cover the field, and every
+  gateway worth targeting speaks one of them.
+- **The endpoint is configuration, so the gateway question answers itself.**
+  A `base-url` on the seat means OpenRouter, an OpenAI-compatible proxy, a
+  self-hosted gateway, or a local model server all work through the same code
+  path. The existing `provider/model` string keeps its meaning.
+- **Credentials are an env-var REFERENCE in config, resolved in the host,
+  never printed** — the same doctrine 0069 sets for channel secrets. `doctor`
+  reports whether a key resolves without echoing it.
+- **One shot, no streaming, in v1.** Nothing this transport serves needs
+  incremental output; the surfaces that do are harness-driven agent frames.
+- **Not for worker seats, and this is the boundary that matters.** A worker
+  needs tools, a filesystem, and an agentic loop — that *is* what a harness is.
+  This transport serves one-shot text seats: narrator, scribe, guide, clerk,
+  session title. Anything that would need a second turn belongs on a harness.
+- **Absent credentials degrade, never fail.** A seat whose key does not resolve
+  falls back to its harness declaration, or is reported unavailable at `doctor`
+  time. A run must never fail because a status line had no API key — 0030's
+  rule, unchanged.
+- **Bounded like everything else that talks to a model.** Its own connect and
+  read timeouts, and a small bounded retry, sized for a call that should take
+  under a second rather than the 20s a harness spawn needs.
+
+## Scope
+
+`RunTransport::Api` and its config resolution; a provider client in
+`modules/io` over the existing `ureq`; the two wire formats; per-seat
+`base-url`, model, key reference, and timeouts; `doctor --config` rendering of
+the resolved endpoint and key status; and rewiring the narrator and
+session-title seats onto it as the first consumers.
+
+## Watch
+
+- **The threat model changes.** A harness spawn runs under `sandbox-exec` with
+  a declared write boundary; an in-process HTTPS call does not. This puts
+  network egress in the `ctx` process itself for the first time. The endpoint
+  must be visible in `doctor --config` — a `base-url` that silently redirects
+  every prompt to an arbitrary host is exactly the failure to design against.
+- **Token accounting has to keep working.** `NarratorTokenTracker` and the
+  panel's token rows are fed by harness stdout parsing today; provider APIs
+  report usage in their response body, differently per format. Map both, or
+  the panel quietly reads zero.
+- **Resist routing worker seats through it.** The first time someone wants
+  tools here, the answer is a harness, not a hand-rolled agent loop inside
+  `ctx`. That is a different product and it is not this one.
+- 0030 remains the statement of *why* for the narrator specifically; its
+  "Done when" is satisfied by this task plus the rewiring, and it should be
+  closed against this rather than implemented separately.
+- Retries interact with 0076's title worker, which already retries three times.
+  Two retry layers multiply — decide which owns it rather than letting both.
+
+## Done when
+
+A seat can declare `transport = "api"` with a base URL, model, and key
+reference and be dispatched with one HTTP round trip; both OpenAI-compatible
+and Anthropic wire formats work against it; OpenRouter works with no code
+specific to it; a missing key degrades to the harness declaration rather than
+failing a run; `doctor --config` shows the resolved endpoint and whether the
+key resolves without printing it; token usage reaches the panel; and the
+narrator and session-title seats run on it with tick latency under a second.
