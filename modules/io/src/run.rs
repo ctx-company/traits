@@ -121,9 +121,11 @@ pub enum TraitSourceDrift {
     /// identity and digests. This is distinct from a pre-pinning ledger.
     UnrecoverableInvalidPin {
         current_source_digest: Option<String>,
+        recorded_source_digest: Option<String>,
     },
     UnrecoverableLegacy {
         current_source_digest: Option<String>,
+        recorded_source_digest: Option<String>,
     },
 }
 
@@ -136,23 +138,37 @@ impl TraitSourceDrift {
             } => Some(format!(
                 "trait source rebuilt to {current_source_digest}; pinned session bytes remain resumable"
             )),
-            Self::Missing => Some("trait source path disappeared; pinned session bytes remain resumable".to_string()),
+            Self::Missing => Some(
+                "trait source path disappeared; pinned session bytes remain resumable".to_string(),
+            ),
             Self::UnrecoverableInvalidPin {
                 current_source_digest,
-            } => Some(match current_source_digest {
-                Some(digest) => format!(
-                    "trait source rebuilt to {digest}; pinned session document is malformed or does not match the recorded digests and is unrecoverable"
-                ),
-                None => "trait source path disappeared; pinned session document is malformed or does not match the recorded digests and is unrecoverable".to_string(),
-            }),
+                recorded_source_digest,
+            } => {
+                let recorded = recorded_source_digest.as_deref().unwrap_or("unknown");
+                Some(match current_source_digest {
+                    Some(digest) => format!(
+                        "trait source rebuilt from {recorded} to {digest}; pinned session document is malformed or does not match the recorded digests and is unrecoverable — resume with `--file <path>` against bytes matching {recorded}, or start a fresh run and harvest this session's worktree"
+                    ),
+                    None => format!(
+                        "trait source path disappeared; pinned session document (recorded digest {recorded}) is malformed or does not match the recorded digests and is unrecoverable — resume with `--file <path>` against bytes matching {recorded}, or start a fresh run and harvest this session's worktree"
+                    ),
+                })
+            }
             Self::UnrecoverableLegacy {
                 current_source_digest,
-            } => Some(match current_source_digest {
-                Some(digest) => format!(
-                    "trait source rebuilt to {digest}; legacy session has no pinned document and is unrecoverable"
-                ),
-                None => "trait source path disappeared; legacy session has no pinned document and is unrecoverable".to_string(),
-            }),
+                recorded_source_digest,
+            } => {
+                let recorded = recorded_source_digest.as_deref().unwrap_or("unknown");
+                Some(match current_source_digest {
+                    Some(digest) => format!(
+                        "trait source rebuilt from {recorded} to {digest}; legacy session has no pinned document and is unrecoverable — resume with `--file <path>` against bytes matching {recorded}, or start a fresh run and harvest this session's worktree"
+                    ),
+                    None => format!(
+                        "trait source path disappeared; legacy session (recorded digest {recorded}) has no pinned document and is unrecoverable — resume with `--file <path>` against bytes matching {recorded}, or start a fresh run and harvest this session's worktree"
+                    ),
+                })
+            }
         }
     }
 }
@@ -3156,6 +3172,7 @@ pub fn trait_source_drift_from(
     let Some(source) = session.provenance.trait_source.as_ref() else {
         return TraitSourceDrift::UnrecoverableLegacy {
             current_source_digest: None,
+            recorded_source_digest: session.source_digest.as_ref().map(ToString::to_string),
         };
     };
     let source_path = Utf8Path::new(&source.path);
@@ -3192,6 +3209,7 @@ pub fn trait_source_drift_from(
             })
             .unwrap_or(false)
     });
+    let recorded_source_digest = expected.clone();
     match (valid_pin, current, expected) {
         (_, Some(current), Some(expected)) if current == expected => TraitSourceDrift::Current,
         (true, Some(current_source_digest), _) => TraitSourceDrift::Rebuilt {
@@ -3201,10 +3219,12 @@ pub fn trait_source_drift_from(
         (false, current_source_digest, _) if pin_present => {
             TraitSourceDrift::UnrecoverableInvalidPin {
                 current_source_digest,
+                recorded_source_digest,
             }
         }
         (false, current_source_digest, _) => TraitSourceDrift::UnrecoverableLegacy {
             current_source_digest,
+            recorded_source_digest,
         },
     }
 }

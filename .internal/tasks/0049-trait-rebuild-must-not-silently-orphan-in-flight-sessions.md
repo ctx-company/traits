@@ -3,6 +3,28 @@
 **Status:** ready to implement · **Raised:** 2026-08-01 (owner hit it twice in one night; every
 resume of a live session failed with an opaque manifest error)
 
+## Implementation note, 2026-08-04
+
+The correction's hypothesis (a `deriveParkReportStep` clear/append not re-deriving `output_ports`
+in the same transition) did not reproduce. Two targeted repros were built and both pass on the
+current tree:
+
+- `guarded_exhaustion_refreshes_project_written_park_report_output` (already landed, single
+  reviewer, `--no-drive` + `ctx traits call` boundary).
+- `dual_review_call_boundary_refreshes_both_park_report_appends` (new, added this round): two
+  reviewers, each conditionally clearing/appending `slot:park-report` in the same transition,
+  driven step by step through the persisted-ledger call boundary — the shape closest to the
+  correction's hypothesis. Passes.
+
+No further reproduction was attempted this round (parallel-barrier merge path untried). Per the
+correction's own mitigation, `validate_output_port_contract`'s diagnostic
+(`modules/core/src/procedure/runtime/ledger_contract_outputs.rs`) now prints the expected-vs-actual
+`OutputPortFact` pair on a mismatch, so a future recurrence is diagnosable without attaching a
+debugger. The done-when audit (pinning, drift wording, run-status visibility, trust reporting)
+found four of five bullets already satisfied by landed code/tests; the refusal-wording bullet
+(`TraitSourceDrift::Unrecoverable{InvalidPin,Legacy}` naming only the current digest, not both
+digests and the recovery options) was fixed in `modules/io/src/run.rs`.
+
 ## Correction, 2026-08-01 (verified before implementing — read this first)
 
 The original premise below was WRONG in one important way, and the task must not be built on it.

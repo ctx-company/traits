@@ -1465,3 +1465,101 @@ fn dual_review_simultaneous_revise_keeps_both_entries() {
 
     let _ = scratch;
 }
+
+/// 0049 correction repro: the dual-reviewer loop body clears
+/// `slot:park-report`, then conditionally appends it TWICE in the same
+/// transition (`record-1`'s branch, then `record-2`'s branch) before the
+/// loop's own exhaustion check makes the run terminal. Driven step by step
+/// through the persisted-ledger `ctx traits call` boundary (the same
+/// boundary `guarded_exhaustion_refreshes_project_written_park_report_output`
+/// already regression-tests for a SINGLE append), smart-2's call is the one
+/// transition that must refresh `output-ports` after BOTH conditional
+/// appends land, not just the first.
+#[test]
+fn dual_review_call_boundary_refreshes_both_park_report_appends() {
+    let id = "implement-fixture-park-dual-call";
+    let (scratch, repo, home) = setup_fixture(
+        "p461-park-dual-call",
+        id,
+        &dual_review_trait_toml(id, 1),
+        &[("P972", None)],
+    );
+    let ledger_path = scratch.path().join("dual-call.json");
+    require_success(
+        "dual-review fixture `ctx traits run --no-drive`",
+        &[
+            "traits",
+            "run",
+            id,
+            "--set",
+            "task=P972",
+            "--no-drive",
+            "--out",
+            ledger_path.to_str().unwrap(),
+            "--json",
+        ],
+        &repo,
+        &home,
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "worker",
+        serde_json::json!({ "slot:work-summary": "implemented" }),
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "smart-1",
+        serde_json::json!({
+            "slot:review-verdict-1": {
+                "status": "revise",
+                "blockers": [{
+                    "id": "fixture-both-defect-one",
+                    "where": "fixture",
+                    "what": "fixture blocker one",
+                    "root-cause": "fixture",
+                    "required-fix": "fixture",
+                    "done-when": "fixture",
+                }],
+                "wall-id": "WALL-P461-DUAL-CALL-A",
+            },
+        }),
+    );
+    call_fixture_frame(
+        &repo,
+        &home,
+        &ledger_path,
+        "smart-2",
+        serde_json::json!({
+            "slot:review-verdict-2": {
+                "status": "revise",
+                "blockers": [{
+                    "id": "fixture-both-defect-two",
+                    "where": "fixture",
+                    "what": "fixture blocker two",
+                    "root-cause": "fixture",
+                    "required-fix": "fixture",
+                    "done-when": "fixture",
+                }],
+                "wall-id": "WALL-P461-DUAL-CALL-B",
+            },
+        }),
+    );
+
+    let ledger_text = fs::read_to_string(&ledger_path).expect("dual-call ledger readable");
+    let ledger: serde_json::Value =
+        serde_json::from_str(&ledger_text).expect("dual-call ledger is JSON");
+    assert_eq!(ledger["ledger"]["final-state"], "blocked", "{ledger:#?}");
+    assert_park_entries(
+        &ledger_text,
+        &[
+            ("WALL-P461-DUAL-CALL-A", "fixture-both-defect-one"),
+            ("WALL-P461-DUAL-CALL-B", "fixture-both-defect-two"),
+        ],
+    );
+
+    let _ = scratch;
+}

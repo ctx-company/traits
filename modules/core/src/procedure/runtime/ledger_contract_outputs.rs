@@ -72,7 +72,8 @@ fn validate_output_port_contract(
         };
         if &actual_fact != expected_fact {
             diagnostics.push(format!(
-                "output_ports row {port_ref} contradicts recomputed semantic output evidence"
+                "output_ports row {port_ref} contradicts recomputed semantic output evidence: \
+                 ledger has {actual_fact:?}, recompute expects {expected_fact:?}"
             ));
         }
     }
