@@ -1,0 +1,46 @@
+# 0094 — "Started at" is shown in the reader's local time
+
+**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner)
+
+The title row's `Started at HH:MM:SS` is UTC. Nobody reading their own terminal
+is in UTC by preference, so the one timestamp a person compares against their
+own clock is the one that does not match it.
+
+## Decisions
+
+- **Local time, and it is the only display that changes.** Elapsed durations
+  are already timezone-free and stay exactly as they are; this is about the
+  single wall-clock stamp.
+- **No new dependency for a clock string.** `epoch_clock_utc`
+  (`run_view.rs:1642`) exists precisely because there is no `chrono`/`time` in
+  this workspace and its doc comment says so. That reasoning still holds: a
+  UTC offset read from the environment is enough to render local time, and it
+  is a smaller thing to own than a calendar library.
+- **An unknown offset degrades to UTC, labelled.** If the offset cannot be
+  determined, keep showing UTC and say `UTC` rather than silently presenting
+  it as local — a wrong-by-hours timestamp that looks right is worse than an
+  honest one that needs a moment's thought.
+
+## Scope
+
+`epoch_clock_utc` and its callers — `title_row_line`, `title_pending_line`, and
+anything else rendering a wall-clock stamp from an epoch.
+
+## Watch
+
+- The function name encodes the old behaviour; rename it with the change or
+  the next reader will trust it.
+- Its unit test asserts UTC arithmetic (`epoch_clock_utc_wraps_seconds_of_day`,
+  `run_view.rs:6246`). Keep a test for the pure seconds-of-day decomposition,
+  and add one for the offset applied to it, so a broken offset is not
+  indistinguishable from a broken clock.
+- Offsets are not whole hours everywhere, and can be negative. Anything that
+  assumes `hours` alone will be wrong in some places and only some of the year.
+- P552's one-renderer contract: live, preview and attached surfaces share this
+  renderer.
+
+## Done when
+
+`Started at` reads in the reader's local time; a machine whose offset cannot be
+determined shows UTC and says so; elapsed durations are untouched; and the
+function no longer claims UTC in its name.
