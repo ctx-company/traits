@@ -5977,12 +5977,17 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(120, 22)).expect("test terminal");
         let area = Rect::new(0, 0, 120, 22);
         let regions = live_frame_regions(area);
+        // The draw below renders a blank title line, so the body area this
+        // test measures against has to have that row taken out of it. The
+        // variant that consumes a row is `Visible`; `Reserved(None)` was the
+        // spelling before `PaneTitleRow` collapsed to `None`/`Visible`.
+        let title_line = tui::Line::blank();
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&[]),
-            title: PaneTitleRow::Reserved(None),
+            title: PaneTitleRow::Visible(&title_line),
         };
         let body = pane_body_area(regions[0], &data.title);
         let history_rect = pane_tree(&LIVE_PANE_IDS, body, &data)
