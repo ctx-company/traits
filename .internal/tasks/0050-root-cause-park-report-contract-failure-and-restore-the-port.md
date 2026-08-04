@@ -1,7 +1,57 @@
 # 0050 — Root-cause the park-report ledger-contract failure, then restore the output port
 
-**Status:** ready to investigate · **Raised:** 2026-08-01 (after this failure killed runs repeatedly
-across a full day of runs)
+**Status:** code-verified, two clauses await owner-run evidence · **Raised:** 2026-08-01 (after this
+failure killed runs repeatedly across a full day of runs) · **Verified:** 2026-08-04
+
+## Verification (2026-08-04)
+
+The fix, proofs, and port restore described below were already landed in commit `52a14830` ("Fix
+stale output_ports in quick's guarded review loop, restore park-report port") before this run
+started; `git merge-base --is-ancestor 52a14830 HEAD` confirms it is an ancestor of the current
+branch. This run's work was verifying that landing against every done-when clause, not
+re-implementing it — the status line above was stale relative to the code.
+
+Evidence gathered this run:
+
+- **Root-cause fix present**: `modules/core/src/procedure/runtime/control_flow.rs:60-63` — inside
+  `refresh_runtime_status`, the early-return path for a guard-terminal run (`FinalState::Blocked |
+  Failed | Rejected`) now recomputes `state.output_ports = finalize_outputs(trait_ref, state)?;`
+  before returning, closing exactly the gap the surviving hypothesis names.
+- **Regression proofs pass**: `CARGO_TARGET_DIR=target cargo test --test proof_park_honesty` — all
+  8 tests green, including the two guarded-shape regressions
+  (`guarded_exhaustion_refreshes_project_written_park_report_output`,
+  `guarded_timed_out_stop_refreshes_project_written_park_report_output`).
+- **Proofs bite (reverse-proof)**: reverted the 4-line `control_flow.rs` hunk in the working tree
+  (`git diff 52a14830^ 52a14830 -- modules/core/src/procedure/runtime/control_flow.rs | git apply
+  -R`), reran the two guarded tests — both FAILED. Reapplied the hunk (`git apply`, no `-R`), reran
+  — both green again. Tree confirmed clean (`git status --porcelain`) before and after.
+- **Port restored and rebuilt clean**: `port.parkReportPort` is declared in `quick.ts:141` and
+  `quick/port.ts:20`. `ctx traits check implement:quick --verbose` reports `cdk-drift: 5 family
+  leaves and source maps byte-match rebuilt ./.ctx/traits/packages/implement/source/index.ts (ok)`
+  and `machine-trust: trust=verified` — no drift between source and the generated canonical despite
+  `1884eaae` touching `quick.ts` after the fix commit.
+- **Sibling variants covered by construction**: `smart.ts:192`, `strict.ts:153`, and
+  `quick/port.ts:20` all still declare `parkReportPort`; the core fix lives in the
+  variant-agnostic `refresh_runtime_status`, so every variant is covered without further code
+  changes.
+- **No stale containment comment**: grep for the `2026-08-01` park-report removal comment across
+  `.ctx/traits/packages/implement/source/` finds none — the surviving `DISABLED 2026-08-01`
+  comments are the unrelated feasibility-gate parking, not this task.
+- **Standard gate green**: `CARGO_TARGET_DIR=target just test` (sdk-check, ts-format-check, cargo
+  fmt --check, cargo clippy, `cargo test --workspace --lib`) passes with no new failures.
+
+**Still open, and cannot be closed from inside this run** (per the standing reviewer-role ruling —
+the owner runs live paid dispatches, this agent audits transcripts):
+
+- Done-when clause "a parked run again surfaces its park report in structured final outputs" — needs
+  a real dispatch that parks and an inspection of its structured output.
+- Done-when clause "a full implement run in this repository completes without a ledger-contract
+  error" — needs a real end-to-end dispatch.
+- Re-approval of the rebuilt trait on the owner's machine (trust is a per-machine, per-digest
+  decision; this run's `trust=verified` reflects this machine's prior approval of the current
+  digest, not a fresh approval action).
+
+This task stays open until the owner runs those dispatches and confirms the two live-run clauses.
 
 ## What was removed, and why this task exists
 
