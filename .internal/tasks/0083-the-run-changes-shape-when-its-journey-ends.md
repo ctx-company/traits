@@ -38,15 +38,19 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
   run is moving they say what each step consumes and produces; once it is done
   they are noise between the reader and the shape of what happened. Show the
   completed steps, nothing else.
-- **The finished journey takes over the current-activity pane.** Current
-  activity has nothing to report once the run's steps are done, and the
-  completed journey is what the reader wants to keep looking at.
-- **The pane the journey vacates becomes the landing pane.** What is appended
-  to the journey today gets its own space, at the moment it becomes the only
-  thing still happening.
-- **This is one transition, at one moment.** Both swaps happen together when
-  the journey completes, not as two independent conditions that can disagree
-  and produce a layout with no journey and no landing.
+- **The journey does not move.** It stays exactly where the reader has been
+  looking at it for the whole run. Nothing about finishing is a reason to
+  relocate the one pane they have been tracking.
+- **Post-processing takes the entire right column**, replacing BOTH current
+  activity and history with one full-height pane. Current activity has nothing
+  left to report, and history is redundant with a journey that is now complete
+  and visible — the journey already tells that story, so the space it was
+  duplicating goes to the phase that is actually running.
+- **One column changes, and only once.** The morph is a single substitution on
+  the right, not a rotation of three panes through each other's positions. The
+  point of the design is that the reader's eye does not have to re-find
+  anything: the journey is where it was, and the new pane is where the panes
+  that went quiet used to be.
 - **The trigger is journey-done AND something still running** (owner call).
   Journey done with nothing after it: stop where it is, no morph — the
   finished journey stays where the reader last saw it. Journey done with a
@@ -72,7 +76,14 @@ resolution; and the `landing` wording in `run_view`, `MergeStage` and
   exactly that box, and it is wrong.
 - 0080 hides an empty history and gives command rows verdicts, and 0082
   changes journey follow. All three edit the same panes; landing them
-  independently will conflict.
+  independently will conflict. 0080 in particular now has two reasons history
+  can be absent — empty, and superseded by post-processing — and they must not
+  be implemented as two competing conditions on the same pane.
+- The right column is not always two panes. `pane_tree` already picks
+  different splits by what has content, including a narrow-terminal
+  single-leaf tree, so "replace current activity and history" has to mean
+  "take the whole right column, whatever it currently holds" rather than
+  substituting two named leaves that may not both be there.
 - P552's one-renderer contract: live, preview and attached surfaces share this
   renderer — and 0081 makes the attached surface the same view — so check both
   width breakpoints and the narrow single-leaf tree.
@@ -86,7 +97,7 @@ resolution; and the `landing` wording in `run_view`, `MergeStage` and
 `End` and `Home` reach the true end and start of the journey including its
 landing rows; the phase has one non-mechanical name everywhere a person reads
 it; a completed journey shows its done steps with no `in`/`out` lines; the
-completed journey occupies the current-activity pane and post-processing
-occupies the journey's; the morph happens once, only when the journey is done
-AND a next phase is running; and a run that ends with nothing after it simply
-stays as it was.
+the journey stays where it was and post-processing replaces the whole right
+column, current activity and history together, at full height; the morph
+happens once, only when the journey is done AND a next phase is running; and a
+run that ends with nothing after it simply stays as it was.
