@@ -215,3 +215,27 @@ Three accounts serve one ctx run through the proxy; a quota rotation happens mid
 ## Explicitly not in scope
 
 Implementing P557; bundling, vendoring or defaulting to TeamClaude in the product; automatic account rotation logic inside ctx (the proxy owns that, and duplicating it would be worse).
+
+
+## Post-archive incident, 2026-08-04 19:25 — the fail-fast fired in anger
+
+The first real fleet dispatch after the seat flip (0020, smart-1=fable-5)
+parked with four instant `exit=1` harness failures and no visible reason. Root
+cause, established by timeline: the morning's `teamclaude server` process had
+died (sleep or closed terminal — the session's last write was 19:25, the
+replacement server started 19:31:50), and `teamclaude run` refuses with exit 1
+when the proxy is down — the fail-fast this integration chose on purpose. The
+refusal message went to stderr, which ctx captures but never surfaces
+([[0100]]); the same argv reproduced green by hand minutes later, and a
+shim-wrapped frame (env + args + exit logged) confirmed nothing else differed.
+
+Two durable lessons:
+
+- **The harness probe does not cover the proxy.** `probe` runs
+  `teamclaude --version`, which succeeds with the server down — a run can
+  probe green and then lose every frame. Reachability is only proven by a
+  frame (or `teamclaude status`) actually traversing the proxy.
+- **The server must be a service, not a terminal tab.** A LaunchAgent plist
+  (KeepAlive + RunAtLoad, `--activity-log` wired) is staged for the owner to
+  install; until it is, `teamclaude status` before dispatching is the manual
+  pre-flight.

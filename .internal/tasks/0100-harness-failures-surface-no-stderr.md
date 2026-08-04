@@ -1,0 +1,44 @@
+# 0100 — A failed harness spawn shows its exit code but never its stderr
+
+**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner-visible
+incident: a parked run whose four failures each carried a one-line explanation on stderr that no
+surface ever showed)
+
+## The defect
+
+When a harness spawn fails, the `harness-run` event records `exit=1
+timed-out=false stdout-truncated=false stderr-truncated=false` and the full
+argv — but not one byte of what the process wrote to stderr. The stream is
+captured (the truncated flag proves the plumbing exists) and then discarded:
+it is not in the event, not in the ledger, not in the activity log, not in the
+session summary.
+
+Tonight's incident (0003 postscript) is the clean specimen: the teamclaude
+proxy was down, every spawn printed `[TeamClaude] Proxy not running on port
+3456. Start it with: teamclaude server` to stderr and exited 1, and the run
+parked as `harness-failed` with nothing but exit codes. Diagnosis required
+reproducing the argv by hand and then wrapping the bin in a logging shim —
+for a failure whose entire explanation existed in captured-and-dropped bytes.
+An instantly-refused spawn, a crashed binary, and a model-rejected flag are
+currently indistinguishable at every surface.
+
+## The shape of the fix
+
+`merge.rs` already has the pattern: `trimmed_stderr_tail` renders the last
+non-blank stderr line of a failed gate into the park reason. The drive layer
+should do the equivalent for failed harness attempts:
+
+- record a bounded stderr tail (reuse the existing `CHECK_TAIL_LIMIT`-style
+  clipping in `procedure/session.rs`) on the harness attempt evidence when
+  exit is nonzero;
+- render it in the `harness-run` event line and in the parked-run reason.
+
+Success exit with stderr content stays silent — stderr is a legitimate side
+channel for wrapper chatter (teamclaude prints pin notices there), and only
+failures need the forensics.
+
+## Not in scope
+
+Probing wrapped-harness liveness at assignment time (the probe-green /
+frames-dead gap is recorded in 0003's postscript; a probe convention change is
+its own decision), and any change to stdout handling.
