@@ -456,6 +456,8 @@ const PROGRESS_PANE: PaneId = "progress";
 const JOURNEY_PANE: PaneId = "journey";
 const HISTORY_PANE: PaneId = "history";
 const CURRENT_PANE: PaneId = "current";
+/// A bordered pane needs two border rows plus one content row.
+const HISTORY_MIN_OUTER_ROWS: u16 = 3;
 const CURRENT_MIN_OUTER_ROWS: u16 = 8;
 /// P552: below this width every populated pane stacks vertically instead of
 /// the 2x2 (or narrower 2-pane) grid — unchanged from the pre-P552 threshold;
@@ -1724,17 +1726,21 @@ pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneT
         },
     };
 
-    let right = if has_history && has_current && area.height > CURRENT_MIN_OUTER_ROWS {
+    let right = if has_history
+        && has_current
+        && area.height >= HISTORY_MIN_OUTER_ROWS + CURRENT_MIN_OUTER_ROWS
+    {
         let history_rows = data.history.map_or(0, <[_]>::len);
-        let history_cap = area.height.saturating_sub(CURRENT_MIN_OUTER_ROWS) / 2;
         let history_height = u16::try_from(history_rows)
             .unwrap_or(u16::MAX)
             .saturating_add(2)
-            .min(history_cap);
+            .max(HISTORY_MIN_OUTER_ROWS)
+            .min(area.height / 2)
+            .min(area.height.saturating_sub(CURRENT_MIN_OUTER_ROWS));
         Some(PaneTree::Split {
             dir: Direction::Vertical,
             children: vec![
-                (Constraint::Max(history_height), history()),
+                (Constraint::Length(history_height), history()),
                 (Constraint::Min(CURRENT_MIN_OUTER_ROWS), current()),
             ],
         })
@@ -5502,7 +5508,8 @@ mod tests {
 
     // Normal-width full data: the bounded-progress 2x2 grid — progress is
     // bounded to its own content height, journey receives the rest of the
-    // left column, history is capped, current keeps its content floor.
+    // left column, history retains up to half the right column, and current
+    // receives the remainder while keeping its content floor.
     #[test]
     fn wide_full_data_produces_bounded_progress_2x2_grid() {
         let progress = sample_lines(3);
@@ -5532,7 +5539,9 @@ mod tests {
             journey_rect.height > progress_rect.height,
             "journey must receive the rest of the left column"
         );
-        assert!(history_rect.height <= (area.height - CURRENT_MIN_OUTER_ROWS) / 2);
+        assert_eq!(history_rect.height, area.height / 2);
+        assert_eq!(current_rect.height, area.height - history_rect.height);
+        assert!(history_rect.height >= HISTORY_MIN_OUTER_ROWS);
         assert!(current_rect.height >= CURRENT_MIN_OUTER_ROWS);
         assert!(tui_panes::pane_inner(current_rect).height >= 6);
         assert_eq!(progress_rect.x, journey_rect.x, "left column shares an x");
@@ -5545,6 +5554,78 @@ mod tests {
         assert_eq!(current_rect.y + current_rect.height, area.y + area.height);
         assert_eq!(journey_rect.x + journey_rect.width, history_rect.x);
         assert_eq!(current_rect.x + current_rect.width, area.x + area.width);
+    }
+
+    #[test]
+    fn wide_short_history_yields_unused_rows_to_current_activity() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(4);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+
+        assert_eq!(layout.rect(HISTORY_PANE).expect("history").height, 6);
+        assert_eq!(layout.rect(CURRENT_PANE).expect("current").height, 18);
+    }
+
+    #[test]
+    fn wide_current_activity_length_does_not_change_history_allocation() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let short_current = sample_event_rows(1);
+        let long_current = sample_event_rows(100);
+        let area = Rect::new(0, 0, 120, 24);
+        let short_data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&short_current),
+            title: PaneTitleRow::None,
+        };
+        let long_data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&long_current),
+            title: PaneTitleRow::None,
+        };
+
+        let short = pane_tree(&LIVE_PANE_IDS, area, &short_data).resolve(area);
+        let long = pane_tree(&LIVE_PANE_IDS, area, &long_data).resolve(area);
+        assert_eq!(short.rect(HISTORY_PANE), long.rect(HISTORY_PANE));
+    }
+
+    #[test]
+    fn smallest_supported_wide_body_keeps_history_and_current_floors() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(100);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, HISTORY_MIN_OUTER_ROWS + CURRENT_MIN_OUTER_ROWS);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+        let history = layout.rect(HISTORY_PANE).expect("history");
+        let current = layout.rect(CURRENT_PANE).expect("current");
+
+        assert_eq!(history.height, HISTORY_MIN_OUTER_ROWS);
+        assert_eq!(current.height, CURRENT_MIN_OUTER_ROWS);
+        assert_eq!(history.y + history.height, current.y);
+        assert_eq!(current.y + current.height, area.y + area.height);
     }
 
     // Dashboard preview supplies only progress/journey — this must produce
@@ -5894,6 +5975,20 @@ mod tests {
             100,
         ));
         let mut terminal = Terminal::new(TestBackend::new(120, 22)).expect("test terminal");
+        let area = Rect::new(0, 0, 120, 22);
+        let regions = live_frame_regions(area);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&[]),
+            title: PaneTitleRow::Reserved(None),
+        };
+        let body = pane_body_area(regions[0], &data.title);
+        let history_rect = pane_tree(&LIVE_PANE_IDS, body, &data)
+            .resolve(body)
+            .rect(HISTORY_PANE)
+            .expect("history");
 
         terminal
             .draw(|frame| {
@@ -5926,6 +6021,13 @@ mod tests {
         assert!(scrolls.get(HISTORY_PANE).window(1).start > 1);
         assert!(!journey_follow);
         assert!(!history_follow);
+        assert_eq!(
+            pane_tree(&LIVE_PANE_IDS, body, &data)
+                .resolve(body)
+                .rect(HISTORY_PANE),
+            Some(history_rect),
+            "scrolling history must not change its allocated rectangle"
+        );
     }
 
     #[test]
