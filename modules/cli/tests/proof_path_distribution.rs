@@ -6,6 +6,7 @@
 //! ctx-gate/ctx-trait cross-repository handoff documented in the phase
 //! contract uses, minus the second real repository.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
@@ -279,26 +280,42 @@ fn path_dependency_installs_every_family_leaf() {
     .unwrap();
     fs::write(
         producer.join("generated/default/index.toml"),
-        family_leaf_trait_doc("family-demo", "default", "default leaf"),
+        format!(
+            "{}\n[[resource]]\nid = \"default-resource\"\npath = \"resources/default.txt\"\ntrigger = \"on-demand\"\n\n[[resource]]\nid = \"consumer-resource\"\npath = \"consumer-resource.txt\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n",
+            family_leaf_trait_doc("family-demo", "default", "default leaf")
+        ),
     )
     .unwrap();
     fs::write(
         producer.join("generated/quick/index.toml"),
-        family_leaf_trait_doc("family-demo", "quick", "quick leaf"),
+        format!(
+            "{}\n[[resource]]\nid = \"quick-resource\"\npath = \"resources/quick.txt\"\ntrigger = \"on-demand\"\n",
+            family_leaf_trait_doc("family-demo", "quick", "quick leaf")
+        ),
     )
     .unwrap();
+    fs::create_dir_all(producer.join("resources")).unwrap();
+    fs::write(producer.join("resources/default.txt"), "default resource\n").unwrap();
+    fs::write(producer.join("resources/quick.txt"), "quick resource\n").unwrap();
 
     let consumer = home.join("consumer");
     fs::create_dir_all(&consumer).unwrap();
     git_init(&consumer);
+    fs::write(
+        consumer.join("consumer-resource.txt"),
+        "consumer-owned resource\n",
+    )
+    .unwrap();
 
     let add_stdout = require_success(
-        "`ctx traits dependency add path:../producer/family-demo --json`",
+        "`ctx traits dependency add path:../producer/family-demo --alias family-install --json`",
         &[
             "traits",
             "dependency",
             "add",
             "path:../producer/family-demo",
+            "--alias",
+            "family-install",
             "--json",
         ],
         &consumer,
@@ -309,6 +326,33 @@ fn path_dependency_installs_every_family_leaf() {
         id_occurrences >= 2,
         "install report is missing one of the two family-demo leaf entries: {add_stdout}"
     );
+    let vendored_root = consumer.join(".ctx/traits/vendor/family-install");
+    for path in [
+        "package.toml",
+        "generated/default/index.toml",
+        "generated/quick/index.toml",
+        "resources/default.txt",
+        "resources/quick.txt",
+    ] {
+        assert!(
+            vendored_root.join(path).is_file(),
+            "package install did not mirror {path}"
+        );
+    }
+    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/vendor.lock")).unwrap();
+    let canonical_digests = lock_text
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("canonical-digest = \"")?
+                .strip_suffix('"')
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        canonical_digests.len(),
+        2,
+        "lock evidence must contain distinct canonical digests for both leaves: {lock_text}"
+    );
 
     let list_stdout = require_success(
         "`ctx traits list --json`",
@@ -317,6 +361,10 @@ fn path_dependency_installs_every_family_leaf() {
         &home,
     );
     assert!(list_stdout.contains("\"id\": \"family-demo\""));
+    assert!(
+        list_stdout.contains("\"status\": \"ready\""),
+        "vendored family did not retain package status=ready: {list_stdout}"
+    );
 
     // Bare id resolves the declared default leaf.
     let default_check = run_ctx(
@@ -364,4 +412,13 @@ fn path_dependency_installs_every_family_leaf() {
         quick_digest, alias_digest,
         "legacy alias family-demo-quick did not resolve the same quick leaf as family-demo:quick"
     );
+
+    for reference in ["family-demo", "family-demo:quick"] {
+        require_success(
+            &format!("`ctx traits trust approve {reference}`"),
+            &["traits", "trust", "approve", reference],
+            &consumer,
+            &home,
+        );
+    }
 }
