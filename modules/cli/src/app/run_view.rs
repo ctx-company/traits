@@ -6441,7 +6441,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].at, Some(Duration::ZERO));
         let rendered = line_text(&event_row_line(&rows[0], 80));
-        assert!(rendered.starts_with("00:00:00  \u{b7}  working"));
+        assert!(rendered.starts_with("00:00:00 working"));
     }
 
     #[test]
@@ -6483,7 +6483,6 @@ mod tests {
         let rendered = line_text(&event_row_line(&row, 20));
         assert_eq!(rendered, "check: completed");
         assert!(!rendered.contains("00:00:00"));
-        assert!(!rendered.contains(EVENT_PREFIX_SEP));
     }
 
     #[test]
@@ -6535,7 +6534,6 @@ summary = "A test trait."
         let rendered = line_text(&event_row_line(row, 20));
         assert_eq!(rendered, "check: completed");
         assert!(!rendered.contains("00:00:00"));
-        assert!(!rendered.contains(EVENT_PREFIX_SEP));
 
         let _ = std::fs::remove_file(sidecar_path.as_std_path());
     }
