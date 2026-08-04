@@ -1,6 +1,20 @@
 # 0078 — A race the machine can rerun is retried, not parked
 
-**Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner call: landings must survive a repository that moves under them)
+**Status:** superseded — split into 0078.1–0078.4, do not dispatch this file · **Depends on:** nothing · **Raised:** 2026-08-04 (owner call: landings must survive a repository that moves under them)
+
+## Split (2026-08-04)
+
+Run-414acdf0 (`wt-18ef5c297dd4`) implemented the whole mechanism, then exhausted max-iterations in
+review refinement. Its uncommitted work is harvested verbatim as
+`.internal/tasks/assets/0078-retry-core.patch`. The remainder is one-run-sized children; the
+sections below stay as the decision record they inherit from:
+
+- **0078.1** — land the harvested retry core (ready).
+- **0078.2** — make the merger-dispatch proofs actually count dispatches, add the
+  checkout-branch-probe public-path proof (blocked on 0078.1).
+- **0078.3** — prove convergence under deterministically established lock contention
+  (blocked on 0078.2).
+- **0078.4** — decide autostash for the dirty-overlap remainder (owner decision, not queued).
 
 Merging parks when `main` moves between capturing the rebase revision and the
 fast-forward. The park text is `merge.rs:1866`:
