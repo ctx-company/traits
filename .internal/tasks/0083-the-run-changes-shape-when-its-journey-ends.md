@@ -26,14 +26,24 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
   (`run_view.rs:1278`, `:1968`); whatever that path computes as "the end" has
   to be the end of the content actually rendered, which now includes the
   landing rows appended after the steps. Same for `Home` and the true start.
-- **"landing" is renamed.** It reads as jargon — the label is
-  `muted_line(&mut landing, "landing")` at `run_view.rs:2714`, and the word
-  also appears through `MergeStage::Landing` and `merge_story`'s prose. Pick
-  one word for what this phase IS — reconciling, gating and publishing the
-  work — and use it everywhere those three surfaces say "landing". "Post
-  processing" is the owner's suggestion and is fine; the requirement is that
-  it stops sounding like machinery and stays a phase name rather than a
-  sentence.
+- **"landing" becomes "post-run"** (owner call), as one third of a vocabulary
+  used everywhere: **pre-run, run, post-run**. The value is not the individual
+  word — it is that the three phases are named as a set, so a reader who
+  learns one has learned all three. Anywhere a surface currently invents its
+  own word for one of these phases, it says the set's word instead.
+- **Rename thoroughly, including the stored strings.** These reason strings
+  are matched by text to translate already-recorded parks
+  (`reason.starts_with(GATE_FAILED_PREFIX)`), so renaming them means ledgers
+  written before the change lose their plain-language rendering and show the
+  raw reason. **Accepted** (owner: alpha, breaking is fine). Do NOT add
+  dual-spelling matching or a compatibility shim for it — carrying two
+  vocabularies to spare old ledgers is a worse outcome than the ledgers
+  reading rough.
+- **"pre-landing gate" does not become "pre-run gate".** It is the one name
+  that does not map mechanically: that gate runs INSIDE post-run, before the
+  fast-forward — it has nothing to do with the phase before the run. It is the
+  post-run gate. Getting this one wrong would leave the vocabulary actively
+  misleading rather than merely inconsistent.
 - ~~A finished journey drops its `in`/`out` port lines.~~ **DONE ELSEWHERE**:
   `9e08fc07` collapsed the three-row step display to one width-aware row and
   took the `in`/`out` lines out of the journey entirely, for every step rather
@@ -41,7 +51,7 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
 - **The journey does not move.** It stays exactly where the reader has been
   looking at it for the whole run. Nothing about finishing is a reason to
   relocate the one pane they have been tracking.
-- **Post-processing takes the entire right column**, replacing BOTH current
+- **Post-run takes the entire right column**, replacing BOTH current
   activity and history with one full-height pane. Current activity has nothing
   left to report, and history is redundant with a journey that is now complete
   and visible — the journey already tells that story, so the space it was
@@ -76,7 +86,7 @@ arm; the page-key end/start resolution; and the `landing` wording in
 - 0080 hides an empty history and gives command rows verdicts, and 0082
   changes journey follow. All three edit the same panes; landing them
   independently will conflict. 0080 in particular now has two reasons history
-  can be absent — empty, and superseded by post-processing — and they must not
+  can be absent — empty, and superseded by post-run — and they must not
   be implemented as two competing conditions on the same pane.
 - The right column is not always two panes. `pane_tree` already picks
   different splits by what has content, including a narrow-terminal
@@ -86,21 +96,23 @@ arm; the page-key end/start resolution; and the `landing` wording in
 - P552's one-renderer contract: live, preview and attached surfaces share this
   renderer — and 0081 makes the attached surface the same view — so check both
   width breakpoints and the narrow single-leaf tree.
-- **The rename is of displayed words only — and one of them is load-bearing.**
-  Rust identifiers (`MergeStage::Landing`, `ParkClass::Landing*`) stay: they
-  are never displayed and renaming them buys nothing. But
-  `merge_story` translates already-recorded park reasons by matching their
-  TEXT — `reason.starts_with(GATE_FAILED_PREFIX)` where that prefix is the
-  literal `"pre-landing gate "`. Change that string and every reason already
-  written into a ledger stops matching, and loses its plain-language
-  rendering. Either keep the stored prefix and rename only what is printed, or
-  match both spellings. Do not rename it and move on.
+- **Rust identifiers stay.** `MergeStage::Landing`, `ParkClass::Landing*` and
+  friends are never displayed, so renaming them buys nothing and only widens
+  the diff. The vocabulary is a thing readers see, not a thing the compiler
+  sees.
+- The displayed wording is spread wider than the one journey label:
+  `merge_story` alone carries `GATE_FAILED_PREFIX` (`"pre-landing gate "`),
+  `GATE_DISK_FLOOR_PREFIX`, the dirty-worktree refusal, the stage prose at
+  `:370-372`, and `MergeStage::Landing => "landing"` at `:573`. A rename that
+  catches the label and misses these leaves the vocabulary half-applied, which
+  is worse than not starting.
 
 ## Done when
 
 `End` and `Home` reach the true end and start of the journey including its
-landing rows; the phase has one non-mechanical name everywhere a person reads
-it; the journey stays where it was and post-processing replaces the whole right
-column, current activity and history together, at full height; the morph
-happens once, only when the journey is done AND a next phase is running; and a
-run that ends with nothing after it simply stays as it was.
+post-run rows; the phase is called post-run everywhere a person reads it, with
+the gate inside it named for post-run rather than pre-run, and no surface still
+saying "landing"; the journey stays where it was and post-run replaces the
+whole right column, current activity and history together, at full height; the
+morph happens once, only when the journey is done AND a next phase is running;
+and a run that ends with nothing after it simply stays as it was.
