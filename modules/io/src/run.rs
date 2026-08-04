@@ -1798,20 +1798,37 @@ mod startup_observer_tests {
             "[worktree]\nseed = [\"seed.txt\"]\nwarm = [\"warm-valid\"]\n",
         )
         .unwrap();
+        // Serialised against tests that restrict the whole process: a child
+        // `git` started while a Seatbelt profile is in force cannot see these
+        // files, stages nothing, and the commit below fails for a reason that
+        // has nothing to do with this test.
+        let _process_wide = crate::lock_process_wide_test();
+        // `-c` flags keep the fixture hermetic: the developer's global
+        // excludes must not decide what `add -A` stages, and the default
+        // branch name must not depend on their git config.
         for args in [
-            vec!["init"],
+            vec!["init", "-q", "-b", "main"],
             vec!["config", "user.email", "startup@example.invalid"],
             vec!["config", "user.name", "Startup observer"],
-            vec!["add", "-A"],
+            vec!["-c", "core.excludesFile=", "add", "-A"],
             vec!["commit", "-qm", "startup fixture"],
         ] {
+            let output = Command::new("git")
+                .args(&args)
+                .current_dir(&fixture.root)
+                .output()
+                .unwrap_or_else(|err| panic!("could not spawn `git {}`: {err}", args.join(" ")));
+            // Name the command and show what git said. The bare `assert!`
+            // this replaces reported only "assertion failed", which is why a
+            // real gate failure took a log dig to attribute.
             assert!(
-                Command::new("git")
-                    .args(args)
-                    .current_dir(&fixture.root)
-                    .status()
-                    .unwrap()
-                    .success()
+                output.status.success(),
+                "fixture `git {}` failed in {} with {}\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                args.join(" "),
+                fixture.root.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
             );
         }
 

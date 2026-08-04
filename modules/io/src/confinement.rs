@@ -1472,6 +1472,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_sandbox_seatbelt_enforces_write_boundaries_live() {
+        // Held for the whole test: the children spawned below run under a
+        // Seatbelt profile, and a sibling test's own child process must not
+        // be started while that is in force. See `lock_process_wide_test`.
+        let _process_wide = crate::lock_process_wide_test();
         if !sandbox_exec_available() {
             eprintln!("skipping: /usr/bin/sandbox-exec not present on this host");
             return;

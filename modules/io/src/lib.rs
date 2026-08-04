@@ -80,3 +80,26 @@ pub mod worktree;
 pub mod write;
 
 pub use error::{Error, Result};
+
+/// Serialises tests that change something the WHOLE PROCESS shares, against
+/// tests that spawn child processes and expect an ordinary environment.
+///
+/// Cargo runs a crate's tests as parallel threads in one binary, so a test
+/// that applies a Seatbelt sandbox is not isolated from its siblings: any
+/// child spawned by another thread during that window inherits the restricted
+/// environment. That is how the startup-observer fixture failed in a landing
+/// gate and nowhere else — its `git add -A` staged nothing, so `git commit`
+/// exited non-zero, and a bare `assert!` reported it as an anonymous failure.
+///
+/// Every test on either side of that boundary takes this lock. Poisoning is
+/// ignored deliberately: a panicking test must not convert every later one
+/// into a second failure that hides it.
+#[cfg(test)]
+pub(crate) static PROCESS_WIDE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn lock_process_wide_test() -> std::sync::MutexGuard<'static, ()> {
+    PROCESS_WIDE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
