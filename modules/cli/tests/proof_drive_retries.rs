@@ -619,7 +619,7 @@ fn content_rejection_resumed_retry_then_stale_identity_abandons_at_frame_boundar
     );
     assert!(
         retry_prompt.contains("<output>")
-            && retry_prompt.contains("\"answer\": boolean")
+            && retry_prompt.contains("\"answer\": \"boolean\"")
             && retry_prompt.contains("Return ONLY one JSON object")
             && !retry_prompt.contains("<identity>")
             && !retry_prompt.contains("Input types (JSON Schema):")

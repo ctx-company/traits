@@ -228,14 +228,14 @@ fn resident_persistent_turns_each_receive_one_current_output_contract() {
         );
     }
     assert!(
-        messages[0].contains("\"answer\": boolean")
-            && messages[1].contains("\"answer\": boolean")
-            && messages[2].contains("\"answer2\": string"),
+        messages[0].contains("\"answer\": \"boolean\"")
+            && messages[1].contains("\"answer\": \"boolean\"")
+            && messages[2].contains("\"answer2\": \"string\""),
         "each turn must receive its frame's current format: {messages:?}"
     );
     assert!(
         messages[1].contains("schema schema:boolean")
-            && !messages[2].contains("\"answer\": boolean"),
+            && !messages[2].contains("\"answer\": \"boolean\""),
         "the correction must retain its boolean schema and the next frame must not inherit it: {messages:?}"
     );
     assert!(

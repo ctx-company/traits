@@ -172,23 +172,30 @@ fn response_byte_budget() -> usize {
 /// output shape it must correct.
 pub(crate) fn requested_output_contract_section(schema: &Value) -> String {
     let (sketch, named) = output_format_sketch(schema);
-    let schema_section = if named.is_empty() {
-        String::new()
+    let (schema_section, response) = if named.is_empty() {
+        (
+            String::new(),
+            "Return ONLY one JSON object matching <format> — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.",
+        )
     } else {
-        format!("\n  <schema>\n{}\n  </schema>\n", indent_block(&named, 4))
+        (
+            format!("\n  <schema>\n{}\n  </schema>\n", indent_block(&named, 4)),
+            "Return ONLY one JSON object matching <schema>; <format> is a shape summary only — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.",
+        )
     };
     let budget = response_byte_budget();
     format!(
-        "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    Return ONLY one JSON object matching <format> — no prose before or after it, no code fences, no extra top-level fields. String-typed fields are single strings, never arrays.\n  </response>\n</output>\n",
+        "<output>\n  <format>\n{}\n  </format>\n{schema_section}\n  <budget>Your entire response must fit in {budget} bytes.</budget>\n  <response>\n    {response}\n  </response>\n</output>\n",
         indent_block(&sketch, 4)
     )
 }
 
 /// The key skeleton a model reads first: one line per requested output naming
-/// its type, with object/array shapes named rather than expanded. The full
-/// JSON Schema stays the validation authority and rides in `<schema>`; this is
-/// a sketch, never a second dialect, and the runtime never validates against
-/// it.
+/// its type, with object/array shapes named rather than expanded. Every
+/// placeholder value is valid JSON (a quoted string), so the sketch parses on
+/// its own — but it stays a shape summary, never an example: the full JSON
+/// Schema stays the validation authority and rides in `<schema>`, and the
+/// runtime never validates against the sketch.
 fn output_format_sketch(schema: &Value) -> (String, String) {
     let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
         return ("{}".to_string(), String::new());
@@ -205,7 +212,7 @@ fn output_format_sketch(schema: &Value) -> (String, String) {
             let rendered = match spec.get("type").and_then(Value::as_str) {
                 Some("object") => {
                     named.push(format!("<{name}>{spec}</{name}>"));
-                    name.clone()
+                    format!("\"{name}\"")
                 }
                 Some("array")
                     if spec
@@ -217,7 +224,7 @@ fn output_format_sketch(schema: &Value) -> (String, String) {
                     if let Some(items) = spec.get("items") {
                         named.push(format!("<{name}>{items}</{name}>"));
                     }
-                    format!("[{name}]")
+                    format!("[\"{name}\"]")
                 }
                 _ => sketch_type(spec),
             };
@@ -234,10 +241,10 @@ fn sketch_type(spec: &Value) -> String {
             let item = spec
                 .get("items")
                 .map(sketch_type)
-                .unwrap_or_else(|| "any".to_string());
+                .unwrap_or_else(|| "\"any\"".to_string());
             format!("[{item}]")
         }
-        Some("object") => "object".to_string(),
+        Some("object") => "\"object\"".to_string(),
         Some(other) => {
             if let Some(values) = spec.get("enum").and_then(Value::as_array) {
                 let allowed = values
@@ -246,12 +253,12 @@ fn sketch_type(spec: &Value) -> String {
                     .collect::<Vec<_>>()
                     .join(" | ");
                 if !allowed.is_empty() {
-                    return allowed;
+                    return format!("\"{allowed}\"");
                 }
             }
-            other.to_string()
+            format!("\"{other}\"")
         }
-        None => "any".to_string(),
+        None => "\"any\"".to_string(),
     }
 }
 
