@@ -181,6 +181,18 @@ pub fn run_ctx(args: &[&str], cwd: &Path, home: &Path) -> Output {
         .unwrap_or_else(|error| panic!("cannot execute {}: {error}", ctx_bin().display()))
 }
 
+/// Spawn `ctx` with `args` in `cwd`, isolated under `home`, without waiting
+/// for it to exit — the controlled-environment counterpart to [`run_ctx`]
+/// for a proof that must observe the child mid-flight (e.g. its pid, or a
+/// marker file it writes before it finishes) rather than only its final
+/// output. Stdout/stderr stay piped so a caller can still collect them via
+/// `wait_with_output` once the child is done. Panics only on spawn failure.
+pub fn spawn_ctx(args: &[&str], cwd: &Path, home: &Path) -> std::process::Child {
+    controlled_command(&ctx_bin(), args, cwd, home)
+        .spawn()
+        .unwrap_or_else(|error| panic!("cannot spawn {}: {error}", ctx_bin().display()))
+}
+
 /// Run `git` with `args` in `cwd`, under the same controlled environment as
 /// `ctx` invocations (`env_clear`, `LC_ALL`/`LANG=C`, `HOME`/`XDG_*`/`TMPDIR`
 /// rooted at `home`) — so a proof's outcome (in particular, which files

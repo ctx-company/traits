@@ -2,13 +2,14 @@
 //! precedence/validation, the combined report, and centralized exit codes.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use support::{
     ScratchRoot, assert_exit_code, git_init_on_branch, require_success, run_ctx, run_ctx_with_env,
-    utf8,
+    spawn_ctx, utf8,
 };
 
 /// Centralized P460 exit statuses, mirrored here rather than imported so a
@@ -16,6 +17,7 @@ use support::{
 /// of silently tracking whatever the binary happens to emit.
 const EXIT_RUN_NOT_COMPLETED: i32 = 3;
 const EXIT_MERGE_PARKED: i32 = 4;
+const EXIT_MERGE_FAILED: i32 = 5;
 
 /// A scratch git repo carrying one reviewed, activated, provider-free
 /// command-only trait (`demo`, running `cmd`), with `.ctx/traits/worktrees/`
@@ -1110,16 +1112,144 @@ fn checkout_branch_probe_race_retry_parks_with_zero_merger_dispatches() {
     );
 }
 
+/// A fixture repo whose `[merge] gate` blocks: it touches `gate_entered`
+/// (proving the holding merge process has reached the gate stage, inside the
+/// lock — `modules/core/src/procedure/session.rs:500-512`) and then spins
+/// until `release_gate` exists. `gate-seconds`/`retry-backoff-ms` bound the
+/// pinned window and any incidental retry so a broken proof fails in minutes,
+/// never hangs. Marker paths are absolute under `home` because the gate's
+/// cwd is the generated worktree, not `home`.
+fn init_fixture_repo_with_blocking_gate(
+    repo: &Path,
+    home: &Path,
+    gate_entered: &Path,
+    release_gate: &Path,
+) {
+    init_fixture_repo_inner(repo, home, "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            format!(
+                "[merge]\ngate = [[\"sh\", \"-c\", \"touch '{}'; until [ -f '{}' ]; do sleep 0.05; done\"]]\ngate-seconds = 60\nretry-backoff-ms = 25\n",
+                gate_entered.display(),
+                release_gate.display()
+            ),
+        )
+        .unwrap();
+    });
+}
+
+/// [`install_counting_merger`], plus a declared `[agent.role.merger].budget`
+/// `frame-seconds`, so the derived lock-wait ceiling
+/// (`merge_lock_wait_timeout_ms`, `modules/cli/src/app/merge.rs:206-214`)
+/// collapses from `25 * 900s` to a few minutes — a hang bound if this proof
+/// ever regresses, never a tuned expectation for the healthy path.
+fn install_counting_merger_with_frame_budget(repo: &Path, marker: &Path, frame_seconds: u64) {
+    install_counting_merger(repo, marker);
+    let ctx_toml = repo.join("ctx.toml");
+    let mut contents = fs::read_to_string(&ctx_toml).unwrap();
+    contents.push_str(&format!(
+        "\n[agent.role.merger.budget]\nframe-seconds = {frame_seconds}\n"
+    ));
+    fs::write(&ctx_toml, contents).unwrap();
+    Command::new("git")
+        .args(["add", "ctx.toml"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "bound merger frame budget"])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+}
+
+/// Poll `check` at a short fixed interval until it returns `true` or
+/// `deadline` passes. Returns whether `check` ever succeeded.
+fn poll_until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
+    loop {
+        if check() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Locate the single `merge.lock` file under the scratch `home` (HOME/XDG are
+/// scratch-rooted by `controlled_command`, so exactly one repo's runs root —
+/// and thus exactly one `merge.lock` — exists under it).
+fn find_merge_lock(home: &Path) -> PathBuf {
+    fn walk(dir: &Path) -> Option<PathBuf> {
+        for entry in fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = walk(&path) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("merge.lock") {
+                return Some(path);
+            }
+        }
+        None
+    }
+    walk(home).expect("a pinned merge holds the cross-process lock, so merge.lock must exist")
+}
+
+/// Whether `pid` currently holds an open file descriptor on `lock_path` —
+/// the pre-acquisition observable (`modules/io/src/merge_lock.rs:116-131`):
+/// a waiter opens `merge.lock` before its first `try_lock_exclusive`, so
+/// this going true proves the waiter is inside `acquire()` and about to (or
+/// already having) fail its first try while the winner is still pinned.
+fn process_holds_fd(pid: u32, lock_path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let canonical = fs::canonicalize(lock_path).unwrap_or_else(|_| lock_path.to_path_buf());
+        let Ok(entries) = fs::read_dir(format!("/proc/{pid}/fd")) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            fs::read_link(entry.path())
+                .map(|target| target == canonical)
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let output = Command::new("lsof").arg("-t").arg(lock_path).output();
+        match output {
+            Ok(output) => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.trim().parse::<u32>() == Ok(pid)),
+            Err(_) => false,
+        }
+    }
+}
+
 /// Independent completed runs contend for the merge lock and converge without
 /// starving either run. Their commits touch distinct paths, so serializing the
 /// lock holders is sufficient for both public-path landings to succeed.
+///
+/// Contention here is coordination-driven, not scheduling luck: merge A is
+/// pinned inside the lock by a blocking `[merge] gate` (observed via a
+/// marker file), merge B's queued waiter is observed holding an open fd on
+/// `merge.lock` before the gate is released, and only then is the lock
+/// released — so B's first `try_lock_exclusive` is guaranteed to fail
+/// while A is pinned, making `queued_behind`/`wait_ms` guaranteed, not
+/// lucky (`modules/io/src/merge_lock.rs:105-194`).
 #[test]
 fn concurrent_disjoint_runs_eventually_land() {
     let scratch = ScratchRoot::new("p478-concurrent-convergence");
-    let repo = scratch.home().join("repo");
-    init_fixture_repo_without_gate(&repo, &scratch.home(), "true");
-    install_counting_merger(&repo, &repo.join("concurrent-merger-calls"));
+    let home = scratch.home();
+    let repo = home.join("repo");
+    let gate_entered = home.join("gate-entered");
+    let release_gate = home.join("release-gate");
+    init_fixture_repo_with_blocking_gate(&repo, &home, &gate_entered, &release_gate);
+    install_counting_merger_with_frame_budget(&repo, &repo.join("concurrent-merger-calls"), 5);
+
     let mut run_ids = Vec::new();
+    let mut session_paths = Vec::new();
     for name in ["a", "b"] {
         let output = run_ctx(
             &[
@@ -1133,7 +1263,7 @@ fn concurrent_disjoint_runs_eventually_land() {
                 "none",
             ],
             &repo,
-            &scratch.home(),
+            &home,
         );
         assert_exit_code(&output, 0);
         let run = value_json(&output);
@@ -1163,20 +1293,96 @@ fn concurrent_disjoint_runs_eventually_land() {
                 .unwrap()
                 .to_string(),
         );
+        session_paths.push(run["value"]["session-path"].as_str().unwrap().to_string());
     }
-    let handles: Vec<_> = run_ids
-        .into_iter()
-        .map(|run_id| {
-            let repo = repo.clone();
-            let home = scratch.home().to_path_buf();
-            thread::spawn(move || run_ctx(&["traits", "merge", &run_id, "--json"], &repo, &home))
-        })
-        .collect();
-    for handle in handles {
-        assert_exit_code(&handle.join().unwrap(), 0);
-    }
+    let run_a = run_ids[0].clone();
+    let run_b = run_ids[1].clone();
+    let session_path_b = session_paths[1].clone();
+
+    // 1. Spawn merge A and wait for it to reach its blocking gate — from
+    // here A provably holds the merge lock and cannot release it until this
+    // test creates `release_gate`.
+    let handle_a = {
+        let (repo, home, run_a) = (repo.clone(), home.clone(), run_a.clone());
+        thread::spawn(move || run_ctx(&["traits", "merge", &run_a, "--json"], &repo, &home))
+    };
+    assert!(
+        poll_until(Instant::now() + Duration::from_secs(60), || gate_entered
+            .is_file()),
+        "merge A must reach its blocking gate (and thus hold the merge lock) within the deadline"
+    );
+
+    // 2. Deterministic contending probe: zero timing assumptions — if lock
+    // serialization ever regressed, this would land B early instead of
+    // passing vacuously, and the assertions below would fail loudly.
+    let probe = run_ctx(
+        &["traits", "merge", &run_b, "--no-wait", "--json"],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&probe, EXIT_MERGE_FAILED);
+    let probe_report = value_json(&probe);
+    assert_eq!(probe_report["value"]["status"], "lock-unavailable");
+    assert!(
+        probe_report["value"]["lock-holder"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&format!("run-id={run_a}")),
+        "the probe must report A as the current lock holder: {probe_report}"
+    );
+
+    // 3. Spawn merge B and observe its queued waiter holding an open fd on
+    // `merge.lock` before A releases — proof it is inside `acquire()`, about
+    // to fail its first `try_lock_exclusive` while A is still pinned.
+    let child_b = spawn_ctx(&["traits", "merge", &run_b, "--json"], &repo, &home);
+    let pid_b = child_b.id();
+    let lock_path = find_merge_lock(&home);
+    assert!(
+        poll_until(Instant::now() + Duration::from_secs(60), || {
+            process_holds_fd(pid_b, &lock_path)
+        }),
+        "merge B must be observed queued behind the merge lock within the deadline"
+    );
+
+    // 4. Release: A finishes and lands; B then acquires, its gate passes
+    // instantly (release_gate already exists), and it lands in turn.
+    fs::write(&release_gate, "").unwrap();
+    assert_exit_code(&handle_a.join().unwrap(), 0);
+    let output_b = child_b
+        .wait_with_output()
+        .unwrap_or_else(|error| panic!("cannot wait for merge B: {error}"));
+    assert_exit_code(&output_b, 0);
+
     assert!(repo.join("landing-a").is_file());
     assert!(repo.join("landing-b").is_file());
+
+    // The loser's frames record the wait: this is the assertion that fails
+    // whenever the second process never actually waited on the lock.
+    let ledger_b = fs::read_to_string(&session_path_b).unwrap();
+    let lock_frame = ledger_b
+        .split_once("\"stage\": \"lock\"")
+        .expect("B's ledger must record a Lock frame")
+        .1;
+    assert!(
+        lock_frame.contains("queued-behind=pid="),
+        "B's Lock frame must record who it queued behind: {lock_frame}"
+    );
+    assert!(
+        lock_frame.contains(&format!("run-id={run_a}")),
+        "B's Lock frame must record A as the holder it queued behind: {lock_frame}"
+    );
+    let wait_ms: u64 = lock_frame
+        .split("wait-ms=")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or_else(|| {
+            panic!("B's Lock frame must carry a wait-ms= evidence value: {lock_frame}")
+        });
+    assert!(
+        wait_ms > 0,
+        "B must have actually waited on the merge lock (wait-ms=0 would mean it never contended): {lock_frame}"
+    );
 }
 
 /// Git's `--ff-only` check is the safety boundary for owner work: unrelated
