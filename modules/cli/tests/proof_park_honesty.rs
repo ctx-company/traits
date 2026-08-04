@@ -541,7 +541,7 @@ fn setup_fixture(
     );
     write_file(
         &repo.join(".gitignore"),
-        "/.ctx/runs/*.json\n/.ctx/worktrees/\n/.ctx/debug/\n",
+        "/.ctx/runs/*.json\n/.ctx/traits/worktrees/\n/.ctx/debug/\n",
     );
     for (task, wall) in phases {
         let mut body = format!(

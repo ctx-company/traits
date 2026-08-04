@@ -508,7 +508,7 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
     let repo = home.join("repo");
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init(&repo);
-    fs::write(repo.join(".gitignore"), ".ctx/worktrees/\n").unwrap();
+    fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         "id = \"demo\"\n\
@@ -632,7 +632,7 @@ fn run_progress_modes_remain_line_oriented_when_stdio_is_piped() {
     let fixture = command_trait_fixture("p551-run-piped-progress");
     fs::write(
         fixture.repo.join(".gitignore"),
-        ".ctx/worktrees/\nwarm-valid/\n",
+        ".ctx/traits/worktrees/\nwarm-valid/\n",
     )
     .unwrap();
     fs::write(

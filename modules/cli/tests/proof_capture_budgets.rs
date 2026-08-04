@@ -63,7 +63,7 @@ fn write_trait_toml(repo: &Path) {
 fn init_command_step_fixture(repo: &Path, home: &Path, cmd: &str, capture_bytes: u64) {
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init_on_branch(repo, "main");
-    fs::write(repo.join(".gitignore"), ".ctx/worktrees/\n").unwrap();
+    fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
@@ -103,7 +103,7 @@ output = ["slot:notified"]
 fn init_default_input_fixture(repo: &Path, home: &Path, cmd: &str, capture_bytes: u64) {
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init_on_branch(repo, "main");
-    fs::write(repo.join(".gitignore"), ".ctx/worktrees/\n").unwrap();
+    fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(

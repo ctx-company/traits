@@ -14,7 +14,7 @@ const EXIT_RUN_NOT_COMPLETED: i32 = 3;
 const EXIT_MERGE_PARKED: i32 = 4;
 
 /// A scratch git repo carrying one reviewed, activated, provider-free
-/// command-only trait (`demo`, running `cmd`), with `.ctx/worktrees/`
+/// command-only trait (`demo`, running `cmd`), with `.ctx/traits/worktrees/`
 /// gitignored and a caller-supplied `Justfile` `test` recipe standing in for
 /// this repository's own — so the declared `[merge] gate` (P477) `ctx
 /// traits merge` runs inside the generated worktree stays exactly
@@ -62,7 +62,7 @@ fn init_fixture_repo_inner(
 ) {
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init_on_branch(repo, branch);
-    fs::write(repo.join(".gitignore"), ".ctx/worktrees/\n").unwrap();
+    fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     declare_gate(repo);
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
@@ -238,8 +238,8 @@ fn worktree_merge_lands_automatically_and_exits_zero() {
     let envelope = value_json(&output);
     assert_eq!(envelope["value"]["merge"]["status"], "merged");
     assert!(
-        !repo.join(".ctx/worktrees").exists()
-            || fs::read_dir(repo.join(".ctx/worktrees"))
+        !repo.join(".ctx/traits/worktrees").exists()
+            || fs::read_dir(repo.join(".ctx/traits/worktrees"))
                 .unwrap()
                 .next()
                 .is_none(),
@@ -284,7 +284,7 @@ fn landing_gate_failure_parks_and_exits_distinct_status() {
     assert_exit_code(&output, EXIT_MERGE_PARKED);
     let envelope = value_json(&output);
     assert_eq!(envelope["value"]["merge"]["status"], "parked");
-    let worktrees = fs::read_dir(repo.join(".ctx/worktrees")).unwrap();
+    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
     assert!(
         worktrees.count() > 0,
         "a parked merge must leave its branch and worktree intact"
@@ -424,7 +424,7 @@ fn parked_merge_is_not_retried_on_a_later_resume() {
         before_reason, after_reason,
         "the original park reason must survive the resume unchanged"
     );
-    let worktrees = fs::read_dir(repo.join(".ctx/worktrees")).unwrap();
+    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
     assert!(
         worktrees.count() > 0,
         "the original park must still leave its branch and worktree intact"
@@ -632,8 +632,8 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
         "an empty gate must still record the GatesPassed ledger frame: {ledger_text}"
     );
     assert!(
-        !repo.join(".ctx/worktrees").exists()
-            || fs::read_dir(repo.join(".ctx/worktrees"))
+        !repo.join(".ctx/traits/worktrees").exists()
+            || fs::read_dir(repo.join(".ctx/traits/worktrees"))
                 .unwrap()
                 .next()
                 .is_none(),
@@ -729,7 +729,7 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
         main_rev_before, main_rev_after,
         "a parked gate must never advance main"
     );
-    let worktrees = fs::read_dir(repo.join(".ctx/worktrees")).unwrap();
+    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
     assert!(
         worktrees.count() > 0,
         "a parked gate must leave its branch and worktree intact"

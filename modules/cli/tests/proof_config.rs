@@ -1651,8 +1651,11 @@ fn named_build_caches_export_concurrently_through_the_public_worktree_path() {
     );
     assert_exit_code(&output, 0);
 
-    let captured = fs::read_to_string(repo.join(".ctx/worktrees/env-proof/env-capture.txt"))
-        .expect("worktree setup command must have written env-capture.txt");
+    let captured = fs::read_to_string(
+        repo.join(ctx_traits_io::layout::WORKTREE_ROOT)
+            .join("env-proof/env-capture.txt"),
+    )
+    .expect("worktree setup command must have written env-capture.txt");
     let (cargo_dir, pnpm_dir) = captured
         .split_once('|')
         .unwrap_or_else(|| panic!("expected two '|'-separated values: {captured}"));
@@ -1970,8 +1973,12 @@ fn linked_worktree_cache_export_uses_main_key_without_rebasing_relative_overlays
         ),
         0,
     );
-    let captured = fs::read_to_string(linked.join(".ctx/worktrees/env-proof/env-capture.txt"))
-        .expect("linked worktree setup must capture effective environment");
+    let captured = fs::read_to_string(
+        linked
+            .join(ctx_traits_io::layout::WORKTREE_ROOT)
+            .join("env-proof/env-capture.txt"),
+    )
+    .expect("linked worktree setup must capture effective environment");
     let (cache, relative) = captured.split_once('|').expect("two captured values");
     assert_eq!(cache, main_cache);
     let linked_real = fs::canonicalize(&linked).unwrap();

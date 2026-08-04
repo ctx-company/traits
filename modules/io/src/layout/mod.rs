@@ -94,7 +94,19 @@ pub const DEBUG_ROOT: &str = ".ctx/debug";
 /// dual-read fallback. See [`crate::state::global_runs_root`] for the active
 /// default.
 pub const RUN_ROOT: &str = ".ctx/runs";
-pub const WORKTREE_ROOT: &str = ".ctx/worktrees";
+/// Active repo-local run-worktree root (0052). Everything this product owns
+/// repo-locally lives under `.ctx/traits/`; `.ctx/` is a shared namespace and
+/// a top-level `worktrees/` there is a claim this product should not make.
+///
+/// The other four repo-local roots 0052 named — `.ctx/cache/traits`,
+/// `.ctx/cache/builtin-traits`, `.ctx/runs`, `.ctx/debug` — were already moved
+/// OUT of the repository entirely by P426 and survive only as the legacy
+/// fallbacks documented above. This was the one still live.
+pub const WORKTREE_ROOT: &str = ".ctx/traits/worktrees";
+/// Pre-0052 run-worktree root at `.ctx/`'s top level. Still resolved for a
+/// worktree that already exists there, so a checkout with live or parked runs
+/// keeps working across the change — see [`crate::worktree::worktree_path_for`].
+pub const LEGACY_WORKTREE_ROOT: &str = ".ctx/worktrees";
 /// Current repo-local runtime configuration path (P311). Read after the
 /// legacy [`LEGACY_RUNTIME_CONFIG`] sibling at each ancestor so `.ctx/`
 /// paths always win the merge.
@@ -216,6 +228,11 @@ pub fn trait_protocol_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
 /// Working-directory-relative worktree root.
 pub fn worktree_root() -> &'static str {
     WORKTREE_ROOT
+}
+
+/// Working-directory-relative pre-0052 worktree root, still read.
+pub fn legacy_worktree_root() -> &'static str {
+    LEGACY_WORKTREE_ROOT
 }
 
 /// Project manifest path for an encoding extension such as `toml`.

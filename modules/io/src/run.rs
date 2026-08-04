@@ -1803,11 +1803,13 @@ mod startup_observer_tests {
         // files, stages nothing, and the commit below fails for a reason that
         // has nothing to do with this test.
         let _process_wide = crate::lock_process_wide_test();
-        // `-c` flags keep the fixture hermetic: the developer's global
-        // excludes must not decide what `add -A` stages, and the default
-        // branch name must not depend on their git config.
+        // The `-c` flag keeps the fixture hermetic: the developer's global
+        // excludes must not decide what `add -A` stages. The branch name is
+        // deliberately NOT pinned — this fixture never refers to it, and
+        // `proof_branch_literals` is right that a literal default-branch name
+        // needs a justification nothing here can give.
         for args in [
-            vec!["init", "-q", "-b", "main"],
+            vec!["init", "-q"],
             vec!["config", "user.email", "startup@example.invalid"],
             vec!["config", "user.name", "Startup observer"],
             vec!["-c", "core.excludesFile=", "add", "-A"],

@@ -13,7 +13,7 @@ use support::{ScratchRoot, assert_exit_code, git_init_on_branch, run_ctx, utf8};
 const EXIT_RUN_NOT_COMPLETED: i32 = 3;
 
 /// A scratch git repo carrying one reviewed, activated, provider-free
-/// command-only trait (`demo`) whose command is `cmd`, with `.ctx/worktrees/`
+/// command-only trait (`demo`) whose command is `cmd`, with `.ctx/traits/worktrees/`
 /// gitignored and no `[merge] gate` declared (the product default — a clean
 /// run lands with no repository command at all). Modeled on
 /// `proof_merge_on_completion.rs`'s `init_fixture_repo_inner`, reused rather
@@ -23,7 +23,7 @@ fn init_fixture_repo(repo: &Path, home: &Path, cmd: &str, extra_config: &str) {
     git_init_on_branch(repo, "main");
     fs::write(
         repo.join(".gitignore"),
-        ".ctx/worktrees/\n.ctx/config.toml\n",
+        ".ctx/traits/worktrees/\n.ctx/config.toml\n",
     )
     .unwrap();
     if !extra_config.is_empty() {
@@ -206,7 +206,7 @@ fn gitignored_invocation_repo_write_parks_and_does_not_land() {
         "finding must carry a frame label naming the frame that ran: {finding}"
     );
 
-    let worktrees = fs::read_dir(repo.join(".ctx/worktrees")).unwrap();
+    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
     assert!(
         worktrees.count() > 0,
         "a park must leave branch and worktree intact"
@@ -313,7 +313,7 @@ fn seeded_park_evidence_refuses_an_explicit_merge_of_an_otherwise_clean_completi
         "park reason must name the offending path: {merge_envelope}"
     );
 
-    let worktrees = fs::read_dir(repo.join(".ctx/worktrees")).unwrap();
+    let worktrees = fs::read_dir(repo.join(".ctx/traits/worktrees")).unwrap();
     assert!(
         worktrees.count() > 0,
         "the seeded park must leave branch and worktree intact"

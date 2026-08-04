@@ -283,7 +283,12 @@ fn status_records(main_root: &Utf8Path) -> crate::Result<Vec<(String, String)>> 
 }
 
 fn push_if_in_scope(records: &mut Vec<(String, String)>, xy: &str, path: &str) {
-    if path.starts_with(crate::layout::WORKTREE_ROOT) {
+    // Both roots: 0052 moved run worktrees under `.ctx/traits/`, and a
+    // checkout that still holds pre-0052 worktrees must not have them
+    // reported as escapes either.
+    if path.starts_with(crate::layout::WORKTREE_ROOT)
+        || path.starts_with(crate::layout::LEGACY_WORKTREE_ROOT)
+    {
         return;
     }
     records.push((xy.to_string(), path.to_string()));

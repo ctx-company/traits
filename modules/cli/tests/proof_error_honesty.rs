@@ -201,7 +201,7 @@ fn build_seeded_park_run(repo: &Path, home: &Path) -> String {
     support::git_init(repo);
     fs::write(
         repo.join(".gitignore"),
-        ".ctx/worktrees/\n.ctx/config.toml\n",
+        ".ctx/traits/worktrees/\n.ctx/config.toml\n",
     )
     .unwrap();
     fs::write(

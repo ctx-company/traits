@@ -19,7 +19,7 @@ fn command_trait_fixture() -> Fixture {
     let repo = home.join("repo");
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init(&repo);
-    fs::write(repo.join(".gitignore"), ".ctx/worktrees/\n").unwrap();
+    fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         "id = \"demo\"\nschema-version = \"0.2\"\nversion = \"0.1.0\"\nname = \"Demo\"\nsummary = \"Demo\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",

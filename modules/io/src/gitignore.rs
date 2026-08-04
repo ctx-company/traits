@@ -25,6 +25,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 /// `.ctx/.gitignore`. Every diagnostic and writer in this module reads this
 /// same list.
 pub const CANONICAL_ENTRIES: &[&str] = &[
+    // 0052: run worktrees live under `.ctx/traits/` now. The pre-0052
+    // top-level entry stays listed on purpose — a checkout that still holds
+    // old worktrees must not suddenly show them as untracked, and they are
+    // never rewritten in place, only drained as their runs land.
+    "traits/worktrees/",
     "worktrees/",
     "config.toml",
     "config.ts",
@@ -170,6 +175,7 @@ pub fn tracked_runtime_paths(repo_root: &Utf8Path) -> crate::Result<Vec<TrackedR
     let candidates = [
         ".ctx/config.toml",
         ".ctx/config.ts",
+        ".ctx/traits/worktrees",
         ".ctx/worktrees",
         ".ctx/runs",
         ".ctx/debug",
