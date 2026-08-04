@@ -1,6 +1,23 @@
 # 0076 — The session title must not block the first frame, and must not cost 20 seconds to fail
 
-**Status:** ready to implement · **Depends on:** nothing; 0030 removes the cause of the timeouts and makes this cheaper, but neither blocks the other · **Raised:** 2026-08-03 (measured on this machine while diagnosing a merge stall)
+**Status:** IMPLEMENTED 2026-08-04 · **Depends on:** nothing; 0030 removes the cause of the timeouts and makes this cheaper, but neither blocks the other · **Raised:** 2026-08-03 (measured on this machine while diagnosing a merge stall)
+
+## What landed
+
+The dispatch runs on a detached thread and `drive_loop` starts immediately;
+the worker never writes the ledger, parking its result in
+`PendingSessionTitle` for the drive thread to persist at a frame boundary. A
+dimmed `generating title…` row shows from dispatch until it resolves. The
+invocation that took 29s now takes 9s.
+
+**One decision below was reversed on the owner's call: "Never retry the
+title" is wrong.** A blank title row for the life of a run is a worse outcome
+than a second and third cheap flash-model call, so the worker retries three
+times with linear backoff. It stays bounded for the reason that decision was
+reaching for — decoration must never become unbounded background spend.
+
+Still open, and the reason 0030 matters: the same narrator seat is called
+**per frame** inside the loop, and that cost is untouched by this.
 
 Every driven run pays for one narrator model call before its first frame, and
 on this machine that call fails its bound three times out of four. The run is
