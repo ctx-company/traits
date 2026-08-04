@@ -239,7 +239,7 @@ pub(crate) struct RatatuiPane {
 /// terminal — a genuinely headless invocation, where the alternate screen at
 /// least renders (fullscreen viewport, no cursor query) instead of hanging.
 fn inline_capable_screen() -> PaneScreen {
-    if std::io::stdin().is_terminal() {
+    if std::io::stdin().is_terminal() && !stdin_was_adopted() {
         PaneScreen::Inline
     } else {
         PaneScreen::Alt
@@ -265,26 +265,47 @@ fn inline_capable_screen() -> PaneScreen {
 /// Idempotent, and a no-op when stdin is already a terminal or when no
 /// controlling terminal exists (CI, a daemon, a detached spawn) — those keep
 /// today's behaviour and fall to the alternate screen or to status progress.
-pub(crate) fn adopt_controlling_terminal() {
-    use std::os::fd::AsRawFd;
+/// True once [`adopt_controlling_terminal`] actually replaced stdin. The
+/// inline viewport needs a cursor-position reply, and on an adopted stdin that
+/// reply is contended: the startup pane's input pump is already draining the
+/// same process-global crossterm reader, so the query can spin unanswered.
+/// The alternate screen needs no cursor query at all, so an adopted terminal
+/// takes that path — working input beats preserved scrollback.
+static STDIN_ADOPTED: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn stdin_was_adopted() -> bool {
+    STDIN_ADOPTED.load(Ordering::SeqCst)
+}
+
+pub(crate) fn adopt_controlling_terminal() {
     static ADOPTED: Once = Once::new();
     ADOPTED.call_once(|| {
         if std::io::stdin().is_terminal() {
             return;
         }
-        let Ok(tty) = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/tty")
-        else {
+        // Prefer duplicating a stream we ALREADY hold on the terminal —
+        // stderr is where the pane draws, stdout next — over opening
+        // `/dev/tty`. Both make `isatty` true, but they are not equivalent to
+        // the thing that has to happen next: crossterm registers the fd with
+        // mio/kqueue, and the `/dev/tty` alias (device 2,0) is not the pty
+        // slave (16,N) and fails to register. The result is a reader whose
+        // source is `None` forever — "Failed to initialize input reader" on
+        // every poll, and not one key delivered. Duplicating fd 2 hands over
+        // the real slave, which registers.
+        let source_fd = if std::io::stderr().is_terminal() {
+            libc::STDERR_FILENO
+        } else if std::io::stdout().is_terminal() {
+            libc::STDOUT_FILENO
+        } else {
             return;
         };
         // `dup2` duplicates onto fd 0; the borrowed handle is closed on drop
         // and fd 0 stays valid. A failure leaves the original stdin in place,
         // which is exactly the no-op we want.
         unsafe {
-            libc::dup2(tty.as_raw_fd(), libc::STDIN_FILENO);
+            if libc::dup2(source_fd, libc::STDIN_FILENO) >= 0 {
+                STDIN_ADOPTED.store(true, Ordering::SeqCst);
+            }
         }
     });
 }

@@ -778,6 +778,18 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     args.json,
                     args.no_tui,
                 );
+                // BEFORE anything can touch crossterm. Its event reader is a
+                // process-global built ONCE, lazily, on first use — and if
+                // stdin is not a terminal at that moment its source is `None`
+                // permanently. Repairing stdin later (which is what this call
+                // does) cannot revive it: the singleton is never rebuilt, so
+                // every later `poll` returns "Failed to initialize input
+                // reader" and no key is ever delivered. Adopting here, before
+                // the first pane, is what makes the reader come up bound to a
+                // real terminal.
+                if progress == cli::DriveProgress::Tui && !no_drive && !args.json {
+                    crate::app::tui_ratatui::adopt_controlling_terminal();
+                }
                 // Startup owns a pane only with fully interactive stdio. Keep
                 // an explicit TUI mode intact otherwise: drive owns its
                 // established allocation fallback and diagnostic.
