@@ -874,6 +874,7 @@ impl State {
         // means "moving right now" is the one worth opening on arrival.
         let mut collapsed_groups = HashSet::new();
         collapsed_groups.extend([
+            SessionGroup::Resumable,
             SessionGroup::Pending,
             SessionGroup::Failed,
             SessionGroup::Completed,
@@ -1397,13 +1398,14 @@ fn parked_ask_presentation(
     Some(format!("ask: {question} ({wait})"))
 }
 
-/// SESSIONS-screen grouping (P506 §3.1/§1.1): the owner's four buckets, in
+/// SESSIONS-screen grouping (P506 §3.1/§1.1): the owner's five buckets, in
 /// the fixed order [`SessionGroup::order`] renders them. Sourced today from
 /// [`SessionClass`]/`Status` behind the single [`session_group`] seam, so a
 /// later P504 typed-session-state landing is a one-function change.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum SessionGroup {
     Live,
+    Resumable,
     Pending,
     Failed,
     Completed,
@@ -1411,9 +1413,10 @@ enum SessionGroup {
 
 impl SessionGroup {
     /// The owner's fixed display order.
-    fn order() -> [SessionGroup; 4] {
+    fn order() -> [SessionGroup; 5] {
         [
             SessionGroup::Live,
+            SessionGroup::Resumable,
             SessionGroup::Pending,
             SessionGroup::Failed,
             SessionGroup::Completed,
@@ -1423,6 +1426,7 @@ impl SessionGroup {
     fn label(self) -> &'static str {
         match self {
             SessionGroup::Live => "live",
+            SessionGroup::Resumable => "resumable",
             SessionGroup::Pending => "pending",
             SessionGroup::Failed => "failed",
             SessionGroup::Completed => "completed",
@@ -1435,11 +1439,9 @@ impl SessionGroup {
 /// (no ledger was ever parsed) — that case always lands in `Failed`.
 ///
 /// A held driver is live regardless of the ledger's last-recorded status, and
-/// that is the ONLY route into `Live`. An `awaiting-agent-output` run whose
-/// driver died is also live — the driver lock probe is authoritative for the
-/// *current* liveness, but `AwaitingAgentOutput` means the run was actively
-/// driving when its frame went out; that makes it live in practical terms
-/// (task 0004).
+/// that is the ONLY route into `Live`. An unheld `awaiting-agent-output` run
+/// remains resumable: its ledger records interrupted in-flight work, not
+/// current liveness.
 fn session_group(
     class: SessionClass,
     status: Option<&ctx_traits_core::procedure::session::Status>,
@@ -1457,9 +1459,7 @@ fn session_group(
         return SessionGroup::Failed;
     }
     match status {
-        // A run that was actively driving when its last frame went out is
-        // still live — the owner should see it at the top, not buried.
-        ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Live,
+        ctx_traits_core::procedure::session::Status::AwaitingAgentOutput => SessionGroup::Resumable,
         ctx_traits_core::procedure::session::Status::AwaitingInput
         | ctx_traits_core::procedure::session::Status::WaitingOnHuman => SessionGroup::Pending,
         ctx_traits_core::procedure::session::Status::Completed => SessionGroup::Completed,
@@ -6507,7 +6507,20 @@ mod tests {
         let mut state = State::new_without_worker();
         state.sessions = vec![row_with_id("live", SessionClass::Live)];
         rebuild_visible_sessions(&mut state);
-        state.list_sessions.set_selected(2);
+        let pending_header = state
+            .sessions_visible
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    VisibleRow::GroupHeader {
+                        group: SessionGroup::Pending,
+                        ..
+                    }
+                )
+            })
+            .expect("pending group header");
+        state.list_sessions.set_selected(pending_header);
         assert!(matches!(
             state.sessions_visible.get(state.list_sessions.selected()),
             Some(VisibleRow::GroupHeader {
@@ -7389,13 +7402,13 @@ mod tests {
             ),
             (
                 // Resumable == the driver-lock probe said nobody is driving
-                // this. A stale `awaiting-agent-output` is still live — it
-                // was actively driving when its last frame went out.
+                // this. A stale `awaiting-agent-output` remains resumable;
+                // only a held driver is live.
                 "awaiting agent",
                 SessionClass::Resumable,
                 Some(Status::AwaitingAgentOutput),
                 None,
-                SessionGroup::Live,
+                SessionGroup::Resumable,
             ),
             (
                 "awaiting input",
@@ -7488,15 +7501,12 @@ mod tests {
     fn session_groups_have_fixed_display_order_and_labels() {
         assert_eq!(
             SessionGroup::order().map(SessionGroup::label),
-            ["live", "pending", "failed", "completed"]
+            ["live", "resumable", "pending", "failed", "completed"]
         );
     }
 
-    /// Task 0004: an `awaiting-agent-output` run without a held driver is live
-    /// — it was actively driving when its last frame went out, and the owner
-    /// should see it in the live section rather than buried.
     #[test]
-    fn a_stopped_mid_frame_run_is_live() {
+    fn a_stopped_mid_frame_run_is_resumable_unless_a_driver_is_held() {
         use ctx_traits_core::procedure::session::Status;
         assert_eq!(
             session_group(
@@ -7504,7 +7514,7 @@ mod tests {
                 Some(&Status::AwaitingAgentOutput),
                 None
             ),
-            SessionGroup::Live
+            SessionGroup::Resumable
         );
         // ...and a genuinely driven one still is, whatever its status says.
         assert_eq!(
@@ -7525,7 +7535,7 @@ mod tests {
         let mut completed = row_with_id("completed", SessionClass::Terminal);
         completed.status = Some(Status::Completed);
         // Resumable + `awaiting-agent-output`: a run whose driver died while a
-        // frame was out. Mapped to `Live` per task 0004.
+        // frame was out. It belongs in the collapsed resumable section.
         let mut stopped = row_with_id("stopped", SessionClass::Resumable);
         stopped.status = Some(Status::AwaitingAgentOutput);
         state.sessions = vec![
@@ -7541,12 +7551,19 @@ mod tests {
             state.sessions_visible[0],
             VisibleRow::GroupHeader {
                 group: SessionGroup::Live,
-                count: 2,
+                count: 1,
                 collapsed: false
             }
         ));
         assert!(matches!(state.sessions_visible[1], VisibleRow::Session(0)));
-        assert!(matches!(state.sessions_visible[2], VisibleRow::Session(2)));
+        assert!(matches!(
+            state.sessions_visible[2],
+            VisibleRow::GroupHeader {
+                group: SessionGroup::Resumable,
+                count: 1,
+                collapsed: true
+            }
+        ));
         assert!(matches!(
             state.sessions_visible[3],
             VisibleRow::GroupHeader {
@@ -7594,7 +7611,7 @@ mod tests {
             state
                 .sessions_visible
                 .iter()
-                .any(|row| matches!(row, VisibleRow::Session(1)))
+                .any(|row| matches!(row, VisibleRow::Session(2)))
         );
         assert!(
             state
