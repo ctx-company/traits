@@ -1,8 +1,8 @@
-# 0080 — Panes earn their space: drop an empty history, drop startup's detail column
+# 0080 — Panes earn their space: drop an empty history, drop startup's detail column, keep machinery out of history
 
 **Status:** ready to implement · **Depends on:** nothing · **Raised:** 2026-08-04 (owner)
 
-Two small ones. Both are a pane holding screen width while saying nothing.
+Three small ones. Each is screen space spent on something that says nothing.
 
 ## Decisions
 
@@ -18,11 +18,33 @@ Two small ones. Both are a pane holding screen width while saying nothing.
 - **Empty means nothing to show, not zero rows yet.** A pane that will fill a
   moment later should not flicker in and out — decide on whether the run has
   produced that kind of content at all, not on the current row count.
+- **History is the narrative, not the machinery.** Command steps — staging,
+  committing, capturing a diff — are how the run does its work, not what
+  happened in it. They belong in the ledger and the story, not in the pane an
+  owner watches. Drop them.
+- **`00:00:00` is a symptom, and it gets fixed on its own terms too.**
+  `story_row_line` (`run_view.rs:2181`) computes
+  `summary_at.or(elapsed).unwrap_or_default()`, so a step with neither prints a
+  fabricated zero timestamp. Filtering commands out removes today's instance;
+  it does not stop the next kind of row from doing the same. A row with no
+  time should render without one rather than inventing midnight.
+- **A check step's verdict stays.** The repository gate is a check, and a red
+  gate is exactly what history is for. "Command" here means command-kind
+  steps, not everything that runs a process. If that reads wrong in practice,
+  the rule to reach for is "did it produce a verdict the owner cares about",
+  not a longer list of exempt ids.
 
 ## Scope
 
-The history arm of `pane_tree`, and the startup pane tree in
-`run_startup_view.rs::render`.
+The history arm of `pane_tree`; the startup pane tree in
+`run_startup_view.rs::render`; and the history row source.
+
+`HistoryStep` (`run_view.rs:402`) has no kind, and neither does the
+`SequenceStatus` it is built from (`item_id`, `title`, `status`, `reason`,
+`position_path` — `state.rs:253`). The kind lives on the procedure item, which
+the panel already holds via its trait and plan, so this needs the kind carried
+onto `HistoryStep` at construction in `history_step_from_status` — not a
+guess from the label text.
 
 ## Watch
 
@@ -37,9 +59,16 @@ The history arm of `pane_tree`, and the startup pane tree in
   stage row itself, which is where `startup_pty_commits_each_failed_stage_
   before_restoring_the_terminal` will hold it.
 
+- Dropping command rows makes an all-command stretch of a run produce an EMPTY
+  history — which is now a hidden pane, by the first decision above. The two
+  interact, and a run whose first minutes are setup commands should not flash
+  the pane in and out as it goes.
+
 ## Done when
 
 A run with no history renders no history pane and its width goes to the panes
 that have content; a run that gains history gains the pane; run startup renders
-its stages full width with no detail column; and a failing startup stage still
-shows why it failed.
+its stages full width with no detail column; a failing startup stage still
+shows why it failed; command steps do not appear in history while a check
+step's verdict still does; and no history row prints a timestamp it does not
+have.
