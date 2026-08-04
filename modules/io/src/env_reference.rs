@@ -87,8 +87,21 @@ fn testhook_env_reference() -> [EnvVarDoc; 0] {
     []
 }
 
+/// Unit-test handoff: the scratch root a `startup_observer_tests` child
+/// process reads its fixture layout from. Declared here rather than only as a
+/// `#[cfg(test)]` literal in `run.rs` because `proof_env_reference` scans every
+/// `CTX_`-prefixed literal under `modules/*/src/**` — a name a test invents is
+/// still a name, and the reference is what makes it discoverable.
 #[cfg(debug_assertions)]
-fn testhook_env_reference() -> [EnvVarDoc; 4] {
+pub const TESTHOOK_STARTUP_OBSERVER_TEST_ROOT: &str = "CTX_TRAITS_STARTUP_OBSERVER_TEST_ROOT";
+
+/// Unit-test handoff: the config home a `trust` child process resolves its
+/// trust store under, so the test never touches the developer's real one.
+#[cfg(debug_assertions)]
+pub const TESTHOOK_TRUST_TEST_CONFIG_HOME: &str = "CTX_TRAITS_TRUST_TEST_CONFIG_HOME";
+
+#[cfg(debug_assertions)]
+fn testhook_env_reference() -> [EnvVarDoc; 6] {
     [
         EnvVarDoc {
             name: TESTHOOK_CHECKPOINT_WAVE_PERSISTED,
@@ -108,6 +121,16 @@ fn testhook_env_reference() -> [EnvVarDoc; 4] {
         EnvVarDoc {
             name: TESTHOOK_FAIL_RESERVATION_WRITE_ORDINAL,
             contract: "P402 fault injection: forces the reservation write for the given ordinal to fail. A no-op unless set to an ordinal. Absent from release builds.",
+            kind: EnvVarKind::DebugOnlyTestHook,
+        },
+        EnvVarDoc {
+            name: TESTHOOK_STARTUP_OBSERVER_TEST_ROOT,
+            contract: "Unit-test parent→child handoff: the scratch root a `startup_observer_tests` child reads its fixture layout from. Set only by that test. Absent from release builds.",
+            kind: EnvVarKind::DebugOnlyTestHook,
+        },
+        EnvVarDoc {
+            name: TESTHOOK_TRUST_TEST_CONFIG_HOME,
+            contract: "Unit-test parent→child handoff: the config home a `trust` child resolves its trust store under, keeping the test off the developer's real store. Set only by that test. Absent from release builds.",
             kind: EnvVarKind::DebugOnlyTestHook,
         },
     ]
