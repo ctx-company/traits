@@ -277,7 +277,16 @@ fn reconstruct_loop_context(
         sequence_id: Some(sequence_id),
         iteration_index,
         max_iterations: control_item
-            .and_then(|item| resolved_loop_bound(item, state))
+            .map(|item| {
+                resolved_loop_bound(item, state).unwrap_or_else(|| {
+                    if item.max_iterations.is_none() && item.max_iterations_from.is_none() {
+                        // Declared unbounded (0093): no bound to recover.
+                        usize::MAX
+                    } else {
+                        iteration_index + 1
+                    }
+                })
+            })
             .unwrap_or(iteration_index + 1),
     })
 }

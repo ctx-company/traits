@@ -1,0 +1,530 @@
+id = "plannotate"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Plannotate"
+summary = "Draft a plan, put the owner inside plannotator to annotate it, refine against the annotations, then loop worker and reviewer with no round limit until both the reviewer and the owner approve — writing a tracked brief and committing."
+
+[metadata]
+tag = [
+    "demo",
+    "implementation",
+    "review",
+    "human-in-the-loop",
+    "plannotator",
+]
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "role-attributed-output"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "assignment"
+direction = "input"
+schema = "schema:text"
+description = "What to build, in the caller's own words. The scope contract plan-draft drafts from."
+
+[[slot]]
+id = "preflight-output"
+schema = "schema:text"
+description = "Output evidence that plannotator is on PATH, from the preflight command step."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "The implementation draft for the assignment, before the owner has annotated it."
+hint = "Scope, files to touch, approach, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "plan-decision"
+schema = "schema:plan-decision"
+description = "plannotator's plan-mode verdict on the draft: approve, or deny with annotation text."
+
+[[slot]]
+id = "plan"
+schema = "schema:text"
+description = "The refined plan: the draft with every plan-mode annotation visibly addressed. The contract the build loop implements."
+hint = "Every deny/annotation from plan-decision must be provably reflected here, not just acknowledged."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the implemented state; replaced in full each round."
+hint = "What changed (files), how it was validated, and open concerns."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "The reviewer's verdict for the current round, plus its owner-facing briefing."
+
+[[slot]]
+id = "owner-briefing"
+schema = "schema:text"
+description = "The current round's briefing, lifted flat from review-verdict.briefing for the file-writing command step (a command step interpolates only flat slots, never a nested field)."
+
+[[slot]]
+id = "owner-decision"
+schema = "schema:owner-decision"
+description = "plannotator's gate verdict on the round briefing, only once a review has approved and the owner has been summoned. Absent (Missing) every round the owner is not summoned, and on round 1."
+
+[[slot]]
+id = "brief"
+schema = "schema:brief"
+description = "The scribe's final brief: slug plus markdown, before it is written to .internal/briefs/."
+
+[[slot]]
+id = "brief-slug"
+schema = "schema:text"
+description = "brief.slug, lifted flat for the file-writing and display command steps."
+
+[[slot]]
+id = "brief-markdown"
+schema = "schema:text"
+description = "brief.markdown, lifted flat for the file-writing and display command steps."
+
+[[slot]]
+id = "brief-write-output"
+schema = "schema:text"
+description = "Output evidence from the command step that writes the brief file."
+
+[[slot]]
+id = "brief-display-output"
+schema = "schema:text"
+description = "Output evidence from the command step that displays the brief to the owner (no --gate; no decision attached)."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Scribe's commit message for the approved work; also saved to .git/CTX_COMMITMSG for the commit command step."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[schema]]
+id = "decision"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[schema]]
+id = "review-verdict"
+description = "Typed review verdict for the current work state, plus the round's owner-facing briefing. The loop blocks only on blockers, so taste and cosmetics never cause churn."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: naming, structure, taste, optional improvements. Never affects status and never forces another round."
+
+[schema.fields.blockers]
+schema = "schema:text"
+description = "The blocking defects that must be fixed before this work can ship: a correctness bug, a failing check, work the plan did not ask for, or an owner annotation from ownerDecision that is not yet satisfied. Present when status is revise; empty or absent when approved."
+
+[schema.fields.briefing]
+schema = "schema:text"
+required = true
+description = "A short markdown briefing of this round for the owner: what changed, what this verdict found, and (when status is approved) what the owner is being asked to confirm. Written to be read cold — the owner has not seen the working tree."
+
+[schema.fields.status]
+schema = "schema:decision"
+required = true
+description = "approved when no blocking defect remains (advisory notes may still exist) AND every owner annotation from a prior round is addressed; revise when at least one blocking defect or unaddressed owner annotation remains. Set to approved if and only if blockers is empty."
+
+[[schema]]
+id = "plan-decision"
+description = "plannotator's plan-mode hook JSON. Only declares an optional marker field so the object-shape check rejects non-JSON/non-object stdout loudly; the undeclared `hookSpecificOutput.decision.behavior`/`.message` path is read directly from the raw JSON text by `plan-review`'s prompt."
+
+[schema.fields.session-id]
+schema = "schema:text"
+description = "plannotator's session identifier for the plan-mode hook exchange, when present in the payload."
+
+[[schema]]
+id = "owner-decision"
+description = "plannotator's `annotate --gate --json` verdict on one round's briefing."
+
+[schema.fields.decision]
+schema = "schema:text"
+required = true
+description = """"approved", "denied", or "dismissed" — plannotator's gate verdict on the round briefing. Only "approved" advances the build loop; denied and dismissed both leave it unsatisfied and the loop continues."""
+
+[[schema]]
+id = "brief"
+description = "The run's final brief: a tracked markdown record plus the filename stem to save it under."
+
+[schema.fields.markdown]
+schema = "schema:text"
+required = true
+description = "The brief itself: what was built, why, and how it was validated — for the tracked record."
+
+[schema.fields.slug]
+schema = "schema:text"
+required = true
+description = "A short kebab-case filename stem for the tracked brief, e.g. the assignment's own slug."
+
+[[agent]]
+id = "smart"
+description = "Strong model: drafts the plan, refines it against plan-mode annotations, and reviews the implemented work each round against the plan and the owner's annotations."
+summary = "Drafting, plan refinement, and implement-review role."
+
+[[agent]]
+id = "worker"
+description = "Implements the plan and applies reviewer/owner fixes each round."
+summary = "Implementation role."
+
+[[agent]]
+id = "scribe"
+description = "Writes the tracked brief and the commit message for the approved work; staging and committing run as command steps."
+summary = "Brief and commit-message role."
+
+[prompt.implement-review]
+text = """
+
+                    Review the implemented work for the plan {slot:plan}. Current work summary: {slot:work-summary}.
+                    Inspect the actual working tree with your tools — never review the summary alone; re-run the project's checks if the summary does not prove they pass.
+                    If an owner decision is attached to this frame, it is the owner's verdict on the previous round's briefing (denied or dismissed, since an approved verdict would already have ended the loop): treat any annotation it carries as an unsatisfied BLOCKER, never advisory, until the work visibly addresses it.
+                    A BLOCKER makes the work genuinely unshippable: a correctness bug, a failing check, work the plan did not ask for, or an unsatisfied owner annotation. Everything else — naming, structure, taste, optional improvements — is ADVISORY.
+                    Put blocking defects in blockers and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved. Do not promote taste to a blocker to earn another round.
+                    Also write briefing: a short markdown briefing of this round for the owner — what changed, what you found, and (only when status is approved) what you are asking the owner to confirm before it ships.
+                    Return the typed verdict."""
+input = [
+    "slot:plan",
+    "slot:work-summary",
+]
+output = ["slot:review-verdict"]
+
+[prompt.implement-work]
+text = """
+
+                    Produce the work for the plan {slot:plan}.
+                    If no reviewer verdict is attached to this frame, this is round 1: implement the plan in full. If a verdict IS attached, this is a fix round: fix every BLOCKER it names — including any owner annotation it names as unsatisfied — and address advisory notes only when the fix is cheap and safe.
+                    Run the project's own checks with your tools before reporting.
+                    Return the full updated work summary — what changed (files), how you validated it, and any open concern — never a diff against your previous summary."""
+input = ["slot:plan"]
+output = ["slot:work-summary"]
+
+[prompt.plan-draft]
+text = """
+
+                    Create an implementation plan for the assignment: {port:assignment}.
+                    Inspect the repository with your tools to ground the plan; do not guess at structure.
+                    Cover: scope, the files to touch, the approach, the validation plan (which of the project's own checks prove it), and the risks.
+                    Reference files by path; do not inline documents. Do not implement anything yet."""
+input = ["port:assignment"]
+output = ["slot:draft"]
+
+[prompt.plan-review]
+text = """
+
+                    Refine the draft {slot:draft} into the final plan, using plannotator's plan-mode verdict {slot:plan-decision}.
+                    If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.
+                    If it is "deny", hookSpecificOutput.decision.message is the owner's annotation — every point it raises must be visibly and provably addressed in the refined plan (not merely acknowledged): change the affected section, or state explicitly why the draft already covers it.
+                    Reference files by path; do not inline documents. Do not implement anything yet."""
+input = [
+    "slot:draft",
+    "slot:plan-decision",
+]
+output = ["slot:plan"]
+
+[prompt.summary-brief]
+text = """
+
+                    The build loop for the plan {slot:plan} has ended in a double approval (reviewer and owner), and the work is being recorded. Current work summary: {slot:work-summary}.
+                    Write a short kebab-case slug for this assignment, and a brief in markdown: what was built, why, and how it was validated. Draw its substance from the work summary rather than re-deriving the change from the working tree.
+                    Return the slug and the markdown as the typed brief output. Do not write any file yourself; a later runtime step saves it."""
+input = [
+    "slot:plan",
+    "slot:work-summary",
+]
+output = ["slot:brief"]
+
+[prompt.summary-commit]
+text = """
+
+                    The build loop for the plan {slot:plan} has ended in a double approval, and the work is being committed. The final verdict is {slot:review-verdict}, and the tracked brief is {slot:brief}.
+                    Write a concise commit message: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated. Draw its substance from the brief's stated intents rather than re-deriving the change from the working tree.
+                    Save exactly that message to the file .git/CTX_COMMITMSG at the repo root (create or overwrite it), and return the same message as your output.
+                    Do not run any git commands; staging and committing happen in later runtime steps."""
+input = [
+    "slot:plan",
+    "slot:review-verdict",
+    "slot:brief",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
+id = "lift-owner-briefing"
+title = "Lift Owner Briefing"
+kind = "project"
+input = ["slot:review-verdict"]
+output = ["slot:owner-briefing"]
+
+[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.projection]]
+source = "slot:review-verdict"
+field = "briefing"
+destination = "slot:owner-briefing"
+
+[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
+id = "write-owner-briefing"
+title = "Write the round briefing for the owner"
+input = ["slot:owner-briefing"]
+output = ["slot:brief-write-output"]
+
+[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'printf %s "$1" > .git/CTX_BRIEFING.md',
+    "sh",
+    "{slot:owner-briefing}",
+]
+
+[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
+id = "implement-owner-review"
+title = "Summon the owner (plannotator, gated)"
+input = ["slot:brief-write-output"]
+output = ["slot:owner-decision"]
+
+[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.command]
+argv = [
+    "plannotator",
+    "annotate",
+    ".git/CTX_BRIEFING.md",
+    "--gate",
+    "--json",
+]
+idle-timeout-ms = 14400000
+
+[[sequence.implement-round.sequence]]
+id = "implement-work"
+title = "Implement (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement-work"
+input = [
+    "slot:plan",
+    { slot = "slot:review-verdict", optional = true },
+    { slot = "slot:owner-decision", optional = true },
+]
+output = ["slot:work-summary"]
+
+[[sequence.implement-round.sequence]]
+id = "implement-review"
+title = "Review the work (smart)"
+agent = "agent:smart"
+prompt = "prompt:implement-review"
+input = [
+    "slot:plan",
+    "slot:work-summary",
+    { slot = "slot:owner-decision", optional = true },
+]
+output = ["slot:review-verdict"]
+
+[[sequence.implement-round.sequence]]
+id = "implement-owner-gate"
+title = "Implement Owner Gate"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then"
+
+[sequence.implement-round.sequence.when]
+slot = "slot:review-verdict"
+field = "status"
+equals = "approved"
+
+[procedure]
+description = "Confirm plannotator is installed, draft a plan and put the owner inside plannotator to annotate it, refine the plan against the annotations, loop the worker and reviewer with no iteration bound until the reviewer and the owner both approve — the owner summoned only on a round the reviewer already approved — then write a tracked brief and commit."
+input = ["port:assignment"]
+
+[[procedure.sequence]]
+id = "preflight-binary"
+title = "Confirm plannotator is installed"
+output = ["slot:preflight-output"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    "command -v plannotator",
+]
+
+[[procedure.sequence]]
+id = "plan-draft"
+title = "Draft the plan (smart)"
+agent = "agent:smart"
+prompt = "prompt:plan-draft"
+input = ["port:assignment"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "plan-owner-review"
+title = "Annotate the plan (plannotator, plan mode)"
+input = ["slot:draft"]
+output = ["slot:plan-decision"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """printf %s "$1" | jq -n --arg plan "$(cat)" '{hook_event_name: "PreToolUse", tool_name: "ExitPlanMode", tool_input: {plan: $plan}}' | PLANNOTATOR_ORIGIN=plannotate-trait plannotator""",
+    "sh",
+    "{slot:draft}",
+]
+idle-timeout-ms = 14400000
+
+[[procedure.sequence]]
+id = "plan-review"
+title = "Refine the plan against the owner's annotations (smart)"
+agent = "agent:smart"
+prompt = "prompt:plan-review"
+input = [
+    "slot:draft",
+    "slot:plan-decision",
+]
+output = ["slot:plan"]
+
+[[procedure.sequence]]
+id = "implement-loop"
+title = "Implement, review, and (on approval) summon the owner"
+kind = "loop"
+sequence = "sequence:implement-round"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:owner-decision"
+field = "decision"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "summary-brief"
+title = "Write the brief (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:summary-brief"
+input = [
+    "slot:plan",
+    "slot:work-summary",
+]
+output = ["slot:brief"]
+
+[[procedure.sequence]]
+id = "lift-brief"
+title = "Lift Brief"
+kind = "project"
+input = ["slot:brief"]
+output = [
+    "slot:brief-slug",
+    "slot:brief-markdown",
+]
+
+[[procedure.sequence.projection]]
+source = "slot:brief"
+field = "slug"
+destination = "slot:brief-slug"
+
+[[procedure.sequence.projection]]
+source = "slot:brief"
+field = "markdown"
+destination = "slot:brief-markdown"
+
+[[procedure.sequence]]
+id = "write-brief"
+title = "Save the brief to .internal/briefs/"
+input = [
+    "slot:brief-markdown",
+    "slot:brief-slug",
+]
+output = ["slot:brief-write-output"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'mkdir -p .internal/briefs && printf %s "$1" > ".internal/briefs/$2.md"',
+    "sh",
+    "{slot:brief-markdown}",
+    "{slot:brief-slug}",
+]
+
+[[procedure.sequence]]
+id = "display-brief"
+title = "Show the brief to the owner (plannotator, display only)"
+input = [
+    "slot:brief-slug",
+    "slot:brief-write-output",
+]
+output = ["slot:brief-display-output"]
+
+[procedure.sequence.command]
+argv = [
+    "plannotator",
+    "annotate",
+    ".internal/briefs/{slot:brief-slug}.md",
+]
+idle-timeout-ms = 14400000
+
+[[procedure.sequence]]
+id = "summary-commit"
+title = "Write the commit message (scribe)"
+agent = "agent:scribe"
+prompt = "prompt:summary-commit"
+input = [
+    "slot:plan",
+    "slot:review-verdict",
+    "slot:brief",
+]
+output = ["slot:commit-message"]
+
+[[procedure.sequence]]
+id = "git-stage"
+title = "Stage all changes except runtime state"
+output = ["slot:stage-output"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+    "--",
+    ":(exclude).agents/runs",
+]
+
+[[procedure.sequence]]
+id = "git-commit"
+title = "Commit the work"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-F",
+    ".git/CTX_COMMITMSG",
+]

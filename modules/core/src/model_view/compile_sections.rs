@@ -1073,7 +1073,7 @@ fn format_procedure(
                     item.max_iterations
                         .map(|value| value.to_string())
                         .or_else(|| item.max_iterations_from.clone())
-                        .unwrap_or_else(|| "missing".to_string())
+                        .unwrap_or_else(|| "unbounded".to_string())
                 ));
                 if item.until.is_some() {
                     lines.push("  Loop exit: typed until guard declared".to_string());

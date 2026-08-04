@@ -430,15 +430,23 @@ fn validate_control_state(
                 }
             }
             ControlKind::Loop => {
-                let Some(max_iterations) = frame.max_iterations else {
-                    diagnostics.push(format!(
-                        "control-stack[{index}] loop frame missing max-iterations"
-                    ));
-                    continue;
-                };
                 let Some(iteration) = frame.iteration_index else {
                     diagnostics.push(format!(
                         "control-stack[{index}] loop frame missing iteration-index"
+                    ));
+                    continue;
+                };
+                if frame.unbounded {
+                    if frame.max_iterations.is_some() {
+                        diagnostics.push(format!(
+                            "control-stack[{index}] unbounded loop frame must not carry max-iterations"
+                        ));
+                    }
+                    continue;
+                }
+                let Some(max_iterations) = frame.max_iterations else {
+                    diagnostics.push(format!(
+                        "control-stack[{index}] loop frame missing max-iterations"
                     ));
                     continue;
                 };
@@ -2004,8 +2012,12 @@ fn control_segment_is_valid(
         SequenceKind::Loop => {
             segment.item_index.is_none()
                 && segment.iteration.is_some_and(|iteration| {
-                    resolved_loop_bound(item, ledger)
-                        .is_some_and(|max_iterations| iteration < max_iterations)
+                    match resolved_loop_bound(item, ledger) {
+                        Some(max_iterations) => iteration < max_iterations,
+                        // No declared bound (0093): any iteration is in
+                        // range — the guard, not a count, is what exits.
+                        None => item.max_iterations.is_none() && item.max_iterations_from.is_none(),
+                    }
                 })
         }
         SequenceKind::ForEach => segment.iteration.is_none()

@@ -324,7 +324,11 @@ type LoopSequenceFields = SequenceCommonFields & {
   readonly sequence?: SequenceRefValue;
   /** The loop body inline: materializes as a nested sequence auto-named `<step-id>-body`. Exactly one of `sequence`/`body` is required. */
   readonly body?: readonly SequenceHandle[];
-  readonly iterations: number | PortHandle<number>;
+  /** The iteration bound. Omit it (alongside `maxIterations`) to declare an
+   * unbounded loop — one that never exhausts and exits only via `until`/
+   * `stopIf`, which is then required. A large number picked to approximate
+   * "never" is refused authoring, not honored: say unbounded, don't fake it. */
+  readonly iterations?: number | PortHandle<number>;
   readonly maxIterations?: number;
   readonly until?: BranchCheckValue;
   readonly stopIf?: BranchCheckValue;
@@ -1126,13 +1130,23 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   }
   if (isSequenceKind(fields, kind, "loop")) {
     const loop = fields;
-    if (loop.iterations === undefined && loop.maxIterations === undefined) {
-      throw new Error(`procedure.sequence ${fields.id}: loop requires iterations`);
+    const hasBound = loop.iterations !== undefined || loop.maxIterations !== undefined;
+    // Absent bound is a deliberate unbounded loop (0093), not an omission —
+    // it must pair with an exit guard, and it makes onExhausted meaningless.
+    if (!hasBound && loop.until === undefined && loop.stopIf === undefined) {
+      throw new Error(`procedure.sequence ${fields.id}: unbounded loop requires until or stopIf`);
+    }
+    if (!hasBound && loop.onExhausted !== undefined) {
+      throw new Error(
+        `procedure.sequence ${fields.id}: onExhausted requires iterations or maxIterations — an unbounded loop cannot exhaust`,
+      );
     }
     if (loop.iterations !== undefined && loop.maxIterations !== undefined && loop.iterations !== loop.maxIterations) {
       throw new Error(`procedure.sequence ${fields.id}: iterations and maxIterations differ`);
     }
-    if (typeof loop.iterations !== "number" && loop.maxIterations !== undefined) {
+    if (
+      loop.iterations !== undefined && typeof loop.iterations !== "number" && loop.maxIterations !== undefined
+    ) {
       throw new Error(`procedure.sequence ${fields.id}: dynamic iterations and maxIterations are mutually exclusive`);
     }
   }
@@ -1301,7 +1315,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     canonical["stop-if"] = guardForOutput(loop.stopIf as GuardValue | undefined, outputRefs);
     const iterations = loop.iterations ?? loop.maxIterations;
     canonical["max-iterations"] = typeof iterations === "number" ? iterations : undefined;
-    canonical["max-iterations-from"] = typeof iterations === "number"
+    canonical["max-iterations-from"] = iterations === undefined || typeof iterations === "number"
       ? undefined
       : refText(iterations, `sequence.${fields.id}.iterations`);
     canonical["on-exhausted"] = normalizeExhaustionTarget(loop.onExhausted, `sequence.${fields.id}.onExhausted`);
@@ -1803,10 +1817,12 @@ function commandInput(
 }
 function loopInput(
   value: SequenceFields["input"],
-  iterations: number | PortHandle<number>,
+  iterations: number | PortHandle<number> | undefined,
 ): NormalizedInputItem[] | undefined {
   const explicit = normalizeSequenceInputList(value);
-  if (typeof iterations === "number") return explicit.length === 0 ? undefined : explicit;
+  if (iterations === undefined || typeof iterations === "number") {
+    return explicit.length === 0 ? undefined : explicit;
+  }
   return uniqueInputsInOrder([refText(iterations, "sequence.loop.iterations"), ...explicit]);
 }
 

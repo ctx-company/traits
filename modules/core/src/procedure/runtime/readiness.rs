@@ -617,7 +617,11 @@ fn control_kind_name(kind: &ControlKind) -> &'static str {
 fn loop_context_from_stack(stack: &[ControlFrame]) -> Option<LoopContext> {
     stack.iter().rev().find_map(|frame| {
         if frame.kind == ControlKind::Loop {
-            let max_iterations = frame.max_iterations?;
+            let max_iterations = match frame.max_iterations {
+                Some(value) => value,
+                None if frame.unbounded => usize::MAX,
+                None => return None,
+            };
             Some(LoopContext {
                 loop_id: frame
                     .control_item_id

@@ -200,12 +200,20 @@ fn build_sequence_frame(
         ready.run_index, ready.sequence_index, ready.item.title
     );
     if let Some(loop_context) = ready.loop_context.as_ref() {
-        frame_text.push_str(&format!(
-            "Loop {} iteration {}/{}\n",
-            loop_context.loop_id,
-            loop_context.iteration_index + 1,
-            loop_context.max_iterations
-        ));
+        if loop_context.max_iterations == usize::MAX {
+            frame_text.push_str(&format!(
+                "Loop {} iteration {} (unbounded — exits on its own guard)\n",
+                loop_context.loop_id,
+                loop_context.iteration_index + 1,
+            ));
+        } else {
+            frame_text.push_str(&format!(
+                "Loop {} iteration {}/{}\n",
+                loop_context.loop_id,
+                loop_context.iteration_index + 1,
+                loop_context.max_iterations
+            ));
+        }
     }
     if let Some(for_each_context) = ready.for_each_context.as_ref() {
         frame_text.push_str(&format!(

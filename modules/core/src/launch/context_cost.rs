@@ -237,12 +237,12 @@ fn sequence_item_cost_text(item: &crate::r#trait::procedure::SequenceItem) -> St
             item.otherwise.as_deref().unwrap_or("none")
         ),
         crate::r#trait::procedure::SequenceKind::Loop => format!(
-            "bounded runtime loop {} max-iterations={}",
+            "runtime loop {} max-iterations={}",
             item.sequence.as_deref().unwrap_or("sequence:<missing>"),
             item.max_iterations
                 .map(|value| value.to_string())
                 .or_else(|| item.max_iterations_from.clone())
-                .unwrap_or_else(|| "missing".to_string())
+                .unwrap_or_else(|| "unbounded".to_string())
         ),
         crate::r#trait::procedure::SequenceKind::ForEach => format!(
             "typed runtime for-each over {} item {} sequence {}",

@@ -1560,10 +1560,20 @@ fn validate_loop_item(
         }
         .into());
     }
-    if item.max_iterations.is_none() && item.max_iterations_from.is_none() {
+    let has_bound = item.max_iterations.is_some() || item.max_iterations_from.is_some();
+    if !has_bound && item.until.is_none() && item.stop_if.is_none() {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{base}.max-iterations"),
-            message: "loop must declare max-iterations or max-iterations-from".to_string(),
+            message:
+                "unbounded loop must declare until or stop-if — a loop with neither a bound nor an exit guard can never end"
+                    .to_string(),
+        }
+        .into());
+    }
+    if !has_bound && item.on_exhausted.is_some() {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.on-exhausted"),
+            message: "on-exhausted requires max-iterations or max-iterations-from — an unbounded loop cannot exhaust".to_string(),
         }
         .into());
     }

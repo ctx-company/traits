@@ -14,12 +14,20 @@ fn evaluate_control_guards_after_step(
         .collect();
     for loop_index in loop_indexes.into_iter().rev() {
         let frame = state.control_stack[loop_index].clone();
-        let Some(max_iterations) = frame.max_iterations else {
-            let step = frame.control_item_id.as_deref().unwrap_or("unnamed");
-            return Err(crate::procedure::invalid_field(
-                "runtime.control-stack.max-iterations",
-                format!("loop step {step:?} is unbounded and will not run"),
-            ));
+        // An unbounded loop (0093) has no iteration ceiling to report; guard
+        // evaluation only reads `iteration_index`, so `usize::MAX` stands in
+        // as "no bound" rather than erroring a step that is only here to
+        // check `until`/`stop-if` — those guards are this frame's only exit.
+        let max_iterations = match frame.max_iterations {
+            Some(value) => value,
+            None if frame.unbounded => usize::MAX,
+            None => {
+                let step = frame.control_item_id.as_deref().unwrap_or("unnamed");
+                return Err(crate::procedure::invalid_field(
+                    "runtime.control-stack.max-iterations",
+                    format!("loop step {step:?} is unbounded and will not run"),
+                ));
+            }
         };
         let loop_context = LoopContext {
             loop_id: frame
@@ -927,7 +935,11 @@ fn condition_evaluation_outcome(
             loop_id: loop_context.loop_id.clone(),
             sequence_id: loop_context.sequence_id.clone(),
             iteration_index: loop_context.iteration_index,
-            max_iterations: Some(loop_context.max_iterations),
+            // `usize::MAX` is this frame's in-memory "no bound" sentinel
+            // (0093) — recorded as absent rather than as a literal huge
+            // number in the ledger's evidence.
+            max_iterations: (loop_context.max_iterations != usize::MAX)
+                .then_some(loop_context.max_iterations),
         }),
         comparison_evidence: None,
         outcome: matches!(outcome, GuardOutcome::Unmeasurable).then_some(outcome),

@@ -767,6 +767,7 @@ fn enter_control_frame(
         next_index: 0,
         iteration_index: None,
         max_iterations: None,
+        unbounded: false,
         max_items: None,
         item_index: None,
         item_total: None,
@@ -791,8 +792,9 @@ fn enter_control_frame(
         parallel_branch_outcomes: Vec::new(),
     };
     if frame.kind == ControlKind::Loop {
-        let max_iterations = if let Some(max_iterations) = item.max_iterations {
-            max_iterations
+        if let Some(max_iterations) = item.max_iterations {
+            frame.iteration_index = Some(0);
+            frame.max_iterations = Some(max_iterations);
         } else if let Some(max_iterations_from) = item.max_iterations_from.as_deref() {
             if accepted_value(state, max_iterations_from).is_none() {
                 state.final_state = FinalState::Blocked;
@@ -810,16 +812,27 @@ fn enter_control_frame(
                     ));
                 return Ok(());
             }
-            resolve_positive_usize_input(state, max_iterations_from, "max-iterations-from")?
+            let max_iterations =
+                resolve_positive_usize_input(state, max_iterations_from, "max-iterations-from")?;
+            frame.iteration_index = Some(0);
+            frame.max_iterations = Some(max_iterations);
+        } else if item.until.is_some() || item.stop_if.is_some() {
+            // No bound declared (0093): validation already requires `until`
+            // or `stop-if` in this case, so the loop is deliberately
+            // unbounded — it exhausts never, only its own guard exits it.
+            frame.iteration_index = Some(0);
+            frame.max_iterations = None;
+            frame.unbounded = true;
         } else {
+            // Defensive: static validation already refuses a loop with
+            // neither a bound nor an exit guard, so this is unreachable
+            // through authored/validated procedures.
             let step = item.id.as_deref().unwrap_or("unnamed");
             return Err(crate::procedure::invalid_field(
                 format!("procedure.sequence[{parent_sequence_index}].max-iterations"),
                 format!("loop step {step:?} is unbounded and will not run"),
             ));
-        };
-        frame.iteration_index = Some(0);
-        frame.max_iterations = Some(max_iterations);
+        }
     }
     if frame.kind == ControlKind::ForEach {
         let over = item.over.as_deref().unwrap_or_default();
@@ -1087,6 +1100,7 @@ fn enter_parallel_frame(
         next_index: 0,
         iteration_index: Some(0),
         max_iterations: Some(branch_total),
+        unbounded: false,
         max_items: None,
         item_index: None,
         item_total: None,
@@ -1715,13 +1729,6 @@ fn complete_or_repeat_current_control(trait_ref: &Trait, state: &mut State) -> c
             Ok(true)
         }
         ControlKind::Loop => {
-            let Some(max_iterations) = frame.max_iterations else {
-                let step = frame.control_item_id.as_deref().unwrap_or("unnamed");
-                return Err(crate::procedure::invalid_field(
-                    "runtime.control-stack.max-iterations",
-                    format!("loop step {step:?} is unbounded and will not run"),
-                ));
-            };
             let iteration = frame.iteration_index.unwrap_or(0);
             let Some(next_iteration) = iteration.checked_add(1) else {
                 stop_with_reason(
@@ -1732,6 +1739,23 @@ fn complete_or_repeat_current_control(trait_ref: &Trait, state: &mut State) -> c
                     None,
                 );
                 return Ok(true);
+            };
+            if frame.unbounded {
+                // No bound to exhaust (0093): the guard path
+                // (`evaluate_control_guards_after_step`) is the only exit —
+                // this frame always just advances to the next iteration.
+                if let Some(frame) = state.control_stack.last_mut() {
+                    frame.iteration_index = Some(next_iteration);
+                    frame.next_index = 0;
+                }
+                return Ok(true);
+            }
+            let Some(max_iterations) = frame.max_iterations else {
+                let step = frame.control_item_id.as_deref().unwrap_or("unnamed");
+                return Err(crate::procedure::invalid_field(
+                    "runtime.control-stack.max-iterations",
+                    format!("loop step {step:?} is unbounded and will not run"),
+                ));
             };
             if next_iteration >= max_iterations {
                 let failing_index = state.control_stack.len().saturating_sub(1);

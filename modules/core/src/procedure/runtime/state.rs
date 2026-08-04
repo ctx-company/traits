@@ -328,6 +328,13 @@ pub struct ControlFrame {
     pub iteration_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_iterations: Option<usize>,
+    /// True only for a `Loop` frame authored with neither `max-iterations`
+    /// nor `max-iterations-from` (0093). `max_iterations: None` already
+    /// means "not applicable" on every non-loop frame kind, so this flag is
+    /// the explicit signal that a `Loop` frame's `None` means "no bound"
+    /// rather than reusing the ambiguous value.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unbounded: bool,
     #[serde(default, rename = "max-items", skip_serializing_if = "Option::is_none")]
     pub max_items: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

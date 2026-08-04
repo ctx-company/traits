@@ -525,6 +525,8 @@ fn push_procedure_steps(out: &mut String, trait_ref: &Trait) {
             out.push_str(&format!("   Loop bound: max {limit} iteration(s).\n"));
         } else if let Some(source) = item.max_iterations_from.as_deref() {
             out.push_str(&format!("   Loop bound: resolved once from `{source}`.\n"));
+        } else if item.effective_kind() == crate::r#trait::procedure::SequenceKind::Loop {
+            out.push_str("   Loop bound: unbounded — exits on its own guard.\n");
         }
         if let Some(limit) = item.max_items {
             out.push_str(&format!("   For-each bound: max {limit} item(s).\n"));
