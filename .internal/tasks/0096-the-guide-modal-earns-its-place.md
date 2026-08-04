@@ -24,31 +24,34 @@ matters: **the guide does not know what the run is about.**
   to what the seat can actually take, and if something must be dropped, drop
   routine activity before verdicts and blockers — the existing sort already
   knows that order.
-- **The context is the state at the moment the question is SENT, and the
-  answer is attributable to it.** A run moves while the guide thinks; an
-  answer about a step that finished thirty seconds ago is wrong even though it
-  was right when asked. Two thirds of this already works and the remaining
-  third is the real gap:
-  - Already right: `apply_ask_key` (`run_view.rs:1387`) recomputes
-    `guide::evidence` on EVERY key the ask pane handles — including the Enter
-    that sends — and the worker captures `chat.context.clone()` at dispatch.
-    So the evidence is not from when the modal opened. Do not "fix" this.
-  - Still wrong: that evidence is built from `state.view`, which is rebuilt in
-    `tick_locked` when the panel paints. Between paints the view lags the
-    ledger, so "fresh" can mean "as of the last repaint". Rebuild, or read
-    through to current state, before composing evidence for a send.
-  - Still wrong: nothing tells the reader WHICH state an answer describes. An
-    answer should carry the step it was composed against, so an answer that
-    has been overtaken is visibly an answer about the past rather than a wrong
-    answer about the present.
-- **Each question is currently answered with no memory of the previous one.**
-  `guide_prompt` (`guide.rs:158`) is instructions + question + evidence;
-  `dispatch(question, context)` never receives the transcript. The modal
-  renders a conversation the model is not having. Decide deliberately: either
-  send prior exchanges so follow-ups like "why?" work, or make it plain that
-  each question stands alone. Silently looking like a chat while behaving like
-  single-shot lookups is the one option to reject — and it interacts with the
-  budget above, since a transcript competes with evidence for the same room.
+- **Evidence is composed ONCE, when a question is sent.** Today
+  `apply_ask_key` (`run_view.rs:1387`) rebuilds it on EVERY key the ask pane
+  handles, and `evidence` is not cheap: it reads the whole activity sidecar
+  off disk (`story::load_activity`) and rebuilds the story
+  (`story::build`) — per keystroke, while someone is still typing the
+  question. Every one of those but the last is thrown away. Compose on send.
+- **On send, read CURRENT state, not the last painted view.** The evidence is
+  built from `state.view`, which is rebuilt in `tick_locked` when the panel
+  paints — so between paints it lags the ledger. Doing the work once, at send,
+  is what makes reading through to current state affordable rather than a
+  second cost on every keystroke. The two changes are the same change.
+- **An answer says which state it was composed against.** A run moves while
+  the guide thinks, so an answer can be overtaken between asking and
+  rendering. Carrying the step it was composed against makes such an answer
+  visibly about the past, rather than looking like a wrong answer about the
+  present.
+- **The conversation is persisted state, and the model sees it.** Today it is
+  not: `guide_prompt` (`guide.rs:158`) is instructions + question + evidence,
+  and `dispatch(question, context)` never receives the transcript — so the
+  modal renders a conversation the model is not having, and a follow-up "why?"
+  is answered by something that never saw the first question. Keep the
+  exchanges for the life of the conversation and send them, so follow-ups
+  work. **Clearing (below) is what ends it** — that is the one action that
+  drops the transcript, which is why the two belong in the same task.
+- **Transcript and evidence share one budget.** Both compete for the same room
+  in the prompt, and a long conversation must not silently starve the evidence
+  that makes answers correct. Decide which yields — recent turns and current
+  evidence over older turns is the obvious shape.
 - **Keep the honesty instruction.** The prompt tells the guide to say unknown
   rather than guess. That is right and stays; it is currently just saying
   unknown to almost everything, which is a context problem wearing an honesty
@@ -79,9 +82,11 @@ matters: **the guide does not know what the run is about.**
   wanted for the opposite direction — 0087 makes `ask` a trait-authoring verb
   for a run asking outward, and two opposite meanings of one word across the
   ledger and the UI is a collision worth spending an afternoon to avoid.
-- **Clearing the chat.** A conversation that can only grow is one you abandon
-  rather than reuse. It is in-memory (`4926b24d`), so clearing is local — no
-  ledger involvement.
+- **Clearing the chat, which is what ends a conversation.** Once the
+  transcript is kept and sent, clearing is not merely cosmetic — it is the
+  boundary between one conversation and the next, and the only way to stop
+  paying for turns that no longer matter. It is in-memory (`4926b24d`), so
+  clearing is local: no ledger involvement.
 - **Hints match the main view exactly:** `[enter] send · [esc] close`, bullet
   separated, same shape as `"[d] dashboard · [q] exit · [ctrl-c] kill · …"`
   (`run_view.rs:1856`). If 0095 has landed, the bullet spacing follows it.
@@ -109,10 +114,12 @@ and its hint; the guide's hint line.
 
 Asking "what is this run about?" gets an answer drawn from the trait and the
 run's assignment; verdicts and blockers survive alongside it rather than being
-evicted; a question sent after the run advances is answered against the state
-at send time rather than the last repaint, and its answer says which state that
-was; a follow-up question either sees the previous exchange or is plainly not a
-follow-up; the modal opens at roughly 3:2 and about 1.5× its current size,
+evicted; evidence is composed once per question rather than once per keystroke,
+and the activity sidecar is not read while someone is typing; a question sent
+after the run advances is answered against the state at send time rather than
+the last repaint, and its answer says which state that was; a follow-up sees
+the previous exchanges, and clearing is what ends that; the modal opens at
+roughly 3:2 and about 1.5× its current size,
 capped by the terminal; the content behind it is dimmed and still readable,
 through one helper the other two dim sites also use; the chat can be cleared;
 and the hints read like the main view's.
