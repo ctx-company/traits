@@ -158,36 +158,29 @@ impl PaneLayoutResult {
 }
 
 /// Draws a bordered pane with `title` in the border's top-left, styled per
-/// `focused` — default-fg border + BOLD title when focused, DIM border + DIM
-/// title otherwise. An unfocused pane also seeds `DIM` across its full
-/// rectangle, so subsequently rendered content inherits the same secondary
-/// treatment. Terminal-window focus is deliberately NOT an input here: when
-/// the window itself is unfocused, `tui_ratatui`'s draw pass dims the whole
-/// frame buffer and strips BOLD, so this chrome dims with everything else
-/// without tracking window state. Returns the inner content rect, so a
-/// consumer never computes
-/// `block.inner()` itself (the single call every second-copy chrome bug in
-/// this kit has been about).
+/// `focused` — primary (default-fg) border + title when focused, DIM border +
+/// DIM title otherwise (owner spec 2026-08-04: pane focus shows in the chrome
+/// alone). Content is deliberately never dimmed here — text stays primary in
+/// every pane, so this block carries no whole-rect style and no BOLD.
+/// Terminal-window focus is not an input either: when the window itself is
+/// unfocused, `tui_ratatui`'s draw pass dims the whole frame buffer, taking
+/// chrome, titles, and content down together. Returns the inner content rect,
+/// so a consumer never computes `block.inner()` itself (the single call every
+/// second-copy chrome bug in this kit has been about).
 pub(crate) fn render_pane(
     frame: &mut ratatui::Frame<'_>,
     rect: Rect,
     title: &str,
     focused: bool,
 ) -> Rect {
-    let border_style = if focused {
+    let chrome_style = if focused {
         Style::default()
     } else {
         Style::default().add_modifier(Modifier::DIM)
     };
-    let title_style = if focused {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::DIM)
-    };
     let block = Block::bordered()
-        .style(border_style)
-        .border_style(border_style)
-        .title_top(RLine::from(Span::styled(title.to_string(), title_style)));
+        .border_style(chrome_style)
+        .title_top(RLine::from(Span::styled(title.to_string(), chrome_style)));
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
     inner
