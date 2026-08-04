@@ -424,12 +424,7 @@ struct RunPanelState {
     /// [`RunPanel::set_title`] after a successful title dispatch — `None`
     /// before success and permanently for a missing-narrator/failed/killed
     /// attempt.
-    title: Option<String>,
-    /// True from the moment a background title worker is dispatched until it
-    /// resolves or gives up. Drives the dimmed placeholder row: the title now
-    /// arrives seconds into a run rather than before it, so the row has to say
-    /// which state it is in instead of being blank and looking stuck.
-    title_pending: bool,
+    title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>,
     ask: Option<GuideChatHandle>,
     guide_ledger_path: Option<camino::Utf8PathBuf>,
     /// Detached guide workers wake through this non-owning handle after they
@@ -743,11 +738,7 @@ impl RunPanel {
         // A resumed drive whose title already resolved in an earlier
         // invocation shows it immediately — never re-dispatched, per
         // `SessionTitleState`'s "resolved title is read-only" contract.
-        let title = session
-            .provenance
-            .session_title
-            .as_ref()
-            .and_then(|state| state.title.clone());
+        let title_state = session.provenance.session_title.clone();
         let view = run_view(
             &trait_ref,
             &plan,
@@ -774,7 +765,6 @@ impl RunPanel {
             input_generation,
             handled_generation,
             repaint,
-            title_pending: false,
             trait_name,
             trait_ref,
             plan,
@@ -808,7 +798,7 @@ impl RunPanel {
             modal: None,
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
-            title,
+            title_state,
             ask: None,
             guide_ledger_path: None,
             wake_state: Weak::new(),
@@ -943,6 +933,9 @@ impl RunPanel {
                 .map(|key| (key.clone(), Instant::now()));
         }
         state.session = session.clone();
+        // Frame refreshes read the authoritative ledger lifecycle. This also
+        // replaces an abandoned final in-flight claim with its terminal state.
+        state.title_state = session.provenance.session_title.clone();
         let display = state.live.current_display();
         let mut narration = narration_for(&state.session, display.clone());
         if display.finished
@@ -1144,40 +1137,16 @@ impl RunPanel {
         render_locked(&mut state);
     }
 
-    /// P552: record the one successful narrator session-title result and
-    /// repaint the title row above the panes. Never called for a
-    /// missing-narrator/failed/killed attempt — that path leaves the row
-    /// permanently blank instead of calling this with a placeholder.
-    pub(crate) fn set_title(&self, title: String) {
+    /// Update the persisted title lifecycle without changing the row geometry.
+    pub(crate) fn set_title_state(
+        &self,
+        title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>,
+    ) {
         let _handoff = self.handoff_driver();
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        state.title = Some(title);
-        state.title_pending = false;
-        render_locked(&mut state);
-    }
-
-    /// Show the dimmed "generating title…" row while a background worker is
-    /// resolving it. Cleared by [`Self::set_title`] on success, or by
-    /// [`Self::clear_title_pending`] when every attempt has been spent.
-    pub(crate) fn set_title_pending(&self) {
-        let _handoff = self.handoff_driver();
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        state.title_pending = true;
-        render_locked(&mut state);
-    }
-
-    /// Give up on the title: drop back to a blank row rather than leaving a
-    /// promise on screen that will never be kept.
-    pub(crate) fn clear_title_pending(&self) {
-        let _handoff = self.handoff_driver();
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        state.title_pending = false;
+        state.title_state = title_state;
         render_locked(&mut state);
     }
 
@@ -1585,18 +1554,11 @@ fn render_locked(state: &mut RunPanelState) {
     if let Some(overlay) = stream_overlay_line(state) {
         current_rows.push(overlay);
     }
-    let title_line = match (state.title.as_ref(), state.title_pending) {
-        (Some(title), _) => Some(title_row_line(
-            title,
-            &state.trait_name,
-            state.session.provenance.started_at_epoch,
-        )),
-        (None, true) => Some(title_pending_line(
-            &state.trait_name,
-            state.session.provenance.started_at_epoch,
-        )),
-        (None, false) => None,
-    };
+    let title_line = title_row_line(
+        state.title_state.as_ref(),
+        &state.trait_name,
+        state.session.provenance.started_at_epoch,
+    );
     let RunPanelState {
         repaint,
         scrolls,
@@ -1615,7 +1577,7 @@ fn render_locked(state: &mut RunPanelState) {
         render_live_panes(
             frame,
             LiveFrame {
-                title_line: title_line.as_ref(),
+                title_line: &title_line,
                 progress_lines: &progress_lines,
                 journey_lines: &journey_lines,
                 active_row,
@@ -1639,40 +1601,28 @@ fn render_locked(state: &mut RunPanelState) {
         .fetch_max(input_generation, Ordering::Release);
 }
 
-/// P552 title row: `<bold title> · <trait name> · Started at <HH:MM:SS>`,
-/// the clock read from `started_at_epoch` (UTC — the ledger stamps wall-clock
-/// epoch seconds only, never a timezone). Blank (an empty line, occupying its
-/// reserved row without content) is rendered by the caller simply never
-/// calling this — there is no placeholder variant.
-/// The title row before the narrator has answered. Same geometry as
-/// [`title_row_line`] so the row does not jump when the real title lands —
-/// only the leading span differs, and it is `Muted` because it is a promise,
-/// not a fact. Rendering nothing here instead is what made a run look frozen:
-/// the title call used to block the first frame, so an empty row and an empty
-/// pane were indistinguishable from a hang.
-pub(crate) fn title_pending_line(trait_name: &str, started_at_epoch: Option<u64>) -> tui::Line {
-    let mut line = tui::Line::blank();
-    line.push("generating title\u{2026}".to_string(), tui::Tone::Muted);
-    line.push(" \u{b7} ", tui::Tone::Muted);
-    line.push(trait_name.to_string(), tui::Tone::Default);
-    if let Some(epoch) = started_at_epoch {
-        line.push(" \u{b7} ", tui::Tone::Muted);
-        line.push(
-            format!("Started at {}", epoch_clock_utc(epoch)),
-            tui::Tone::Muted,
-        );
-    }
-    line
-}
-
+/// One visible title row for every live or attached lifecycle state.
 pub(crate) fn title_row_line(
-    title: &str,
+    title_state: Option<&ctx_traits_core::procedure::session::SessionTitleState>,
     trait_name: &str,
     started_at_epoch: Option<u64>,
 ) -> tui::Line {
     let mut line = tui::Line::blank();
-    line.push(title.to_string(), tui::Tone::Bold);
-    line.push(" \u{b7} ", tui::Tone::Muted);
+    match title_state {
+        Some(ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+            title, ..
+        }) => {
+            line.push(title.clone(), tui::Tone::Bold);
+            line.push(" \u{b7} ", tui::Tone::Muted);
+        }
+        Some(ctx_traits_core::procedure::session::SessionTitleState::Terminal { .. }) => {}
+        None
+        | Some(ctx_traits_core::procedure::session::SessionTitleState::InFlight { .. })
+        | Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { .. }) => {
+            line.push("(Generating session title…)".to_string(), tui::Tone::Muted);
+            line.push(" \u{b7} ", tui::Tone::Muted);
+        }
+    }
     line.push(trait_name.to_string(), tui::Tone::Default);
     if let Some(epoch) = started_at_epoch {
         line.push(" \u{b7} ", tui::Tone::Muted);
@@ -1809,10 +1759,7 @@ pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneT
 }
 
 struct LiveFrame<'a> {
-    /// `None` before the P552 title dispatch succeeds (or for a
-    /// permanently title-less run) — the reserved row is left blank rather
-    /// than filled with a placeholder.
-    title_line: Option<&'a tui::Line>,
+    title_line: &'a tui::Line,
     /// The PROGRESS pane's bounded standing facts — [`progress_lines`].
     progress_lines: &'a [tui::Line],
     /// The JOURNEY pane's full content — [`journey_lines_with_active_row`].
@@ -1911,7 +1858,7 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         journey: Some(journey_rows),
         history: Some(history_rows),
         current: Some(current_rows),
-        title: PaneTitleRow::Reserved(title_line),
+        title: PaneTitleRow::Visible(title_line),
     };
     render_pane_body(
         frame,
@@ -1987,7 +1934,7 @@ pub(crate) struct PaneRenderState<'a> {
 /// [`title_row_line`]).
 pub(crate) enum PaneTitleRow<'a> {
     None,
-    Reserved(Option<&'a tui::Line>),
+    Visible(&'a tui::Line),
 }
 
 fn title_row_area(area: Rect) -> Rect {
@@ -2005,7 +1952,7 @@ fn title_row_area(area: Rect) -> Rect {
 pub(crate) fn pane_body_area(area: Rect, title: &PaneTitleRow<'_>) -> Rect {
     match title {
         PaneTitleRow::None => area,
-        PaneTitleRow::Reserved(_) => Layout::default()
+        PaneTitleRow::Visible(_) => Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(area)[1],
@@ -2040,7 +1987,7 @@ pub(crate) fn render_pane_body(
     reconcile_default: Option<PaneId>,
     state: PaneRenderState<'_>,
 ) {
-    if let PaneTitleRow::Reserved(Some(title_line)) = &data.title {
+    if let PaneTitleRow::Visible(title_line) = &data.title {
         let title_area = title_row_area(area);
         frame.render_widget(
             ratatui::widgets::Paragraph::new(vec![tui_ratatui::render_line(title_line)]),
@@ -5543,7 +5490,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            title: PaneTitleRow::None,
+            title: PaneTitleRow::Visible(&title_row_line(None, "trait", None)),
         };
         let area = Rect::new(0, 0, 80, 24);
         let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
@@ -5790,7 +5737,7 @@ mod tests {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &tui::Line::blank(),
                         progress_lines: &progress_sample_lines,
                         journey_lines: &tree_lines,
                         active_row: Some(0),
@@ -5819,7 +5766,7 @@ mod tests {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &tui::Line::blank(),
                         progress_lines: &progress_sample_lines,
                         journey_lines: &tree_lines,
                         active_row: Some(0),
@@ -5870,7 +5817,7 @@ mod tests {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &tui::Line::blank(),
                         progress_lines: &progress,
                         journey_lines: &journey,
                         active_row: Some(0),
@@ -5891,12 +5838,13 @@ mod tests {
             .expect("draw");
 
         let area = Rect::new(0, 0, 120, 11);
+        let title_line = title_row_line(None, "trait", None);
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),
             history: Some(&[]),
             current: Some(&[]),
-            title: PaneTitleRow::Reserved(None),
+            title: PaneTitleRow::Visible(&title_line),
         };
         let body = pane_body_area(area, &data.title);
         let layout = pane_tree(&LIVE_PANE_IDS, body, &data).resolve(body);
@@ -5952,7 +5900,7 @@ mod tests {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &tui::Line::blank(),
                         progress_lines: &progress,
                         journey_lines: &journey,
                         active_row: Some(0),
@@ -6025,7 +5973,7 @@ mod tests {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &tui::Line::blank(),
                         progress_lines: &[],
                         journey_lines: &[],
                         active_row: None,
@@ -6054,11 +6002,10 @@ mod tests {
         assert!(rendered.contains("unique current"));
     }
 
-    /// P552: the entire title row is blank before a title exists — no
-    /// placeholder text — and, once present, the title span renders bold
-    /// with the trait name and start clock following it.
+    /// P552: pending titles use a stable visible row; resolved titles render
+    /// bold with the trait name and start clock following them.
     #[test]
-    fn title_row_is_blank_before_success_and_bold_after() {
+    fn title_row_is_pending_before_success_and_bold_after() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::style::Modifier;
@@ -6070,13 +6017,14 @@ mod tests {
         let mut current_follow = true;
         let mut focus = FocusRing::new(vec![PROGRESS_PANE]);
         let mut keys = Vec::new();
+        let pending_title_line = title_row_line(None, "implement-phase", Some(3_723));
         let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("test terminal");
         terminal
             .draw(|frame| {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: None,
+                        title_line: &pending_title_line,
                         progress_lines: &[],
                         journey_lines: &[],
                         active_row: None,
@@ -6095,18 +6043,25 @@ mod tests {
                 );
             })
             .expect("draw");
-        let blank_row: String = (0..terminal.backend().buffer().area.width)
+        let pending_row: String = (0..terminal.backend().buffer().area.width)
             .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
             .collect();
-        assert_eq!(blank_row.trim(), "");
+        assert_eq!(
+            pending_row.trim_end(),
+            "(Generating session title…) · implement-phase · Started at 01:02:03"
+        );
 
-        let title_line = title_row_line("Refactor the merge story", "implement-phase", Some(3_723));
+        let title_state = ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+            attempts: 1,
+            title: "Refactor the merge story".to_string(),
+        };
+        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
         terminal
             .draw(|frame| {
                 render_live_panes(
                     frame,
                     LiveFrame {
-                        title_line: Some(&title_line),
+                        title_line: &title_line,
                         progress_lines: &[],
                         journey_lines: &[],
                         active_row: None,
@@ -6140,6 +6095,43 @@ mod tests {
                 .style()
                 .add_modifier
                 .contains(Modifier::BOLD)
+        );
+
+        let title_state = ctx_traits_core::procedure::session::SessionTitleState::Terminal {
+            attempts: 3,
+            reason: "attempt-limit-exhausted".to_string(),
+        };
+        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: &title_line,
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        active_row: None,
+                        history_rows: &[],
+                        current_rows: &[],
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                        ask: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let terminal_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert_eq!(
+            terminal_row.trim_end(),
+            "implement-phase · Started at 01:02:03"
         );
     }
 
@@ -6609,7 +6601,7 @@ mod tests {
                     render_live_panes(
                         frame,
                         LiveFrame {
-                            title_line: None,
+                            title_line: &tui::Line::blank(),
                             progress_lines: &[],
                             journey_lines: &[],
                             active_row: None,

@@ -301,17 +301,96 @@ pub struct Provenance {
     pub session_title: Option<SessionTitleState>,
 }
 
-/// See [`Provenance::session_title`]. `attempted` is set the moment the one
-/// permitted title call is claimed, before dispatch — so a missing narrator,
-/// a failed call, or a killed process leaves `title: None` but `attempted:
-/// true`, and is never retried.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Persisted lifecycle of the optional narrator title. `None` on
+/// [`Provenance::session_title`] remains the unattempted state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
-pub struct SessionTitleState {
-    pub attempted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+#[serde(tag = "state")]
+pub enum SessionTitleState {
+    InFlight { owner: String, attempts: u32 },
+    Retryable { attempts: u32 },
+    Resolved { attempts: u32, title: String },
+    Terminal { attempts: u32, reason: String },
+}
+
+impl SessionTitleState {
+    pub fn resolved_title(&self) -> Option<&str> {
+        match self {
+            Self::Resolved { title, .. } => Some(title),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionTitleState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = JsonValue::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("session title must be an object"))?;
+        if let Some(state) = object.get("state").and_then(JsonValue::as_str) {
+            let attempts = object
+                .get("attempts")
+                .and_then(JsonValue::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(|| serde::de::Error::custom("session title state requires attempts"))?;
+            return match state {
+                "in-flight" => object
+                    .get("owner")
+                    .and_then(JsonValue::as_str)
+                    .map(|owner| Self::InFlight {
+                        owner: owner.to_string(),
+                        attempts,
+                    })
+                    .ok_or_else(|| {
+                        serde::de::Error::custom("in-flight session title requires owner")
+                    }),
+                "retryable" => Ok(Self::Retryable { attempts }),
+                "resolved" => object
+                    .get("title")
+                    .and_then(JsonValue::as_str)
+                    .map(|title| Self::Resolved {
+                        attempts,
+                        title: title.to_string(),
+                    })
+                    .ok_or_else(|| {
+                        serde::de::Error::custom("resolved session title requires title")
+                    }),
+                "terminal" => object
+                    .get("reason")
+                    .and_then(JsonValue::as_str)
+                    .map(|reason| Self::Terminal {
+                        attempts,
+                        reason: reason.to_string(),
+                    })
+                    .ok_or_else(|| {
+                        serde::de::Error::custom("terminal session title requires reason")
+                    }),
+                _ => Err(serde::de::Error::custom("unknown session title state")),
+            };
+        }
+        // P552's old shape used `attempted`; an old claim without a title was
+        // terminal, never a newly retryable request.
+        if object.get("attempted").and_then(JsonValue::as_bool) == Some(true) {
+            return Ok(match object.get("title").and_then(JsonValue::as_str) {
+                Some(title) => Self::Resolved {
+                    attempts: 1,
+                    title: title.to_string(),
+                },
+                None => Self::Terminal {
+                    attempts: 1,
+                    reason: "legacy-attempted".to_string(),
+                },
+            });
+        }
+        Err(serde::de::Error::custom(
+            "invalid legacy session title state",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -4234,9 +4313,9 @@ equals = "revise"
             out_of_tree_mutations: Vec::new(),
             started_at_epoch: None,
             trust_approval: None,
-            session_title: Some(SessionTitleState {
-                attempted: true,
-                title: Some("Refactor the merge story".to_string()),
+            session_title: Some(SessionTitleState::Resolved {
+                attempts: 2,
+                title: "Refactor the merge story".to_string(),
             }),
         };
         let text = serde_json::to_string(&provenance).expect("serialize");
@@ -4245,13 +4324,44 @@ equals = "revise"
     }
 
     #[test]
-    fn permanently_failed_session_title_is_attempted_with_no_title() {
+    fn legacy_attempted_title_less_state_is_terminal() {
         let provenance: Provenance = serde_json::from_str(
             r#"{"started-by":{"surface":"test","caller":"c"},"state-source":"s","session-title":{"attempted":true}}"#,
         )
         .expect("attempted-with-no-title JSON deserializes");
         let state = provenance.session_title.expect("state present");
-        assert!(state.attempted);
-        assert!(state.title.is_none());
+        assert_eq!(
+            state,
+            SessionTitleState::Terminal {
+                attempts: 1,
+                reason: "legacy-attempted".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn every_session_title_lifecycle_state_round_trips() {
+        for state in [
+            SessionTitleState::InFlight {
+                owner: "driver-a".to_string(),
+                attempts: 1,
+            },
+            SessionTitleState::Retryable { attempts: 2 },
+            SessionTitleState::Resolved {
+                attempts: 3,
+                title: "Title".to_string(),
+            },
+            SessionTitleState::Terminal {
+                attempts: 3,
+                reason: "failed".to_string(),
+            },
+        ] {
+            let json = serde_json::to_string(&state).expect("serialize");
+            assert!(json.contains("state"));
+            assert_eq!(
+                serde_json::from_str::<SessionTitleState>(&json).expect("deserialize"),
+                state
+            );
+        }
     }
 }

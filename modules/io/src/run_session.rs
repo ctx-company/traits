@@ -362,43 +362,130 @@ pub fn append_out_of_tree_mutation(
     Ok(session)
 }
 
-/// Claim the one permitted P552 narrator session-title attempt for a session,
-/// marking it attempted before any dispatch happens so a killed process or a
-/// resumed drive can never retry. Returns `Ok(true)` when this call performed
-/// the claim (the caller must proceed to dispatch the bounded title request);
-/// `Ok(false)` when a title attempt was already recorded — resolved or
-/// permanently failed — and the caller must not dispatch at all.
-pub fn claim_session_title_attempt(path: &Utf8Path) -> crate::Result<bool> {
+pub const SESSION_TITLE_ATTEMPT_LIMIT: u32 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTitleClaim {
+    Claimed { attempts: u32 },
+    NotClaimable,
+}
+
+/// Claim one bounded title attempt under the current driver-lock owner. An
+/// in-flight owner from an earlier lock acquisition has lapsed by definition.
+pub fn claim_session_title_attempt(
+    path: &Utf8Path,
+    owner: &str,
+) -> crate::Result<SessionTitleClaim> {
     let mut session = read_run_session(path)?;
-    if session
-        .provenance
-        .session_title
-        .as_ref()
-        .is_some_and(|state| state.attempted)
-    {
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let attempts = match session.provenance.session_title.as_ref() {
+        None => 1,
+        Some(SessionTitleState::Retryable { attempts })
+        | Some(SessionTitleState::InFlight { attempts, .. })
+            if *attempts < SESSION_TITLE_ATTEMPT_LIMIT =>
+        {
+            // Same-owner reclaims would duplicate a still-running worker.
+            if matches!(session.provenance.session_title.as_ref(), Some(SessionTitleState::InFlight { owner: current, .. }) if current == owner)
+            {
+                return Ok(SessionTitleClaim::NotClaimable);
+            }
+            *attempts + 1
+        }
+        // A new driver proves the prior owner cannot complete this final
+        // attempt. Make that abandoned claim terminal rather than displaying a
+        // permanent in-flight title row on resume.
+        Some(SessionTitleState::InFlight {
+            owner: current,
+            attempts,
+        }) if current != owner && *attempts >= SESSION_TITLE_ATTEMPT_LIMIT => {
+            session.provenance.session_title = Some(SessionTitleState::Terminal {
+                attempts: *attempts,
+                reason: "attempt-limit-exhausted".to_string(),
+            });
+            write_run_session(path, &session)?;
+            return Ok(SessionTitleClaim::NotClaimable);
+        }
+        _ => return Ok(SessionTitleClaim::NotClaimable),
+    };
+    session.provenance.session_title = Some(SessionTitleState::InFlight {
+        owner: owner.to_string(),
+        attempts,
+    });
+    write_run_session(path, &session)?;
+    Ok(SessionTitleClaim::Claimed { attempts })
+}
+
+/// Persist a successful title only when `owner` still owns the current claim.
+pub fn record_session_title(path: &Utf8Path, owner: &str, title: String) -> crate::Result<bool> {
+    let mut session = read_run_session(path)?;
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let Some(SessionTitleState::InFlight {
+        owner: current,
+        attempts,
+    }) = session.provenance.session_title.as_ref()
+    else {
+        return Ok(false);
+    };
+    if current != owner {
         return Ok(false);
     }
-    session.provenance.session_title =
-        Some(ctx_traits_core::procedure::session::SessionTitleState {
-            attempted: true,
-            title: None,
-        });
+    session.provenance.session_title = Some(SessionTitleState::Resolved {
+        attempts: *attempts,
+        title,
+    });
     write_run_session(path, &session)?;
     Ok(true)
 }
 
-/// Persist a successful P552 session-title result after a claimed attempt
-/// ([`claim_session_title_attempt`]). A failed/killed attempt is never
-/// recorded here — the claim above already marked `attempted` permanently, so
-/// title-less remains this session's terminal state.
-pub fn record_session_title(path: &Utf8Path, title: String) -> crate::Result<()> {
+/// Finish a claimed attempt as retryable or terminal. As with success, stale
+/// workers cannot change a newer owner's lifecycle.
+pub fn record_session_title_failure(
+    path: &Utf8Path,
+    owner: &str,
+    reason: String,
+) -> crate::Result<bool> {
     let mut session = read_run_session(path)?;
-    session.provenance.session_title =
-        Some(ctx_traits_core::procedure::session::SessionTitleState {
-            attempted: true,
-            title: Some(title),
-        });
-    write_run_session(path, &session)
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let Some(SessionTitleState::InFlight {
+        owner: current,
+        attempts,
+    }) = session.provenance.session_title.as_ref()
+    else {
+        return Ok(false);
+    };
+    if current != owner {
+        return Ok(false);
+    }
+    let attempts = *attempts;
+    session.provenance.session_title = Some(if attempts >= SESSION_TITLE_ATTEMPT_LIMIT {
+        SessionTitleState::Terminal { attempts, reason }
+    } else {
+        SessionTitleState::Retryable { attempts }
+    });
+    write_run_session(path, &session)?;
+    Ok(true)
+}
+
+/// Terminally complete an owned claim when no narrator can be resolved.
+pub fn record_session_title_no_narrator(path: &Utf8Path, owner: &str) -> crate::Result<bool> {
+    let mut session = read_run_session(path)?;
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let Some(SessionTitleState::InFlight {
+        owner: current,
+        attempts,
+    }) = session.provenance.session_title.as_ref()
+    else {
+        return Ok(false);
+    };
+    if current != owner {
+        return Ok(false);
+    }
+    session.provenance.session_title = Some(SessionTitleState::Terminal {
+        attempts: *attempts,
+        reason: "no-resolvable-narrator".to_string(),
+    });
+    write_run_session(path, &session)?;
+    Ok(true)
 }
 
 /// Clear the P460 automatic-landing merge intent on a session's provenance
@@ -897,56 +984,130 @@ mod session_title_tests {
     }
 
     #[test]
-    fn first_claim_succeeds_and_marks_attempted_with_no_title() {
+    fn first_claim_records_owned_in_flight_state() {
         let path = scratch_session_path("first-claim");
         write_test_session(&path, "first-claim-run");
-        let claimed = claim_session_title_attempt(&path).expect("claim");
-        assert!(claimed);
+        let claimed = claim_session_title_attempt(&path, "owner-a").expect("claim");
+        assert_eq!(claimed, SessionTitleClaim::Claimed { attempts: 1 });
         let session = read_run_session(&path).expect("read session back");
         let state = session.provenance.session_title.expect("attempt recorded");
-        assert!(state.attempted);
-        assert!(state.title.is_none());
+        assert_eq!(
+            state,
+            ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                owner: "owner-a".to_string(),
+                attempts: 1
+            }
+        );
     }
 
     #[test]
-    fn repeated_or_resumed_claim_never_dispatches_twice() {
+    fn same_owner_refused_but_new_owner_reclaims_lapsed_attempt() {
         let path = scratch_session_path("repeat-claim");
         write_test_session(&path, "repeat-claim-run");
-        assert!(claim_session_title_attempt(&path).expect("first claim"));
-        // A resumed drive re-reads the ledger and calls claim again; it must
-        // observe the earlier attempt and refuse to claim a second time,
-        // regardless of whether that first attempt ever resolved a title.
-        assert!(!claim_session_title_attempt(&path).expect("second claim"));
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-a").expect("first claim"),
+            SessionTitleClaim::Claimed { attempts: 1 }
+        );
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-a").expect("same owner"),
+            SessionTitleClaim::NotClaimable
+        );
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-b").expect("new owner"),
+            SessionTitleClaim::Claimed { attempts: 2 }
+        );
     }
 
     #[test]
     fn successful_result_persists_and_survives_reconstruction() {
         let path = scratch_session_path("success");
         write_test_session(&path, "success-run");
-        assert!(claim_session_title_attempt(&path).expect("claim"));
-        record_session_title(&path, "Refactor the merge story".to_string()).expect("record");
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-a").expect("claim"),
+            SessionTitleClaim::Claimed { attempts: 1 }
+        );
+        assert!(
+            record_session_title(&path, "owner-a", "Refactor the merge story".to_string())
+                .expect("record")
+        );
         let session = read_run_session(&path).expect("read session back");
         let state = session.provenance.session_title.expect("title state");
-        assert!(state.attempted);
-        assert_eq!(state.title.as_deref(), Some("Refactor the merge story"));
+        assert_eq!(state.resolved_title(), Some("Refactor the merge story"));
         // A later claim attempt (e.g. a stray resume) must still refuse,
         // since a resolved title is read-only from here on.
-        assert!(!claim_session_title_attempt(&path).expect("claim after success"));
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-b").expect("claim after success"),
+            SessionTitleClaim::NotClaimable
+        );
     }
 
     #[test]
-    fn missing_or_failed_narrator_leaves_permanent_title_less_state() {
+    fn failures_retry_until_budget_then_become_terminal() {
         let path = scratch_session_path("no-narrator");
         write_test_session(&path, "no-narrator-run");
-        // Simulates "claim, dispatch, dispatch failed/no narrator": the
-        // caller claims the attempt but never calls `record_session_title`.
-        assert!(claim_session_title_attempt(&path).expect("claim"));
+        for attempt in 1..=SESSION_TITLE_ATTEMPT_LIMIT {
+            let owner = format!("owner-{attempt}");
+            assert_eq!(
+                claim_session_title_attempt(&path, &owner).expect("claim"),
+                SessionTitleClaim::Claimed { attempts: attempt }
+            );
+            assert!(
+                record_session_title_failure(&path, &owner, "failed".to_string()).expect("failure")
+            );
+        }
         let session = read_run_session(&path).expect("read session back");
-        let state = session.provenance.session_title.expect("attempt recorded");
-        assert!(state.attempted);
-        assert!(state.title.is_none());
-        // Never retried on a later resume.
-        assert!(!claim_session_title_attempt(&path).expect("no retry"));
+        assert!(matches!(
+            session.provenance.session_title,
+            Some(ctx_traits_core::procedure::session::SessionTitleState::Terminal { .. })
+        ));
+    }
+
+    #[test]
+    fn new_owner_terminalizes_an_abandoned_final_attempt() {
+        let path = scratch_session_path("abandoned-final-attempt");
+        write_test_session(&path, "abandoned-final-attempt-run");
+        for attempt in 1..=SESSION_TITLE_ATTEMPT_LIMIT {
+            let owner = format!("owner-{attempt}");
+            assert_eq!(
+                claim_session_title_attempt(&path, &owner).expect("claim"),
+                SessionTitleClaim::Claimed { attempts: attempt }
+            );
+            if attempt < SESSION_TITLE_ATTEMPT_LIMIT {
+                assert!(
+                    record_session_title_failure(&path, &owner, "failed".to_string())
+                        .expect("record failure")
+                );
+            }
+        }
+
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-3").expect("refuse current owner"),
+            SessionTitleClaim::NotClaimable
+        );
+        assert!(matches!(
+            read_run_session(&path)
+                .expect("read still in-flight")
+                .provenance
+                .session_title,
+            Some(ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                owner,
+                attempts: SESSION_TITLE_ATTEMPT_LIMIT,
+            }) if owner == "owner-3"
+        ));
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-4").expect("lapse final attempt"),
+            SessionTitleClaim::NotClaimable
+        );
+        let session = read_run_session(&path).expect("read terminal state");
+        assert_eq!(
+            session.provenance.session_title,
+            Some(
+                ctx_traits_core::procedure::session::SessionTitleState::Terminal {
+                    attempts: SESSION_TITLE_ATTEMPT_LIMIT,
+                    reason: "attempt-limit-exhausted".to_string(),
+                }
+            )
+        );
     }
 }
 

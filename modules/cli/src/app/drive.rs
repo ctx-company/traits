@@ -1089,8 +1089,9 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &narrator_tokens,
         &mut profile,
         &pending_title,
+        driver_lock.title_claim_owner(),
     );
-    let mut report = drive_loop(
+    let drive_result = drive_loop(
         input,
         drive_started,
         &mut profile,
@@ -1103,11 +1104,13 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &activity,
         run_panel.0.take(),
         &pending_title,
-    )?;
+    );
     // Last chance to write down a title that arrived after the final frame —
     // and the only chance for a run short enough to have no frame boundary
     // left once the worker answered.
-    pending_title.flush(&ledger_path);
+    let mut report = flush_after_drive_loop(drive_result, || {
+        pending_title.flush(&ledger_path, None);
+    })?;
     report.activity = activity.snapshot();
     // P479 terminal sweep: one more checkpoint after the loop returns,
     // covering the interval between the last loop-top check and however this
@@ -1492,6 +1495,12 @@ impl Drop for RunPanelGuard {
     }
 }
 
+/// Preserve a completed title outcome even when the loop itself failed.
+fn flush_after_drive_loop<T>(result: crate::Result<T>, flush: impl FnOnce()) -> crate::Result<T> {
+    flush();
+    result
+}
+
 #[allow(clippy::too_many_arguments)]
 fn drive_loop(
     input: DriveInputs<'_>,
@@ -1663,7 +1672,7 @@ fn drive_loop(
         // Frame boundary: no frame write is in flight here, so this is where a
         // title the background worker produced gets written down. Cheap — a
         // mutex probe that is `None` on every iteration but at most one.
-        pending_title.flush(ledger_path);
+        pending_title.flush(ledger_path, run_panel.0.as_ref());
         if started
             .elapsed()
             .saturating_sub(attach_wait_paused.get())
@@ -3717,17 +3726,6 @@ fn create_run_panel(
 /// timeout) rather than on a detached thread, so its `record_session_title`
 /// write can never race a frame's whole-ledger write from `drive_loop`, which
 /// starts only after this call returns.
-/// How many times the background worker will ask for a title before giving up.
-/// The narrator misses its 20s bound far more often than it meets it on some
-/// hosts, and a blank title row for the life of a run is a worse outcome than
-/// spending a second and third cheap flash-model call on it. Bounded, because
-/// this is decoration and must never become an unbounded background spend.
-const SESSION_TITLE_ATTEMPTS: u32 = 3;
-
-/// Linear backoff between title attempts (`n * BACKOFF`). A failure here is
-/// usually the seat being slow or briefly unreachable, not a permanent no.
-const SESSION_TITLE_RETRY_BACKOFF: Duration = Duration::from_secs(2);
-
 /// Where the background title worker leaves its answer for the drive thread.
 ///
 /// The title dispatch used to run inline, before `drive_loop`, for one
@@ -3740,32 +3738,60 @@ const SESSION_TITLE_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 /// is just a mutex and has no such ordering constraint: the title appears the
 /// moment it exists, and is written down at the next safe point.
 #[derive(Clone, Default)]
-pub(crate) struct PendingSessionTitle(Arc<Mutex<Option<String>>>);
+pub(crate) struct PendingSessionTitle(Arc<Mutex<Option<SessionTitleOutcome>>>);
+
+enum SessionTitleOutcome {
+    Success { owner: String, title: String },
+    Failure { owner: String, reason: String },
+}
 
 impl PendingSessionTitle {
-    fn put(&self, title: String) {
+    fn put(&self, outcome: SessionTitleOutcome) {
         if let Ok(mut slot) = self.0.lock() {
-            *slot = Some(title);
+            *slot = Some(outcome);
         }
     }
 
     /// Take the pending title, if one has arrived. Called from the drive
     /// thread only.
-    fn take(&self) -> Option<String> {
+    fn take(&self) -> Option<SessionTitleOutcome> {
         self.0.lock().ok().and_then(|mut slot| slot.take())
     }
 
     /// Persist a title that has arrived, from the drive thread, at a point
     /// where no frame write is in flight. A no-op when nothing is pending.
-    fn flush(&self, ledger_path: &camino::Utf8Path) {
-        if let Some(title) = self.take()
-            && let Err(err) = ctx_traits_io::run_session::record_session_title(ledger_path, title)
-        {
-            eprintln!("session title could not be persisted: {err}");
+    fn flush(&self, ledger_path: &camino::Utf8Path, panel: Option<&run_view::RunPanel>) {
+        let Some(outcome) = self.take() else {
+            return;
+        };
+        let result = match outcome {
+            SessionTitleOutcome::Success { owner, title } => {
+                ctx_traits_io::run_session::record_session_title(ledger_path, &owner, title)
+            }
+            SessionTitleOutcome::Failure { owner, reason } => {
+                ctx_traits_io::run_session::record_session_title_failure(
+                    ledger_path,
+                    &owner,
+                    reason,
+                )
+            }
+        };
+        match result {
+            Ok(true) => match ctx_traits_io::run_session::read_run_session(ledger_path) {
+                Ok(session) => {
+                    if let Some(panel) = panel {
+                        panel.set_title_state(session.provenance.session_title);
+                    }
+                }
+                Err(err) => eprintln!("session title state could not be refreshed: {err}"),
+            },
+            Ok(false) => {}
+            Err(err) => eprintln!("session title could not be persisted: {err}"),
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn maybe_dispatch_session_title(
     input: &DriveInputs<'_>,
     run_panel: Option<&run_view::RunPanel>,
@@ -3774,15 +3800,8 @@ fn maybe_dispatch_session_title(
     narrator_tokens: &harness_stream::NarratorTokenTracker,
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
     pending: &PendingSessionTitle,
+    claim_owner: &str,
 ) {
-    let claimed = ctx_traits_io::run_session::claim_session_title_attempt(ledger_path)
-        .inspect_err(|err| {
-            eprintln!("session title claim failed; leaving the title row blank: {err}");
-        })
-        .unwrap_or(false);
-    if !claimed {
-        return;
-    }
     let Ok(loaded) = ctx_traits_io::run::load_trait_for_session(input.file, None, session, "drive")
     else {
         return;
@@ -3801,6 +3820,20 @@ fn maybe_dispatch_session_title(
     else {
         return;
     };
+    let attempts =
+        match ctx_traits_io::run_session::claim_session_title_attempt(ledger_path, claim_owner) {
+            Ok(ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts }) => {
+                Some(attempts)
+            }
+            Ok(ctx_traits_io::run_session::SessionTitleClaim::NotClaimable) => None,
+            Err(err) => {
+                eprintln!("session title claim failed: {err}");
+                None
+            }
+        };
+    let Some(attempts) = attempts else {
+        return;
+    };
     let Some(config) = cold_narrator_config_for_session_title(
         profile,
         ColdNarratorContext {
@@ -3812,45 +3845,53 @@ fn maybe_dispatch_session_title(
             trace_sequence: &Arc::new(AtomicU64::new(0)),
         },
     ) else {
-        // No resolvable narrator seat: the claim above already marked this
-        // session permanently title-less, matching the missing-narrator
-        // outcome documented on `SessionTitleState`.
+        if let Ok(true) =
+            ctx_traits_io::run_session::record_session_title_no_narrator(ledger_path, claim_owner)
+            && let Some(panel) = run_panel
+        {
+            panel.set_title_state(Some(
+                ctx_traits_core::procedure::session::SessionTitleState::Terminal {
+                    attempts,
+                    reason: "no-resolvable-narrator".to_string(),
+                },
+            ));
+        }
         return;
     };
     let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
     if let Some(panel) = run_panel {
-        panel.set_title_pending();
+        panel.set_title_state(Some(
+            ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                owner: claim_owner.to_string(),
+                attempts,
+            },
+        ));
     }
     let panel = run_panel.cloned();
     let tokens = narrator_tokens.clone();
     let pending = pending.clone();
+    let owner = claim_owner.to_string();
     // Detached: `drive_loop` starts NOW. The ledger write is deliberately not
     // done here — see `PendingSessionTitle`.
     std::thread::spawn(move || {
-        for attempt in 1..=SESSION_TITLE_ATTEMPTS {
-            tokens.begin_call();
-            let (result, call_total) = harness_stream::dispatch_narration(&config, prompt.clone());
-            tokens.end_call(call_total);
-            if call_total > 0
-                && let Some(panel) = panel.as_ref()
-            {
-                panel.add_narrator_tokens(call_total);
-            }
-            if let Ok(title) = result {
-                if let Some(panel) = panel.as_ref() {
-                    panel.set_title(title.clone());
-                }
-                pending.put(title);
-                return;
-            }
-            if attempt < SESSION_TITLE_ATTEMPTS {
-                std::thread::sleep(SESSION_TITLE_RETRY_BACKOFF * attempt);
-            }
+        tokens.begin_call();
+        let (result, call_total) = harness_stream::dispatch_narration(&config, prompt);
+        tokens.end_call(call_total);
+        if call_total > 0
+            && let Some(panel) = panel.as_ref()
+        {
+            panel.add_narrator_tokens(call_total);
         }
-        // Spent every attempt: drop the promise rather than leave a
-        // placeholder on screen that will never be replaced.
+        pending.put(match result {
+            Ok(title) => SessionTitleOutcome::Success { owner, title },
+            Err(error) => SessionTitleOutcome::Failure {
+                owner,
+                reason: error.to_string(),
+            },
+        });
+        // The drive thread persists and paints the outcome at a safe boundary.
         if let Some(panel) = panel.as_ref() {
-            panel.clear_title_pending();
+            panel.tick();
         }
     });
 }
@@ -8672,6 +8713,150 @@ mod resolve_progress_tests {
                 && correction.len() < 1_500
                 && !correction.contains("internal validator wording"),
             "complete correction must be bounded: {correction}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod session_title_flush_tests {
+    use super::{PendingSessionTitle, SessionTitleOutcome, flush_after_drive_loop};
+    use camino::{Utf8Path, Utf8PathBuf};
+    use ctx_traits_core::digest::Digest;
+    use ctx_traits_core::procedure::runtime::FinalState;
+
+    fn write_test_session(path: &Utf8Path) {
+        let run_id = ctx_traits_core::procedure::run::Id::new("title-flush-run".to_string())
+            .expect("run id");
+        let session = ctx_traits_core::procedure::session::Session {
+            schema_version: "1".to_string(),
+            session_id: ctx_traits_core::procedure::session::SessionId::new("title-flush-session")
+                .expect("session id"),
+            run_id: run_id.clone(),
+            trait_id: "test-trait".to_string(),
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            current_source_index: None,
+            current_sequence_item_id: None,
+            current_sequence_title: None,
+            current_agent: None,
+            status: ctx_traits_core::procedure::session::Status::AwaitingInput,
+            warnings: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_submissions: Vec::new(),
+            unresolved_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            stop_reason: None,
+            final_output_summary: Vec::new(),
+            next_frame: None,
+            last_validation_report: None,
+            completion: None,
+            last_drive_outcome: None,
+            provenance: ctx_traits_core::procedure::session::Provenance {
+                started_by: ctx_traits_core::procedure::session::CallerProvenance {
+                    surface: "test".to_string(),
+                    caller: "drive-test".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                state_source: "test".to_string(),
+                agent_assignments: None,
+                harness_probes: Vec::new(),
+                warnings: Vec::new(),
+                trait_source: None,
+                query_selection: None,
+                worktree: None,
+                merge_frames: Vec::new(),
+                merge_intent: None,
+                out_of_tree_mutations: Vec::new(),
+                started_at_epoch: None,
+                trust_approval: None,
+                session_title: None,
+            },
+            ledger: ctx_traits_core::procedure::runtime::State {
+                run_id,
+                trait_id: "test-trait".to_string(),
+                strict_loops: false,
+                source_digest: None,
+                canonical_digest: None,
+                current_run_index: 0,
+                sequence_statuses: Vec::new(),
+                accepted_port_values: Vec::new(),
+                accepted_slot_values: Vec::new(),
+                accepted_output_port_values: Vec::new(),
+                slot_revisions: Vec::new(),
+                resource_evidence: Vec::new(),
+                emitted_signals: Vec::new(),
+                rejected_attempts: Vec::new(),
+                provider_capability_reports: Vec::new(),
+                output_ports: Vec::new(),
+                active_path: Vec::new(),
+                control_stack: Vec::new(),
+                branch_decisions: Vec::new(),
+                conditional_input_decisions: Vec::new(),
+                ask_decisions: Vec::new(),
+                failure_routes: Vec::new(),
+                guard_evaluations: Vec::new(),
+                parallel_panel_records: Vec::new(),
+                stop_reason: None,
+                elapsed_seconds: 0,
+                final_state: FinalState::Running,
+            },
+            state_digest: Digest::source("test"),
+        };
+        ctx_traits_io::run_session::write_run_session(path, &session).expect("write session");
+    }
+
+    fn scratch_session_path() -> Utf8PathBuf {
+        let directory = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir")
+            .join(format!(
+                "ctx-drive-title-flush-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(directory.as_std_path());
+        std::fs::create_dir_all(directory.as_std_path()).expect("create scratch directory");
+        directory.join("ledger.json")
+    }
+
+    #[test]
+    fn flushes_pending_title_before_propagating_drive_loop_error() {
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::Success {
+            owner: "driver-owner".to_string(),
+            title: "Persisted before failure".to_string(),
+        });
+        let result: crate::Result<()> = Err(crate::Error::Command {
+            message: "drive loop failed".to_string(),
+        });
+
+        let error = flush_after_drive_loop(result, || pending.flush(&ledger_path, None))
+            .expect_err("the original drive-loop error is preserved");
+
+        assert!(error.to_string().contains("drive loop failed"));
+        assert_eq!(
+            ctx_traits_io::run_session::read_run_session(&ledger_path)
+                .expect("read persisted title")
+                .provenance
+                .session_title
+                .and_then(|state| state.resolved_title().map(str::to_string)),
+            Some("Persisted before failure".to_string())
         );
     }
 }

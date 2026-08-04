@@ -517,6 +517,9 @@ struct AttachedView {
     /// `None` for a session whose title attempt never resolved (missing
     /// narrator, failed call) or predates P552.
     title: Option<String>,
+    /// Full lifecycle drives the attached title row; `title` remains the
+    /// resolved-only dashboard list label.
+    title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>,
     /// The resolved trait's own name and the ledger's `started_at_epoch`,
     /// carried so the attached four-pane body can render the same
     /// `<bold title> · <trait name> · Started at <HH:MM:SS>` row a live run
@@ -2826,6 +2829,7 @@ fn build_attached_view(
                 history: reconstruction.history,
                 current: reconstruction.current,
                 title,
+                title_state: session.provenance.session_title.clone(),
                 trait_name: reconstruction.trait_name,
                 started_at_epoch: reconstruction.started_at_epoch,
                 trait_degraded: reconstruction.trait_degraded,
@@ -2844,6 +2848,7 @@ fn build_attached_view(
             history: Vec::new(),
             current: Vec::new(),
             title: None,
+            title_state: None,
             trait_name: None,
             started_at_epoch: None,
             trait_degraded: Some(error.to_string()),
@@ -2872,6 +2877,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
         Ok(session) => {
             let state_digest = session.state_digest.to_string();
             view.title = persisted_session_title(&session);
+            view.title_state = session.provenance.session_title.clone();
             view.terminal = session_is_terminal(&session, &view.ledger_path);
             if state_digest == view.state_digest {
                 let summary = run_view::load_sidecar_activity_summary(
@@ -3027,7 +3033,8 @@ fn persisted_session_title(
         .provenance
         .session_title
         .as_ref()
-        .and_then(|state| state.title.clone())
+        .and_then(ctx_traits_core::procedure::session::SessionTitleState::resolved_title)
+        .map(str::to_string)
 }
 
 fn mark_view_unreadable(view: &mut AttachedView, error: String) {
@@ -5369,13 +5376,11 @@ fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
     // row (not `.zip`), since `reconstruct_panes` always carries at least
     // the ledger's own trait id even when full trait resolution degrades —
     // a persisted title must still render rather than silently vanish.
-    let title_line = preview.title.as_deref().map(|title| {
-        run_view::title_row_line(
-            title,
-            preview.trait_name.as_deref().unwrap_or("(unknown trait)"),
-            preview.started_at_epoch,
-        )
-    });
+    let title_line = run_view::title_row_line(
+        preview.title_state.as_ref(),
+        preview.trait_name.as_deref().unwrap_or("(unknown trait)"),
+        preview.started_at_epoch,
+    );
     // P552 review `dashboard-attach-contract-absent`: paint every honest
     // degradation reason (trait resolution and/or the activity sidecar can
     // each independently fail) in the always-rendered progress pane, rather
@@ -5388,7 +5393,7 @@ fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
         journey: Some(&preview.journey_lines),
         history: has_activity.then_some(preview.history.as_slice()),
         current: has_activity.then_some(preview.current.as_slice()),
-        title: run_view::PaneTitleRow::Reserved(title_line.as_ref()),
+        title: run_view::PaneTitleRow::Visible(&title_line),
     };
     // `state.last_pane_layout` backs the generic ALT+arrow/page-key scroll
     // and focus-move handling in `handle_navigation_key`/`handle_key` — it
@@ -6564,6 +6569,7 @@ mod tests {
             history: Vec::new(),
             current: Vec::new(),
             title: None,
+            title_state: None,
             trait_name: Some("stub-trait".to_string()),
             started_at_epoch: Some(0),
             trait_degraded: None,

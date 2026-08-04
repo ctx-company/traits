@@ -96,10 +96,19 @@ pub struct DriverHolder {
 pub struct DriverLockGuard {
     file: std::fs::File,
     control: Option<ControlListener>,
+    title_claim_owner: String,
     /// `None` when this acquisition never had liveness facts to index (not
     /// expected in production — every `try_acquire` caller supplies them —
     /// but tests and any future bare caller must still drop cleanly).
     session_id: Option<String>,
+}
+
+impl DriverLockGuard {
+    /// Unique for this authoritative lock acquisition and therefore suitable
+    /// for durable title-attempt ownership.
+    pub fn title_claim_owner(&self) -> &str {
+        &self.title_claim_owner
+    }
 }
 
 /// Exclusive maintenance ownership of a driver's stable lock inode. Unlike a
@@ -428,6 +437,7 @@ pub fn try_acquire(
     Ok(Some(DriverLockGuard {
         file,
         control,
+        title_claim_owner: control_token,
         session_id: Some(session_id.to_string()),
     }))
 }
