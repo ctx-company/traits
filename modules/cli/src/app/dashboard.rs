@@ -94,9 +94,13 @@ const TRUST_RIGHT_MIN: u16 = 40;
 const PANE_SESSIONS_LIST: PaneId = "sessions-list";
 const PANE_SESSIONS_PROGRESS: PaneId = "sessions-progress";
 const PANE_SESSIONS_JOURNEY: PaneId = "sessions-journey";
-/// P552: attach-only panes — never part of the ordinary (list-visible)
-/// preview tree, only of [`render_attached_session_body`]'s full four-pane
-/// body.
+/// P081: unused sentinels. `render_sessions_preview_body`'s own
+/// `PaneData` never populates `history`/`current` (the list-visible preview
+/// is progress/journey only — attach now hands the WHOLE terminal to the
+/// shared `run_view::RunPanel` observer instead of a second in-dashboard
+/// four-pane body), but `run_view::PaneIds` still requires concrete ids for
+/// every slot; `run_view::pane_tree` never materializes a leaf for either of
+/// these two.
 const PANE_SESSIONS_HISTORY: PaneId = "sessions-history";
 const PANE_SESSIONS_CURRENT: PaneId = "sessions-current";
 /// P552 review `live-run-pane-contract-absent`: the ordinary (list-visible)
@@ -107,7 +111,11 @@ const PANE_SESSIONS_CURRENT: PaneId = "sessions-current";
 /// `PANE_SESSIONS_JOURNEY` leaves, from this placeholder's own resolved
 /// rect, inside `render_sessions_preview_body`.
 const PANE_SESSIONS_PREVIEW_REGION: PaneId = "sessions-preview-region";
-const SESSIONS_ATTACH_PANE_IDS: run_view::PaneIds = run_view::PaneIds {
+/// P081: renamed from `SESSIONS_ATTACH_PANE_IDS` — attach no longer draws
+/// through this module at all (see [`attach_selected`]/`run_with_initial_session`'s
+/// attach loop, which hands the terminal to `run_view::RunPanel::new_observer`
+/// instead); this backs only the list-visible progress/journey preview now.
+const SESSIONS_PREVIEW_PANE_IDS: run_view::PaneIds = run_view::PaneIds {
     progress: PANE_SESSIONS_PROGRESS,
     journey: PANE_SESSIONS_JOURNEY,
     history: PANE_SESSIONS_HISTORY,
@@ -544,9 +552,8 @@ struct AttachedView {
     /// [`Self::trait_degraded`].
     activity_degraded: Option<String>,
     /// P552 review `dashboard-attach-contract-absent`: whether this ledger
-    /// has a P521 activity sidecar at all — the SOLE authority for whether
-    /// `render_attached_session_body` supplies the history/current panes.
-    /// Deliberately independent of `history`/`current`'s own contents (a
+    /// has a P521 activity sidecar at all. Deliberately independent of
+    /// `history`/`current`'s own contents (a
     /// current-only sidecar with no completed step is still available) and
     /// of `trait_degraded`/`activity_degraded` (a trait-reconstruction
     /// fallback with no sidecar read at all must not be conflated with
@@ -570,6 +577,16 @@ struct SessionPreviewRequest {
     session_id: String,
     ledger_path: camino::Utf8PathBuf,
     run_id: String,
+}
+
+/// P081: `State::attach_request`'s payload — exactly the identity
+/// `run_with_initial_session`'s attach loop needs to build the observer
+/// (`load_trait_for_session`/`plan_procedure_run` both key off the session
+/// id's ledger, never a list index).
+#[derive(Clone)]
+struct AttachRequest {
+    session_id: String,
+    ledger_path: camino::Utf8PathBuf,
 }
 
 /// The single-keypress action model's tag (P469 §3.3, generalized by P471
@@ -736,9 +753,14 @@ struct State {
     /// structs each carried (P506 §3.7).
     pane_scrolls: PaneScrolls,
     session_preview: Option<AttachedView>,
-    /// Attached-pane identity is retained independently from the last worker
-    /// preview so an initial or delayed worker result still has a target.
-    attached_session_id: Option<String>,
+    /// P081: a live SESSIONS row's Enter/`s`(resume) request, recorded here
+    /// and picked up by `run_with_initial_session`'s own loop (never acted on
+    /// inside `handle_key` itself — the attach loop tears down and rebuilds
+    /// this process's OWN terminal pane, which `draw_screen`'s borrowed
+    /// `&mut RatatuiPane` cannot do). `None` on every ordinary draw — attach
+    /// is a synchronous handoff to `run_view::RunPanel::new_observer`, never
+    /// a persisted "attached" mode this struct's own fields describe.
+    attach_request: Option<AttachRequest>,
     /// Attachment explicitly follows live trace updates until the user scrolls
     /// away from the tail; list-focused previews stay top-aligned. P552
     /// review `dashboard-attach-contract-absent`: one bool per attached pane
@@ -800,7 +822,6 @@ struct State {
     /// Retaining this across detach permits an explicit reattach, but never
     /// leaks the originating run's context into the list or another session.
     guide_chat_session_id: Option<String>,
-    guide_body_rows: usize,
 }
 
 /// P550 dashboard `S`-key state: a snapshot of one session's story, built
@@ -904,7 +925,7 @@ impl State {
             last_pane_layout: PaneLayoutResult::default(),
             pane_scrolls: PaneScrolls::new(),
             session_preview: None,
-            attached_session_id: None,
+            attach_request: None,
             session_progress_follow: false,
             session_journey_follow: false,
             session_history_follow: false,
@@ -927,7 +948,6 @@ impl State {
             pending_keys: Vec::new(),
             guide_chat,
             guide_chat_session_id,
-            guide_body_rows: 10,
         }
     }
 
@@ -953,10 +973,9 @@ impl State {
         self.current_list().selected()
     }
 
-    /// Sets all four attached-pane follow flags together — used only at
-    /// attach/detach/reset boundaries. Paging a single pane afterward
-    /// releases only that pane's own flag (`render_attached_session_body`),
-    /// never the other three.
+    /// Sets all four list-visible-preview follow flags together — used only
+    /// at selection/reset boundaries. Paging a single pane afterward
+    /// releases only that pane's own flag, never the other three.
     fn set_session_follow_all(&mut self, follow: bool) {
         self.session_progress_follow = follow;
         self.session_journey_follow = follow;
@@ -973,7 +992,6 @@ impl State {
     /// persists across a switch (§3.7).
     fn switch_screen(&mut self, screen: Screen) {
         if self.screen == Screen::Sessions && screen != Screen::Sessions {
-            self.attached_session_id = None;
             self.set_session_follow_all(false);
         }
         self.screen = screen;
@@ -1001,28 +1019,13 @@ impl State {
         }
     }
 
+    /// P081: always the currently-selected row's own request — attach is now
+    /// a synchronous handoff (see [`AttachRequest`]) rather than a persisted
+    /// dashboard mode, so there is no longer a second "attached" identity to
+    /// prefer over the list selection.
     fn session_preview_request(&self) -> Option<SessionPreviewRequest> {
         if self.screen != Screen::Sessions {
             return None;
-        }
-        let attached = matches!(
-            self.focus.current(),
-            Some(PANE_SESSIONS_PROGRESS)
-                | Some(PANE_SESSIONS_JOURNEY)
-                | Some(PANE_SESSIONS_HISTORY)
-                | Some(PANE_SESSIONS_CURRENT)
-        );
-        if attached {
-            let session_id = self.attached_session_id.as_deref()?;
-            let row = self
-                .sessions
-                .iter()
-                .find(|row| row.session_id == session_id)?;
-            return Some(SessionPreviewRequest {
-                session_id: row.session_id.clone(),
-                ledger_path: row.ledger_path.clone(),
-                run_id: row.run_id.clone(),
-            });
         }
         let row = selected_session(self)?;
         row.class.can_attach().then(|| SessionPreviewRequest {
@@ -1109,15 +1112,11 @@ impl State {
         self.trust_marks.retain_existing(&trust_ids);
         self.list_traits.set_len(self.traits.len());
         self.list_merges.set_len(self.merges.len());
+        // P081: attach is a synchronous handoff, never a persisted mode this
+        // reload path has to keep re-pointing at (see [`AttachRequest`]) — the
+        // list-visible preview always tracks the current selection.
         if self.screen == Screen::Sessions {
-            // P552: `attached_session_id` is the sole attach authority (the
-            // list is hidden and its own draw path skipped entirely while
-            // attached) — never re-derived from which of the four attach
-            // panes currently holds focus.
-            let attached = self.attached_session_id.is_some();
-            if attached {
-                refresh_attached_session(self);
-            } else if self.session_preview.as_ref().is_some_and(|preview| {
+            if self.session_preview.as_ref().is_some_and(|preview| {
                 selected_session(self).is_none_or(|row| row.session_id != preview.session_id)
             }) {
                 self.session_preview = None;
@@ -1132,30 +1131,6 @@ impl State {
                     preview.progress_lines.len(),
                 );
                 self.session_preview = Some(preview.clone());
-                // P552 review `dashboard-attach-contract-absent`: an attached
-                // run becoming terminal reuses the existing P550 story
-                // instead of continuing to redraw a four-pane body for a run
-                // that is no longer advancing. Only fires while genuinely
-                // attached (never for the ordinary list-visible preview,
-                // which never sets `attached_session_id`). P552 review
-                // `terminal-attach-story-identity-lost`: resolved from the
-                // attached view's own `ledger_path` — its authoritative
-                // identity — never by re-looking up `run_id` alone, which
-                // could resolve to an unrelated session sharing that run-id
-                // in the current repository's default session store.
-                if attached && preview.terminal {
-                    let ledger_path = preview.ledger_path.clone();
-                    match build_story_view_from_ledger(&ledger_path) {
-                        Ok(view) => {
-                            self.story_view = Some(view);
-                            self.attached_session_id = None;
-                            self.set_session_follow_all(false);
-                        }
-                        Err(err) => {
-                            self.message = Some(format!("story: {err}"));
-                        }
-                    }
-                }
             }
         }
     }
@@ -2222,6 +2197,35 @@ fn run_with_initial_session(
     // first `draw_screen` call reconciles it against the real tree.
     let mut last_reload = std::time::Instant::now();
     while !state.quit && !pane.detached() {
+        if let Some(request) = state.attach_request.take() {
+            // P081: tears down this process's own alt-screen pane before the
+            // observer's inline pane exists — mirrors the `d`-handoff's own
+            // ordering the other direction (dashboard thread takes the
+            // terminal only after the live view has already quit its pane).
+            pane.quit();
+            let outcome = run_attached_observer(
+                &request,
+                state.guide_chat.as_ref(),
+                state.guide_chat_session_id.as_deref(),
+            );
+            state.message = Some(match outcome {
+                Ok(Some(message)) => message,
+                Ok(None) => format!(
+                    "detached from {}",
+                    state_short_session(&state, &request.session_id)
+                ),
+                Err(error) => format!("attach failed: {error}"),
+            });
+            pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
+                ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+                    path: "<tty>".to_string(),
+                    source,
+                })
+            })?;
+            state.reload();
+            last_reload = std::time::Instant::now();
+            continue;
+        }
         if let Some(guide_chat) = state.guide_chat.as_ref() {
             guide_chat.poll_results();
         }
@@ -2266,6 +2270,73 @@ fn run_with_initial_session(
     Ok(())
 }
 
+/// P081: Enter on a live SESSIONS row IS the live run view — this builds and
+/// runs the observer `run_view::RunPanel` exactly [`reconstruct_projection`]
+/// builds its ledger-only reconstruction from (`load_trait_for_session` +
+/// `plan_procedure_run`), then drives its own small poll/refresh loop until
+/// the panel closes (`d`/confirmed `q`, or the run finishing while attached —
+/// see `RunPanel::refresh_from_ledger`). Returns `Ok(Some(message))` only for
+/// the finished-while-attached case; `Ok(None)` is an ordinary detach.
+/// Trait-resolution failure degrades to `Err` (the caller renders it as a
+/// dashboard message) with no terminal ever handed to a panel — this
+/// function creates its own inline pane, so nothing is left half-torn-down.
+fn run_attached_observer(
+    request: &AttachRequest,
+    guide_chat: Option<&run_view::GuideChatHandle>,
+    guide_chat_session_id: Option<&str>,
+) -> crate::Result<Option<String>> {
+    let session = ctx_traits_io::run_session::read_run_session(&request.ledger_path)?;
+    let loaded =
+        ctx_traits_io::run::load_trait_for_session(None, None, &session, "dashboard-attach")?;
+    let plan = ctx_traits_core::procedure::run::plan_procedure_run(
+        &loaded.trait_ref,
+        session.run_id.clone(),
+    )?;
+    let pane = RatatuiPane::new_inline().map_err(|source| {
+        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+            path: "<tty>".to_string(),
+            source,
+        })
+    })?;
+    let observer = run_view::RunPanel::new_observer(
+        loaded.trait_ref.name.as_str().to_string(),
+        loaded.trait_ref,
+        plan,
+        session,
+        request.ledger_path.clone(),
+        pane,
+    );
+    // P081 "ask: one deliberate rule" — the observer never dispatches a
+    // fresh guide seat; the ONLY permitted handle is the one this dashboard
+    // process already holds in-process from a `d`-handoff for this exact
+    // session. Every other session's attach leaves `state.ask` `None`,
+    // which `poll_and_apply_keys` answers with a visible refusal.
+    if guide_chat_session_id == Some(request.session_id.as_str())
+        && let Some(chat) = guide_chat
+    {
+        observer.install_guide_handle(chat.clone(), request.ledger_path.clone());
+    }
+    let mut last_reload = std::time::Instant::now();
+    while !observer.presentation_closed() {
+        observer.tick();
+        std::thread::sleep(TICK);
+        if last_reload.elapsed() >= RELOAD_INTERVAL {
+            last_reload = std::time::Instant::now();
+            // P081: a transient read error is tolerated (skip the refresh,
+            // keep the last frame) — mirrors `refresh_attached_view`'s own
+            // degrade discipline; only a fatal error at the INITIAL read
+            // above (before any frame exists) surfaces as `Err`.
+            if let Ok(session) = ctx_traits_io::run_session::read_run_session(&request.ledger_path)
+            {
+                observer.refresh_from_ledger(&session, &request.ledger_path);
+            }
+        }
+    }
+    let finished = observer.observer_finished();
+    observer.close();
+    Ok(finished.then(|| "the run finished while attached".to_string()))
+}
+
 fn handle_key(
     pane: &mut RatatuiPane,
     state: &mut State,
@@ -2279,9 +2350,6 @@ fn handle_key(
         // keystroke (`ModalOutcome::Pending`) — every other key routes
         // through it exclusively (the focus trap), never falling through to
         // screen-level handling below.
-        return Ok(());
-    }
-    if handle_guide_chat_key(state, &key) {
         return Ok(());
     }
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -2302,9 +2370,7 @@ fn handle_key(
             _ => None,
         };
         if let Some(dir) = dir {
-            let was_attached = session_progress_attached(state);
             state.focus.move_dir(dir, &state.last_pane_layout);
-            update_session_attachment_for_focus(state, was_attached);
             return Ok(());
         }
     }
@@ -2401,30 +2467,12 @@ fn handle_key(
     Ok(())
 }
 
-/// Attached dashboards get guide capability only from a live handoff. This
-/// router is deliberately ahead of dashboard actions so printable input never
-/// activates an identically named dashboard shortcut.
-fn handle_guide_chat_key(state: &State, key: &crossterm::event::KeyEvent) -> bool {
-    if state.attached_session_id.as_deref() != state.guide_chat_session_id.as_deref() {
-        return false;
-    }
-    let Some(guide_chat) = state.guide_chat.as_ref() else {
-        return false;
-    };
-    if guide_chat.is_open() || key.code == KeyCode::Char('?') {
-        guide_chat.handle_key(key, state.guide_body_rows);
-        return true;
-    }
-    false
-}
-
 /// Focus transitions are local state changes, kept apart from action routing
 /// so `Enter` and `Esc` remain directly state-machine-testable.
 fn handle_focus_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => {
             if state.screen == Screen::Sessions {
-                state.attached_session_id = None;
                 state.set_session_follow_all(false);
             }
             focus_pane(&mut state.focus, list_pane_id(state.screen));
@@ -2445,34 +2493,19 @@ fn handle_focus_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool
     }
 }
 
-/// P552 review `live-run-pane-contract-absent`: while a SESSIONS row is
-/// genuinely attached, pane-cycle (`Tab`/`BackTab`) and scroll keys belong to
-/// the shared run-pane renderer, not to dashboard's own screen-switching/
-/// list-navigation handling — queued here for `render_attached_session_body`'s
-/// `render_pane_body` call to drain against the SAME geometry it just drew,
-/// rather than dashboard recomputing scroll bounds from a second,
-/// independently maintained content-length table.
-///
-/// While the SESSIONS list is still visible (not attached), only paging keys
-/// (`PageUp`/`PageDown`) queue — targeting the journey pane per
-/// `render_sessions_preview_body`'s `key_target` — so a long journey can be
-/// inspected without leaving the list; `Tab`/`BackTab` are deliberately left
-/// unqueued here so they keep switching dashboard screens, and single-row
+/// P081: attach is a synchronous handoff to `run_view::RunPanel::new_observer`
+/// (see `attach_selected`/`run_with_initial_session`'s attach loop) — the
+/// SESSIONS list is always what this dashboard's own loop draws, so only
+/// paging keys (`PageUp`/`PageDown`) queue here, targeting the journey pane
+/// per `render_sessions_preview_body`'s `key_target`, letting a long journey
+/// be inspected without leaving the list. `Tab`/`BackTab` are deliberately
+/// left unqueued so they keep switching dashboard screens, and single-row
 /// `Up`/`Down`/`j`/`k` are left to `handle_navigation_key`'s list-selection
 /// path. Extracted out of `handle_key` so it stays directly testable without
 /// a `RatatuiPane`.
 fn queue_sessions_pane_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
     if state.screen != Screen::Sessions {
         return false;
-    }
-    if state.attached_session_id.is_some() {
-        let is_pane_key =
-            tui_panes::tab_cycle_key(key).is_some() || tui_kit::scroll_key(key).is_some();
-        if !is_pane_key {
-            return false;
-        }
-        state.pending_keys.push(*key);
-        return true;
     }
     if !matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
         return false;
@@ -2583,33 +2616,6 @@ fn focus_pane(ring: &mut FocusRing, target: PaneId) {
     }
 }
 
-fn session_progress_attached(state: &State) -> bool {
-    state.screen == Screen::Sessions
-        && matches!(
-            state.focus.current(),
-            Some(PANE_SESSIONS_PROGRESS)
-                | Some(PANE_SESSIONS_JOURNEY)
-                | Some(PANE_SESSIONS_HISTORY)
-                | Some(PANE_SESSIONS_CURRENT)
-        )
-}
-
-fn update_session_attachment_for_focus(state: &mut State, was_attached: bool) {
-    let now_attached = session_progress_attached(state);
-    if state.screen != Screen::Sessions || was_attached == now_attached {
-        return;
-    }
-    if now_attached {
-        state.attached_session_id = selected_session(state).map(|row| row.session_id.clone());
-        state.set_session_follow_all(true);
-        follow_current_session_preview(state);
-        state.reload();
-    } else {
-        state.attached_session_id = None;
-        state.set_session_follow_all(false);
-    }
-}
-
 fn state_pane_scroll_rows(state: &State, pane_id: PaneId) -> usize {
     state
         .last_pane_layout
@@ -2629,20 +2635,6 @@ fn follow_session_preview(
     if follow {
         scroll.apply(ScrollDelta::Down(new_len), rows);
     }
-}
-
-fn follow_current_session_preview(state: &mut State) {
-    let rows = state_pane_scroll_rows(state, PANE_SESSIONS_PROGRESS);
-    let len = state
-        .session_preview
-        .as_ref()
-        .map_or(0, |view| view.progress_lines.len());
-    follow_session_preview(
-        rows,
-        state.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS),
-        state.session_progress_follow,
-        len,
-    );
 }
 
 /// The scrollable content length backing `pane_id`, for clamping its
@@ -2718,64 +2710,8 @@ fn refresh_preview_for_selection(state: &mut State) {
     // Preview reads are worker-owned. Do not show a prior row while the new
     // selected row's request is in flight.
     state.session_preview = None;
-    state.attached_session_id = None;
     state.set_session_follow_all(false);
     state.reload();
-}
-
-/// Reload-path refresh for the attached progress/narration pane: the
-/// invariant §3.3 already established for actions (identity-addressed by
-/// `session_id`, re-resolved by id rather than by list position) applies
-/// here too — once attached, the pane must never be substituted with a
-/// different row's view just because a reload reordered or removed rows.
-/// Re-points the SESSIONS list's selection at the attached session's current
-/// VISIBLE position when it is still listed (so backing out lands on the
-/// right row, expanding its group if that group is collapsed); when the
-/// attached session has left the inventory entirely, the pane says so in
-/// place rather than being replaced by whatever now occupies the old index.
-fn refresh_attached_session(state: &mut State) {
-    let Some(session_id) = state.attached_session_id.clone().or_else(|| {
-        state
-            .session_preview
-            .as_ref()
-            .map(|preview| preview.session_id.clone())
-    }) else {
-        return;
-    };
-    match state
-        .sessions
-        .iter()
-        .position(|row| row.session_id == session_id)
-    {
-        Some(idx) => {
-            if let Some(group) = state
-                .sessions
-                .get(idx)
-                .map(|row| session_group(row.class, row.status.as_ref(), row.outcome.as_ref()))
-                && state.collapsed_groups.remove(&group)
-            {
-                rebuild_visible_sessions(state);
-            }
-            if let Some(visible_idx) = state.sessions_visible.iter().position(
-                |row| matches!(row, VisibleRow::Session(session_idx) if *session_idx == idx),
-            ) {
-                state.list_sessions.set_selected(visible_idx);
-            }
-        }
-        None => {
-            if let Some(preview) = &mut state.session_preview {
-                preview.progress_lines = vec![labeled_dim_line(&format!(
-                    "({session_id} is no longer listed)"
-                ))];
-                preview.journey_lines.clear();
-                preview.history.clear();
-                preview.current.clear();
-                preview.trait_degraded = Some("session no longer listed".to_string());
-                preview.activity_degraded = None;
-                preview.activity_available = false;
-            }
-        }
-    }
 }
 
 fn labeled_dim_line(text: &str) -> tui::Line {
@@ -2794,7 +2730,7 @@ fn labeled_dim_line(text: &str) -> tui::Line {
 /// resumed-and-held session with a stale prior `Interrupted`/`Killed`
 /// outcome on its ledger is correctly kept live rather than forced into the
 /// story view out from under the user.
-fn session_is_terminal(
+pub(crate) fn session_is_terminal(
     session: &ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
 ) -> bool {
@@ -3072,12 +3008,7 @@ fn mark_view_unreadable(view: &mut AttachedView, error: String) {
 }
 
 fn session_preview_matches_current(state: &State, session_id: &str) -> bool {
-    let attached = state.attached_session_id.is_some();
-    if attached {
-        state.attached_session_id.as_deref() == Some(session_id)
-    } else {
-        selected_session(state).is_some_and(|row| row.session_id == session_id)
-    }
+    selected_session(state).is_some_and(|row| row.session_id == session_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -3408,8 +3339,7 @@ fn trait_preview_lines(facts: &TraitPreviewFacts) -> Vec<tui::Line> {
     lines
 }
 
-/// Identity-addressed re-location (§4.6 point 1, mirrors
-/// [`refresh_attached_session`]'s own re-lookup-by-id): the new index of
+/// Identity-addressed re-location (§4.6 point 1): the new index of
 /// `trait_id` within `traits`, or `None` when an edit made it vanish from
 /// the inventory entirely (never "select whatever now sits at the old
 /// index").
@@ -3893,9 +3823,11 @@ fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
 // SESSIONS: verbs (P469 §3.3–3.6)
 // ---------------------------------------------------------------------------
 
-/// `Enter` on a SESSIONS row (P506 §1: the attached view is a pane, not a
-/// mode): requests the selected row's live view from the worker, resets the
-/// progress pane's scroll, and moves pane focus into it.
+/// P081: `Enter` on a SESSIONS row records an attach request (session id +
+/// ledger path) rather than switching this dashboard into an in-process
+/// attached-pane mode. `run_with_initial_session`'s loop drains the request
+/// and hands the terminal to an observer `run_view::RunPanel` — the same
+/// renderer `--progress tui` builds — until it detaches or the run finishes.
 fn attach_selected(state: &mut State) {
     let Some(row) = selected_session(state) else {
         return;
@@ -3907,20 +3839,10 @@ fn attach_selected(state: &mut State) {
         ));
         return;
     }
-    let session_id = row.session_id.clone();
-    if state
-        .session_preview
-        .as_ref()
-        .is_none_or(|preview| preview.session_id != session_id)
-    {
-        state.session_preview = None;
-    }
-    state.attached_session_id = Some(session_id);
-    state.set_session_follow_all(true);
-    *state.pane_scrolls.get_mut(PANE_SESSIONS_PROGRESS) = tui_kit::ViewportScroll::new();
-    focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
-    follow_current_session_preview(state);
-    state.reload();
+    state.attach_request = Some(AttachRequest {
+        session_id: row.session_id.clone(),
+        ledger_path: row.ledger_path.clone(),
+    });
 }
 
 /// `x`: opens the KILL confirm modal for the selected row. Refuses outright
@@ -4594,12 +4516,12 @@ fn apply_session_action(
             }
             match spawn_resume(row) {
                 Ok(()) => {
-                    let id = row.session_id.clone();
                     state.message = Some(format!("resume started for {display_id}"));
                     state.session_preview = None;
-                    state.attached_session_id = Some(id);
-                    state.set_session_follow_all(true);
-                    focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
+                    state.attach_request = Some(AttachRequest {
+                        session_id: row.session_id.clone(),
+                        ledger_path: row.ledger_path.clone(),
+                    });
                     state.reload();
                 }
                 Err(error) => {
@@ -5231,31 +5153,14 @@ fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()>
             frame.render_widget(footer_line(state), regions[2]);
             if let Some(modal) = state.modal_host.modal() {
                 tui_kit::render_modal(frame, area, modal);
-            } else if let Some(guide_chat) = active_guide_chat(state) {
-                guide_chat.render(frame, area);
             }
             return;
         }
-        // P552: an attached SESSIONS row bypasses the tab bar and the
-        // sessions list entirely — the shared `run_view` pane renderer takes
-        // over the whole dashboard body, exactly the four-pane contract a
-        // live run's own `RunPanel` draws. `attached_session_id` (set
-        // explicitly by `attach_selected`/focus entry, cleared explicitly by
-        // Esc) is the sole authority here — never re-derived from focus, so
-        // a reload that reorders or removes rows can never silently attach a
-        // different one.
-        if state.attached_session_id.is_some() {
-            let regions = tui_panes::screen_regions(area);
-            state.guide_body_rows = tui_kit::conversation_body_rows(area);
-            render_attached_session_body(frame, regions[1], state);
-            frame.render_widget(footer_line(state), regions[2]);
-            if let Some(modal) = state.modal_host.modal() {
-                tui_kit::render_modal(frame, area, modal);
-            } else if let Some(guide_chat) = active_guide_chat(state) {
-                guide_chat.render(frame, area);
-            }
-            return;
-        }
+        // P081: a live SESSIONS row's attach is a synchronous handoff to the
+        // shared `run_view::RunPanel` observer (`run_with_initial_session`'s
+        // attach loop) — this draw pass never renders a second, in-dashboard
+        // attached body; the SESSIONS screen always draws its ordinary list
+        // + preview tree below.
         let regions = tui_panes::screen_regions(area);
         let titles: Vec<String> = Screen::all()
             .into_iter()
@@ -5317,12 +5222,6 @@ fn draw_screen(pane: &mut RatatuiPane, state: &mut State) -> std::io::Result<()>
     })
 }
 
-fn active_guide_chat(state: &State) -> Option<&run_view::GuideChatHandle> {
-    (state.attached_session_id.as_deref() == state.guide_chat_session_id.as_deref())
-        .then_some(())
-        .and(state.guide_chat.as_ref())
-}
-
 /// The pane tree for `state.screen`, at `width` columns (P506 §3.2). Below
 /// each screen's own narrow-terminal threshold, degrades to the list pane
 /// alone — `PaneTree` itself has no floor/cap policy (`tui_panes.rs`'s own
@@ -5361,95 +5260,6 @@ fn build_tree_for_screen(state: &State, width: u16) -> PaneTree {
     }
 }
 
-/// SESSIONS' pane tree (P506 §3.2): list left, preview right split
-/// progress-top/narration-bottom, per the owner's reference layout.
-/// P552: the attached full-screen body — `progress`/`journey` are always
-/// present (the same standing-facts/journey split the preview uses);
-/// `history`/`current` are present only when this ledger has an activity
-/// sidecar (`AttachedView::activity_degraded` names the honest reason
-/// otherwise, per the implementation draft's item 8 — a legacy session omits those panes
-/// rather than showing them empty). Shares `state.pane_scrolls`/`state.focus`
-/// with the rest of the SESSIONS screen (scoped down to just these four ids
-/// while attached, via `reconcile_default`); each of the four panes keeps
-/// its own follow flag (`state.session_*_follow`) so paging one pane away
-/// from the tail never disturbs the other three.
-fn render_attached_session_body(frame: &mut ratatui::Frame<'_>, area: Rect, state: &mut State) {
-    let Some(preview) = state.session_preview.clone() else {
-        tui_panes::render_lines_pane(
-            frame,
-            tui_panes::pane_inner(area),
-            &[RLine::from("(no session attached)")],
-            state.pane_scrolls.get(PANE_SESSIONS_PROGRESS),
-        );
-        return;
-    };
-    // P552 review `dashboard-attach-contract-absent`: `activity_available` is
-    // the SOLE authority for whether the history/current panes exist at
-    // all — never re-derived from whether `history` happens to be
-    // non-empty, or a current-only sidecar (no completed step yet) would be
-    // mistaken for "no source".
-    let has_activity = preview.activity_available;
-    // P552: the same title row a live run shows, blank until the drive's
-    // one narrator call resolves — `Reserved` is unconditional here (not
-    // gated on `preview.title.is_some()`) so the attached body reserves the
-    // row identically before and after resolution, matching the live
-    // surface's own "blank reserved row, no placeholder" contract. P552
-    // review `live-run-pane-contract-absent`: `trait_name` alone gates the
-    // row (not `.zip`), since `reconstruct_panes` always carries at least
-    // the ledger's own trait id even when full trait resolution degrades —
-    // a persisted title must still render rather than silently vanish.
-    let title_line = run_view::title_row_line(
-        preview.title_state.as_ref(),
-        preview.trait_name.as_deref().unwrap_or("(unknown trait)"),
-        preview.started_at_epoch,
-    );
-    // P552 review `dashboard-attach-contract-absent`: paint every honest
-    // degradation reason (trait resolution and/or the activity sidecar can
-    // each independently fail) in the always-rendered progress pane, rather
-    // than a skipped placeholder tree title that never reaches the screen —
-    // both compose here instead of one overwriting the other.
-    let mut progress_lines = preview.progress_lines.clone();
-    push_degradation_lines(&mut progress_lines, &preview);
-    let data = run_view::PaneData {
-        progress: Some(&progress_lines),
-        journey: Some(&preview.journey_lines),
-        history: (has_activity && preview.history_available).then_some(preview.history.as_slice()),
-        current: has_activity.then_some(preview.current.as_slice()),
-        post_run: (!preview.post_run.is_empty()).then_some(preview.post_run.as_slice()),
-        title: run_view::PaneTitleRow::Visible(&title_line),
-    };
-    // `state.last_pane_layout` backs the generic ALT+arrow/page-key scroll
-    // and focus-move handling in `handle_navigation_key`/`handle_key` — it
-    // must reflect THIS tree, not whatever the ordinary (list-visible) tree
-    // last resolved, or those generic handlers would read stale rects for
-    // the attach-only history/current panes. `pane_body_area` matches
-    // `render_pane_body`'s own internal title-row carve-out exactly, so
-    // cached rects never drift by the title row.
-    let body_area = run_view::pane_body_area(area, &data.title);
-    let tree = run_view::pane_tree(&SESSIONS_ATTACH_PANE_IDS, body_area, &data);
-    state.last_pane_layout = tree.resolve(body_area);
-    run_view::render_pane_body(
-        frame,
-        area,
-        &SESSIONS_ATTACH_PANE_IDS,
-        &data,
-        None,
-        Some(PANE_SESSIONS_CURRENT),
-        run_view::PaneRenderState {
-            scrolls: &mut state.pane_scrolls,
-            follow: run_view::PaneFollow {
-                progress: &mut state.session_progress_follow,
-                journey: &mut state.session_journey_follow,
-                history: &mut state.session_history_follow,
-                current: &mut state.session_current_follow,
-            },
-            focus: &mut state.focus,
-            pending_keys: &mut state.pending_keys,
-            key_target: None,
-        },
-    );
-}
-
 /// P552 review `live-run-pane-contract-absent`: the ordinary (list-visible)
 /// SESSIONS preview's progress/journey source content, WITHOUT resolving any
 /// geometry — the one place both [`render_sessions_preview_body`] and
@@ -5483,10 +5293,9 @@ fn push_degradation_lines(lines: &mut Vec<tui::Line>, view: &AttachedView) {
 }
 
 /// P552: the ordinary (list-visible) SESSIONS preview's progress/journey
-/// pair, drawn through the exact same shared [`run_view::render_pane_body`]
-/// [`render_attached_session_body`] uses for the full attached body — never
-/// a second, independently constructed subtree or content renderer. `area`
-/// is [`PANE_SESSIONS_PREVIEW_REGION`]'s own resolved rect (never re-derived
+/// pair, drawn through the shared [`run_view::render_pane_body`] renderer —
+/// never a second, independently constructed subtree or content renderer.
+/// `area` is [`PANE_SESSIONS_PREVIEW_REGION`]'s own resolved rect (never re-derived
 /// here), so this call inherits the bounded-progress/rest-to-journey
 /// geometry [`run_view::pane_tree`] computes rather than a plain 50/50
 /// split.
@@ -5504,7 +5313,7 @@ fn render_sessions_preview_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
     // pane's own rect, set by the generic per-leaf loop just above, must
     // survive) so directional focus movement and scroll never read stale
     // rects for these two ids.
-    let tree = run_view::pane_tree(&SESSIONS_ATTACH_PANE_IDS, area, &data);
+    let tree = run_view::pane_tree(&SESSIONS_PREVIEW_PANE_IDS, area, &data);
     let layout = tree.resolve(area);
     if let Some(rect) = layout.rect(PANE_SESSIONS_PROGRESS) {
         state.last_pane_layout.set(PANE_SESSIONS_PROGRESS, rect);
@@ -5520,7 +5329,7 @@ fn render_sessions_preview_body(frame: &mut ratatui::Frame<'_>, area: Rect, stat
     run_view::render_pane_body(
         frame,
         area,
-        &SESSIONS_ATTACH_PANE_IDS,
+        &SESSIONS_PREVIEW_PANE_IDS,
         &data,
         None,
         None,
@@ -5557,7 +5366,7 @@ fn sessions_focus_leaf_ids(state: &State, resolved: &PaneLayoutResult) -> Vec<Pa
             post_run: None,
             title: run_view::PaneTitleRow::None,
         };
-        ids.extend(run_view::pane_tree(&SESSIONS_ATTACH_PANE_IDS, region, &data).leaf_ids());
+        ids.extend(run_view::pane_tree(&SESSIONS_PREVIEW_PANE_IDS, region, &data).leaf_ids());
     }
     ids
 }
@@ -6082,93 +5891,11 @@ fn explanation_task_text(message: &str, elapsed: Duration) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn dashboard_guide_chat_is_scoped_to_handoff_session() {
-        use ratatui::{Terminal, backend::TestBackend};
-
-        let chat = run_view::GuideChatHandle::test_handle();
-        let mut attached = State::new_without_worker_for_session_with_guide(
-            Some("s1".to_string()),
-            Some(chat.clone()),
-        );
-        attached.attached_session_id = Some("s1".to_string());
-        attached.guide_body_rows = 4;
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-        assert!(chat.is_open());
-        for key in [KeyCode::Char('d'), KeyCode::Up, KeyCode::PageDown] {
-            assert!(handle_guide_chat_key(
-                &attached,
-                &crossterm::event::KeyEvent::from(key)
-            ));
-        }
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Enter)
-        ));
-        let settled = chat.wait_for_result(Duration::from_secs(1));
-        assert!(settled, "shared guide result did not settle");
-        let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
-        terminal
-            .draw(|frame| chat.render(frame, frame.area()))
-            .expect("draw shared chat");
-        let rendered: String = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect();
-        assert!(rendered.contains("You: d"));
-        assert!(rendered.contains("Guide: test answer"));
-
-        // `q`/Esc are modal-close keys, never dashboard quit/detach actions.
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('q'))
-        ));
-        assert!(!chat.is_open());
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-        assert!(chat.is_open());
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Esc)
-        ));
-        assert!(!chat.is_open());
-
-        // Leaving the source pane or attaching another session removes both
-        // the invisible input trap and the stale source-run overlay.
-        attached.attached_session_id = None;
-        assert!(!handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-        assert!(active_guide_chat(&attached).is_none());
-        attached.attached_session_id = Some("s2".to_string());
-        assert!(!handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-        assert!(active_guide_chat(&attached).is_none());
-
-        attached.attached_session_id = Some("s1".to_string());
-        assert!(handle_guide_chat_key(
-            &attached,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-        assert!(chat.is_open());
-        let standalone = State::new_without_worker();
-        assert!(standalone.guide_chat.is_none());
-        assert!(!handle_guide_chat_key(
-            &standalone,
-            &crossterm::event::KeyEvent::from(KeyCode::Char('?'))
-        ));
-    }
+    // P081: guide-chat routing while attached moved into
+    // `run_view::RunPanel`'s own observer (`install_guide_handle`/the
+    // ask-refusal branch in `poll_and_apply_keys`) — see run_view.rs's own
+    // tests for that coverage. This dashboard no longer routes ask keys or
+    // renders a guide chat pane itself.
 
     fn row(class: SessionClass) -> SessionRow {
         row_with_id("s1", class)
@@ -6744,79 +6471,18 @@ mod tests {
         assert_eq!(request.run_id, "r-selected");
     }
 
-    #[test]
-    fn focus_enter_and_leave_keep_the_attached_identity_in_sync() {
-        let mut state = State::new_without_worker();
-        state.sessions = vec![
-            row_with_id("A", SessionClass::Live),
-            row_with_id("B", SessionClass::Live),
-        ];
-        rebuild_visible_sessions(&mut state);
-        state.list_sessions.set_selected(1);
-        state.focus = FocusRing::new(vec![PANE_SESSIONS_LIST, PANE_SESSIONS_PROGRESS]);
-        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
-
-        update_session_attachment_for_focus(&mut state, false);
-        assert_eq!(state.attached_session_id.as_deref(), Some("A"));
-
-        focus_pane(&mut state.focus, PANE_SESSIONS_LIST);
-        update_session_attachment_for_focus(&mut state, true);
-        assert!(state.attached_session_id.is_none());
-
-        state.list_sessions.set_selected(2);
-        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
-        update_session_attachment_for_focus(&mut state, false);
-        assert_eq!(state.attached_session_id.as_deref(), Some("B"));
-    }
-
-    /// P552 review `dashboard-attach-contract-absent`/`live-run-pane-contract-absent`:
-    /// Up/Down while genuinely attached (`attached_session_id` set) must
-    /// never move the hidden session list's selection or the attachment
-    /// identity — instead of dashboard scrolling the pane itself, the key is
-    /// queued for the shared `render_pane_body` to drain against the
-    /// geometry it actually drew (`queue_sessions_pane_key`'s own doc).
-    #[test]
-    fn attached_up_down_queues_for_the_shared_renderer_instead_of_the_hidden_list() {
-        let mut state = State::new_without_worker();
-        state.sessions = vec![
-            row_with_id("A", SessionClass::Live),
-            row_with_id("B", SessionClass::Live),
-        ];
-        rebuild_visible_sessions(&mut state);
-        state.list_sessions.set_selected(0);
-        state.attached_session_id = Some("A".to_string());
-        state.focus = FocusRing::new(vec![PANE_SESSIONS_JOURNEY]);
-        let mut preview = attached_view_for("A");
-        preview.journey_lines = (0..5)
-            .map(|n| run_view::journey_line(labeled_dim_line(&format!("line-{n}"))))
-            .collect();
-        state.session_preview = Some(preview);
-        state.last_pane_layout = PaneLayoutResult::default();
-        state
-            .last_pane_layout
-            .set(PANE_SESSIONS_JOURNEY, Rect::new(0, 0, 40, 4));
-
-        let key = crossterm::event::KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
-        let queued = queue_sessions_pane_key(&mut state, &key);
-
-        assert!(queued);
-        assert_eq!(state.pending_keys, vec![key]);
-        assert_eq!(state.list_sessions.selected(), 0);
-        assert_eq!(state.attached_session_id.as_deref(), Some("A"));
-        // The scroll itself has NOT been applied yet — only the shared
-        // renderer's own drain (inside `render_pane_body`) applies it.
-        assert_eq!(
-            state.pane_scrolls.get(PANE_SESSIONS_JOURNEY).window(2),
-            0..0
-        );
-    }
+    // P081: `focus_enter_and_leave_keep_the_attached_identity_in_sync` and
+    // `attached_up_down_queues_for_the_shared_renderer_instead_of_the_hidden_list`
+    // tested `update_session_attachment_for_focus`/attached-mode pane-key
+    // queueing, both removed — attach is now a synchronous handoff (see
+    // `attach_selected`/`run_attached_observer`), never a persisted focus
+    // state this dashboard's own key routing tracks.
 
     /// P552 review `live-run-pane-contract-absent`, `done-when`: the
     /// ordinary (list-visible) SESSIONS preview's own PageDown must reach
     /// the journey pane through the shared renderer's `pending_keys`/
     /// `key_target` path (not the deleted progress-hardcoded direct scroll),
-    /// while the list itself stays visible, its selection untouched, and
-    /// `attached_session_id` stays `None` throughout.
+    /// while the list itself stays visible and its selection untouched.
     #[test]
     fn list_visible_preview_page_down_scrolls_journey_not_the_list() {
         use ratatui::Terminal;
@@ -6865,7 +6531,6 @@ mod tests {
                 > 0
         );
         assert_eq!(state.list_sessions.selected(), 0);
-        assert!(state.attached_session_id.is_none());
     }
 
     /// P552 review `live-run-pane-contract-absent`, `done-when`: `Tab` must
@@ -7291,27 +6956,16 @@ mod tests {
     }
 
     #[test]
-    fn attaching_an_existing_tall_preview_enables_tail_follow() {
+    fn attach_selected_records_a_request_for_the_selected_live_row() {
         let mut state = State::new_without_worker();
         state.sessions = vec![row_with_id("A", SessionClass::Live)];
         rebuild_visible_sessions(&mut state);
         state.list_sessions.set_selected(1);
-        let mut preview = attached_view_for("A");
-        preview.progress_lines = (0..8)
-            .map(|line| labeled_dim_line(&line.to_string()))
-            .collect();
-        state.session_preview = Some(preview);
 
         attach_selected(&mut state);
 
-        assert!(state.session_progress_follow);
-        assert!(state.session_journey_follow);
-        assert!(state.session_history_follow);
-        assert!(state.session_current_follow);
-        assert_eq!(
-            state.pane_scrolls.get(PANE_SESSIONS_PROGRESS).window(3),
-            5..8
-        );
+        let request = state.attach_request.expect("attach request recorded");
+        assert_eq!(request.session_id, "A");
     }
 
     // Classification table (draft test 1), now covering the real mapping
@@ -7643,7 +7297,7 @@ mod tests {
         attach_selected(&mut state);
         open_kill_modal(&mut state);
 
-        assert!(state.attached_session_id.is_none());
+        assert!(state.attach_request.is_none());
         assert!(!state.modal_host.is_open());
     }
 
@@ -7734,62 +7388,13 @@ mod tests {
         assert!(!headline.contains("unrecognized"));
     }
 
-    // Blocker attached-view-index-addressed: once attached, the pane must
-    // never adopt another row's identity just because that row now sits at
-    // the frozen selection index after a reorder.
-    #[test]
-    fn attached_session_survives_reorder_and_never_adopts_another_rows_identity() {
-        let mut state = State::new();
-        state.screen = Screen::Sessions;
-        state.sessions = vec![row_with_id("A", SessionClass::Live)];
-        rebuild_visible_sessions(&mut state);
-        state.session_preview = Some(attached_view_for("A"));
-
-        // Reorder: B now occupies A's old index (0); A moves to index 1 and
-        // becomes Terminal (Completed group, collapsed by default) — mirrors
-        // `State::reload`'s own order: the visible-row rebuild runs against
-        // the new row set before the attached-pane refresh.
-        state.sessions = vec![
-            row_with_id("B", SessionClass::Live),
-            row_with_id("A", SessionClass::Terminal),
-        ];
-        rebuild_visible_sessions(&mut state);
-        refresh_attached_session(&mut state);
-
-        assert_eq!(
-            state
-                .session_preview
-                .as_ref()
-                .map(|p| p.session_id.as_str()),
-            Some("A")
-        );
-        // A's now-Completed group was collapsed by default — the refresh
-        // must expand it so the selection can land on A's own row rather
-        // than a collapsed count header.
-        assert_eq!(
-            selected_session(&state).map(|row| row.session_id.as_str()),
-            Some("A")
-        );
-    }
-
-    // Blocker attached-view-index-addressed: when the attached session
-    // leaves the inventory entirely, the pane must say so rather than being
-    // silently substituted with whatever row now occupies the old index.
-    #[test]
-    fn attached_session_reports_gone_when_it_leaves_the_inventory() {
-        let mut state = State::new();
-        state.screen = Screen::Sessions;
-        state.sessions = vec![row_with_id("A", SessionClass::Live)];
-        rebuild_visible_sessions(&mut state);
-        state.session_preview = Some(attached_view_for("A"));
-
-        state.sessions = Vec::new();
-        refresh_attached_session(&mut state);
-
-        let preview = state.session_preview.as_ref().expect("preview retained");
-        assert_eq!(preview.session_id, "A");
-        assert!(preview.trait_degraded.is_some());
-    }
+    // P081: `attached_session_survives_reorder_and_never_adopts_another_rows_identity`
+    // and `attached_session_reports_gone_when_it_leaves_the_inventory` tested
+    // `refresh_attached_session`, which is removed — attach no longer
+    // persists a pane this reload path has to re-point at (see
+    // `AttachRequest`/`run_attached_observer`); the list-visible preview's
+    // own identity handling (`apply_snapshot`'s `session_preview` branch) is
+    // covered elsewhere.
 
     // Session classes remain presentation-only; attach/resume display policy
     // must not grow back into stop/delete authorization.
@@ -8692,39 +8297,10 @@ mod tests {
         );
     }
 
-    /// P552 review `dashboard-attach-contract-absent`/`live-run-pane-contract-absent`:
-    /// once genuinely attached (`attached_session_id` set — the sole attach
-    /// authority), `j`/`Down` must never move the hidden list's selection,
-    /// clear the attachment identity, or fall through to
-    /// `handle_navigation_key` at all — `queue_sessions_pane_key` claims it
-    /// first, for the shared renderer to drain — see
-    /// `attached_up_down_queues_for_the_shared_renderer_instead_of_the_hidden_list`
-    /// for that queuing assertion.
-    #[test]
-    fn list_navigation_never_detaches_a_genuinely_attached_session() {
-        let mut state = State::new_without_worker();
-        state.screen = Screen::Sessions;
-        state.sessions = vec![
-            row_with_id("A", SessionClass::Live),
-            row_with_id("B", SessionClass::Live),
-        ];
-        rebuild_visible_sessions(&mut state);
-        state.list_sessions.set_selected(1);
-        state.focus = FocusRing::new(vec![PANE_SESSIONS_LIST, PANE_SESSIONS_PROGRESS]);
-        focus_pane(&mut state.focus, PANE_SESSIONS_PROGRESS);
-        state.attached_session_id = Some("A".to_string());
-        state.session_preview = Some(attached_view_for("A"));
-
-        let key = crossterm::event::KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert!(queue_sessions_pane_key(&mut state, &key));
-        // Not routed to `handle_navigation_key` at all while attached —
-        // confirmed by nothing here having called it, unlike before P552.
-
-        assert_eq!(state.focus.current(), Some(PANE_SESSIONS_PROGRESS));
-        assert_eq!(state.list_sessions.selected(), 1);
-        assert_eq!(state.attached_session_id.as_deref(), Some("A"));
-        assert_eq!(state.pending_keys, vec![key]);
-    }
+    // P081: `list_navigation_never_detaches_a_genuinely_attached_session`
+    // tested `queue_sessions_pane_key`'s deleted attached-mode branch — Enter
+    // is a synchronous handoff now, so there is no longer a persisted
+    // attached focus state for list navigation to disturb.
 
     // P506 review blocker `focus-ring-includes-undrawn-panes`: below a
     // screen's narrow-terminal floor the tree degrades to the list leaf

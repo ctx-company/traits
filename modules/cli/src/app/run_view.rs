@@ -103,20 +103,6 @@ impl GuideChatHandle {
         false
     }
 
-    #[cfg(test)]
-    pub(crate) fn wait_for_result(&self, timeout: Duration) -> bool {
-        let mut chat = self.lock();
-        let Some(receiver) = chat.results.as_ref() else {
-            return false;
-        };
-        let Ok((generation, result)) = receiver.recv_timeout(timeout) else {
-            return false;
-        };
-        let changed = apply_ask_result(&mut chat.ask, generation, result);
-        chat.results = None;
-        changed
-    }
-
     fn set_context(&self, context: String) {
         self.lock().context = context;
     }
@@ -449,9 +435,36 @@ struct RunPanelState {
     /// a worker that could only reach the panel's weak state would tick
     /// without ever driving a dashboard the tick may have queued.
     handoff: Arc<DashboardHandoff>,
+    /// P081: true only for a dashboard-attach observer panel — one that
+    /// polls a live run's own ledger rather than being fed by a drive loop.
+    /// Folded into [`has_running_work`] (an observer's `active_started` is
+    /// `None` between ledger polls, but its clock must still tick) and into
+    /// [`poll_and_apply_keys`]'s ask-refusal branch.
+    observer: bool,
+    /// The observed run's own ledger path — `Some` only for an observer
+    /// panel, read by [`has_running_work`]'s liveness probe and by
+    /// [`RunPanel::refresh_from_ledger`]'s terminal check.
+    ledger_path: Option<camino::Utf8PathBuf>,
+    /// The ledger's own persisted guide-token count, used as `rebuild_view`'s
+    /// header total only while no live `ask` handle is installed — an
+    /// observer with an inherited handle reads its live counter instead.
+    ledger_guide_tokens: u64,
+    /// Set once [`RunPanel::refresh_from_ledger`] observes a terminal session
+    /// and has already surfaced the finished note, so a later poll before
+    /// [`RunPanel::close`] takes effect does not push the note twice.
+    observer_finished: bool,
+    /// P081: the observer's ask-refusal notice, retained OUTSIDE
+    /// `current_stream` because [`apply_ledger_seed`] rebuilds that field
+    /// wholesale from the sidecar on every poll — a refusal pushed only into
+    /// `current_stream` would vanish after at most one `RELOAD_INTERVAL`,
+    /// silently violating the "never silence" rule. Re-appended by
+    /// [`apply_ledger_seed`] after it rebuilds `current_stream`; cleared only
+    /// by a fresh ask attempt or an inherited handle making ask usable.
+    observer_notice: Option<StreamRow>,
 }
 
 /// One row of the CURRENT step's verbatim message/thinking stream.
+#[derive(Clone)]
 struct StreamRow {
     /// Elapsed since the run pane started, rendered as `HH:MM:SS`.
     at: Duration,
@@ -459,6 +472,7 @@ struct StreamRow {
     text: String,
 }
 
+#[derive(Clone, Copy)]
 enum StreamRowKind {
     /// A narrator summary line (narrated mode).
     Narration,
@@ -836,6 +850,11 @@ impl RunPanel {
             guide_ledger_path: None,
             wake_state: Weak::new(),
             handoff: Arc::clone(&handoff),
+            observer: false,
+            ledger_path: None,
+            ledger_guide_tokens: 0,
+            observer_finished: false,
+            observer_notice: None,
         }));
         let panel = Self {
             state: Arc::clone(&state),
@@ -854,6 +873,104 @@ impl RunPanel {
         panel.render();
         panel.cadence.painted();
         panel
+    }
+
+    /// P081: the dashboard-attach mirror of [`Self::new`] — the SAME shared
+    /// renderer a live `--progress tui` run builds, driven purely as an
+    /// observer of `session`'s own ledger (never a drive loop, never a second
+    /// `GuideDispatch`). Seeds every presentation field
+    /// [`ledger_presentation_seed`] can supply from the ledger + activity
+    /// sidecar alone (back-dated `run_started`, token maps, step summaries,
+    /// the CURRENT pane's latest-frame rows) — the same derivation
+    /// [`render_ledger_run_view`] uses for the dashboard's list-visible
+    /// preview, so an attach's very first frame matches what a reload of the
+    /// preview would already have shown. The handoff is constructed
+    /// pre-closed (`closing: true`) so a `d` press inside this observer
+    /// cannot spawn a second dashboard thread — see [`Self::presentation_closed`].
+    pub(crate) fn new_observer(
+        trait_name: String,
+        trait_ref: ctx_traits_core::Trait,
+        plan: ctx_traits_core::procedure::run::Plan,
+        session: ctx_traits_core::procedure::session::Session,
+        ledger_path: camino::Utf8PathBuf,
+        pane: RatatuiPane,
+    ) -> Self {
+        let panel = Self::new_with_pane(trait_name, trait_ref, plan, session, pane);
+        if let Ok(mut handoff_state) = panel.handoff.state.lock() {
+            handoff_state.closing = true;
+        }
+        if let Ok(mut state) = panel.state.lock() {
+            state.observer = true;
+            state.ledger_path = Some(ledger_path.clone());
+            apply_ledger_seed(&mut state, &ledger_path);
+            rebuild_view(&mut state, None);
+            render_locked(&mut state);
+        }
+        panel.cadence.painted();
+        panel
+    }
+
+    /// P081: the observer's counterpart of the drive loop's incremental
+    /// `add_output_tokens`/`push_summary`/`refresh` feeding — re-derives the
+    /// whole ledger/sidecar presentation from persisted truth on every call
+    /// (never accumulated in-process) via the same [`ledger_presentation_seed`]
+    /// [`Self::new_observer`] seeds from, then goes through the ordinary
+    /// [`rebuild_view`]/[`render_locked`] pipeline. A newly terminal session
+    /// renders its final frame, surfaces a [`Self::note`]-equivalent stream
+    /// row exactly once, and closes this presentation — the caller (the
+    /// dashboard's attach loop) observes that through [`Self::presentation_closed`]
+    /// and [`Self::observer_finished`].
+    pub(crate) fn refresh_from_ledger(
+        &self,
+        session: &ctx_traits_core::procedure::session::Session,
+        ledger_path: &camino::Utf8Path,
+    ) {
+        let _handoff = self.handoff_driver();
+        let terminal = super::dashboard::session_is_terminal(session, ledger_path);
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.session = session.clone();
+        state.title_state = session.provenance.session_title.clone();
+        apply_ledger_seed(&mut state, ledger_path);
+        if terminal && !state.observer_finished {
+            state.observer_finished = true;
+            push_stream_row(
+                &mut state,
+                StreamRowKind::Narration,
+                "run finished — returning to dashboard".to_string(),
+            );
+        }
+        rebuild_view(&mut state, None);
+        render_locked(&mut state);
+        drop(state);
+        if terminal {
+            self.close();
+        }
+    }
+
+    /// P081: `true` once this observer's own pane can no longer draw — either
+    /// the run finished (see [`Self::refresh_from_ledger`]) or the user
+    /// pressed `d`/confirmed `q` (both routed through the ordinary
+    /// [`poll_and_apply_keys`] key handling, unchanged from the live view).
+    /// The dashboard's attach loop polls this to know when to tear this
+    /// pane down and rebuild its own.
+    pub(crate) fn presentation_closed(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.repaint.detached())
+            .unwrap_or(true)
+    }
+
+    /// P081: `true` once [`Self::refresh_from_ledger`] observed the run reach
+    /// a terminal state while this observer was attached — the dashboard's
+    /// attach loop reads this (after `presentation_closed`) to decide whether
+    /// its own return message reports a finished run or an ordinary detach.
+    pub(crate) fn observer_finished(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.observer_finished)
+            .unwrap_or(false)
     }
 
     /// Deterministically restore the terminal, regardless of how many other
@@ -887,8 +1004,20 @@ impl RunPanel {
         tokens: crate::app::harness_stream::OneShotTokenTracker,
         ledger_path: camino::Utf8PathBuf,
     ) {
+        self.install_guide_handle(GuideChatHandle::new(dispatch, tokens), ledger_path);
+    }
+
+    /// P081: shared by [`Self::set_guide`] (a fresh dispatcher for a driven
+    /// run) and an attach observer inheriting the SAME in-process
+    /// [`GuideChatHandle`] a `d`-handoff already holds — the only guide seat
+    /// an observer is ever permitted to use, per the implementation draft's
+    /// "ask: one deliberate rule" (never a second writer against the run).
+    pub(crate) fn install_guide_handle(
+        &self,
+        chat: GuideChatHandle,
+        ledger_path: camino::Utf8PathBuf,
+    ) {
         if let Ok(mut state) = self.state.lock() {
-            let chat = GuideChatHandle::new(dispatch, tokens);
             let weak_state = state.wake_state.clone();
             let cadence = Arc::clone(&state.cadence);
             let handoff = Arc::clone(&state.handoff);
@@ -1294,6 +1423,15 @@ fn has_running_work(state: &RunPanelState) -> bool {
             .merge_rows
             .iter()
             .any(|row| row.state == MergeRowState::Running)
+        // P081: an observer's ledger snapshot carries no in-process active
+        // step timer at all (`active_started` is `None` between ledger
+        // polls) — its own repaint must stay admitted for as long as the
+        // observed run itself is non-terminal, or the header clock freezes
+        // on a between-steps snapshot instead of merely between polls.
+        || (state.observer
+            && state.ledger_path.as_deref().is_none_or(|ledger_path| {
+                !super::dashboard::session_is_terminal(&state.session, ledger_path)
+            }))
 }
 
 fn mark_timer_painted(state: &mut RunPanelState) {
@@ -1316,7 +1454,10 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
             step_summaries: &state.step_summaries,
             step_summary_at: &state.step_summary_at,
             narrator_tokens: state.narrator_tokens,
-            guide_tokens: state.ask.as_ref().map_or(0, GuideChatHandle::guide_tokens),
+            guide_tokens: state
+                .ask
+                .as_ref()
+                .map_or(state.ledger_guide_tokens, GuideChatHandle::guide_tokens),
             run_started: state.run_started,
         },
     );
@@ -1360,9 +1501,15 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
                 tui_kit::ModalOutcome::Confirmed => {
                     state.modal = None;
                     state.repaint.quit();
-                    eprintln!(
-                        "live view closed; run continues — reattach with ctx traits dashboard"
-                    );
+                    // P081: an observer's `q` returns to the dashboard
+                    // automatically — this message is only accurate for the
+                    // live view's own quit, which leaves no dashboard to
+                    // return to.
+                    if !state.observer {
+                        eprintln!(
+                            "live view closed; run continues — reattach with ctx traits dashboard"
+                        );
+                    }
                 }
                 tui_kit::ModalOutcome::Cancelled => {
                     state.modal = None;
@@ -1373,6 +1520,28 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             continue;
         }
         if state.ask.is_some() && apply_ask_key(state, key) {
+            changed = true;
+            continue;
+        }
+        // P081: an observer never dispatches a fresh guide seat (that would
+        // reintroduce a second writer against the driving process's own
+        // ledger). Without an inherited handle, the ask-open key gets a
+        // visible refusal — never silence, per the implementation draft's
+        // "ask: one deliberate rule".
+        if state.observer && state.ask.is_none() && key.code == KeyCode::Char('?') {
+            let notice = StreamRow {
+                at: state.run_started.elapsed(),
+                kind: StreamRowKind::Narration,
+                text: "ask refused: this run is driven by another process — ask there".to_string(),
+            };
+            // Retained on the state (not just pushed into `current_stream`)
+            // since `apply_ledger_seed` rebuilds that field wholesale on
+            // every poll — see `observer_notice`'s doc comment.
+            state.observer_notice = Some(notice.clone());
+            state.current_stream.push_back(notice);
+            while state.current_stream.len() > CURRENT_STREAM_CAP {
+                state.current_stream.pop_front();
+            }
             changed = true;
             continue;
         }
@@ -3212,12 +3381,30 @@ pub(crate) struct LedgerPaneProjection {
 /// persisted counters under a synthetic key that intentionally matches no
 /// real step (so per-step token display correctly stays absent, while the
 /// header total — the only thing the ledger can support — still renders).
-pub(crate) fn render_ledger_run_view(
-    trait_ref: &ctx_traits_core::Trait,
-    plan: &ctx_traits_core::procedure::run::Plan,
+/// P081: everything a ledger + P521 activity sidecar alone can supply for a
+/// [`PresentationState`] — shared by [`render_ledger_run_view`] (the
+/// dashboard's own preview/attach reconstruction) and the observer
+/// [`RunPanel`]'s [`RunPanel::new_observer`]/[`RunPanel::refresh_from_ledger`],
+/// which seed/re-derive a live panel's state from exactly the same source
+/// rather than duplicating this derivation. `activity`/`started_at_epoch` are
+/// carried through (not folded into the maps below) because the observer
+/// also needs them to rebuild `current_stream` — a live-only field this
+/// struct itself has no opinion on.
+struct LedgerPresentationSeed {
+    run_started: Instant,
+    output_tokens: BTreeMap<String, u64>,
+    narrator_tokens: u64,
+    guide_tokens: u64,
+    step_summaries: BTreeMap<String, String>,
+    step_summary_at: BTreeMap<String, Duration>,
+    activity: Option<ctx_traits_core::procedure::story::ActivityInput>,
+    started_at_epoch: Option<u64>,
+}
+
+fn ledger_presentation_seed(
     session: &ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
-) -> LedgerPaneProjection {
+) -> LedgerPresentationSeed {
     let elapsed = Duration::from_secs(session.ledger.elapsed_seconds);
     let run_started = Instant::now()
         .checked_sub(elapsed)
@@ -3242,6 +3429,69 @@ pub(crate) fn render_ledger_run_view(
         .as_ref()
         .map(|activity| sidecar_step_summary_maps(activity, started_at_epoch))
         .unwrap_or_default();
+    LedgerPresentationSeed {
+        run_started,
+        output_tokens,
+        narrator_tokens,
+        guide_tokens,
+        step_summaries,
+        step_summary_at,
+        activity,
+        started_at_epoch,
+    }
+}
+
+/// P081: applies [`ledger_presentation_seed`] to a live [`RunPanelState`] —
+/// the observer panel's counterpart of [`render_ledger_run_view`]'s local
+/// bindings. Also rebuilds `current_stream` from the sidecar's latest-frame
+/// events (there is no live narration stream to accumulate for an observer),
+/// via the SAME [`latest_frame_event_rows`] the ledger reconstruction's
+/// CURRENT pane uses. Does not itself call `rebuild_view`/`render_locked` —
+/// callers combine this with whichever presentation-only follow-up
+/// (finished-note, terminal close) their own call site needs first.
+fn apply_ledger_seed(state: &mut RunPanelState, ledger_path: &camino::Utf8Path) {
+    let seed = ledger_presentation_seed(&state.session, ledger_path);
+    // `elapsed_seconds` is stepwise-constant between the drive's call/advance
+    // persists, so a refresh may only back-date `run_started` further (larger
+    // displayed elapsed), never pull it forward and reset a locally ticking
+    // clock — the same ratchet `observe_elapsed_seconds` applies with `max()`.
+    state.run_started = state.run_started.min(seed.run_started);
+    state.output_tokens = seed.output_tokens;
+    state.narrator_tokens = seed.narrator_tokens;
+    state.ledger_guide_tokens = seed.guide_tokens;
+    state.step_summaries = seed.step_summaries;
+    state.step_summary_at = seed.step_summary_at;
+    let current_rows = seed
+        .activity
+        .as_ref()
+        .map(|activity| latest_frame_event_rows(activity, seed.started_at_epoch))
+        .unwrap_or_default();
+    state.current_stream = current_rows
+        .into_iter()
+        .map(|row| StreamRow {
+            at: row.at.unwrap_or_default(),
+            kind: StreamRowKind::ModelText,
+            text: row.tail,
+        })
+        .collect();
+    // P081: a retained ask-refusal notice survives this wholesale rebuild —
+    // otherwise the observer's "never silence" rule holds for at most one
+    // `RELOAD_INTERVAL` poll. See `observer_notice`'s doc comment.
+    if let Some(notice) = state.observer_notice.clone() {
+        state.current_stream.push_back(notice);
+        while state.current_stream.len() > CURRENT_STREAM_CAP {
+            state.current_stream.pop_front();
+        }
+    }
+}
+
+pub(crate) fn render_ledger_run_view(
+    trait_ref: &ctx_traits_core::Trait,
+    plan: &ctx_traits_core::procedure::run::Plan,
+    session: &ctx_traits_core::procedure::session::Session,
+    ledger_path: &camino::Utf8Path,
+) -> LedgerPaneProjection {
+    let seed = ledger_presentation_seed(session, ledger_path);
     let view = run_view(
         trait_ref,
         plan,
@@ -3250,14 +3500,14 @@ pub(crate) fn render_ledger_run_view(
         PresentationState {
             active_started: &None,
             finished_durations: &BTreeMap::new(),
-            output_tokens: &output_tokens,
+            output_tokens: &seed.output_tokens,
             loop_elapsed: &BTreeMap::new(),
             loop_output_tokens: &BTreeMap::new(),
-            step_summaries: &step_summaries,
-            step_summary_at: &step_summary_at,
-            narrator_tokens,
-            guide_tokens,
-            run_started,
+            step_summaries: &seed.step_summaries,
+            step_summary_at: &seed.step_summary_at,
+            narrator_tokens: seed.narrator_tokens,
+            guide_tokens: seed.guide_tokens,
+            run_started: seed.run_started,
         },
     );
     // P552 review `dashboard-attach-contract-absent`: history/current are
@@ -3265,11 +3515,12 @@ pub(crate) fn render_ledger_run_view(
     // never derived from the ledger's own step states as a fallback, or a
     // legacy session's `activity_available: false` would still show a
     // populated history pane its own presence contradicts.
-    let history = activity
+    let history = seed
+        .activity
         .as_ref()
         .map(|_| story_history_lines(&view))
         .unwrap_or_default();
-    let (current, activity_degraded) = current_and_degraded(&activity, started_at_epoch);
+    let (current, activity_degraded) = current_and_degraded(&seed.activity, seed.started_at_epoch);
     LedgerPaneProjection {
         progress: progress_lines(&view),
         journey: journey_lines(&view),
@@ -3279,10 +3530,10 @@ pub(crate) fn render_ledger_run_view(
         ),
         history,
         current,
-        activity_available: activity.is_some(),
+        activity_available: seed.activity.is_some(),
         activity_degraded,
         trait_name: trait_ref.name.as_str().to_string(),
-        started_at_epoch,
+        started_at_epoch: seed.started_at_epoch,
     }
 }
 
@@ -6537,6 +6788,206 @@ summary = "A test trait."
         assert!(!rendered.contains("00:00:00"));
 
         let _ = std::fs::remove_file(sidecar_path.as_std_path());
+    }
+
+    /// P081: `ledger_presentation_seed` is the observer panel's own state
+    /// seed (`RunPanel::new_observer`) and re-derivation source
+    /// (`RunPanel::refresh_from_ledger`) — this exercises it directly,
+    /// independent of any live `RunPanel`/terminal, covering the draft's
+    /// "observer panel seeds clock from start epoch" and "token rows" unit
+    /// coverage.
+    #[test]
+    fn ledger_presentation_seed_back_dates_clock_and_reads_persisted_tokens() {
+        let mut session = session_with_history_revisions(Vec::new(), Vec::new());
+        session.ledger.elapsed_seconds = 90;
+        session.last_drive_outcome = Some(ctx_traits_core::procedure::session::DriveOutcome {
+            outcome: ctx_traits_core::procedure::session::DriveOutcomeKind::Running,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: Some(ctx_traits_core::procedure::session::TokenUsageEvidence {
+                work_tokens: Some(42),
+                narrator_tokens: Some(7),
+                narration_complete: None,
+                guide_tokens: Some(3),
+                guide_complete: None,
+            }),
+            exit_code: None,
+        });
+        let ledger_path = camino::Utf8PathBuf::from(format!(
+            "/tmp/ctx-traits-run-view-ledger-seed-{}.json",
+            std::process::id()
+        ));
+
+        let seed = ledger_presentation_seed(&session, &ledger_path);
+
+        // Back-dated by the ledger's own persisted elapsed seconds, so the
+        // panel's existing 1s clock timer reads a truthful header elapsed
+        // immediately, before any tick.
+        let observed_elapsed = seed.run_started.elapsed();
+        assert!(
+            observed_elapsed >= Duration::from_secs(90),
+            "run_started must be back-dated by the ledger's elapsed_seconds, got {observed_elapsed:?}"
+        );
+        assert!(
+            observed_elapsed < Duration::from_secs(95),
+            "run_started must not be back-dated by more than the ledger records, got {observed_elapsed:?}"
+        );
+        assert_eq!(
+            seed.output_tokens.get("__ledger-total__").copied(),
+            Some(42)
+        );
+        assert_eq!(seed.narrator_tokens, 7);
+        assert_eq!(seed.guide_tokens, 3);
+        assert!(seed.step_summaries.is_empty());
+        assert!(seed.activity.is_none());
+    }
+
+    /// P081 regression: `RunPanel::refresh_from_ledger`'s periodic
+    /// `apply_ledger_seed` call must never move the header clock BACKWARD.
+    /// `elapsed_seconds` is stepwise-constant between the drive's persisted
+    /// call/advance boundaries, so re-deriving `run_started = now -
+    /// elapsed_seconds` on every poll (without ratcheting against the
+    /// state's own already-ticking `run_started`) produces a sawtooth: the
+    /// displayed elapsed ticks up locally between polls, then snaps back to
+    /// the stale persisted value on every poll. `state.run_started =
+    /// state.run_started.min(seed.run_started)` fixes this — proven here by
+    /// polling twice across a real sleep with an unchanged ledger and
+    /// asserting the observed elapsed only ever grows.
+    #[test]
+    fn apply_ledger_seed_ratchets_run_started_and_never_reverses_the_clock() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "clock-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Clock Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let mut session = session_with_history_revisions(Vec::new(), Vec::new());
+        session.ledger.elapsed_seconds = 90;
+        let ledger_path = camino::Utf8PathBuf::from(format!(
+            "/tmp/ctx-traits-run-view-clock-ratchet-{}.json",
+            std::process::id()
+        ));
+
+        let panel = RunPanel::new_observer(
+            "clock-test".to_string(),
+            trait_ref,
+            plan,
+            session.clone(),
+            ledger_path.clone(),
+            RatatuiPane::new_detached_for_test(),
+        );
+
+        let elapsed_before = panel
+            .state
+            .lock()
+            .expect("state lock")
+            .run_started
+            .elapsed();
+
+        std::thread::sleep(Duration::from_millis(50));
+        // The ledger itself is UNCHANGED — `elapsed_seconds` still reads 90.
+        // Without the ratchet this poll would re-derive the exact same
+        // `run_started` as construction and the observed elapsed would stay
+        // pinned at ~90s instead of growing by the real sleep.
+        panel.refresh_from_ledger(&session, &ledger_path);
+
+        let elapsed_after = panel
+            .state
+            .lock()
+            .expect("state lock")
+            .run_started
+            .elapsed();
+
+        assert!(
+            elapsed_after > elapsed_before + Duration::from_millis(10),
+            "observed elapsed must grow across a poll of an unchanged ledger, \
+             got before={elapsed_before:?} after={elapsed_after:?}"
+        );
+    }
+
+    /// P081 regression: an observer's ask-refusal notice (the `?`-without-a-
+    /// handle branch in `poll_and_apply_keys`, run_view.rs:1521) must survive
+    /// `RunPanel::refresh_from_ledger`'s periodic `apply_ledger_seed`, which
+    /// otherwise rebuilds `current_stream` wholesale from the sidecar and
+    /// erases anything pushed there directly — turning the draft's "visible
+    /// refusal, never silence" rule into silence after one poll interval.
+    /// `observer_notice` is the retained copy `apply_ledger_seed` re-appends
+    /// after every rebuild; this constructs the SAME state the key handler
+    /// would (rather than driving a real key through the pump, which the
+    /// detached test pane cannot forward) and proves the notice is still
+    /// present in `current_stream` after a refresh.
+    #[test]
+    fn observer_ask_refusal_survives_a_ledger_refresh() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "ask-refusal-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Ask Refusal Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let session = session_with_history_revisions(Vec::new(), Vec::new());
+        let ledger_path = camino::Utf8PathBuf::from(format!(
+            "/tmp/ctx-traits-run-view-ask-refusal-{}.json",
+            std::process::id()
+        ));
+
+        let panel = RunPanel::new_observer(
+            "ask-refusal-test".to_string(),
+            trait_ref,
+            plan,
+            session.clone(),
+            ledger_path.clone(),
+            RatatuiPane::new_detached_for_test(),
+        );
+
+        let refusal_text = "ask refused: this run is driven by another process — ask there";
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            assert!(state.observer && state.ask.is_none());
+            let notice = StreamRow {
+                at: state.run_started.elapsed(),
+                kind: StreamRowKind::Narration,
+                text: refusal_text.to_string(),
+            };
+            state.observer_notice = Some(notice.clone());
+            state.current_stream.push_back(notice);
+        }
+
+        panel.refresh_from_ledger(&session, &ledger_path);
+
+        let state = panel.state.lock().expect("state lock");
+        assert!(
+            state
+                .current_stream
+                .iter()
+                .any(|row| row.text == refusal_text),
+            "the ask refusal must still be present after a ledger refresh, got {:?}",
+            state
+                .current_stream
+                .iter()
+                .map(|row| row.text.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 
     // P552: the CURRENT pane's in-flight line is not a special overlay

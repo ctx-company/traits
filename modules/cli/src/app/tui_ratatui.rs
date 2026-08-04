@@ -479,6 +479,35 @@ impl RatatuiPane {
         })
     }
 
+    /// P081: a pane that never touches the real terminal (no raw mode, no
+    /// alternate-screen/cursor escapes) — for tests that need a `RunPanel`
+    /// (e.g. exercising `apply_ledger_seed` through `RunPanel::new_observer`)
+    /// without the side effects of a live `RatatuiPane`. Already `detached`,
+    /// so every draw/poll call is the existing no-op path (`:631`, `:702`)
+    /// rather than a special case.
+    #[cfg(test)]
+    pub(crate) fn new_detached_for_test() -> Self {
+        let (_sender, keys) = mpsc::channel();
+        Self {
+            terminal: None,
+            generation: 0,
+            screen: PaneScreen::Alt,
+            detached: true,
+            keys,
+            pump: Arc::new(PumpControl {
+                stop: AtomicBool::new(true),
+                paused: AtomicBool::new(false),
+                focused: AtomicBool::new(true),
+                resize_size: AtomicU32::new(0),
+                input_generation: Arc::new(AtomicU64::new(0)),
+                wake: Mutex::new(None),
+                ctrl_c_policy: CtrlCPolicy::RequestStop,
+            }),
+            inline_size: None,
+            last_inline_resize: Instant::now(),
+        }
+    }
+
     pub(crate) fn input_generation(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.pump.input_generation)
     }
