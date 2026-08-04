@@ -1288,7 +1288,15 @@ fn merge_delta_json_schema(mut schema: Value) -> Value {
     schema
 }
 
-const MAX_SCHEMA_REF_DEPTH: usize = 4;
+/// Defensive resolution-step ceiling, not a real limit. Cycle detection in
+/// `validate_schemas_with_ids` (`modules/core/src/trait/schema.rs`) rejects
+/// recursive `[[schema]]` graphs at build time, so a validated trait can
+/// never drive this counter this high — every declared-schema hop and every
+/// list-wrapper hop increments it. Tripping it means validation regressed
+/// and let a non-terminating graph through; that is loud in debug builds
+/// (`debug_assert!`) and degrades to the old `{}` with a logged warning in
+/// release, rather than hanging the process.
+const MAX_SCHEMA_RESOLUTION_STEPS: usize = 64;
 
 /// Resolve a schema ref into full JSON Schema for frame prompts. Custom
 /// `schema:<id>` refs resolve against the trait's `[[schema]]` declarations —
@@ -1308,7 +1316,7 @@ fn json_schema_for_ref(
     {
         return serde_json::json!({
             "type": "array",
-            "items": json_schema_for_ref(Some(inner.trim()), loaded, depth),
+            "items": json_schema_for_ref(Some(inner.trim()), loaded, depth + 1),
         });
     }
     match reference {
@@ -1320,7 +1328,19 @@ fn json_schema_for_ref(
             let Some(id) = other.strip_prefix("schema:") else {
                 return serde_json::json!({});
             };
-            if depth >= MAX_SCHEMA_REF_DEPTH {
+            if depth >= MAX_SCHEMA_RESOLUTION_STEPS {
+                debug_assert!(
+                    false,
+                    "schema resolution exceeded {MAX_SCHEMA_RESOLUTION_STEPS} steps resolving \
+                     {other:?}; validate_schemas_with_ids should have rejected this schema \
+                     graph as recursive at build time"
+                );
+                eprintln!(
+                    "warning: schema resolution exceeded {MAX_SCHEMA_RESOLUTION_STEPS} steps \
+                     resolving {other:?}; emitting {{}} instead of hanging. This indicates a \
+                     validation regression — recursive schema graphs should be rejected at \
+                     build time."
+                );
                 return serde_json::json!({});
             }
             match loaded

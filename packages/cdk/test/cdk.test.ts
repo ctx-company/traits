@@ -281,6 +281,7 @@ describe("schema adapters", () => {
     [{ type: "object", properties: {}, additionalProperties: { type: "string" } }, "additionalProperties"],
     [{ oneOf: [] }, "oneOf"],
     [{ type: "object", properties: { value: { $ref: "#/x" } } }, "$ref"],
+    [{ type: "object", $defs: { x: { type: "string" } }, properties: {} }, "$defs"],
     [{ type: "object", properties: { value: { type: "string", default: "x" } } }, "default"],
     [{ type: "string", enum: [1, 2] }, "declared scalar type"],
     [{ type: "object", properties: { value: { type: "string", enum: [1, 2] } } }, "declared scalar type"],

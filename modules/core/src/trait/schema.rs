@@ -212,7 +212,136 @@ pub fn validate_schemas_with_ids(
         }
     }
 
+    reject_recursive_schemas(schemas)?;
+
     Ok(())
+}
+
+/// Local schema ids referenced by a `schema` field string, following list
+/// (`[schema:x]`) and union (`(schema:a|schema:b)`) wrappers. Built-in refs
+/// and dependency-qualified refs are not local edges and are skipped.
+fn referenced_local_ids(schema_ref: &str) -> Vec<String> {
+    let Ok(parsed) = crate::schema::form::Schema::try_from_str(schema_ref) else {
+        return Vec::new();
+    };
+    match parsed {
+        crate::schema::form::Schema::Builtin(_) => Vec::new(),
+        crate::schema::form::Schema::List(inner) => {
+            local_id_from_plain_ref(&inner).into_iter().collect()
+        }
+        crate::schema::form::Schema::Union(members) => members
+            .iter()
+            .filter_map(|member| {
+                let plain = member
+                    .strip_prefix('[')
+                    .and_then(|rest| rest.strip_suffix(']'))
+                    .unwrap_or(member.as_str());
+                local_id_from_plain_ref(plain)
+            })
+            .collect(),
+        crate::schema::form::Schema::Ref(s) => local_id_from_plain_ref(&s).into_iter().collect(),
+    }
+}
+
+/// Resolve a plain `schema:<id>` string to a local (unqualified,
+/// non-built-in) schema id, or `None` if it names a built-in or a
+/// dependency-qualified schema.
+fn local_id_from_plain_ref(schema_ref: &str) -> Option<String> {
+    if crate::schema::form::Builtin::from_ref(schema_ref).is_some() {
+        return None;
+    }
+    let parsed = Reference::parse(schema_ref).ok()?;
+    if parsed.kind() != Kind::Schema || parsed.is_qualified() {
+        return None;
+    }
+    Some(parsed.id().to_string())
+}
+
+/// Build the id -> referenced-local-ids graph for a set of declarations and
+/// reject any cycle with a named, path-bearing error. Flattening at emit
+/// walks these same edges (declared `fields.*.schema` and scalar `schema`,
+/// through list/union wrappers); a cycle here would not terminate there.
+fn reject_recursive_schemas(schemas: &[Schema]) -> crate::Result<()> {
+    let mut graph: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for schema in schemas {
+        let mut edges = Vec::new();
+        if let Some(fields) = &schema.fields {
+            for field in fields.values() {
+                edges.extend(referenced_local_ids(&field.schema));
+            }
+        }
+        if let Some(schema_ref) = &schema.schema {
+            edges.extend(referenced_local_ids(schema_ref));
+        }
+        graph.insert(schema.id.as_str(), edges);
+    }
+
+    let mut visited: BTreeSet<&str> = BTreeSet::new();
+    let starts: Vec<&str> = graph.keys().copied().collect();
+    for start in starts {
+        if visited.contains(start) {
+            continue;
+        }
+        let mut path: Vec<&str> = Vec::new();
+        let mut on_path: BTreeSet<&str> = BTreeSet::new();
+        if let Some(cycle) = walk_for_cycle(start, &graph, &mut path, &mut on_path, &mut visited) {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: "schema".to_string(),
+                message: format!(
+                    "schema {:?} is recursive: {}; flattening cannot terminate",
+                    cycle[0],
+                    cycle.join(" -> ")
+                ),
+            }
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// DFS with an explicit path stack. Returns the cycle path (start id
+/// repeated at the end) the first time a node already on the current path
+/// is revisited.
+fn walk_for_cycle<'a>(
+    node: &'a str,
+    graph: &BTreeMap<&'a str, Vec<String>>,
+    path: &mut Vec<&'a str>,
+    on_path: &mut BTreeSet<&'a str>,
+    visited: &mut BTreeSet<&'a str>,
+) -> Option<Vec<String>> {
+    path.push(node);
+    on_path.insert(node);
+
+    if let Some(edges) = graph.get(node) {
+        for next in edges {
+            let Some((&next_key, _)) = graph.get_key_value(next.as_str()) else {
+                // Not a local schema in this batch (e.g. dependency-composed
+                // set not yet merged in); no local edge to walk.
+                continue;
+            };
+            if on_path.contains(next_key) {
+                let start = path.iter().position(|&id| id == next_key).unwrap_or(0);
+                let mut cycle: Vec<String> = path[start..].iter().map(|s| s.to_string()).collect();
+                cycle.push(next_key.to_string());
+                path.pop();
+                on_path.remove(node);
+                return Some(cycle);
+            }
+            if !visited.contains(next_key)
+                && let Some(cycle) = walk_for_cycle(next_key, graph, path, on_path, visited)
+            {
+                path.pop();
+                on_path.remove(node);
+                return Some(cycle);
+            }
+        }
+    }
+
+    path.pop();
+    on_path.remove(node);
+    visited.insert(node);
+    None
 }
 
 pub(crate) fn validate_allowed_literal(
@@ -302,4 +431,99 @@ fn validate_allowed_value_shape(
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field(schema_ref: &str) -> SchemaField {
+        SchemaField {
+            schema: schema_ref.to_string(),
+            required: false,
+            description: None,
+            hint: None,
+            allowed: None,
+        }
+    }
+
+    fn object_schema(id: &str, fields: &[(&str, &str)]) -> Schema {
+        Schema {
+            id: id.to_string(),
+            resource: None,
+            fields: Some(
+                fields
+                    .iter()
+                    .map(|(name, schema_ref)| (name.to_string(), field(schema_ref)))
+                    .collect(),
+            ),
+            schema: None,
+            allowed: None,
+            description: None,
+        }
+    }
+
+    fn validate_all(schemas: &[Schema]) -> crate::Result<()> {
+        let resource_ids: BTreeSet<&str> = BTreeSet::new();
+        validate_schemas(schemas, &resource_ids)
+    }
+
+    fn expect_recursive_message(err: &crate::Error) -> String {
+        match err {
+            crate::Error::Manifest(crate::manifest::Error::InvalidField { message, .. }) => {
+                message.clone()
+            }
+            other => panic!("expected InvalidField manifest error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn self_cycle_is_rejected() {
+        let schemas = vec![object_schema("a", &[("self", "schema:a")])];
+        let err = validate_all(&schemas).expect_err("self cycle must be rejected");
+        let message = expect_recursive_message(&err);
+        assert!(message.contains("recursive"), "message: {message}");
+        assert!(message.contains("a -> a"), "message: {message}");
+    }
+
+    #[test]
+    fn mutual_cycle_is_rejected() {
+        let schemas = vec![
+            object_schema("a", &[("b-ref", "schema:b")]),
+            object_schema("b", &[("a-ref", "schema:a")]),
+        ];
+        let err = validate_all(&schemas).expect_err("mutual cycle must be rejected");
+        let message = expect_recursive_message(&err);
+        assert!(message.contains("recursive"), "message: {message}");
+        assert!(
+            message.contains("a -> b -> a") || message.contains("b -> a -> b"),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn cycle_through_list_wrapper_is_rejected() {
+        let schemas = vec![
+            object_schema("a", &[("items", "[schema:b]")]),
+            object_schema("b", &[("a-ref", "schema:a")]),
+        ];
+        let err = validate_all(&schemas).expect_err("cycle through list wrapper must be rejected");
+        let message = expect_recursive_message(&err);
+        assert!(message.contains("recursive"), "message: {message}");
+    }
+
+    #[test]
+    fn deep_acyclic_chain_flattens_without_truncation() {
+        // A chain longer than the old MAX_SCHEMA_REF_DEPTH (4) must validate
+        // cleanly — depth is no longer a build-time limit.
+        let schemas = vec![
+            object_schema("a", &[("next", "schema:b")]),
+            object_schema("b", &[("next", "schema:c")]),
+            object_schema("c", &[("next", "schema:d")]),
+            object_schema("d", &[("next", "schema:e")]),
+            object_schema("e", &[("next", "schema:f")]),
+            object_schema("f", &[("leaf", "schema:text")]),
+        ];
+        validate_all(&schemas).expect("deep acyclic chain must validate");
+    }
 }
