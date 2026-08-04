@@ -521,6 +521,18 @@ pub(crate) fn truncate_display_width_end(line: &str, max_width: usize) -> String
     format!("{head}{marker}")
 }
 
+/// Same clipping as [`truncate_display_width_end`], but when it actually
+/// truncates, also records the `(rendered, full)` pair into task 0023's
+/// per-frame ledger (`super::tui_select`) — so a mouse selection that
+/// reaches the ellipsis can later be expanded back to the untruncated
+/// source rather than copying the `...`-truncated cells that were on
+/// screen. A no-op on the ledger when nothing was actually truncated.
+pub(crate) fn truncate_display_width_end_recording(line: &str, max_width: usize) -> String {
+    let truncated = truncate_display_width_end(line, max_width);
+    super::tui_select::record_truncation(&truncated, line);
+    truncated
+}
+
 fn render_line(line: &Line) -> String {
     let mut rendered = String::new();
     for segment in &line.segments {

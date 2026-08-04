@@ -19,6 +19,7 @@ serde_json.workspace = true
 schemars.workspace = true
 toml.workspace = true
 libc = "0.2"
+base64.workspace = true
 crossterm = "0.29"
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
 ctx-traits-core = { workspace = true, features = ["builtin-trait-packages"] }

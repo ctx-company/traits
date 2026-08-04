@@ -68,3 +68,4 @@ mod tui_demo;
 mod tui_kit;
 mod tui_panes;
 mod tui_ratatui;
+mod tui_select;

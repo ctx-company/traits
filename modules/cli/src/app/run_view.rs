@@ -21,6 +21,7 @@ use crate::app::tui_panes::{
     self, FocusRing, PaneId, PaneLayoutResult, PaneScrolls, PaneTree, TabStep,
 };
 use crate::app::tui_ratatui::{self, RatatuiPane};
+use crate::app::tui_select;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 type GuideDispatch = Arc<dyn Fn(String, String) -> crate::Result<String> + Send + Sync>;
@@ -1374,7 +1375,14 @@ fn tick_locked(state: &mut RunPanelState) -> TickOutcome {
     let focus_now = state.repaint.focused();
     let focus_changed = focus_now != state.last_focus;
     state.last_focus = focus_now;
-    let changed = poll_and_apply_keys(state) || resized || focus_changed;
+    // Task 0023: a drag or mouseup wakes this tick the same way a key or
+    // resize does (the pump's mouse arms bump the input generation), but
+    // left no trace `changed` recognised until `take_mouse_changed` — so the
+    // drag highlight and the mouseup's copy went unpainted until an
+    // unrelated key/resize/focus forced the next frame. Same failure class
+    // `focus_changed` above was extracted to fix.
+    let mouse_changed = state.repaint.take_mouse_changed();
+    let changed = poll_and_apply_keys(state) || resized || focus_changed || mouse_changed;
     if state.repaint.detached() {
         return TickOutcome {
             consumed_generation,
@@ -1783,6 +1791,9 @@ fn entered_step_text(view: &RunView, phase: &str) -> Option<String> {
 }
 
 fn render_locked(state: &mut RunPanelState) {
+    // Task 0023: rebuild the ellipsized-text ledger once per frame, before
+    // any truncating call site below can record into it.
+    tui_select::clear_ledger();
     // Capture before draining: a wake that lands concurrently afterwards must
     // remain pending for a later tick rather than being acknowledged unseen.
     let input_generation = state.input_generation.load(Ordering::Acquire);
@@ -2660,7 +2671,10 @@ fn event_row_line(row: &EventRow, width: u16) -> tui::Line {
     line.push(prefix, tui::Tone::Muted);
     let tail = tui::clean_live_text(&row.tail);
     let budget = (width as usize).saturating_sub(prefix_width);
-    line.push(tui::truncate_display_width_end(&tail, budget), row.tone);
+    line.push(
+        tui::truncate_display_width_end_recording(&tail, budget),
+        row.tone,
+    );
     line
 }
 
@@ -4132,7 +4146,10 @@ fn journey_step_line(step: &RunStep, width: u16) -> tui::Line {
                 .join(" · ");
             let budget = (width as usize)
                 .saturating_sub(tui::display_width(mark) + 1 + 3 + tui::display_width(&tail_width));
-            (tui::truncate_display_width_end(&step.label, budget), tail)
+            (
+                tui::truncate_display_width_end_recording(&step.label, budget),
+                tail,
+            )
         });
     let mut line = tui::Line::blank();
     line.push(mark, tone);
@@ -6670,6 +6687,7 @@ mod tests {
     // never desyncs the truncation point from a plain byte/char count.
     #[test]
     fn event_row_line_truncates_only_the_tail_by_display_width() {
+        tui_select::clear_ledger();
         let row = EventRow {
             at: Some(Duration::from_secs(5)),
             tail: "a".repeat(50),
@@ -6680,10 +6698,18 @@ mod tests {
         assert!(rendered.starts_with("00:00:05 "));
         assert!(rendered.ends_with("..."));
         assert!(tui::display_width(&rendered) <= 20);
+        // Task 0023: the truncation was recorded, so a selection spanning
+        // this row expands back to the full untruncated tail on copy.
+        assert_eq!(
+            tui_select::substitute_ledger(&rendered),
+            format!("00:00:05 {}", row.tail)
+        );
+        tui_select::clear_ledger();
     }
 
     #[test]
     fn event_row_line_wide_unicode_tail_truncates_by_display_width_not_char_count() {
+        tui_select::clear_ledger();
         // Each "文" is 2 display columns; a char-count truncation would
         // overflow the requested width, a display-width one will not.
         let row = EventRow {
@@ -6695,6 +6721,11 @@ mod tests {
         let rendered: String = line.segments().map(|(text, _)| text).collect();
         assert!(tui::display_width(&rendered) <= 25);
         assert!(rendered.ends_with("..."));
+        assert_eq!(
+            tui_select::substitute_ledger(&rendered),
+            format!("00:00:01 {}", row.tail)
+        );
+        tui_select::clear_ledger();
     }
 
     #[test]

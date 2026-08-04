@@ -6,14 +6,15 @@
 //! `LiveOutputPanel` for `--progress stream`, and `check`'s line-mode
 //! styling) until P423 retires it.
 
-use std::io::{IsTerminal, Stderr};
+use std::io::{IsTerminal, Stderr, Write};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once, mpsc};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{
-    self, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyEvent, KeyModifiers,
+    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -21,12 +22,14 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as RatatuiLine, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use ratatui::{TerminalOptions, Viewport};
 
 use super::tui::{Line, Tone};
+use super::tui_select;
 
 /// Monotonic pane identity: bumped once per successfully constructed
 /// [`RatatuiPane`], never reused. Backs [`TORN_DOWN_GENERATION`] so torn-down
@@ -142,7 +145,20 @@ fn restore_terminal(screen: PaneScreen) {
     let _ = disable_raw_mode();
     match screen {
         PaneScreen::Alt => {
-            let _ = execute!(std::io::stderr(), LeaveAlternateScreen, Show);
+            // `DisableMouseCapture` is unconditional and best-effort here,
+            // regardless of whether `EnableMouseCapture` ever actually
+            // succeeded (it is idempotent against a terminal that never had
+            // capture on) — this is the one path every Alt-screen exit
+            // (drop, quit, panic hook, a failed construction rollback) goes
+            // through, so it is the only place that needs to get this right.
+            // Leaving a terminal with mouse reporting stuck on is a worse
+            // trap than the feature this disables.
+            let _ = execute!(
+                std::io::stderr(),
+                DisableMouseCapture,
+                LeaveAlternateScreen,
+                Show
+            );
         }
         PaneScreen::Inline => {
             let _ = ctx_traits_io::decode_diagnostics::end_capture();
@@ -180,6 +196,25 @@ struct PumpControl {
     /// Latest terminal dimensions observed by the input pump. A single atomic
     /// coalesces drag-resize bursts; the render tick consumes it once.
     resize_size: AtomicU32,
+    /// Task 0023: mouse-drag selection, `Alt` panes only. `mouse_anchor` is
+    /// the packed (column, row) of the mouse-down that started the current
+    /// selection; `mouse_current` is the packed position of the latest
+    /// drag/up event, coalesced the same way `resize_size` coalesces resize
+    /// bursts — a fast drag never floods a channel, [`RatatuiPane::draw`]
+    /// just reads the latest position each render. `mouse_selecting` is true
+    /// from mouse-down until the pending mouseup has been consumed;
+    /// `mouse_up_pending` is set by mouse-up and swapped off by `draw` once
+    /// it has extracted and copied the selected text. `mouse_dirty` is set by
+    /// every handled mouse arm (down/drag/up) and swapped off by
+    /// [`RatatuiPane::take_mouse_changed`] — the signal a tick's `changed`
+    /// computation folds in so a wake the pump raises for mouse input is
+    /// actually recognised as something to paint, the same way a resize or a
+    /// key already is.
+    mouse_anchor: AtomicU32,
+    mouse_current: AtomicU32,
+    mouse_selecting: AtomicBool,
+    mouse_up_pending: AtomicBool,
+    mouse_dirty: AtomicBool,
     input_generation: Arc<AtomicU64>,
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync + 'static>>>,
     ctrl_c_policy: CtrlCPolicy,
@@ -347,6 +382,15 @@ impl RatatuiPane {
                     restore_terminal(PaneScreen::Alt);
                     return Err(err);
                 }
+                // Task 0023: the alternate screen has no usable native
+                // select-and-copy, so capture the terminal's own mouse
+                // reporting to drive it ourselves. `restore_terminal`'s Alt
+                // arm disables this unconditionally, so every rollback below
+                // (and every later teardown path) already undoes it.
+                if let Err(err) = execute!(std::io::stderr(), EnableMouseCapture) {
+                    restore_terminal(PaneScreen::Alt);
+                    return Err(err);
+                }
                 match Terminal::new(CrosstermBackend::new(std::io::stderr())) {
                     Ok(terminal) => terminal,
                     Err(err) => {
@@ -395,6 +439,11 @@ impl RatatuiPane {
             paused: AtomicBool::new(false),
             focused: AtomicBool::new(true),
             resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(None),
             ctrl_c_policy,
@@ -441,6 +490,14 @@ impl RatatuiPane {
                         }
                         Event::FocusLost => set_focus(&pump, false),
                         Event::FocusGained => set_focus(&pump, true),
+                        // Only reachable on an `Alt` pane — `EnableMouseCapture`
+                        // is never sent for `Inline`, so no terminal reports
+                        // mouse events there and this arm simply never matches.
+                        Event::Mouse(mouse) => {
+                            if !handle_mouse_event(&pump, &sender, mouse) {
+                                return;
+                            }
+                        }
                         Event::Key(key) => {
                             if key.kind != crossterm::event::KeyEventKind::Press {
                                 continue;
@@ -499,6 +556,11 @@ impl RatatuiPane {
                 paused: AtomicBool::new(false),
                 focused: AtomicBool::new(true),
                 resize_size: AtomicU32::new(0),
+                mouse_anchor: AtomicU32::new(0),
+                mouse_current: AtomicU32::new(0),
+                mouse_selecting: AtomicBool::new(false),
+                mouse_up_pending: AtomicBool::new(false),
+                mouse_dirty: AtomicBool::new(false),
                 input_generation: Arc::new(AtomicU64::new(0)),
                 wake: Mutex::new(None),
                 ctrl_c_policy: CtrlCPolicy::RequestStop,
@@ -566,6 +628,17 @@ impl RatatuiPane {
 
     pub(crate) fn resize_pending(&self) -> bool {
         self.pump.resize_size.load(Ordering::SeqCst) != 0
+    }
+
+    /// Consumes the pump's mouse-activity signal, set by every handled
+    /// Down/Drag/Up arm. A tick's `changed` computation must fold this in —
+    /// mouse input wakes the tick (`notify_input` bumps the input
+    /// generation) exactly like a key or resize does, but unlike those it
+    /// left no trace `changed` recognised, so a drag rendered no highlight
+    /// and a mouseup performed no copy until an unrelated key/focus/resize
+    /// forced the next frame.
+    pub(crate) fn take_mouse_changed(&self) -> bool {
+        self.pump.mouse_dirty.swap(false, Ordering::SeqCst)
     }
 
     /// Whether the terminal window currently has focus, as last reported by
@@ -650,6 +723,19 @@ impl RatatuiPane {
     /// paragraph. Gated on `detached()` exactly like every other draw path so
     /// a panic caught elsewhere can never cause a later frame onto the
     /// restored normal screen.
+    ///
+    /// Task 0023: also the single hook every `Alt` surface (run view,
+    /// dashboard, startup view, demo, trait editor) shares for mouse
+    /// selection — mirroring how the unfocused-DIM overlay above already
+    /// post-processes the frame buffer generically instead of every renderer
+    /// doing its own thing. While a drag is live, the selected linear region
+    /// is painted `REVERSED` after the widget closure runs. Once a mouseup
+    /// lands, the frame after it (this same call, since drawing wakes on
+    /// mouse input) extracts the selected text from the buffer this exact
+    /// frame just drew, expands any ellipsized row through the truncation
+    /// ledger, writes it to the clipboard via OSC 52, and clears the
+    /// selection — so the highlight never lingers past the release that
+    /// produced the copy.
     pub(crate) fn draw(
         &mut self,
         widget: impl FnOnce(&mut ratatui::Frame<'_>),
@@ -657,10 +743,23 @@ impl RatatuiPane {
         if self.detached() {
             return Ok(());
         }
+        let screen = self.screen;
         let Some(terminal) = self.terminal.as_mut() else {
             return Ok(());
         };
         let focused = &self.pump.focused;
+        let pump = &self.pump;
+        // Peek the pending mouseup here, before `terminal.draw` runs, rather
+        // than only clearing `mouse_selecting` after it: the mouseup is
+        // processed inside THIS call (below), so if the highlight were still
+        // painted from `mouse_selecting` alone, this exact release frame
+        // would render with the REVERSED overlay still on and only the NEXT
+        // frame would clear it visually — leaving a stale highlight on
+        // screen after the copy until an unrelated key/resize/focus event
+        // forced a repaint.
+        let selecting = screen == PaneScreen::Alt
+            && pump.mouse_selecting.load(Ordering::SeqCst)
+            && !pump.mouse_up_pending.load(Ordering::SeqCst);
         terminal.draw(|frame| {
             widget(frame);
             if !focused.load(Ordering::SeqCst) {
@@ -669,7 +768,33 @@ impl RatatuiPane {
                     .buffer_mut()
                     .set_style(area, Style::default().add_modifier(Modifier::DIM));
             }
+            if selecting {
+                let area = frame.area();
+                let anchor = unpack_terminal_size(pump.mouse_anchor.load(Ordering::SeqCst));
+                let current = unpack_terminal_size(pump.mouse_current.load(Ordering::SeqCst));
+                let buffer = frame.buffer_mut();
+                for span in tui_select::linear_region(anchor, current, area) {
+                    let rect =
+                        Rect::new(span.start_col, span.row, span.end_col - span.start_col, 1);
+                    buffer.set_style(rect, Style::default().add_modifier(Modifier::REVERSED));
+                }
+            }
         })?;
+        if screen == PaneScreen::Alt && pump.mouse_up_pending.swap(false, Ordering::SeqCst) {
+            pump.mouse_selecting.store(false, Ordering::SeqCst);
+            let anchor = unpack_terminal_size(pump.mouse_anchor.load(Ordering::SeqCst));
+            let current = unpack_terminal_size(pump.mouse_current.load(Ordering::SeqCst));
+            let buffer = terminal.current_buffer_mut();
+            let spans = tui_select::linear_region(anchor, current, buffer.area);
+            let text = tui_select::substitute_ledger(&tui_select::extract_text(buffer, &spans));
+            if !text.is_empty() {
+                // Fire-and-forget, same stream the backend already owns: a
+                // terminal that ignores OSC 52 (Terminal.app by default) or
+                // a tmux without `set-clipboard on` just silently no-ops.
+                let _ = write!(std::io::stderr(), "{}", tui_select::osc52_sequence(&text));
+                let _ = std::io::stderr().flush();
+            }
+        }
         Ok(())
     }
 
@@ -793,7 +918,8 @@ impl RatatuiPane {
                 let screen_ok = focus_ok
                     && match self.screen {
                         PaneScreen::Alt => {
-                            execute!(std::io::stderr(), EnterAlternateScreen).is_ok()
+                            execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture)
+                                .is_ok()
                         }
                         // Inline never left the alternate screen (it was never
                         // in one) — only raw mode needs re-entering.
@@ -819,7 +945,12 @@ impl RatatuiPane {
         disable_raw_mode()?;
         match screen {
             PaneScreen::Alt => {
-                execute!(std::io::stderr(), LeaveAlternateScreen, Show)?;
+                execute!(
+                    std::io::stderr(),
+                    DisableMouseCapture,
+                    LeaveAlternateScreen,
+                    Show
+                )?;
             }
             PaneScreen::Inline => {
                 execute!(std::io::stderr(), Show)?;
@@ -885,6 +1016,79 @@ fn set_focus(pump: &PumpControl, focused: bool) {
     }
 }
 
+/// The pump thread's `Event::Mouse` handling, extracted so it is callable
+/// (and testable) without a real terminal. Returns `false` only when the key
+/// channel has been dropped by the receiver — the same "give up the pump"
+/// signal the resize/key arms already return on — so the caller can
+/// propagate it into its own `return`.
+fn handle_mouse_event(
+    pump: &PumpControl,
+    sender: &mpsc::Sender<KeyEvent>,
+    mouse: crossterm::event::MouseEvent,
+) -> bool {
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let packed = pack_terminal_size(mouse.column, mouse.row);
+            pump.mouse_anchor.store(packed, Ordering::SeqCst);
+            pump.mouse_current.store(packed, Ordering::SeqCst);
+            pump.mouse_up_pending.store(false, Ordering::SeqCst);
+            pump.mouse_selecting.store(true, Ordering::SeqCst);
+            pump.mouse_dirty.store(true, Ordering::SeqCst);
+            notify_input(pump);
+            true
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if pump.mouse_selecting.load(Ordering::SeqCst) {
+                pump.mouse_current.store(
+                    pack_terminal_size(mouse.column, mouse.row),
+                    Ordering::SeqCst,
+                );
+                pump.mouse_dirty.store(true, Ordering::SeqCst);
+                notify_input(pump);
+            }
+            true
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if pump.mouse_selecting.load(Ordering::SeqCst) {
+                pump.mouse_current.store(
+                    pack_terminal_size(mouse.column, mouse.row),
+                    Ordering::SeqCst,
+                );
+                pump.mouse_up_pending.store(true, Ordering::SeqCst);
+                pump.mouse_dirty.store(true, Ordering::SeqCst);
+                notify_input(pump);
+            }
+            true
+        }
+        // Capture stops the terminal from emulating arrow keys for the
+        // wheel in the alternate screen, so translate the wheel onto the
+        // same key channel every scrollable surface already reads —
+        // otherwise this feature regresses scrolling on terminals that
+        // relied on that emulation.
+        MouseEventKind::ScrollUp => {
+            if sender
+                .send(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+                .is_err()
+            {
+                return false;
+            }
+            notify_input(pump);
+            true
+        }
+        MouseEventKind::ScrollDown => {
+            if sender
+                .send(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+                .is_err()
+            {
+                return false;
+            }
+            notify_input(pump);
+            true
+        }
+        _ => true,
+    }
+}
+
 impl Drop for RatatuiPane {
     fn drop(&mut self) {
         self.leave();
@@ -927,6 +1131,11 @@ mod tests {
             paused: AtomicBool::new(false),
             focused: AtomicBool::new(true),
             resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(Some({
                 let wakes = Arc::clone(&wakes);
@@ -950,6 +1159,11 @@ mod tests {
             paused: AtomicBool::new(false),
             focused: AtomicBool::new(true),
             resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
             input_generation: Arc::new(AtomicU64::new(0)),
             wake: Mutex::new(Some({
                 let wakes = Arc::clone(&wakes);
@@ -981,6 +1195,82 @@ mod tests {
     fn inline_viewport_height_handles_tiny_terminals() {
         assert_eq!(inline_viewport_height(0), 0);
         assert_eq!(inline_viewport_height(1), 1);
+    }
+
+    #[test]
+    fn mouse_down_drag_up_sets_dirty_and_take_consumes_it_once() {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let control = PumpControl {
+            stop: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
+            focused: AtomicBool::new(true),
+            resize_size: AtomicU32::new(0),
+            mouse_anchor: AtomicU32::new(0),
+            mouse_current: AtomicU32::new(0),
+            mouse_selecting: AtomicBool::new(false),
+            mouse_up_pending: AtomicBool::new(false),
+            mouse_dirty: AtomicBool::new(false),
+            input_generation: Arc::new(AtomicU64::new(0)),
+            wake: Mutex::new(Some({
+                let wakes = Arc::clone(&wakes);
+                Arc::new(move || {
+                    wakes.fetch_add(1, Ordering::SeqCst);
+                })
+            })),
+            ctrl_c_policy: CtrlCPolicy::RequestStop,
+        };
+        let (sender, _keys) = mpsc::channel();
+
+        // `take_mouse_changed` is not exposed on a bare `PumpControl` (it is
+        // a `RatatuiPane` method), so this reads the same atomic it swaps.
+        assert!(!control.mouse_dirty.swap(false, Ordering::SeqCst));
+
+        let down = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(handle_mouse_event(&control, &sender, down));
+        assert!(control.mouse_selecting.load(Ordering::SeqCst));
+        assert_eq!(
+            control.mouse_anchor.load(Ordering::SeqCst),
+            pack_terminal_size(5, 2)
+        );
+        // Consuming here proves the signal survives exactly the one Down
+        // event that set it, then is gone until the next handled arm.
+        assert!(control.mouse_dirty.swap(false, Ordering::SeqCst));
+        assert!(!control.mouse_dirty.swap(false, Ordering::SeqCst));
+
+        let drag = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 9,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(handle_mouse_event(&control, &sender, drag));
+        assert_eq!(
+            control.mouse_current.load(Ordering::SeqCst),
+            pack_terminal_size(9, 4)
+        );
+        assert!(control.mouse_dirty.swap(false, Ordering::SeqCst));
+
+        let up = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 9,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(handle_mouse_event(&control, &sender, up));
+        // `draw()`, not the pump, clears `mouse_selecting` once it has
+        // consumed the pending mouseup — still true here.
+        assert!(control.mouse_selecting.load(Ordering::SeqCst));
+        assert!(control.mouse_up_pending.load(Ordering::SeqCst));
+        assert!(control.mouse_dirty.swap(false, Ordering::SeqCst));
+        assert!(!control.mouse_dirty.swap(false, Ordering::SeqCst));
+
+        assert_eq!(control.input_generation.load(Ordering::SeqCst), 3);
+        assert_eq!(wakes.load(Ordering::SeqCst), 3);
     }
 
     #[test]

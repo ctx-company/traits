@@ -306,6 +306,7 @@ version = "0.1.0-alpha.1"
 name = "ctx-traits-cli"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "base64 0.23.0",
  "camino",
  "clap",
  "crossterm 0.29.0",
