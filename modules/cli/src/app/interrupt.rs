@@ -50,32 +50,72 @@ pub fn install() {
         }
         // SAFETY: `signal(2)` with a plain `extern "C" fn(i32)` handler that
         // only performs async-signal-safe work (atomic stores, `write`,
-        // `tcsetattr`, `_exit`) is a standard, sound use of this API.
+        // `tcsetattr`, `kill`, `_exit`) is a standard, sound use of this API.
         unsafe {
             libc::signal(
                 libc::SIGINT,
                 handle_sigint as *const () as libc::sighandler_t,
             );
+            // 0024: `kill <pid>`/`kill -HUP <pid>` of a live run previously
+            // took the default action and died with the alternate screen,
+            // raw mode, mouse capture, and focus reporting all left on —
+            // unlike `SIGINT`, there was no handler here at all. Both share
+            // one body: rescue the terminal, best-effort kill the child
+            // process group (no wait — the terminal must never wait on the
+            // dying child harness), then exit with the conventional
+            // 128+signo. This is a real behavior change for headless
+            // drives: SIGTERM used to be an untouched default kill; it now
+            // exits 143 with the child pgid SIGKILLed first, which is
+            // strictly more orderly but means a caller keying on the raw
+            // default-death signal status now sees a plain exit code.
+            libc::signal(
+                libc::SIGTERM,
+                handle_sigterm as *const () as libc::sighandler_t,
+            );
+            libc::signal(
+                libc::SIGHUP,
+                handle_sigterm as *const () as libc::sighandler_t,
+            );
         }
     });
 }
 
-/// Best-effort terminal rescue from inside the signal handler: leave the
-/// alternate screen, show the cursor, and restore the cooked-mode attributes
-/// captured at install. Every step is async-signal-safe; every step
-/// tolerates a terminal that was never in raw/alternate mode.
+/// Best-effort terminal rescue from inside the signal handler: leave every
+/// mode a pane can enter (alternate screen, mouse capture, focus reporting,
+/// raw mode) and restore the cooked-mode attributes captured at install.
+/// Every step is async-signal-safe; every step tolerates a terminal that was
+/// never in raw/alternate mode. The escape write is gated on
+/// [`super::tui_ratatui::signal_safe_pane_active`] — a plain atomic load —
+/// so a headless kill, where no pane was ever constructed, never writes
+/// terminal escapes onto a piped stderr; `tcsetattr` still runs unconditionally
+/// since restoring captured cooked-mode attributes is a no-op when nothing
+/// ever changed them.
 fn rescue_terminal_signal_safe() {
-    const LEAVE: &[u8] = b"\x1b[?1049l\x1b[?25h\r\n";
     // SAFETY: `write` on a borrowed fd with a static buffer, and `tcsetattr`
     // with attributes fully initialized before the handler was registered
     // (guarded by TERMIOS_SAVED).
     unsafe {
-        let _ = libc::write(libc::STDERR_FILENO, LEAVE.as_ptr().cast(), LEAVE.len());
+        if super::tui_ratatui::signal_safe_pane_active() {
+            let escape = super::tui_ratatui::FULL_RESTORE_ESCAPE;
+            let _ = libc::write(libc::STDERR_FILENO, escape.as_ptr().cast(), escape.len());
+        }
         if TERMIOS_SAVED.load(Ordering::SeqCst) {
             let saved = std::ptr::addr_of!(SAVED_TERMIOS);
             let _ = libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, (*saved).as_ptr());
         }
     }
+}
+
+/// Shared `SIGTERM`/`SIGHUP` body (0024): rescue the terminal, best-effort
+/// kill the registered child process group, then exit with the conventional
+/// 128+signo. Never reaps the child — only signals the group and exits — so
+/// the terminal restore never waits on the dying child harness.
+extern "C" fn handle_sigterm(signal: i32) {
+    rescue_terminal_signal_safe();
+    // Async-signal-safe: atomic load + `kill(2)`, no allocation, no locks.
+    ctx_traits_io::run_kill::kill_active_process_group();
+    // SAFETY: `_exit` is async-signal-safe.
+    unsafe { libc::_exit(128 + signal) };
 }
 
 /// Escalation ladder: the 1st `SIGINT` requests the graceful between-frames

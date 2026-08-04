@@ -31,9 +31,12 @@ pub fn clear(pgid: i32) {
 }
 
 /// Sends `SIGKILL` to the currently registered process group, if any.
-/// Called from the pump thread (never a signal handler), so ordinary Rust
-/// is fine here — the async-signal-safety constraint only binds
-/// `interrupt::handle_sigint`.
+/// Called from the pump thread on the ctrl-c key path, and — as of 0024 —
+/// also from the CLI's `SIGTERM`/`SIGHUP` signal handlers
+/// (`interrupt::handle_sigterm`). Both call sites are safe: the body is
+/// nothing but an atomic load and a single `kill(2)`, no allocation and no
+/// locks, so it is async-signal-safe as written and needs no change to be
+/// called from a handler.
 #[cfg(unix)]
 pub fn kill_active_process_group() {
     let pgid = ACTIVE_PGID.load(Ordering::SeqCst);

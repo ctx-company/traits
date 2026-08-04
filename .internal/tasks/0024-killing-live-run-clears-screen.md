@@ -1,6 +1,6 @@
 # 0024 — Killing a live run leaves the terminal dirty
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** implemented, pending review · **Raised:** 2026-07-29
 
 Killing a run mid-flight does not properly restore the screen: the alternate
 screen buffer and/or raw mode are left behind, so the shell prompt comes back

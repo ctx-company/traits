@@ -57,6 +57,33 @@ static PANIC_HOOK: Once = Once::new();
 /// the hook only reads it guarded by `active != 0`.
 static ACTIVE_SCREEN: AtomicU8 = AtomicU8::new(PaneScreen::Alt as u8);
 
+/// Async-signal-safe check for whether any [`RatatuiPane`] currently owns
+/// the terminal — a single atomic load, safe to call from
+/// `interrupt::handle_sigint`/`handle_sigterm`. Gates the signal-safe rescue
+/// escape write (see [`crate::app::interrupt`]) so a headless kill, where no
+/// pane was ever constructed, never writes terminal escapes onto a piped
+/// stderr.
+pub(crate) fn signal_safe_pane_active() -> bool {
+    ACTIVE_GENERATION.load(Ordering::SeqCst) != 0
+}
+
+/// The canonical "leave every mode a pane can enter" escape sequence:
+/// disable mouse reporting (`?1006l ?1003l ?1002l ?1000l`, reverse of
+/// crossterm's `EnableMouseCapture` enable order), disable focus reporting
+/// (`?1004l`), leave the alternate screen (`?1049l`), and show the cursor
+/// (`?25h`), then a bare CR/LF so a following shell prompt does not run on
+/// from wherever the cursor was left. Every step is idempotent against a
+/// mode that was never entered (an inline pane never enters the alternate
+/// screen, for instance), so this single sequence is correct regardless of
+/// [`PaneScreen`]. Used verbatim, byte-for-byte, by
+/// `interrupt::rescue_terminal_signal_safe` — kept `pub(crate)` and
+/// colocated here rather than duplicated so it can never silently drift out
+/// of lockstep with the crossterm calls [`restore_terminal`] issues below;
+/// `tests::full_restore_escape_disables_every_mode_the_pane_enables` pins
+/// the invariant.
+pub(crate) const FULL_RESTORE_ESCAPE: &[u8] =
+    b"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1004l\x1b[?1049l\x1b[?25h\r\n";
+
 /// Which terminal mode a [`RatatuiPane`] owns: the historical full alternate
 /// screen (dashboard, demo, trait editor), or P244's inline viewport (the
 /// live run pane), which leaves the caller's scrollback above it intact for
@@ -369,6 +396,11 @@ impl RatatuiPane {
         // terminal it can actually read the answer from.
         adopt_controlling_terminal();
         install_panic_hook();
+        // Every pane-owning surface (dashboard, demo, editor, the live run
+        // pane) needs the SIGTERM/SIGHUP/SIGINT rescue ladder, not just the
+        // drive loop's own `drive.rs` call — both call sites are idempotent
+        // via the same `Once`.
+        crate::app::interrupt::install();
         enable_raw_mode()?;
         if let Err(err) = execute!(std::io::stderr(), EnableFocusChange) {
             let _ = execute!(std::io::stderr(), DisableFocusChange);
@@ -1122,6 +1154,24 @@ fn style_for(tone: Tone) -> Style {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn full_restore_escape_disables_every_mode_the_pane_enables() {
+        // Lockstep invariant with `new_with_options`/`restore_terminal`: for
+        // every mode a pane can enable, the signal-safe rescue const must
+        // carry the matching disable escape. Not a snapshot of the whole
+        // byte string — a per-mode membership check, so appending an
+        // unrelated escape (e.g. the trailing CR/LF) never breaks the test.
+        let escape = std::str::from_utf8(FULL_RESTORE_ESCAPE).expect("ascii escapes");
+        for mode in [
+            "?1000l", "?1002l", "?1003l", "?1006l", "?1004l", "?1049l", "?25h",
+        ] {
+            assert!(
+                escape.contains(mode),
+                "FULL_RESTORE_ESCAPE missing {mode}: {escape:?}"
+            );
+        }
+    }
 
     #[test]
     fn input_notification_advances_generation_and_wakes_after_queueing() {
