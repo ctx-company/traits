@@ -466,6 +466,39 @@ pub fn record_session_title_failure(
     Ok(true)
 }
 
+/// Finish a claimed attempt as terminal unconditionally, regardless of
+/// `attempts`. 0079: an api-transport title dispatch already retried
+/// internally (the provider client's own bounded, transient-only retry) —
+/// re-driving its failure through the ordinary [`record_session_title_failure`]
+/// attempt ladder would let a later tick reclaim and re-dispatch it, stacking
+/// a second retry layer on top of the client's own (the draft's "double
+/// retry" risk). As with [`record_session_title_failure`], a stale (not
+/// current) owner cannot change a newer owner's lifecycle.
+pub fn record_session_title_failure_terminal(
+    path: &Utf8Path,
+    owner: &str,
+    reason: String,
+) -> crate::Result<bool> {
+    let mut session = read_run_session(path)?;
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let Some(SessionTitleState::InFlight {
+        owner: current,
+        attempts,
+    }) = session.provenance.session_title.as_ref()
+    else {
+        return Ok(false);
+    };
+    if current != owner {
+        return Ok(false);
+    }
+    session.provenance.session_title = Some(SessionTitleState::Terminal {
+        attempts: *attempts,
+        reason,
+    });
+    write_run_session(path, &session)?;
+    Ok(true)
+}
+
 /// Terminally complete an owned claim when no narrator can be resolved.
 pub fn record_session_title_no_narrator(path: &Utf8Path, owner: &str) -> crate::Result<bool> {
     let mut session = read_run_session(path)?;

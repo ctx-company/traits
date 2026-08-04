@@ -202,6 +202,11 @@ pub(crate) struct NarratorConfig {
     /// warm seam gets its own copy via [`NarratorWarmConfig::new`].
     pub(crate) sandbox: Option<ctx_traits_io::confinement::SpawnSandbox>,
     pub(crate) trace: Option<NarratorTraceContext>,
+    /// 0079: when set, this narrator seat resolved to `transport = "api"`
+    /// with a resolving key — [`dispatch_narration`] dispatches through the
+    /// native provider client instead of spawning `argv`/`warm`, and every
+    /// field above that only makes sense for a harness subprocess is unused.
+    pub(crate) api: Option<super::agent_dispatch::ApiSeatRequest>,
 }
 
 #[derive(Clone)]
@@ -713,6 +718,9 @@ pub(crate) fn dispatch_narration(
     config: &NarratorConfig,
     prompt: String,
 ) -> (Result<String, String>, u64) {
+    if let Some(request) = config.api.as_ref() {
+        return dispatch_narration_api(request, prompt);
+    }
     let mut call_total: u64 = 0;
     let mut fallback_reason = None;
     let result = (|| {
@@ -752,6 +760,31 @@ pub(crate) fn dispatch_narration(
         })
     })();
     (result, call_total)
+}
+
+/// 0079: the api-transport counterpart of the warm/cold harness dispatch
+/// above — one blocking round trip through the native provider client, no
+/// spawn/trace/warm-pool machinery to thread through. Callers observe the
+/// same `(Result<String, String>, u64)` shape so `narrate_once`,
+/// `finish_with_summary_call`, and every cold narrator caller (merge,
+/// session-title) stay format-agnostic.
+fn dispatch_narration_api(
+    request: &super::agent_dispatch::ApiSeatRequest,
+    prompt: String,
+) -> (Result<String, String>, u64) {
+    match super::agent_dispatch::dispatch_api_seat(
+        request,
+        None,
+        &prompt,
+        ctx_traits_io::provider_client::DEFAULT_MAX_TOKENS,
+    ) {
+        Ok(response) => {
+            let call_total =
+                response.input_tokens.unwrap_or(0) + response.output_tokens.unwrap_or(0);
+            (Ok(response.text), call_total)
+        }
+        Err(error) => (Err(error.to_string()), 0),
+    }
 }
 
 fn narrate_cold(
@@ -1846,6 +1879,7 @@ mod tests {
                 harness_id: "fake".to_string(),
                 sequence: Arc::new(AtomicU64::new(0)),
             }),
+            api: None,
         };
 
         let accumulator = ctx_traits_io::harness::AttemptTokenAccumulator::new(|_delta| {});

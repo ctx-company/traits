@@ -100,8 +100,15 @@ pub const TESTHOOK_STARTUP_OBSERVER_TEST_ROOT: &str = "CTX_TRAITS_STARTUP_OBSERV
 #[cfg(debug_assertions)]
 pub const TESTHOOK_TRUST_TEST_CONFIG_HOME: &str = "CTX_TRAITS_TRUST_TEST_CONFIG_HOME";
 
+/// Unit-test fixture: a deliberately-unset `api-key-env` reference name used
+/// by 0079's `resolve_api_seat` degrade-path tests to prove a missing key
+/// reference falls back to the harness declaration rather than failing the
+/// run. Never actually set in any environment.
 #[cfg(debug_assertions)]
-fn testhook_env_reference() -> [EnvVarDoc; 6] {
+pub const TESTHOOK_API_TRANSPORT_MISSING_KEY: &str = "CTX_TEST_NONEXISTENT_API_KEY_0079";
+
+#[cfg(debug_assertions)]
+fn testhook_env_reference() -> [EnvVarDoc; 7] {
     [
         EnvVarDoc {
             name: TESTHOOK_CHECKPOINT_WAVE_PERSISTED,
@@ -133,7 +140,22 @@ fn testhook_env_reference() -> [EnvVarDoc; 6] {
             contract: "Unit-test parent→child handoff: the config home a `trust` child resolves its trust store under, keeping the test off the developer's real store. Set only by that test. Absent from release builds.",
             kind: EnvVarKind::DebugOnlyTestHook,
         },
+        EnvVarDoc {
+            name: TESTHOOK_API_TRANSPORT_MISSING_KEY,
+            contract: "Unit-test fixture: a deliberately-unset `api-key-env` reference name proving 0079's `resolve_api_seat` degrades instead of failing when the key does not resolve. Never actually set. Absent from release builds.",
+            kind: EnvVarKind::DebugOnlyTestHook,
+        },
     ]
+}
+
+/// Resolves a config-declared environment-variable *reference* by name
+/// (0069's channel-secrets doctrine, reused by 0079's `api-key-env`): config
+/// stores the variable's NAME only, and this is the one place its VALUE is
+/// ever read — never serialized, logged, or echoed back. An unset or
+/// empty-string variable resolves to `None`, the same "absent" the caller
+/// degrades on either way.
+pub fn resolve_env_var_reference(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 fn base_env_reference() -> Vec<EnvVarDoc> {

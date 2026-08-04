@@ -1122,6 +1122,22 @@ fn command_step_bound_doctor_rows(
     rows
 }
 
+/// 0079: whether an `api-key-env` reference resolves — the variable's NAME
+/// only ever appears elsewhere in this render; its VALUE is never read into
+/// any rendered string, here or anywhere else.
+fn api_key_status(api_key_env: Option<&str>) -> String {
+    match api_key_env {
+        None => "absent".to_string(),
+        Some(name) => {
+            if ctx_traits_io::env_reference::resolve_env_var_reference(name).is_some() {
+                "resolves".to_string()
+            } else {
+                "missing".to_string()
+            }
+        }
+    }
+}
+
 fn format_env_var_kind(kind: ctx_traits_io::env_reference::EnvVarKind) -> &'static str {
     match kind {
         ctx_traits_io::env_reference::EnvVarKind::UserFacing => "user-facing",
@@ -1176,7 +1192,37 @@ fn add_assignment_rows(
                 },
             ),
         ];
-        for (field, rendered) in rows {
+        // 0079: `transport = "api"` endpoint visibility is the designed
+        // defense against a `base-url` silently redirecting every prompt to
+        // an arbitrary host — always rendered when declared, never only when
+        // the transport happens to resolve to `api`, so a stale endpoint
+        // left behind by a transport switch is still visible.
+        let api_rows: Vec<(&str, String)> = if assignment.transport
+            == Some(ctx_traits_io::harness_config::RunTransport::Api)
+            || assignment.api.base_url.is_some()
+        {
+            vec![
+                (
+                    "base-url",
+                    crate::app::presentation::wire_name(&assignment.api.base_url),
+                ),
+                (
+                    "wire",
+                    crate::app::presentation::wire_name(&assignment.api.wire),
+                ),
+                (
+                    "api-key-env",
+                    crate::app::presentation::wire_name(&assignment.api.api_key_env),
+                ),
+                (
+                    "api-key-status",
+                    api_key_status(assignment.api.api_key_env.as_deref()),
+                ),
+            ]
+        } else {
+            Vec::new()
+        };
+        for (field, rendered) in rows.into_iter().chain(api_rows) {
             let name = format!("{prefix}.{field}");
             let winner = winners.get(&name).cloned().unwrap_or(
                 ctx_traits_io::harness_config::ConfigWinner {

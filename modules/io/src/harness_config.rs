@@ -268,6 +268,7 @@ impl HarnessMcpConvention {
 pub enum RunTransport {
     Cli,
     Mcp,
+    Api,
 }
 
 impl RunTransport {
@@ -275,6 +276,30 @@ impl RunTransport {
         match self {
             Self::Cli => "cli",
             Self::Mcp => "mcp",
+            Self::Api => "api",
+        }
+    }
+}
+
+/// Which wire format a `transport = "api"` seat's endpoint speaks (0079):
+/// OpenAI-compatible `/chat/completions` (the baseline — OpenRouter, proxies,
+/// local servers) or Anthropic's `/v1/messages`. Declared on the seat as
+/// `wire`, never inferred from `base-url`, so a self-hosted or unfamiliar
+/// host name never has to be pattern-matched to guess its shape.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderWire {
+    OpenaiCompat,
+    Anthropic,
+}
+
+impl ProviderWire {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenaiCompat => "openai-compat",
+            Self::Anthropic => "anthropic",
         }
     }
 }
@@ -698,6 +723,7 @@ impl RunProfileAssignment {
             system_prompt: None,
             extra_args: Vec::new(),
             budget: RoleBudget::default(),
+            api: Box::default(),
         }
     }
 }
@@ -1783,6 +1809,40 @@ pub struct ProfileAssignment {
     /// bytes are unaffected until an operator actually declares one.
     #[serde(default, skip_serializing_if = "RoleBudget::is_empty")]
     pub budget: RoleBudget,
+    /// 0079 `transport = "api"` endpoint fields, boxed and flattened: boxed
+    /// so this rarely-populated cluster does not grow every
+    /// [`ProfileAssignment`] (and, through it, [`RoleAssignmentValue`]'s
+    /// `Single` variant vs. `List`'s `Vec` pointer — clippy's
+    /// `large_enum_variant`) by six fields' worth of bytes; flattened so the
+    /// wire shape stays the flat `base-url`/`wire`/`api-key-env`/... seat
+    /// fields the draft specifies, not a nested `[agent.role.<role>.api]`
+    /// sub-table. Every field skip-serializes when absent, so a config that
+    /// never declares any of them keeps byte-identical serialized
+    /// assignments.
+    #[serde(flatten)]
+    pub api: Box<ApiEndpoint>,
+}
+
+/// See [`ProfileAssignment::api`].
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub struct ApiEndpoint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<ProviderWire>,
+    /// The environment variable's NAME, never its value — resolved at
+    /// dispatch/doctor time by [`crate::env_reference::resolve_env_var_reference`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retries: Option<u32>,
 }
 
 impl<'de> Deserialize<'de> for ProfileAssignment {
@@ -1813,24 +1873,44 @@ impl<'de> Deserialize<'de> for ProfileAssignment {
             extra_args: Vec<String>,
             #[serde(default)]
             budget: RoleBudget,
+            #[serde(default)]
+            base_url: Option<String>,
+            #[serde(default)]
+            wire: Option<ProviderWire>,
+            #[serde(default)]
+            api_key_env: Option<String>,
+            #[serde(default)]
+            connect_timeout_ms: Option<u64>,
+            #[serde(default)]
+            read_timeout_ms: Option<u64>,
+            #[serde(default)]
+            retries: Option<u32>,
         }
 
-        let wire = WireAssignment::deserialize(deserializer)?;
+        let raw = WireAssignment::deserialize(deserializer)?;
         Ok(Self {
             replace_inherited: false,
             model_selector: None,
             model_resolution_reason: None,
-            mode: wire.mode.unwrap_or_default(),
-            mode_authored: wire.mode.is_some(),
-            harness: wire.harness,
-            transport: wire.transport,
-            session_mode: wire.session_mode,
-            model: wire.model,
-            model_tier: wire.model_tier,
-            reasoning_effort: wire.reasoning_effort,
-            system_prompt: wire.system_prompt,
-            extra_args: wire.extra_args,
-            budget: wire.budget,
+            mode: raw.mode.unwrap_or_default(),
+            mode_authored: raw.mode.is_some(),
+            harness: raw.harness,
+            transport: raw.transport,
+            session_mode: raw.session_mode,
+            model: raw.model,
+            model_tier: raw.model_tier,
+            reasoning_effort: raw.reasoning_effort,
+            system_prompt: raw.system_prompt,
+            extra_args: raw.extra_args,
+            budget: raw.budget,
+            api: Box::new(ApiEndpoint {
+                base_url: raw.base_url,
+                wire: raw.wire,
+                api_key_env: raw.api_key_env,
+                connect_timeout_ms: raw.connect_timeout_ms,
+                read_timeout_ms: raw.read_timeout_ms,
+                retries: raw.retries,
+            }),
         })
     }
 }
@@ -5486,10 +5566,13 @@ pub fn parse_assignment_overrides(overrides: &[String]) -> crate::Result<Assignm
         let transport = match parts.next() {
             Some("cli") | None => Some(RunTransport::Cli),
             Some("mcp") => Some(RunTransport::Mcp),
+            Some("api") => Some(RunTransport::Api),
             Some(other) => {
                 return invalid_config(
                     "run.assign.transport",
-                    format!("unsupported assignment transport {other:?}; expected cli or mcp"),
+                    format!(
+                        "unsupported assignment transport {other:?}; expected cli, mcp, or api"
+                    ),
                 );
             }
         };
@@ -5534,6 +5617,7 @@ pub fn parse_assignment_overrides(overrides: &[String]) -> crate::Result<Assignm
             system_prompt: None,
             extra_args: Vec::new(),
             budget: RoleBudget::default(),
+            api: Box::default(),
         };
         match seat {
             Some(seat) => {
@@ -5679,6 +5763,24 @@ fn merge_assignment_fields(base: &mut ProfileAssignment, next: &ProfileAssignmen
         // argv is ordered command input, not an additive set. A nearer
         // assignment owns the complete argument vector.
         base.extra_args = next.extra_args.clone();
+    }
+    if next.api.base_url.is_some() {
+        base.api.base_url = next.api.base_url.clone();
+    }
+    if next.api.wire.is_some() {
+        base.api.wire = next.api.wire;
+    }
+    if next.api.api_key_env.is_some() {
+        base.api.api_key_env = next.api.api_key_env.clone();
+    }
+    if next.api.connect_timeout_ms.is_some() {
+        base.api.connect_timeout_ms = next.api.connect_timeout_ms;
+    }
+    if next.api.read_timeout_ms.is_some() {
+        base.api.read_timeout_ms = next.api.read_timeout_ms;
+    }
+    if next.api.retries.is_some() {
+        base.api.retries = next.api.retries;
     }
     overlay_role_budget(&mut base.budget, &next.budget);
 }
@@ -6130,6 +6232,13 @@ fn validate_special_assignment(assignment: &ProfileAssignment, path: &str) -> cr
 fn validate_assignment(role: &str, assignment: &ProfileAssignment) -> crate::Result<()> {
     match assignment.mode {
         RunAssignmentMode::Attach => validate_attach_assignment(role, assignment)?,
+        // 0079: an api-transport seat needs no harness declaration of its
+        // own — its endpoint is `base-url`/`model`, validated by
+        // `validate_api_transport` below. A harness may still be declared
+        // alongside it as the missing-key/unavailable-endpoint fallback
+        // (dispatch resolution owns that precedence), so it is not rejected
+        // here either — only not required.
+        RunAssignmentMode::Harness if assignment.transport == Some(RunTransport::Api) => {}
         RunAssignmentMode::Harness => {
             if assignment
                 .harness
@@ -6182,6 +6291,50 @@ fn validate_assignment_common(role: &str, assignment: &ProfileAssignment) -> cra
     }
     if let Some(effort) = assignment.reasoning_effort.as_deref() {
         validate_reasoning_effort(effort, &format!("assign.{role}.reasoning-effort"))?;
+    }
+    if assignment.transport == Some(RunTransport::Api) {
+        validate_api_transport(role, assignment)?;
+    }
+    Ok(())
+}
+
+/// 0079: `transport = "api"` validation. The worker/driver seat
+/// (`[agent.role.default]`) is rejected structurally here — not by
+/// convention — because it is the one seat that needs tools, a filesystem,
+/// and an agentic loop, which this one-shot transport does not provide. Every
+/// other role requires `base-url` and a model, since a one-shot HTTP round
+/// trip has no other way to find an endpoint or a model name.
+fn validate_api_transport(role: &str, assignment: &ProfileAssignment) -> crate::Result<()> {
+    if role == DEFAULT_SEAT {
+        return invalid_config(
+            format!("assign.{role}.transport"),
+            "transport = \"api\" is not available on the worker/driver seat (agent.role.default); it needs tools and an agentic loop, which is what a harness is for",
+        );
+    }
+    if assignment
+        .api
+        .base_url
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return invalid_config(
+            format!("assign.{role}.base-url"),
+            "transport = \"api\" requires base-url",
+        );
+    }
+    if assignment
+        .model
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return invalid_config(
+            format!("assign.{role}.model"),
+            "transport = \"api\" requires model",
+        );
     }
     Ok(())
 }
@@ -6286,6 +6439,14 @@ fn resolve_assignment_model(
     mut assignment: ProfileAssignment,
 ) -> crate::Result<ProfileAssignment> {
     if assignment.mode == RunAssignmentMode::Attach {
+        return Ok(assignment);
+    }
+    if assignment.transport == Some(RunTransport::Api) {
+        // 0079: an api-transport seat's model is an opaque string handed
+        // straight to the provider endpoint over HTTP — there is no harness
+        // model catalog to resolve it against, and (per
+        // `validate_api_transport`) no harness need be declared at all, so
+        // this must not require one.
         return Ok(assignment);
     }
     let explicit_model = assignment.model.clone();
@@ -8798,5 +8959,163 @@ mod config_tests {
                 .and_then(|assignment| assignment.harness),
             Some("override-harness".to_string())
         );
+    }
+
+    // -- 0079: `RunTransport::Api` -----------------------------------------
+
+    #[test]
+    fn transport_api_parses_from_toml() {
+        let config: RuntimeConfig = toml::from_str(
+            "[agent.role.narrator]\ntransport = \"api\"\nmodel = \"gpt-4o-mini\"\nbase-url = \"https://openrouter.ai/api/v1\"\nwire = \"openai-compat\"\napi-key-env = \"OPENROUTER_API_KEY\"\n",
+        )
+        .expect("api transport decodes");
+        let RoleAssignmentValue::Single(assignment) = &config.agent.role["narrator"] else {
+            panic!("expected a single-table assignment");
+        };
+        assert_eq!(assignment.transport, Some(RunTransport::Api));
+        assert_eq!(
+            assignment.api.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(assignment.api.wire, Some(ProviderWire::OpenaiCompat));
+        assert_eq!(
+            assignment.api.api_key_env.as_deref(),
+            Some("OPENROUTER_API_KEY")
+        );
+    }
+
+    #[test]
+    fn transport_api_round_trips_through_serialize() {
+        let mut assignment = ProfileAssignment {
+            transport: Some(RunTransport::Api),
+            model: Some("claude-haiku-4-5".into()),
+            ..ProfileAssignment::default()
+        };
+        assignment.api.base_url = Some("https://api.anthropic.com".into());
+        assignment.api.wire = Some(ProviderWire::Anthropic);
+        assignment.api.api_key_env = Some("ANTHROPIC_API_KEY".into());
+        let text = toml::to_string(&assignment).expect("assignment serializes");
+        assert!(text.contains("transport = \"api\""));
+        assert!(text.contains("base-url = \"https://api.anthropic.com\""));
+        assert!(text.contains("wire = \"anthropic\""));
+        assert!(text.contains("api-key-env = \"ANTHROPIC_API_KEY\""));
+    }
+
+    #[test]
+    fn assignment_with_no_api_fields_serializes_without_them() {
+        let assignment = single("claude");
+        let text = toml::to_string(&assignment).expect("assignment serializes");
+        assert!(!text.contains("base-url"));
+        assert!(!text.contains("api-key-env"));
+        assert!(!text.contains("\nwire "));
+    }
+
+    fn api_assignment(model: Option<&str>, base_url: Option<&str>) -> ProfileAssignment {
+        ProfileAssignment {
+            mode: RunAssignmentMode::Harness,
+            transport: Some(RunTransport::Api),
+            model: model.map(String::from),
+            api: Box::new(ApiEndpoint {
+                base_url: base_url.map(String::from),
+                wire: Some(ProviderWire::OpenaiCompat),
+                api_key_env: Some("SOME_API_KEY".into()),
+                ..ApiEndpoint::default()
+            }),
+            ..ProfileAssignment::default()
+        }
+    }
+
+    #[test]
+    fn transport_api_requires_base_url() {
+        let assignment = api_assignment(Some("gpt-4o-mini"), None);
+        let error = validate_assignment("narrator", &assignment).expect_err("must reject");
+        assert!(error.to_string().contains("base-url"));
+    }
+
+    #[test]
+    fn transport_api_requires_model() {
+        let assignment = api_assignment(None, Some("https://example.com/v1"));
+        let error = validate_assignment("narrator", &assignment).expect_err("must reject");
+        assert!(error.to_string().contains("model"));
+    }
+
+    #[test]
+    fn transport_api_accepts_a_fully_declared_one_shot_seat() {
+        let assignment = api_assignment(Some("gpt-4o-mini"), Some("https://example.com/v1"));
+        validate_assignment("narrator", &assignment).expect("must accept");
+    }
+
+    #[test]
+    fn transport_api_is_rejected_on_the_worker_seat() {
+        let assignment = api_assignment(Some("gpt-4o-mini"), Some("https://example.com/v1"));
+        let error =
+            validate_assignment(DEFAULT_SEAT, &assignment).expect_err("must reject worker seat");
+        assert!(error.to_string().contains("default"));
+    }
+
+    #[test]
+    fn transport_api_does_not_require_a_harness_declaration() {
+        // A seat may still declare a harness fallback (dispatch resolution
+        // owns the precedence), but config validation must not force one.
+        let assignment = api_assignment(Some("gpt-4o-mini"), Some("https://example.com/v1"));
+        assert!(assignment.harness.is_none());
+        validate_assignment("narrator", &assignment).expect("api transport needs no harness");
+    }
+
+    #[test]
+    fn transport_api_key_env_stays_a_name_never_a_value() {
+        let config: RuntimeConfig = toml::from_str(
+            "[agent.role.narrator]\ntransport = \"api\"\nmodel = \"m\"\nbase-url = \"https://example.com\"\napi-key-env = \"MY_SECRET_KEY_NAME\"\n",
+        )
+        .expect("decodes");
+        let RoleAssignmentValue::Single(assignment) = &config.agent.role["narrator"] else {
+            panic!("expected a single-table assignment");
+        };
+        // The declared value is a variable NAME, never resolved/interpreted
+        // by config decoding itself.
+        assert_eq!(
+            assignment.api.api_key_env.as_deref(),
+            Some("MY_SECRET_KEY_NAME")
+        );
+    }
+
+    #[test]
+    fn resolve_assignment_model_skips_harness_catalog_for_api_transport() {
+        // A harness-declared model requires a harness to resolve its catalog
+        // against; an api-transport model is an opaque string sent straight
+        // to the endpoint, so resolving it must not require a harness even
+        // though `assignment.harness` is unset.
+        let assignment = api_assignment(Some("gpt-4o-mini"), Some("https://example.com/v1"));
+        assert!(assignment.harness.is_none());
+        let mut catalogs = BTreeMap::new();
+        let mut capabilities = Vec::new();
+        let resolved = resolve_assignment_model(
+            &HarnessRegistry::default(),
+            &mut catalogs,
+            &mut capabilities,
+            assignment,
+        )
+        .expect("api-transport model resolution must not require a harness");
+        assert_eq!(resolved.model.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn merge_assignment_fields_overlays_api_fields_independently() {
+        let mut base = api_assignment(Some("base-model"), Some("https://base.example.com"));
+        let next = ProfileAssignment {
+            api: Box::new(ApiEndpoint {
+                base_url: Some("https://override.example.com".into()),
+                ..ApiEndpoint::default()
+            }),
+            ..ProfileAssignment::default()
+        };
+        merge_assignment_fields(&mut base, &next);
+        assert_eq!(
+            base.api.base_url.as_deref(),
+            Some("https://override.example.com")
+        );
+        // Fields `next` left unset survive from `base` untouched.
+        assert_eq!(base.model.as_deref(), Some("base-model"));
+        assert_eq!(base.api.wire, Some(ProviderWire::OpenaiCompat));
     }
 }

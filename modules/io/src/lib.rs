@@ -57,6 +57,7 @@ pub mod parse;
 pub mod path_safety;
 pub mod process;
 pub mod project_lock;
+pub mod provider_client;
 pub mod publish;
 pub mod read;
 pub mod registry;

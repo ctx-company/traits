@@ -1550,14 +1550,21 @@ fn drive_loop(
     // P478: the claude-code half of confinement is argv-delivered
     // (`--settings`); the opencode half is already folded into
     // `worktree_env` above (`OPENCODE_CONFIG_CONTENT`).
-    let narrator_plan = if narration_requested {
-        profile
-            .resolved_narrator_assignment()?
-            .map(|assignment| plan_from_assignment(assignment, None, None))
+    let narrator_assignment = if narration_requested {
+        profile.resolved_narrator_assignment()?
     } else {
         None
     };
-    validate_narrator_assignment(profile, narrator_plan.as_ref())?;
+    let narrator_seat_dispatch = narrator_assignment
+        .as_ref()
+        .map(agent_dispatch::resolve_seat_dispatch);
+    let narrator_plan =
+        narrator_assignment.map(|assignment| plan_from_assignment(assignment, None, None));
+    validate_narrator_assignment(
+        &profile.registry,
+        narrator_plan.as_ref(),
+        narrator_seat_dispatch.as_ref(),
+    )?;
     // Reuses the single deadline anchor `drive()` established before the
     // conductor-lease wait, rather than starting a fresh timer here — time
     // already spent waiting for the lease counts against this same
@@ -2059,6 +2066,7 @@ fn drive_loop(
                 &input,
                 profile,
                 narrator_plan.as_ref(),
+                narrator_seat_dispatch.as_ref(),
                 NarratorFrameContext {
                     session: &outcome.session,
                     item_id: frame.item_id.as_deref(),
@@ -2443,6 +2451,7 @@ fn drive_loop(
                 &input,
                 profile,
                 narrator_plan.as_ref(),
+                narrator_seat_dispatch.as_ref(),
                 NarratorFrameContext {
                     session: &outcome.session,
                     item_id: frame.item_id.as_deref(),
@@ -3735,8 +3744,18 @@ fn create_run_panel(
 pub(crate) struct PendingSessionTitle(Arc<Mutex<Option<SessionTitleOutcome>>>);
 
 enum SessionTitleOutcome {
-    Success { owner: String, title: String },
-    Failure { owner: String, reason: String },
+    Success {
+        owner: String,
+        title: String,
+    },
+    Failure {
+        owner: String,
+        reason: String,
+        /// 0079: an api-transport dispatch already retried internally
+        /// (bounded, transient-only); its failure is terminal on the first
+        /// claimed attempt rather than feeding the outer 0076 claim ladder.
+        terminal: bool,
+    },
 }
 
 impl PendingSessionTitle {
@@ -3762,13 +3781,24 @@ impl PendingSessionTitle {
             SessionTitleOutcome::Success { owner, title } => {
                 ctx_traits_io::run_session::record_session_title(ledger_path, &owner, title)
             }
-            SessionTitleOutcome::Failure { owner, reason } => {
-                ctx_traits_io::run_session::record_session_title_failure(
-                    ledger_path,
-                    &owner,
-                    reason,
-                )
-            }
+            SessionTitleOutcome::Failure {
+                owner,
+                reason,
+                terminal: true,
+            } => ctx_traits_io::run_session::record_session_title_failure_terminal(
+                ledger_path,
+                &owner,
+                reason,
+            ),
+            SessionTitleOutcome::Failure {
+                owner,
+                reason,
+                terminal: false,
+            } => ctx_traits_io::run_session::record_session_title_failure(
+                ledger_path,
+                &owner,
+                reason,
+            ),
         };
         match result {
             Ok(true) => match ctx_traits_io::run_session::read_run_session(ledger_path) {
@@ -3828,6 +3858,13 @@ fn maybe_dispatch_session_title(
     let Some(attempts) = attempts else {
         return;
     };
+    let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
+    // 0079: `cold_narrator_config_for_session_title` applies the single
+    // resolution-owned api/harness precedence (`resolve_seat_dispatch`) —
+    // api wins when its key resolves, the declared harness is the degrade
+    // target when it does not (0030's "never fail" rule), and only a seat
+    // with neither returns `None` here. `doctor --config` reports the same
+    // unresolved key status independently, so the two can never disagree.
     let Some(config) = cold_narrator_config_for_session_title(
         profile,
         ColdNarratorContext {
@@ -3852,7 +3889,6 @@ fn maybe_dispatch_session_title(
         }
         return;
     };
-    let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
     if let Some(panel) = run_panel {
         panel.set_title_state(Some(
             ctx_traits_core::procedure::session::SessionTitleState::InFlight {
@@ -3865,6 +3901,13 @@ fn maybe_dispatch_session_title(
     let tokens = narrator_tokens.clone();
     let pending = pending.clone();
     let owner = claim_owner.to_string();
+    // 0079: the api client owns its own bounded transient retry; re-driving
+    // an api failure through the outer 3-attempt claim ladder would multiply
+    // the two retry layers (worst case 3 claims × client retries × read
+    // timeout — the draft's "double retry" risk). A harness-dispatched
+    // failure keeps the existing ladder (0076), since the harness path has
+    // no retry of its own.
+    let api_terminal = config.api.is_some();
     // Detached: `drive_loop` starts NOW. The ledger write is deliberately not
     // done here — see `PendingSessionTitle`.
     std::thread::spawn(move || {
@@ -3881,6 +3924,7 @@ fn maybe_dispatch_session_title(
             Err(error) => SessionTitleOutcome::Failure {
                 owner,
                 reason: error.to_string(),
+                terminal: api_terminal,
             },
         });
         // The drive thread persists and paints the outcome at a safe boundary.
@@ -4335,8 +4379,9 @@ fn plan_from_assignment(
 }
 
 fn validate_narrator_assignment(
-    profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    registry: &ctx_traits_io::harness_config::HarnessRegistry,
     plan: Option<&AssignmentPlan>,
+    seat_dispatch: Option<&agent_dispatch::SeatDispatch>,
 ) -> crate::Result<()> {
     // No narrator configured is a valid, deliberate mode: the live panel runs
     // in passthrough and shows the agent's own stream text (owner decision,
@@ -4345,11 +4390,25 @@ fn validate_narrator_assignment(
     let Some(plan) = plan else {
         return Ok(());
     };
+    // 0079: an api-transport narrator seat has no cli/harness convention to
+    // validate at all — config resolution already required its `base-url`/
+    // `model` — and a seat whose key does not resolve degrades to either its
+    // declared harness (validated below over the Cli transport, the actual
+    // dispatch path `resolve_seat_dispatch` chose) or to no narration at all
+    // (0030's "never fail" rule: a missing key must never hard-error a run).
+    let transport = match seat_dispatch {
+        Some(agent_dispatch::SeatDispatch::Api(_)) => return Ok(()),
+        Some(agent_dispatch::SeatDispatch::Unavailable { .. }) => return Ok(()),
+        Some(agent_dispatch::SeatDispatch::Harness) => {
+            ctx_traits_io::harness_config::RunTransport::Cli
+        }
+        Some(agent_dispatch::SeatDispatch::NotConfigured) | None => plan.transport,
+    };
     agent_dispatch::validate_cli_standing_agent(
-        &profile.registry,
+        registry,
         plan.mode,
         &plan.harness_id,
-        plan.transport,
+        transport,
         plan.model.as_deref(),
         plan.reasoning_effort.as_deref(),
         "progress narration",
@@ -7611,10 +7670,41 @@ pub(crate) fn resolve_offline_narrator_config(
 ) -> Option<harness_stream::NarratorConfig> {
     let mut profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[]).ok()?;
     let assignment = profile.resolved_narrator_assignment().ok()??;
+    let seat_dispatch = agent_dispatch::resolve_seat_dispatch(&assignment);
     let plan = plan_from_assignment(assignment, None, None);
-    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness
-        || plan.transport != ctx_traits_io::harness_config::RunTransport::Cli
-    {
+    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness {
+        return None;
+    }
+    if let agent_dispatch::SeatDispatch::Api(request) = seat_dispatch {
+        return Some(harness_stream::NarratorConfig {
+            argv: Vec::new(),
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            warm: None,
+            prompt_delivery: ctx_traits_io::harness::PromptDelivery::Arg,
+            output_id: None,
+            task_label: frame_key.to_string(),
+            timeout_ms: request.read_timeout_ms,
+            exec_dir: None,
+            confinement: None,
+            sandbox: None,
+            trace: Some(harness_stream::NarratorTraceContext {
+                run_id: run_id.to_string(),
+                session_id: session_id.to_string(),
+                item_id: Some(frame_key.to_string()),
+                frame_title: frame_key.to_string(),
+                harness_id: "api".to_string(),
+                sequence: std::sync::Arc::new(AtomicU64::new(0)),
+            }),
+            api: Some(request),
+        });
+    }
+    if let agent_dispatch::SeatDispatch::Unavailable { reason } = &seat_dispatch {
+        eprintln!("narrator api transport unavailable, no harness fallback declared: {reason}");
+    }
+    let effective_cli = matches!(seat_dispatch, agent_dispatch::SeatDispatch::Harness)
+        || plan.transport == ctx_traits_io::harness_config::RunTransport::Cli;
+    if !effective_cli {
         return None;
     }
     let harness = profile.registry.harness.get(&plan.harness_id)?;
@@ -7650,6 +7740,7 @@ pub(crate) fn resolve_offline_narrator_config(
             harness_id: plan.harness_id.clone(),
             sequence: std::sync::Arc::new(AtomicU64::new(0)),
         }),
+        api: None,
     })
 }
 
@@ -7660,10 +7751,12 @@ struct NarratorResolution {
     unsupported_confinement: Vec<ctx_traits_core::response::CapabilityReport>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn narrator_config(
     input: &DriveInputs<'_>,
     profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
     plan: Option<&AssignmentPlan>,
+    seat_dispatch: Option<&agent_dispatch::SeatDispatch>,
     frame: NarratorFrameContext<'_>,
     narrator_warm_pool: &harness_stream::NarratorWarmPool,
     env_overlay: &BTreeMap<String, String>,
@@ -7682,9 +7775,51 @@ fn narrator_config(
     let Some(plan) = plan else {
         return none;
     };
-    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness
-        || plan.transport != ctx_traits_io::harness_config::RunTransport::Cli
-    {
+    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness {
+        return none;
+    }
+    // 0079: an api-transport narrator seat with a resolving key dispatches
+    // every live tick through the native provider client — no harness spawn,
+    // argv, or warm pool applies. This is the resolution-owned precedence
+    // (`resolve_seat_dispatch`) `doctor` and every other dispatch call site
+    // also consume, so they can never disagree about which narrator ran.
+    if let Some(agent_dispatch::SeatDispatch::Api(request)) = seat_dispatch {
+        return NarratorResolution {
+            config: Some(harness_stream::NarratorConfig {
+                argv: Vec::new(),
+                env_overlay: BTreeMap::new(),
+                env_remove: Vec::new(),
+                warm: None,
+                prompt_delivery: ctx_traits_io::harness::PromptDelivery::Arg,
+                output_id: None,
+                task_label: frame.task_label.to_string(),
+                timeout_ms: request.read_timeout_ms,
+                exec_dir: None,
+                confinement: None,
+                sandbox: None,
+                trace: Some(harness_stream::NarratorTraceContext {
+                    run_id: frame.session.run_id.as_str().to_string(),
+                    session_id: frame.session.session_id.as_str().to_string(),
+                    item_id: frame.item_id.map(str::to_string),
+                    frame_title: frame.task_label.to_string(),
+                    harness_id: "api".to_string(),
+                    sequence: std::sync::Arc::clone(frame.trace_sequence),
+                }),
+                api: Some(request.clone()),
+            }),
+            unsupported_confinement: Vec::new(),
+        };
+    }
+    // A declared harness is the fallback target whenever the api key does
+    // not resolve (`SeatDispatch::Harness`); an api seat with neither a
+    // resolving key nor a declared harness degrades to no narration at all
+    // (`SeatDispatch::Unavailable`) rather than erroring the drive.
+    if let Some(agent_dispatch::SeatDispatch::Unavailable { reason }) = seat_dispatch {
+        eprintln!("narrator api transport unavailable, no harness fallback declared: {reason}");
+    }
+    let effective_cli = matches!(seat_dispatch, Some(agent_dispatch::SeatDispatch::Harness))
+        || plan.transport == ctx_traits_io::harness_config::RunTransport::Cli;
+    if !effective_cli {
         return none;
     }
     let Some(harness) = profile.registry.harness.get(&plan.harness_id) else {
@@ -7784,6 +7919,7 @@ fn narrator_config(
                 harness_id: plan.harness_id.clone(),
                 sequence: std::sync::Arc::clone(frame.trace_sequence),
             }),
+            api: None,
         }),
         unsupported_confinement,
     }
@@ -7820,10 +7956,46 @@ fn cold_narrator_config(
     trace_item_id: Option<String>,
 ) -> Option<harness_stream::NarratorConfig> {
     let assignment = profile.resolved_narrator_assignment().ok().flatten()?;
+    let seat_dispatch = agent_dispatch::resolve_seat_dispatch(&assignment);
     let plan = plan_from_assignment(assignment, None, None);
-    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness
-        || plan.transport != ctx_traits_io::harness_config::RunTransport::Cli
-    {
+    if plan.mode != ctx_traits_io::harness_config::RunAssignmentMode::Harness {
+        return None;
+    }
+    // 0079: api wins when its key resolves; a declared harness (checked
+    // below over the Cli transport) is the degrade target when it does not;
+    // neither means no narrator at all. One precedence, consumed here for
+    // both merge and session-title cold dispatch, so `doctor` and dispatch
+    // agree by construction.
+    if let agent_dispatch::SeatDispatch::Api(request) = seat_dispatch {
+        return Some(harness_stream::NarratorConfig {
+            argv: Vec::new(),
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            warm: None,
+            prompt_delivery: ctx_traits_io::harness::PromptDelivery::Arg,
+            output_id: None,
+            task_label: task_label.to_string(),
+            timeout_ms: request.read_timeout_ms,
+            exec_dir: None,
+            confinement: None,
+            sandbox: None,
+            trace: Some(harness_stream::NarratorTraceContext {
+                run_id: ctx.run_id.to_string(),
+                session_id: ctx.session_id.to_string(),
+                item_id: trace_item_id,
+                frame_title: task_label.to_string(),
+                harness_id: "api".to_string(),
+                sequence: Arc::clone(ctx.trace_sequence),
+            }),
+            api: Some(request),
+        });
+    }
+    if let agent_dispatch::SeatDispatch::Unavailable { reason } = &seat_dispatch {
+        eprintln!("narrator api transport unavailable, no harness fallback declared: {reason}");
+    }
+    let effective_cli = matches!(seat_dispatch, agent_dispatch::SeatDispatch::Harness)
+        || plan.transport == ctx_traits_io::harness_config::RunTransport::Cli;
+    if !effective_cli {
         return None;
     }
     let harness = profile.registry.harness.get(&plan.harness_id)?;
@@ -7875,6 +8047,7 @@ fn cold_narrator_config(
             harness_id: plan.harness_id.clone(),
             sequence: Arc::clone(ctx.trace_sequence),
         }),
+        api: None,
     })
 }
 
@@ -8842,5 +9015,156 @@ mod session_title_flush_tests {
                 .and_then(|state| state.resolved_title().map(str::to_string)),
             Some("Persisted before failure".to_string())
         );
+    }
+
+    #[test]
+    fn an_api_transport_title_failure_is_terminal_on_its_first_claimed_attempt() {
+        // 0079 blocker title-double-retry-not-collapsed: an api-transport
+        // title dispatch already retried internally (the provider client's
+        // own bounded, transient-only retry) — its `Failure` must be
+        // terminal on the FIRST claimed attempt, never `Retryable`, so no
+        // later tick reclaims and re-dispatches it (two multiplying retry
+        // layers).
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::Failure {
+            owner: "driver-owner".to_string(),
+            reason: "endpoint unreachable".to_string(),
+            terminal: true,
+        });
+        pending.flush(&ledger_path, None);
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert!(matches!(
+            session.provenance.session_title,
+            Some(
+                ctx_traits_core::procedure::session::SessionTitleState::Terminal {
+                    attempts: 1,
+                    ..
+                }
+            )
+        ));
+        // No second claim: the api transport's own failure is terminal, not
+        // re-driven by the outer 0076 attempt ladder.
+        assert_eq!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("reclaim attempt"),
+            ctx_traits_io::run_session::SessionTitleClaim::NotClaimable
+        );
+    }
+
+    #[test]
+    fn a_harness_dispatched_title_failure_keeps_the_existing_retryable_ladder() {
+        // The harness-dispatched path has no client-side retry of its own —
+        // `terminal: false` must keep 0076's existing 3-attempt ladder alive
+        // exactly as before 0079.
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::Failure {
+            owner: "driver-owner".to_string(),
+            reason: "harness spawn failed".to_string(),
+            terminal: false,
+        });
+        pending.flush(&ledger_path, None);
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert!(matches!(
+            session.provenance.session_title,
+            Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { attempts: 1 })
+        ));
+        assert_eq!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("reclaim attempt"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 2 }
+        );
+    }
+}
+
+#[cfg(test)]
+mod narrator_seat_dispatch_tests {
+    use super::{AssignmentPlan, agent_dispatch, validate_narrator_assignment};
+    use ctx_traits_io::harness_config::{
+        HarnessRegistry, RunAssignmentMode, RunSessionMode, RunTransport,
+    };
+
+    fn plan(transport: RunTransport) -> AssignmentPlan {
+        AssignmentPlan {
+            harness_id: "attach".to_string(),
+            transport,
+            mode: RunAssignmentMode::Harness,
+            session_mode: RunSessionMode::default(),
+            model: Some("gpt-4o-mini".to_string()),
+            reasoning_effort: None,
+            system_prompt: None,
+            extra_args: Vec::new(),
+            model_resolution_evidence: None,
+            from_session: false,
+            seat_index: None,
+            list_length: None,
+        }
+    }
+
+    #[test]
+    fn an_api_transport_narrator_assignment_passes_validation_without_a_cli_harness() {
+        // 0079 blocker narrator-tick-api-path-unwired: an api-transport
+        // narrator plan must not be routed into `validate_cli_standing_agent`'s
+        // hard "requires transport cli" error.
+        let registry = HarnessRegistry::default();
+        let plan = plan(RunTransport::Api);
+        let request = agent_dispatch::ApiSeatRequest {
+            base_url: "https://example.invalid".to_string(),
+            wire: ctx_traits_io::harness_config::ProviderWire::OpenaiCompat,
+            model: "gpt-4o-mini".to_string(),
+            api_key: "test-key".to_string(),
+            connect_timeout_ms: ctx_traits_io::provider_client::DEFAULT_CONNECT_TIMEOUT_MS,
+            read_timeout_ms: ctx_traits_io::provider_client::DEFAULT_READ_TIMEOUT_MS,
+            retries: ctx_traits_io::provider_client::DEFAULT_RETRIES,
+        };
+        let seat_dispatch = agent_dispatch::SeatDispatch::Api(request);
+
+        validate_narrator_assignment(&registry, Some(&plan), Some(&seat_dispatch))
+            .expect("an api-transport narrator plan must validate cleanly");
+    }
+
+    #[test]
+    fn a_degraded_harness_narrator_seat_is_validated_over_the_cli_transport() {
+        // `SeatDispatch::Harness` means the seat's api key did not resolve
+        // and dispatch degraded to its declared harness — validation must
+        // check the harness over the Cli transport (not the declared `api`
+        // transport still carried on `plan`), and a harness this registry
+        // does not know about is still rejected.
+        let registry = HarnessRegistry::default();
+        let plan = plan(RunTransport::Api);
+        let seat_dispatch = agent_dispatch::SeatDispatch::Harness;
+
+        let error = validate_narrator_assignment(&registry, Some(&plan), Some(&seat_dispatch))
+            .expect_err("an unregistered fallback harness must still fail validation");
+        assert!(error.to_string().contains("unknown harness"));
+    }
+
+    #[test]
+    fn an_unavailable_narrator_seat_degrades_to_no_narration_without_error() {
+        let registry = HarnessRegistry::default();
+        let plan = plan(RunTransport::Api);
+        let seat_dispatch = agent_dispatch::SeatDispatch::Unavailable {
+            reason: "api-key-env \"MISSING\" does not resolve".to_string(),
+        };
+
+        validate_narrator_assignment(&registry, Some(&plan), Some(&seat_dispatch))
+            .expect("0030: a missing key must never hard-fail the drive");
     }
 }

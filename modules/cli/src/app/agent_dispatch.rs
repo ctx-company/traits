@@ -9,7 +9,8 @@
 use camino::Utf8Path;
 
 use ctx_traits_io::harness_config::{
-    HarnessCliConvention, HarnessDefinition, HarnessRegistry, RunAssignmentMode, RunTransport,
+    HarnessCliConvention, HarnessDefinition, HarnessRegistry, ProfileAssignment, ProviderWire,
+    RunAssignmentMode, RunTransport,
 };
 
 /// Environment variables removed before spawning a harness subprocess, so a
@@ -337,12 +338,155 @@ pub(crate) fn run_one_shot(
     .map_err(Into::into)
 }
 
+// ---------------------------------------------------------------------------
+// 0079: `transport = "api"` resolution and dispatch
+// ---------------------------------------------------------------------------
+
+/// One resolved `transport = "api"` seat's request-shaped fields, with every
+/// default (timeout, retries) already applied.
+#[derive(Clone)]
+pub(crate) struct ApiSeatRequest {
+    pub(crate) base_url: String,
+    pub(crate) wire: ProviderWire,
+    pub(crate) model: String,
+    /// The resolved credential VALUE. Held only for the duration of the one
+    /// call this is built for — never logged, serialized, or echoed.
+    pub(crate) api_key: String,
+    pub(crate) connect_timeout_ms: u64,
+    pub(crate) read_timeout_ms: u64,
+    pub(crate) retries: u32,
+}
+
+/// Whether a resolved standing-agent assignment can dispatch over the native
+/// api provider client, and if not, why. Config resolution already rejects
+/// `transport = "api"` on the worker/driver seat and requires `base-url`/
+/// `model` when it is declared, so this only has to resolve the credential
+/// — a run must never fail because a status line had no key (0030's rule):
+/// `Unavailable` is the caller's signal to degrade to the seat's harness
+/// declaration, or skip with a `doctor`-visible "unavailable" if none.
+pub(crate) enum ApiSeatResolution {
+    /// The seat did not declare `transport = "api"` — every existing config
+    /// takes this path unchanged.
+    NotConfigured,
+    Unavailable {
+        reason: String,
+    },
+    Ready(ApiSeatRequest),
+}
+
+pub(crate) fn resolve_api_seat(assignment: &ProfileAssignment) -> ApiSeatResolution {
+    if assignment.transport != Some(RunTransport::Api) {
+        return ApiSeatResolution::NotConfigured;
+    }
+    let (Some(base_url), Some(model)) = (assignment.api.base_url.clone(), assignment.model.clone())
+    else {
+        // Defense in depth: `validate_api_transport` already requires both
+        // whenever `transport = "api"` is declared, so this path is not the
+        // primary guard.
+        return ApiSeatResolution::Unavailable {
+            reason: "transport = \"api\" is missing base-url or model".to_string(),
+        };
+    };
+    let wire = assignment.api.wire.unwrap_or(ProviderWire::OpenaiCompat);
+    let resolved_key = assignment
+        .api
+        .api_key_env
+        .as_deref()
+        .and_then(ctx_traits_io::env_reference::resolve_env_var_reference);
+    let Some(api_key) = resolved_key else {
+        let name = assignment
+            .api
+            .api_key_env
+            .as_deref()
+            .unwrap_or("(none declared)");
+        return ApiSeatResolution::Unavailable {
+            reason: format!("api-key-env {name:?} does not resolve"),
+        };
+    };
+    ApiSeatResolution::Ready(ApiSeatRequest {
+        base_url,
+        wire,
+        model,
+        api_key,
+        connect_timeout_ms: assignment
+            .api
+            .connect_timeout_ms
+            .unwrap_or(ctx_traits_io::provider_client::DEFAULT_CONNECT_TIMEOUT_MS),
+        read_timeout_ms: assignment
+            .api
+            .read_timeout_ms
+            .unwrap_or(ctx_traits_io::provider_client::DEFAULT_READ_TIMEOUT_MS),
+        retries: assignment
+            .api
+            .retries
+            .unwrap_or(ctx_traits_io::provider_client::DEFAULT_RETRIES),
+    })
+}
+
+/// Resolution-owned precedence between a seat's `transport = "api"`
+/// declaration and its harness declaration, so `doctor` and every dispatch
+/// call site agree by construction instead of each call site improvising its
+/// own fallback order (0079 risk: "fallback ordering ambiguity"). Api wins
+/// whenever its key resolves; a declared harness is the degrade target
+/// whenever it does not (0030's "never fail" rule); `Unavailable` only when
+/// neither applies.
+pub(crate) enum SeatDispatch {
+    /// The seat did not declare `transport = "api"` at all — ordinary Cli
+    /// resolution proceeds exactly as it did before 0079.
+    NotConfigured,
+    Api(ApiSeatRequest),
+    /// Degrade to the seat's own harness declaration over the Cli transport.
+    Harness,
+    Unavailable {
+        reason: String,
+    },
+}
+
+pub(crate) fn resolve_seat_dispatch(assignment: &ProfileAssignment) -> SeatDispatch {
+    match resolve_api_seat(assignment) {
+        ApiSeatResolution::NotConfigured => SeatDispatch::NotConfigured,
+        ApiSeatResolution::Ready(request) => SeatDispatch::Api(request),
+        ApiSeatResolution::Unavailable { reason } => {
+            if assignment.harness.is_some() {
+                SeatDispatch::Harness
+            } else {
+                SeatDispatch::Unavailable { reason }
+            }
+        }
+    }
+}
+
+/// One blocking round trip through the resolved api seat. Callers own the
+/// system/user prompt shape and the fallback-to-harness degrade on `Err`.
+pub(crate) fn dispatch_api_seat(
+    request: &ApiSeatRequest,
+    system: Option<&str>,
+    user: &str,
+    max_tokens: u32,
+) -> Result<ctx_traits_io::provider_client::ProviderResponse, ctx_traits_io::provider_client::Error>
+{
+    ctx_traits_io::provider_client::dispatch(&ctx_traits_io::provider_client::ProviderRequest {
+        base_url: &request.base_url,
+        wire: request.wire,
+        model: &request.model,
+        api_key: &request.api_key,
+        system,
+        user,
+        max_tokens,
+        connect_timeout_ms: request.connect_timeout_ms,
+        read_timeout_ms: request.read_timeout_ms,
+        retries: request.retries,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        append_confinement, append_exec_dir, standing_agent_argv, tool_less_standing_agent_argv,
+        ApiSeatResolution, SeatDispatch, append_confinement, append_exec_dir, resolve_api_seat,
+        resolve_seat_dispatch, standing_agent_argv, tool_less_standing_agent_argv,
     };
     use ctx_traits_io::confinement::ConfinementPayloads;
+    use ctx_traits_io::harness_config::ProviderWire;
     use ctx_traits_io::harness_config::{
         HarnessCliConvention, HarnessDefinition, HarnessRegistry, built_in_harness_definition,
     };
@@ -609,5 +753,118 @@ mod tests {
         );
 
         assert_eq!(argv, ["claude", "-p"]);
+    }
+
+    fn api_assignment() -> ctx_traits_io::harness_config::ProfileAssignment {
+        let mut assignment: ctx_traits_io::harness_config::ProfileAssignment = toml::from_str(
+            "transport = \"api\"\nmodel = \"gpt-4o-mini\"\nbase-url = \"https://example.invalid\"\n",
+        )
+        .expect("api assignment decodes");
+        assignment.api.api_key_env =
+            Some(ctx_traits_io::env_reference::TESTHOOK_API_TRANSPORT_MISSING_KEY.to_string());
+        assignment
+    }
+
+    #[test]
+    fn resolve_api_seat_is_not_configured_for_a_cli_transport_seat() {
+        let assignment = ctx_traits_io::harness_config::ProfileAssignment::default();
+        assert!(matches!(
+            resolve_api_seat(&assignment),
+            ApiSeatResolution::NotConfigured
+        ));
+    }
+
+    #[test]
+    fn resolve_api_seat_degrades_when_key_env_does_not_resolve() {
+        // Missing env var → run must never fail because a status line had
+        // no key (0030's rule) — the caller degrades to its harness
+        // declaration on `Unavailable`, never a hard error here.
+        assert!(
+            std::env::var(ctx_traits_io::env_reference::TESTHOOK_API_TRANSPORT_MISSING_KEY)
+                .is_err()
+        );
+        let assignment = api_assignment();
+        match resolve_api_seat(&assignment) {
+            ApiSeatResolution::Unavailable { reason } => {
+                assert!(
+                    reason
+                        .contains(ctx_traits_io::env_reference::TESTHOOK_API_TRANSPORT_MISSING_KEY)
+                );
+            }
+            _ => panic!("expected Unavailable for an unresolved key reference"),
+        }
+    }
+
+    #[test]
+    fn resolve_api_seat_applies_default_timeouts_and_retries_when_undeclared() {
+        // Reuses an env var already present in every test process (PATH) to
+        // exercise the `Ready` branch without `std::env::set_var`, which is
+        // `unsafe` on this edition and process-wide/thread-unsafe to boot.
+        let mut assignment = api_assignment();
+        assignment.api.api_key_env = Some("PATH".to_string());
+        match resolve_api_seat(&assignment) {
+            ApiSeatResolution::Ready(request) => {
+                assert_eq!(request.base_url, "https://example.invalid");
+                assert_eq!(request.model, "gpt-4o-mini");
+                assert_eq!(request.wire, ProviderWire::OpenaiCompat);
+                assert_eq!(
+                    request.connect_timeout_ms,
+                    ctx_traits_io::provider_client::DEFAULT_CONNECT_TIMEOUT_MS
+                );
+                assert_eq!(
+                    request.read_timeout_ms,
+                    ctx_traits_io::provider_client::DEFAULT_READ_TIMEOUT_MS
+                );
+                assert_eq!(
+                    request.retries,
+                    ctx_traits_io::provider_client::DEFAULT_RETRIES
+                );
+                assert!(!request.api_key.is_empty());
+            }
+            _ => panic!("expected Ready when the key reference resolves"),
+        }
+    }
+
+    #[test]
+    fn seat_dispatch_degrades_to_the_declared_harness_when_the_key_env_does_not_resolve() {
+        // 0079 blocker missing-key-fallback-never-reaches-harness: an
+        // unresolved api key with a declared harness must resolve to the
+        // harness dispatch, never `Unavailable`.
+        let mut assignment = api_assignment();
+        assignment.harness = Some("claude-code".to_string());
+        assert!(matches!(
+            resolve_seat_dispatch(&assignment),
+            SeatDispatch::Harness
+        ));
+    }
+
+    #[test]
+    fn seat_dispatch_is_unavailable_when_the_key_env_does_not_resolve_and_no_harness_is_declared() {
+        let assignment = api_assignment();
+        assert!(assignment.harness.is_none());
+        match resolve_seat_dispatch(&assignment) {
+            SeatDispatch::Unavailable { .. } => {}
+            _ => panic!("expected Unavailable when neither api nor a harness is dispatchable"),
+        }
+    }
+
+    #[test]
+    fn seat_dispatch_prefers_api_over_a_declared_harness_when_the_key_resolves() {
+        let mut assignment = api_assignment();
+        assignment.harness = Some("claude-code".to_string());
+        assignment.api.api_key_env = Some("PATH".to_string());
+        assert!(matches!(
+            resolve_seat_dispatch(&assignment),
+            SeatDispatch::Api(_)
+        ));
+    }
+
+    #[test]
+    fn seat_dispatch_is_not_configured_for_a_cli_transport_seat() {
+        let assignment = ctx_traits_io::harness_config::ProfileAssignment::default();
+        assert!(matches!(
+            resolve_seat_dispatch(&assignment),
+            SeatDispatch::NotConfigured
+        ));
     }
 }
