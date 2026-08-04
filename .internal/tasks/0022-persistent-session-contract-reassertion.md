@@ -1,6 +1,6 @@
 # 0022 — Re-assert the output contract per turn in persistent sessions
 
-**Status:** blocked on persistent sessions being used again · **Raised:** 2026-07-29
+**Status:** ready to implement · **Raised:** 2026-07-29
 
 ## Why
 
