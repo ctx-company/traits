@@ -12,6 +12,65 @@ A **self-hosted local proxy** that holds several Claude accounts and rotates bet
 - **Model-aware**: an account exhausted for Fable is skipped for Fable only, still serves other models
 - Distinguishes 429-quota (switch account) from 429-throttle (pause that account), with storm control when moving onto a fresh account
 
+## VERIFIED 2026-08-04 — headless `claude -p` works through the proxy, live on this machine
+
+The question this round of research answered: does teamclaude support the way
+ctx actually spawns claude — `claude -p` one-shots, no TUI, no `teamclaude run`
+wrapper. **Yes, proven end to end** against the running server (v1.1.11, all
+three accounts logged in), with each claim tested rather than read off a README:
+
+- **`claude -p` honors `ANTHROPIC_BASE_URL` for `/v1/messages`.** Proven two
+  ways: a local capture sink received claude's `POST /v1/messages?beta=true`
+  (claude 2.1.220, headless), and a dead-port base URL hangs the call rather
+  than falling through to api.anthropic.com. The `--output-format stream-json
+  --verbose` shape ctx uses for worker seats works identically, and the
+  stream still carries `rate_limit_event` — the P556 signal survives proxying
+  (it now describes the INJECTED account, which is the operationally useful
+  one; the "do not develop P556 against the proxy" warning below stands).
+- **The proxy REPLACES the client's auth unconditionally on `/v1/messages`.**
+  The machine's logged-in claude identity is irrelevant: a request with a
+  bogus bearer succeeds, one with no auth succeeds, and a real headless call
+  was served by `oskar-1@ctx.company` (its `usage.totalRequests` moved and
+  `lastUsed` matched) while this machine's claude is logged in as a different
+  account. Confirmed in source: `/v1/messages` is not in
+  `CLIENT_CREDENTIAL_PATHS` (only `/v1/code/*` and OAuth file endpoints pass
+  through) and `forwardRequest` has no client-auth branch — selection then
+  `headers['authorization'] = Bearer <account.credential>` always.
+- **`TC_ACCT` is NOT read from claude's environment — do not put it in
+  `[worktree.env]` and expect pinning.** Tested: a spawn with `TC_ACCT` set
+  rotated normally. The variable is consumed by `teamclaude env`/`run`, which
+  encode the pin INTO the emitted environment: `--no-mitm` yields
+  `ANTHROPIC_BASE_URL=http://localhost:3456/tc-acct/<name-or-uuid>`, MITM
+  yields proxy basic-auth credentials. So per-seat pinning for ctx is simply a
+  per-seat `ANTHROPIC_BASE_URL` VALUE — which collapses P557's claude-code
+  path to "one env var per seat, different path per account".
+- **An unknown pin is refused, not rotated**: 404 `Unknown account pin`,
+  verified live. Note the path-prefix form is marked deprecated in source in
+  favour of `TC_ACCT` — but kept explicitly "for the warmer and for direct API
+  callers", which is precisely what ctx is. It is single-segment, so the
+  fully-qualified `accountUuid/orgUuid` form is not expressible; use the
+  accountUuid, which is unambiguous for these three accounts.
+- **Headless server operation is real**: the server here has run for 25h+
+  from a plain background start; `--headless` exists, `status --json` is
+  script-friendly, and `--activity-log FILE` is documented to work headless —
+  the right attribution source for step 3's rotation test, because…
+- **…do not build verification on `status --json` counters.** They are
+  in-memory and reset when the server re-syncs accounts from config, which
+  token refreshes trigger; a counter reading zero does not mean no traffic
+  (this cost an hour of confusion during this research). Use the activity log.
+- Two operational notes from the live check: the background quota probe was
+  429-throttled on all three accounts at once (probe-endpoint throttling, not
+  quota; serving was unaffected) — treat probe `error` states as advisory.
+  And `distributeSessions: false` means rotation serves everything from one
+  account until `switchThreshold`; flipping it to `true` is the zero-code way
+  to get concurrent multi-account spread BEFORE P557's per-seat pinning
+  exists, and should be part of the Level-1 trial.
+
+Still unverified, deliberately: a rotation crossing mid-run without a failed
+frame (needs a real quota approach, not worth forcing), and loopback egress
+from inside ctx's sandbox-exec confinement — the tests above ran unconfined,
+so step 2 below should confirm a confined frame reaches `localhost:3456`.
+
 ## The integration point, and it is smaller than expected
 
 **`teamclaude env` prints export lines to stdout, and nothing else** (summary/hints go to stderr, so `eval` is safe):
