@@ -74,6 +74,18 @@ pub fn prune_worktree_artifact(
             message: format!("refusing to prune protected worktree control path: {path}"),
         });
     }
+    // Nothing to prune is not a policy question. Answer it before asking Git
+    // anything: a declared artifact that does not exist cannot be pruned, and
+    // `check_ignored` on a missing path is not even a meaningful question —
+    // a directory-only pattern like `target/` cannot match a name with no
+    // directory behind it, so Git reports NOT ignored and the guard below
+    // refuses. That is why `[worktree.retention] expensive = ["target"]`
+    // warned on every single merge once 0057 moved the build directory to a
+    // leased cache slot and `<worktree>/target` stopped existing: a refusal
+    // to prune something that was never there.
+    if !path.exists() {
+        return Ok(false);
+    }
     // A real worktree must only prune ignored, regenerable artifacts. Unit
     // scratch directories without Git metadata retain their direct primitive
     // coverage; production worktrees always carry a `.git` control file.

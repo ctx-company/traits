@@ -2113,7 +2113,14 @@ fn run_declared_command(
             success_exit_code: &[0],
             timeout_ms: Some(timeout_ms),
             idle_timeout_ms: None,
-            capture_limit: 65_536,
+            // A landing gate is a whole test suite, not a status line: this
+            // repository's `just test-full` alone emits ~71 KiB — a full
+            // workspace build plus ~40 proof binaries — so a 64 KiB budget
+            // truncated EVERY green gate and made the "output exceeded the
+            // capture limit" note constant background noise instead of a
+            // signal. Room for a suite that grows, still bounded so a runaway
+            // gate cannot stream without end.
+            capture_limit: 1_048_576,
             tick_observer: None,
         },
         env_overlay,
