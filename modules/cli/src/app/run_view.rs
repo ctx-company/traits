@@ -268,9 +268,14 @@ struct RunPanelState {
     merge_rows: Vec<MergeRowView>,
     /// P552 one-time narrator session title, set once by
     /// [`RunPanel::set_title`] after a successful title dispatch — `None`
-    /// (a blank title row) before success and permanently for a
-    /// missing-narrator/failed/killed attempt. Never a placeholder.
+    /// before success and permanently for a missing-narrator/failed/killed
+    /// attempt.
     title: Option<String>,
+    /// True from the moment a background title worker is dispatched until it
+    /// resolves or gives up. Drives the dimmed placeholder row: the title now
+    /// arrives seconds into a run rather than before it, so the row has to say
+    /// which state it is in instead of being blank and looking stuck.
+    title_pending: bool,
     ask: Option<AskPane>,
     guide_dispatch: Option<GuideDispatch>,
     guide_tokens: Option<crate::app::harness_stream::OneShotTokenTracker>,
@@ -601,6 +606,7 @@ impl RunPanel {
             input_generation,
             handled_generation,
             repaint,
+            title_pending: false,
             trait_name,
             trait_ref,
             plan,
@@ -973,6 +979,30 @@ impl RunPanel {
             return;
         };
         state.title = Some(title);
+        state.title_pending = false;
+        render_locked(&mut state);
+    }
+
+    /// Show the dimmed "generating title…" row while a background worker is
+    /// resolving it. Cleared by [`Self::set_title`] on success, or by
+    /// [`Self::clear_title_pending`] when every attempt has been spent.
+    pub(crate) fn set_title_pending(&self) {
+        let _handoff = self.handoff_driver();
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.title_pending = true;
+        render_locked(&mut state);
+    }
+
+    /// Give up on the title: drop back to a blank row rather than leaving a
+    /// promise on screen that will never be kept.
+    pub(crate) fn clear_title_pending(&self) {
+        let _handoff = self.handoff_driver();
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.title_pending = false;
         render_locked(&mut state);
     }
 
@@ -1381,13 +1411,18 @@ fn render_locked(state: &mut RunPanelState) {
     if let Some(overlay) = stream_overlay_line(state) {
         current_rows.push(overlay);
     }
-    let title_line = state.title.as_ref().map(|title| {
-        title_row_line(
+    let title_line = match (state.title.as_ref(), state.title_pending) {
+        (Some(title), _) => Some(title_row_line(
             title,
             &state.trait_name,
             state.session.provenance.started_at_epoch,
-        )
-    });
+        )),
+        (None, true) => Some(title_pending_line(
+            &state.trait_name,
+            state.session.provenance.started_at_epoch,
+        )),
+        (None, false) => None,
+    };
     let ask_lines = state.ask.as_ref().map(ask_lines);
     let ask_cursor = state
         .ask
@@ -1440,6 +1475,27 @@ fn render_locked(state: &mut RunPanelState) {
 /// epoch seconds only, never a timezone). Blank (an empty line, occupying its
 /// reserved row without content) is rendered by the caller simply never
 /// calling this — there is no placeholder variant.
+/// The title row before the narrator has answered. Same geometry as
+/// [`title_row_line`] so the row does not jump when the real title lands —
+/// only the leading span differs, and it is `Muted` because it is a promise,
+/// not a fact. Rendering nothing here instead is what made a run look frozen:
+/// the title call used to block the first frame, so an empty row and an empty
+/// pane were indistinguishable from a hang.
+pub(crate) fn title_pending_line(trait_name: &str, started_at_epoch: Option<u64>) -> tui::Line {
+    let mut line = tui::Line::blank();
+    line.push("generating title\u{2026}".to_string(), tui::Tone::Muted);
+    line.push(" \u{b7} ", tui::Tone::Muted);
+    line.push(trait_name.to_string(), tui::Tone::Default);
+    if let Some(epoch) = started_at_epoch {
+        line.push(" \u{b7} ", tui::Tone::Muted);
+        line.push(
+            format!("Started at {}", epoch_clock_utc(epoch)),
+            tui::Tone::Muted,
+        );
+    }
+    line
+}
+
 pub(crate) fn title_row_line(
     title: &str,
     trait_name: &str,

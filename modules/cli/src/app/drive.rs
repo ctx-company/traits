@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -1080,6 +1080,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // just-acquired driver lock, and strictly before `drive_loop` starts
     // writing frames — so a detached narrator thread never races a frame's
     // whole-ledger write, and a resumed drive never dispatches a second call.
+    let pending_title = PendingSessionTitle::default();
     maybe_dispatch_session_title(
         &input,
         run_panel.0.as_ref(),
@@ -1087,6 +1088,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &ledger_path,
         &narrator_tokens,
         &mut profile,
+        &pending_title,
     );
     let mut report = drive_loop(
         input,
@@ -1100,7 +1102,12 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &ledger_path,
         &activity,
         run_panel.0.take(),
+        &pending_title,
     )?;
+    // Last chance to write down a title that arrived after the final frame —
+    // and the only chance for a run short enough to have no frame boundary
+    // left once the worker answered.
+    pending_title.flush(&ledger_path);
     report.activity = activity.snapshot();
     // P479 terminal sweep: one more checkpoint after the loop returns,
     // covering the interval between the last loop-top check and however this
@@ -1498,6 +1505,7 @@ fn drive_loop(
     ledger_path: &camino::Utf8Path,
     activity: &ActivityRecorder,
     initial_run_panel: Option<run_view::RunPanel>,
+    pending_title: &PendingSessionTitle,
 ) -> crate::Result<DriveReport> {
     let mut input = input;
     let tui_degraded_to_status =
@@ -1652,6 +1660,10 @@ fn drive_loop(
     }
 
     'frames: loop {
+        // Frame boundary: no frame write is in flight here, so this is where a
+        // title the background worker produced gets written down. Cheap — a
+        // mutex probe that is `None` on every iteration but at most one.
+        pending_title.flush(ledger_path);
         if started
             .elapsed()
             .saturating_sub(attach_wait_paused.get())
@@ -3705,6 +3717,55 @@ fn create_run_panel(
 /// timeout) rather than on a detached thread, so its `record_session_title`
 /// write can never race a frame's whole-ledger write from `drive_loop`, which
 /// starts only after this call returns.
+/// How many times the background worker will ask for a title before giving up.
+/// The narrator misses its 20s bound far more often than it meets it on some
+/// hosts, and a blank title row for the life of a run is a worse outcome than
+/// spending a second and third cheap flash-model call on it. Bounded, because
+/// this is decoration and must never become an unbounded background spend.
+const SESSION_TITLE_ATTEMPTS: u32 = 3;
+
+/// Linear backoff between title attempts (`n * BACKOFF`). A failure here is
+/// usually the seat being slow or briefly unreachable, not a permanent no.
+const SESSION_TITLE_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+
+/// Where the background title worker leaves its answer for the drive thread.
+///
+/// The title dispatch used to run inline, before `drive_loop`, for one
+/// concrete reason: `record_session_title` rewrites the whole session file, and
+/// doing that from a second thread would race a frame's own whole-ledger write.
+/// That is a real hazard and moving the call off-thread does not remove it —
+/// so the worker never touches the ledger. It parks the string here, and the
+/// drive thread persists it at a frame boundary where it already owns the
+/// ledger. The panel is updated directly by the worker, because a panel write
+/// is just a mutex and has no such ordering constraint: the title appears the
+/// moment it exists, and is written down at the next safe point.
+#[derive(Clone, Default)]
+pub(crate) struct PendingSessionTitle(Arc<Mutex<Option<String>>>);
+
+impl PendingSessionTitle {
+    fn put(&self, title: String) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(title);
+        }
+    }
+
+    /// Take the pending title, if one has arrived. Called from the drive
+    /// thread only.
+    fn take(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Persist a title that has arrived, from the drive thread, at a point
+    /// where no frame write is in flight. A no-op when nothing is pending.
+    fn flush(&self, ledger_path: &camino::Utf8Path) {
+        if let Some(title) = self.take()
+            && let Err(err) = ctx_traits_io::run_session::record_session_title(ledger_path, title)
+        {
+            eprintln!("session title could not be persisted: {err}");
+        }
+    }
+}
+
 fn maybe_dispatch_session_title(
     input: &DriveInputs<'_>,
     run_panel: Option<&run_view::RunPanel>,
@@ -3712,6 +3773,7 @@ fn maybe_dispatch_session_title(
     ledger_path: &camino::Utf8Path,
     narrator_tokens: &harness_stream::NarratorTokenTracker,
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    pending: &PendingSessionTitle,
 ) {
     let claimed = ctx_traits_io::run_session::claim_session_title_attempt(ledger_path)
         .inspect_err(|err| {
@@ -3756,22 +3818,41 @@ fn maybe_dispatch_session_title(
         return;
     };
     let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
-    narrator_tokens.begin_call();
-    let (result, call_total) = harness_stream::dispatch_narration(&config, prompt);
-    narrator_tokens.end_call(call_total);
-    if call_total > 0
-        && let Some(panel) = run_panel
-    {
-        panel.add_narrator_tokens(call_total);
+    if let Some(panel) = run_panel {
+        panel.set_title_pending();
     }
-    let Ok(title) = result else {
-        return;
-    };
-    if ctx_traits_io::run_session::record_session_title(ledger_path, title.clone()).is_ok()
-        && let Some(panel) = run_panel
-    {
-        panel.set_title(title);
-    }
+    let panel = run_panel.cloned();
+    let tokens = narrator_tokens.clone();
+    let pending = pending.clone();
+    // Detached: `drive_loop` starts NOW. The ledger write is deliberately not
+    // done here — see `PendingSessionTitle`.
+    std::thread::spawn(move || {
+        for attempt in 1..=SESSION_TITLE_ATTEMPTS {
+            tokens.begin_call();
+            let (result, call_total) = harness_stream::dispatch_narration(&config, prompt.clone());
+            tokens.end_call(call_total);
+            if call_total > 0
+                && let Some(panel) = panel.as_ref()
+            {
+                panel.add_narrator_tokens(call_total);
+            }
+            if let Ok(title) = result {
+                if let Some(panel) = panel.as_ref() {
+                    panel.set_title(title.clone());
+                }
+                pending.put(title);
+                return;
+            }
+            if attempt < SESSION_TITLE_ATTEMPTS {
+                std::thread::sleep(SESSION_TITLE_RETRY_BACKOFF * attempt);
+            }
+        }
+        // Spent every attempt: drop the promise rather than leave a
+        // placeholder on screen that will never be replaced.
+        if let Some(panel) = panel.as_ref() {
+            panel.clear_title_pending();
+        }
+    });
 }
 
 fn refresh_existing_run_panel(
