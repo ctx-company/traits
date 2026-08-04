@@ -1,0 +1,11 @@
+[package]
+id = "grill-me"
+version = "0.1.0"
+name = "Grill Me"
+# Draft until a first live grilling has run end to end: build, check, and
+# vendor all pass, but no run has exercised the interview loop yet.
+status = "draft"
+
+[publish]
+name = "@ctx-traits/grill-me"
+access = "public"
