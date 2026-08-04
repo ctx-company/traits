@@ -316,6 +316,7 @@ const CURRENT_MIN_OUTER_ROWS: u16 = 8;
 /// re-evaluated against the extra journey pane/borders and confirmed still
 /// wide enough for a 60/40 two-column split to stay usable.
 const NARROW_WIDTH_THRESHOLD: u16 = 109;
+const ASK_FOOTER_HINT: &str = "[?] ask · [up/down] scroll · [pg] page · [home/end] jump · [tab] pane · [d] dash · [q] exit · [ctrl-c] kill";
 
 /// P552: the (up to) four panes a run's presentation contract can show,
 /// identified once so [`pane_tree`], [`render_pane_body`], and every caller
@@ -1225,6 +1226,10 @@ fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
     if let Some(consumed) = apply_ask_presentation_key(ask, &key) {
         return consumed;
     }
+    // While composing, the input owns Home/End for cursor movement and
+    // PageUp/PageDown are consumed rather than scrolling a pane. Waiting also
+    // consumes every non-Escape key. The stable footer still advertises pane
+    // navigation, which resumes after the ask pane is collapsed.
     match key.code {
         KeyCode::Enter => {
             let question = ask.input.text().trim().to_string();
@@ -1282,7 +1287,9 @@ fn apply_ask_key(state: &mut RunPanelState, key: KeyEvent) -> bool {
 }
 
 /// Handle presentation-only keys before dispatch. Keeping this reducer small
-/// makes every visible phase transition share the live router's exact rules.
+/// makes every visible phase transition share the live router's exact rules;
+/// in particular, Waiting consumes pane-navigation keys until Escape collapses
+/// the ask pane.
 fn apply_ask_presentation_key(ask: &mut AskPane, key: &KeyEvent) -> Option<bool> {
     if ask.phase == AskPhase::Collapsed {
         if key.code == KeyCode::Char('?') {
@@ -1674,7 +1681,7 @@ struct LiveFrame<'a> {
 
 fn ask_lines(ask: &AskPane) -> Vec<String> {
     if ask.phase == AskPhase::Collapsed {
-        return vec!["[?] Ask the guide".to_string()];
+        return Vec::new();
     }
     let mut lines = vec![format!("Ask: {}", ask.input.text())];
     if ask.phase == AskPhase::Waiting {
@@ -1728,13 +1735,17 @@ fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame<'_>) {
         ask_cursor,
     } = state;
     let full_area = frame.area();
-    // A configured but collapsed guide consumes exactly one row; expanded
-    // states consume only the rows they visibly render.
+    // `Some([])` marks the run as ask-capable for its footer while allocating
+    // no ask rows. Expanded states consume only the rows they visibly render.
     let ask_height = ask_lines.map_or(0, |lines| lines.len() as u16);
     let regions = live_frame_regions(full_area, ask_height);
     frame.render_widget(
         tui_kit::keymap_footer(
-            if ask_lines.is_some() { "[?] ask · [q] exit · [ctrl-c] kill · [tab] cycle pane" } else { "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane" },
+            if ask_lines.is_some() {
+                ASK_FOOTER_HINT
+            } else {
+                "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane"
+            },
             None,
         ),
         regions[2],
@@ -6084,7 +6095,7 @@ mod tests {
     #[test]
     fn ask_pane_routes_open_edit_answer_and_collapse_visibility() {
         let mut ask = AskPane::default();
-        assert_eq!(ask_lines(&ask), ["[?] Ask the guide"]);
+        assert!(ask_lines(&ask).is_empty());
         assert_eq!(
             apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?'))),
             Some(true)
@@ -6097,6 +6108,9 @@ mod tests {
         ));
         assert_eq!(ask_lines(&ask), ["Ask: é"]);
         assert_eq!(ask.input.cursor(), 1);
+        ask.phase = AskPhase::Waiting;
+        assert_eq!(ask_lines(&ask), ["Ask: é", "Guide: thinking..."]);
+        ask.phase = AskPhase::Editing;
         assert!(matches!(
             ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
             tui_kit::ModalOutcome::Pending
@@ -6113,7 +6127,7 @@ mod tests {
             apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc)),
             Some(true)
         );
-        assert_eq!(ask_lines(&ask), ["[?] Ask the guide"]);
+        assert!(ask_lines(&ask).is_empty());
     }
 
     #[test]
@@ -6145,8 +6159,14 @@ mod tests {
 
     #[test]
     fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
-        let collapsed = live_frame_regions(Rect::new(0, 0, 70, 7), 1);
-        assert_eq!(collapsed[1].height, 1, "collapsed ask uses one row");
+        let collapsed = live_frame_regions(Rect::new(0, 0, 70, 7), 0);
+        let expanded = live_frame_regions(Rect::new(0, 0, 70, 7), 2);
+        assert_eq!(collapsed[1].height, 0, "collapsed ask uses no rows");
+        assert_eq!(
+            collapsed[0].height,
+            expanded[0].height + 2,
+            "the body reclaims collapsed ask rows"
+        );
         for area in [
             Rect::new(0, 0, 160, 40),
             Rect::new(0, 0, 70, 20),
@@ -6163,6 +6183,67 @@ mod tests {
             assert_eq!(regions[2].height, 1);
             assert!(regions[0].bottom() <= regions[1].y);
             assert!(regions[1].bottom() <= regions[2].y);
+        }
+    }
+
+    #[test]
+    fn ask_footer_renders_every_hint_at_narrow_width_boundary() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        for width in [NARROW_WIDTH_THRESHOLD - 1, NARROW_WIDTH_THRESHOLD] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 12)).expect("test terminal");
+            let mut scrolls = PaneScrolls::new();
+            let mut progress_follow = true;
+            let mut journey_follow = true;
+            let mut history_follow = true;
+            let mut current_follow = true;
+            let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+            let mut keys = Vec::new();
+            terminal
+                .draw(|frame| {
+                    render_live_panes(
+                        frame,
+                        LiveFrame {
+                            title_line: None,
+                            progress_lines: &[],
+                            journey_lines: &[],
+                            active_row: None,
+                            history_rows: &[],
+                            current_rows: &[],
+                            scrolls: &mut scrolls,
+                            progress_follow: &mut progress_follow,
+                            journey_follow: &mut journey_follow,
+                            history_follow: &mut history_follow,
+                            current_follow: &mut current_follow,
+                            focus: &mut focus,
+                            pending_keys: &mut keys,
+                            modal: None,
+                            ask_lines: Some(&[]),
+                            ask_cursor: None,
+                        },
+                    );
+                })
+                .expect("draw");
+            let rendered: String = (0..width)
+                .map(|x| terminal.backend().buffer().cell((x, 11)).unwrap().symbol())
+                .collect();
+            for hint in [
+                "[?] ask",
+                "[up/down] scroll",
+                "[pg] page",
+                "[home/end] jump",
+                "[tab] pane",
+                "[d] dash",
+                "[q] exit",
+                "[ctrl-c] kill",
+            ] {
+                assert!(
+                    rendered.contains(hint),
+                    "width {width} omits {hint}: {rendered}"
+                );
+            }
+            assert!(!rendered.contains("Ask the guide"));
         }
     }
 
