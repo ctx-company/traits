@@ -6,7 +6,10 @@ use std::path::Path;
 use std::process::Command;
 use std::thread;
 
-use support::{ScratchRoot, assert_exit_code, git_init_on_branch, require_success, run_ctx, utf8};
+use support::{
+    ScratchRoot, assert_exit_code, git_init_on_branch, require_success, run_ctx, run_ctx_with_env,
+    utf8,
+};
 
 /// Centralized P460 exit statuses, mirrored here rather than imported so a
 /// drift in `crate::app::error`'s constants breaks this proof loudly instead
@@ -159,7 +162,7 @@ fn install_counting_merger(repo: &Path, marker: &Path) {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\nprintf call >> '{}'\nprintf '{{\\\"result\\\":\\\"proceed\\\"}}\\n'\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\nprintf 'call\\n' >> '{}'\nprintf '{{\\\"result\\\":\\\"proceed\\\"}}\\n'\n",
             marker.display()
         ),
     )
@@ -956,6 +959,150 @@ fn race_retry_conflict_parks_without_a_second_merger_dispatch() {
             .count(),
         1,
         "a retry requiring reconciliation must park without a second merger dispatch: {ledger}"
+    );
+    assert!(
+        ledger.contains("\"stage\": \"rebase\"") && ledger.contains("\"status\": \"parked\""),
+        "the mechanical retry must park at rebase rather than reenter reconciliation: {ledger}"
+    );
+}
+
+/// Mirrored from `reasons::CHECKOUT_BRANCH_PROBE_FAILED` in `app::merge_story`
+/// rather than imported (a private implementation constant), so a drift
+/// between the two breaks this proof loudly instead of silently tracking
+/// whatever text the binary happens to emit.
+const CHECKOUT_BRANCH_PROBE_FAILED: &str = "failed to determine invocation checkout branch";
+
+/// A race at the invocation checkout's branch probe (`git rev-parse
+/// --abbrev-ref HEAD`, the only such call site on the merge path) must not
+/// buy a merger dispatch either: every race retry is mechanical-only, so
+/// when the retried rebase meets a divergent base that would need
+/// reconciliation, the run parks instead of ever invoking the merger.
+#[test]
+#[cfg(unix)]
+fn checkout_branch_probe_race_retry_parks_with_zero_merger_dispatches() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = ScratchRoot::new("p478-checkout-branch-probe-race");
+    let repo = scratch.home().join("repo");
+    let marker = repo.join("merger-calls");
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        fs::write(
+            repo.join(".ctx/config.toml"),
+            "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"true\"]]\n",
+        )
+        .unwrap();
+    });
+    install_counting_merger(&repo, &marker);
+
+    let run_output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&run_output, 0);
+    let run = value_json(&run_output);
+    let run_id = run["value"]["session"]["run-id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let worktree = Path::new(
+        run["value"]["session"]["provenance"]["worktree"]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    fs::write(worktree.join("conflict"), "run\n").unwrap();
+    Command::new("git")
+        .args(["add", "conflict"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "run conflict"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+
+    // The divergent base, committed on `main` in the invocation checkout
+    // BEFORE merge (not dirty — preflight requires a clean checkout): had
+    // attempt 1 reached the merger, it would have needed reconciliation.
+    fs::write(repo.join("conflict"), "main\n").unwrap();
+    Command::new("git")
+        .args(["add", "conflict"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "main conflict"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+
+    // A fail-once `git` shim: the first `rev-parse --abbrev-ref` (the
+    // checkout-branch probe) fails, forcing the race; every other call
+    // (including every later probe and every gate/rebase git invocation)
+    // passes through to the real `git`.
+    let shim_dir = scratch.home().join("shim");
+    fs::create_dir_all(&shim_dir).unwrap();
+    let once_marker = scratch.home().join("probe-raced-once");
+    let real_git = String::from_utf8(
+        Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    assert!(!real_git.is_empty(), "cannot resolve a real `git` on PATH");
+    let shim_script = shim_dir.join("git");
+    fs::write(
+        &shim_script,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"rev-parse --abbrev-ref\" ] && [ ! -f '{once}' ]; then\n  touch '{once}'\n  echo 'shim: forcing checkout-branch-probe race' >&2\n  exit 1\nfi\nexec '{git}' \"$@\"\n",
+            once = once_marker.display(),
+            git = real_git,
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&shim_script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let shimmed_path = format!("{}:{}", shim_dir.display(), original_path);
+
+    let output = run_ctx_with_env(
+        &["traits", "merge", &run_id, "--json"],
+        &repo,
+        &scratch.home(),
+        &[("PATH", &shimmed_path)],
+    );
+    assert_exit_code(&output, EXIT_MERGE_PARKED);
+    assert!(
+        once_marker.is_file(),
+        "the shim never intercepted the checkout-branch probe, so this proof would pass \
+         vacuously without the race it exists to force"
+    );
+    assert_eq!(
+        fs::read_to_string(&marker)
+            .unwrap_or_default()
+            .lines()
+            .count(),
+        0,
+        "the merger harness must never be invoked across a checkout-branch-probe retry-then-park"
+    );
+    let ledger = fs::read_to_string(run["value"]["session-path"].as_str().unwrap()).unwrap();
+    assert!(
+        ledger.contains(&format!("merge-race-class={CHECKOUT_BRANCH_PROBE_FAILED}")),
+        "the ledger must record that the checkout-branch-probe race actually fired: {ledger}"
     );
     assert!(
         ledger.contains("\"stage\": \"rebase\"") && ledger.contains("\"status\": \"parked\""),
