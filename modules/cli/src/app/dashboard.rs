@@ -3058,6 +3058,7 @@ fn mark_view_unreadable(view: &mut AttachedView, error: String) {
     view.progress_lines = vec![labeled_dim_line(&format!("(unreadable: {error})"))];
     view.history.clear();
     view.current.clear();
+    view.post_run.clear();
     view.trait_degraded = Some(error);
     view.activity_degraded = None;
     view.activity_available = false;
@@ -6100,14 +6101,7 @@ mod tests {
             &attached,
             &crossterm::event::KeyEvent::from(KeyCode::Enter)
         ));
-        let settled = (0..100).any(|_| {
-            if chat.poll_results() {
-                true
-            } else {
-                std::thread::yield_now();
-                false
-            }
-        });
+        let settled = chat.wait_for_result(Duration::from_secs(1));
         assert!(settled, "shared guide result did not settle");
         let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
         terminal
@@ -6614,6 +6608,7 @@ mod tests {
     fn unreadable_view_clears_digest_for_same_digest_recovery() {
         let mut view = attached_view_for("s1");
         view.state_digest = "unchanged-after-recovery".to_string();
+        view.post_run = vec![labeled_dim_line("post-run row")];
 
         mark_view_unreadable(&mut view, "temporary read failure".to_string());
 
@@ -6621,6 +6616,7 @@ mod tests {
         assert!(view.journey_lines.is_empty());
         assert!(view.history.is_empty());
         assert!(view.current.is_empty());
+        assert!(view.post_run.is_empty());
     }
 
     #[test]

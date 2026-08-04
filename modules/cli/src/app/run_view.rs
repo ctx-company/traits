@@ -103,6 +103,20 @@ impl GuideChatHandle {
         false
     }
 
+    #[cfg(test)]
+    pub(crate) fn wait_for_result(&self, timeout: Duration) -> bool {
+        let mut chat = self.lock();
+        let Some(receiver) = chat.results.as_ref() else {
+            return false;
+        };
+        let Ok((generation, result)) = receiver.recv_timeout(timeout) else {
+            return false;
+        };
+        let changed = apply_ask_result(&mut chat.ask, generation, result);
+        chat.results = None;
+        changed
+    }
+
     fn set_context(&self, context: String) {
         self.lock().context = context;
     }

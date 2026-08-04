@@ -1083,7 +1083,7 @@ pub enum TraitsCommand {
         no_worktree: bool,
 
         /// Clear a persisted P460 merge intent before resuming, so this
-        /// drive completes without landing even though the original
+        /// drive skips automatic post-run merge work even though the original
         /// `run`/`session start` requested `--merge`.
         #[arg(long = "no-merge")]
         no_merge: bool,
@@ -2116,7 +2116,7 @@ pub struct SessionStartArgs {
     #[arg(long, num_args = 0..=1, require_equals = true, value_name = "RUNG", conflicts_with = "no_merge")]
     pub merge: Option<Option<MergeRung>>,
 
-    /// Override `[merge].auto` and never land automatically.
+    /// Override `[merge].auto` and skip automatic post-run merge work.
     #[arg(long = "no-merge", conflicts_with = "merge")]
     pub no_merge: bool,
 

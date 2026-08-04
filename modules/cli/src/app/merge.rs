@@ -1140,7 +1140,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                     input.run_id,
                     MergeStage::Reconciliation,
                     format!(
-                        "{} {MAX_RECONCILIATION_ITERATIONS} merger iterations without landing",
+                        "{} {MAX_RECONCILIATION_ITERATIONS} merger iterations without completing post-run work",
                         reasons::RECONCILIATION_ITERATION_CAP_PREFIX
                     ),
                     merger_evidence,

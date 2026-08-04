@@ -369,7 +369,7 @@ pub(crate) fn stage_sentence(stage: MergeStage) -> &'static str {
         MergeStage::Reconciliation => "while reconciling conflicts with the merger",
         MergeStage::Gates => "after reconciliation, while running the post-run gate",
         MergeStage::Landing => "while fast-forwarding the target branch",
-        MergeStage::Cleanup => "after landing, during post-merge cleanup",
+        MergeStage::Cleanup => "after fast-forwarding the target branch, during post-run cleanup",
     }
 }
 
@@ -906,7 +906,7 @@ mod tests {
             (
                 MergeStage::Reconciliation,
                 format!(
-                    "{RECONCILIATION_ITERATION_CAP_PREFIX} 8 merger iterations without landing"
+                    "{RECONCILIATION_ITERATION_CAP_PREFIX} 8 merger iterations without completing post-run work"
                 ),
             ),
             (
