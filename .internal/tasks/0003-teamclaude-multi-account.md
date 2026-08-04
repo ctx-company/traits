@@ -66,6 +66,41 @@ three accounts logged in), with each claim tested rather than read off a README:
   to get concurrent multi-account spread BEFORE P557's per-seat pinning
   exists, and should be part of the Level-1 trial.
 
+### `teamclaude run` and the `-p` worry — resolved, in its favour
+
+The concern was that `teamclaude run -p` might swallow `-p` as teamclaude's
+own flag. It does not, by construction: `runCommand` recognises exactly three
+flags of its own (`--mitm`, `--no-mitm`, `--auto-fallback`); without a `--`
+separator it filters ONLY those three and hands **everything else verbatim**
+to `spawnSync('claude', claudeArgs, { stdio: 'inherit' })`. There is no
+teamclaude `-p` at all — the `-p` that reaches claude is claude's own print
+flag, which is exactly what ctx wants. Verified live, not just read:
+
+- `teamclaude run -p 'Reply with exactly: ok' --model …` → exit 0, stdout is
+  the bare `ok`, stderr empty. **All teamclaude chatter goes to stderr**
+  (`console.error` throughout), so a stream-json stdout is never corrupted.
+- That call ran in MITM mode (the default) — which also closes the earlier
+  gap: **MITM works headless**; claude 2.1.220 honors `NODE_EXTRA_CA_CERTS`.
+- `TC_ACCT=<acct> teamclaude run -p …` pinned correctly (stderr notice, and
+  the pinned account's request counter/lastUsed moved, read immediately);
+  `run` deletes `TC_ACCT` from the child env as documented.
+- **Child exit codes propagate** (`process.exit(result.status ?? 1)`): a bad
+  claude flag exits 1. Proxy down → refusal with exit 1 by default; only
+  `--auto-fallback` silently bypasses (correct default for ctx: fail loudly
+  rather than quietly spend one account).
+- `holdSeconds` is plumbed for headless too: `run` raises the child's
+  `API_TIMEOUT_MS` above the hold budget so the all-accounts-exhausted hold
+  does not trip claude's client timeout.
+- One sharp edge for scripts: the three teamclaude flags are filtered even
+  when intended for claude, so anything scripted should use the explicit
+  separator — `teamclaude run -- -p …`. With `--`, everything after is
+  verbatim, no filtering at all.
+
+For ctx the conclusion is unchanged but now double-backed: env-only
+integration (no wrapper) and `teamclaude run --` both support ctx's headless
+spawn shape fully; env-only stays the recommendation because it adds no binary
+between the harness and claude, and the harness registry owns argv anyway.
+
 Still unverified, deliberately: a rotation crossing mid-run without a failed
 frame (needs a real quota approach, not worth forcing), and loopback egress
 from inside ctx's sandbox-exec confinement — the tests above ran unconfined,
