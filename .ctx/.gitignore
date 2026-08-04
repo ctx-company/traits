@@ -11,3 +11,4 @@ runs/
 debug/
 cache/
 node_modules/
+traits/worktrees/
