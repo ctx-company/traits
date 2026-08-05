@@ -1,6 +1,6 @@
 id = "implement-guided"
 schema-version = "0.2"
-version = "0.1.0"
+version = "0.1.1"
 name = "Implement Guided"
 summary = "Take the assignment as annotations from the annotation tool, draft it, implement it under bounded review, explain the approved diff hunk by hunk, then commit and push through the gate."
 
@@ -41,33 +41,6 @@ id = "evidence-first"
 
 [behavior.verbosity]
 id = "brief"
-
-[[port]]
-id = "change-walkthrough"
-direction = "output"
-schema = "schema:text"
-description = "Markdown walkthrough of the approved change, one fenced hunk per section with its intent and explanation."
-title = "Change Walkthrough"
-format = ["text"]
-value = "slot:hunk-notes"
-
-[[port]]
-id = "commit-report"
-direction = "output"
-schema = "schema:text"
-description = "Final commit evidence from the git commit command step: the committed hash and subject."
-title = "Commit Report"
-format = ["text"]
-value = "slot:commit-output"
-
-[[port]]
-id = "push-report"
-direction = "output"
-schema = "schema:text"
-description = "Evidence from the gated push — the gate's own verdict plus the push result under it."
-title = "Push Report"
-format = ["text"]
-value = "slot:push-output"
 
 [[slot]]
 id = "annotations"
@@ -183,7 +156,7 @@ required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise when at least one blocking defect remains. Set to approved if and only if blockers is empty."
 
 [[agent]]
-id = "smart"
+id = "smart-1"
 description = "Strong model: drafts the implementation from the annotations, reviews the work each round, and explains the finished diff hunk by hunk."
 summary = "Drafting, review, and explanation role."
 
@@ -280,7 +253,7 @@ output = ["slot:work-summary"]
 [[sequence.build-round.sequence]]
 id = "review"
 title = "Review the work (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:review"
 input = [
     "slot:annotations",
@@ -291,11 +264,6 @@ output = ["slot:review-verdict"]
 
 [procedure]
 description = "Collect the assignment as annotations, draft it, implement it under bounded review, write a markdown walkthrough of the approved diff, then commit and push through the gate."
-output = [
-    "port:change-walkthrough",
-    "port:commit-report",
-    "port:push-report",
-]
 
 [[procedure.sequence]]
 id = "collect-annotations"
@@ -312,7 +280,7 @@ argv = [
 [[procedure.sequence]]
 id = "draft"
 title = "Draft the work (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:draft"
 input = ["slot:annotations"]
 output = ["slot:draft"]
@@ -348,7 +316,7 @@ argv = [
 [[procedure.sequence]]
 id = "explain-hunks"
 title = "Explain the change hunk by hunk (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:explain-hunks"
 input = [
     "slot:reviewed-diff",

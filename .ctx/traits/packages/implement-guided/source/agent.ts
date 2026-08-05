@@ -1,6 +1,8 @@
 import { agent as cdkAgent } from "@ctx-traits/cdk";
 
-const smart = cdkAgent("smart", {
+// "smart-1" matches the runtime's [agent.role.smart-1] seat exactly; a bare
+// "smart" matches no role table and silently inherits [agent.role.default].
+const smart = cdkAgent("smart-1", {
     description:
         "Strong model: drafts the implementation from the annotations, reviews the work each round, and explains the finished diff hunk by hunk.",
     summary: "Drafting, review, and explanation role.",
