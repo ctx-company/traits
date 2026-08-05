@@ -1,6 +1,6 @@
 # 0037 — `config.toml` (committed, shared) and `runtime.toml` (local, mine)
 
-**Status:** ready to implement · **Raised:** 2026-07-29 · **Supersedes the single-file layout in 0034/0036**
+**Status:** implemented, landed 298b30c3 (2026-08-05) · **Raised:** 2026-07-29 · **Supersedes the single-file layout in 0034/0036**
 
 ## The split
 
