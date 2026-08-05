@@ -306,6 +306,19 @@ fn check_default_output_matches_the_panel_registry_shape() {
 }
 
 #[test]
+fn migrate_default_output_matches_the_panel_registry_shape() {
+    let fixture = build_trait_fixture("p467-migrate-panel-shape", "fixture-migrate-panel");
+    let stdout = require_success(
+        "`ctx traits migrate` over a freshly-init'd trait already at the latest schema version",
+        &["traits", "migrate", &fixture.trait_id],
+        &fixture.repo,
+        &fixture.home,
+    );
+
+    assert_matches_registry_claim("migrate", "ctx", "migrate", &stdout);
+}
+
+#[test]
 fn diff_default_output_matches_the_panel_registry_shape() {
     let fixture = build_trait_fixture("p467-diff-panel-shape", "fixture-diff-panel");
     let stdout = require_success(
@@ -812,6 +825,7 @@ const HONESTY_TESTED: &[&str] = &[
     "export",
     "new",
     "build",
+    "migrate",
     "host",
     "import",
     "activate",

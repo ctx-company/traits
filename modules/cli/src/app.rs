@@ -34,6 +34,7 @@ mod lifecycle_handlers;
 mod lifecycle_reporting;
 mod merge;
 mod merge_story;
+mod migrate;
 mod new;
 pub mod presentation;
 mod preview;

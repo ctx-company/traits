@@ -48,6 +48,7 @@ Author:
   generate    Use a model to draft a new trait from a brief
   refine      Use a model to revise an existing canonical trait
   critique    Use a model to write an advisory design critique of a canonical trait
+  migrate     Mechanically migrate a canonical trait to a newer supported schema-version
   export      Export a trait to a compatibility profile directory
   host        Place, refresh, or remove exported traits on host tools (install/update/remove)
 Execute:
@@ -693,6 +694,33 @@ pub enum TraitsCommand {
         out: Option<String>,
 
         /// Emit structured JSON build evidence instead of the plain report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mechanically migrate a canonical trait from its declared
+    /// `schema-version` to a newer supported version.
+    ///
+    /// Without `--apply`, prints a reviewable diff and digest before/after
+    /// without writing. With `--apply`, writes the migrated document and
+    /// reports that its canonical digest moved — trust re-approval follows.
+    /// Refuses rather than guessing when a construct can't be mechanically
+    /// rewritten or the migrated output fails to round-trip decode.
+    Migrate {
+        /// Trait name to migrate. Pass an explicit canonical trait file path
+        /// as an escape hatch.
+        #[arg(value_name = "TRAIT")]
+        id_or_path: String,
+
+        /// Target schema-version. Defaults to the latest version this
+        /// binary supports.
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Write the migrated document after gates pass.
+        #[arg(long)]
+        apply: bool,
+
+        /// Emit structured JSON instead of the plain report.
         #[arg(long)]
         json: bool,
     },

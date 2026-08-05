@@ -343,6 +343,7 @@ dependencies = [
  "strum 0.28.0",
  "thiserror",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]

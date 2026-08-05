@@ -590,6 +590,12 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 out,
                 json,
             }) => handle_build(&path, &format, out.as_deref(), json),
+            Some(cli::TraitsCommand::Migrate {
+                id_or_path,
+                to,
+                apply,
+                json,
+            }) => crate::app::migrate::handle_migrate(&id_or_path, to.as_deref(), apply, json),
             Some(cli::TraitsCommand::Generate {
                 name,
                 brief,

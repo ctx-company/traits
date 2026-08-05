@@ -698,6 +698,7 @@ pub const REGISTERED_COMMAND_NAMES: &[&str] = &[
     "generate",
     "refine",
     "critique",
+    "migrate",
     "run",
     "merge",
     "activate",
@@ -726,8 +727,8 @@ pub fn presentation_for(name: &str) -> Result<CommandPresentation, String> {
 
     let presentation = match name {
         "doctor" | "init" | "new" | "list" | "build" | "host" | "generate" | "refine"
-        | "critique" | "merge" | "activate" | "trust" | "import" | "cache" | "config" | "check"
-        | "diff" | "explain" | "export" | "run" | "dependency" => Panel,
+        | "critique" | "migrate" | "merge" | "activate" | "trust" | "import" | "cache"
+        | "config" | "check" | "diff" | "explain" | "export" | "run" | "dependency" => Panel,
         other => {
             return Err(format!(
                 "presentation_for: unclassified visible command {other:?}; add it to the \

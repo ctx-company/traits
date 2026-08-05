@@ -32,6 +32,7 @@ const VISIBLE_COMMANDS: &[&str] = &[
     "generate",
     "refine",
     "critique",
+    "migrate",
     "export",
     "host",
     "run",

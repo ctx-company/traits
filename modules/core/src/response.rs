@@ -343,6 +343,13 @@ impl ResponseError {
             crate::Error::Distribution(error) => {
                 Self::new("core.distribution-error", error.to_string())
             }
+            crate::Error::Migrate(error) => match error {
+                crate::migrate::Error::Refused { step, reason } => {
+                    Self::new("core.migration-refused", "migration refused")
+                        .with_detail("step", step.clone())
+                        .with_detail("reason", reason.clone())
+                }
+            },
         }
     }
 }

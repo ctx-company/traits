@@ -48,6 +48,7 @@ pub mod import;
 pub mod launch;
 pub mod lockfile;
 pub mod manifest;
+pub mod migrate;
 pub mod model_view;
 pub mod parse;
 pub mod procedure;

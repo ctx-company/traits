@@ -40,6 +40,9 @@ pub enum Error {
 
     #[error(transparent)]
     Distribution(#[from] crate::distribution::Error),
+
+    #[error(transparent)]
+    Migrate(#[from] crate::migrate::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

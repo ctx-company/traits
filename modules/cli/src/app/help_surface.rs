@@ -67,7 +67,7 @@ fn classify(name: &str) -> Result<&'static str, String> {
     let group = match name {
         "init" | "new" | "list" => "manage",
         "build" | "check" | "diff" | "explain" | "generate" | "refine" | "critique" | "export"
-        | "host" => "author",
+        | "migrate" | "host" => "author",
         "run" | "merge" => "execute",
         "activate" | "review" | "trust" => "trust",
         // P567: `vendor`/`install`/`remove`/`update`/`outdated`/`info` are now
