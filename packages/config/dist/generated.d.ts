@@ -83,17 +83,25 @@ export interface PortDefaults {
     port?: Record<string, string>;
 }
 export interface ProfileAssignment {
+    apiKeyEnv?: string;
+    baseUrl?: string;
     budget?: RoleBudget;
+    connectTimeoutMs?: number;
+    count?: number;
     extraArgs?: string[];
     harness?: string;
     mode?: RunAssignmentMode;
     model?: string;
     modelTier?: AgentModelTier;
+    readTimeoutMs?: number;
     reasoningEffort?: string;
+    retries?: number;
     sessionMode?: RunSessionMode;
     systemPrompt?: string;
     transport?: RunTransport;
+    wire?: ProviderWire;
 }
+export type ProviderWire = "openai-compat" | "anthropic";
 export interface PublishTable {
     exclude?: string[];
 }
@@ -164,7 +172,7 @@ export interface RunTable {
     wait?: boolean;
     worktree?: boolean;
 }
-export type RunTransport = "cli" | "mcp";
+export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 export interface TraitDefaults {
     defaults?: PortDefaults;
