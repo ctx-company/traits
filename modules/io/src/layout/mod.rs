@@ -116,10 +116,25 @@ pub const WORKTREE_ROOT: &str = ".ctx/traits/worktrees";
 /// worktree that already exists there, so a checkout with live or parked runs
 /// keeps working across the change — see [`crate::worktree::worktree_path_for`].
 pub const LEGACY_WORKTREE_ROOT: &str = ".ctx/worktrees";
-/// Current repo-local runtime configuration path (P311). Read after the
-/// legacy [`LEGACY_RUNTIME_CONFIG`] sibling at each ancestor so `.ctx/`
-/// paths always win the merge.
+/// Machine-local runtime configuration path (P311; retiered by 0037). What
+/// I decide, on THIS machine: seats, models, credentials, absolute paths,
+/// and any budget this machine wants different. Gitignored and never
+/// scaffolded — copied from [`RUNTIME_CONFIG_EXAMPLE`] by whoever needs it.
+/// Read after [`PROJECT_CONFIG`] at each ancestor so a machine-local field
+/// wins the field-wise merge over the committed project decision.
 pub const RUNTIME_CONFIG: &str = ".ctx/traits/runtime.toml";
+/// Committed project configuration path (0037): what the PROJECT decides,
+/// for everyone — "this project runs in worktrees", setup commands, the
+/// merge gate, seeds. Same schema as [`RUNTIME_CONFIG`]; the tier carries
+/// the meaning, not the key set. Read before [`RUNTIME_CONFIG`] at each
+/// ancestor so the machine-local file overrides it field-wise.
+pub const PROJECT_CONFIG: &str = ".ctx/traits/config.toml";
+/// Committed, fully-commented template for [`RUNTIME_CONFIG`] (0037),
+/// scaffolded by `ctx traits init`. Every knob present but commented out
+/// showing its default (task 0019's rule: a written value freezes today's
+/// default forever, a commented one keeps inheriting). Never read by config
+/// resolution — it exists to be copied to `runtime.toml`.
+pub const RUNTIME_CONFIG_EXAMPLE: &str = ".ctx/traits/runtime.example.toml";
 /// P569 predecessor of [`RUNTIME_CONFIG`], still read so an existing checkout
 /// keeps working. `config.toml` claimed a scope it never had — the document
 /// configures trait EXECUTION, nothing else — and sat beside `traits.toml`

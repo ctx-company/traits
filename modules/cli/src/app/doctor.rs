@@ -1315,8 +1315,30 @@ fn config_layer_label(layer: ctx_traits_io::harness_config::ConfigLayer) -> &'st
     }
 }
 
+/// 0037 refinement of [`config_layer_label`] for winner provenance: the two
+/// `.ctx/traits/` documents share [`ConfigLayer::Repo`] in the resolver (the
+/// merge order alone encodes their precedence), but the tier is exactly what
+/// a `--config` reader needs — so the label splits them by the source path,
+/// which JSON consumers also receive and can derive identically.
+fn config_tier_label(
+    layer: ctx_traits_io::harness_config::ConfigLayer,
+    source: Option<&str>,
+) -> &'static str {
+    if layer == ctx_traits_io::harness_config::ConfigLayer::Repo
+        && let Some(source) = source
+    {
+        if source.ends_with(ctx_traits_io::layout::RUNTIME_CONFIG) {
+            return "local (this machine)";
+        }
+        if source.ends_with(ctx_traits_io::layout::PROJECT_CONFIG) {
+            return "project";
+        }
+    }
+    config_layer_label(layer)
+}
+
 fn format_winner(winner: &ctx_traits_io::harness_config::ConfigWinner) -> String {
-    let layer = config_layer_label(winner.layer);
+    let layer = config_tier_label(winner.layer, winner.source.as_deref());
     match winner.source.as_deref() {
         Some(source) => format!("{layer}: {source}"),
         None => layer.to_string(),

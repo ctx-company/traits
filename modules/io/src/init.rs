@@ -45,7 +45,8 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
     entries.push(ensure_dir(&authoring_root, "trait authoring root")?);
 
     entries.push(ensure_project_manifest(repo_root)?);
-    entries.push(ensure_runtime_config(repo_root)?);
+    entries.push(ensure_project_config(repo_root)?);
+    entries.push(ensure_runtime_example(repo_root)?);
     entries.push(ensure_authoring_manifest(repo_root)?);
     // `.ctx/.gitignore`, so the machine-local half of `.ctx` — worktrees, runs,
     // caches, and now `node_modules/` — is ignored from the first commit
@@ -112,23 +113,20 @@ fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
     }
 }
 
-/// P569: scaffold `.ctx/traits/runtime.toml` as a commented map of the
-/// execution surface.
+/// 0037: scaffold the committed `.ctx/traits/config.toml` — what the PROJECT
+/// decides, for everyone.
 ///
-/// Every knob is present but COMMENTED OUT, showing its default. That is the
-/// point: a written value freezes today's default into the file forever, so a
-/// later ctx release that improves a default would never reach this repo — the
-/// file-level twin of the wholesale-replace problem the merge model exists to
-/// end. Commented keys document what exists while still inheriting.
-///
-/// The file is machine-local and gitignored; `ctx traits doctor --config`
-/// remains the authority on what is actually in effect, with provenance.
-fn ensure_runtime_config(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
-    let path = repo_root.join(crate::layout::RUNTIME_CONFIG);
+/// Populated with the project-facing sections (worktree policy, run budgets,
+/// the merge gate) and comments explaining each; the knobs themselves ship
+/// COMMENTED OUT showing their defaults, per task 0019's rule — a written
+/// value freezes today's default into the file forever, a commented one keeps
+/// inheriting. This is a file the project fills in.
+fn ensure_project_config(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
+    let path = repo_root.join(crate::layout::PROJECT_CONFIG);
     match crate::package_scaffold::create_new_file(
         &path,
-        "runtime config",
-        RUNTIME_CONFIG_TEMPLATE,
+        "project config",
+        PROJECT_CONFIG_TEMPLATE,
     )? {
         crate::package_scaffold::CreateOutcome::Created => Ok(InitEntry::Created(path.to_string())),
         crate::package_scaffold::CreateOutcome::AlreadyExists => {
@@ -137,42 +135,48 @@ fn ensure_runtime_config(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
     }
 }
 
-/// Commented scaffold written by [`ensure_runtime_config`]. Values shown are
-/// the built-in defaults at the time of writing; uncomment only what this
-/// machine actually needs to differ on.
-const RUNTIME_CONFIG_TEMPLATE: &str = r#"# ctx.traits runtime config — HOW traits execute on this machine.
+/// 0037: scaffold the committed `.ctx/traits/runtime.example.toml` — the
+/// template for the machine-local `runtime.toml` beside it.
+///
+/// Fully commented, every knob present showing its default (task 0019's rule
+/// again). `runtime.toml` itself is NEVER scaffolded: it is copied from this
+/// example by whoever needs it, and is gitignored — `ctx traits init` writing
+/// it would put one machine's file into everyone's diff.
+fn ensure_runtime_example(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
+    let path = repo_root.join(crate::layout::RUNTIME_CONFIG_EXAMPLE);
+    match crate::package_scaffold::create_new_file(
+        &path,
+        "runtime config example",
+        RUNTIME_EXAMPLE_TEMPLATE,
+    )? {
+        crate::package_scaffold::CreateOutcome::Created => Ok(InitEntry::Created(path.to_string())),
+        crate::package_scaffold::CreateOutcome::AlreadyExists => {
+            Ok(InitEntry::Preserved(path.to_string()))
+        }
+    }
+}
+
+/// Committed project-tier scaffold written by [`ensure_project_config`].
+/// Same schema as the runtime tier — the tier carries the meaning, not the
+/// key set — so the sections here are guidance about what a PROJECT usually
+/// decides, not a restriction.
+const PROJECT_CONFIG_TEMPLATE: &str = r#"# ctx.traits project config — what THIS PROJECT decides, for everyone.
 #
-# Machine-local and gitignored. The committed half lives beside it:
-# `vendor.toml` (what this project depends on) and `packages/` (the traits).
+# Committed and shared. Decisions that travel with the repository belong here:
+# "this project runs in worktrees", setup commands, seeds, the merge gate.
+# The machine-local half lives beside it in `runtime.toml` (gitignored, copied
+# from `runtime.example.toml`); a field stated there overrides the same field
+# here and nothing else. Same schema in both files — the only question is
+# "shared, or mine?".
 #
 # Every key below is commented out and shows its default. Uncomment only what
-# you need to change: a commented key keeps inheriting future defaults, while a
-# written one pins today's value forever.
+# this project actually decides: a commented key keeps inheriting future
+# defaults, while a written one pins today's value forever.
 #
-# `ctx traits doctor --config` prints what is actually in effect, and where
-# each value came from.
+# `ctx traits doctor --config` prints what is actually in effect, and which
+# tier each value came from.
 
 schema-version = "0.1.0"
-
-# --- Agents -------------------------------------------------------------------
-# Which model and harness each trait role runs on. Roles come from the trait
-# (worker, reviewer, narrator, ...); anything unmapped falls back to
-# `[agent.role.default]`.
-#
-# [agent.role.default]
-# harness = "opencode"            # a built-in id: claude-code, opencode, pi, codex
-# model = "openai/gpt-5.6-terra"
-# reasoning-effort = "medium"     # low | medium | high  (mapped per harness)
-# session-mode = "per-frame"      # per-frame | persistent; persistent restates each turn's output contract inline and cannot use per-frame json-schema-flag enforcement
-# budget = { frame-seconds = 1800 }
-
-# --- Run budgets --------------------------------------------------------------
-# [run]
-# total-seconds = 3600            # the ONLY whole-run clock
-# max-frames = 200
-# frame-seconds = 1800            # floor for roles declaring no budget
-# max-retries = 3
-# inline-prompt-bytes = 300000
 
 # --- Worktree runs (`--worktree`) ---------------------------------------------
 # [worktree]
@@ -197,6 +201,76 @@ schema-version = "0.1.0"
 # [worktree.tripwire]
 # policy = "park"                 # park | warn — out-of-tree mutation findings
 
+# --- Run budgets --------------------------------------------------------------
+# [run]
+# total-seconds = 3600            # the ONLY whole-run clock
+# max-frames = 200
+# frame-seconds = 1800            # floor for roles declaring no budget
+# max-retries = 3
+# inline-prompt-bytes = 300000
+
+# --- Post-run merge gate ------------------------------------------------------
+# [merge]
+# deep = false                    # use a judgment-capable merger
+# gate = []                       # e.g. [["just", "test"]] — runs during post-run
+
+# --- Agents (usually machine-local — see runtime.example.toml) -----------------
+# A project MAY commit a seat decision, e.g. reviewers run at high effort:
+#
+# [agent.role.reviewer]
+# reasoning-effort = "high"
+#
+# Committing a `model` here binds every collaborator to a model they may not
+# have access to. Allowed — but models, credentials and machine paths usually
+# belong in your own `runtime.toml`.
+"#;
+
+/// Fully-commented machine-tier template written by [`ensure_runtime_example`].
+/// Values shown are the built-in defaults at the time of writing; copy to
+/// `runtime.toml` and uncomment only what this machine actually needs to
+/// differ on.
+const RUNTIME_EXAMPLE_TEMPLATE: &str = r#"# ctx.traits runtime config — HOW traits execute on THIS machine.
+#
+# This is the committed EXAMPLE. Copy it to `runtime.toml` beside it (which is
+# gitignored and never scaffolded) and uncomment what your machine needs:
+# seats, models, credentials, absolute paths, and any budget you want
+# different. A field stated in `runtime.toml` overrides the same field in the
+# committed `config.toml` and nothing else — same schema in both files.
+#
+# Every key below is commented out and shows its default. Uncomment only what
+# you need to change: a commented key keeps inheriting future defaults, while a
+# written one pins today's value forever.
+#
+# `ctx traits doctor --config` prints what is actually in effect, and which
+# tier each value came from.
+
+schema-version = "0.1.0"
+
+# --- Agents -------------------------------------------------------------------
+# Which model and harness each trait role runs on. Roles come from the trait
+# (worker, reviewer, narrator, ...); anything unmapped falls back to
+# `[agent.role.default]`.
+#
+# [agent.role.default]
+# harness = "opencode"            # a built-in id: claude-code, opencode, pi, codex
+# model = "openai/gpt-5.6-terra"
+# reasoning-effort = "medium"     # low | medium | high  (mapped per harness)
+# session-mode = "per-frame"      # per-frame | persistent; persistent restates each turn's output contract inline and cannot use per-frame json-schema-flag enforcement
+# budget = { frame-seconds = 1800 }
+
+# --- Run budgets (machine overrides) -------------------------------------------
+# [run]
+# total-seconds = 3600            # the ONLY whole-run clock
+# max-frames = 200
+# frame-seconds = 1800            # floor for roles declaring no budget
+# max-retries = 3
+# inline-prompt-bytes = 300000
+
+# --- Worktree environment (machine paths) --------------------------------------
+# [worktree.env]                  # env for every process in the worktree.
+# # `{worktree}/...` resolves per run; `.ctx/...` against the invocation checkout.
+# # CARGO_TARGET_DIR = "{worktree}/target"
+
 # --- Harnesses ----------------------------------------------------------------
 # claude-code, opencode, pi and codex are built in and need no configuration. A table
 # here MERGES over the built-in, so state only what differs; an omitted field is
@@ -204,11 +278,6 @@ schema-version = "0.1.0"
 #
 # [harness.claude-code.cli]
 # reasoning-effort-flag = "--effort"
-
-# --- Post-run merge gate ------------------------------------------------------
-# [merge]
-# deep = false                    # use a judgment-capable merger
-# gate = []                       # e.g. [["just", "test"]] — runs during post-run
 "#;
 
 fn ensure_dir(path: &Utf8Path, label: &str) -> crate::Result<InitEntry> {
@@ -376,4 +445,65 @@ fn fs_err(path: &Utf8Path, message: impl Into<String>) -> crate::Error {
         source: std::io::Error::new(std::io::ErrorKind::InvalidInput, message.into()),
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+
+    fn scratch_repo(label: &str) -> Utf8PathBuf {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!("ctx-init-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(dir.as_std_path());
+        std::fs::create_dir_all(dir.as_std_path()).expect("scratch repo root");
+        dir
+    }
+
+    /// 0037: `init` scaffolds the committed pair — a populated
+    /// `config.toml` and a fully-commented `runtime.example.toml` — and
+    /// NEVER `runtime.toml` itself, which is copied from the example by
+    /// whoever needs it and is gitignored from the first commit.
+    #[test]
+    fn init_scaffolds_the_committed_config_pair_and_never_runtime_toml() {
+        let repo = scratch_repo("config-pair");
+        let report = super::init(&repo, None).expect("init succeeds");
+
+        let project_config = repo.join(crate::layout::PROJECT_CONFIG);
+        let example = repo.join(crate::layout::RUNTIME_CONFIG_EXAMPLE);
+        let runtime = repo.join(crate::layout::RUNTIME_CONFIG);
+        assert!(project_config.exists(), "config.toml scaffolded");
+        assert!(example.exists(), "runtime.example.toml scaffolded");
+        assert!(!runtime.exists(), "runtime.toml is never scaffolded");
+        assert!(
+            report
+                .entries
+                .iter()
+                .all(|entry| !entry.path().ends_with("traits/runtime.toml")),
+            "runtime.toml never appears in the init report: {report:?}"
+        );
+
+        let ignore =
+            std::fs::read_to_string(crate::gitignore::nested_gitignore_path(&repo).as_std_path())
+                .expect("nested gitignore written");
+        assert!(
+            ignore.lines().any(|line| line == "traits/runtime.toml"),
+            "machine tier ignored from the first commit: {ignore}"
+        );
+        let _ = std::fs::remove_dir_all(repo.as_std_path());
+    }
+
+    /// Both scaffolds decode as the one shared `RuntimeConfig` schema — the
+    /// tier carries the meaning, not the key set — so an author uncommenting
+    /// any shown knob starts from a document the resolver already accepts.
+    #[test]
+    fn both_templates_decode_as_the_shared_runtime_schema() {
+        for (label, template) in [
+            ("config.toml", super::PROJECT_CONFIG_TEMPLATE),
+            ("runtime.example.toml", super::RUNTIME_EXAMPLE_TEMPLATE),
+        ] {
+            let decoded: Result<crate::harness_config::RuntimeConfig, _> = toml::from_str(template);
+            assert!(decoded.is_ok(), "{label} template decodes: {decoded:?}");
+        }
+    }
 }

@@ -33,6 +33,11 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
     "worktrees/",
     "config.toml",
     "config.ts",
+    // 0037: the machine-local runtime tier. The committed siblings —
+    // `traits/config.toml` (project decisions) and
+    // `traits/runtime.example.toml` (the template this file is copied from) —
+    // are deliberately NOT listed here.
+    "traits/runtime.toml",
     "harness.toml",
     "traits/vendor/",
     "runs/",
@@ -167,7 +172,9 @@ pub struct TrackedRuntimeFinding {
     pub remedy: String,
 }
 
-/// Tracked `.ctx/config.toml`, `.ctx/config.ts`, and tracked files under
+/// Tracked `.ctx/config.toml`, `.ctx/config.ts`, `.ctx/traits/runtime.toml`
+/// (machine-local per 0037 — the committed tier is `.ctx/traits/config.toml`),
+/// and tracked files under
 /// `.ctx/{worktrees,runs,debug,cache}`, discovered via `git ls-files` with
 /// literal arguments against `repo_root`, sorted. Empty when nothing in
 /// those runtime paths is tracked.
@@ -175,6 +182,7 @@ pub fn tracked_runtime_paths(repo_root: &Utf8Path) -> crate::Result<Vec<TrackedR
     let candidates = [
         ".ctx/config.toml",
         ".ctx/config.ts",
+        ".ctx/traits/runtime.toml",
         ".ctx/traits/worktrees",
         ".ctx/worktrees",
         ".ctx/runs",

@@ -24,7 +24,7 @@ pub fn activity_adapter_kind(
 pub use crate::layout::{
     GLOBAL_RUNTIME_CONFIG, HARNESS_REGISTRY, LEGACY_CTX_GLOBAL_RUNTIME_CONFIG,
     LEGACY_CTX_RUNTIME_CONFIG, LEGACY_GLOBAL_RUNTIME_CONFIG, LEGACY_HARNESS_REGISTRY,
-    LEGACY_RUNTIME_CONFIG, RUNTIME_CONFIG,
+    LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RUNTIME_CONFIG,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -4765,6 +4765,11 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
         // checkout carrying both is governed by the new name.
         layers.push((ConfigLayer::Repo, ancestor.join(LEGACY_CTX_RUNTIME_CONFIG)));
         layers.push((ConfigLayer::Repo, ancestor.join(HARNESS_REGISTRY)));
+        // 0037: the committed project tier (`.ctx/traits/config.toml`) merges
+        // BEFORE the machine-local `.ctx/traits/runtime.toml`, so a local
+        // field overrides the project decision field-wise and nothing else —
+        // built-in < package < machine ~/.config < config.toml < runtime.toml.
+        layers.push((ConfigLayer::Repo, ancestor.join(PROJECT_CONFIG)));
         layers.push((ConfigLayer::Repo, ancestor.join(RUNTIME_CONFIG)));
     }
     if let Ok(path) = std::env::var("CTX_CONFIG") {
@@ -9689,6 +9694,90 @@ mod config_tests {
                 .agent
                 .role["worker"],
             RoleAssignmentValue::Single(single("trait-quick-harness"))
+        );
+    }
+
+    /// 0037: at every ancestor, the committed project tier
+    /// (`.ctx/traits/config.toml`) merges immediately before the
+    /// machine-local `.ctx/traits/runtime.toml`, so a local field wins the
+    /// field-wise merge and nothing else does.
+    #[test]
+    fn project_config_layers_immediately_before_machine_runtime_config() {
+        let layers = runtime_config_layers(Utf8Path::new(".")).expect("layers enumerate");
+        let paths: Vec<String> = layers.iter().map(|(_, path)| path.to_string()).collect();
+        let mut pairs = 0;
+        for (index, path) in paths.iter().enumerate() {
+            if path.ends_with(PROJECT_CONFIG) {
+                let next = paths.get(index + 1).expect("project tier is never last");
+                assert!(
+                    next.ends_with(RUNTIME_CONFIG),
+                    "expected {RUNTIME_CONFIG} directly after {path}, found {next}"
+                );
+                pairs += 1;
+            }
+        }
+        assert!(pairs > 0, "no project-tier layer enumerated: {paths:?}");
+    }
+
+    /// 0037: a machine-local `runtime.toml` stating ONE field overrides that
+    /// field of the committed `config.toml` and nothing else, and the winner
+    /// map names each field's actual source document.
+    #[test]
+    fn machine_runtime_config_overrides_project_config_field_wise() {
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+
+        let mut project = RuntimeConfig::default();
+        let mut committed_seat = single("project-harness");
+        committed_seat.model = Some("project-model".into());
+        project
+            .agent
+            .role
+            .insert("worker".into(), RoleAssignmentValue::Single(committed_seat));
+        merge_machine_config(
+            &mut effective,
+            project,
+            ConfigLayer::Repo,
+            Some(".ctx/traits/config.toml".into()),
+            &mut winners,
+        );
+
+        let mut mine = RuntimeConfig::default();
+        let local_seat = ProfileAssignment {
+            model: Some("mine-model".into()),
+            ..ProfileAssignment::default()
+        };
+        mine.agent
+            .role
+            .insert("worker".into(), RoleAssignmentValue::Single(local_seat));
+        merge_machine_config(
+            &mut effective,
+            mine,
+            ConfigLayer::Repo,
+            Some(".ctx/traits/runtime.toml".into()),
+            &mut winners,
+        );
+
+        let RoleAssignmentValue::Single(resolved) = &effective.agent.role["worker"] else {
+            panic!("expected a single-table assignment");
+        };
+        assert_eq!(
+            resolved.harness.as_deref(),
+            Some("project-harness"),
+            "an omitted field inherits the project tier"
+        );
+        assert_eq!(
+            resolved.model.as_deref(),
+            Some("mine-model"),
+            "a stated field replaces the project tier"
+        );
+        assert_eq!(
+            winners["agent.role.worker.model"].source.as_deref(),
+            Some(".ctx/traits/runtime.toml")
+        );
+        assert_eq!(
+            winners["agent.role.worker.harness"].source.as_deref(),
+            Some(".ctx/traits/config.toml")
         );
     }
 
