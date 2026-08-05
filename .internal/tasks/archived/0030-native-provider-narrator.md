@@ -1,6 +1,6 @@
 # 0030 — Narrate through the provider API directly, not a harness
 
-**Status:** ready to implement, but do NOT build the transport here — 0079 (2026-08-04) generalises it to any one-shot seat and this becomes its first consumer. Keep this file as the statement of *why* for the narrator specifically; close it against 0079 rather than implementing it separately. · **Raised:** 2026-07-29
+**Status:** closed against 0079 (`69ca2ef9`, "0079: narrator rides an API transport with seat-dispatch precedence") — the narrator seat is 0079's first consumer via `resolve_seat_dispatch` (`modules/cli/src/app/drive.rs:1558-1566`); this file stays as the statement of *why* for the narrator specifically. · **Raised:** 2026-07-29 · **Closed:** 2026-08-05
 
 Narration currently spawns a whole coding-agent CLI per tick. That is enormous
 overhead for a task that is: take a few lines of recent activity, return one
