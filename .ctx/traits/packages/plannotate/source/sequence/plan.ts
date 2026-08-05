@@ -5,7 +5,7 @@ import { port, slot } from "../data.ts";
 
 const planDraft = sequence.prompt("plan-draft", {
     title: "Draft the plan (smart)",
-    agent: agent.smart,
+    agent: agent.smart1,
     text: prompt.text`
                     Create an implementation plan for the assignment: ${port.assignment}.
                     Inspect the repository with your tools to ground the plan; do not guess at structure.
@@ -14,21 +14,9 @@ const planDraft = sequence.prompt("plan-draft", {
     output: slot.draft,
 });
 
-// A command step has no stdin channel — every spawn is `Stdio::null()` — so
-// piping the hook envelope into plannotator rides `sh -c`, the same
-// workaround `implement-guided/source/sequence/annotation.ts` documents. The
-// draft text reaches the shell as a positional `$1` argument, never spliced
-// into the script string, so no character in the plan can break out of the
-// intended command. `PLANNOTATOR_ORIGIN` is set deliberately so a deny reads
-// as addressed to plannotator, not to some other tool sharing the hook shape.
-//
-// The exact `jq` envelope below encodes the shape this trait's own schema
-// (`schema.planDecision`) and the core fixture at
-// `modules/core/src/procedure/session.rs:4374` agree on —
-// `hookSpecificOutput.decision.behavior`/`.message` — but was authored
-// without a live plannotator session to confirm against (interactive; opens
-// a browser and blocks on a human decision, which this environment could not
-// drive). Confirm against a real captured payload before recording.
+// A command step has no stdin channel, so piping the hook envelope into
+// plannotator rides `sh -c`; the draft reaches the shell as a positional `$1`
+// argument, never spliced into the script string.
 const planOwnerReview = sequence.command("plan-owner-review", {
     title: "Annotate the plan (plannotator, plan mode)",
     argv: [
@@ -38,17 +26,15 @@ const planOwnerReview = sequence.command("plan-owner-review", {
         "sh",
         "{slot:draft}",
     ],
-    // A human annotates the plan in a browser window; there is no
-    // "silence budget" shorter than that. `.ctx/traits/runtime.toml` sets
-    // `command-idle-seconds = 600`; this step declares its own bound (0084)
-    // so it wins over that default rather than timing out mid-review.
+    // A human annotates in a browser; the per-step bound must beat
+    // runtime.toml's `command-idle-seconds`.
     idleTimeoutMs: 4 * 60 * 60 * 1000,
     output: slot.planDecision,
 });
 
 const planReview = sequence.prompt("plan-review", {
     title: "Refine the plan against the owner's annotations (smart)",
-    agent: agent.smart,
+    agent: agent.smart1,
     text: prompt.text`
                     Refine the draft ${slot.draft} into the final plan, using plannotator's plan-mode verdict ${slot.planDecision}.
                     If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.

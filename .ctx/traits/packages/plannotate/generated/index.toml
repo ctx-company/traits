@@ -1,6 +1,6 @@
 id = "plannotate"
 schema-version = "0.2"
-version = "0.1.0"
+version = "0.2.0"
 name = "Plannotate"
 summary = "Draft a plan, put the owner inside plannotator to annotate it, refine against the annotations, then loop worker and reviewer with no round limit until both the reviewer and the owner approve — writing a tracked brief and committing."
 
@@ -74,12 +74,12 @@ hint = "What changed (files), how it was validated, and open concerns."
 [[slot]]
 id = "review-verdict"
 schema = "schema:review-verdict"
-description = "The reviewer's verdict for the current round, plus its owner-facing briefing."
+description = "The reviewer's verdict for the current round."
 
 [[slot]]
 id = "owner-briefing"
 schema = "schema:text"
-description = "The current round's briefing, lifted flat from review-verdict.briefing for the file-writing command step (a command step interpolates only flat slots, never a nested field)."
+description = "The round briefing for the owner, written after a reviewer approval from the work summary, the verdict, and the working tree; fed to the plannotator gate step."
 
 [[slot]]
 id = "owner-decision"
@@ -89,7 +89,7 @@ description = "plannotator's gate verdict on the round briefing, only once a rev
 [[slot]]
 id = "brief"
 schema = "schema:brief"
-description = "The scribe's final brief: slug plus markdown, before it is written to .internal/briefs/."
+description = "The final record: slug, brief markdown, and commit message, before the file-writing and commit command steps run."
 
 [[slot]]
 id = "brief-slug"
@@ -114,7 +114,7 @@ description = "Output evidence from the command step that displays the brief to 
 [[slot]]
 id = "commit-message"
 schema = "schema:text"
-description = "Scribe's commit message for the approved work; also saved to .git/CTX_COMMITMSG for the commit command step."
+description = "brief.commit-message, lifted flat for the git commit command step's argv."
 
 [[slot]]
 id = "stage-output"
@@ -136,7 +136,7 @@ allowed = [
 
 [[schema]]
 id = "review-verdict"
-description = "Typed review verdict for the current work state, plus the round's owner-facing briefing. The loop blocks only on blockers, so taste and cosmetics never cause churn."
+description = "Typed review verdict for the current work state. The loop blocks only on blockers, so taste and cosmetics never cause churn."
 
 [schema.fields.advisory]
 schema = "schema:text"
@@ -145,11 +145,6 @@ description = "Non-blocking notes: naming, structure, taste, optional improvemen
 [schema.fields.blockers]
 schema = "schema:text"
 description = "The blocking defects that must be fixed before this work can ship: a correctness bug, a failing check, work the plan did not ask for, or an owner annotation from ownerDecision that is not yet satisfied. Present when status is revise; empty or absent when approved."
-
-[schema.fields.briefing]
-schema = "schema:text"
-required = true
-description = "A short markdown briefing of this round for the owner: what changed, what this verdict found, and (when status is approved) what the owner is being asked to confirm. Written to be read cold — the owner has not seen the working tree."
 
 [schema.fields.status]
 schema = "schema:decision"
@@ -175,12 +170,17 @@ description = """"approved", "denied", or "dismissed" — plannotator's gate ver
 
 [[schema]]
 id = "brief"
-description = "The run's final brief: a tracked markdown record plus the filename stem to save it under."
+description = "The run's final record: a tracked markdown brief, the filename stem to save it under, and the commit message."
+
+[schema.fields.commit-message]
+schema = "schema:text"
+required = true
+description = "Commit message for the approved work: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated."
 
 [schema.fields.markdown]
 schema = "schema:text"
 required = true
-description = "The brief itself: what was built, why, and how it was validated — for the tracked record."
+description = "The brief itself: what was built, why, how it was validated, and what the review found — for the tracked record."
 
 [schema.fields.slug]
 schema = "schema:text"
@@ -188,19 +188,19 @@ required = true
 description = "A short kebab-case filename stem for the tracked brief, e.g. the assignment's own slug."
 
 [[agent]]
-id = "smart"
-description = "Strong model: drafts the plan, refines it against plan-mode annotations, and reviews the implemented work each round against the plan and the owner's annotations."
-summary = "Drafting, plan refinement, and implement-review role."
+id = "smart-1"
+description = "Strong model: drafts the plan, refines it against plan-mode annotations, reviews the implemented work each round, and writes the owner's round briefing."
+summary = "Drafting, plan refinement, review, and briefing role."
+
+[[agent]]
+id = "smart-2"
+description = "Strong model: writes the tracked brief and the commit message for the approved work, grounded in the work summary, the final verdict, and the working tree."
+summary = "Brief and commit-message role."
 
 [[agent]]
 id = "worker"
 description = "Implements the plan and applies reviewer/owner fixes each round."
 summary = "Implementation role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the tracked brief and the commit message for the approved work; staging and committing run as command steps."
-summary = "Brief and commit-message role."
 
 [prompt.implement-review]
 text = """
@@ -210,7 +210,6 @@ text = """
                     If an owner decision is attached to this frame, it is the owner's verdict on the previous round's briefing (denied or dismissed, since an approved verdict would already have ended the loop): treat any annotation it carries as an unsatisfied BLOCKER, never advisory, until the work visibly addresses it.
                     A BLOCKER makes the work genuinely unshippable: a correctness bug, a failing check, work the plan did not ask for, or an unsatisfied owner annotation. Everything else — naming, structure, taste, optional improvements — is ADVISORY.
                     Put blocking defects in blockers and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved. Do not promote taste to a blocker to earn another round.
-                    Also write briefing: a short markdown briefing of this round for the owner — what changed, what you found, and (only when status is approved) what you are asking the owner to confirm before it ships.
                     Return the typed verdict."""
 input = [
     "slot:plan",
@@ -251,72 +250,59 @@ input = [
 ]
 output = ["slot:plan"]
 
-[prompt.summary-brief]
+[prompt.round-briefing]
 text = """
 
-                    The build loop for the plan {slot:plan} has ended in a double approval (reviewer and owner), and the work is being recorded. Current work summary: {slot:work-summary}.
-                    Write a short kebab-case slug for this assignment, and a brief in markdown: what was built, why, and how it was validated. Draw its substance from the work summary rather than re-deriving the change from the working tree.
-                    Return the slug and the markdown as the typed brief output. Do not write any file yourself; a later runtime step saves it."""
+                    The reviewer has approved this round's work for the plan {slot:plan}, and the owner is about to be summoned to confirm it ships. Work summary: {slot:work-summary}. Reviewer verdict: {slot:review-verdict}.
+                    Inspect the working tree with your tools (git diff, git status, the changed files) so the briefing reflects what actually changed, not just what the summary claims.
+                    Write a short markdown briefing for the owner, to be read cold — the owner has not seen the working tree: what changed and why, what the review checked and found (including advisory notes worth the owner's attention), and what the owner is being asked to confirm.
+                    Return only the briefing markdown."""
 input = [
     "slot:plan",
     "slot:work-summary",
+    "slot:review-verdict",
+]
+output = ["slot:owner-briefing"]
+
+[prompt.summary-brief]
+text = """
+
+                    The build loop for the plan {slot:plan} has ended in a double approval (reviewer and owner), and the work is being recorded and committed. Work summary: {slot:work-summary}. Final reviewer verdict: {slot:review-verdict}.
+                    Inspect the working tree with your tools (git diff, git status) so the record reflects the actual change, not just the summary's claims.
+                    Write: a short kebab-case slug for this assignment; the brief in markdown — what was built, why, how it was validated, and what the review found; and the commit message — a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated.
+                    Return the slug, the markdown, and the commit message as the typed output. Do not write any file and do not run git commands; later runtime steps save and commit."""
+input = [
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
 ]
 output = ["slot:brief"]
 
-[prompt.summary-commit]
-text = """
-
-                    The build loop for the plan {slot:plan} has ended in a double approval, and the work is being committed. The final verdict is {slot:review-verdict}, and the tracked brief is {slot:brief}.
-                    Write a concise commit message: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated. Draw its substance from the brief's stated intents rather than re-deriving the change from the working tree.
-                    Save exactly that message to the file .git/CTX_COMMITMSG at the repo root (create or overwrite it), and return the same message as your output.
-                    Do not run any git commands; staging and committing happen in later runtime steps."""
+[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
+id = "round-briefing"
+title = "Write the round briefing (smart)"
+agent = "agent:smart-1"
+prompt = "prompt:round-briefing"
 input = [
     "slot:plan",
+    "slot:work-summary",
     "slot:review-verdict",
-    "slot:brief",
 ]
-output = ["slot:commit-message"]
-
-[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
-id = "lift-owner-briefing"
-title = "Lift Owner Briefing"
-kind = "project"
-input = ["slot:review-verdict"]
 output = ["slot:owner-briefing"]
 
-[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.projection]]
-source = "slot:review-verdict"
-field = "briefing"
-destination = "slot:owner-briefing"
-
 [[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
-id = "write-owner-briefing"
-title = "Write the round briefing for the owner"
+id = "implement-owner-review"
+title = "Summon the owner (plannotator, gated)"
 input = ["slot:owner-briefing"]
-output = ["slot:brief-write-output"]
+output = ["slot:owner-decision"]
 
 [sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.command]
 argv = [
     "sh",
     "-c",
-    'printf %s "$1" > .git/CTX_BRIEFING.md',
+    'd=$(mktemp -d) && printf %s "$1" > "$d/briefing.md" && plannotator annotate "$d/briefing.md" --gate --json; s=$?; rm -rf "$d"; exit $s',
     "sh",
     "{slot:owner-briefing}",
-]
-
-[[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence]]
-id = "implement-owner-review"
-title = "Summon the owner (plannotator, gated)"
-input = ["slot:brief-write-output"]
-output = ["slot:owner-decision"]
-
-[sequence.ctx-branch-arm-s-15-implement-round-20-implement-owner-gate-then.sequence.command]
-argv = [
-    "plannotator",
-    "annotate",
-    ".git/CTX_BRIEFING.md",
-    "--gate",
-    "--json",
 ]
 idle-timeout-ms = 14400000
 
@@ -335,7 +321,7 @@ output = ["slot:work-summary"]
 [[sequence.implement-round.sequence]]
 id = "implement-review"
 title = "Review the work (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:implement-review"
 input = [
     "slot:plan",
@@ -356,7 +342,7 @@ field = "status"
 equals = "approved"
 
 [procedure]
-description = "Confirm plannotator is installed, draft a plan and put the owner inside plannotator to annotate it, refine the plan against the annotations, loop the worker and reviewer with no iteration bound until the reviewer and the owner both approve — the owner summoned only on a round the reviewer already approved — then write a tracked brief and commit."
+description = "Confirm plannotator is installed, draft a plan and put the owner inside plannotator to annotate it, refine the plan against the annotations, loop the worker and reviewer with no iteration bound until the reviewer and the owner both approve — the owner summoned only on a round the reviewer already approved, briefed by a fresh smart frame grounded in the working tree — then write a tracked brief and commit."
 input = ["port:assignment"]
 
 [[procedure.sequence]]
@@ -374,7 +360,7 @@ argv = [
 [[procedure.sequence]]
 id = "plan-draft"
 title = "Draft the plan (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:plan-draft"
 input = ["port:assignment"]
 output = ["slot:draft"]
@@ -398,7 +384,7 @@ idle-timeout-ms = 14400000
 [[procedure.sequence]]
 id = "plan-review"
 title = "Refine the plan against the owner's annotations (smart)"
-agent = "agent:smart"
+agent = "agent:smart-1"
 prompt = "prompt:plan-review"
 input = [
     "slot:draft",
@@ -424,12 +410,13 @@ equals = "approved"
 
 [[procedure.sequence]]
 id = "summary-brief"
-title = "Write the brief (scribe)"
-agent = "agent:scribe"
+title = "Write the brief and commit message (smart)"
+agent = "agent:smart-2"
 prompt = "prompt:summary-brief"
 input = [
     "slot:plan",
     "slot:work-summary",
+    "slot:review-verdict",
 ]
 output = ["slot:brief"]
 
@@ -441,6 +428,7 @@ input = ["slot:brief"]
 output = [
     "slot:brief-slug",
     "slot:brief-markdown",
+    "slot:commit-message",
 ]
 
 [[procedure.sequence.projection]]
@@ -452,6 +440,11 @@ destination = "slot:brief-slug"
 source = "slot:brief"
 field = "markdown"
 destination = "slot:brief-markdown"
+
+[[procedure.sequence.projection]]
+source = "slot:brief"
+field = "commit-message"
+destination = "slot:commit-message"
 
 [[procedure.sequence]]
 id = "write-brief"
@@ -490,18 +483,6 @@ argv = [
 idle-timeout-ms = 14400000
 
 [[procedure.sequence]]
-id = "summary-commit"
-title = "Write the commit message (scribe)"
-agent = "agent:scribe"
-prompt = "prompt:summary-commit"
-input = [
-    "slot:plan",
-    "slot:review-verdict",
-    "slot:brief",
-]
-output = ["slot:commit-message"]
-
-[[procedure.sequence]]
 id = "git-stage"
 title = "Stage all changes except runtime state"
 output = ["slot:stage-output"]
@@ -525,6 +506,6 @@ output = ["slot:commit-output"]
 argv = [
     "git",
     "commit",
-    "-F",
-    ".git/CTX_COMMITMSG",
+    "-m",
+    "{slot:commit-message}",
 ]

@@ -5,11 +5,11 @@ generated-at = "not-recorded"
 
 [[trait]]
 id = "plannotate"
-requested-version = "0.1.0"
-resolved-version = "0.1.0"
+requested-version = "0.2.0"
+resolved-version = "0.2.0"
 
 [trait.digests]
-source = "sha256:ad4520af36394044080466102b0c0240d9b8a5b6de4b513b08d98f1ff5793cd4"
-canonical = "sha256:f5e9ee59a32019dbba458579895fdb051822f29dab0bd43123bdd18319ed4621"
-model-visible = "sha256:5cc2a7344cc68bcf8c4db2f733d4fcf63e59cf4add2d993da8021cc8053581a8"
+source = "sha256:121e5f88e834101e2af2b5f9dc299e464cc38f5aba32bfc44c77ba1dcfd10d32"
+canonical = "sha256:ce7318cf199d58bc975346ca5a8db853ab53acc5051bdaee7aa2a1f746b334e2"
+model-visible = "sha256:81cdeee83203b29fbb30fd99a36d6765356b9f9ab3afc8658fe8d35ce6725ed3"
 resource-manifest = "sha256:772c103b2a4ca1570d4babb215822d9f098166cb29e64408a4f0442c6debacb3"

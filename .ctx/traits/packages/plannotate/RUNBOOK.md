@@ -38,19 +38,21 @@ annotate.
    has to be satisfied before the run will ever ask you for anything.
 6. **`implement-work` → `implement-review`** (round 2) — reviewer now sets `approved`. Narrate that
    *this* is what triggers the owner gate — nothing else does.
-7. **`implement-owner-review`** — plannotator opens the round briefing in gate mode. **Reject it
-   once**, with a concrete annotation. Narrate: the loop is not done — a reviewer approval alone
-   never ends it.
+7. **`round-briefing` → `implement-owner-review`** — a fresh smart frame writes the round briefing
+   from the work summary, the verdict, and the actual working tree; then plannotator opens it in
+   gate mode. **Reject it once**, with a concrete annotation. Narrate: the loop is not done — a
+   reviewer approval alone never ends it.
 8. **`implement-work` → `implement-review`** (round 3) — the worker addresses your rejection; the
    reviewer's prompt treats your unaddressed note as a blocker until it visibly is one, so point out
    in this round's `blockers` field that it named your note by content, not just "apply owner
    feedback".
 9. **`implement-owner-review`** (second time) — **approve it**. Narrate: only now does the loop
    exit — both the reviewer and you had to say yes, and nothing forces a re-ask.
-10. **`summary-brief`** — the scribe writes the brief; plannotator displays it with no gate. Narrate
-    that this window carries no decision — it's a record, not another checkpoint.
-11. **`summary-commit`** — the run stages and commits, brief included. Show the commit: the brief
-    under `.internal/briefs/<slug>.md` is inside it.
+10. **`summary-brief`** — a smart frame writes the brief and the commit message, grounded in the
+    diff; plannotator displays the brief with no gate. Narrate that this window carries no
+    decision — it's a record, not another checkpoint.
+11. **`git-stage` → `git-commit`** — the run stages and commits, brief included. Show the commit:
+    the brief under `.internal/briefs/<slug>.md` is inside it.
 
 ## What the viewer should walk away noticing
 
