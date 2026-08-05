@@ -75,7 +75,7 @@ fn classify(name: &str) -> Result<&'static str, String> {
         // hidden-command help path keeps working for the deprecation window.
         "dependency" | "vendor" | "install" | "remove" | "update" | "outdated" | "info"
         | "publish" | "import" => "dependencies",
-        "doctor" | "cache" | "config" => "maintain",
+        "doctor" | "cache" | "config" | "task" => "maintain",
         "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
         | "evidence" | "compatibility" | "subagent" | "inspect" | "compose" | "manifest"
         | "schema" | "sdk-generate" | "synth" | "generate-evals" | "import-refresh"

@@ -1,0 +1,51 @@
+schema-version = "0.1"
+key = "0014"
+title = "Scrolling the journey to the bottom must not jump back to the top"
+status = "done"
+raised = "2026-07-28"
+content = """
+
+
+## The behaviour
+
+Scroll the journey/progress pane down to its last row and the view jumps back to the beginning, as if it wrapped.
+
+## Why — hypothesis, and it fits exactly
+
+Nothing in the scrollers wraps: `ScrollList::clamp` and `ViewportScroll::clamp` both saturate at the ends, and P547 already removed the rebuild-from-zero that used to reset the offset each frame. So the jump is not the scroller.
+
+The likely cause is **follow-mode re-engaging and then snapping to the ACTIVE row, which is not the last row**:
+
+```rust
+// run_view.rs — follow_progress
+if follow {
+    let target = active_row.unwrap_or_else(|| len.saturating_sub(1));
+    align_scroll_start(scroll, target.saturating_sub(rows.saturating_sub(1)), rows);
+}
+```
+
+P470's rule derives `follow` from the RESULTING scroll position — reaching the tail re-engages it. For the history/activity panes that is harmless, because their tail *is* the newest row. For the **journey**, the interesting row is the step currently running, which in a long procedure sits well above the bottom (completed steps above it, pending steps below). So: scroll to the bottom → follow re-engages → follow aligns to the active step → the view snaps upward, which reads as wrapping.
+
+`follow_tail` (used by the append-only panes) has no such divergence — it aligns to `len - rows`, which is the tail. Only `follow_progress` targets a row that is not the end.
+
+**This is a hypothesis from reading, not a reproduction.** Confirm it by scrolling a run whose active step is near the top of a long journey; if the jump lands on the active step rather than row 0, it is this.
+
+## What to build
+
+Reaching the bottom of the journey should mean "I am looking at the end", not "resume following the active step". Options, in the order I would try them:
+
+1. **Do not re-engage follow at the tail for a target-row pane.** Follow re-engages only when the view reaches the FOLLOW TARGET (the active row), not merely the last row. That keeps P470's intent — following resumes when you catch up to what is being followed — and makes the journey behave like the others.
+2. Re-engage only on an explicit key (`End`/`G`), never implicitly.
+
+Whatever is chosen, the two follow kinds should stop diverging silently: one aligns to a row, the other to the tail, and only one of them can surprise the user.
+
+## Watch
+
+- Do not fix this by disabling follow on the journey. Following the active step is the behaviour that makes a long run watchable without touching the keyboard; the bug is the re-engagement rule, not the following.
+- P470's derive-follow-from-resulting-position rule is load-bearing (it fixed `down-key-forces-follow-jump`) — amend where the target is, not whether follow is derived.
+- Verify with a run whose journey is longer than the pane, mid-procedure. A short run cannot show this at all, which is presumably why it survived P547.
+
+## Done when
+
+Scrolling the journey to its last row leaves the view there; follow resumes when the view reaches the step being followed (or on an explicit key), never by arriving at the end; the history and activity panes are unchanged.
+"""

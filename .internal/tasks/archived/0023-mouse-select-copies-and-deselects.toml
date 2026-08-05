@@ -1,0 +1,32 @@
+schema-version = "0.1"
+key = "0023"
+title = "Mouse selection copies to clipboard on mouseup, then deselects"
+status = "done"
+raised = "2026-07-29"
+content = """
+
+
+Select text with the mouse in the live view; on mouseup the selection goes to
+the system clipboard and the selection clears. No modifier, no menu.
+
+## Watch
+
+- The TUI takes over the alternate screen, so the terminal's own
+  select-and-copy is unavailable — this replaces it, and must therefore work
+  for the case people actually use it for: grabbing an error line or a path out
+  of the activity stream.
+- Copy the RENDERED text of the selected region, not the underlying model
+  values. A path that was ellipsized on screen must copy whole, or the feature
+  is a trap. Decide this explicitly rather than inheriting whatever the widget
+  does.
+- Deselect on mouseup is the point: a selection that lingers reads as a mode
+  the user must escape.
+- Terminals differ on mouse reporting; a terminal that cannot report drag must
+  fall back to leaving selection alone rather than half-working.
+
+## Done when
+
+Dragging over text in any pane copies it on release and leaves no selection
+behind; ellipsized content copies in full; a terminal without drag reporting
+behaves as it does today.
+"""

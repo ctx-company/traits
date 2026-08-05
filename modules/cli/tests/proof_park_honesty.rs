@@ -518,11 +518,11 @@ fn trait_manifest(id: &str) -> String {
 
 /// Fresh scratch repo carrying one fixture trait (`id`, rendered as
 /// `trait_toml` by the caller — [`fixture_trait_toml`] or
-/// [`dual_review_trait_toml`]), and one `.internal/tasks/<task>.md` file per
-/// `(task, wall)` pair — reviewed and ready to drive. The board is committed
-/// here, under the controlled environment (never the invoking machine's own
-/// `~/.gitconfig`), so whether it lands in the fixture's tracked set never
-/// depends on ambient developer config.
+/// [`dual_review_trait_toml`]), and one `.internal/tasks/<task>.toml`
+/// canonical task document per `(task, wall)` pair — reviewed and ready to
+/// drive. The board is committed here, under the controlled environment
+/// (never the invoking machine's own `~/.gitconfig`), so whether it lands
+/// in the fixture's tracked set never depends on ambient developer config.
 fn setup_fixture(
     label: &str,
     id: &str,
@@ -544,14 +544,15 @@ fn setup_fixture(
         "/.ctx/runs/*.json\n/.ctx/traits/worktrees/\n/.ctx/debug/\n",
     );
     for (task, wall) in phases {
-        let mut body = format!(
-            "# {task} — Park-honesty fixture task\n\n**Status:** ready to implement\n\nWhy: fixture.\nApproach: fixture.\n"
-        );
+        let mut content = "Why: fixture.\nApproach: fixture.\n".to_string();
         if let Some(wall) = wall {
-            body.push_str(&format!("\n**Wall:** {wall}\n"));
+            content.push_str(&format!("\n**Wall:** {wall}\n"));
         }
-        body.push_str("\n## Done when\n\nFixture gates pass.\n");
-        write_file(&repo.join(format!(".internal/tasks/{task}.md")), &body);
+        content.push_str("\n## Done when\n\nFixture gates pass.\n");
+        let body = format!(
+            "schema-version = \"0.1\"\nkey = \"{task}\"\ntitle = \"Park-honesty fixture task\"\nstatus = \"ready\"\n\ncontent = \"\"\"\n{content}\"\"\"\n"
+        );
+        write_file(&repo.join(format!(".internal/tasks/{task}.toml")), &body);
     }
     commit_all(&repo, &home, "initial commit");
 

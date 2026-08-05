@@ -1,0 +1,55 @@
+schema-version = "0.1"
+key = "0015"
+title = "The journey line: bullets not gutters, and drop the in/out rows"
+status = "done"
+raised = "2026-07-28"
+content = """
+
+
+## What is wrong
+
+Each step spends three-space gutters between every field, and every step carries two extra rows for its slot flow:
+
+```
+✓ Draft the work   smart-1·opencode   prompt   done (5m 25s · 6.2k tok)
+    in phase execution-plan product-doc
+    out draft
+```
+
+Three fields, two three-space gaps, then two rows that are mostly the words `in` and `out`. On a narrow pane the gutters push the status off-screen while the `in`/`out` rows — the least-read content — keep their full width.
+
+## Target
+
+One line per step, bullet-separated, labelled:
+
+```
+~ Building Produce · [agent] worker@opencode · [variant] prompt · in-progress (12m 04s · 3.1k tok)
+```
+
+- `·` with single spaces replaces the three-space gutters (`run_view.rs:1856,1859,1862`), matching the house separator already used for `step.tags` and for the P551 footer.
+- Field labels — `[agent]`, `[variant]` — name what would otherwise be bare values.
+- **`in`/`out` rows are removed.** They are the widest, least-read thing in the pane. A later setting can bring them back; nothing today needs them, and the slot flow is in the ledger and in `story`.
+
+## Degradation is the real requirement
+
+Width is scarce — the journey shares a 2x2 grid (P552) inside an inline viewport already a row short of the terminal. Drop in a stated order as width shrinks, rather than truncating the line:
+
+1. full — `~ Building Produce · [agent] worker@opencode · [variant] prompt · in-progress (12m 04s · 3.1k tok)`
+2. drop the `[label]` prefixes, keep values — `~ Building Produce · worker@opencode · prompt · in-progress (12m 04s)`
+3. drop the variant — `~ Building Produce · worker@opencode · in-progress`
+4. drop the agent — `~ Building Produce · in-progress`
+5. ellipsize the step label itself, never the state
+
+**The mark, the step label and the state survive to the narrowest width.** They are what the pane is for; the agent and variant are context.
+
+## Watch
+
+- Truncate on DISPLAY width, not byte length — `·` is multi-byte and the step labels are authored text.
+- The `(N open)` structured-count suffix and the `~`/`✓`/`×` marks stay as they are; this is spacing and labelling, not a rewrite of what a step reports.
+- Keep it consistent with `story` (task 0007's history line format) — the same run should read the same way live and afterwards. If the two formats must differ, say why.
+- Do not delete the in/out DATA, only its rendering. A later `--verbose` or setting should be able to restore the rows without re-deriving anything.
+
+## Done when
+
+A step is one bullet-separated line with labelled agent and variant; no `in`/`out` rows appear; narrowing the pane drops fields in the stated order while the mark, label and state survive; nothing wraps.
+"""

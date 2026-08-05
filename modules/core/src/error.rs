@@ -43,6 +43,9 @@ pub enum Error {
 
     #[error(transparent)]
     Migrate(#[from] crate::migrate::Error),
+
+    #[error(transparent)]
+    Task(#[from] crate::task::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

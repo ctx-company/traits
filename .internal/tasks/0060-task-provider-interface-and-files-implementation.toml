@@ -1,0 +1,56 @@
+schema-version = "0.1"
+key = "0060"
+title = "The task provider interface, with the files backend as its first implementation"
+status = "ready"
+raised = "2026-08-03"
+content = """
+
+
+Second slice of the task-interface arc. The point of this task is that `.internal/tasks/` stops
+being *the* board and becomes *one implementation* of it.
+
+## Decisions
+
+- **Verb set:** `resolve · get · list · create · update · sync`. Small on purpose.
+- **`split` and `dispatchable` compose ABOVE the provider** — backends only ever implement reads,
+  creates and updates. Backends differ too much (Linear has real sub-issues, files have a naming
+  convention) for split to be primitive.
+- **Relations are stored one-directional** (`depends-on`, `parent`) and inverses (`blocks`,
+  `children`) are computed, so the two halves can never disagree.
+- **`get()` returns relations RESOLVED** — each edge carrying the other task's key, title and
+  current status. A consumer must never need N+1 lookups to render "blocked by 0049 (ready)".
+- **Cycles are refused at write time**, naming both paths. **Dangling edges** (pointing at a key
+  that does not exist) are surfaced by `sync`, never silently treated as satisfied.
+- **Archival is a provider mechanic.** The files backend moves a document to `archived/` when it
+  becomes `done` or `cancelled`. `get()` must still resolve archived documents — otherwise
+  inbound edges break — while `list()` hides them by default.
+- **Key assignment belongs to the provider**, including child keys (`0010.1`). This retires the
+  numbering instructions currently baked into the plan family's prompts.
+- **Read-only and read-write are separate capabilities**, not one type. Runs get read-only; only
+  the dashboard and CLI can write. The board is owner-maintained and a run must never be able to
+  touch it, even by accident.
+- **`ctx tasks sync | list | show` ships with this slice** (owner call). Sync is manual only —
+  never automatic on opening a surface.
+
+## Watch
+
+- `sync` re-reads the backend: it reports what the backend says, not whether the backend is right.
+  Do not let it grow into verification of the repository's actual state — that is a different
+  question and it needs a different name.
+- The provider stays pure: derived state that needs the session store (`in-flight`, `parked`)
+  belongs to its consumers, not here.
+- Parent status derives from children — implement it as a computation over the graph, never a
+  stored field.
+- Trait/CDK must learn nothing about backends. This is a Rust-side interface consumed by
+  dispatch, the CLI and the dashboard.
+
+## Done when
+
+The files backend implements all six verbs; keys (including child keys) are provider-assigned;
+`done` moves a document to `archived/` while `get()` still resolves it; a write that would create
+a cycle is refused naming both paths; `sync` reports dangling edges; `ctx tasks sync`, `list` and
+`show` work; and the provider is unit-testable with no dashboard and no dispatch.
+"""
+
+[relations]
+depends-on = ["0059"]

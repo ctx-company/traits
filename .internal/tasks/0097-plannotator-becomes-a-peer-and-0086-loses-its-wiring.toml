@@ -1,0 +1,73 @@
+schema-version = "0.1"
+key = "0097"
+title = "plannotator becomes a peer, and 0086 loses its hand-wiring"
+status = "ready"
+raised = "2026-08-04"
+content = '''
+
+
+0086 puts the owner inside the loop by wiring one third-party binary into a trait by hand. 0087–0088
+generalise exactly that. This is the migration, and its real purpose is to be the honest test of
+whether the abstraction is right: an interface with no second consumer is a guess.
+
+**0086 is not blocked on this and must not become blocked on it.** It is ready now, it depends on
+0083/0084/0085 which are ready now, and it is a demo artifact with a recording attached. Ship it
+hand-wired, then move it — the pragmatic artifact and the rigorous version, in that order.
+
+## Decisions
+
+- **plannotator is a peer, and the trait stops naming it.** `plan-owner-review` and
+  `implement-owner-review` become `ask("owner", …)` against a declared reply schema. Which binary
+  answers moves to `[[peer]]` in repo config, exactly as 0087 splits role from binding.
+- **It ships as a `command` peer first (0089), not a first-party variant.** Envelope in, JSON reply
+  out is precisely plannotator's existing contract. A first-party `plannotator` variant is only worth
+  it if the command peer proves insufficient — the same test 0074 applies to itself.
+- **The exit-0 hazard becomes the peer's problem, once.** plannotator exits 0 for dismissed, denied
+  and approved alike, so the single JSON line is the only signal. 0086 has to handle that inside a
+  trait; a peer handles it in one place, and a parse failure becomes an ordinary schema-validation
+  refusal (0088) instead of a slot quietly left Missing while the loop spins.
+- **The idle-budget fight becomes `wait-ms`.** 0086 needs `command-idle-seconds = 600` set repo-wide
+  because a human is reading; 0084 makes that per-step. As a peer it is per-peer config, which is
+  where "how long will a person take" actually belongs.
+- **The escalation ladder stays in the trait.** `implement-owner-review` runs only when the machine
+  reviewer already approved. That is a `when` guard and it does not move — 0087 supplies mechanism and
+  takes no position on when a run has earned the right to ask.
+- **Migration is behaviour-preserving or it is not done.** The same nine steps, the same two gates,
+  the same three decision states. If the peer version cannot express something 0086 does, that is a
+  finding about the interface and it gets written down here, not worked around in the trait.
+
+## Scope
+
+A `[[peer]]` binding for plannotator over the command peer; `plan-owner-review` and
+`implement-owner-review` rewritten as `ask` steps with their reply schemas declared; the scratch-file
+and stdin invocation shapes moved into peer config; 0086's package updated, relocked and re-approved;
+a written comparison of the two versions.
+
+## Watch
+
+- **Two invocation shapes, one binary.** 0086 uses plan mode over stdin *and* `annotate <file>
+  --gate --json`, deliberately. Two peers over one program, not one peer with a mode switch — a peer
+  is one callable (0090's rule, and it holds here).
+- `annotate` rejects a path on its name before checking existence (`/\.mdx?$/i`), so the scratch file
+  must still end in `.md` and the peer, not the trait, now owns creating it.
+- The demo recording is the artifact. Do not migrate between recording and publishing, and do not
+  rebuild the package while a run is live.
+- If the interface turns out to need a change to express 0086, that is the point of this task and the
+  change belongs in 0087 — resist making the trait bend around a gap.
+
+## Done when
+
+plannotator is reached through `[[peer]]` config rather than named in the trait; both owner gates are
+`ask` steps with declared reply schemas; a dismissed, denied or approved reply is distinguished by
+schema validation rather than by trait-side parsing; the wait bound is peer config; the run behaves
+identically to the hand-wired version end to end; and any expressiveness gap found on the way is
+recorded against 0087 rather than patched around.
+'''
+
+[relations]
+depends-on = [
+    "0086",
+    "0087",
+    "0088",
+    "0089",
+]

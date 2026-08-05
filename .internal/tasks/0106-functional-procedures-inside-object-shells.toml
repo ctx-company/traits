@@ -1,0 +1,55 @@
+schema-version = "0.1"
+key = "0106"
+title = "functional procedures inside object shells"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+The bridge form: the whole registration DSL, compiling 1:1 to the object layer, usable inside
+today's `variant({ procedure: … })` shells before full-file traits exist (0107). This is the one
+genuinely novel machinery in the overhaul — everything after it is derivation and migration —
+so it gets its own task and its own proof.
+
+## Decisions
+
+- **Build context.** A synchronous stack: a registrar called outside a build throws; an async
+  callback is a build error; one build at a time; `flow.*` block callbacks push/pop scope.
+  These are runtime checks in the builder — no lint plugin.
+- **The registrars.** `agent.prompt(title, opts)` (agents stay module-level handles, per-role
+  descriptions intact), `step.command` / `step.check`, `flow.loop` / `flow.when` / `flow.match`
+  / `flow.parallel` / `flow.until`, `slot.forEach`, `effect.onComplete` / `effect.onFailure` /
+  `effect.onAbort`, `loop.maxIterations(n, { onExhausted })`. Arms and bodies per 0102: match
+  arms are always callbacks; parallel registration order means nothing.
+- **Positional lowering** for `flow.until` and `flow.when(…, flow.Abort)` exactly as 0102
+  records: trailing steps wrapped in `when(not cond)`, the condition becoming the loop's
+  ordinary guard.
+- **Build rules enforced here.** Exactly one `flow.until` per loop; `loop.maxIterations`
+  required and callable once; duplicate titles per scope rejected (0104's rule, now surfaced at
+  authoring time with the author's file in the error); the `when:` field accepted on any step.
+
+## Scope
+
+The functional entry module; a `procedure`-from-function adapter so existing object-layer
+variant shells can host a functional body; error messages that name the offending title and
+rule; docs with the settled snippets from 0102.
+
+## Watch
+
+- The functional layer may not reach around the object layer — every emission goes through
+  object-layer constructors, or 0108's byte-identical proof proves nothing.
+- `par.maxAtOnce` is reserved surface: accepting the call and erroring with "parked — see 0102
+  ledger" is right; emitting anything for it is not.
+
+## Done when
+
+A procedure authored functionally inside an object shell builds, and its generated canonical is
+byte-identical to the same procedure authored directly in the object layer; every build rule
+fails loudly with an actionable message; drift/embed + builds + cargo test green.
+"""
+
+[relations]
+depends-on = [
+    "0103",
+    "0104",
+]

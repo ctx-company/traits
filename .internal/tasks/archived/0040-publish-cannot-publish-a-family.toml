@@ -1,0 +1,96 @@
+schema-version = "0.1"
+key = "0040"
+title = "`publish` refuses every folded family package"
+status = "done"
+raised = "2026-07-29"
+content = """
+
+
+## The behaviour
+
+Verified against a build of `8d24168`:
+
+```
+$ ctx traits publish --dry-run .ctx/traits/packages/implement
+publish requires exactly one trait package, found 5
+
+$ ctx traits publish --dry-run --trait implement          # same
+$ ctx traits publish --dry-run --trait implement:quick    # same
+$ ctx traits publish --dry-run .ctx/traits/packages/plan     → found 4
+$ ctx traits publish --dry-run .ctx/traits/packages/refactor → found 5
+```
+
+Every single-trait package (`engineering-standards`, `guarded-change`,
+`deep-research`, `auto-research`, `implement-guided`) gets past this and stops at
+the ordinary `publish requires a passed locked check with verified CDK drift`.
+
+So publishing is blocked for **exactly the three packages worth publishing**, and
+there is no flag that reaches them: `path`, `--trait <id>`, and
+`--trait <id>:<variant>` all fail identically.
+
+## Why
+
+`handle_publish` (`modules/cli/src/app/distribution.rs:452-458`) asserts:
+
+```rust
+let inspection = inspect_local_package(&package_root)?;
+if inspection.packages.len() != 1 { … PackageCount(len) … }
+```
+
+That check was written when one package root meant one canonical trait. P535
+changed the other side of it: `inspect_local_package`
+(`modules/io/src/distribution.rs:1268-1277`) now calls
+`family_leaf_local_packages` and **extends the vector with one entry per family
+leaf** — deliberately, so a single `dependency add` installs all five canonical
+variant IDs.
+
+Nothing is wrong with either half. The two just disagree about what
+`packages.len()` counts: after P535 it is *canonical traits*, while publish still
+reads it as *publishable packages*. A family is one package containing five
+traits, which the count can no longer say.
+
+## What to build
+
+**Count packages, not leaves.** The publishable unit is one `package.toml`, so
+the guard should compare distinct package roots (`LocalTraitPackage::root`)
+rather than vector length. A family collapses to one; a genuine multi-package
+directory still trips the error the guard exists for.
+
+**Then decide what gets checked.** The line after the guard is the real work:
+
+```rust
+let trait_file = &trait_package.manifest_path;   // distribution.rs:460
+… build_check_report(CheckInputs { file: trait_file, locked: true, … })
+```
+
+For a single trait that is the one canonical document. For a family there are
+five, and publishing a package whose *default* variant passes while another leaf
+is stale would ship exactly the drift the locked check exists to prevent. **Check
+every leaf and refuse on the first failure**, reporting which leaf failed —
+publishing is a one-way act and the whole package moves together.
+
+## Watch
+
+- **Do not add a `--variant` flag to make one leaf publishable.** The npm package
+  is the family; a leaf is not independently installable and publishing one
+  would create a package whose lock records variants its tarball does not carry.
+  If per-leaf publication is ever wanted, that is a different package layout, not
+  a flag on this command.
+- The guard's error type is `publish::Error::PackageCount(usize)`. Its message
+  says "trait package" and will now be counting something else — reword it, or
+  the next reader re-derives this whole task from a misleading string.
+- `--trait implement:quick` currently fails with the same count error, which
+  reads as if the variant were the problem. Once the guard is fixed, decide
+  whether a variant-qualified id is accepted as "publish the family that contains
+  it" or refused as a category error. Silently publishing the family from a leaf
+  id is the surprising option.
+- Verify with `--dry-run` on all three families before and after; it inspects the
+  payload without touching npm, which is what made this diagnosable at all.
+
+## Done when
+
+`ctx traits publish --dry-run` reaches the locked check for `implement`, `plan`,
+and `refactor`; the check covers every leaf and names the failing one; a
+directory holding two real packages still refuses; and no per-leaf publish flag
+exists.
+"""

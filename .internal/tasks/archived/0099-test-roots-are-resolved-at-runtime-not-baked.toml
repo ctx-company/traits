@@ -1,0 +1,96 @@
+schema-version = "0.1"
+key = "0099"
+title = "Test roots are resolved at runtime, never baked at compile time"
+status = "done"
+content = """
+
+baking at compile time), confirmed ancestor of `HEAD` (`6ccd5c3a`) · **Depends on:** nothing ·
+**Raised:** 2026-08-04 (owner call after this failure class killed two runs' gates in one day;
+decisions in this file are the contract — they were settled deliberately, do not re-open them
+without a concrete contradiction)
+
+## Evidence
+
+All four sites read `std::env::var("CARGO_MANIFEST_DIR")` at runtime with a landmark probe
+(`modules/cli/tests/support/src/lib.rs:47`, `modules/wasm-core/tests/native_wasm_parity.rs:47`,
+`modules/core/src/model_view/compile.rs:1335`, `modules/io/src/confinement.rs:1467`); a repo-wide
+grep for the live `env!("CARGO_MANIFEST_DIR")` / `option_env!(...)` tokens under `modules/**`
+returns zero hits outside a doc comment and the guard proof's own assembled-needle machinery. The
+guard proof `modules/cli/tests/proof_compile_time_paths.rs` exists with an empty `ALLOWLIST`.
+
+Verified this close-out round:
+- `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_compile_time_paths` — 3/3
+  green.
+- Mutation test: added a throwaway `env!("CARGO_MANIFEST_DIR")` to `modules/cli/src/lib.rs`, reran
+  the proof — `no_unjustified_compile_time_manifest_dir_bakes` failed red, naming the exact
+  file:line; reverted (`git checkout -- modules/cli/src/lib.rs`).
+- Shared-slot regression, reproduced directly: built `proof_compile_time_paths` from a second git
+  worktree (`git worktree add`) at the same commit with `CARGO_TARGET_DIR` pointed at a shared
+  slot, ran it green there, then `git worktree remove --force`d that worktree (source now gone),
+  then reran the *same* `CARGO_TARGET_DIR` from this worktree — cargo relinked the identical cached
+  binary (0.14s, same artifact hash) rather than rebuilding, and it still passed: the runtime
+  `CARGO_MANIFEST_DIR` re-resolved to this worktree's own path on the shared binary rather than
+  carrying the deleted worktree's stale root. This is the exact run-4de40dda kill mechanism,
+  confirmed non-regressing.
+- `CARGO_TARGET_DIR=target just test` (the per-round gate) — exit 0, all suites green.
+
+No gap found against the Done-when below; no code changes were needed, only validation and this
+close-out.
+
+Gate builds share build-slot target dirs (`CARGO_TARGET_DIR=…/build-slots/slot-N`) across run
+worktrees. Any test code that bakes a filesystem path at compile time — `env!("CARGO_MANIFEST_DIR")`
+— can therefore execute as a cached binary whose baked path names a *different worktree than the one
+under test*, including one that no longer exists. This is not hypothetical; it happened twice on
+2026-08-04:
+
+- run-4de40dda (0082) parked three times because slot-3's cached `proof_branch_literals` binary
+  carried `repo_root()` = the pruned 0085 worktree (`wt-e8af0ba4971f`): the source walk found 0
+  `.rs` files and the allowlist check ENOENT'd, failing `just test-full` deterministically on every
+  merge retry. Verified at the artifact level: the dead path is baked into
+  `libsupport-*.rlib` and the test binary the gate ran.
+- run-414acdf0 (0078) went red the same way one layer over: its per-round gate's sdk-check ran a
+  stale shared-slot `ctx` binary that predated the new config schema.
+
+The house already knows the rule: `ctx_bin()` in `modules/cli/tests/support/src/lib.rs` reads
+`CARGO_BIN_EXE_ctx` **at runtime** and its comment explains precisely why (P477). `repo_root()`,
+directly below it, violates the same rule with `env!`.
+
+## Decisions
+
+- **Runtime derivation only.** Every path a test resolves must come from the running process's own
+  environment or working directory — `std::env::var("CARGO_MANIFEST_DIR")` (cargo sets it as a real
+  process env var for test binaries), the test binary's own location, or cwd. Never `env!`/
+  `option_env!` for anything that names a directory.
+- **Mind whose manifest it is.** The runtime `CARGO_MANIFEST_DIR` for an integration-test binary is
+  the manifest dir of the package under test (e.g. `modules/cli`), not of a helper crate like
+  `support` — the parent-hop arithmetic changes when switching from the baked form. Verify each
+  derived root by probing for a landmark (e.g. `Cargo.toml` + `modules/`) rather than trusting hop
+  counts blindly.
+- **Sweep the class, not the instance.** All four current bakes go:
+  - `modules/cli/tests/support/src/lib.rs:38` (`repo_root()` — today's kill),
+  - `modules/wasm-core/tests/native_wasm_parity.rs:40`,
+  - `modules/core/src/model_view/compile.rs:1328` (test code),
+  - `modules/io/src/confinement.rs:1458` (test code).
+- **Guard the invariant the house way.** Extend the grep-gate pattern (`proof_branch_literals` is
+  the precedent) with a small proof that fails on any new `env!("CARGO_MANIFEST_DIR")` in
+  `modules/**` outside an explicit, justified allowlist — so the class stays dead instead of
+  regrowing one helper at a time.
+
+## Watch
+
+- The proof guarding the invariant must itself resolve its root at runtime, or it re-imports the
+  disease it polices.
+- `CARGO_MANIFEST_DIR` as a runtime var is set by `cargo test`/`cargo run` but NOT for a binary
+  executed directly outside cargo; helpers that also serve non-cargo contexts need the
+  landmark-probe fallback, not an `expect`.
+- Do not "fix" this by cleaning build slots in the gate — that treats the symptom, costs a full
+  rebuild per gate, and leaves every other baked path waiting.
+
+## Done when
+
+No `env!("CARGO_MANIFEST_DIR")` remains in the four listed sites; each derives its root at runtime
+and verifies it by landmark; a proof fails on new compile-time path bakes outside its allowlist;
+`just test-full` passes when the test binaries were compiled under a *different* worktree's checkout
+of identical sources (the shared-slot scenario that killed run-4de40dda); and the full per-round
+gate is green.
+"""

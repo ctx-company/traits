@@ -1,0 +1,35 @@
+schema-version = "0.1"
+key = "0051.2"
+title = "Restore the piped explicit `--progress tui` fallback path"
+status = "done"
+raised = "2026-08-03"
+content = """
+
+
+Carried from blocker `piped-explicit-tui-fallback-regressed` (0/2 — none of this landed).
+**Live regression on main:** 0051's own scope required piped output to stay byte-identical, and
+it no longer is.
+
+## The defect
+
+With output piped and `--progress tui` given explicitly, the run no longer follows the existing
+drive-level fallback path. The command handler rewrites the resolved `Tui` to `Status` when
+startup-pane eligibility fails, which changes stderr — exactly the byte-identical-piped-output
+requirement 0051 was written under.
+
+## Remaining
+
+- Remove the command-handler rewrite from resolved `Tui` to `Status` when startup-pane
+  eligibility fails, while still skipping `StartupView` creation for ineligible surfaces. The
+  fallback decision belongs at the drive level where it already exists; the handler must not
+  pre-empt it.
+- Strengthen the piped explicit-Tui regression test to assert the existing DRIVE-LEVEL fallback
+  diagnostic, not merely that initialization happened — the weak assertion is why the
+  regression slipped through.
+
+## Done when
+
+`ctx traits run --progress tui` with piped stdout/stderr emits byte-identical stderr to the
+pre-0051 behaviour, including the drive-level fallback diagnostic, and the regression test
+asserts that diagnostic explicitly.
+"""

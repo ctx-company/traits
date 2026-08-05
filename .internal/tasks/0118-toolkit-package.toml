@@ -1,0 +1,56 @@
+schema-version = "0.1"
+key = "0118"
+title = "`@ctx-traits/toolkit`: the package the others are cut from"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+The reusable material exists and is misfiled. `@ctx-traits/agents` holds role
+factories, eight doctrine strings, five schemas, `guardedProduction` and
+`commitTail` under a name that describes only one of those things — and every
+family trait imports from it, so its name is the first thing an external author
+reads. The toolkit is that material, named for what it is, plus the patterns the
+store has proven and never packaged.
+
+What goes in, cherry-picked from what already works — ROLES: the
+`workerRole`/`reviewerRole`/`scribeRole`/`clerkRole` factories (agents) and the
+Rust-specialized pair (rust). SCHEMAS: `blockerSchema`, `reviewVerdictSchema`,
+`leftoverSchema`, `ownerItemSchema`, plus the diagnostic shape 0119 defines.
+SEQUENCE FACTORIES: `guardedProduction` and `commitTail` (agents/process.ts), the
+gate-and-diff evidence pair every implement variant repeats, the deterministic
+park-report projection, and 0119's capture-reduce-fix loop. PARALLEL PATTERNS: the
+store uses `sequence.parallel` and `forEach` nowhere despite both being landed CDK
+primitives — fan-out-then-join over a typed list, and per-item processing with a
+joined result, are exactly the shapes a toolkit should make one call.
+
+The migration is the risky half: every `.ctx/traits/*` package imports from
+`@ctx-traits/agents`; moving that surface moves every canonical digest → rebuild +
+re-approval of the whole store. Decide in-task between (a) rename `agents` →
+`toolkit` with a one-release re-export shim, or (b) leave `agents` in place and
+build `toolkit` as the new home re-exporting from it during transition. (b) is
+lower risk and probably right for a release; (a) is cleaner and can follow. Either
+way ONE package is the source of truth per symbol — a re-export is a pointer,
+never a second copy.
+
+## Watch
+
+- A toolkit is where over-abstraction goes to hide: only material with TWO existing
+  consumers earns a place; single-consumer material gets inlined at its call site.
+- Doctrine strings are the sharpest case — `implement-quick` was cut from five
+  spliced blocks to zero (2026-07-27) and reads better for it; export them as
+  available material, never imply composing them is good practice.
+- Land ahead of or after the family-fold work (0134's neighborhood), never during —
+  both rewrite the same imports.
+- Authoring doctrine binding (P533): index declares only; nouns in data.ts; shapes
+  in schema.ts; roles in agent.ts; one sequence/<concept>.ts per step.
+
+## Done when
+
+One package holds the reusable roles, schemas, sequence factories and parallel
+patterns, each with exactly one definition; the family traits build against it
+unchanged in behavior; the parallel patterns have at least one real consumer; an
+external author reading the package name can tell what is inside.
+
+Full original contract: `archived/board/execution-plan.md` (Group 134, P555).
+"""

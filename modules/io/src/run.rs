@@ -729,12 +729,14 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         return invalid_request("run.task", message);
     }
 
-    // Blocked-status pre-flight (0047 mechanism 1's companion layer): refuse
-    // to dispatch an `implement-*` task whose own task file carries an
-    // explicit blocked/deps-unmet marker on its `**Status:**` header line —
-    // deleting the marker is precisely the owner decision the refusal asks
-    // for. Fails open like the wall preflight above.
-    if let Some(marker) = crate::dispatch_preflight::blocked_status_marker(
+    // Closed-status pre-flight (0047 mechanism 1's companion layer, rewired
+    // onto the typed task document by 0059): refuse to dispatch an
+    // `implement-*` task whose own task document's stored `status` field is
+    // `done` or `cancelled` — a direct typed-field read, never a
+    // derivation. Unmet-dependency (`blocked`) refusal has no stored
+    // representation under 0059's schema and moves to 0060's derived
+    // status. Fails open like the wall preflight above.
+    if let Some(marker) = crate::dispatch_preflight::closed_status_marker(
         &loaded.trait_ref,
         &loaded.trait_root,
         task_value,
@@ -746,7 +748,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             error.to_string(),
         );
     })? {
-        let message = crate::dispatch_preflight::blocked_status_refusal_message(&marker);
+        let message = crate::dispatch_preflight::closed_status_refusal_message(&marker);
         update(
             StartupStage::Harness,
             StartupStageState::Failed,

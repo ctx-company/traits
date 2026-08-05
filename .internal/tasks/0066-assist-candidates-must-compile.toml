@@ -1,0 +1,77 @@
+schema-version = "0.1"
+key = "0066"
+title = "An assist candidate must compile: produce → build → check, in a bounded loop"
+status = "ready"
+raised = "2026-08-03"
+content = """
+
+
+Second slice of the authoring-assist arc. Every LLM-assisted authoring command is a single
+unguarded model call today: one prompt, one answer, gates, verdict. A candidate that does not
+compile comes back `blocked` and the operator re-runs the whole command by hand. This is the exact
+shape the product argues against — the guarded produce/review loop is our own primitive, and our
+own authoring commands do not use it.
+
+## Decisions
+
+- **A failed build is a ROUND, not a verdict.** `generate`, `import --llm-assisted` and
+  `refine --apply` each run a bounded guarded loop and only report failure once the bound is spent.
+- **The loop is declared in the meta-trait, not in Rust.** These are traits; they get a guarded
+  produce/review loop like any other. No bespoke retry logic in `generate.rs`.
+- **Feedback is typed, never scraped.** `cdk_build` already parses `authoringDiagnostics`
+  (`severity`/`code`/`fieldPath`/`message`, `cdk_build.rs:13`) alongside synth and check
+  diagnostics. Those structured diagnostics are the next round's input. Nobody re-reads stderr.
+- **The rung ladder is build → synth/normalize → `check` → audit,** and a round's evidence names
+  which rung failed. "It failed" is not a diagnosis; "it failed at check, section X" is.
+- **`critique` is NOT in the loop.** It is advisory and unbounded in taste; putting it in the exit
+  criterion means terminating on opinion. The loop's exit criterion is mechanical: it builds, it
+  normalizes, it checks clean. Critique stays the separate command it is.
+- **Convergence is not degeneracy.** A source file that compiles because the model deleted the
+  procedure must fail. Keep an explicit non-degenerate rung — the built trait still declares a
+  procedure and a sequence, and `refine` still preserves trait identity.
+- **Nothing mutates the package until the loop converges.** Rounds run against a scratch candidate
+  location; a converged candidate is written once, through the safe writer, and only then locked.
+- **A non-converged run writes no package but does not throw the work away.** It reports the last
+  failing rung with its diagnostics and preserves the last candidate source at a stated path, so a
+  human can pick it up. Silently discarding N paid rounds is not acceptable; silently landing
+  something that does not build is worse.
+- **`--check` means the loop must converge and write nothing.** **`--candidate <file>` stays
+  single-shot** — supplying a candidate means zero model calls, so it evaluates one round and
+  reports. No loop, no retries, gate tests stay cheap.
+
+## Scope
+
+`generate-trait`, `refine-trait` and `import-trait` gain the guarded loop. The CLI handlers surface
+per-round progress the way a run does rather than blocking silently on a multi-minute command. The
+assist `Candidate` envelope grows round evidence: rounds spent, which rung failed each round, and
+the diagnostics that drove the next attempt.
+
+## Watch
+
+- **Each round costs a model call plus a node build.** Bound the rounds, declare the bound, and
+  report rounds spent — an unbounded authoring loop is the same failure mode as an unbounded run.
+- **Assist inherits the run bounds for the first time.** These execute through
+  `run_builtin_trait` → ephemeral session → `drive`, so `[run] frame-seconds` and the 0058 command
+  bounds (`command-idle-seconds`, `command-seconds`) now apply to authoring. A hung build must be
+  killed by the command bound with the bound named, not surface as a masked timeout.
+- **Digests move every round.** Only the converged candidate gets locked and approved; intermediate
+  rounds must not touch `trait.lock` or the trust store.
+- **This is the dogfood argument.** The guarded-change loop the launch material sells should be
+  visibly the same mechanism running inside `ctx traits generate`. If implementing it here needs a
+  concept the loop primitive cannot express, that is a finding about the primitive, and it should
+  be written down rather than worked around in Rust.
+- Ordering: 0065 must land first. A loop that retries until canonical TOML parses is a loop over
+  the wrong artifact.
+
+## Done when
+
+`ctx traits generate` returns a package that builds, normalizes and checks clean, having retried
+on its own typed diagnostics within a declared bound; the same holds for
+`import --llm-assisted` and `refine --apply`; a non-converging run writes no package, names the
+failing rung and preserves its last candidate source; a degenerate candidate that compiles but
+declares no procedure fails; `--candidate` still evaluates exactly one round with no provider
+call; and the round evidence is visible in the candidate envelope.
+"""
+
+[relations]
+depends-on = ["0065"]

@@ -1,0 +1,32 @@
+schema-version = "0.1"
+key = "0127"
+title = "Mode B host plugins: the agent operator's manual + packaging"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+Owner call: Mode B ships as plugins whose commands teach the agent to drive the
+ctx CLI; MCP server code stays in-tree but is not the story.
+
+One canonical model-facing operator's manual (~a page):
+`run <trait> --no-drive --json` → session id → loop `next`/`call` (typed outputs
+validated, wrong shapes refused) → receipt; `prompt <trait>` for pure ingestion;
+`list --json` for discovery; what a digest/trust refusal means (the human owns
+`trust`). Ergonomics pass on `next`/`call`: stable `--json` shapes, loose
+session-id acceptance (prefix), documented exit codes — they become a de-facto
+public API for agents.
+
+Packaging: claude-code plugin (`/ctx:run`, `/ctx:list`, `/ctx:status` + per-trait
+commands rendered via the existing export targets), opencode command pack, pi
+skill export. RIDER: the claude-code pack also emits
+`.claude-plugin/marketplace.json` so exported traits are one-click installable
+through the marketplace UI.
+
+## Done when
+
+A cold agent completes a trait run driven only by the manual; all three host packs
+install from the repo; `next`/`call` JSON shapes are documented and stable.
+
+Full original contract: `archived/board/execution-plan.md` (Group 106, P421).
+"""

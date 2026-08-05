@@ -1,0 +1,41 @@
+schema-version = "0.1"
+key = "0134"
+title = "Store consolidation gate: rebuild, relock, re-approve, and gate `.ctx/traits/*` drift"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+Nothing gates `.ctx/traits/*` for source-vs-canonical drift — the builtin drift
+gate covers only `modules/core/builtins/`, which is exactly how a store canonical
+once went stale unnoticed.
+
+First step is a reconciliation audit of the family folds the original group
+ordered, since the tree has moved: the implement family IS folded (one package,
+five `variant.import()` leaves + run-configs) — P530 landed in substance. Verify
+P531's half: whether `refactor` and `plan` are single packages resolving all their
+variant names, and whether `refactor-direct`'s annotation-driven leaf folded or
+deliberately stayed separate (either is fine — record which).
+
+Then the gate itself: rebuild every surviving package's `generated/index.toml`
+from source; refresh every lock; re-approve machine trust for moved digests (a
+human step — digests are the trust boundary); extend the drift gate to repo traits
+so a source edit without a rebuild fails, handling the legitimately-source-less
+package rather than failing it.
+
+## Watch
+
+- Trust re-approval is deliberately human.
+- The gate lands only after churn settles — gating a shape mid-refactor creates
+  noise. Coordinate with 0118 (toolkit) which moves every consumer's imports.
+- The pragmatism doctrine binds any residual folding: fewer, well-named files;
+  every variant still resolves by its existing name; behavior preserved exactly.
+
+## Done when
+
+Every `.ctx/traits/*` package rebuilds byte-identically from its source; locks
+current; trust clean; a deliberate source edit without a rebuild fails the gate;
+the fold-state of refactor/plan is verified and recorded.
+
+Full original contract: `archived/board/execution-plan.md` (Group 128, P530–P532).
+"""

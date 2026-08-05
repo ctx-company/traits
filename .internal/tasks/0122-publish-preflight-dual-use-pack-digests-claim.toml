@@ -1,0 +1,31 @@
+schema-version = "0.1"
+key = "0122"
+title = "`publish`: preflight, dual-use pack, digests claim"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+Closing the loop makes the owner-gated npm publishes a product flow instead of a
+hand ritual, and the embedded digests claim is what `install` verifies —
+publisher-signed content identity, the supply-chain story made mechanical.
+
+`ctx traits publish [path|--trait <id>]`: preflight = check green,
+`[package].status = ready` (draft REFUSES), CDK drift clean, lock fresh, version
+not already on the registry (no republish); pack the dual-use tarball — trait
+package content + a GENERATED package.json (name/version/exports for
+authoring-time TS consumers) carrying `ctx.digests` (per-variant canonical
+digests) so installers verify tarball-content-vs-claim; `--dry-run` prints the
+file list + digests; then shell to `npm publish` under the caller's npm auth
+(2FA/OTP stays npm's problem). One rule: ONE npm package = ONE trait package
+(families ride along as variants; aggregation stays in `[dependencies]`). Rider:
+pass through npm provenance attestation (`--provenance`) when publishing from CI.
+
+## Done when
+
+A draft package refuses with the reason; `--dry-run` output matches what lands on
+the registry; a published package round-trips through install with the claim
+verified; the CDK/useful-traits publishes (0113's gate) execute through this flow.
+
+Full original contract: `archived/board/execution-plan.md` (Group 108, P440).
+"""

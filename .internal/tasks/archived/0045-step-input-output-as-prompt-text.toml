@@ -1,0 +1,96 @@
+schema-version = "0.1"
+key = "0045"
+title = "Sequence-step input and output as prompt text"
+status = "done"
+raised = "2026-07-31"
+content = """
+
+retired `.plans/EXECUTION_PLAN.md`, P458 rules 2-5 + 11 — owner-settled in
+the 2026-07-22/23 API-beauty brainstorm; the settled grammar carries
+verbatim, only the packaging is new)
+
+Leaf steps become isomorphic — an input drives, an output falls out — with
+prompt text on both sides:
+
+## Input as prompt text (`input.text`)
+
+`prompt` = `{ agent, input: input.text`…`, include?, output }`;
+`command`/`check` = `{ input: input.command`…`, output }`.
+
+- `input.text` is a tagged template: it carries the prompt text AND
+  auto-derives the step's declared inputs from its `${refs}`. The
+  `prompt.template` builder and the redundant explicit `input:` ref lists
+  are DELETED (audit census 2026-07-23: 91 `text:` vs 17 `prompt.template`,
+  40 redundant `input:` lists — recount before relying on the numbers).
+- `input.command` is a tagged template: literal segments shell-word-split at
+  BUILD (no live shell, hermetic); interpolated refs become discrete argv
+  elements (injection-proof — the git-commit `-m` slot case). Raw `argv:`
+  stays as the escape hatch; canonical stores argv either way.
+- `include:` is the ONE home for declared-but-not-interpolated dependencies
+  (resources consulted via tools, optional inputs:
+  `include: [optional(slot.verdict)]`).
+
+## Output as prompt text (`output.text` / `output.of(schema)`) — the centerpiece
+
+`output:` accepts slot handles (unchanged; single-or-array polymorphism
+stays) AND instruction-outputs — `` output.text`A work summary: what
+changed, …` `` / `` output.of(schema)`Your verdict …` `` — which:
+
+- auto-declare the slot,
+- render the what-to-produce INTO the compiled prompt, and
+- render the slot's TYPE as a return-format instruction.
+
+One source of truth for prompt, slot, and validator; prose/schema drift
+becomes structurally impossible. Rendering happens at BUILD into canonical
+text (deterministic, digest-covered; the render template is version-gated —
+changing its wording is a canonical change, never a silent runtime shift).
+
+**Auto-slot-id rule (digests depend on it, stable forever):** the first
+anonymous output takes the step id, subsequent take `<step-id>-2`…;
+collision with a hand-declared slot id is a build error; binding an
+`output.text` to a const for downstream `${ref}` use keeps object identity —
+the id is assigned at build from the attaching step. The forEach item-slot
+auto-id (`<step-id>-item`, never the callback parameter name) is pinned by
+the same digest-stability fixture.
+
+**Conditional output-shaping** ("if revise, end with Unresolved blockers")
+is INSTRUCTION text — it stays in `input.text`; `output.*` carries the
+contract, not every nuance (owner call).
+
+## Watch
+
+- **This slice needs NO canonical schema change** — instruction-outputs
+  render at build into existing canonical text/slot shapes. P458's dispatch
+  guard ("do not re-dispatch before P432's implementation lands") bound the
+  WHOLE grammar phase because rule 6 (`sequence.match`, native kind) rides
+  P432's schema bump; match/branch conditionals are explicitly OUT of this
+  task, which is what makes it dispatchable while P432 remains a design doc.
+- **Salvage branch:** `de431a6` on `ctx/run/wt-6b56bc3d1b31` ("CDK
+  grammar-v2 and native-match phase (revised, unapproved)") holds an
+  unmerged full-P458 implementation that invented its own schema support out
+  of contract. Owner adjudication (salvage vs discard) is still open —
+  treat it as reference material only; implement fresh against the current
+  tree. The landed grammar SLICE (f38b7aa + 14828e9) stands and is the base.
+- **Digest blast radius:** deleting `prompt.template` and explicit `input:`
+  lists rewrites every trait source (implement, plan, refactor,
+  auto-research, deep-research, guarded-change…); digests move fleet-wide ⇒
+  one rebuild/relock/trust-re-approve pass, coordinated like the 2026-07-31
+  task-board migration.
+- **Companion lints (P436 rider):** WARN on an explicit `input:` entry
+  duplicating an interpolated ref, and WARN on `prompt.template` / the
+  `prompt:` field dual once this deletes them — land them with or after the
+  migration so the old forms cannot creep back.
+- Old constructors get a deprecation window OR a pre-launch clean break —
+  owner call at build time (nothing external consumes the CDK yet).
+
+## Done when
+
+A family variant re-authored in the grammar reads in one voice end to end
+(zero `prompt.template` / redundant-`input:` remnants) and builds green with
+the rendered output-instructions visible in its canonical; the auto-slot-id
+rule (outputs and forEach item slots) is pinned by a digest-stability
+fixture; a collision between an auto-declared and hand-declared slot id
+fails the build with both names cited; the CDK reference documents
+`input.text` / `input.command` / `include:` / `output.text` /
+`output.of(schema)` with the before/after gallery from the brainstorm.
+"""

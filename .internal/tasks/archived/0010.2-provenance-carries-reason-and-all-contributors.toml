@@ -1,0 +1,33 @@
+schema-version = "0.1"
+key = "0010.2"
+title = "Provenance carries the semantic reason and every additive contributor"
+status = "done"
+raised = "2026-08-03"
+content = """
+
+
+Carried from blocker `provenance-and-additive-contributors-incorrect` (3/5 steps done).
+
+## What already landed
+
+Additive values merge from every applicable global document plus the matching repo block, recording
+contributors for seed, warm, env entries, sentinel, build-cache entries and publish exclusions. The
+hard-coded `config_reason` inference is gone — doctor renders resolver-provided reasons and
+contributors. Built-in `PACK_DEFAULT_EXCLUDES` is the first `publish.exclude` contributor, so
+authored exclusions augment the product defaults instead of replacing them.
+
+## Remaining
+
+- Extend report provenance so each effective leaf carries its semantic reason, and every additive
+  leaf carries all ordered contributor sources — effective harness, host and assignment leaves can
+  still report stale or overly broad sources.
+- Doctor text AND JSON tests covering: global defaults, repository defaults, repository
+  requirements, personal overrides, `$CTX_CONFIG`, duplicate additive entries, and same-key map
+  conflicts.
+
+## Done when
+
+`cargo test -p ctx-traits-cli --test proof_config` passes with exact text and JSON assertions
+showing the correct reason per leaf, the correct repository winner source, and every additive
+contributor in order.
+"""

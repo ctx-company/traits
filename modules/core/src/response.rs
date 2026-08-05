@@ -350,6 +350,7 @@ impl ResponseError {
                         .with_detail("reason", reason.clone())
                 }
             },
+            crate::Error::Task(error) => Self::new("core.task-error", error.to_string()),
         }
     }
 }

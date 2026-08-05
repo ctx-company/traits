@@ -1,0 +1,137 @@
+schema-version = "0.1"
+key = "0046"
+title = "Big cleanup across all trait sources: one vocabulary, one style, inferred contracts"
+status = "done"
+raised = "2026-07-31"
+content = '''
+
+
+One sweep over every package in `.ctx/traits/packages/` (implement, plan,
+refactor, auto-research, deep-research, guarded-change, engineering-standards;
+implement-guided is the style reference, not a target) plus the CDK surface
+changes the sweep needs. Nine rules:
+
+## 1. One vocabulary form: `tone.Direct`, `verbosity.Brief`
+
+The canonical lowercase callable namespaces with PascalCase leaves already
+exist (`packages/cdk/src/trait.ts:607-645`: `tone`, `method`, `verbosity`,
+`intent`). Migrate every source to them and REMOVE — not deprecate — every
+other form: the `deprecatedNamespace` shims `Tone`/`Method`/`Verbosity`/
+`Intent` (`trait.ts:665+`) are deleted from the CDK export surface, so
+`Tone.direct`, `tone.direct`, `Tone.Direct` all fail at tsc. Census at
+raise time: implement variants ~15 uses each, guarded-change 5,
+auto-research 3, refactor 2-4 per variant, plan 1 per variant.
+
+## 2. No inline intent/behavior objects — builtins only
+
+No `{ id: "robustness", summary: … }` literals in any variant. Where the
+builtin already exists, use it: `robustness`, `pragmatism`, `elegance` are
+in `modules/core/builtins/vocabulary/intent.toml:24-26` with near-verbatim
+text — implement's four dual-review variants inline all three today. Where
+it does not exist, ADD it to the builtins vocabulary and use it: refactor's
+`behavior-preserving-default`, `verbatim-design-execution`,
+`interface-widening`, `silent-plan-deviation`, and implement-strict's
+`verbatim-draft-execution` currently have no builtin. Adding builtins means
+regenerating the CDK catalog (`just sdk-generate`) — coordinate the bump so
+generated.ts and the TOML stay in lockstep.
+
+## 3. `schema:` on variant/trait is inferred, never declared
+
+Remove the explicit `schema: [blockerSchema, ownerItemSchema]` lists from
+every variant. The emitter collects schemas transitively from what is
+actually referenced — slots' schemas, ports' schemas, schema-typed fields
+inside them. Declaring a schema nothing references should be impossible by
+construction, not a lint. CDK/emitter change; the declared-list surface is
+removed once inference lands.
+
+## 4. Procedure `input:`/`output:` are inferred, never declared
+
+Same principle one level up: a procedure's input ports are the input ports
+its prompts/steps actually consume; its output ports are the output ports
+defined and bound (`value: slot`) in the package that its procedure
+actually produces into. Remove the explicit `input:`/`output:` lists from
+`procedure({ … })`. CDK/emitter change.
+
+## 5. No mixed step-construction styles inside a package
+
+A package either composes named step builders from its `sequence/` modules
+or authors steps inline — never both in one procedure. Live offender:
+plan's complex variant calls `refineTaskStep(…)`/`splitTasksStep(…)` then
+inlines `sequence.prompt("critique", …)` and `sequence.prompt("revise", …)`
+beside them. With rule 9's layout the resolution is: steps live in
+`sequence/` modules, variants only compose.
+
+## 6. Prompt texts wrapped for readability
+
+~100 characters per line, then wrap. Applies to every `prompt.text`/
+`prompt.template` body (today several run 400+ chars on one line).
+Wrapping must not change rendered text semantics — verify the built
+canonical against pre-cleanup output where only whitespace may differ, and
+flag any prompt whose canonical text changes beyond whitespace.
+
+## 7. No boolean-parameterized data factories
+
+`planData(includeGrounding: boolean)` dies. Declare and export every slot/
+port as a plain const (implement-guided's `data.ts` is the shape); a
+variant that needs `grounding` imports it, one that doesn't simply doesn't.
+Unused exports are fine — only what a procedure references is emitted.
+
+## 8. No agent-factory helpers with description parameters
+
+`planningAgents(smartDescription, …)` dies the same way. Declare agents as
+plain consts in `agent.ts` via the CDK builder (implement-guided:
+`cdkAgent("smart", { description, summary })`, exported as
+`export const agent = { smart, worker, scribe }`). Where variants genuinely
+need different descriptions for the same role, declare two consts — the
+difference is then visible at the declaration, not threaded through call
+sites.
+
+## 9. Module layout per entity & intent — implement-guided is the reference
+
+```
+source/
+├── agent.ts          all agents
+├── data.ts           all slots + ports (or slot.ts / port.ts when large)
+├── schema.ts         all schemas
+├── resource.ts       all resources (when any)
+├── sequence/
+│   ├── <intent>.ts   steps grouped by what they accomplish
+│   └── …             (draft.ts, implementation.ts, commit.ts, …)
+├── variants/…        variants compose, declare nothing structural
+└── index.ts          trait + variants map
+```
+
+Every package converges on this shape. implement's `variants/quick/*`
+sub-package and plan's `data.ts`/`agent.ts` factories both dissolve into it.
+
+## Watch
+
+- **Sequencing against 0045** (`input.text`/`output.text` grammar): both
+  tasks rewrite every prompt and every step declaration. Doing 0046's rules
+  5/6 before 0045 re-touches the same lines twice; doing 0045 first means
+  wrapping/wiring happen in the final grammar. Owner sequencing call —
+  default recommendation: 0045 first, or one combined dispatch.
+- Items 3/4 are CDK emitter features, not mechanical edits — inference must
+  land before the declared lists can be deleted, and the inferred result
+  for every existing package must equal today's declared lists (build both,
+  diff canonicals) before the surface is removed.
+- Digest blast radius is total: every package rebuilds, every digest moves,
+  one relock + trust re-approve pass at the end (like the 2026-07-31
+  task-board migration).
+- Builtins additions (rule 2) change `modules/core` vocabulary TOMLs and
+  the generated CDK catalog — `just sdk-check` gates the sync.
+- Rule 1's shim deletion breaks any un-migrated source at tsc — migrate
+  sources and delete shims in the same commit so the tree never holds a red
+  intermediate state.
+
+## Done when
+
+`rg "Tone\.|Method\.|Verbosity\.|Intent\."` over `.ctx/traits/packages`
+returns nothing and the deprecated shims are gone from the CDK; no variant
+carries an inline `{ id: … }` intent/behavior object, a `schema:` list, or
+a procedure `input:`/`output:` list; every package matches the rule-9
+layout with no factory helpers and no mixed step styles; every prompt body
+wraps at ~100 chars; all packages build green, canonicals differ from
+pre-cleanup only where a rule requires it (vocabulary refs, inferred
+contracts, whitespace); locks refreshed and trust re-approved once.
+'''

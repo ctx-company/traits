@@ -64,6 +64,7 @@ Maintain:
   doctor      Inspect a folder of Agent-Skills-style files before importing (or, with --migrate-state/--migrate-config, the legacy-to-global runtime state/agent-config migrations)
   cache       Cache lifecycle commands
   config      TypeScript config authoring commands (build)
+  task        Task board document commands (import)
 Options:
       --session <SESSION>  Run-session ID or ledger path for commands such as `set`
   -h, --help                Print help
@@ -1806,6 +1807,16 @@ pub enum TraitsCommand {
         #[command(subcommand)]
         subcommand: CacheCommand,
     },
+    /// Task board document commands.
+    Task {
+        /// Emit structured JSON. Applies to whichever task subcommand is
+        /// given; equivalent to that subcommand's own `--json`.
+        #[arg(long, global = true)]
+        json: bool,
+
+        #[command(subcommand)]
+        subcommand: TaskCommand,
+    },
     /// Emit the full parser-derived command surface (visible and hidden
     /// commands, groups, one-line descriptions, aliases, flags, and nested
     /// subcommands) as JSON, generated from Clap's own command tree rather
@@ -2727,6 +2738,23 @@ pub enum CacheCommand {
         build_target: bool,
 
         /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Nested `ctx traits task ...` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum TaskCommand {
+    /// Import a markdown board file into a canonical TOML task document,
+    /// writing `<stem>.toml` beside the source file. Never overwrites an
+    /// existing `.toml` file at that path.
+    Import {
+        /// Markdown source file to import.
+        #[arg(value_name = "FILE")]
+        path: String,
+
+        /// Emit structured JSON instead of the plain report.
         #[arg(long)]
         json: bool,
     },

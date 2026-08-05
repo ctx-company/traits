@@ -1,0 +1,41 @@
+schema-version = "0.1"
+key = "0004"
+title = "Sessions grouped by state, with labels that stop repeating themselves"
+status = "done"
+raised = "2026-07-28"
+content = """
+
+
+## What is wrong
+
+Two things, both in the SESSIONS list.
+
+**No grouping.** Every session is one flat list, so a live run sits between two week-old completed ones. The states already exist as `SessionClass`; the list just does not use them to organise anything.
+
+**Labels repeat.** A running session reads `in-progress in-progress`. The state word is printed, then a detail field that is the same word. The detail is only worth showing when it *adds* something — `failed · blocked`, `failed · serialization failed`, `parked · needs owner`.
+
+## What to build
+
+Four groups, as collapsible sections, in this order:
+
+```
+live       (open by default)
+pending
+failed
+completed
+```
+
+`live` is expanded on entry; the rest are collapsed with a count. The owner's working set is what is running now — everything else is history that should not cost screen rows until asked for.
+
+**Label rule:** print the state; append `· <detail>` only when the detail differs from the state. Never `in-progress in-progress`. The separator is the bullet the house style already uses.
+
+## Watch
+
+- The four names are the display vocabulary, not new state. Map from the existing `SessionClass`/status rather than inventing a parallel taxonomy — a session that is `awaiting-agent-output` is live, `blocked`/`rejected`/`harness-failed` are failed, and so on. Write that mapping down in one place; two places will drift.
+- A collapsed group still needs its count visible, or the owner cannot tell whether anything happened while they were away.
+- Keep the group state stable across the reload tick. A group that re-collapses itself every 2 seconds because the list rebuilt is worse than no grouping.
+
+## Done when
+
+Sessions are grouped live/pending/failed/completed with live expanded by default; no row prints its state twice; a detail appears only when it says something the state does not.
+"""

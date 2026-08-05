@@ -1,0 +1,30 @@
+schema-version = "0.1"
+key = "0132"
+title = "deep-research: configure the seats, approve trust, run the live validation"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+The deep-research trait is built (P392–P394 landed the package, standards
+resources, typed schemas, serial procedure) and its four review defects are fixed
+(P413, landed). The live validation has never run: zero deep-research sessions
+exist in a store of 400. The board diagnosed the setup gap — `probe`, `synthesis`
+and `reviewer` seats are unconfigured and fall back to `[agent.role.default]`, so
+the web-capable/cheap-probe tiering does not exist; and the trait has no trust
+record, so the first run refuses.
+
+Steps: configure the three seats (probe/synthesis on web-capable harnesses, cheap
+probe tier) in this repo's runtime config; `ctx traits trust approve
+deep-research`; stub-fixture drive end-to-end; then one REAL topic run,
+owner-audited against the source repo's own quality rubric; every fidelity gap
+becomes a typed note routed to 0133 or a new task — never silently absorbed.
+
+## Done when
+
+The real-topic run produces the research output structure the source AGENTS.md
+mandates, passes its own quality checklist, and the owner signs the comparison.
+
+Full original contract: `archived/board/execution-plan.md` (Group 97, P395) and
+`archived/board/run-problems-log.md` (Forward queue entry 3).
+"""

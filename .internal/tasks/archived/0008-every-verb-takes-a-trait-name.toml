@@ -1,0 +1,36 @@
+schema-version = "0.1"
+key = "0008"
+title = "Every verb takes a trait name; a path is the escape hatch, never the requirement"
+status = "done"
+raised = "2026-07-28"
+content = """
+
+
+## Measured surface, 2026-07-28
+
+Most verbs already resolve a name — `check`, `diff`, `explain`, `export`, `critique`, `eval`, `prompt`, `preview`, `run`, `trust` all take `[TRAIT]`, and `ctx traits check implement:quick` works. Three do not:
+
+| verb | argument | consequence |
+| --- | --- | --- |
+| `build` | `<PATH>` | the only way to rebuild a trait is to know its source layout |
+| `refine` | `<ID_OR_PATH>` | half-converted: accepts an id already, so the work is finishing it |
+| `generate` | `<NAME>` | creates a new trait, so a name is correct here — not in scope |
+
+So the real gap is `build`, and `refine` is a consistency check rather than a change.
+
+## What to build
+
+`ctx traits build implement:quick` resolves the name to its package and rebuilds from that package's own source, exactly as if the path had been typed. Path input keeps working — an explicit file is the escape hatch for a source outside any package, and for `--out` flows.
+
+Resolution goes through the SAME seam every other verb uses (`try_resolve_trait_id` → `resolve_trait_path`), never a second lookup. That seam already handles colon variants, hyphenated family aliases, tiers and typo diagnostics; a parallel implementation would resolve a different set of names and the two would drift.
+
+## Watch
+
+- **A name resolves to a built manifest; `build` needs the SOURCE.** `resolve_trait_path` returns `generated/index.toml`. Build must go from there to the package root and find its authored entry point — `package_root_for_manifest` is the existing helper for the first half. A native family adds a wrinkle: `implement:quick` resolves to a leaf manifest inside one package whose source is the family's own `index.ts`, so building a variant means building the family. State that rather than letting it half-work.
+- A package with no source at all (`vendor/`, a hand-written canonical) must refuse with that reason, not with a path error about a file the user never named.
+- Do not widen `generate` — it names something that does not exist yet, so a path is meaningless there and an id would be misleading.
+
+## Done when
+
+`ctx traits build <name>` builds the named trait, including a family variant; a path still works; every verb that takes a trait resolves names through one seam; a source-less package refuses with an honest reason.
+"""

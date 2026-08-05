@@ -66,6 +66,7 @@ pub mod shared;
 pub mod source_map;
 pub mod source_plan;
 pub mod synth;
+pub mod task;
 pub mod r#trait;
 
 pub use error::{Error, Result};

@@ -62,6 +62,7 @@ mod story;
 mod story_view;
 mod structured_output;
 pub mod surface;
+mod task;
 mod trait_editor;
 mod trust_story;
 mod tui;

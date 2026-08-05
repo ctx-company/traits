@@ -261,6 +261,15 @@ fn merge_config_json(subcommand: cli::ConfigCommand, namespace_json: bool) -> cl
     }
 }
 
+fn merge_task_json(subcommand: cli::TaskCommand, namespace_json: bool) -> cli::TaskCommand {
+    match subcommand {
+        cli::TaskCommand::Import { path, json } => cli::TaskCommand::Import {
+            path,
+            json: json || namespace_json,
+        },
+    }
+}
+
 fn merge_cache_json(subcommand: cli::CacheCommand, namespace_json: bool) -> cli::CacheCommand {
     match subcommand {
         cli::CacheCommand::Rebuild {
@@ -1583,6 +1592,13 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         build_target,
                         json,
                     ),
+                }
+            }
+            Some(cli::TraitsCommand::Task { json, subcommand }) => {
+                match merge_task_json(subcommand, json) {
+                    cli::TaskCommand::Import { path, json } => {
+                        crate::app::task::handle_task_import(&path, json)
+                    }
                 }
             }
             Some(cli::TraitsCommand::Help { json }) => crate::app::help_surface::handle_help(json),

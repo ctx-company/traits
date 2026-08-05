@@ -1,0 +1,38 @@
+schema-version = "0.1"
+key = "0010.4"
+title = "Defaults overlay leaf-by-leaf, so partial declarations stop erasing siblings"
+status = "done"
+raised = "2026-08-03"
+content = """
+
+
+Carried from blocker `default-resolution-remains-whole-value` (1/5 steps done).
+
+## The gap
+
+Partial defaults still resolve as whole values, so an omitted MCP or assignment-mode leaf can erase
+inherited configuration or report the wrong winner. A higher tier that declares one field of a
+harness or agent table should not silently blank the rest.
+
+## What already landed
+
+Config-layer assignment `extra-args` replaces the earlier ordered list rather than extending it.
+
+## Remaining
+
+- Leaf-wise default overlay operations for harness definitions and single-table agent role/variant
+  assignments, reusing the existing harness and assignment merge helpers rather than a third path.
+- Route global, repository, matching personal and `$CTX_CONFIG` default declarations through those
+  operations, while KEEPING whole-value replacement for ordered argv and seat lists (ordered lists
+  are replaced, not merged — that distinction is deliberate).
+- Retain authored presence for `ProfileAssignment.mode`, so an omitted higher-tier mode does not
+  reset an inherited `attach` assignment to the Rust default.
+- Resolver and public-path tests where each tier supplies different harness and assignment leaves
+  and every undeclared sibling survives with the correct winner.
+
+## Done when
+
+`cargo test -p ctx-traits-io harness_config` and `cargo test -p ctx-traits-cli --test proof_config`
+pass with tests proving partial harness and single-table agent declarations preserve undeclared
+sibling leaves across global, repository, personal and `$CTX_CONFIG` tiers.
+"""

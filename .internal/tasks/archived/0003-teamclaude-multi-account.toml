@@ -1,0 +1,245 @@
+schema-version = "0.1"
+key = "0003"
+title = "TeamClaude: multi-account Claude routing under ctx runs"
+status = "done"
+content = """
+
+
+## What it is
+
+A **self-hosted local proxy** that holds several Claude accounts and rotates between them on quota. Not a fork of Claude Code, not a wrapper library — a process that sits between the `claude` binary and Anthropic.
+
+- Install: `npm install -g @karpeleslab/teamclaude`
+- Config: `~/.config/teamclaude.json` (accounts with OAuth tokens, `switchThreshold` default `0.98`, proxy port)
+- Reads `anthropic-ratelimit-unified-*` response headers, switches accounts round-robin at threshold
+- **Model-aware**: an account exhausted for Fable is skipped for Fable only, still serves other models
+- Distinguishes 429-quota (switch account) from 429-throttle (pause that account), with storm control when moving onto a fresh account
+
+## VERIFIED 2026-08-04 — headless `claude -p` works through the proxy, live on this machine
+
+The question this round of research answered: does teamclaude support the way
+ctx actually spawns claude — `claude -p` one-shots, no TUI, no `teamclaude run`
+wrapper. **Yes, proven end to end** against the running server (v1.1.11, all
+three accounts logged in), with each claim tested rather than read off a README:
+
+- **`claude -p` honors `ANTHROPIC_BASE_URL` for `/v1/messages`.** Proven two
+  ways: a local capture sink received claude's `POST /v1/messages?beta=true`
+  (claude 2.1.220, headless), and a dead-port base URL hangs the call rather
+  than falling through to api.anthropic.com. The `--output-format stream-json
+  --verbose` shape ctx uses for worker seats works identically, and the
+  stream still carries `rate_limit_event` — the P556 signal survives proxying
+  (it now describes the INJECTED account, which is the operationally useful
+  one; the "do not develop P556 against the proxy" warning below stands).
+- **The proxy REPLACES the client's auth unconditionally on `/v1/messages`.**
+  The machine's logged-in claude identity is irrelevant: a request with a
+  bogus bearer succeeds, one with no auth succeeds, and a real headless call
+  was served by `oskar-1@ctx.company` (its `usage.totalRequests` moved and
+  `lastUsed` matched) while this machine's claude is logged in as a different
+  account. Confirmed in source: `/v1/messages` is not in
+  `CLIENT_CREDENTIAL_PATHS` (only `/v1/code/*` and OAuth file endpoints pass
+  through) and `forwardRequest` has no client-auth branch — selection then
+  `headers['authorization'] = Bearer <account.credential>` always.
+- **`TC_ACCT` is NOT read from claude's environment — do not put it in
+  `[worktree.env]` and expect pinning.** Tested: a spawn with `TC_ACCT` set
+  rotated normally. The variable is consumed by `teamclaude env`/`run`, which
+  encode the pin INTO the emitted environment: `--no-mitm` yields
+  `ANTHROPIC_BASE_URL=http://localhost:3456/tc-acct/<name-or-uuid>`, MITM
+  yields proxy basic-auth credentials. So per-seat pinning for ctx is simply a
+  per-seat `ANTHROPIC_BASE_URL` VALUE — which collapses P557's claude-code
+  path to "one env var per seat, different path per account".
+- **An unknown pin is refused, not rotated**: 404 `Unknown account pin`,
+  verified live. Note the path-prefix form is marked deprecated in source in
+  favour of `TC_ACCT` — but kept explicitly "for the warmer and for direct API
+  callers", which is precisely what ctx is. It is single-segment, so the
+  fully-qualified `accountUuid/orgUuid` form is not expressible; use the
+  accountUuid, which is unambiguous for these three accounts.
+- **Headless server operation is real**: the server here has run for 25h+
+  from a plain background start; `--headless` exists, `status --json` is
+  script-friendly, and `--activity-log FILE` is documented to work headless —
+  the right attribution source for step 3's rotation test, because…
+- **…do not build verification on `status --json` counters.** They are
+  in-memory and reset when the server re-syncs accounts from config, which
+  token refreshes trigger; a counter reading zero does not mean no traffic
+  (this cost an hour of confusion during this research). Use the activity log.
+- Two operational notes from the live check: the background quota probe was
+  429-throttled on all three accounts at once (probe-endpoint throttling, not
+  quota; serving was unaffected) — treat probe `error` states as advisory.
+  And `distributeSessions: false` means rotation serves everything from one
+  account until `switchThreshold`; flipping it to `true` is the zero-code way
+  to get concurrent multi-account spread BEFORE P557's per-seat pinning
+  exists, and should be part of the Level-1 trial.
+
+### `teamclaude run` and the `-p` worry — resolved, in its favour
+
+The concern was that `teamclaude run -p` might swallow `-p` as teamclaude's
+own flag. It does not, by construction: `runCommand` recognises exactly three
+flags of its own (`--mitm`, `--no-mitm`, `--auto-fallback`); without a `--`
+separator it filters ONLY those three and hands **everything else verbatim**
+to `spawnSync('claude', claudeArgs, { stdio: 'inherit' })`. There is no
+teamclaude `-p` at all — the `-p` that reaches claude is claude's own print
+flag, which is exactly what ctx wants. Verified live, not just read:
+
+- `teamclaude run -p 'Reply with exactly: ok' --model …` → exit 0, stdout is
+  the bare `ok`, stderr empty. **All teamclaude chatter goes to stderr**
+  (`console.error` throughout), so a stream-json stdout is never corrupted.
+- That call ran in MITM mode (the default) — which also closes the earlier
+  gap: **MITM works headless**; claude 2.1.220 honors `NODE_EXTRA_CA_CERTS`.
+- `TC_ACCT=<acct> teamclaude run -p …` pinned correctly (stderr notice, and
+  the pinned account's request counter/lastUsed moved, read immediately);
+  `run` deletes `TC_ACCT` from the child env as documented.
+- **Child exit codes propagate** (`process.exit(result.status ?? 1)`): a bad
+  claude flag exits 1. Proxy down → refusal with exit 1 by default; only
+  `--auto-fallback` silently bypasses (correct default for ctx: fail loudly
+  rather than quietly spend one account).
+- `holdSeconds` is plumbed for headless too: `run` raises the child's
+  `API_TIMEOUT_MS` above the hold budget so the all-accounts-exhausted hold
+  does not trip claude's client timeout.
+- One sharp edge for scripts: the three teamclaude flags are filtered even
+  when intended for claude, so anything scripted should use the explicit
+  separator — `teamclaude run -- -p …`. With `--`, everything after is
+  verbatim, no filtering at all.
+
+For ctx the conclusion is unchanged but now double-backed: env-only
+integration (no wrapper) and `teamclaude run --` both support ctx's headless
+spawn shape fully; env-only stays the recommendation because it adds no binary
+between the harness and claude, and the harness registry owns argv anyway.
+
+### CONFIGURED on this repo, 2026-08-04 — the harness spawns `teamclaude run`
+
+**Correction (owner call, same day): the first configuration attempt set
+`ANTHROPIC_BASE_URL` in `[worktree.env]`, and that was the wrong shape.** The
+chosen integration is the harness registry: `[harness.claude-code]` in this
+machine's `runtime.toml` (machine-local, gitignored — deliberately NOT a
+committed product default, per the risks section) swaps the binary:
+
+```toml
+[harness.claude-code]
+bin = "teamclaude"
+
+[harness.claude-code.cli]
+argv = ["run", "--", "-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--include-partial-messages", "--verbose", "--disallowedTools", "Agent"]
+narrator-argv = ["run", "--", "-p"]
+```
+
+Why the bin swap beats the env var, concretely:
+
+- **It covers `--no-worktree` runs.** `[worktree.env]` only reaches worktree
+  spawns; the harness bin applies to every claude-code spawn, period.
+- **A down proxy fails FAST.** `teamclaude run` refuses with exit 1 and a
+  stderr message when the server is not up; the env approach left claude
+  hanging on a dead port until the frame timeout.
+- The explicit `--` disables even teamclaude's three-flag filtering, so the
+  `--model`/`--effort`/prompt that ctx appends AFTER `cli.argv` reach claude
+  verbatim (argv is composed `[bin] + cli.argv + model + effort + prompt`,
+  `drive.rs:4451`). A table argv replaces the compiled-in one wholesale, which
+  is why the built-in claude argv is reproduced behind the prefix.
+- All teamclaude output is stderr-only, so stream-json stdout stays clean.
+
+`doctor --config` shows `bin: teamclaude` with repo provenance. **Step 2's
+end-to-end ran and passed on this exact shape**: a `--no-worktree` run with
+`--assign 'narrator=claude-code:cli:per-frame:claude-haiku-4-5-20251001'`
+(per-invocation override; five owner runs were live and untouched) dispatched
+its title call through `teamclaude run` in MITM-default mode, and the rotated
+account served it — its request counter moved with `lastUsed` at that second
+while the machine's own logged-in account stayed at zero. Confinement is a
+non-issue by construction: the seatbelt profile is `(allow default)` +
+`(deny file-write*)`, no network rules.
+
+Residual notes: warm/persistent claude sessions (`warm-argv`) are not
+reproduced behind the prefix — this repo runs per-frame everywhere and 0022 is
+blocked on persistent sessions anyway; add `warm-argv = ["run", "--", …]` if
+that ever changes. Per-seat pinning is P557: `TC_ACCT` cannot be used from
+here (it is read by `teamclaude run` from ITS environment — a per-seat env
+mechanism is exactly what ctx lacks), so pinning waits for P557 or uses
+per-seat base URLs at that point.
+
+Still unverified, deliberately: a rotation crossing mid-run without a failed
+frame (needs a real quota approach, not worth forcing).
+
+## The integration point, and it is smaller than expected
+
+**`teamclaude env` prints export lines to stdout, and nothing else** (summary/hints go to stderr, so `eval` is safe):
+
+```
+eval "$(teamclaude env)"            # MITM mode: HTTPS_PROXY + NODE_EXTRA_CA_CERTS
+eval "$(teamclaude env --no-mitm)"  # base-URL mode: ANTHROPIC_BASE_URL only
+```
+
+No `ANTHROPIC_API_KEY` is emitted — loopback clients are trusted by the proxy. So **integration is environment variables on the spawn.** Any `claude` process launched with that environment routes through the proxy. There is nothing to wrap, no CLI to shell out to per frame, and no ctx-side account logic — the proxy owns rotation.
+
+Two modes matter differently to us:
+- **MITM (default since 1.1.0)** intercepts even hardcoded `api.anthropic.com` endpoints via a local CA. Needs `NODE_EXTRA_CA_CERTS` to be honored by the spawned process.
+- **`--no-mitm`** sets only `ANTHROPIC_BASE_URL`. Simpler, no CA trust, but misses hardcoded endpoints. **Start here** — fewer moving parts, and ctx's frames only make ordinary API calls.
+
+Run the server headless for automation: `teamclaude server --headless` (or `--no-tui`). It falls back to plain logs when stdout is not a TTY, so it backgrounds cleanly.
+
+## Why this is worth doing — with today's evidence
+
+At **06:40 on 2026-07-28**, six runs across ctx-trait *and* ctx-gate died within seconds of each other:
+
+```json
+{"status":"rejected","resetsAt":1785213600,"rateLimitType":"five_hour",
+ "overageStatus":"rejected","overageDisabledReason":"out_of_credits"}
+```
+
+One exhausted five-hour window took out every run in both repos, because **every seat authenticates as the same ambient account**. The owner has three Claude Max accounts. TeamClaude is exactly the missing piece — and its `switchThreshold: 0.98` acts on the same signal `P556` charters ctx to read from the stream.
+
+## What ctx is missing, precisely
+
+**There is no per-seat env.** `harness_config.rs:199` has `pub env: BTreeMap<String,String>` but it belongs to `[worktree.env]` — **run-wide**, applied to every spawn in the run. The spawn plumbing itself is fine (`command.rs:67` calls `command.env(key, value)` per pair), so the mechanism exists; only the per-seat binding is absent.
+
+That is precisely **P557** ("One harness, several accounts: per-seat credential routing"). **TeamClaude is the reference implementation for P557's claude-code path** — and it is a strong argument for shaping P557 as *env-per-seat* rather than inventing a credential abstraction, because the ecosystem already speaks env vars.
+
+## Two integration levels
+
+**Level 1 — works today, zero code.** Put TeamClaude's exports in `[worktree.env]`, or `eval "$(teamclaude env --no-mitm)"` in the shell that launches ctx. Every claude-code seat in the run rotates across all three accounts. **This is probably enough for the owner's own use and should be tried first**, before any phase is dispatched.
+
+**Level 2 — P557.** Per-seat env, so seat A pins `TC_ACCT=<uuid-or-name>` (pins a session to one account, bypassing rotation; **stripped from the environment before claude starts**) while seat B pins another. That buys *deliberate* concurrency — two seats genuinely running on two accounts at once — rather than sequential rotation.
+
+## Risks to state honestly
+
+- **A third-party proxy in the auth path.** It holds OAuth tokens in `~/.config/teamclaude.json` and MITMs Anthropic traffic with a local CA. Fine as an owner tool; **do not make it a product dependency or a documented default** without a security review. Recommending it to users is a different decision from using it yourself.
+- **ToS.** Multi-account rotation against subscription quotas is the owner's call to make knowingly, not something ctx should quietly automate for others.
+- **It hides the signal P556 wants.** If the proxy rotates at 0.98, ctx may never observe a `rejected` event — the failure mode simply stops appearing. That is good operationally and bad for testing: **do not develop or validate P556 with TeamClaude in the path**, or you will be testing an unreachable branch.
+- **Credentials must never reach argv.** ctx writes spawn argv verbatim into `~/.config/ctx/debug/**`. Env-var indirection is safe; a token as an argument would be written to disk in cleartext. This is already recorded in P557's Watch.
+
+## Steps
+
+1. Install, `teamclaude login` for each of the three accounts, `teamclaude accounts` to confirm.
+2. `teamclaude server --headless &`, then `eval "$(teamclaude env --no-mitm)"` in a shell and run one small ctx phase. Confirm from the debug trace that frames succeed and the proxy log shows the account in use.
+3. Force a rotation: run until one account crosses threshold, confirm the switch happens without a failed frame.
+4. Decide whether MITM mode is needed (only if something in the path hardcodes `api.anthropic.com`).
+5. Record the outcome on **P557** — specifically whether env-per-seat is the right shape for that phase, which this research says it is.
+
+## Done when
+
+Three accounts serve one ctx run through the proxy; a quota rotation happens mid-run with no failed frame; and P557's design records env-per-seat with `TC_ACCT` pinning as its claude-code reference path.
+
+## Explicitly not in scope
+
+Implementing P557; bundling, vendoring or defaulting to TeamClaude in the product; automatic account rotation logic inside ctx (the proxy owns that, and duplicating it would be worse).
+
+
+## Post-archive incident, 2026-08-04 19:25 — the fail-fast fired in anger
+
+The first real fleet dispatch after the seat flip (0020, smart-1=fable-5)
+parked with four instant `exit=1` harness failures and no visible reason. Root
+cause, established by timeline: the morning's `teamclaude server` process had
+died (sleep or closed terminal — the session's last write was 19:25, the
+replacement server started 19:31:50), and `teamclaude run` refuses with exit 1
+when the proxy is down — the fail-fast this integration chose on purpose. The
+refusal message went to stderr, which ctx captures but never surfaces
+([[0100]]); the same argv reproduced green by hand minutes later, and a
+shim-wrapped frame (env + args + exit logged) confirmed nothing else differed.
+
+Two durable lessons:
+
+- **The harness probe does not cover the proxy.** `probe` runs
+  `teamclaude --version`, which succeeds with the server down — a run can
+  probe green and then lose every frame. Reachability is only proven by a
+  frame (or `teamclaude status`) actually traversing the proxy.
+- **The server must be a service, not a terminal tab.** A LaunchAgent plist
+  (KeepAlive + RunAtLoad, `--activity-log` wired) is staged for the owner to
+  install; until it is, `teamclaude status` before dispatching is the manual
+  pre-flight.
+"""

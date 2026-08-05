@@ -1,0 +1,56 @@
+schema-version = "0.1"
+key = "0101"
+title = "a large merger prompt still dispatches"
+status = "done"
+raised = "2026-08-05"
+content = """
+
+
+## Problem
+
+`ctx traits merge <run-id> --deep` dies before the merger ever runs when the run's accepted slot
+values are large. The merger prompt embeds the review verdict, shipping message, and work summary
+verbatim; the whole composed prompt is passed to the harness as a single argv element, and the
+spawn fails with `Argument list too long (os error 7)` — macOS ARG_MAX. Deterministic per run:
+retrying cannot help, so an otherwise-mergeable, reviewer-approved run is stranded (0025 had to be
+hand-landed).
+
+Two defects, one dispatch:
+
+1. **Delivery.** An unbounded, payload-derived prompt rides argv. `HarnessCliConvention` already
+   has `prompt-via = "stdin"` and `run_one_shot` already honors it — but a convention that doesn't
+   declare it (opencode's usual one) silently takes the argv path with no size guard.
+2. **Surfacing.** The failure is formatted as `filesystem error at <entire argv, prompt included>`,
+   so the real one-line cause sits at the tail of ~3MB of error text and reads like a broken
+   opencode install. `command -v opencode` succeeding is the standard red herring.
+
+## Evidence
+
+- run-62fbd456 re-merge, 2026-08-05: `raw-reason: unexpected failure during merge: filesystem
+  error at opencode run --format json --thinking --auto --model openai/gpt-5.6-sol … <full merger
+  prompt> … Argument list too long (os error 7)`. Lock released and worktree left clean; the run
+  stayed parked.
+- The same run merged by hand with zero drama (union-additive conflicts only), so the payload was
+  never the problem — only its delivery.
+
+## Fix shape
+
+- **Never let a prompt ride argv unbounded.** At the `run_one_shot` seam: if the composed prompt
+  exceeds a conservative argv budget and the convention supports stdin delivery, use it; if the
+  convention cannot take stdin, refuse BEFORE spawn with a one-line reason naming the prompt size
+  and the harness — a park the owner can read, not an OS error to excavate. Verify whether
+  declaring `prompt-via = "stdin"` on the opencode convention is already a complete mitigation
+  (opencode `run` reads a piped prompt) and, if so, make it the default convention for
+  merger-class dispatches.
+- **Error text carries sizes, not bodies.** The dispatch-failure formatting names the command,
+  argv count, and prompt byte size — never the prompt content. The full prompt already lives in
+  the debug trace under `config/ctx/debug/<repo>/<run-id>/`; the error should point there.
+
+## Done when
+
+- A `--deep` merge whose slot payloads exceed ARG_MAX dispatches successfully (stdin delivery) or
+  parks with a single-line reason naming prompt size and harness — proven by a test that composes
+  an over-budget prompt and asserts no `os error 7` surfaces.
+- No dispatch-failure path interpolates the prompt body into `raw-reason`.
+- The re-merge of a large-payload run (0025-class) completes through ctx without hand-landing.
+"""

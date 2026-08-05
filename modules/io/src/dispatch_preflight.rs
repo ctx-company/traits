@@ -6,10 +6,11 @@
 //! whose typed park report cites that exact wall id — and no later run of
 //! that wall's ORIGINATING task has since completed. The task value resolves
 //! to one file among the trait's declared `task-board` directory's direct
-//! children (2026-07-31 migration off `.plans/EXECUTION_PLAN.md`'s
-//! checklist grammar), and the whole file is that task's section. An id is
-//! never inferred from prose similarity — only an explicit, identical
-//! `**Wall:**` label id ever blocks a sibling.
+//! children (0059 canonical-TOML migration: board files are `.toml`
+//! [`ctx_traits_core::task::TaskDocument`]s, not markdown), and the whole
+//! file is that task's document. An id is never inferred from prose
+//! similarity — only an explicit, identical `**Wall:**` label id (found by
+//! scanning the document's opaque `content`) ever blocks a sibling.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +20,6 @@ use ctx_traits_core::procedure::session::{Session, Status};
 
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
 const WALL_LABEL: &str = "**Wall:**";
-const STATUS_LABEL: &str = "**Status:**";
 const IMPLEMENT_FAMILY_ID: &str = "implement";
 const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
 const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
@@ -104,11 +104,12 @@ fn read_task_board_file(
     Ok(Some((text, file_name)))
 }
 
-/// Parse the explicit `**Wall:** <id>` label, if any, out of the task file
-/// that `task_value` names among the trait's declared `task-board`
-/// directory's direct children. A trait without a declared `task-board`
-/// resource, a missing task value, an unreadable board, or a task value
-/// matching no file yields `None` — never a refusal.
+/// Parse the explicit `**Wall:** <id>` label, if any, out of the opaque
+/// `content` of the task document that `task_value` names among the
+/// trait's declared `task-board` directory's direct children. A trait
+/// without a declared `task-board` resource, a missing task value, an
+/// unreadable board, a task value matching no file, or a document that
+/// fails to parse yields `None` — never a refusal.
 pub fn explicit_wall_id(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
@@ -117,85 +118,60 @@ pub fn explicit_wall_id(
     let Some((text, _file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
         return Ok(None);
     };
-    Ok(text.lines().find_map(wall_label))
+    let Ok(document) = ctx_traits_core::task::parse(&text) else {
+        return Ok(None);
+    };
+    Ok(document.content.lines().find_map(wall_label))
 }
 
-/// A task file carrying an explicit blocked-status marker in its
-/// `**Status:**` header line — the file name (for the refusal message's
-/// clearing instruction) and the offending marker line's text.
+/// A task document carrying a closed (`done` or `cancelled`) stored
+/// status — the file name (for the refusal message's clearing
+/// instruction) and the offending status.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockedStatusMarker {
+pub struct ClosedStatusMarker {
     pub file_name: String,
-    pub status_line: String,
+    pub status: ctx_traits_core::task::TaskStatus,
 }
 
-/// The deterministic dispatch refusal message for a blocked-status marker.
-pub fn blocked_status_refusal_message(marker: &BlockedStatusMarker) -> String {
+/// The deterministic dispatch refusal message for a closed-status task.
+pub fn closed_status_refusal_message(marker: &ClosedStatusMarker) -> String {
+    let status = match marker.status {
+        ctx_traits_core::task::TaskStatus::Done => "done",
+        ctx_traits_core::task::TaskStatus::Cancelled => "cancelled",
+        ctx_traits_core::task::TaskStatus::Ready => "ready",
+    };
     format!(
-        "task file {} carries a blocked-status marker ({}); edit .internal/tasks/{} and remove the blocked marker once the dependency lands",
-        marker.file_name, marker.status_line, marker.file_name
+        "task file {} carries stored status {status} — dispatch refuses done/cancelled tasks; edit .internal/tasks/{} to change its status if this is wrong",
+        marker.file_name, marker.file_name
     )
 }
 
-/// Scan the task file `task_value` names for an explicit blocked marker on
-/// its `**Status:**` header line — the standalone word `blocked` or the
-/// token `deps-unmet` (word-boundary matched, so "unblocked" never trips).
-/// Deliberately conservative, mirroring the `**Wall:**` precedent:
-/// explicit-labels-only, never inferred from prose. A trait without a
+/// Refuse to dispatch a task document whose stored `status` field is
+/// `done` or `cancelled` — a direct typed-field read, never a derivation.
+/// Unmet-dependency (`blocked`) refusal has no stored representation under
+/// 0059's schema and moves to 0060's derived status. A trait without a
 /// declared `task-board` resource, a missing task value, an unreadable
-/// board, a task value matching no file, or a `**Status:**` line without
-/// either token yields `None` — never a refusal.
-pub fn blocked_status_marker(
+/// board, a task value matching no file, a document that fails to parse,
+/// or a document with `status = "ready"`/absent yields `None` — never a
+/// refusal.
+pub fn closed_status_marker(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
     task_value: Option<&str>,
-) -> crate::Result<Option<BlockedStatusMarker>> {
+) -> crate::Result<Option<ClosedStatusMarker>> {
     let Some((text, file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
         return Ok(None);
     };
-    let Some(status_line) = text.lines().find(|line| line.contains(STATUS_LABEL)) else {
+    let Ok(document) = ctx_traits_core::task::parse(&text) else {
         return Ok(None);
     };
-    if !status_line_has_blocked_marker(status_line) {
-        return Ok(None);
+    match document.status {
+        Some(
+            status @ (ctx_traits_core::task::TaskStatus::Done
+            | ctx_traits_core::task::TaskStatus::Cancelled),
+        ) => Ok(Some(ClosedStatusMarker { file_name, status })),
+        _ => Ok(None),
     }
-    Ok(Some(BlockedStatusMarker {
-        file_name,
-        status_line: status_line.trim().to_string(),
-    }))
-}
-
-/// Whether `status_line` contains the standalone word `blocked` or the
-/// token `deps-unmet`, word-boundary matched against ASCII alphanumerics
-/// and `-`/`_` so "unblocked" or "deps-unmet-tracker" never trips.
-fn status_line_has_blocked_marker(status_line: &str) -> bool {
-    let lower = status_line.to_ascii_lowercase();
-    contains_word(&lower, "blocked") || contains_word(&lower, "deps-unmet")
-}
-
-/// Whether `haystack` contains `word` as a standalone token: the match is
-/// not immediately preceded or followed by an ASCII alphanumeric, `-`, or
-/// `_` character.
-fn contains_word(haystack: &str, word: &str) -> bool {
-    let is_word_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-    let mut start = 0;
-    while let Some(offset) = haystack[start..].find(word) {
-        let match_start = start + offset;
-        let match_end = match_start + word.len();
-        let before_ok = haystack[..match_start]
-            .chars()
-            .next_back()
-            .is_none_or(|c| !is_word_char(c));
-        let after_ok = haystack[match_end..]
-            .chars()
-            .next()
-            .is_none_or(|c| !is_word_char(c));
-        if before_ok && after_ok {
-            return true;
-        }
-        start = match_start + 1;
-    }
-    false
 }
 
 /// Resolve `task_value` to a file name among the board directory's direct
@@ -212,11 +188,11 @@ fn task_file_name_in_board(board: &Utf8Path, task_value: &str) -> Option<String>
         .flatten()
         .filter(|entry| entry.path().is_file())
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .filter(|name| name.ends_with(".md"))
+        .filter(|name| name.ends_with(".toml"))
         .collect();
     names.sort();
     names.into_iter().find(|name| {
-        let stem = &name[..name.len() - 3];
+        let stem = &name[..name.len() - 5];
         name == task_value || stem == task_value || (numeric && stem.starts_with(&prefix))
     })
 }
@@ -522,41 +498,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blocked_status_line_is_flagged() {
-        assert!(status_line_has_blocked_marker("**Status:** blocked"));
-        assert!(status_line_has_blocked_marker(
-            "**Status:** deps-unmet · waiting on 0046"
-        ));
-        assert!(status_line_has_blocked_marker("**Status:** Blocked"));
+    fn task_file_name_in_board_matches_toml_not_markdown() {
+        let dir = tempfile_dir();
+        std::fs::write(dir.join("0050-example.toml"), "").unwrap();
+        std::fs::write(dir.join("0050-example.md"), "").unwrap();
+        let board = Utf8Path::from_path(dir.as_path()).unwrap();
+        assert_eq!(
+            task_file_name_in_board(board, "0050"),
+            Some("0050-example.toml".to_string())
+        );
     }
 
     #[test]
-    fn ready_status_line_is_not_flagged() {
-        assert!(!status_line_has_blocked_marker(
-            "**Status:** ready to implement"
-        ));
-        assert!(!status_line_has_blocked_marker("**Status:** in progress"));
+    fn task_file_name_in_board_matches_exact_stem() {
+        let dir = tempfile_dir();
+        std::fs::write(dir.join("0050-example.toml"), "").unwrap();
+        let board = Utf8Path::from_path(dir.as_path()).unwrap();
+        assert_eq!(
+            task_file_name_in_board(board, "0050-example"),
+            Some("0050-example.toml".to_string())
+        );
     }
 
     #[test]
-    fn unblocked_does_not_trip_the_blocked_token() {
-        assert!(!status_line_has_blocked_marker(
-            "**Status:** unblocked, ready to implement"
-        ));
+    fn task_file_name_in_board_ignores_subdirectories() {
+        let dir = tempfile_dir();
+        std::fs::create_dir(dir.join("archived")).unwrap();
+        std::fs::write(dir.join("archived").join("0050-example.toml"), "").unwrap();
+        let board = Utf8Path::from_path(dir.as_path()).unwrap();
+        assert_eq!(task_file_name_in_board(board, "0050"), None);
     }
 
     #[test]
-    fn deps_unmet_prefix_does_not_trip_on_unrelated_token() {
-        assert!(!status_line_has_blocked_marker(
-            "**Status:** deps-unmet-tracker-closed"
-        ));
+    fn wall_label_extracts_the_first_whitespace_delimited_token() {
+        assert_eq!(
+            wall_label("**Wall:** wall-42 extra text"),
+            Some("wall-42".to_string())
+        );
+        assert_eq!(wall_label("no wall label here"), None);
     }
 
     #[test]
-    fn contains_word_matches_only_at_boundaries() {
-        assert!(contains_word("status blocked here", "blocked"));
-        assert!(!contains_word("status unblocked here", "blocked"));
-        assert!(!contains_word("status blockedout here", "blocked"));
-        assert!(contains_word("blocked", "blocked"));
+    fn closed_status_refusal_message_names_the_status() {
+        let marker = ClosedStatusMarker {
+            file_name: "0050-example.toml".to_string(),
+            status: ctx_traits_core::task::TaskStatus::Done,
+        };
+        let message = closed_status_refusal_message(&marker);
+        assert!(message.contains("done"));
+        assert!(message.contains("0050-example.toml"));
+    }
+
+    fn tempfile_dir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "dispatch-preflight-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }

@@ -1,0 +1,36 @@
+schema-version = "0.1"
+key = "0051.3"
+title = "Fixture-backed coverage for the startup surface"
+status = "done"
+raised = "2026-08-03"
+content = """
+
+
+Carries the one open step of `startup-failures-not-attributed-or-persisted` (14/15 — the
+production behaviour landed, its proofs did not) and the open step of
+`line-mode-warm-progress-regressed` (1/2).
+
+## Remaining
+
+- Startup-model tests, IO observer-ordering tests, PTY failure-scrollback tests, successful
+  handoff, resize, and cooked-mode restoration tests. The production paths for all of these
+  landed in the 0051 merge; none of them is pinned.
+- A line-mode regression fixture with configured warming that compares stderr across piped
+  default, stream, status, none, and no-drive paths, rejecting any drift. `warm_worktree_paths`
+  now emits `warming <entry>` only when a validated directory is about to be cloned — that
+  narrowing is the thing the fixture must hold.
+
+## Watch
+
+- These are behaviour-freezing tests over a surface that just changed and is about to change
+  again (0044, 0048, 0053, 0054, 0055 all touch the same renderer). Pin the CONTRACTS that
+  matter — failure attribution, observer ordering, terminal restoration, byte-identical
+  non-interactive output — not the cosmetic layout, or they will be red for churn reasons
+  within a week and get disabled under the standing ruling.
+
+## Done when
+
+A startup failure at each stage is attributed to that stage and readable in scrollback after the
+process exits; observer ordering, resize and cooked-mode restoration are pinned by tests; and the
+line-mode fixture proves stderr is unchanged across all five non-interactive paths.
+"""

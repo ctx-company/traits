@@ -1,0 +1,61 @@
+schema-version = "0.1"
+key = "0142"
+title = "ctx-runtime: the owned frame executor (parked strategy record)"
+status = "ready"
+raised = "2026-08-05"
+content = """
+
+
+**What it is.** A frame executor, not a coding agent: provider-streaming model
+calls + a small bounded tool set + ctx-sandbox confinement + a **turn-level
+durable event log inside the frame-level ledger** (every model call, tool call,
+result appended — event sourcing). Pause-mid-frame = stop appending; resume =
+replay; distributed = the log lives in shared storage and any worker picks it up.
+The loop for a narrow typed frame is much simpler than a general agent's: bounded
+tools, bounded turns, schema-validated exit.
+
+**Why it becomes inevitable.** (a) ctx-gate needs a runtime that is DISTRIBUTED
+and PAUSABLE — today a frame is an atomic harness subprocess; in-flight state
+lives in someone else's process, so pause means restart and compaction happens TO
+us. (b) Every harness incident of the July window (narrator redaction, session
+identity, resume eligibility, background-task escapes) was a harness-contract
+failure — reverse-engineering four undocumented runtimes that change in point
+releases. (c) When you own the loop, **what is in the context window on every
+call is a pure function of the ledger** — compaction becomes a declared,
+receipted operation, and "prove the loop" extends to **"prove what the model
+saw."** (d) Mid-frame `ask` becomes a natural unlock.
+
+**What it is NOT.** Not a coding agent (no TUI, no interactive UX, no human
+extension ecosystem — we serve frames). Not a Pi competitor (evaluate Pi as a
+BASE vs building from zero when the time comes). Not a TS framework — the
+authoring layer already exists: the trait + CDK. Thinner than Pi where Pi serves
+humans; thicker where Pi is thin (durable turn log, distributed state,
+deterministic context assembly, first-party activity events).
+
+**Product split that resolves the economics.** ctx-trait rides BYO harnesses
+FOREVER as the default — subscriptions and adoption live there. ctx-gate rides
+ctx-runtime — CI/hosted contexts are API-key-native. Two execution substrates,
+one procedure engine, one receipt model.
+
+**Guardrail 1 — scope-creep tell.** NOTHING pre-launch may depend on mid-frame
+pause. Frame-boundary pause suffices for everything chartered. Any task whose
+contract quietly requires owning the loop is rejected on sight until ctx-runtime
+is a real project.
+
+**Guardrail 2 — P504 is the seam.** The normalized activity model is the contract
+both worlds share: for the four harnesses it is an adapter over
+reverse-engineered streams; for ctx-runtime it is first-party truth. Build
+everything against it and the runtime slots in later as another (better)
+implementation of the same contract, with nothing above it changing.
+
+**Boundary doctrine (owner, 2026-07-26).** WASM stays a thin authoring layer
+(pure core: decode/validate/render/resolve at most); the runtime stays Rust. The
+layer stack is being claimed — Flue the framework, Pi the harness, Cloudflare the
+platform. Nobody claims process + governance (typed procedures, validated
+handoffs, gates, receipts). That layer is ours, it appreciates as the layers
+below commoditize, and ctx-runtime exists to SERVE it — if the runtime ever
+becomes the product, we have built a worse Pi and abandoned the only layer nobody
+is fighting for.
+
+Full original text: `archived/board/future.md`.
+"""
