@@ -1,0 +1,31 @@
+# 0141 — Frame persona envelope (parked)
+
+**Status:** filed, not scheduled (parked by owner ruling 2026-07-25: "I don't care about frame envelope" — revisit as part of a larger frame-rendering effort, never as a rider on the behavioral render) · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/FUTURE.md` — was P495, moved out of the plan 2026-07-25)
+
+**Idea.** Mode A driven frames carry NO behavioral layer today: a frame is title +
+instructions + inputs + output contract, and the trait's Intent/Behavior material
+never reaches the driven agent — only the per-role `[[agent]] system` string does.
+Render v2's shared section renderer would make `<persona>` — the same
+`<intent>`/`<behavior>` blocks the behavioral render emits — available to
+`frame_prompt`, so the reviewer/worker frames would carry the trait's doctrine
+verbatim and digest-tracked, exactly as a Mode B injection does.
+
+**Shape if ever built.** `frame_prompt` composes `<persona>` from the P493
+emitters ahead of `<instructions>`/`<inputs>`/`<output-contract>`;
+`ctx traits preview` shows the same. Behind a switch, off by default until
+measured.
+
+**Why parked.** The real frame-rendering question is bigger than a persona block:
+driven frames will likely want richer structural rendering (ASCII diagrams, call
+trees, structured evidence layouts) before a persona layer matters. Note: frame
+render v2 has since landed the `<information>` block and `<input>`-operand
+collapse (task 0019 et al.) — any revisit starts from that current envelope, not
+the one this idea was written against.
+
+**Cost/risk when revisited.** Touches live drive prompts — a behavioral change to
+every driven frame in every run; measure per-frame token cost before defaulting
+it on.
+
+**Depends on.** The P493 shared emitters (landed).
+
+Full original text: `archived/board/future.md`.

@@ -1,0 +1,35 @@
+# 0113 — Shareable trait package on npm, end to end: the reuse demo
+
+**Status:** filed, not scheduled (blocked: needs `@ctx-traits/cdk` published to npm — was P345, owner-gated on an npm account/token and a publish decision, deliberately NOT migrated as a task) · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/` board — was P346)
+
+The blog promises `import { resources, agents } from "@ctx-company/useful-traits"`
+and `[dependencies] useful-traits = { npm = ... }` — make both literally true with
+one published example package, or the composition story is vapor.
+
+The package lives IN THIS REPO at `packages/useful-traits/` (published independently
+to npm): TS entry exporting reusable `agent(...)`/`resource(...)`/schema handles for
+authoring-time reuse, plus a complete trait package (manifest + source/ + generated/
++ resources/) inside the npm tarball for `[dependencies]` consumption; the consumer
+side already shipped (`dependency.rs` ReadNpm + vendoring + lock).
+
+Publish RESTRICTED (same access disposition as the CDK publish; flip later
+together). If the `@ctx-company` npm scope is not owned by the logged-in account
+(403/404), fall back to `@ctx-traits/useful-traits` and log the rename for the blog
+sweep. In a fresh repo, demo BOTH reuse modes authenticated as the scope owner:
+(a) TS import of shared agents/resources into a local trait's source;
+(b) `[dependencies] useful-traits = { version, npm = "..." }` → `ctx traits sync`
+installs, vendors, locks, `check` green with dependency digests. Capture as the
+launch demo + blog snippet.
+
+## Watch
+
+- The vendored subset (canonical doc + resources/) must be exactly what ships in the
+  tarball — the files field includes generated/ + resources/.
+- The demo must not depend on this repo's checkout at all.
+
+## Done when
+
+A stranger can `pnpm add` the package and both reuse modes work from the public
+artifacts alone; the blog composition section is verified against it (claim-gate).
+
+Full original contract: `archived/board/execution-plan.md` (Group 86, P346).

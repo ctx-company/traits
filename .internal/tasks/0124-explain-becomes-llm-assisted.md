@@ -1,0 +1,43 @@
+# 0124 — `explain` becomes LLM-assisted like refine; deterministic stays default
+
+**Status:** ready to implement · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/` board — was P320/P321/P322)
+
+The import half of this family landed (P315–P319: `import-trait` meta-trait,
+runner registration, model fallback, flags). `explain` is the remaining stub of
+the same class: the command is deterministic (`explain_inspect.rs`
+`handle_explain_scaffold` → `plan_deterministic_boundary`,
+`provider_available: false`), and `explain-trait` exists as an **agent-less**
+receipt-grounded scaffold contract, never executed as a model step.
+
+Three pieces, mirroring the import treatment:
+
+1. **Extend `explain-trait` with a grounded narration step** (was P320): keep the
+   deterministic receipt+source-map scaffold as grounding INPUT; add one agent
+   (role `generator`) + an authoring step that narrates a human explanation
+   strictly grounded in the scaffold (no facts beyond the receipt/source-map);
+   output the same typed draft wrapper the other meta-traits emit. Rebuild +
+   `check` green.
+2. **Register `explain-trait` in the built-in runner** (was P321): the
+   `generate.rs` role map gains `"explain-trait" => "generator"`.
+3. **Give `explain` the refine-style path** (was P322): add
+   `--llm-assisted`/`--candidate`/`--model`/`--profile`/`--assign`; when
+   `--llm-assisted`, switch to `plan_assist_boundary` with
+   `provider_available: candidate_path.is_none()`, add the
+   `run_builtin_trait("explain-trait", ...)` fallback, and feed model output
+   through the explain gate (`evaluate_supplied_explain_scaffold` +
+   `attach_check_report`).
+
+## Watch
+
+- explain uses its OWN gate, not import's `evaluate_supplied_candidate` — keep the
+  receipt-grounding gate.
+- **No `--llm-assisted` ⇒ exact current deterministic behavior** (zero regression).
+- The model narrates the deterministic evidence, never invents.
+
+## Done when
+
+`ctx traits explain --scaffold --llm-assisted` (no `--candidate`) runs
+`explain-trait` via the harness → gated narrated explanation; deterministic
+`explain` unchanged; `--candidate` overrides.
+
+Full original contract: `archived/board/execution-plan.md` (Group 78, P320–P322).

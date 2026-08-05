@@ -1,0 +1,29 @@
+# 0121 — Trait distribution: global tier + run-anywhere
+
+**Status:** ready to implement · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/` board — was P439)
+
+Owner order: run a trait anywhere — not only inside repos. A global trait runs in
+every project, which is exactly where the per-machine trust gate matters most. The
+project-scope porcelain (`install`/`remove`/`update`/`outdated`/`info`, pure-Rust
+registry client) landed as P438; this is the user-root tier on top.
+
+Mirror the manifest/lock/store at the user root: `~/.config/ctx/traits.toml`,
+`traits.lock`, `traits/<name>/`; `install -g` / `remove -g` / `update -g`.
+Resolution order: repo-authored → repo-vendored → user-global → built-ins, nearest
+wins; run start prints origin (`trait: useful-agents (global v1.2.0)`); `list`
+gains the origin column; name shadowing across tiers is surfaced by list/doctor,
+never silently ambiguous. Run-anywhere: outside any repo, resolution uses
+global+built-ins; non-repo cwds get an `adhoc-<cwd-slug>` run key in repos.toml so
+the global run store and the TUI ALL-view cover them; `worktreeRequired` traits
+refuse outside a git repo with a clear error. Package-granular trust:
+`trust approve <package>` reviews once and approves ALL current variant digests of
+that package (per-digest records underneath, all revert on change).
+
+## Done when
+
+`cd /tmp && ctx traits run <installed-global-trait>` works end to end on a machine
+with a PATH harness; the same trait installed at both tiers resolves repo-first
+with the shadow surfaced; package-granular approve admits a family in one review;
+global mutations appear in the audit journal.
+
+Full original contract: `archived/board/execution-plan.md` (Group 108, P439).

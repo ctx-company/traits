@@ -1,0 +1,40 @@
+# 0137 — Finished-step summaries in the narration sidebar
+
+**Status:** ready to implement (first step: verify fit against the current TUI — the pane tree and unified renderer landed after this was written; the narration surface moved) · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/` board — was P455, owner ask 2026-07-22)
+
+The sidebar should carry the run's story, not only the live thinking ticks — when
+a step FINISHES, one narrated summary of that whole step ("wrote a draft covering
+X and Y", "reviewer approved with two nits") joins the history, so scrolling reads
+as a narrative of what the run did.
+
+Step-completion detection already exists (the transition that credits
+`finished_durations`); on that transition, enqueue ONE summarization request to
+the existing narrator machinery (`harness_stream::StreamNarrator` — reuse the
+pacing/timeout/disable discipline; never a new narrator kind) with a step-summary
+prompt fed from what the panel already holds (narration window tail + step
+title/role + elapsed/tokens), NEVER from slot values (presentation stays
+presentation; no ledger reads). The result lands in the same ring buffer as a
+distinct entry kind — step summaries render with the step label emphasized (Bold,
+still two-tone) as chapter marks between thinking ticks. An absent/disabled
+narrator produces no summary entry, no fallback text.
+
+## Watch
+
+- COST is the design constraint: exactly one extra narrator call per finished
+  step, riding the existing pacing floor; batch nothing, retry nothing (a missed
+  summary is a blank, not an error).
+- Entries stay presentation-only and out of every byte-stable surface.
+- Two-tone palette doctrine unchanged.
+- Verify against the CURRENT pane layout (history/current panes may already be the
+  right landing surface rather than a "sidebar") — adapt the surface, keep the
+  mechanism.
+
+## Done when
+
+A real run's sidebar/history shows step-summary entries within a few seconds of
+each step finishing, visually distinct from thinking ticks, correct under
+iteration rollover (one per completed iteration-step, not per repaint); disabling
+the narrator yields zero summary entries and zero warnings; token cost grows by
+≈ one narrator call per finished step, visible in the narrator-token evidence.
+
+Full original contract: `archived/board/execution-plan.md` (Group 105, P455).

@@ -1,6 +1,25 @@
 # 0032 — Move what remains of `.plans/` into `.internal/tasks/`
 
-**Status:** ready to implement · **Raised:** 2026-07-29
+**Status:** implemented 2026-08-05 (owner-reviewed migration list); one owner step remains — delete `.plans/` from the main checkout · **Raised:** 2026-07-29
+
+## Migration record (2026-08-05)
+
+- All three `.plans/` files are archived VERBATIM and committed at
+  `archived/board/{execution-plan,run-problems-log,future}.md` (kebab-case names
+  because the owner's global gitignore blocks `**/EXECUTION_PLAN.md` by name).
+  Nothing is lost by the deletion — including the open items deliberately NOT
+  migrated (P236, P350, P345, P243, P246, P248, P249, P282, P384, P554, P461).
+- 33 owner-approved tasks migrated as 0110–0142 (each names its source phase).
+  P546 was approved for verify-then-migrate and verified LANDED (closure note
+  2026-07-28, commit 6bf0299) — dropped, no task.
+- The Watch below is stale: no trait references `.plans/EXECUTION_PLAN.md`
+  anymore (the 2026-07-31 task-board migration moved the implement contract to
+  `port:task` + the task-board resource), so no trait rebuild/relock/re-approval
+  was needed.
+- `[worktree] seed` in the machine-local `.ctx/traits/runtime.toml` drops the
+  `.plans` entry (host-side edit, done with this landing).
+- Owner step to finish: `rm -rf /Users/rpunkfu/ctx-company/ctx-trait/.plans` —
+  recoverable afterwards from the committed archive.
 
 Work is tracked as tasks now. Fold the remaining `.plans/` content into
 `.internal/tasks/` and retire the directory.
