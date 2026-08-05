@@ -346,4 +346,55 @@ summary = "A demo trait."
         let err = rename_summary_to_synopsis(&mut doc).expect_err("second rename refuses");
         assert!(matches!(err, Error::Refused { .. }));
     }
+
+    /// Release gate (task 0029): `SUPPORTED_SCHEMA_VERSIONS` must never gain
+    /// a version without a corresponding, working `MIGRATION_STEPS` entry.
+    mod release_gate {
+        use super::*;
+        use crate::r#trait::SUPPORTED_SCHEMA_VERSIONS;
+
+        /// Minimal fixture text for a given supported schema version, used
+        /// only to prove a registered step actually migrates. A new
+        /// supported version with no arm here panics, forcing the author to
+        /// add one.
+        fn minimal_fixture(version: &str) -> &'static str {
+            match version {
+                "0.2" => V02,
+                other => panic!("add a minimal fixture for schema {other} (task 0029)"),
+            }
+        }
+
+        #[test]
+        fn every_supported_version_step_has_a_declared_migration() {
+            assert_eq!(
+                MIGRATION_STEPS.len(),
+                SUPPORTED_SCHEMA_VERSIONS.len() - 1,
+                "SUPPORTED_SCHEMA_VERSIONS and MIGRATION_STEPS have diverged: \
+                 declare a MigrationStep for each adjacent pair; if nothing \
+                 changed for authors, declare an explicit no-op step that \
+                 only bumps schema-version (task 0029)"
+            );
+            for (i, window) in SUPPORTED_SCHEMA_VERSIONS.windows(2).enumerate() {
+                let (from, to) = (window[0], window[1]);
+                let step = &MIGRATION_STEPS[i];
+                assert_eq!(
+                    (step.from, step.to),
+                    (from, to),
+                    "declare a MigrationStep for {from} -> {to}; if nothing \
+                     changed for authors, declare an explicit no-op step \
+                     that only bumps schema-version (task 0029)"
+                );
+            }
+        }
+
+        #[test]
+        fn every_declared_step_actually_migrates() {
+            for step in MIGRATION_STEPS {
+                let fixture = minimal_fixture(step.from);
+                let plan = plan_migration(fixture, step.to)
+                    .unwrap_or_else(|e| panic!("{} -> {} refused: {e}", step.from, step.to));
+                assert_eq!(plan.to, step.to);
+            }
+        }
+    }
 }

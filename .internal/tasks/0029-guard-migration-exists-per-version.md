@@ -1,6 +1,15 @@
 # 0029 — Gate our own releases on a migration existing for the new version
 
-**Status:** ready to implement (depends on 0028) · **Raised:** 2026-07-29
+**Status:** done · **Raised:** 2026-07-29 · **Closed:** 2026-08-05
+
+Implemented as two lib tests in `modules/core/src/migrate.rs` under
+`tests::release_gate`: `every_supported_version_step_has_a_declared_migration`
+asserts `MIGRATION_STEPS` mirrors `SUPPORTED_SCHEMA_VERSIONS` exactly (catches
+missing/stray/out-of-order steps), and `every_declared_step_actually_migrates`
+runs `plan_migration` per declared step against a minimal fixture. Both run
+inside `just test` (`cargo test --workspace --lib`), the repo's own per-round
+gate — no new gate wiring. `SUPPORTED_SCHEMA_VERSIONS` in
+`modules/core/src/trait/mod.rs` now doc-comments the requirement.
 
 A schema version bump must not land without its migration. Add a gate: if the
 canonical schema version changes and no mechanical+assisted migration is
