@@ -3423,6 +3423,37 @@ fn expansion_seat_out_of_range(defaults: &AgentDefaults, agent_id: &str) -> Opti
     ))
 }
 
+/// True when a declared trait agent id will resolve by inheriting the whole
+/// `[agent.role.default]` seat: it has no role table of its own, no
+/// `--assign` override, is not a standing seat, and is not an expansion seat
+/// of an authored base table. The inheritance itself is intended behavior
+/// (see `base_for_role`); this predicate exists so `prepare_run_assignments`
+/// can say so out loud — a silently inherited default seat is how a trait's
+/// "smart" role ends up on the default model with nobody noticing.
+fn inherits_default_seat(
+    defaults: &AgentDefaults,
+    overrides: &BTreeMap<String, ProfileAssignment>,
+    agent_id: &str,
+) -> bool {
+    if agent_id == DEFAULT_SEAT
+        || is_standing_seat(agent_id)
+        || defaults.role.contains_key(agent_id)
+        || overrides.contains_key(agent_id)
+    {
+        return false;
+    }
+    if let Some((base, suffix)) = agent_id.rsplit_once('-')
+        && !suffix.is_empty()
+        && suffix.bytes().all(|byte| byte.is_ascii_digit())
+        && defaults.role.contains_key(base)
+    {
+        // An expansion seat resolves from its authored base; an out-of-range
+        // seat already errored in `expansion_seat_out_of_range`.
+        return false;
+    }
+    true
+}
+
 pub fn prepare_run_assignments(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
@@ -3451,11 +3482,28 @@ pub fn prepare_run_assignments(
 
     let mut prepared = Vec::new();
     let mut harness_ids = BTreeSet::new();
+    let mut seat_warnings: Vec<String> = Vec::new();
     for agent in &trait_ref.agents {
         if let Some(err) = expansion_seat_out_of_range(&resolved.agent_defaults, &agent.id) {
             return Err(err);
         }
         let seats = resolved.resolved_seats_for_role(&agent.id)?;
+        if inherits_default_seat(&resolved.agent_defaults, &resolved.assignments, &agent.id) {
+            let seat_desc = seats
+                .first()
+                .map(|(assignment, _)| {
+                    let harness = assignment.harness.as_deref().unwrap_or("unassigned");
+                    match assignment.model.as_deref() {
+                        Some(model) => format!("harness={harness} model={model}"),
+                        None => format!("harness={harness}"),
+                    }
+                })
+                .unwrap_or_else(|| "unassigned".to_string());
+            seat_warnings.push(format!(
+                "agent role {:?} has no [agent.role.{}] table and no --assign override; it inherits the whole default seat ({seat_desc}) — add a role table or rename the trait agent to a configured role",
+                agent.id, agent.id
+            ));
+        }
         if seats.is_empty() {
             // `resolved_seats_for_role` already attempted the P427 built-in
             // fallback for every seat that reached here without a
@@ -3566,6 +3614,7 @@ pub fn prepare_run_assignments(
         harness_ids.difference(&fallback_ids).cloned().collect();
     let (mut harness_probes, mut warnings, mut capability_reports) =
         probe_harnesses(&resolved.registry, &configured_probe_ids);
+    warnings.extend(seat_warnings);
     warnings.extend(resolved.builtin_fallback_warnings());
     for id in &fallback_ids {
         let Some(row) = resolved
@@ -8791,6 +8840,53 @@ mod config_tests {
             winners["schema-version"].reason,
             ConfigReason::RepoRequirement
         );
+    }
+
+    #[test]
+    fn inherits_default_seat_flags_only_unmatched_trait_roles() {
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([
+                (
+                    DEFAULT_SEAT.to_string(),
+                    RoleAssignmentValue::Single(ProfileAssignment {
+                        harness: Some("harness".into()),
+                        ..ProfileAssignment::default()
+                    }),
+                ),
+                (
+                    "smart-1".to_string(),
+                    RoleAssignmentValue::Single(ProfileAssignment {
+                        harness: Some("harness".into()),
+                        ..ProfileAssignment::default()
+                    }),
+                ),
+                (
+                    "expandable".to_string(),
+                    RoleAssignmentValue::Single(ProfileAssignment {
+                        harness: Some("harness".into()),
+                        count: Some(2),
+                        ..ProfileAssignment::default()
+                    }),
+                ),
+            ]),
+            ..AgentDefaults::default()
+        };
+        let mut overrides: BTreeMap<String, ProfileAssignment> = BTreeMap::new();
+        // A bare id with no table of its own inherits the default seat.
+        assert!(inherits_default_seat(&defaults, &overrides, "smart"));
+        // Its own table, a standing seat, or an expansion of an authored
+        // base all resolve without inheriting.
+        assert!(!inherits_default_seat(&defaults, &overrides, "smart-1"));
+        assert!(!inherits_default_seat(&defaults, &overrides, "narrator"));
+        assert!(!inherits_default_seat(&defaults, &overrides, DEFAULT_SEAT));
+        assert!(!inherits_default_seat(
+            &defaults,
+            &overrides,
+            "expandable-2"
+        ));
+        // An explicit --assign override covers a table-less role.
+        overrides.insert("smart".to_string(), ProfileAssignment::default());
+        assert!(!inherits_default_seat(&defaults, &overrides, "smart"));
     }
 
     #[test]
