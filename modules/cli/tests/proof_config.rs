@@ -122,6 +122,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [publish]\nexclude = ['global-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nGLOBAL_ONLY = 'global'\nCONFLICT = 'global'\n\
 [run.build-cache.shared]\nenv = 'GLOBAL_CACHE'\n\
+[trait.layered-trait.agent.role.worker]\nmodel = 'trait-model'\n\
 [repo.\"{active_key}\".host.layered]\nprofile = 'personal-profile'\n\
 [repo.\"{active_key}\".agent.role.worker]\nmodel = 'personal-model'\n\
 [repo.\"{active_key}\".publish]\nexclude = ['personal-exclude', 'duplicate-exclude']\n\
@@ -303,6 +304,21 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     assert_eq!(
         knobs["harness.layered.mcp.allowed-tools"]["winner"]["layer"], "user-global",
         "a partial repo MCP table must retain the global allowed-tools winner"
+    );
+    // 0035 invariant 2, end-to-end: a `[trait.<id>.agent.role.*]` seat (0034
+    // scoping) must appear in the resolved view with its winning layer, the
+    // same as any other layered table, not just in the internal winners map.
+    assert_eq!(
+        knobs["trait.layered-trait.agent.role.worker.model"]["value"],
+        "trait-model"
+    );
+    assert_eq!(
+        knobs["trait.layered-trait.agent.role.worker.model"]["winner"]["layer"],
+        "user-global"
+    );
+    assert_eq!(
+        knobs["trait.layered-trait.agent.role.worker.model"]["winner"]["source"],
+        global_source
     );
     assert_eq!(knobs["run.build-cache.shared.env"]["value"], "REPO_CACHE");
     assert_eq!(

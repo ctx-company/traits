@@ -10021,4 +10021,101 @@ mod config_tests {
             toml::from_str(&serialized).expect("round-trips through TOML");
         assert_eq!(decoded.count, Some(3));
     }
+
+    // P568/0035 invariant 1: layered config is collapsed at ONE resolution
+    // point (`merge_built_in_harness_overrides`, called once inside
+    // `resolve_runtime_config`), so a raw `.get(id)` afterwards is always
+    // correct. These three tests each lock one of the named casualties.
+
+    #[test]
+    fn raw_lookup_on_resolved_registry_equals_merged_value() {
+        let mut registry: HarnessRegistry = toml::from_str(
+            r#"
+            [harness.claude-code]
+            bin = "custom-claude"
+            "#,
+        )
+        .expect("partial override decodes");
+
+        merge_built_in_harness_overrides(&mut registry.harness);
+
+        let raw = registry
+            .harness
+            .get("claude-code")
+            .expect("claude-code is materialized after the merge");
+        // The stated field won...
+        assert_eq!(raw.bin(), "custom-claude");
+        // ...and an untouched field still carries the built-in's value: a
+        // half-defined harness (P568's narrator casualty) would have lost
+        // this instead of inheriting it.
+        assert_eq!(
+            raw.cli.as_ref().and_then(|cli| cli.model_flag.as_deref()),
+            Some("--model")
+        );
+        // A plain lookup on the resolved document is the merged value —
+        // exactly the property the choke point exists to guarantee.
+        assert_eq!(raw, &built_in_harness_definition("claude-code", &registry));
+    }
+
+    #[test]
+    fn empty_harness_section_materializes_every_built_in() {
+        let mut harness: BTreeMap<String, HarnessDefinition> = BTreeMap::new();
+
+        merge_built_in_harness_overrides(&mut harness);
+
+        for (id, definition) in built_in_harness_definitions() {
+            assert_eq!(
+                harness.get(id),
+                Some(&definition),
+                "built-in `{id}` must be materialized even with no `[harness]` section \
+                 stated for it, or every lookup fails with \"unknown harness id\""
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_unset_survives_resolution_and_is_not_reinherited() {
+        let mut registry: HarnessRegistry = toml::from_str(
+            r#"
+            [harness.claude-code.cli]
+            model-flag = ""
+            "#,
+        )
+        .expect("explicit-unset override decodes");
+
+        merge_built_in_harness_overrides(&mut registry.harness);
+        let resolved = registry
+            .harness
+            .get("claude-code")
+            .expect("claude-code is materialized after the merge");
+        assert_eq!(
+            resolved
+                .cli
+                .as_ref()
+                .and_then(|cli| cli.model_flag.as_deref()),
+            None,
+            "an explicit `model-flag = \"\"` must resolve to None, not inherit the built-in's flag"
+        );
+
+        // A second merge pass over the already-resolved map is NOT
+        // idempotent: it re-inherits the built-in's value, because the
+        // explicit unset has already been applied to `None` and a `None`
+        // looks identical to "not stated" to the merge. This is why
+        // resolution runs exactly once and lookup sites must never
+        // "merge defensively".
+        merge_built_in_harness_overrides(&mut registry.harness);
+        let reinherited = registry
+            .harness
+            .get("claude-code")
+            .expect("claude-code is still present after the second pass");
+        assert_eq!(
+            reinherited
+                .cli
+                .as_ref()
+                .and_then(|cli| cli.model_flag.as_deref()),
+            Some("--model"),
+            "a second merge pass re-inherits the built-in's flag, demonstrating why \
+             merging must happen exactly once"
+        );
+    }
 }

@@ -175,7 +175,12 @@ export interface RunTable {
 export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 export interface TraitDefaults {
+    agent?: AgentDefaults;
     defaults?: PortDefaults;
+    variant?: Record<string, TraitVariantDefaults>;
+}
+export interface TraitVariantDefaults {
+    agent?: AgentDefaults;
 }
 export type TripwirePolicy = "park" | "warn";
 export interface VariantOverride {

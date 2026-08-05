@@ -1,10 +1,50 @@
 # 0035 — Three config-resolution invariants, enforced rather than remembered
 
-**Status:** ready to implement · **Raised:** 2026-07-29 · **Applies to:** 0025, 0034, and every future layered config
+**Status:** done · **Raised:** 2026-07-29 · **Closed:** 2026-08-05 · **Applies to:** 0025, 0034, and every future layered config
 
 These three keep appearing as "watch out for" notes on individual tasks. Each
 has already cost real time once. Make them properties of the system instead of
 things the next author has to recall.
+
+All three invariants were already enforced at the runtime seams before this
+change closed the remaining gaps:
+
+- **Invariant 1** (merge once): `merge_built_in_harness_overrides` has run
+  exactly once inside `resolve_runtime_config` since P568
+  (`modules/io/src/harness_config.rs:3552-3559`). This change adds the
+  regression tests the invariant named as missing, in
+  `modules/io/src/harness_config.rs` `mod config_tests`:
+  `raw_lookup_on_resolved_registry_equals_merged_value` (a raw `.get(id)` on
+  the resolved registry equals the merged value — the narrator casualty),
+  `empty_harness_section_materializes_every_built_in` (an empty `[harness]`
+  section still yields every built-in id — the "unknown harness id"
+  casualty), and `explicit_unset_survives_resolution_and_is_not_reinherited`
+  (locks the Watch item: an explicit `flag = ""` resolves to `None`, and a
+  second merge pass over the same map re-inherits the built-in's value —
+  proof that lookup sites must never "merge defensively").
+- **Invariant 2** (provenance-bearing resolved view): `ConfigReport.winners`
+  and `doctor --config` already rendered every layered table including
+  `trait.<id>.*` seats (0034, commit `58b91f3a`). This change adds the
+  end-to-end proof that was missing: `proof_config.rs`'s
+  `layered_doctor_reports_exact_leaf_provenance_and_additive_contributors`
+  now declares a `[trait.layered-trait.agent.role.worker]` seat and asserts
+  its `doctor --config --json` value, winning layer, and source — the
+  "new scope appears in the resolved view" property pinned through the CLI,
+  not just the internal winners map (which `merge_machine_config_records_trait_agent_winners`
+  already covered).
+- **Invariant 3** (one mechanism per decision): `--assign`, run-profile
+  `[assign.<role>]`, and `[agent.role.*]`/scope tables converge on
+  `resolved_assignment_for_role`'s single layering
+  (`modules/io/src/harness_config.rs:5920-5995`); `--master` is a hard error
+  routing to `--assign` (P567 alias pattern,
+  `modules/cli/src/app/run.rs:350-353`); the Justfile bakes no `--assign`.
+  No residual dual mechanism was found in this audit; none was added.
+
+Verified: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io` (new tests
+pass among 78 in `config_tests`), `CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-cli --test proof_config` (all 35 pass, including the extended
+fixture), `cargo fmt --check`, and `cargo clippy -p ctx-traits-io -p
+ctx-traits-cli --all-targets --all-features -- -D warnings` (clean).
 
 ---
 
