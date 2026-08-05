@@ -1,0 +1,35 @@
+# 0104 — normalized emission: moving code is not drift
+
+**Status:** filed, ready · **Depends on:** 0103 · **Raised:** 2026-08-05 · **Touches:** packages/cdk emission path, every package canonical + lockfile
+
+The law (0102): only the relative position of steps and `flow.*` statements is semantic. This
+task makes the emitter honor it, so reformatting, renaming a variable, reordering declarations,
+or moving a configuration call never reads as drift and never torches trust in the gate.
+
+## Decisions
+
+- **Stable emission order.** Canonical keys and derived structures emit in a fixed, documented
+  order regardless of authoring order.
+- **IDs derive from declared titles/ids, never counters.** Inserting a step must not renumber
+  its siblings. Enforced consequence: duplicate step titles within one scope are a build
+  error — uniquifying by counter would smuggle order-dependence right back in.
+- **Second and last relock churn.** After this lands, the byte-identical baseline that 0108
+  measures against is fixed.
+
+## Scope
+
+Emitter ordering; title→id derivation and duplicate-title validation; regenerate and relock all
+packages; the normalization rules documented next to the emitter.
+
+## Watch
+
+- Per the standing validation ruling (2026-07-24), the normalization property test (two sources
+  differing non-semantically → same TOML) is authored but stays out of the gate until surfaces
+  stop churning; done-when is verified by hand-run experiments instead.
+- Same relock discipline as 0103: no live runs, HEAD re-verified immediately before landing.
+
+## Done when
+
+The regenerated canonical diff is ordering and IDs only; hand experiments — reformat, rename a
+variable, reorder declarations, move a `loop.maxIterations` call — emit byte-identical TOML; and
+moving a `flow.until` within its loop body changes the canonical, which is correct.

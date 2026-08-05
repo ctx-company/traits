@@ -1,0 +1,34 @@
+# 0108 — pilot: implement:quick compiles byte-identical
+
+**Status:** filed, ready · **Depends on:** 0107 (baseline fixed by 0104) · **Raised:** 2026-08-05 · **Touches:** .ctx/traits/packages/implement/source (a ported copy of the quick variant)
+
+The honest test, by 0097's rule: an interface with no consumer is a guess. Port implement:quick
+to the functional layer using carried-over features only — no output templates, no optional
+outputs, nothing 0105 added — and prove the sugar is sugar.
+
+## Decisions
+
+- **Byte-identical or it is not done.** The ported variant's generated canonical must equal the
+  post-0104 baseline exactly. Byte-identical is only meaningful because the pilot uses no new
+  features — the additive surface proves itself separately, by using it, not here.
+- **Gaps are findings, not workarounds.** Anything quick cannot express functionally is
+  recorded as an amendment against 0102; the port never bends around a gap.
+- **Quick first because it is the smallest full variant** — guarded review loop, park report,
+  commit tail: every construct class with the least surface.
+
+## Scope
+
+The ported source, committed alongside (not replacing) the object-layer original; the diff of
+the two canonicals; findings, if any, amended into 0102.
+
+## Watch
+
+- No half-migrated states on main: the object-layer quick stays authoritative until 0109
+  retires the family together.
+- Never rebuild the package while a run is live, and never migrate between a demo recording and
+  its publishing.
+
+## Done when
+
+`diff` of the two generated canonicals is empty; both sources build under drift/embed + builds
++ cargo test; findings (if any) are recorded in 0102 rather than patched around.

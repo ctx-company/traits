@@ -1,0 +1,40 @@
+# 0109 — the family migrates, and behavior stops being copy-pasted
+
+**Status:** filed, not scheduled (0108 must prove the layer first) · **Depends on:** 0108 · **Raised:** 2026-08-05 · **Touches:** .ctx/traits/packages/implement/source (family.ts, all variants), package relock
+
+Every implement variant moves to the functional layer, and the hand-copied `behavior:` /
+`intent:` blocks across default/quick/smart/strict/phase collapse into shared plain-object
+fragments. This is where the composition half of 0102 meets its first real consumer — the same
+role 0108 plays for the procedure half.
+
+## Decisions
+
+- **Behavior-preserving or it is not done.** Same steps, same gates, same verdicts; every
+  variant's canonical verified identical, with the fragment dedup changing no emitted
+  behavior/intent set — union of identical inputs is the identity operation, and the diff must
+  prove it.
+- **Fragments stay in-package** — an `implement-core` module of `Behavior`/`Intent` consts —
+  per the single-trait-package rule; they lift into their own package only when a second
+  consuming package exists, and then only import paths change.
+- **`familyProcedure` and `commitTail` become registrar-calling functions.** The parameter
+  threading and spread arrays die; the composite surface shrinks to what callers actually vary.
+- **The object-layer originals retire in the same commit** that lands their replacements —
+  delete-with-replace, never delete-before or linger-after.
+
+## Scope
+
+All variant sources and family.ts; the fragments module; the relock; a written comparison of
+before/after authoring surface (line counts and what each variant now states versus inherits).
+
+## Watch
+
+- Expressiveness gaps recorded against 0102, exactly as in 0108 — the family is bigger than
+  quick and more likely to find one (guarded production, the escalation `when` guards, the
+  park/leftovers ports).
+- The relock discipline again: no live runs, HEAD re-verified before landing.
+
+## Done when
+
+All variants author functionally; each behavior/intent fact exists in exactly one place; every
+canonical verified unchanged; the object-layer variant sources are gone; drift/embed + builds +
+cargo test green.
