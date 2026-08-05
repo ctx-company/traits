@@ -374,6 +374,10 @@ struct RunPanelState {
     narrator_tokens: u64,
     run_started: Instant,
     last_timer_paint: Instant,
+    /// Throttle stamp for the live pane's own ledger re-read (see
+    /// [`maybe_reload_from_ledger`]); meaningless for observers, whose
+    /// caller drives reloads through [`RunPanel::refresh_from_ledger`].
+    last_ledger_reload: Instant,
     /// Window focus as of the last painted frame. A focus change alters how
     /// the frame is drawn (the whole buffer is dimmed while unfocused)
     /// without changing a byte of its content, so it has to be tracked here
@@ -755,6 +759,13 @@ struct PresentationState<'a> {
     narrator_tokens: u64,
     guide_tokens: u64,
     run_started: Instant,
+    /// Whether this view belongs to the in-process drive of the run (as
+    /// opposed to a dashboard observer or a ledger preview). A live drive
+    /// that has a command frame at the cursor is EXECUTING it — the derived
+    /// `BlockedCommandPermissionRequired` status names the frame kind, not a
+    /// wait — while an observer of a parked session cannot tell the two
+    /// apart and keeps the conservative status text.
+    live_drive: bool,
 }
 
 impl RunPanel {
@@ -809,6 +820,7 @@ impl RunPanel {
                 narrator_tokens: 0,
                 guide_tokens: 0,
                 run_started: now,
+                live_drive: true,
             },
         );
         let handoff = Arc::new(DashboardHandoff {
@@ -832,6 +844,7 @@ impl RunPanel {
             narrator_tokens: 0,
             run_started: now,
             last_timer_paint: now,
+            last_ledger_reload: now,
             // Panes start focused, matching `PumpControl`'s own default for a
             // terminal that never reports focus at all.
             last_focus: true,
@@ -1232,6 +1245,19 @@ impl RunPanel {
         render_locked(&mut state);
     }
 
+    /// Install the persisted ledger path for a LIVE drive panel so `tick`
+    /// can re-derive journey rows while a blocking command frame runs: the
+    /// drive thread is inside `run::call` for the whole command chain and
+    /// cannot call [`Self::refresh`], but the ledger on disk is already past
+    /// the acceptance that preceded the commands. Observers install their
+    /// path in [`Self::new_observer`] and are refreshed by their caller
+    /// through [`Self::refresh_from_ledger`] instead.
+    pub(crate) fn set_live_ledger_path(&self, path: camino::Utf8PathBuf) {
+        if let Ok(mut state) = self.state.lock() {
+            state.ledger_path = Some(path);
+        }
+    }
+
     pub(crate) fn tick(&self) {
         let _handoff = self.handoff_driver();
         if !self.cadence.should_run() {
@@ -1240,6 +1266,7 @@ impl RunPanel {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        maybe_reload_from_ledger(&mut state);
         let outcome = tick_locked(&mut state);
         drop(state);
         self.cadence.observe(outcome);
@@ -1339,6 +1366,48 @@ impl RunPanel {
         let panel = self.clone();
         std::sync::Arc::new(move || panel.tick())
     }
+}
+
+/// Cadence for the live pane's own ledger re-read below — matches the
+/// dashboard observer's reload interval.
+const LIVE_LEDGER_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
+
+/// While the drive thread is blocked inside a command frame, no
+/// [`RunPanel::refresh`] can arrive: `run::call` drains every consecutive
+/// command frame (branch resolution, project steps, the commands themselves)
+/// in one blocking call, and the only signal out is the tick observer. The
+/// pane would keep rendering the pre-command snapshot — the already-finished
+/// prompt step reading "in-progress" for however long the command runs (a
+/// plannotator gate holds it for hours). The ledger on disk is already past
+/// the acceptance, so a throttled re-read moves the journey onto the command
+/// row and materializes any branch-arm rows the decision created.
+///
+/// Deliberately leaves `active_key`/`active_started` untouched:
+/// [`RunPanel::refresh`] stays the sole transition detector (P455), so
+/// step-summary narration and duration crediting behave exactly as before.
+/// A transient read/parse error (including a torn mid-write read) skips the
+/// cycle and keeps the last frame, mirroring the dashboard's degrade
+/// discipline.
+fn maybe_reload_from_ledger(state: &mut RunPanelState) {
+    if state.observer {
+        return;
+    }
+    let Some(path) = state.ledger_path.clone() else {
+        return;
+    };
+    if state.last_ledger_reload.elapsed() < LIVE_LEDGER_RELOAD_INTERVAL {
+        return;
+    }
+    state.last_ledger_reload = Instant::now();
+    let Ok(session) = ctx_traits_io::run_session::read_run_session(&path) else {
+        return;
+    };
+    if session.state_digest.as_str() == state.session.state_digest.as_str() {
+        return;
+    }
+    state.session = session;
+    let narration = state.view.narration.clone();
+    rebuild_view(state, narration);
 }
 
 fn tick_weak(
@@ -1473,6 +1542,7 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
                 .as_ref()
                 .map_or(state.ledger_guide_tokens, GuideChatHandle::guide_tokens),
             run_started: state.run_started,
+            live_drive: !state.observer,
         },
     );
     state.view.merge_rows = state.merge_rows.clone();
@@ -2783,6 +2853,7 @@ fn run_view(
                 &harness_by_role,
                 &accepted,
                 false,
+                presentation.live_drive,
             )
         })
         .collect::<Vec<_>>();
@@ -3566,6 +3637,7 @@ pub(crate) fn render_ledger_run_view(
             narrator_tokens: seed.narrator_tokens,
             guide_tokens: seed.guide_tokens,
             run_started: seed.run_started,
+            live_drive: false,
         },
     );
     // P552 review `dashboard-attach-contract-absent`: history/current are
@@ -4286,6 +4358,7 @@ fn flatten_step(
     harness_by_role: &BTreeMap<String, Vec<(Option<u32>, String)>>,
     accepted: &BTreeSet<String>,
     force_done: bool,
+    live_drive: bool,
 ) -> Vec<RunStep> {
     let step = step_from_item(
         item,
@@ -4294,6 +4367,7 @@ fn flatten_step(
         harness_by_role,
         accepted,
         force_done,
+        live_drive,
     );
     let child_force_done =
         force_done || (is_loop_kind(&item.kind) && step.state == StepState::Done);
@@ -4312,6 +4386,7 @@ fn flatten_step(
             harness_by_role,
             accepted,
             child_force_done,
+            live_drive,
         ));
     }
     for child in item.otherwise_children.iter().filter(|_| include_otherwise) {
@@ -4323,6 +4398,7 @@ fn flatten_step(
             harness_by_role,
             accepted,
             child_force_done,
+            live_drive,
         ));
     }
     steps
@@ -4756,6 +4832,7 @@ fn step_from_item(
     harness_by_role: &BTreeMap<String, Vec<(Option<u32>, String)>>,
     accepted: &BTreeSet<String>,
     force_done: bool,
+    live_drive: bool,
 ) -> RunStep {
     let stamped_path = stamp_live_iterations(session, &location.position_path);
     let runtime_status = session
@@ -4775,7 +4852,14 @@ fn step_from_item(
     let activity = item_activity(session, item, location);
     let active = activity == Activity::Current;
     let mut state = step_state(session, runtime_status, activity);
-    let mut status_text = step_status_text(session, runtime_status, activity, item, location);
+    let mut status_text = step_status_text(
+        session,
+        runtime_status,
+        activity,
+        item,
+        location,
+        live_drive,
+    );
     if force_done {
         state = StepState::Done;
         status_text = "done".to_string();
@@ -4970,6 +5054,7 @@ fn step_status_text(
     activity: Activity,
     item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
     location: &PlannedItemLocation,
+    live_drive: bool,
 ) -> String {
     if session.completion.is_none() {
         match activity {
@@ -4978,6 +5063,18 @@ fn step_status_text(
                 // reads like a wait, not an ended run.
                 if let Some(stop) = session.stop_reason.as_ref() {
                     return stop.reason.clone();
+                }
+                // In the in-process drive, a command frame at the cursor is
+                // executing right now — the derived Blocked* status names
+                // the frame kind, not a wait for a permission grant.
+                if live_drive
+                    && item.kind == ctx_traits_core::procedure::run::PlannedSequenceKind::Command
+                    && matches!(
+                        session.status,
+                        ctx_traits_core::procedure::session::Status::BlockedCommandPermissionRequired
+                    )
+                {
+                    return "running".to_string();
                 }
                 return session_status(&session.status).to_string();
             }
@@ -6422,6 +6519,7 @@ mod tests {
             narrator_tokens: 0,
             guide_tokens: 0,
             run_started: Instant::now(),
+            live_drive: false,
         };
 
         let top_history = history_step_from_status(&top_level, None, None, &presentation);
@@ -6543,6 +6641,7 @@ mod tests {
             narrator_tokens: 0,
             guide_tokens: 0,
             run_started: Instant::now(),
+            live_drive: false,
         };
         assert_eq!(
             history_step_from_status(&status, None, None, &presentation).label,
@@ -6582,6 +6681,7 @@ mod tests {
             narrator_tokens: 0,
             guide_tokens: 0,
             run_started: Instant::now(),
+            live_drive: false,
         };
 
         for (item_id, title, run_index, reason, elapsed_seconds, output_tokens) in [
@@ -6836,6 +6936,7 @@ mod tests {
             narrator_tokens: 0,
             guide_tokens: 0,
             run_started: Instant::now(),
+            live_drive: false,
         };
         let row = story_row_line(&history_step_from_status(
             &status,

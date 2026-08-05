@@ -3713,6 +3713,15 @@ fn create_run_panel(
             message: format!("start ratatui run pane: {source}"),
         })?,
     };
+    // Presentation-only: lets the pane re-derive journey rows from the
+    // persisted ledger while this thread is blocked inside a command frame
+    // (`RunPanel::set_live_ledger_path`); a resolution failure just leaves
+    // the pane on refresh-driven updates.
+    if let Ok(ledger_path) =
+        ctx_traits_io::run_session::resolve_session_path(input.session, input.session_store)
+    {
+        panel.set_live_ledger_path(ledger_path);
+    }
     Ok(panel)
 }
 
