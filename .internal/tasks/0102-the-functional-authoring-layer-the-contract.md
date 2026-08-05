@@ -28,7 +28,9 @@ Every namespace names a role:
 - `loop.*` — configuration on the loop callback param; position-free.
 - `flow.*` — control flow and its constants; positional, always: where a `flow.*` statement
   sits is when it happens.
-- `effect.*` — reactive signal hooks; position-free, attached to the nearest enclosing scope.
+- `effect.*` — reactive effects; position-free. Signal hooks (`effect.on*`) attach to the
+  nearest enclosing scope; session host sinks (`effect.session.*`, 0110) are session-global by
+  name.
 - `step.*` — agentless steps (`step.command`, `step.check`). Settled here: the `sequence`
   namespace dissolves into `step.*` + `flow.*`.
 
@@ -203,7 +205,8 @@ export default function () {
   `on-complete` · exhaustion policy `block` → `abort` · `prompt.text` → `input.prompt` ·
   `flow.Block` → `flow.Abort`.
 - **Canonical/runtime additions:** normalized emission (0104) · optional outputs (0105) ·
-  `parallel.maxAtOnce` (parked) · scoped `use*` inside `flow.*` blocks (parked).
+  session host sinks — `effect.session.title` first (0110) · `parallel.maxAtOnce` (parked) ·
+  scoped `use*` inside `flow.*` blocks (parked).
 - **Pure sugar, no canonical change:** positional lowering, `flow.match`, `slot.forEach`, the
   `when:` field, `$` field paths, condition sugar, derived manifests, spread composition.
 

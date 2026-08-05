@@ -1,0 +1,80 @@
+# 0110 — the session-title sink: the trait feeds the title
+
+**Status:** filed, ready (object-layer + runtime half; the `effect.session.title` spelling rides 0106) · **Depends on:** 0102 (amended: host sinks join the ledger); functional spelling on 0106 · **Raised:** 2026-08-05 (owner design session; the decisions here are the contract) · **Touches:** packages/cdk (sink declaration, reusing the step input encoding), canonical schema, modules/cli (drive.rs title dispatch, harness_stream.rs title prompt), modules/io (run_session.rs SessionTitleState)
+
+Today (P552) the host titles a session once, at start, from only the trait name and the accepted
+input text — by its own comment, "before any step output exists to summarize." This task lets
+the trait feed that title from the run's real content: after the drafter fills `draft`, the
+session gets a title that says what the run is actually doing. It is the first **host sink** —
+the first-party miniature of 0087's "a run tells": the run produces a value, the host performs
+the effect. Sinks are a closed, typed set; each one is added deliberately, like condition sugar.
+
+## Decisions
+
+- **The spelling is `effect.session.title(X)`.** The `session` segment names the affected
+  surface and makes the scope self-describing: `effect.on*` attaches to the nearest enclosing
+  scope, `effect.session.*` is session-global no matter where it is written. Position-free per
+  the law; a duplicate declaration is a build error (the `use*` overlap rule). Future session
+  sinks (`summary`, `notify`, …) join this namespace only when a consumer earns them.
+- **X is the standard input union** — `string`, template, slot, or array of slots — and the
+  canonical sink declaration borrows the exact input encoding steps already use. No new value
+  grammar anywhere.
+- **Mode is inferred from what X is** (owner-ratified 2026-08-05). Authored text — a `string`,
+  or a template — is **verbatim**: rendered deterministically, applied, zero model calls.
+  Material — a bare slot or an array — is **generated**: the assembled text becomes the context
+  of the existing narrator title prompt, replacing today's trait-name+input context. The escape
+  hatch composes from the grammar: a produced-title slot applied untouched is
+  `effect.session.title(input.prompt`${sessionTitle}`)` — wrapping in a template means verbatim.
+- **The default is preserved, and the placeholder story falls out.** No declaration → P552
+  exactly as today. A slot-bearing declaration → the auto-title still fires at start as the
+  instant placeholder and the sink upgrades it once X is ready. A fully static declaration
+  (resolvable at t=0) → the auto-title is suppressed entirely: no wasted narrator call, no
+  flicker, the declared title from the first frame.
+- **Fire-once.** The sink triggers on X's first complete readiness and never again; slot
+  refills in later loop rounds do not re-fire. One placeholder, one upgrade — a title that
+  flickers per refinement round is worse UX, and in generated mode each re-fire is a paid
+  narrator call. If staged retitling ever earns a place, that is a recorded finding here, not a
+  default.
+- **Async is inherited, not built.** The existing background title worker, the frame-boundary
+  flush (`pending_title.flush`), and the claim/attempt state machine are reused verbatim; the
+  generated mode keeps the 3-attempt bound. The sink never blocks a step or the run. If the
+  sink fires while an auto-title attempt is in flight, the sink wins and terminates further
+  auto attempts.
+- **Provenance stays honest.** `SessionTitleState` gains a source — `narrator-default`,
+  `sink-verbatim`, `sink-generated` — so the receipt and run-status say where the title came
+  from, the same philosophy as loops recording their exit mechanism.
+- **The host owns display constraints** regardless of source: 60-character clamp, single line,
+  control characters stripped. Trait text is never trusted for terminal formatting.
+- **Dry-run performs no effects.** The sink appears in the plan; nothing fires, nothing is
+  dispatched.
+
+## Scope
+
+The canonical sink table (`[sink.session-title]` with mode + input, encoded as step inputs
+are); object-layer declaration first (the semantic authority — usable from `variant({…})`
+shells before the DSL exists); runtime watch/assemble/apply for verbatim and
+generate-with-context for material; the narrator prompt context swap in
+`session_title_prompt`; provenance source in `SessionTitleState`; the `effect.session.title`
+registrar added to 0106's surface when that task lands (or as a follow-up commit on this one if
+0106 is already done).
+
+## Watch
+
+- **Seat resolution is reused, not re-resolved.** The generated mode goes through the same
+  `cold_narrator_config_for_session_title` path with the 0079 api/harness precedence — a
+  second, independent resolution is exactly the bug that comment warns about.
+- **Verbatim must not touch the attempt budget.** A deterministic render is a write, not an
+  attempt; only generated-mode dispatches count against the 3-attempt bound.
+- **`.optional()` composes with readiness**: required parts gate the fire, optional parts are
+  included when present. An X that is entirely optional is a build error — a sink that may
+  never have material is a declaration mistake.
+- **A template with zero interpolations is a string** — same mode (verbatim, t=0), no special
+  case.
+
+## Done when
+
+A run with no declaration behaves byte-for-byte as today; a static declaration titles the
+session from the first frame with zero narrator dispatches; a slot declaration shows the
+placeholder then upgrades exactly once when the slot fills, with the upgrade landing at a frame
+boundary; the receipt records the title source; deny/park before the slot fills leaves the
+placeholder standing; drift/embed + builds + cargo test green.
