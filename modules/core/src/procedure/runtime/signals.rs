@@ -37,9 +37,9 @@ fn validate_signal_with_context(
             AcceptanceStatus::Rejected
         },
         reason: if accepted {
-            "signal is declared in current item emits".to_string()
+            "signal is declared in current item on-complete".to_string()
         } else {
-            "signal is not declared in current item emits or is not a valid signal:* ref"
+            "signal is not declared in current item on-complete or is not a valid signal:* ref"
                 .to_string()
         },
     })

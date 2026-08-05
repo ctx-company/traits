@@ -758,7 +758,7 @@ export type CanonicalEval = {
 export type CanonicalEvalVariant = "documentation" | "lint" | "golden-render" | "behavioral" | "runtime";
 
 /**
- * A loop's `on-exhausted` declaration: the keywords `"continue"`/`"block"`,
+ * A loop's `on-exhausted` declaration: the keywords `"continue"`/`"abort"`,
  * or one or more signal refs emitted when the loop continues past
  * exhaustion. A one-element sequence collapses to `One` on decode so each
  * meaning has exactly one canonical spelling.
@@ -1479,6 +1479,10 @@ export type CanonicalSequenceInputList = readonly CanonicalSequenceInput[];
  */
 export type CanonicalSequenceItem = {
   /**
+   * Loop terminal guard.
+   */
+  readonly "abort-if"?: CanonicalGuardExpr | undefined;
+  /**
    * Optional abstract agent role that should serve this executable item.
    */
   readonly "agent"?: string | undefined;
@@ -1510,11 +1514,6 @@ export type CanonicalSequenceItem = {
    * to documents authored before concurrency existed.
    */
   readonly "concurrent"?: boolean | undefined;
-  /**
-   * Declared signal refs this item may emit, either directly as refs or
-   * derived from deterministic output predicates.
-   */
-  readonly "emits"?: readonly CanonicalSignalEmissionRule[] | undefined;
   /**
    * Optional format preferences. Accepted as a format-preference declaration on prompt/command items; rejected on control items.
    */
@@ -1568,12 +1567,25 @@ export type CanonicalSequenceItem = {
    */
   readonly "max-iterations-from"?: string | undefined;
   /**
-   * Runtime signal emitted when a for-each completes.
+   * Names the signal(s) to emit when `abort-if` is the arm that halts the
+   * loop, so the trait's own terminal reason (e.g.
+   * `recurring-blocker-unresolved`) is distinguishable from exhaustion in
+   * the ledger, the receipt, and `run-status` — the runtime still reports
+   * the accurate mechanism (`abort-if-matched`) alongside it. Requires
+   * `abort-if`; the `"continue"`/`"abort"` keywords are meaningless here
+   * (an `abort-if` match always halts the loop) and are rejected.
    */
-  readonly "on-complete"?: string | undefined;
+  readonly "on-abort"?: CanonicalExhaustionTarget | undefined;
+  /**
+   * Declared signal refs this item may emit, either directly as refs or
+   * derived from deterministic output predicates. On a for-each item this
+   * is instead the completion signal, emitted once (at most one entry
+   * allowed there).
+   */
+  readonly "on-complete"?: readonly CanonicalSignalEmissionRule[] | undefined;
   /**
    * Loop exhaustion policy: `"continue"` (the default when omitted),
-   * `"block"`, or one or more `signal:<id>` refs.
+   * `"abort"`, or one or more `signal:<id>` refs.
    * 
    * Continuing treats exhaustion as a normal outcome — the sequence
    * proceeds to the next item, and any declared signals are emitted as
@@ -1582,9 +1594,9 @@ export type CanonicalSequenceItem = {
    * which the following step is responsible for reading; it does not mean
    * the run is broken.
    * 
-   * `"block"` stops the run at exhaustion, for procedures where an unmet
+   * `"abort"` stops the run at exhaustion, for procedures where an unmet
    * exit condition invalidates every step after the loop; no signal is
-   * emitted in that case. A run started with strict loops blocks every
+   * emitted in that case. A run started with strict loops aborts every
    * loop regardless of its declared policy, and suppresses signal
    * emission even when the declaration names one.
    */
@@ -1593,16 +1605,6 @@ export type CanonicalSequenceItem = {
    * Legacy failure signal or structured forward recovery route.
    */
   readonly "on-failure"?: CanonicalFailureTarget | undefined;
-  /**
-   * Names the signal(s) to emit when `stop-if` is the arm that halts the
-   * loop, so the trait's own terminal reason (e.g.
-   * `recurring-blocker-unresolved`) is distinguishable from exhaustion in
-   * the ledger, the receipt, and `run-status` — the runtime still reports
-   * the accurate mechanism (`stop-if-matched`) alongside it. Requires
-   * `stop-if`; the `"continue"`/`"block"` keywords are meaningless here
-   * (a `stop-if` match always halts the loop) and are rejected.
-   */
-  readonly "on-stop"?: CanonicalExhaustionTarget | undefined;
   /**
    * Optional named sequence ref selected when a branch guard is false.
    */
@@ -1629,10 +1631,6 @@ export type CanonicalSequenceItem = {
    * Named sequence ref (`sequence:<id>`) for sequence/loop/for-each items.
    */
   readonly "sequence"?: string | undefined;
-  /**
-   * Loop terminal guard.
-   */
-  readonly "stop-if"?: CanonicalGuardExpr | undefined;
   /**
    * Exit codes treated as success for simple `cmd` shorthand.
    */

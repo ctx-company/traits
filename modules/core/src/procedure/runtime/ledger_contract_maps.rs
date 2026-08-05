@@ -777,15 +777,15 @@ fn validate_emitted_signal_collection(
                     ));
                     continue;
                 };
-                if !item.emits.contains(signal.signal_ref.as_str()) {
+                if !item.on_complete.contains(signal.signal_ref.as_str()) {
                     diagnostics.push(format!(
-                        "emitted signal {} is not listed in sequence item emits",
+                        "emitted signal {} is not listed in sequence item on-complete",
                         signal.signal_ref
                     ));
                 }
             } else if !nested_signal_allowed(trait_ref, signal) {
                 diagnostics.push(format!(
-                    "nested emitted signal {} is not listed in the nested sequence item emits",
+                    "nested emitted signal {} is not listed in the nested sequence item on-complete",
                     signal.signal_ref
                 ));
             }
@@ -802,14 +802,14 @@ fn validate_emitted_signal_collection(
             ));
             continue;
         };
-        let is_canonical_stop_if_matched = signal.source == Some(SignalSource::RuntimeControl)
-            && signal.signal_ref.as_str() == stop_if_matched_signal_ref().as_str();
+        let is_canonical_abort_if_matched = signal.source == Some(SignalSource::RuntimeControl)
+            && signal.signal_ref.as_str() == abort_if_matched_signal_ref().as_str();
         if parsed.kind() != Kind::Signal {
             diagnostics.push(format!(
                 "emitted signal {} must use signal:* kind",
                 signal.signal_ref
             ));
-        } else if !is_canonical_stop_if_matched
+        } else if !is_canonical_abort_if_matched
             && !parsed.is_qualified()
             && !declared_local_signals.contains(parsed.id())
         {
@@ -822,7 +822,7 @@ fn validate_emitted_signal_collection(
 }
 
 /// True when the given `ExhaustionTarget` field (`on-exhausted` or
-/// `on-stop`) names `signal_ref` among its declared signals. One shared
+/// `on-abort`) names `signal_ref` among its declared signals. One shared
 /// check for both loop-terminal signal declarations, since each is exactly
 /// "is this ref among the target's `signals()`".
 fn declares_signal(target: Option<&ExhaustionTarget>, signal_ref: &str) -> bool {
@@ -842,13 +842,15 @@ fn runtime_control_signal_allowed(
             identity,
         )
         .is_some_and(|item| {
-            item.on_complete.as_deref() == Some(signal.signal_ref.as_str())
+            item.on_complete
+                .iter()
+                .any(|rule| rule.signal_ref() == signal.signal_ref.as_str())
                 || item.on_failure.as_ref().and_then(FailureTarget::signal_ref) == Some(signal.signal_ref.as_str())
-                || (item.stop_if.is_some()
-                    && item.on_stop.is_none()
-                    && signal.signal_ref.as_str() == stop_if_matched_signal_ref().as_str())
+                || (item.abort_if.is_some()
+                    && item.on_abort.is_none()
+                    && signal.signal_ref.as_str() == abort_if_matched_signal_ref().as_str())
                 || declares_signal(item.on_exhausted.as_ref(), signal.signal_ref.as_str())
-                || declares_signal(item.on_stop.as_ref(), signal.signal_ref.as_str())
+                || declares_signal(item.on_abort.as_ref(), signal.signal_ref.as_str())
         });
     }
     if signal.position_path.is_empty() {
@@ -857,7 +859,9 @@ fn runtime_control_signal_allowed(
             .as_ref()
             .and_then(|procedure| procedure.sequence.get(signal.sequence_index))
             .is_some_and(|item| {
-                item.on_complete.as_deref() == Some(signal.signal_ref.as_str())
+                item.on_complete
+                    .iter()
+                    .any(|rule| rule.signal_ref() == signal.signal_ref.as_str())
                     || item.on_failure.as_ref().and_then(FailureTarget::signal_ref) == Some(signal.signal_ref.as_str())
                     || declares_signal(item.on_exhausted.as_ref(), signal.signal_ref.as_str())
             });
@@ -916,7 +920,7 @@ fn nested_signal_allowed(trait_ref: &Trait, signal: &SignalEmission) -> bool {
         .get(sequence_id)
         .and_then(|sequence| sequence.sequence.get(item_segment.index))
         .is_some_and(|item| {
-            item.emits
+            item.on_complete
                 .iter()
                 .any(|item_signal| item_signal.signal_ref() == signal.signal_ref.as_str())
         })

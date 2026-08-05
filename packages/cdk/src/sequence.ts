@@ -29,6 +29,7 @@ import type {
   SequenceLinearHandle,
   SlotHandle,
 } from "./handles.js";
+import { input } from "./input.js";
 import type { CommandTemplateValue, OptionalSlotInputValue } from "./input.js";
 import {
   attachInstructionOutput,
@@ -55,15 +56,14 @@ import {
 } from "./normalize.js";
 import type { Mutable } from "./normalize.js";
 import { OUTPUT_RENDER_V1 } from "./output.js";
-import { prompt } from "./prompt.js";
 import { refText } from "./ref.js";
 import { schema } from "./schema.js";
 import { isLiteralProjectionSource, slot } from "./slot.js";
 import { operation } from "./slot.js";
 import type { LiteralProjectionSource } from "./slot.js";
 
-/** Loop exhaustion policy spellings (P448): `sequence.flow.Continue`/`sequence.flow.Block` evaluate to these. */
-export type ExhaustionPolicy = "continue" | "block";
+/** Loop exhaustion policy spellings (P448): `sequence.flow.Continue`/`sequence.flow.Abort` evaluate to these. */
+export type ExhaustionPolicy = "continue" | "abort";
 /** A single loop-exhaustion signal ref, authored the same way as `onComplete`. */
 type ExhaustionSignalValue = string | RefHandle<"signal">;
 type SequenceRefValue = string | RefHandle<"sequence"> | SequenceLinearHandle;
@@ -109,7 +109,7 @@ interface SequenceCommonFields {
   readonly timeout?: number;
   readonly successExitCode?: number | readonly number[];
   readonly format?: string | readonly string[];
-  readonly emits?: SignalOutputValue | readonly SignalOutputValue[];
+  readonly onComplete?: SignalOutputValue | readonly SignalOutputValue[];
   readonly onFailure?: FailureTargetValue;
 }
 type PromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
@@ -117,7 +117,7 @@ type PromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly prompt: PromptHandle | PromptTemplate;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
-  /** @deprecated Declare the prompt body via `input.text` in the `input:` field, or the `text:` field — this legacy list stays honored and merges before `include:`. */
+  /** @deprecated Declare the prompt body via `input.prompt` in the `input:` field, or the `text:` field — this legacy list stays honored and merges before `include:`. */
   readonly input?: SequenceInputValue | readonly SequenceInputValue[];
   readonly text?: never;
   readonly cmd?: never;
@@ -126,7 +126,7 @@ type PromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
 };
 type TextPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly kind?: "prompt";
-  /** @deprecated Use the `input:` field with `input.text` instead. */
+  /** @deprecated Use the `input:` field with `input.prompt` instead. */
   readonly text: PromptTemplate;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
@@ -139,7 +139,7 @@ type TextPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
 };
 /**
  * The preferred prompt-step shape: `input:` carries the compiled prompt body
- * itself (an `input.text`/`prompt.text` tagged-template value), and
+ * itself (an `input.prompt` tagged-template value), and
  * non-interpolated dependencies live in `include:` — mirroring the
  * `input.command`/`include:` command-step surface.
  */
@@ -157,7 +157,7 @@ type InputPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
 /** A human-owned prompt. The required signal guard decides whether the frame
  * is exposed; its one local slot output is supplied through `session frame set`. */
 type AskSequenceFields =
-  & Omit<SequenceCommonFields, "agent" | "format" | "emits" | "onFailure" | "input">
+  & Omit<SequenceCommonFields, "agent" | "format" | "onComplete" | "onFailure" | "input">
   & {
     readonly kind: "ask";
     readonly when: RefHandle<"signal">;
@@ -168,13 +168,13 @@ type AskSequenceFields =
     readonly argv?: never;
     readonly sequence?: never;
     readonly format?: never;
-    readonly emits?: never;
+    readonly onComplete?: never;
     readonly onFailure?: never;
   }
   & (
     | {
       readonly prompt: PromptHandle | PromptTemplate;
-      /** @deprecated Declare the prompt body via `input.text` in the `input:` field instead. */
+      /** @deprecated Declare the prompt body via `input.prompt` in the `input:` field instead. */
       readonly input?: SequenceInputValue | readonly SequenceInputValue[];
     }
     | {
@@ -259,7 +259,7 @@ export type ProjectSequenceFields = {
   readonly timeout?: never;
   readonly successExitCode?: never;
   readonly format?: never;
-  readonly emits?: never;
+  readonly onComplete?: never;
   readonly onFailure?: never;
 };
 
@@ -326,12 +326,12 @@ type LoopSequenceFields = SequenceCommonFields & {
   readonly body?: readonly SequenceHandle[];
   /** The iteration bound. Omit it (alongside `maxIterations`) to declare an
    * unbounded loop — one that never exhausts and exits only via `until`/
-   * `stopIf`, which is then required. A large number picked to approximate
+   * `abortIf`, which is then required. A large number picked to approximate
    * "never" is refused authoring, not honored: say unbounded, don't fake it. */
   readonly iterations?: number | PortHandle<number>;
   readonly maxIterations?: number;
   readonly until?: BranchCheckValue;
-  readonly stopIf?: BranchCheckValue;
+  readonly abortIf?: BranchCheckValue;
   /** Exhaustion policy. Omitted (the default) or `"continue"`: spending the
    * full iteration budget without matching `until` is a normal outcome — the
    * procedure proceeds to the next step, which is responsible for reading
@@ -340,20 +340,20 @@ type LoopSequenceFields = SequenceCommonFields & {
    * broken. One or more signal refs may be declared alongside continuing:
    * they are emitted as recorded evidence a later guard may read (or
    * ignore) — a bare signal is equivalent to `"continue"` plus that signal.
-   * `"block"`: stop the run blocked at exhaustion instead, for procedures
+   * `"abort"`: stop the run blocked at exhaustion instead, for procedures
    * where an unmet exit condition invalidates everything after it; no
    * signal is emitted. A run started with `--strict-loops` blocks every
    * loop regardless of its declared policy, and suppresses signal emission
    * even when the declaration names one. */
   readonly onExhausted?: ExhaustionPolicy | ExhaustionSignalValue | readonly ExhaustionSignalValue[];
-  /** Names the signal(s) to emit when `stopIf` is the arm that halts the
+  /** Names the signal(s) to emit when `abortIf` is the arm that halts the
    * loop, so the trait's own terminal reason (e.g.
    * `recurring-blocker-unresolved`) is distinguishable from exhaustion in
    * the ledger, the receipt, and `run-status` — the runtime still reports
-   * the accurate mechanism (`stop-if-matched`) alongside it. Requires
-   * `stopIf`; a policy keyword (`"continue"`/`"block"`) is meaningless here
-   * since a `stop-if` match always halts the loop, and is rejected. */
-  readonly onStop?: ExhaustionSignalValue | readonly ExhaustionSignalValue[];
+   * the accurate mechanism (`abort-if-matched`) alongside it. Requires
+   * `abortIf`; a policy keyword (`"continue"`/`"abort"`) is meaningless here
+   * since a `abort-if` match always halts the loop, and is rejected. */
+  readonly onAbort?: ExhaustionSignalValue | readonly ExhaustionSignalValue[];
   /** A loop has no failure of its own to route: spending the budget without
    * matching `until` is exhaustion, which `onExhausted` governs, and the items
    * inside the body route their own failures. */
@@ -374,7 +374,6 @@ type ForEachSequenceFields = SequenceCommonFields & {
   readonly item: string | SlotHandle | RefHandle;
   readonly limit?: number;
   readonly maxItems?: number;
-  readonly onComplete?: string | RefHandle;
   readonly concurrent?: boolean;
   readonly prompt?: never;
   readonly text?: never;
@@ -420,7 +419,7 @@ export type ParallelSequenceFields =
     | "timeout"
     | "successExitCode"
     | "format"
-    | "emits"
+    | "onComplete"
     | "onFailure"
   >
   & {
@@ -442,7 +441,7 @@ export type ParallelSequenceFields =
     readonly timeout?: never;
     readonly successExitCode?: never;
     readonly format?: never;
-    readonly emits?: never;
+    readonly onComplete?: never;
   };
 export type BranchSequenceFields =
   & Omit<
@@ -455,7 +454,7 @@ export type BranchSequenceFields =
     | "timeout"
     | "successExitCode"
     | "format"
-    | "emits"
+    | "onComplete"
     | "onFailure"
   >
   & {
@@ -476,7 +475,7 @@ export type BranchSequenceFields =
     readonly timeout?: never;
     readonly successExitCode?: never;
     readonly format?: never;
-    readonly emits?: never;
+    readonly onComplete?: never;
     readonly onFailure?: never;
   };
 /**
@@ -527,7 +526,7 @@ export type SequenceFields =
  * const verdict2 = slot.text("verdict2");
  * const reviewStep = sequence.prompt("review", {
  *   agent: reviewer,
- *   text: prompt.text`Review ${diff} with a focus on ${focus}.`,
+ *   text: input.prompt`Review ${diff} with a focus on ${focus}.`,
  *   output: review,
  * });
  * const applyFixesStep = sequence.command({ id: "apply-fixes", cmd: "apply-fixes" });
@@ -558,7 +557,7 @@ export interface SequenceFunction {
    * ```ts
    * sequence.prompt("review", {
    *   agent: reviewer,
-   *   text: prompt.text`Review ${diff} with a focus on ${focus}.`,
+   *   text: input.prompt`Review ${diff} with a focus on ${focus}.`,
    *   output: review,
    * });
    * ```
@@ -665,7 +664,7 @@ export interface SequenceFunction {
    * - `until` is the guard for SUCCESSFUL completion: the loop re-checks it
    *   after every round and stops early, successfully, the first round it
    *   is satisfied. A round that doesn't satisfy `until` simply continues to
-   *   the next round (or to `stopIf`, or to exhaustion).
+   *   the next round (or to `abortIf`, or to exhaustion).
    * - `onExhausted` governs what happens if the iteration bound is reached
    *   WITHOUT `until` ever succeeding: `"continue"` (the default) treats
    *   running out of budget as a normal outcome — the loop's own output is
@@ -673,13 +672,13 @@ export interface SequenceFunction {
    *   next step, which is responsible for reading that output rather than
    *   assuming success. One or more signal refs may be declared instead of
    *   (or alongside) `"continue"`: they are emitted as recorded evidence a
-   *   later guard may read, or ignore. `"block"` stops the run at exhaustion
+   *   later guard may read, or ignore. `"abort"` stops the run at exhaustion
    *   instead, for procedures where an unmet `until` invalidates everything
    *   after it — no signal is emitted in that case.
    *
    * Crucially, none of this is agent-controlled: the model inside the loop
    * body never decides to keep going or to stop — the HOST/RUNTIME evaluates
-   * `until`/`stopIf` against the loop's own slots after each round and
+   * `until`/`abortIf` against the loop's own slots after each round and
    * enforces the `iterations` bound and `onExhausted` policy on its own.
    * The body's prompts can only produce the values the guards read; they
    * cannot request another round or end the loop themselves.
@@ -771,10 +770,10 @@ export interface SequenceFunction {
    * ```
    */
   parallel(id: string, branches: readonly SequenceRefValue[], options: ParallelOptions): SequenceHandle;
-  /** `sequence.loop(..., { onExhausted })` spellings for the two exhaustion policies, evaluating to `"continue"` and `"block"` respectively. */
+  /** `sequence.loop(..., { onExhausted })` spellings for the two exhaustion policies, evaluating to `"continue"` and `"abort"` respectively. */
   readonly flow: {
     readonly Continue: "continue";
-    readonly Block: "block";
+    readonly Abort: "abort";
   };
 }
 
@@ -894,7 +893,7 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
   const producerFields = producer as unknown as {
     readonly id?: string;
     readonly output?: readonly string[];
-    readonly emits?: readonly (string | { readonly signal: string; })[];
+    readonly "on-complete"?: readonly (string | { readonly signal: string; })[];
   };
   const id = producerFields.id;
   if (id === undefined) throw new Error("sequence.gate: producer must have an id");
@@ -904,7 +903,7 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
   }
   const signalRef = refText(options.when, `sequence.${id}.gate.when`);
   if (
-    !producerFields.emits?.some((emission) =>
+    !producerFields["on-complete"]?.some((emission) =>
       typeof emission === "string" ? emission === signalRef : emission.signal === signalRef
     )
   ) {
@@ -949,8 +948,8 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
     failure: [routeEdit] as [SequenceHandle],
   });
   const ask = sequence.ask(`${id}-gate-ask`, {
-    prompt: prompt
-      .text`Review the current proposal:\n${options.proposal}\nSubmit {action: approve|edit|reject, edit?: string}.`,
+    prompt: input
+      .prompt`Review the current proposal:\n${options.proposal}\nSubmit {action: approve|edit|reject, edit?: string}.`,
     when: options.when,
     output: decision,
   });
@@ -965,14 +964,14 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
     ]),
     until: condition.equals(settled, true),
     iterations: options.rounds,
-    onExhausted: "block",
+    onExhausted: "abort",
   });
 }
 
 /**
  * Declares prompt, command, and control-flow sequence steps.
  * @param fields Step fields discriminated by `kind`.
- * @example `sequence.prompt({ id: "draft", text: prompt.text`Write about ${focus}.` })`
+ * @example `sequence.prompt({ id: "draft", text: input.prompt`Write about ${focus}.` })`
  * @see {@link procedure}
  */
 export const sequence: SequenceFunction = {
@@ -1001,14 +1000,16 @@ export const sequence: SequenceFunction = {
     sequenceOf({ ...fields, id, kind: "project" }),
   loop: (id: string, fields: Omit<LoopSequenceFields, "id" | "kind">): SequenceHandle => {
     const until = fields.until === undefined ? undefined : lowerCheckGuard(fields.until, `sequence.${id}.until`);
-    const stopIf = fields.stopIf === undefined ? undefined : lowerCheckGuard(fields.stopIf, `sequence.${id}.stopIf`);
-    const gates = [until?.gateStep, stopIf?.gateStep].filter((gate): gate is SequenceHandle => gate !== undefined);
+    const abortIf = fields.abortIf === undefined
+      ? undefined
+      : lowerCheckGuard(fields.abortIf, `sequence.${id}.abortIf`);
+    const gates = [until?.gateStep, abortIf?.gateStep].filter((gate): gate is SequenceHandle => gate !== undefined);
     const item = sequenceOf({
       ...fields,
       id,
       kind: "loop",
       ...(until === undefined ? {} : { until: until.guard }),
-      ...(stopIf === undefined ? {} : { stopIf: stopIf.guard }),
+      ...(abortIf === undefined ? {} : { abortIf: abortIf.guard }),
     } as LoopSequenceFields);
     if (gates.length > 0) {
       const uniqueGates = gates.filter((gate, index) => gates.indexOf(gate) === index);
@@ -1039,7 +1040,7 @@ export const sequence: SequenceFunction = {
       ...(options?.branchFailure === undefined ? {} : { branchFailure: options.branchFailure }),
       ...(options?.onFailure === undefined ? {} : { onFailure: options.onFailure }),
     }),
-  flow: { Continue: "continue", Block: "block" } as const,
+  flow: { Continue: "continue", Abort: "abort" } as const,
 };
 
 /**
@@ -1133,8 +1134,8 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     const hasBound = loop.iterations !== undefined || loop.maxIterations !== undefined;
     // Absent bound is a deliberate unbounded loop (0093), not an omission —
     // it must pair with an exit guard, and it makes onExhausted meaningless.
-    if (!hasBound && loop.until === undefined && loop.stopIf === undefined) {
-      throw new Error(`procedure.sequence ${fields.id}: unbounded loop requires until or stopIf`);
+    if (!hasBound && loop.until === undefined && loop.abortIf === undefined) {
+      throw new Error(`procedure.sequence ${fields.id}: unbounded loop requires until or abortIf`);
     }
     if (!hasBound && loop.onExhausted !== undefined) {
       throw new Error(
@@ -1232,7 +1233,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   // sequence-canonical-assembly-untyped): every key written below is checked
   // against the emitted model's key set, so a misspelled key (e.g.
   // `max-iteration`) is a compile error, not a silent pass-through into a
-  // `deny_unknown_fields` decode. `input`/`output`/`emits`/`on-failure`/
+  // `deny_unknown_fields` decode. `input`/`output`/`on-complete`/`on-failure`/
   // `join`/`branch-failure` are now assigned straight from precisely typed
   // producers (P485 §3.3) with no per-assignment cast; `normalizeGuard`/
   // `guardForOutput` (guard typing, P483) and `NormalizedInputItem.when` are
@@ -1245,7 +1246,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     input,
     output,
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],
-    emits: emits(fields.emits, outputRefs),
+    "on-complete": onCompleteRules(fields.onComplete, outputRefs),
   };
   if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(promptWithInstructionOutputs, fields.id);
   if (kind === "ask") {
@@ -1312,25 +1313,22 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   if (isSequenceKind(fields, kind, "loop")) {
     const loop = fields;
     canonical.until = guardForOutput(loop.until as GuardValue | undefined, outputRefs);
-    canonical["stop-if"] = guardForOutput(loop.stopIf as GuardValue | undefined, outputRefs);
+    canonical["abort-if"] = guardForOutput(loop.abortIf as GuardValue | undefined, outputRefs);
     const iterations = loop.iterations ?? loop.maxIterations;
     canonical["max-iterations"] = typeof iterations === "number" ? iterations : undefined;
     canonical["max-iterations-from"] = iterations === undefined || typeof iterations === "number"
       ? undefined
       : refText(iterations, `sequence.${fields.id}.iterations`);
     canonical["on-exhausted"] = normalizeExhaustionTarget(loop.onExhausted, `sequence.${fields.id}.onExhausted`);
-    canonical["on-stop"] = loop.onStop === undefined
+    canonical["on-abort"] = loop.onAbort === undefined
       ? undefined
-      : normalizeExhaustionTarget(loop.onStop, `sequence.${fields.id}.onStop`);
+      : normalizeExhaustionTarget(loop.onAbort, `sequence.${fields.id}.onAbort`);
   }
   if (isSequenceKind(fields, kind, "for-each")) {
     const each = fields;
     canonical.over = refText(each.over, `sequence.${fields.id}.over`);
     canonical.item = refText(each.item, `sequence.${fields.id}.item`);
     canonical["max-items"] = each.limit ?? each.maxItems;
-    canonical["on-complete"] = each.onComplete === undefined
-      ? undefined
-      : refText(each.onComplete, `sequence.${fields.id}.onComplete`);
     canonical["on-failure"] = each.onFailure === undefined
       ? undefined
       : normalizeFailureTarget(
@@ -1362,7 +1360,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
       );
   }
   // Control-flow refs declare too: a signal reached only via onFailure/onComplete
-  // (or slots/guards via until/stopIf/over/item) must still land in the trait root.
+  // (or slots/guards via until/abortIf/over/item) must still land in the trait root.
   // `onFailure` is omitted from the loop half deliberately: loops declare it as
   // `never`, and intersecting that with for-each's real `FailureTargetValue`
   // collapses the field to `never` — which reads as "no loop has one" but
@@ -1395,17 +1393,16 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     (fields as Partial<CommandSequenceFields | CheckSequenceFields | PromptSequenceFields | TextPromptSequenceFields>)
       .include,
     fields.output,
-    fields.emits,
+    fields.onComplete,
     fields.sequence,
     controlFields.iterations,
     controlFields.until,
-    controlFields.stopIf,
+    controlFields.abortIf,
     typeof controlFields.onFailure === "object" && controlFields.onFailure !== null && "step" in controlFields.onFailure
       ? controlFields.onFailure.signal
       : controlFields.onFailure,
-    controlFields.onComplete,
     controlFields.onExhausted,
-    controlFields.onStop,
+    controlFields.onAbort,
     controlFields.over,
     controlFields.item,
     branchFields.if,
@@ -1682,7 +1679,7 @@ function promptInput(value: SequenceFields["input"], prompt: unknown): Normalize
 function isCommandTemplateValue(value: unknown): value is CommandTemplateValue {
   return typeof value === "object" && value !== null && (value as { kind?: unknown; }).kind === "cdk-command-template";
 }
-/** True for an `input.text`/`prompt.text` tagged-template value — the prompt-step `input:` carrier. */
+/** True for an `input.prompt` tagged-template value — the prompt-step `input:` carrier. */
 function isPromptTemplateValue(value: unknown): value is PromptTemplate {
   return metaOf(value)?.kind === "template";
 }
@@ -1761,7 +1758,7 @@ function mergePromptInstructionOutputs(
   const meta = metaOf(promptValue);
   if (meta?.kind !== "template") {
     throw new Error(
-      "output.text/output.of: the attaching step's prompt body must be an input.text/prompt.text value, "
+      "output.text/output.of: the attaching step's prompt body must be an input.prompt value, "
         + "not a named prompt(...) reference",
     );
   }
@@ -1975,13 +1972,16 @@ function bindDefaultOutput(value: JsonValue, path: readonly (string | number)[],
   }
   return value;
 }
-function emits(value: SequenceFields["emits"], outputs: readonly string[]): CanonicalSignalEmissionRule[] | undefined {
+function onCompleteRules(
+  value: SequenceFields["onComplete"],
+  outputs: readonly string[],
+): CanonicalSignalEmissionRule[] | undefined {
   if (value === undefined) return undefined;
   return (Array.isArray(value) ? value : [value]).map((item, index) =>
     typeof item === "string" || metaOf(item)?.ref !== undefined
-      ? signalText(item, `sequence.emits[${index}]`)
+      ? signalText(item, `sequence.on-complete[${index}]`)
       : compact({
-        signal: signalText(item.signal, `sequence.emits[${index}].signal`),
+        signal: signalText(item.signal, `sequence.on-complete[${index}].signal`),
         when: guardForOutput(item.when, outputs),
         // `compact` erases back to `JsonObject`; the object literal above is
         // already exactly `CanonicalSignalEmissionRule`'s object member shape.
@@ -2033,7 +2033,7 @@ function normalizeExhaustionTarget(
   path: string,
 ): CanonicalExhaustionTarget | undefined {
   if (value === undefined) return undefined;
-  if (value === "continue" || value === "block") return value;
+  if (value === "continue" || value === "abort") return value;
   if (Array.isArray(value)) {
     if (value.length === 0) throw new Error(`${path}: must not be empty`);
     return value.map((entry, index) => signalText(entry, `${path}[${index}]`));

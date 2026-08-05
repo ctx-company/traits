@@ -42,7 +42,7 @@ const STOP_MAX_SEQUENCE_DEPTH_EXCEEDED: &str = "max-sequence-depth-exceeded";
 const STOP_NESTED_SEQUENCE_FAILED: &str = "nested-sequence-failed";
 const STOP_NO_CURRENT_EXECUTABLE_ITEM: &str = "no-current-executable-item";
 const STOP_RUN_INDEX_OVERFLOW: &str = "run-index-overflow";
-const STOP_STOP_IF_MATCHED: &str = "stop-if-matched";
+const STOP_STOP_IF_MATCHED: &str = "abort-if-matched";
 const STOP_UNRESOLVED_RUNTIME_SEQUENCE: &str = "unresolved-runtime-sequence";
 const STOP_PARALLEL_QUORUM_VERDICT_FAILED: &str = "parallel-quorum-verdict-failed";
 const STOP_PARALLEL_BRANCH_PARKED: &str = "parallel-branch-parked";
@@ -72,10 +72,10 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// Canonical runtime-control signal reference for a terminal `stop-if` park,
+/// Canonical runtime-control signal reference for a terminal `abort-if` park,
 /// distinct from any trait-declared `on-failure` target: nothing was
 /// exhausted, so the loop's failure signal would misattribute the stop.
-fn stop_if_matched_signal_ref() -> String {
+fn abort_if_matched_signal_ref() -> String {
     format!("signal:{STOP_STOP_IF_MATCHED}")
 }
 
@@ -358,21 +358,21 @@ pub struct ControlFrame {
     pub concurrent: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<GuardExpr>,
-    #[serde(default, rename = "stop-if", skip_serializing_if = "Option::is_none")]
-    pub stop_if: Option<GuardExpr>,
+    #[serde(default, rename = "abort-if", skip_serializing_if = "Option::is_none")]
+    pub abort_if: Option<GuardExpr>,
     #[serde(
         default,
         rename = "on-exhausted",
         skip_serializing_if = "Option::is_none"
     )]
     pub on_exhausted: Option<ExhaustionTarget>,
-    /// Authored terminal signal(s) for a `stop-if` park, carried through
-    /// unchanged from `SequenceItem::on_stop`. When present, the runtime
-    /// emits these in place of the canonical `signal:stop-if-matched` so a
+    /// Authored terminal signal(s) for a `abort-if` park, carried through
+    /// unchanged from `SequenceItem::on_abort`. When present, the runtime
+    /// emits these in place of the canonical `signal:abort-if-matched` so a
     /// trait's own name for its stop condition (e.g.
     /// `recurring-blocker-unresolved`) reaches the ledger and `run-status`.
-    #[serde(default, rename = "on-stop", skip_serializing_if = "Option::is_none")]
-    pub on_stop: Option<ExhaustionTarget>,
+    #[serde(default, rename = "on-abort", skip_serializing_if = "Option::is_none")]
+    pub on_abort: Option<ExhaustionTarget>,
     #[serde(
         default,
         rename = "on-complete",

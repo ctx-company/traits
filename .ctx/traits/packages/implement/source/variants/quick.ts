@@ -14,7 +14,7 @@
 // zero-prompt `project` step, never a spliced doctrine block, so it stays
 // lean by this same rule.
 import { commitTail, guardedProduction } from "@ctx-traits/agents";
-import { condition, intent, method, procedure, prompt, sequence, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { condition, input, intent, method, procedure, sequence, variant, tone, verbosity } from "@ctx-traits/cdk";
 
 import {
     captureDiffStep,
@@ -49,21 +49,21 @@ import * as slot from "./quick/slot.ts";
 const draftStep = sequence.prompt("draft-writing", {
     title: "Draft the work",
     agent: agent.smart,
-    text: prompt.text`
+    text: input.prompt`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Reference files by path. Do not implement anything.`,
     output: slot.draft,
 });
 
-const quickProduceText = prompt.text`
+const quickProduceText = input.prompt`
     Implement ${port.task} following the draft ${slot.draft}.
     No reviewer verdict attached means this is round 1: implement the draft in full. On every later round a verdict IS attached, and it redefines your task: execute its blockers' open steps, in order, largest first. The verdict was written against the exact working tree you are in — nothing has changed since — so if it says something is missing, it is missing NOW; re-auditing the tree against the draft re-does, worse, the review that produced the verdict, and spends your round on nothing. Your own work summary from the previous round is also attached: it is your memory of what prior rounds did — trust it plus the verdict's step statuses instead of re-verifying the tree. Before claiming any step was already satisfied, run the check its blocker's done-when names and cite its passing output as evidence; extend the summary with per-step progress as you go.
     A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports. Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
     Run this task's own Done-when gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns.`;
 
-const quickReviewText = prompt.text`
+const quickReviewText = input.prompt`
     Review the work for ${port.task} against the draft ${slot.draft}. Work summary: ${slot.workSummary}.
     ${reviewDiff} lists every file changed this round with its insertion/deletion counts — an index, not the change. Open whatever it points at with your own tools; it omits untracked files. ${repoGatesPassed} is this round's gate verdict; false is grounds for a blocker on its own — UNLESS its timed-out field is true, which is a repo condition (the bound is the repository's own config), never the worker's blocker, and never grounds for a blocker on its own. This gate is the repository's PER-ROUND gate and proves only what it runs — a repo may reserve heavier proof (full integration suites) for its landing gate, which runs once at merge. Never withhold approval for a check this round's gate does not run: judge the work against the task's own Done-when and this verdict, not against a suite that runs later.
     A BLOCKER is a correctness bug, a failing gate this task's Done-when requires, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
@@ -98,18 +98,18 @@ const building = guardedProduction({
     rounds: 10,
     // Ten rounds without an approving verdict is a blocked run, not a commit:
     // the scribe and the git tail are unreachable, and the run parks.
-    onExhausted: "block",
+    onExhausted: "abort",
     // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
     // round can fix — end the round's routing immediately with a
     // repo-condition park reason instead of burning further rounds.
     // `alsoRequire` conjoins `ok == true`, so this arm is provably mutually
     // exclusive with `until` (an absent field is NotMatched, and a `false`
     // ok already forces the loop to continue rather than exit).
-    stopIf: condition.fieldEquals(repoGatesPassed, "timed-out", true),
-    onStop: gateTimedOut,
+    abortIf: condition.fieldEquals(repoGatesPassed, "timed-out", true),
+    onAbort: gateTimedOut,
 });
 
-const quickScribeText = prompt.text`The review has ended approved and the work is being committed.
+const quickScribeText = input.prompt`The review has ended approved and the work is being committed.
     Write a concise commit message from the draft ${slot.draft} and the verdict ${slot.verdict}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
     Return exactly that message. Do not run git commands and do not write files.`;
 

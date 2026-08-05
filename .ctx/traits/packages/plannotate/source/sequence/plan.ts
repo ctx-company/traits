@@ -1,4 +1,4 @@
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { port, slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { port, slot } from "../data.ts";
 const planDraft = sequence.prompt("plan-draft", {
     title: "Draft the plan (smart)",
     agent: agent.smart1,
-    text: prompt.text`
+    text: input.prompt`
                     Create an implementation plan for the assignment: ${port.assignment}.
                     Inspect the repository with your tools to ground the plan; do not guess at structure.
                     Cover: scope, the files to touch, the approach, the validation plan (which of the project's own checks prove it), and the risks.
@@ -35,7 +35,7 @@ const planOwnerReview = sequence.command("plan-owner-review", {
 const planReview = sequence.prompt("plan-review", {
     title: "Refine the plan against the owner's annotations (smart)",
     agent: agent.smart1,
-    text: prompt.text`
+    text: input.prompt`
                     Refine the draft ${slot.draft} into the final plan, using plannotator's plan-mode verdict ${slot.planDecision}.
                     If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.
                     If it is "deny", hookSpecificOutput.decision.message is the owner's annotation — every point it raises must be visibly and provably addressed in the refined plan (not merely acknowledged): change the affected section, or state explicitly why the draft already covers it.

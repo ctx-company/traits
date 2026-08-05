@@ -3788,7 +3788,7 @@ struct SequenceContractItem {
     item_id: Option<String>,
     executable: bool,
     output_refs: Vec<String>,
-    emits: BTreeSet<String>,
+    on_complete: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3813,9 +3813,9 @@ impl SequenceContract {
                 item_id: item.item.id.clone(),
                 executable: is_executable_item(item.item),
                 output_refs: output_refs.clone(),
-                emits: item
+                on_complete: item
                     .item
-                    .emits
+                    .on_complete
                     .iter()
                     .map(|emit| emit.signal_ref().to_string())
                     .collect(),

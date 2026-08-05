@@ -133,7 +133,7 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
  * ```ts
  * procedure({
  *   description: "Review a diff for the stated focus and return one structured verdict with findings.",
- *   sequence: sequence.prompt("review", { agent: reviewer, text: prompt.text`Review ${diff}.`, output: review }),
+ *   sequence: sequence.prompt("review", { agent: reviewer, text: input.prompt`Review ${diff}.`, output: review }),
  * });
  * ```
  * @see {@link sequence}
@@ -434,10 +434,10 @@ export function rule(fields: RuleFields): CanonicalRule {
 }
 /**
  * Declares a signal emitted by sequence steps: a named event a step's
- * `emits` field raises, that guards elsewhere (`condition.signal`) or
- * `onFailure`/`onComplete` routes can react to.
+ * `onComplete` field raises, that guards elsewhere (`condition.signal`) or
+ * `onFailure` routes can react to.
  *
- * Without a declared signal, a step's `emits`/`onFailure` targets are bare
+ * Without a declared signal, a step's `onComplete`/`onFailure` targets are bare
  * strings with no check that anything actually emits (or listens for) that
  * name. `signal(...)` returns a typed handle usable on both sides.
  *

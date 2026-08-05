@@ -148,7 +148,7 @@ const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 //             ],
 //         }),
 //         sequence.ask("recurrence-owner-answer", {
-//             prompt: prompt.text`The implementation is stalled on a recurring blocker. Owner answer required: ${stallQuestion}`,
+//             prompt: input.prompt`The implementation is stalled on a recurring blocker. Owner answer required: ${stallQuestion}`,
 //             when: ownerInputRequired,
 //             output: ownerAnswer,
 //         }),

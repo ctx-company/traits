@@ -1,11 +1,11 @@
 import type { AgentHandle, SequenceHandle, SlotHandle } from "@ctx-traits/cdk";
-import { condition, prompt, sequence } from "@ctx-traits/cdk";
+import { condition, input, sequence } from "@ctx-traits/cdk";
 import { agreedDesign, commitMessage, commitOutput, stageOutput, survey, target } from "../data.ts";
 
 export function commitMessageStep(agent: AgentHandle, verdict1: SlotHandle, verdict2: SlotHandle) {
     return sequence.prompt("summarization", {
         title: "Write the commit message (scribe)", agent,
-        text: prompt.text`
+        text: input.prompt`
             The refinement loop for the refactor of ${target} has ended and the work is being committed. The final reviewer verdicts are ${verdict1} and ${verdict2} — read their status fields FIRST. The loop exits early once both approve, so a status still set to revise means the rounds ran out with that reviewer unsatisfied: say so plainly rather than implying a clean approval.
             Write the commit message from the agreed design ${agreedDesign}, the survey ${survey}, and those verdicts: subject line "refactor(${target}): <boundary in a few words>", then one paragraph summarizing the new boundary and behavior preservation, then a short "Deferred candidates:" list copied from the survey (omit the list if none were deferred).
             If either verdict status is revise, end the message with an "Unresolved reviewer blockers:" section listing each open blocker in one line — the honest record that the budget ran out before every reviewer was satisfied. Never write that section when there are none.

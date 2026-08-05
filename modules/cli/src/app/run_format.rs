@@ -225,7 +225,7 @@ pub(crate) fn print_run_session(
     if session
         .stop_reason
         .as_ref()
-        .is_some_and(|stop_reason| stop_reason.reason == "stop-if-matched")
+        .is_some_and(|stop_reason| stop_reason.reason == "abort-if-matched")
     {
         print_escalation_blockers("  ", &session.accepted_slot_values);
     }

@@ -1210,7 +1210,7 @@ mod render_v2_shape_tests {
                         "title": format!("sequence-title hostile {HOSTILE}"),
                         "agent": "agent:a1",
                         "prompt": "prompt:p1",
-                        "emits": ["signal:dep/thing"],
+                        "on-complete": ["signal:dep/thing"],
                     },
                 ],
             },

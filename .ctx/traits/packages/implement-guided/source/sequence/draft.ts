@@ -1,4 +1,4 @@
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { slot } from "../data.ts";
 export default sequence.prompt("draft", {
     title: "Draft the work (smart)",
     agent: agent.smart,
-    text: prompt.text`
+    text: input.prompt`
                     Create an implementation draft for the annotated assignment ${slot.annotations}.
                     Every entry in its annotations list is part of the scope — implement exactly what they ask, together, and nothing more. Each annotation's "text" is the request; its "lines" locate it in the annotated source and are context, not work.
                     Inspect the repository with your tools to ground the draft; do not guess at structure.

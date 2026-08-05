@@ -1,7 +1,7 @@
 import type { PortHandle, PromptTemplate, ResourceHandle, SlotHandle } from "./handles.js";
 import { tokenizeShellLiteral } from "./normalize.js";
 import type { PromptInterpolation } from "./prompt.js";
-import { promptTemplate } from "./prompt.js";
+import { promptBoundText, promptTemplate } from "./prompt.js";
 import { refText } from "./ref.js";
 import type { ArgvItem } from "./sequence.js";
 
@@ -42,7 +42,7 @@ export interface InputFunction {
    * contract, or command argv interpolation — those all require a value to
    * be present unconditionally, and an absent optional slot would leave the
    * interpolation unresolved.
-   * @example `sequence.prompt("produce", { agent: worker, text: prompt.text`Produce a draft.`, input: input.optional(verdict), output: draft })`
+   * @example `sequence.prompt("produce", { agent: worker, prompt: input.prompt`Produce a draft.`, input: input.optional(verdict), output: draft })`
    */
   optional<Value>(slot: SlotHandle<Value>): OptionalSlotInputValue<Value>;
 
@@ -66,17 +66,20 @@ export interface InputFunction {
   /**
    * Builds a prompt-step `input:` body from a tagged template literal — the
    * preferred carrier for a prompt/ask step's compiled prompt text, replacing
-   * the legacy `text:`/`prompt:` fields. Returns the same `PromptTemplate`
-   * value `prompt.text` returns (this is a re-export of that shared builder,
-   * under the `input` namespace, so the prompt-step `input:` position and
-   * `prompt.text` agree on one value shape); non-interpolated dependencies
-   * are declared separately through `include:`.
-   * @example `sequence.prompt("review", { agent: reviewer, input: input.text`Review ${diff} with a focus on ${focus}.`, output: review })`
+   * the legacy `text:`/`prompt:` fields. Under the `input` namespace so the
+   * prompt-step `input:` position and this builder agree on one value shape;
+   * non-interpolated dependencies are declared separately through `include:`.
+   * @example `sequence.prompt("review", { agent: reviewer, input: input.prompt`Review ${diff} with a focus on ${focus}.`, output: review })`
    */
-  text<const Values extends readonly PromptInterpolation[]>(
+  prompt<const Values extends readonly PromptInterpolation[]>(
     strings: TemplateStringsArray,
     ...values: Values
   ): PromptTemplate;
+  /**
+   * Binds named `{placeholder}` references in existing prompt text. This is
+   * the non-tagged counterpart for prompts assembled from static doctrines.
+   */
+  prompt(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate;
 }
 
 export function optionalSlot<Value>(slot: SlotHandle<Value>): OptionalSlotInputValue<Value> {
@@ -127,6 +130,11 @@ function commandTemplate(
 export const input: InputFunction = {
   optional: optionalSlot,
   command: commandTemplate,
-  text: (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate =>
-    promptTemplate(strings, values),
+  prompt: (
+    stringsOrText: TemplateStringsArray | string,
+    ...values: readonly PromptInterpolation[] | readonly [Readonly<Record<string, PromptInterpolation>>]
+  ): PromptTemplate =>
+    typeof stringsOrText === "string"
+      ? promptBoundText(stringsOrText, values[0] as Readonly<Record<string, PromptInterpolation>>)
+      : promptTemplate(stringsOrText, values as readonly PromptInterpolation[]),
 } as InputFunction;

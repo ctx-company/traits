@@ -41,7 +41,7 @@ export interface SlotFields {
  *   id: "review",
  *   schema: schema.object("code-review-scaffold", { verdict: schema.verdict() }),
  * });
- * sequence.prompt("review", { text: prompt.text`Review ${diff}.`, output: review });
+ * sequence.prompt("review", { text: input.prompt`Review ${diff}.`, output: review });
  * ```
  * @see {@link SlotFields}
  * @see {@link port}

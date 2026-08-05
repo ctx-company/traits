@@ -1,6 +1,5 @@
-import type { JsonObject, RefKind } from "./generated.js";
+import type { JsonObject } from "./generated.js";
 import type {
-  Handle,
   InstructionOutputHandle,
   PortHandle,
   PromptHandle,
@@ -27,8 +26,6 @@ export type PromptInterpolation<Value = unknown> =
   | SlotHandle<Value>
   | ResourceHandle<Value>
   | InstructionOutputHandle<Value>;
-type HandleValue<Value> = Value extends Handle<RefKind, infer Result> ? Result : never;
-type PromptInputs<Values extends readonly PromptInterpolation[]> = HandleValue<Values[number]>;
 
 export interface PromptFunction {
   <Input, Output = unknown>(
@@ -46,31 +43,9 @@ export interface PromptFunction {
   ): PromptHandle<Input, Output>;
   (id: string, text: string, fields?: JsonObject): PromptHandle;
   /**
-   * Builds a `PromptTemplate` from a tagged template literal: each
-   * interpolated `${handle}` becomes a typed `{port:*}`/`{slot:*}`/
-   * `{resource:*}` reference token, and the referenced handle is
-   * auto-declared as the prompt's input — no separate `input: [...]` list to
-   * keep in sync by hand.
-   * @example
-   * ```ts
-   * const diff = port.input.text({ id: "diff" });
-   * const focus = port.input.text({ id: "focus" });
-   * prompt.text`Review ${diff} with a focus on ${focus}.`;
-   * ```
-   */
-  text<const Values extends readonly PromptInterpolation[]>(
-    strings: TemplateStringsArray,
-    ...values: Values
-  ): PromptTemplate<PromptInputs<Values>>;
-  /**
-   * Binds named `{placeholder}` references in existing prompt text. This is
-   * the non-tagged counterpart for prompts assembled from static doctrines.
-   */
-  text(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate;
-  /**
    * Builds a `PromptTemplate` whose body is a resource's content, with the
    * resource itself as the prompt's declared input — the equivalent of
-   * `prompt.text` for prompt bodies that live in their own file/inline
+   * `input.prompt` for prompt bodies that live in their own file/inline
    * resource instead of a literal in the trait source.
    * @example
    * ```ts
@@ -93,7 +68,7 @@ export interface PromptFunction {
  *
  * A hand-written prompt body is an opaque string — the runtime cannot tell
  * which slots or ports it actually reads, so it can neither validate nor
- * inject them correctly. Building the text with `prompt.text`/`input.text`
+ * inject them correctly. Building the text with `input.prompt`
  * (or passing one to `sequence.prompt`'s `input:` field directly, which is
  * the common path — declaring a standalone named `prompt(...)` is only
  * needed when the same prompt is reused across steps) means every
@@ -104,7 +79,7 @@ export interface PromptFunction {
  * @example
  * ```ts
  * const request = port.input.text({ id: "request" });
- * prompt.text`Summarize ${request}`;
+ * input.prompt`Summarize ${request}`;
  * ```
  * @see {@link sequence}
  */
@@ -136,13 +111,6 @@ function promptFn(idOrFields: string | PromptFields, text?: string, fields?: Jso
 export const prompt = Object.assign(
   promptFn,
   {
-    text: (
-      stringsOrText: TemplateStringsArray | string,
-      ...values: readonly PromptInterpolation[] | readonly [Readonly<Record<string, PromptInterpolation>>]
-    ): PromptTemplate =>
-      typeof stringsOrText === "string"
-        ? promptBoundText(stringsOrText, values[0] as Readonly<Record<string, PromptInterpolation>>)
-        : promptTemplate(stringsOrText, values as readonly PromptInterpolation[]),
     resource: (
       value: ResourceHandle | RefHandle | {
         readonly resource: ResourceHandle | RefHandle | string;
@@ -176,9 +144,9 @@ function promptOf(fields: PromptFields): PromptHandle {
 
 /**
  * Builds a `PromptTemplate` from a tagged template literal — the shared
- * builder behind `prompt.text` and `input.text` (input.ts re-exports this
- * under that name rather than duplicating it, to avoid an import cycle:
- * `input.ts` otherwise imports only `handles.ts`/`normalize.ts`/`ref.ts`).
+ * builder behind `input.prompt` (input.ts re-exports this under that name
+ * rather than duplicating it, to avoid an import cycle: `input.ts`
+ * otherwise imports only `handles.ts`/`normalize.ts`/`ref.ts`).
  */
 export function promptTemplate(
   strings: TemplateStringsArray,
@@ -188,8 +156,8 @@ export function promptTemplate(
   const refs: string[] = [];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
-    if (value === undefined) throw new Error(`prompt.text interpolation ${index}: expected a reference`);
-    const ref = requirePromptRef(value, `prompt.text interpolation ${index}`);
+    if (value === undefined) throw new Error(`input.prompt interpolation ${index}: expected a reference`);
+    const ref = requirePromptRef(value, `input.prompt interpolation ${index}`);
     refs.push(ref);
     text += `{${ref}}${strings[index + 1] ?? ""}`;
   }
@@ -201,10 +169,15 @@ export function promptTemplate(
   });
 }
 
-function promptBoundText(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate {
+/**
+ * Binds named `{placeholder}` references in existing prompt text — the
+ * non-tagged counterpart for prompts assembled from static doctrines. The
+ * shared builder behind `input.prompt`'s non-tagged overload.
+ */
+export function promptBoundText(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate {
   const values = Object.values(bindings);
   const refs = Object.fromEntries(
-    Object.entries(bindings).map(([name, value]) => [name, requirePromptRef(value, `prompt.text ${name}`)]),
+    Object.entries(bindings).map(([name, value]) => [name, requirePromptRef(value, `input.prompt ${name}`)]),
   );
   const rendered = text.replace(
     /\{([A-Za-z][A-Za-z0-9-]*)\}/g,

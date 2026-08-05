@@ -834,7 +834,7 @@ title = "Guard stream-count cardinality before materialization"
 kind = "loop"
 sequence = "sequence:plan-cardinality-guard"
 max-iterations = 1
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [[procedure.sequence.until.all]]
 
@@ -918,7 +918,7 @@ title = "Assess and gate evidence quality"
 kind = "loop"
 sequence = "sequence:assess-evidence-quality"
 max-iterations = 1
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [[procedure.sequence.until.any]]
 
@@ -953,36 +953,36 @@ equals = "rigorous"
 slot = "slot:quality-score"
 at-least = 9.2
 
-[[procedure.sequence.stop-if.not.any]]
+[[procedure.sequence.abort-if.not.any]]
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:deliverables-manifest"
 field = "quality-target"
 equals = "basic"
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:quality-score"
 at-least = 7
 
-[[procedure.sequence.stop-if.not.any]]
+[[procedure.sequence.abort-if.not.any]]
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:deliverables-manifest"
 field = "quality-target"
 equals = "standard"
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:quality-score"
 at-least = 8.5
 
-[[procedure.sequence.stop-if.not.any]]
+[[procedure.sequence.abort-if.not.any]]
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:deliverables-manifest"
 field = "quality-target"
 equals = "rigorous"
 
-[[procedure.sequence.stop-if.not.any.all]]
+[[procedure.sequence.abort-if.not.any.all]]
 slot = "slot:quality-score"
 at-least = 9.2
 
@@ -1010,7 +1010,7 @@ title = "Bounded Chain-of-Verification"
 kind = "loop"
 sequence = "sequence:verify-and-revise"
 max-iterations = 3
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [procedure.sequence.until]
 slot = "slot:verification-verdict"
@@ -1023,7 +1023,7 @@ title = "Gate packaging on final review"
 kind = "loop"
 sequence = "sequence:review-and-revise-final"
 max-iterations = 3
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [procedure.sequence.until]
 slot = "slot:final-review-verdict"

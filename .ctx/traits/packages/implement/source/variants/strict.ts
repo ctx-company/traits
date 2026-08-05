@@ -1,5 +1,5 @@
 import { blockerSchema, commitTail, deviationReportSchema, guardedProduction, STRICT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, method, procedure, prompt, schema, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { condition, intent, method, procedure, schema, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
 import {
     buildDraftPromptText,
     buildPlanReviewText,
@@ -12,7 +12,7 @@ import {
     deriveParkReportStep,
     draft,
     gateTimedOut,
-    gateTimedOutStopIf,
+    gateTimedOutAbortIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
@@ -108,11 +108,11 @@ const building = guardedProduction({
     carry: leftovers,
     minRounds: 3,
     rounds: 5,
-    onExhausted: "block",
+    onExhausted: "abort",
     // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
     // round can fix — stop here rather than grinding toward a doomed park.
-    stopIf: gateTimedOutStopIf,
-    onStop: gateTimedOut,
+    abortIf: gateTimedOutAbortIf,
+    onAbort: gateTimedOut,
 });
 
 export default variant({

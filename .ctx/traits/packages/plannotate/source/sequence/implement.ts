@@ -1,4 +1,4 @@
-import { condition, input, prompt, sequence } from "@ctx-traits/cdk";
+import { condition, input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { slot } from "../data.ts";
 const implementWork = sequence.prompt("implement-work", {
     title: "Implement (worker)",
     agent: agent.worker,
-    text: prompt.text`
+    text: input.prompt`
                     Produce the work for the plan ${slot.plan}.
                     If no reviewer verdict is attached to this frame, this is round 1: implement the plan in full. If a verdict IS attached, this is a fix round: fix every BLOCKER it names — including any owner annotation it names as unsatisfied — and address advisory notes only when the fix is cheap and safe.
                     Run the project's own checks with your tools before reporting.
@@ -20,7 +20,7 @@ const implementWork = sequence.prompt("implement-work", {
 const implementReview = sequence.prompt("implement-review", {
     title: "Review the work (smart)",
     agent: agent.smart1,
-    text: prompt.text`
+    text: input.prompt`
                     Review the implemented work for the plan ${slot.plan}. Current work summary: ${slot.workSummary}.
                     Inspect the actual working tree with your tools — never review the summary alone; re-run the project's checks if the summary does not prove they pass.
                     If an owner decision is attached to this frame, it is the owner's verdict on the previous round's briefing (denied or dismissed, since an approved verdict would already have ended the loop): treat any annotation it carries as an unsatisfied BLOCKER, never advisory, until the work visibly addresses it.
@@ -34,7 +34,7 @@ const implementReview = sequence.prompt("implement-review", {
 const roundBriefing = sequence.prompt("round-briefing", {
     title: "Write the round briefing (smart)",
     agent: agent.smart1,
-    text: prompt.text`
+    text: input.prompt`
                     The reviewer has approved this round's work for the plan ${slot.plan}, and the owner is about to be summoned to confirm it ships. Work summary: ${slot.workSummary}. Reviewer verdict: ${slot.verdict}.
                     Inspect the working tree with your tools (git diff, git status, the changed files) so the briefing reflects what actually changed, not just what the summary claims.
                     Write a short markdown briefing for the owner, to be read cold — the owner has not seen the working tree: what changed and why, what the review checked and found (including advisory notes worth the owner's attention), and what the owner is being asked to confirm.

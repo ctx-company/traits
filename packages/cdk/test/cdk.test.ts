@@ -13,7 +13,6 @@ import {
   planner,
   port,
   procedure,
-  prompt,
   resolveTraitFamily,
   resource,
   reviewer,
@@ -155,7 +154,7 @@ describe("draft synthesis", () => {
           sequence: [
             sequence.prompt("read-guide", {
               title: "Read the guide",
-              text: prompt.text`Open ${guide} and summarize it.`,
+              text: input.prompt`Open ${guide} and summarize it.`,
               output: result,
             }),
           ],
@@ -699,13 +698,16 @@ describe("retired canonical fields", () => {
     const response = port.output.text({ id: "retired-contract-response", value: result });
     procedure({
       description: "Contracts are inferred from reachable steps.",
-      sequence: sequence.prompt("retired-contract-step", { text: prompt.text`Use ${request}.`, output: result }),
+      sequence: sequence.prompt("retired-contract-step", { text: input.prompt`Use ${request}.`, output: result }),
       // @ts-expect-error procedure input ports are inferred from consumed refs.
       input: request,
     });
     procedure({
       description: "Contracts are inferred from reachable steps.",
-      sequence: sequence.prompt("retired-contract-output-step", { text: prompt.text`Use ${request}.`, output: result }),
+      sequence: sequence.prompt("retired-contract-output-step", {
+        text: input.prompt`Use ${request}.`,
+        output: result,
+      }),
       // @ts-expect-error procedure output ports are inferred from produced bound slots.
       output: response,
     });
@@ -726,11 +728,11 @@ describe("retired canonical fields", () => {
 });
 
 describe("sequence.loop on-exhausted (P399)", () => {
-  it("collapses continue/block/signal spellings to the canonical scalar-or-array shape", () => {
+  it("collapses continue/abort/signal spellings to the canonical scalar-or-array shape", () => {
     const exhaustedOne = signal({ id: "exhausted-one", description: "Loop A ran out of budget." });
     const exhaustedTwo = signal({ id: "exhausted-two", description: "Loop B ran out of budget." });
     const bodyOf = (id: string) =>
-      sequence.linear(id, [sequence.prompt(`${id}-step`, { text: prompt.text`Do work.` })]);
+      sequence.linear(id, [sequence.prompt(`${id}-step`, { text: input.prompt`Do work.` })]);
 
     const draft = toDraftJson(
       trait({
@@ -741,10 +743,10 @@ describe("sequence.loop on-exhausted (P399)", () => {
           description: "Exercise every on-exhausted spelling.",
           sequence: [
             sequence.loop("default-loop", { sequence: bodyOf("default-body"), iterations: 3 }),
-            sequence.loop("block-loop", {
-              sequence: bodyOf("block-body"),
+            sequence.loop("abort-loop", {
+              sequence: bodyOf("abort-body"),
               iterations: 3,
-              onExhausted: sequence.flow.Block,
+              onExhausted: sequence.flow.Abort,
             }),
             sequence.loop("signal-loop", {
               sequence: bodyOf("signal-body"),
@@ -764,7 +766,7 @@ describe("sequence.loop on-exhausted (P399)", () => {
 
     const items = draft.procedure?.sequence ?? [];
     expect(items[0]?.["on-exhausted"]).toBeUndefined();
-    expect(items[1]?.["on-exhausted"]).toBe("block");
+    expect(items[1]?.["on-exhausted"]).toBe("abort");
     expect(items[2]?.["on-exhausted"]).toBe("signal:exhausted-one");
     expect(items[3]?.["on-exhausted"]).toEqual(["signal:exhausted-one", "signal:exhausted-two"]);
   });
@@ -773,7 +775,7 @@ describe("sequence.loop on-exhausted (P399)", () => {
     expect(() =>
       sequence.loop("empty-signals-loop", {
         sequence: sequence.linear("empty-signals-body", [
-          sequence.prompt("empty-signals-step", { text: prompt.text`Do work.` }),
+          sequence.prompt("empty-signals-step", { text: input.prompt`Do work.` }),
         ]),
         iterations: 3,
         onExhausted: [],
@@ -843,15 +845,15 @@ describe("input.command", () => {
   });
 });
 
-describe("input.text / output.text / output.of (0045)", () => {
+describe("input.prompt / output.text / output.of (0045)", () => {
   it("accepts a PromptTemplate as a prompt step's input: field, same as text:", () => {
     const diff = slot.text("io-diff");
-    const step = sequence.prompt("io-review", { input: input.text`Review ${diff}.` });
+    const step = sequence.prompt("io-review", { input: input.prompt`Review ${diff}.` });
     const draft = toDraftJson(
       trait({
         id: "io-input-text",
         name: "IO Input Text",
-        description: "input.text fixture.",
+        description: "input.prompt fixture.",
         procedure: procedure({ description: "Review.", sequence: [step] }),
       }),
     ) as { readonly procedure?: { readonly sequence?: unknown; }; readonly prompt?: unknown; };
@@ -866,7 +868,7 @@ describe("input.text / output.text / output.of (0045)", () => {
 
   it("output.text auto-declares a schema:text slot at the step id and renders a return-format instruction", () => {
     const step = sequence.prompt("io-summarize", {
-      input: input.text`Summarize the work so far.`,
+      input: input.prompt`Summarize the work so far.`,
       output: output.text`Write a one-paragraph work summary.`,
     });
     const draft = toDraftJson(
@@ -893,7 +895,7 @@ describe("input.text / output.text / output.of (0045)", () => {
   it("output.of auto-declares a schema-typed slot and names the schema in the rendered instruction", () => {
     const verdictSchema = schema.text();
     const step = sequence.prompt("io-verdict", {
-      input: input.text`Review the change.`,
+      input: input.prompt`Review the change.`,
       output: output.of(verdictSchema)`Your verdict, citing every finding.`,
     });
     const draft = toDraftJson(
@@ -916,7 +918,7 @@ describe("input.text / output.text / output.of (0045)", () => {
 
   it("a second anonymous output on the same step takes the <step-id>-2 auto id", () => {
     const step = sequence.prompt("io-multi", {
-      input: input.text`Do the work.`,
+      input: input.prompt`Do the work.`,
       output: [output.text`Summary one.`, output.text`Summary two.`],
     });
     const draft = toDraftJson(
@@ -934,11 +936,11 @@ describe("input.text / output.text / output.of (0045)", () => {
   it("an interpolated instruction-output resolves to the attaching step's slot once authored produce-then-consume", () => {
     const summary = output.text`A one-paragraph summary.`;
     const producer = sequence.prompt("io-produce", {
-      input: input.text`Summarize the diff.`,
+      input: input.prompt`Summarize the diff.`,
       output: summary,
     });
     const consumer = sequence.prompt("io-consume", {
-      input: input.text`Given ${summary}, write a title.`,
+      input: input.prompt`Given ${summary}, write a title.`,
     });
     const draft = toDraftJson(
       trait({
@@ -954,14 +956,14 @@ describe("input.text / output.text / output.of (0045)", () => {
 
   it("interpolating an instruction-output before its producing step is authored fails", () => {
     const summary = output.text`A one-paragraph summary.`;
-    expect(() => input.text`Given ${summary}, write a title.`).toThrow(/before the step/);
+    expect(() => input.prompt`Given ${summary}, write a title.`).toThrow(/before the step/);
   });
 
   it("collision between an auto-declared and hand-declared slot of the same id cites both names", () => {
     const clashing = slot.text("io-clash");
     expect(() =>
       sequence.prompt("io-clash", {
-        input: input.text`Do the work.`,
+        input: input.prompt`Do the work.`,
         output: [clashing, output.text`Summary.`],
       })
     ).toThrow(/io-clash/);
@@ -969,7 +971,7 @@ describe("input.text / output.text / output.of (0045)", () => {
 
   it("warns when an explicit input: entry duplicates a ref already interpolated into the template", () => {
     const diff = slot.text("io-dup-diff");
-    const step = sequence.prompt("io-dup", { input: input.text`Review ${diff}.`, include: [diff] });
+    const step = sequence.prompt("io-dup", { input: input.prompt`Review ${diff}.`, include: [diff] });
     const { diagnostics: warnings } = toDraftJsonWithSourceMap(
       trait({
         id: "io-duplicate-ref",
@@ -1114,7 +1116,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const question = slot.text("human-question");
     const answer = slot.text("human-answer");
     const ask = sequence.ask("ask-reviewer", {
-      prompt: prompt.text`Question: ${question}`,
+      prompt: input.prompt`Question: ${question}`,
       when: needsHuman,
       output: answer,
     });
@@ -1135,9 +1137,9 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const proposal = slot.text("proposal");
     const ready = signal({ id: "proposal-ready", description: "A proposal is ready for review." });
     const producer = sequence.prompt("produce", {
-      text: prompt.text`Produce a proposal.`,
+      text: input.prompt`Produce a proposal.`,
       output: proposal,
-      emits: ready,
+      onComplete: ready,
     });
     const draft = toDraftJson(trait("approval-gate", {
       version: "0.1.0",
@@ -1155,7 +1157,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       id: "produce-gate",
       kind: "loop",
       "max-iterations": 2,
-      "on-exhausted": "block",
+      "on-exhausted": "abort",
     });
     const body = draft.sequence?.["produce-gate-body"]?.sequence ?? [];
     expect(body.map((item) => item.kind)).toEqual(["project", undefined, "ask", "branch"]);
@@ -1167,14 +1169,14 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const proposal = slot.text("signal-proposal");
     const ready = signal({ id: "signal-ready", description: "Proposal ready." });
     const direct = sequence.prompt("signal-direct", {
-      text: prompt.text`Produce.`,
+      text: input.prompt`Produce.`,
       output: proposal,
-      emits: ready,
+      onComplete: ready,
     });
     const derived = sequence.prompt("signal-derived", {
-      text: prompt.text`Produce.`,
+      text: input.prompt`Produce.`,
       output: proposal,
-      emits: { signal: ready, when: condition.equals(proposal, "ready") },
+      onComplete: { signal: ready, when: condition.equals(proposal, "ready") },
     });
 
     expect(() => sequence.gate(direct, { proposal, when: ready, rounds: 1 })).not.toThrow();
@@ -1192,9 +1194,9 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const proposal = slot.text("edit-proposal");
     const ready = signal({ id: "edit-ready", description: "Proposal ready." });
     const producer = sequence.prompt("edit-produce", {
-      text: prompt.text`Produce.`,
+      text: input.prompt`Produce.`,
       output: proposal,
-      emits: ready,
+      onComplete: ready,
     });
     const unrelated = sequence.project("unrelated-edit", {
       projections: [{ source: operation.literal("unchanged"), destination: slot.text("other-proposal") }],
@@ -1333,7 +1335,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
   });
 
   it("auto-names an inline loop body <step-id>-body", () => {
-    const bodyStep = sequence.prompt("refine", { text: prompt.text`Refine the work.` });
+    const bodyStep = sequence.prompt("refine", { text: input.prompt`Refine the work.` });
     const draft = toDraftJson(
       trait("inline-loop-body", {
         version: "0.1.0",
@@ -1357,7 +1359,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
   it("auto-names an inline forEach body <step-id>-body", () => {
     const files = slot.texts("files");
     const currentFile = slot.text("current-file");
-    const bodyStep = sequence.prompt("review-one", { text: prompt.text`Review a file.` });
+    const bodyStep = sequence.prompt("review-one", { text: input.prompt`Review a file.` });
     const draft = toDraftJson(
       trait("inline-foreach-body", {
         version: "0.1.0",
@@ -1379,7 +1381,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const result = slot.text("contract-result");
     const response = port.output.of({ id: "contract-response", schema: "schema:text", value: result });
     const work = sequence.linear("contract-work", [
-      sequence.prompt("contract-prompt", { text: prompt.text`Use ${request}.`, output: result }),
+      sequence.prompt("contract-prompt", { text: input.prompt`Use ${request}.`, output: result }),
     ]);
     const draft = toDraftJson(
       trait("contract-inference", {
@@ -1425,7 +1427,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const bound = port.output.of({ id: "bound-result", schema: "schema:text", value: result });
     const unproduced = port.output.text({ id: "unproduced-result" });
     const nested = sequence.linear("nested-contract", [
-      sequence.prompt("produce-contract", { text: prompt.text`Use ${request}.`, output: result }),
+      sequence.prompt("produce-contract", { text: input.prompt`Use ${request}.`, output: result }),
     ]);
     const family = trait("isolated-contract", {
       version: "0.1.0",
@@ -1437,7 +1439,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
             sequence: sequence.branch("route-contract", {
               check: condition.output.is("yes"),
               success: [sequence.loop("nested-loop", { sequence: nested, iterations: 1 })],
-              failure: [sequence.prompt("produce-direct", { text: prompt.text`Finish.`, output: direct })],
+              failure: [sequence.prompt("produce-direct", { text: input.prompt`Finish.`, output: direct })],
             }),
           }),
           port: [bound, direct, unproduced, request],
@@ -1446,7 +1448,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           name: "Two",
           procedure: procedure({
             description: "Do not use the sibling boundary.",
-            sequence: sequence.prompt("other", { text: prompt.text`Other.` }),
+            sequence: sequence.prompt("other", { text: input.prompt`Other.` }),
           }),
           port: port.output.text({ id: "bound-result" }),
         }),
@@ -1471,7 +1473,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const result = slot.text("shared-result");
     const shared = procedure({
       description: "Produce one shared result.",
-      sequence: sequence.prompt("produce-shared", { text: prompt.text`Produce.`, output: result }),
+      sequence: sequence.prompt("produce-shared", { text: input.prompt`Produce.`, output: result }),
     });
     const first = port.output.of({ id: "first-output", schema: "schema:text", value: result });
     const second = port.output.of({ id: "second-output", schema: "schema:text", value: result });
@@ -1499,7 +1501,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     });
     const nested = sequence.linear("parity-nested", [
       sequence.prompt("parity-prompt", {
-        text: prompt.text`Use ${required}, ${optional}, and ${defaulted}.`,
+        text: input.prompt`Use ${required}, ${optional}, and ${defaulted}.`,
         output: promptResult,
       }),
       sequence.project("parity-project", {
@@ -1515,7 +1517,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           sequence: sequence.branch("parity-branch", {
             check: condition.output.is("continue"),
             success: [sequence.loop("parity-loop", { sequence: nested, iterations: 1 })],
-            failure: [sequence.prompt("parity-direct", { text: prompt.text`Finish.`, output: directOutput })],
+            failure: [sequence.prompt("parity-direct", { text: input.prompt`Finish.`, output: directOutput })],
           }),
         }),
       }),
@@ -1538,7 +1540,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
   });
 
   it("rejects a loop/forEach declaring both sequence and body, or neither", () => {
-    const named = sequence.linear("named-body", [sequence.prompt("step", { text: prompt.text`Do work.` })]);
+    const named = sequence.linear("named-body", [sequence.prompt("step", { text: input.prompt`Do work.` })]);
     expect(() => sequence.loop("both", { sequence: named, body: [], iterations: 1 })).toThrow(
       /expected exactly one of sequence or body/,
     );
@@ -1557,7 +1559,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           description: "ForEach via closure.",
           sequence: [
             sequence.forEach("review-each", files, (whateverNameYouLike) => ({
-              body: [sequence.prompt("review-one", { text: prompt.text`Review ${whateverNameYouLike}.` })],
+              body: [sequence.prompt("review-one", { text: input.prompt`Review ${whateverNameYouLike}.` })],
             })),
           ],
         }),

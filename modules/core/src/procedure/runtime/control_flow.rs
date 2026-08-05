@@ -742,7 +742,7 @@ fn enter_control_frame(
             };
             emit_runtime_control_signal_at(
                 state,
-                item.on_complete.as_deref(),
+                item.on_complete.first().map(|rule| rule.signal_ref()),
                 parent_sequence_index,
                 path_for_control_item_activation(state, parent_run_index, item),
                 Some(identity),
@@ -776,10 +776,10 @@ fn enter_control_frame(
         list_digest: None,
         concurrent: kind == SequenceKind::ForEach && item.concurrent,
         until: item.until.clone(),
-        stop_if: item.stop_if.clone(),
+        abort_if: item.abort_if.clone(),
         on_exhausted: item.on_exhausted.clone(),
-        on_stop: item.on_stop.clone(),
-        on_complete: item.on_complete.clone(),
+        on_abort: item.on_abort.clone(),
+        on_complete: item.on_complete.first().map(|rule| rule.signal_ref().to_string()),
         on_failure: item.on_failure.clone(),
         parallel_branch_sequence_ids: Vec::new(),
         parallel_buffer: EffectBuffer::default(),
@@ -816,9 +816,9 @@ fn enter_control_frame(
                 resolve_positive_usize_input(state, max_iterations_from, "max-iterations-from")?;
             frame.iteration_index = Some(0);
             frame.max_iterations = Some(max_iterations);
-        } else if item.until.is_some() || item.stop_if.is_some() {
+        } else if item.until.is_some() || item.abort_if.is_some() {
             // No bound declared (0093): validation already requires `until`
-            // or `stop-if` in this case, so the loop is deliberately
+            // or `abort-if` in this case, so the loop is deliberately
             // unbounded — it exhausts never, only its own guard exits it.
             frame.iteration_index = Some(0);
             frame.max_iterations = None;
@@ -1109,11 +1109,11 @@ fn enter_parallel_frame(
         list_digest: None,
         concurrent: false,
         until: None,
-        stop_if: None,
+        abort_if: None,
         // Parallel frames reuse the loop counter for branch progress; branch
         // exhaustion is normal completion, never a policy decision.
         on_exhausted: None,
-        on_stop: None,
+        on_abort: None,
         on_complete: None,
         // A `parallel` item's own `on-failure` is the panel-level recovery
         // route for a `panel-fail` branch policy or a failed
@@ -1771,7 +1771,7 @@ fn complete_or_repeat_current_control(trait_ref: &Trait, state: &mut State) -> c
                 // A loop declares no `on-failure`: it has no failure of its own
                 // to route, and the items inside its body route theirs.
                 //
-                // `on-exhausted = "block"` opts a loop back into stopping, for
+                // `on-exhausted = "abort"` opts a loop back into stopping, for
                 // procedures where an unmet exit condition genuinely invalidates
                 // everything after it. `--strict-loops` does the same for every
                 // loop in a run, from the caller's side, and also suppresses

@@ -1,16 +1,4 @@
-import {
-    agent,
-    condition,
-    operation,
-    port,
-    procedure,
-    prompt,
-    resource,
-    schema,
-    sequence,
-    slot,
-    trait,
-} from "@ctx-traits/cdk";
+import { agent, condition, input, operation, port, procedure, resource, schema, sequence, slot, trait } from "@ctx-traits/cdk";
 
 const researchStandards = resource.file("research-standards", {
     path: "resources/research-standards.md",
@@ -391,7 +379,7 @@ const planStep = sequence.prompt("plan", {
     title: "Plan typed streams and deliverables",
     agent: probe,
     input: [quality, depth],
-    text: prompt.text`
+    text: input.prompt`
         Plan deep research for ${topic} without asking clarification questions.
         Read optional port:quality and port:depth from Resolved input values. If either is absent, treat it as unavailable and use the middle level standard for that setting.
         Apply ${researchStandards}, ${qualityRubric}, and ${sourceQualityGuide}.
@@ -427,12 +415,12 @@ const planGateStep = sequence.loop("plan-gate", {
     sequence: sequence.linear("plan-cardinality-guard", [cardinalityCheckStep]),
     until: streamCountValid,
     iterations: 1,
-    onExhausted: "block",
+    onExhausted: "abort",
 });
 const writePlanStep = sequence.prompt("write-plan", {
     title: "Write the research plan",
     agent: probe,
-    text: prompt.text`
+    text: input.prompt`
         Materialize the approved plan for ${topic} under the safe root research/${topicSlug}/.
         Create the runtime-native 00_plan through 06_metadata directory structure. Fill ${researchBriefTemplate} with the approved ${topic}, ${streamList}, and ${deliverablesManifestSlot} and write the completed brief to 00_plan/00_research_plan.md; do not invent a parallel plan format. Write ${deliverablesManifestSlot} to 06_metadata/deliverables/manifest.json.
         Initialize 06_metadata/evidence_table.csv from ${evidenceTableTemplate} without creating runtime task, heartbeat, result-marker, log, lock, or gate.ok files.
@@ -442,7 +430,7 @@ const writePlanStep = sequence.prompt("write-plan", {
 const researchOneStream = sequence.prompt("research-stream", {
     title: "Research one evidence stream",
     agent: streamWorker,
-    text: prompt.text`
+    text: input.prompt`
         Research ${currentStream} for ${topic} under the contract ${deliverablesManifestSlot}.
         Use ${researchStandards}, ${sourceQualityGuide}, ${citationStyle}, and ${sourceNoteTemplate}.
         Inspect every cited source, prefer primary A-B evidence, seek independent counterevidence, and write only the stream's declared target under research/${topicSlug}/.
@@ -461,7 +449,7 @@ const researchStreamsStep = sequence.forEach("research-streams", {
 const triangulateStep = sequence.prompt("triangulate", {
     title: "Triangulate sources and contradictions",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Triangulate ${findings} for ${topic} using ${researchStandards}, ${qualityRubric}, and ${sourceQualityGuide}.
         Cross-reference critical claims across independent source types, reconcile or expose contradictions, identify paywalled or inaccessible evidence, and perform targeted gap searches with web-capable tools when available.
         Update the bibliography, source ratings, evidence table, and a cross-verification finding under research/${topicSlug}/.
@@ -471,7 +459,7 @@ const triangulateStep = sequence.prompt("triangulate", {
 const assessQualityStep = sequence.prompt("assess-quality", {
     title: "Assess the numeric quality gate",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Assess ${findings} and ${triangulation} against ${deliverablesManifestSlot}, ${researchStandards}, and ${qualityRubric}.
         Score the canonical eight dimensions from 0 to 3, calculate overall-score on the 0-10 scale, and set target-score from quality-target (basic=7.0, standard=8.5, rigorous=9.2).
         Return exactly two typed outputs: quality-verdict and quality-score. quality-score MUST equal quality-verdict.overall-score exactly; it is the numeric projection the runtime guard reads.
@@ -496,15 +484,15 @@ const qualityGateStep = sequence.loop("quality-gate", {
     title: "Assess and gate evidence quality",
     sequence: sequence.linear("assess-evidence-quality", [assessQualityStep]),
     until: qualityPass,
-    stopIf: condition.not(qualityPass),
+    abortIf: condition.not(qualityPass),
     iterations: 1,
-    onExhausted: "block",
+    onExhausted: "abort",
 });
 
 const synthesizeStep = sequence.prompt("synthesize", {
     title: "Synthesize the research deliverables",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Synthesize ${findings}, ${triangulation}, and ${qualityVerdictSlot} for ${topic} using ${researchStandards}, ${citationStyle}, ${researchReadmeTemplate}, and ${deliverablesManifestSlot}.
         Write the required executive summary, full report, bibliography, source ratings, methodology, useful tables or safely quoted Mermaid diagrams, and campaign README under research/${topicSlug}/.
         Every factual claim must be cited. Preserve counterevidence, uncertainty, inaccessible-source caveats, and the quality verdict. Return the paths written and a concise synthesis summary.`,
@@ -513,7 +501,7 @@ const synthesizeStep = sequence.prompt("synthesize", {
 const verifyStep = sequence.prompt("verify", {
     title: "Verify critical claims and deliverables",
     agent: independentReviewer,
-    text: prompt.text`
+    text: input.prompt`
         Independently verify the current research ${synthesisDraft} for ${topic} using Chain-of-Verification in ${researchStandards}, the contract ${deliverablesManifestSlot}, and the source files under research/${topicSlug}/.
         Check critical claims against inspected sources, citation accessibility and support, contradictions, required paths, minimum size/citation expectations, banned markers, internal links, and promised diagrams.
         Return status approved only when every critical claim is supported or removed and all required deliverables are coherent; otherwise return revise with concrete issues.`,
@@ -522,7 +510,7 @@ const verifyStep = sequence.prompt("verify", {
 const reviseStep = sequence.prompt("revise", {
     title: "Apply verification corrections",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Apply ${verificationVerdictSlot} to the current research ${synthesisDraft} under research/${topicSlug}/.
         Correct, qualify, or remove unsupported claims; repair citation and deliverable defects; preserve valid evidence and structure. If status is approved, make no changes and return the existing synthesis receipt.
         Return the complete updated synthesis receipt and paths.`,
@@ -533,12 +521,12 @@ const verificationLoop = sequence.loop("verification-loop", {
     sequence: sequence.linear("verify-and-revise", [verifyStep, reviseStep]),
     until: condition.fieldEquals(verificationVerdictSlot, "status", "approved"),
     iterations: 3,
-    onExhausted: "block",
+    onExhausted: "abort",
 });
 const finalReviewStep = sequence.prompt("final-review", {
     title: "Perform independent final review",
     agent: independentReviewer,
-    text: prompt.text`
+    text: input.prompt`
         Perform a final review of research/${topicSlug}/ for ${topic} against ${deliverablesManifestSlot}.
         Inspect every required path and minimum size/citation expectation, then inspect the executive summary, report, findings, bibliography, source ratings, methodology, quality verdict, contradictions, evidence table, internal links, and unfinished markers.
         Return approved only when the package is coherent, decision-useful, appropriately caveated, and faithful to inspected sources; otherwise return revise with concrete issues.`,
@@ -547,7 +535,7 @@ const finalReviewStep = sequence.prompt("final-review", {
 const finalReviewReviseStep = sequence.prompt("final-review-revise", {
     title: "Apply final-review corrections",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Apply ${finalReviewVerdictSlot} to the completed research package under research/${topicSlug}/.
         Correct, qualify, or remove unsupported claims; repair citation, deliverable, or packaging defects; preserve valid evidence and structure. If status is approved, make no changes and return the existing synthesis receipt.
         Return the complete updated synthesis receipt and paths.`,
@@ -558,12 +546,12 @@ const finalReviewGateStep = sequence.loop("final-review-gate", {
     sequence: sequence.linear("review-and-revise-final", [finalReviewStep, finalReviewReviseStep]),
     until: condition.fieldEquals(finalReviewVerdictSlot, "status", "approved"),
     iterations: 3,
-    onExhausted: "block",
+    onExhausted: "abort",
 });
 const deliverStep = sequence.prompt("deliver", {
     title: "Report the research delivery",
     agent: synthesis,
-    text: prompt.text`
+    text: input.prompt`
         Report the completed research for ${topic} from ${synthesisDraft}, ${qualityVerdictSlot}, and ${finalReviewVerdictSlot}. The numeric quality gate, bounded verification loop, and independent final review all passed before this step became ready.
         Return the campaign path, required deliverables, normalized quality score and target, source/citation summary, known limitations, and next steps.`,
     output: deliveryReport,

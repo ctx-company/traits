@@ -1,4 +1,4 @@
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { port, slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { port, slot } from "../data.ts";
 const summaryBrief = sequence.prompt("summary-brief", {
     title: "Write the brief and commit message (smart)",
     agent: agent.smart2,
-    text: prompt.text`
+    text: input.prompt`
                     The build loop for the plan ${slot.plan} has ended in a double approval (reviewer and owner), and the work is being recorded and committed. Work summary: ${slot.workSummary}. Final reviewer verdict: ${slot.verdict}.
                     Inspect the working tree with your tools (git diff, git status) so the record reflects the actual change, not just the summary's claims.
                     Write: a short kebab-case slug for this assignment; the brief in markdown — what was built, why, how it was validated, and what the review found; and the commit message — a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated.

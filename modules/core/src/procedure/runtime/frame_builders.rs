@@ -604,7 +604,7 @@ fn dependency_capabilities_for_item(
             ));
         }
     }
-    for ref_text in item.emits.iter().map(|emit| emit.signal_ref()) {
+    for ref_text in item.on_complete.iter().map(|emit| emit.signal_ref()) {
         if Reference::parse(ref_text)
             .is_ok_and(|parsed| parsed.is_qualified() && parsed.kind() != Kind::Resource)
         {

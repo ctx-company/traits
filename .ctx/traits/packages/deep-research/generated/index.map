@@ -1,387 +1,387 @@
 {
   "agent:probe": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 274,
-    "end": 274
+    "start": 262,
+    "end": 262
   },
   "agent:reviewer": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 283,
+    "end": 283
+  },
+  "agent:synthesis": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 276,
+    "end": 276
+  },
+  "agent:worker": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 269,
+    "end": 269
+  },
+  "port:depth": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 300,
+    "end": 300
+  },
+  "port:quality": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
     "start": 295,
     "end": 295
   },
-  "agent:synthesis": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 288,
-    "end": 288
-  },
-  "agent:worker": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 281,
-    "end": 281
-  },
-  "port:depth": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 312,
-    "end": 312
-  },
-  "port:quality": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 307,
-    "end": 307
-  },
   "port:research-report": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 382,
-    "end": 382
+    "start": 370,
+    "end": 370
   },
   "port:topic": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 303,
-    "end": 303
+    "start": 291,
+    "end": 291
   },
   "prompt:assess-quality": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 474,
-    "end": 474
+    "start": 462,
+    "end": 462
   },
   "prompt:deliver": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 566,
-    "end": 566
+    "start": 554,
+    "end": 554
   },
   "prompt:final-review": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 541,
-    "end": 541
+    "start": 529,
+    "end": 529
   },
   "prompt:final-review-revise": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 550,
-    "end": 550
-  },
-  "prompt:plan": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 394,
-    "end": 394
-  },
-  "prompt:research-stream": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 445,
-    "end": 445
-  },
-  "prompt:revise": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 525,
-    "end": 525
-  },
-  "prompt:synthesize": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 507,
-    "end": 507
-  },
-  "prompt:triangulate": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 464,
-    "end": 464
-  },
-  "prompt:verify": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 516,
-    "end": 516
-  },
-  "prompt:write-plan": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 435,
-    "end": 435
-  },
-  "resource:citation-style": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 30,
-    "end": 30
-  },
-  "resource:evidence-table-template": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 35,
-    "end": 35
-  },
-  "resource:quality-rubric": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 20,
-    "end": 20
-  },
-  "resource:research-brief-template": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 40,
-    "end": 40
-  },
-  "resource:research-readme-template": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 45,
-    "end": 45
-  },
-  "resource:research-standards": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 15,
-    "end": 15
-  },
-  "resource:source-note-template": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 50,
-    "end": 50
-  },
-  "resource:source-quality-guide": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 25,
-    "end": 25
-  },
-  "schema:deliverables-manifest": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 140,
-    "end": 140
-  },
-  "schema:quality-dimension-score": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 165,
-    "end": 165
-  },
-  "schema:quality-dimensions": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 180,
-    "end": 180
-  },
-  "schema:quality-review": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 197,
-    "end": 197
-  },
-  "schema:quality-verdict": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 212,
-    "end": 212
-  },
-  "schema:research-deliverable": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 87,
-    "end": 87
-  },
-  "schema:research-depth-level": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 61,
-    "end": 61
-  },
-  "schema:research-finding": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 234,
-    "end": 234
-  },
-  "schema:research-quality-criteria": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 119,
-    "end": 119
-  },
-  "schema:research-quality-level": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 56,
-    "end": 56
-  },
-  "schema:research-stream": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 66,
-    "end": 66
-  },
-  "schema:verification-verdict": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 258,
-    "end": 258
-  },
-  "sequence:assess-evidence-quality": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 497,
-    "end": 497
-  },
-  "sequence:assess-evidence-quality/assess-quality": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 471,
-    "end": 471
-  },
-  "sequence:plan-cardinality-guard": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 427,
-    "end": 427
-  },
-  "sequence:plan-cardinality-guard/cardinality-check": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 419,
-    "end": 419
-  },
-  "sequence:procedure/deliver": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 563,
-    "end": 563
-  },
-  "sequence:procedure/final-review-gate": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 556,
-    "end": 556
-  },
-  "sequence:procedure/plan": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 390,
-    "end": 390
-  },
-  "sequence:procedure/plan-gate": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 425,
-    "end": 425
-  },
-  "sequence:procedure/quality-gate": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 495,
-    "end": 495
-  },
-  "sequence:procedure/research-streams": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 453,
-    "end": 453
-  },
-  "sequence:procedure/synthesize": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 504,
-    "end": 504
-  },
-  "sequence:procedure/triangulate": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 461,
-    "end": 461
-  },
-  "sequence:procedure/verification-loop": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 531,
-    "end": 531
-  },
-  "sequence:procedure/write-plan": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 432,
-    "end": 432
-  },
-  "sequence:research-one-stream": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 457,
-    "end": 457
-  },
-  "sequence:research-one-stream/research-stream": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 442,
-    "end": 442
-  },
-  "sequence:review-and-revise-final": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 558,
-    "end": 558
-  },
-  "sequence:review-and-revise-final/final-review": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
     "start": 538,
     "end": 538
   },
-  "sequence:review-and-revise-final/final-review-revise": {
+  "prompt:plan": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 547,
-    "end": 547
+    "start": 382,
+    "end": 382
   },
-  "sequence:verify-and-revise": {
+  "prompt:research-stream": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 533,
-    "end": 533
+    "start": 433,
+    "end": 433
   },
-  "sequence:verify-and-revise/revise": {
-    "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 522,
-    "end": 522
-  },
-  "sequence:verify-and-revise/verify": {
+  "prompt:revise": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
     "start": 513,
     "end": 513
   },
-  "slot:cardinality-check-receipt": {
+  "prompt:synthesize": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 495,
+    "end": 495
+  },
+  "prompt:triangulate": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 452,
+    "end": 452
+  },
+  "prompt:verify": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 504,
+    "end": 504
+  },
+  "prompt:write-plan": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 423,
+    "end": 423
+  },
+  "resource:citation-style": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "resource:evidence-table-template": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 23,
+    "end": 23
+  },
+  "resource:quality-rubric": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 8,
+    "end": 8
+  },
+  "resource:research-brief-template": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 28,
+    "end": 28
+  },
+  "resource:research-readme-template": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 33,
+    "end": 33
+  },
+  "resource:research-standards": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 3,
+    "end": 3
+  },
+  "resource:source-note-template": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 38,
+    "end": 38
+  },
+  "resource:source-quality-guide": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 13,
+    "end": 13
+  },
+  "schema:deliverables-manifest": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 128,
+    "end": 128
+  },
+  "schema:quality-dimension-score": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 153,
+    "end": 153
+  },
+  "schema:quality-dimensions": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 168,
+    "end": 168
+  },
+  "schema:quality-review": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 185,
+    "end": 185
+  },
+  "schema:quality-verdict": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 200,
+    "end": 200
+  },
+  "schema:research-deliverable": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 75,
+    "end": 75
+  },
+  "schema:research-depth-level": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 49,
+    "end": 49
+  },
+  "schema:research-finding": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 222,
+    "end": 222
+  },
+  "schema:research-quality-criteria": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 107,
+    "end": 107
+  },
+  "schema:research-quality-level": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 44,
+    "end": 44
+  },
+  "schema:research-stream": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 54,
+    "end": 54
+  },
+  "schema:verification-verdict": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 246,
+    "end": 246
+  },
+  "sequence:assess-evidence-quality": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 485,
+    "end": 485
+  },
+  "sequence:assess-evidence-quality/assess-quality": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 459,
+    "end": 459
+  },
+  "sequence:plan-cardinality-guard": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
     "start": 415,
     "end": 415
   },
-  "slot:current-stream": {
+  "sequence:plan-cardinality-guard/cardinality-check": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 341,
-    "end": 341
+    "start": 407,
+    "end": 407
   },
-  "slot:deliverables-manifest": {
+  "sequence:procedure/deliver": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 332,
-    "end": 332
+    "start": 551,
+    "end": 551
   },
-  "slot:delivery-report": {
+  "sequence:procedure/final-review-gate": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 544,
+    "end": 544
+  },
+  "sequence:procedure/plan": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
     "start": 378,
     "end": 378
   },
+  "sequence:procedure/plan-gate": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 413,
+    "end": 413
+  },
+  "sequence:procedure/quality-gate": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 483,
+    "end": 483
+  },
+  "sequence:procedure/research-streams": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 441,
+    "end": 441
+  },
+  "sequence:procedure/synthesize": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 492,
+    "end": 492
+  },
+  "sequence:procedure/triangulate": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 449,
+    "end": 449
+  },
+  "sequence:procedure/verification-loop": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 519,
+    "end": 519
+  },
+  "sequence:procedure/write-plan": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 420,
+    "end": 420
+  },
+  "sequence:research-one-stream": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 445,
+    "end": 445
+  },
+  "sequence:research-one-stream/research-stream": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 430,
+    "end": 430
+  },
+  "sequence:review-and-revise-final": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 546,
+    "end": 546
+  },
+  "sequence:review-and-revise-final/final-review": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 526,
+    "end": 526
+  },
+  "sequence:review-and-revise-final/final-review-revise": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 535,
+    "end": 535
+  },
+  "sequence:verify-and-revise": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 521,
+    "end": 521
+  },
+  "sequence:verify-and-revise/revise": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 510,
+    "end": 510
+  },
+  "sequence:verify-and-revise/verify": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 501,
+    "end": 501
+  },
+  "slot:cardinality-check-receipt": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 403,
+    "end": 403
+  },
+  "slot:current-stream": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 329,
+    "end": 329
+  },
+  "slot:deliverables-manifest": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 320,
+    "end": 320
+  },
+  "slot:delivery-report": {
+    "file": ".ctx/traits/packages/deep-research/source/index.ts",
+    "start": 366,
+    "end": 366
+  },
   "slot:final-review-verdict": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 373,
-    "end": 373
+    "start": 361,
+    "end": 361
   },
   "slot:findings": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 346,
-    "end": 346
+    "start": 334,
+    "end": 334
   },
   "slot:manifest-streams": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 327,
-    "end": 327
+    "start": 315,
+    "end": 315
   },
   "slot:plan-receipt": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 337,
-    "end": 337
+    "start": 325,
+    "end": 325
   },
   "slot:quality-score": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 359,
-    "end": 359
+    "start": 347,
+    "end": 347
   },
   "slot:quality-verdict": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 354,
-    "end": 354
+    "start": 342,
+    "end": 342
   },
   "slot:streams": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 322,
-    "end": 322
+    "start": 310,
+    "end": 310
   },
   "slot:synthesis-draft": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 364,
-    "end": 364
+    "start": 352,
+    "end": 352
   },
   "slot:topic-slug": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 318,
-    "end": 318
+    "start": 306,
+    "end": 306
   },
   "slot:triangulation": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 350,
-    "end": 350
+    "start": 338,
+    "end": 338
   },
   "slot:verification-verdict": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 368,
-    "end": 368
+    "start": 356,
+    "end": 356
   },
   "trait:deep-research": {
     "file": ".ctx/traits/packages/deep-research/source/index.ts",
-    "start": 572,
-    "end": 572
+    "start": 560,
+    "end": 560
   }
 }

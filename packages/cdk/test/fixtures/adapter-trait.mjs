@@ -1,4 +1,4 @@
-import { agent, port, procedure, prompt, schema, sequence, slot, trait } from "@ctx-traits/cdk";
+import { agent, input, port, procedure, schema, sequence, slot, trait } from "@ctx-traits/cdk";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -30,7 +30,7 @@ export const draft = trait({
     sequence: sequence.prompt({
       id: "build-result",
       agent: worker,
-      prompt: prompt.text`Return one result.`,
+      prompt: input.prompt`Return one result.`,
       output,
     }),
   }),

@@ -928,8 +928,8 @@ title = "Building"
 kind = "loop"
 sequence = "sequence:building-body"
 max-iterations = 5
-on-exhausted = "block"
-on-stop = "signal:gate-timed-out"
+on-exhausted = "abort"
+on-abort = "signal:gate-timed-out"
 
 [[procedure.sequence.until.all]]
 
@@ -967,7 +967,7 @@ count = "slot:leftovers"
 [[procedure.sequence.until.all.any]]
 iteration-at-least = 2
 
-[procedure.sequence.stop-if]
+[procedure.sequence.abort-if]
 slot = "slot:repo-gates-passed"
 field = "timed-out"
 equals = true

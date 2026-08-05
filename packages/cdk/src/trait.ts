@@ -277,7 +277,7 @@ const FAMILY_OWNED_KEYS = new Set<string>(["id", "version", "variants"]);
  * const focus = port.input.text({ id: "focus" });
  * const review = slot.text("review");
  * const output = port.output.of({ id: "review", schema: "schema:text", value: review });
- * const reviewStep = sequence.prompt("review", { text: prompt.text`Review ${diff} with a focus on ${focus}.`, output: review });
+ * const reviewStep = sequence.prompt("review", { text: input.prompt`Review ${diff} with a focus on ${focus}.`, output: review });
  * export default trait("code-review", {
  *   version: "0.1.0",
  *   summary: "Reviews a diff against a stated focus and returns a structured verdict.",

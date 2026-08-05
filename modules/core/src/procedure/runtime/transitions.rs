@@ -278,7 +278,7 @@ fn build_sequence_frame(
 
     let mut direct_signals = Vec::new();
     let mut derived_signals = Vec::new();
-    for emit in &ready.item.emits {
+    for emit in &ready.item.on_complete {
         if let Some(when) = emit.when() {
             derived_signals.push(FrameDerivedSignal {
                 signal_ref: Reference::parse(emit.signal_ref())?,
@@ -621,7 +621,7 @@ pub fn apply_step_output(
 
     let allowed_signals: BTreeSet<&str> = ready
         .item
-        .emits
+        .on_complete
         .iter()
         .filter(|emit| emit.when().is_none())
         .map(|emit| emit.signal_ref())
@@ -643,7 +643,7 @@ pub fn apply_step_output(
         report.signal_validation.push(emission);
     }
 
-    for emit in ready.item.emits.iter().filter(|emit| emit.when().is_some()) {
+    for emit in ready.item.on_complete.iter().filter(|emit| emit.when().is_some()) {
         let when = emit.when().expect("filtered");
         let loop_context = ready.loop_context.clone().unwrap_or(LoopContext {
             loop_id: ready.item.id.clone().unwrap_or_else(|| "step".to_string()),

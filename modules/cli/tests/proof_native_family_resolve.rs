@@ -9,7 +9,7 @@ use std::fs;
 use support::{ScratchRoot, git_init, run_ctx, symlink_node_modules, utf8};
 
 fn family_fixture_source() -> &'static str {
-    "import { agent, port, procedure, prompt, sequence, slot, trait, variant } from \"@ctx-traits/cdk\";\n\
+    "import { agent, input, port, procedure, sequence, slot, trait, variant } from \"@ctx-traits/cdk\";\n\
 \n\
 const summary = slot.text(\"summary\");\n\
 const output = port.output.text({ id: \"summary\", value: summary });\n\
@@ -24,7 +24,7 @@ const variantFixture = (name) => variant({\n\
     sequence: sequence.prompt({\n\
       id: \"run\",\n\
       agent: worker,\n\
-      prompt: prompt.text`Describe the task for this trait.`,\n\
+      prompt: input.prompt`Describe the task for this trait.`,\n\
       output: summary,\n\
     }),\n\
   }),\n\

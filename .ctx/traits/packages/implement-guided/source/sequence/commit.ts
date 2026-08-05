@@ -1,4 +1,4 @@
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { slot } from "../data.ts";
 const commitMessage = sequence.prompt("commit-message", {
     title: "Write the commit message (scribe)",
     agent: agent.scribe,
-    text: prompt.text`
+    text: input.prompt`
                     The build loop for the annotated assignment ${slot.annotations} has ended in an approved review, and the work is being committed. The final verdict is ${slot.verdict}, and ${slot.hunkNotes} is the walkthrough of what actually changed.
                     Write a concise commit message: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated. Draw its substance from the walkthrough's stated intents rather than re-deriving the change from the working tree.
                     Save exactly that message to the file .git/CTX_COMMITMSG at the repo root (create or overwrite it), and return the same message as your output.

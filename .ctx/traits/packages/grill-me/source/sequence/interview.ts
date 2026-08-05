@@ -1,4 +1,4 @@
-import { condition, input, prompt, sequence } from "@ctx-traits/cdk";
+import { condition, input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { port, resource, slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { port, resource, slot } from "../data.ts";
 const probe = sequence.prompt("probe", {
     title: "Ask the next question (smart-1)",
     agent: agent.interrogator,
-    text: prompt.text`
+    text: input.prompt`
                     Grill the plan ${port.plan}: a relentless interview that sharpens it until nothing vague enough to build wrong remains. Hold to the doctrine ${resource.doctrine}.
                     If the plan names a repository file, read it with your tools first. If an interview ledger is attached to this frame, every entry in it is settled — never re-ask one; on round 1 no ledger exists yet.
                     Walk the plan's decision tree in dependency order — a parent decision before the choices that hang off it — and pick the SINGLE most load-bearing unresolved point. Ask exactly one question about it: name the fork, why it matters, and what choosing wrong would cost. Attach your recommended answer with a one-line rationale — a question is a proposal to react to, never a blank prompt.
@@ -23,7 +23,7 @@ const probe = sequence.prompt("probe", {
 const settle = sequence.prompt("settle", {
     title: "Settle the question (worker)",
     agent: agent.scout,
-    text: prompt.text`
+    text: input.prompt`
                     The interview on the plan ${port.plan} produced this round's probe: ${slot.probe}. Hold to the doctrine ${resource.doctrine}.
                     If its kind is fact, settle it yourself: explore the repository and environment with your tools and answer with concrete evidence — paths, commands, observed values. Never guess. A fact you cannot ground after genuinely looking becomes an owner decision, with a note of where you looked.
                     If its kind is decision, do NOT decide it. Sharpen it for the owner instead: the viable options, the tradeoff each carries, anything the repository already constrains — and keep the interrogator's recommendation attached.

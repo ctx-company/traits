@@ -247,7 +247,7 @@ fn procedure_has_signal_emits(trait_ref: &Trait) -> bool {
     trait_ref
         .procedure
         .as_ref()
-        .is_some_and(|proc| proc.sequence.iter().any(|item| !item.emits.is_empty()))
+        .is_some_and(|proc| proc.sequence.iter().any(|item| !item.on_complete.is_empty()))
 }
 
 fn format_agents(
@@ -393,7 +393,7 @@ fn format_signals(
             );
             let emitted_by = trait_ref.procedure.as_ref().map(|proc| {
                 proc.sequence.iter().enumerate().filter_map(|(i, item)| {
-                    if item.emits.iter().any(|emit| emit.signal_ref() == format!("signal:{}", s.id)) {
+                    if item.on_complete.iter().any(|emit| emit.signal_ref() == format!("signal:{}", s.id)) {
                         let item_id = item.id.as_deref().unwrap_or("-");
                         let title = sanitize_model_text(
                             &item.title,
@@ -426,7 +426,7 @@ fn format_signals(
     if let Some(proc) = &trait_ref.procedure {
         let mut dep_pending: Vec<String> = Vec::new();
         for (i, item) in proc.sequence.iter().enumerate() {
-            for (j, emit) in item.emits.iter().enumerate() {
+            for (j, emit) in item.on_complete.iter().enumerate() {
                 let ref_text = emit.signal_ref();
                 if !ref_text.starts_with("signal:") {
                     continue;
@@ -446,7 +446,7 @@ fn format_signals(
                     // the body instead.
                     let safe_ref = sanitize_model_text(
                         ref_text,
-                        &format!("procedure.sequence[{i}].emits[{j}]"),
+                        &format!("procedure.sequence[{i}].on-complete[{j}]"),
                         warnings,
                         normalizations,
                     );
@@ -464,7 +464,7 @@ fn format_signals(
                         "signal",
                         &[],
                         &body,
-                        &format!("procedure.sequence[{i}].emits[{j}].dependency-pending"),
+                        &format!("procedure.sequence[{i}].on-complete[{j}].dependency-pending"),
                         trait_ref.id.as_str(),
                         warnings,
                         normalizations,
@@ -624,22 +624,22 @@ fn relation_when_sanitized<T: AsRef<str>>(
     sanitized.join(", ")
 }
 
-fn format_sanitized_emits(
-    emits: &[String],
+fn format_sanitized_on_complete(
+    on_complete: &[String],
     seq_index: usize,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
 ) -> String {
-    if emits.is_empty() {
-        return "  Emits: none".to_string();
+    if on_complete.is_empty() {
+        return "  On-complete: none".to_string();
     }
-    let parts: Vec<String> = emits
+    let parts: Vec<String> = on_complete
         .iter()
         .enumerate()
         .map(|(j, raw)| {
             let safe = sanitize_model_text(
                 raw,
-                &format!("procedure.sequence[{seq_index}].emits[{j}]"),
+                &format!("procedure.sequence[{seq_index}].on-complete[{j}]"),
                 warnings,
                 normalizations,
             );
@@ -1078,13 +1078,13 @@ fn format_procedure(
                 if item.until.is_some() {
                     lines.push("  Loop exit: typed until guard declared".to_string());
                 }
-                if item.stop_if.is_some() {
-                    let refs = item.on_stop.as_ref().map(crate::r#trait::procedure::ExhaustionTarget::signals).unwrap_or_default();
+                if item.abort_if.is_some() {
+                    let refs = item.on_abort.as_ref().map(crate::r#trait::procedure::ExhaustionTarget::signals).unwrap_or_default();
                     if refs.is_empty() {
-                        lines.push("  Loop stop: typed stop-if guard declared".to_string());
+                        lines.push("  Loop stop: typed abort-if guard declared".to_string());
                     } else {
                         lines.push(format!(
-                            "  Loop stop: typed stop-if guard declared, on-stop={}",
+                            "  Loop stop: typed abort-if guard declared, on-abort={}",
                             refs.join(",")
                         ));
                     }
@@ -1176,12 +1176,12 @@ fn format_procedure(
             .filter(|text| !text.is_empty())
             .map_or("none".to_string(), |text| text);
         lines.push(format!("  Format: {format_tags}"));
-        let emits: Vec<String> = item
-            .emits
+        let on_complete: Vec<String> = item
+            .on_complete
             .iter()
             .map(|emit| emit.signal_ref().to_string())
             .collect();
-        lines.push(format_sanitized_emits(&emits, i, warnings, normalizations));
+        lines.push(format_sanitized_on_complete(&on_complete, i, warnings, normalizations));
     }
 
     if !trait_ref.sequences.is_empty() {

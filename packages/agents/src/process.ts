@@ -10,7 +10,7 @@ import type {
   SlotHandle,
   SlotWithFields,
 } from "@ctx-traits/cdk";
-import { condition, input, operation, prompt, schema, sequence, slot, withHiddenField } from "@ctx-traits/cdk";
+import { condition, input, operation, schema, sequence, slot, withHiddenField } from "@ctx-traits/cdk";
 
 /** The kit's minimal produce-review verdict value: `schema.decision()`'s stable `approved|revise` vocabulary plus the blockers that justify a `revise`. */
 export type ReviewerVerdictValue = {
@@ -89,7 +89,7 @@ export type GuardedProductionReviewSeat = GuardedProductionRole & {
    */
   readonly extraInputs?: readonly (SlotHandle | OptionalSlotRead)[];
   /** Optional conditional signal emitted with this review's accepted output. */
-  readonly emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue; };
+  readonly onComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue; };
 };
 
 export type GuardedProductionOptions<Produces> = {
@@ -113,9 +113,9 @@ export type GuardedProductionOptions<Produces> = {
   readonly rounds: number;
   readonly onExhausted?: Parameters<SequenceFunction["loop"]>[1]["onExhausted"];
   /** Forwarded verbatim to `sequence.loop`'s own early-stop guard; undeclared for every caller that never passes it, so the built loop stays byte-identical there. */
-  readonly stopIf?: GuardValue;
-  /** Forwarded verbatim to `sequence.loop`'s own early-stop signal(s); requires `stopIf`. */
-  readonly onStop?: Parameters<SequenceFunction["loop"]>[1]["onStop"];
+  readonly abortIf?: GuardValue;
+  /** Forwarded verbatim to `sequence.loop`'s own early-stop signal(s); requires `abortIf`. */
+  readonly onAbort?: Parameters<SequenceFunction["loop"]>[1]["onAbort"];
 };
 
 export type GuardedProductionHandle = SequenceHandle & {
@@ -149,8 +149,8 @@ export type GuardedProductionHandle = SequenceHandle & {
  * const planning = guardedProduction({
  *   id: "planning",
  *   produces: plan,
- *   produce: { agent: worker, text: prompt.text`Draft a plan.` },
- *   review: { agent: reviewer, text: prompt.text`Review ${plan}.` },
+ *   produce: { agent: worker, text: input.prompt`Draft a plan.` },
+ *   review: { agent: reviewer, text: input.prompt`Review ${plan}.` },
  *   rounds: 3,
  * });
  * ```
@@ -168,8 +168,8 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
     minRounds,
     rounds,
     onExhausted,
-    stopIf,
-    onStop,
+    abortIf,
+    onAbort,
   } = options;
   if (minRounds !== undefined && carry === undefined) {
     throw new Error("guardedProduction: \"minRounds\" requires \"carry\"");
@@ -216,7 +216,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
       text: seat.text,
       output: seat.extraOutputs ? [verdicts[index], ...seat.extraOutputs] : verdicts[index],
       input: [input.optional(verdicts[index]), ...(seat.extraInputs ?? [])],
-      ...(seat.emits === undefined ? {} : { emits: seat.emits }),
+      ...(seat.onComplete === undefined ? {} : { onComplete: seat.onComplete }),
     })
   );
   const sealed = carry === undefined ? undefined : slot.boolean(`${id}-sealed`);
@@ -260,8 +260,8 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
     until,
     iterations: rounds,
     ...(onExhausted === undefined ? {} : { onExhausted }),
-    ...(stopIf === undefined ? {} : { stopIf }),
-    ...(onStop === undefined ? {} : { onStop }),
+    ...(abortIf === undefined ? {} : { abortIf }),
+    ...(onAbort === undefined ? {} : { onAbort }),
   });
   // Not the plain `Object.assign(loopHandle, { verdict })` idiom from
   // `port.ts`/`agent.ts`: those merge onto a plain lookup object, but
@@ -336,7 +336,7 @@ export function commitTail(options: CommitTailOptions): readonly SequenceHandle[
     agent: scribeAgent,
     text: ownedScribe
       ? ownedScribe.text
-      : prompt.text`
+      : input.prompt`
       Read the reviewer verdict ${verdict} first. If its status is revise, say so plainly and end with an "Unresolved reviewer blockers" section quoting each of its blockers verbatim.
       Write a concise commit message for the completed work based on the work summary ${summary} and the verdict.
       Return exactly that message as your output; the runtime injects it into the git commit step.`,

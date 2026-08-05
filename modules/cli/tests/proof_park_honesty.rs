@@ -16,7 +16,7 @@
 //! describes, driven by the runtime's native loop-exhaustion mechanism
 //! (`on-exhausted`), never a fixture-authored escalation branch:
 //!
-//! - `on-exhausted = "block"`: the loop's own native block behavior
+//! - `on-exhausted = "abort"`: the loop's own native abort behavior
 //!   (`Status::Blocked`, `stop-reason.reason = "max-iterations-exhausted"`)
 //!   IS the P414 "parked" case — no commit, a typed park-report evidence
 //!   entry citing the reviewer's wall id verbatim, and (only when a merge
@@ -484,7 +484,7 @@ slot = "slot:repo-gates-passed"
 field = "ok"
 equals = true
 
-[procedure.sequence.stop-if]
+[procedure.sequence.abort-if]
 slot = "slot:repo-gates-passed"
 field = "timed-out"
 equals = true
@@ -593,7 +593,7 @@ fn setup_fixture(
 
 /// Fork 1 (blocked) + fork 3 (standing wall): a reviewer that always
 /// revises, citing a wall, drives the fixture's own native
-/// `on-exhausted = "block"` path — `Status::Blocked`, no commit, and a
+/// `on-exhausted = "abort"` path — `Status::Blocked`, no commit, and a
 /// `slot:park-report` evidence entry citing the wall id verbatim. A second
 /// phase citing the SAME wall is then refused at dispatch preflight, before
 /// any session exists.
@@ -604,7 +604,7 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
     let (scratch, repo, home) = setup_fixture(
         "p461-park-blocked",
         id,
-        &fixture_trait_toml(id, 2, "block"),
+        &fixture_trait_toml(id, 2, "abort"),
         &[("P900", Some(WALL)), ("P901", Some(WALL))],
     );
     let runs_root = global_runs_root(&repo, &home);
@@ -759,7 +759,7 @@ fn batch_halts_at_the_first_blocked_phase() {
     let (scratch, repo, home) = setup_fixture(
         "p461-park-batch-exit",
         id,
-        &fixture_trait_toml(id, 2, "block"),
+        &fixture_trait_toml(id, 2, "abort"),
         &[("P960", Some(WALL)), ("P961", Some(WALL))],
     );
     let source_root = support::repo_root();
@@ -1035,7 +1035,7 @@ title = "Dual reviewed pass"
 kind = "loop"
 sequence = "sequence:review-loop-dual"
 max-iterations = {max_iterations}
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"
@@ -1253,7 +1253,7 @@ fn guarded_exhaustion_refreshes_project_written_park_report_output() {
     let (scratch, repo, home) = setup_fixture(
         "p461-park-guarded-call",
         id,
-        &fixture_trait_toml(id, 1, "block"),
+        &fixture_trait_toml(id, 1, "abort"),
         &[("P980", None)],
     );
     let ledger_path = scratch.path().join("guarded-call.json");
@@ -1322,7 +1322,7 @@ fn guarded_exhaustion_refreshes_project_written_park_report_output() {
 fn guarded_timed_out_stop_refreshes_project_written_park_report_output() {
     let id = "implement-fixture-park-guarded-stop";
     let trait_toml =
-        fixture_trait_toml(id, 1, "block").replace("timed-out = false", "timed-out = true");
+        fixture_trait_toml(id, 1, "abort").replace("timed-out = false", "timed-out = true");
     let (scratch, repo, home) =
         setup_fixture("p461-park-guarded-stop", id, &trait_toml, &[("P981", None)]);
     let ledger_path = scratch.path().join("guarded-stop.json");

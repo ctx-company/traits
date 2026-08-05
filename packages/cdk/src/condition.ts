@@ -70,7 +70,7 @@ export type CountComparisonValue = number | ConditionCountFunction;
 /**
  * Guard builder methods reachable as `condition.*`, each returning the JSON
  * guard shape a `sequence.when`/`sequence.loop` accepts for `if`/`until`/
- * `stopIf`. The single-line `@example`s on the individual methods below all
+ * `abortIf`. The single-line `@example`s on the individual methods below all
  * reuse this declared context:
  * @example
  * ```ts
@@ -262,7 +262,7 @@ export interface ConditionOutputFunction {
    * @example
    * ```ts
    * const review = slot.any("review");
-   * sequence.prompt("review", { text: prompt.text`Review the diff.`, output: review });
+   * sequence.prompt("review", { text: input.prompt`Review the diff.`, output: review });
    * condition.output.fieldIs(review, "status", "approved");
    * ```
    */
@@ -284,7 +284,7 @@ export interface ConditionOutputFunction {
 /**
  * Creates inline guards and named condition declarations: the boolean
  * expressions that gate a `sequence.when` branch or a `sequence.loop`'s
- * `until`/`stopIf`.
+ * `until`/`abortIf`.
  *
  * A guard written as raw JSON is a `{ slot, equals }`-shaped object with no
  * static check that the slot exists, that its schema even has the field
@@ -310,7 +310,7 @@ export interface ConditionOutputFunction {
  *
  * Every builder below returns a `GuardHandle`: a branded value backed by the
  * closed canonical guard-predicate shape. A guard position (`if`, `when`,
- * `until`, `stop-if`, quorum `guard`) never accepts a raw object literal —
+ * `until`, `abort-if`, quorum `guard`) never accepts a raw object literal —
  * a typo'd predicate key (`eqals`, `atLeast` vs `at-least`) is a `tsc` error
  * at the call site instead of a silently-inert or synth-time failure.
  * `condition.unsafe(json)` is the one sanctioned raw-JSON escape, for
@@ -422,7 +422,7 @@ export const condition: ConditionFunction = {
  * `sequence.check(...)` step, that step as a gate that must run immediately
  * before the guard is evaluated. The single shared home for check-as-guard
  * polymorphism (CDK grammar v2 rule 6): `sequence.branch`'s `check` field
- * routes through this, and a future loop `until`/`stopIf` rider reuses it
+ * routes through this, and a future loop `until`/`abortIf` rider reuses it
  * rather than re-implementing the discrimination.
  */
 export function lowerCheckGuard(

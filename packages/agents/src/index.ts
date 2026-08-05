@@ -67,7 +67,7 @@ export function clerkRole(id: string, description: string): AgentHandle {
  * Shared scope-split doctrine for the draft step of an implement loop: classify every checklist
  * item as agent-doable or owner-only BEFORE any work exists, so capability walls become a typed
  * owner-items receipt instead of a terminal blocker. Pure static text (no port/slot refs) — safe
- * to splice into any draft-step `input.text` source via `${SCOPE_SPLIT_DOCTRINE}`.
+ * to splice into any draft-step `input.prompt` source via `${SCOPE_SPLIT_DOCTRINE}`.
  */
 export const SCOPE_SPLIT_DOCTRINE =
   `Open the draft with a SCOPE SPLIT section classifying EVERY checklist item and Done-when clause of the task into exactly one of two piles. AGENT-DOABLE (the default): a competent engineer with this repository and a shell could complete and verify it here. OWNER-ONLY: no amount of in-run effort can complete it, for exactly one of these reasons — gui-or-visual (requires seeing or operating a real screen), paid-or-live-execution (requires spending money or an execution only the owner may authorize), owner-decision (requires an authority call: publishing policy, credentials, a trade-off the task reserves to the owner), or contract-conflict (the item contradicts landed code or an authoritative rule, and resolving the contradiction is itself the owner's call). For each OWNER-ONLY item record: the item, its one reason class, one sentence why no in-run effort suffices, the SUBSTITUTE EVIDENCE the worker must produce in its place (the closest verification a shell allows — automated tests, dry runs, static checks; "none possible" only when truly nothing applies), and the CLOSE-OUT — the exact command the owner runs or decision the owner makes to finish the item. Classify honestly: an item that is merely hard, slow, or tedious is AGENT-DOABLE, and reviewers will promote any owner-only claim a shell could in fact satisfy. The split is the run's scope contract: the worker owes 100% of the agent-doable pile plus the named substitute evidence for the rest.`;
@@ -81,7 +81,7 @@ export const SCOPE_SPLIT_DOCTRINE =
  * binds its agreed design and architecture dialect); the `TASK_` forms are the implement-family
  * versions, where the task file from the task board is the sole contract and no separate
  * rule-authority document exists (PRODUCT.md retired 2026-07-31). Not exported — compose the
- * public doctrines below instead of splicing these directly into an `input.text`.
+ * public doctrines below instead of splicing these directly into an `input.prompt`.
  */
 const RECURRENCE_VERIFICATION =
   `Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.`;
@@ -104,7 +104,7 @@ const STATUS_ADVISORY_SPLIT =
  * Shared blocker-reporting and escalation doctrine for the implement-family typed multi-reviewer
  * refinement loop: how to judge severity, report a blocker, and record owner-triage escalation.
  * The task file in `.internal/tasks/` is the sole contract — there is no separate rule-authority
- * document. Pure static text (no port/slot refs) — safe to splice into any `input.text`
+ * document. Pure static text (no port/slot refs) — safe to splice into any `input.prompt`
  * review-step source via `${REVIEW_VERDICT_DOCTRINE}`, next to the review's own task-specific
  * opening line and `{taskBrief}` placeholder. Composed from the private paragraphs above plus
  * this doctrine's own SCOPE SPLIT, owner-items, cross-task-seam, and escalation machinery.
@@ -132,7 +132,7 @@ ${STATUS_ADVISORY_SPLIT}`;
  * strict variant). Since the 2026-07-31 task-board migration this doctrine also DIVERGES from
  * `REVIEW_VERDICT_DOCTRINE` by design: implement retired its rule-authority document, so only
  * this fragment still carries `RULE_CITATION_VERIFICATION` and the `{productBrief}` binding.
- * Pure static text (no port/slot/family refs) — safe to splice into any `input.text`
+ * Pure static text (no port/slot/family refs) — safe to splice into any `input.prompt`
  * review-step source via `${INTEGRITY_DOCTRINE}`, next to the review's own opening line and
  * `{phaseBrief}`/`{productBrief}` placeholders. When a `VARIANT_DOCTRINE` fragment references
  * `REVIEW_VERDICT_DOCTRINE`, that means this composed `INTEGRITY_DOCTRINE` baseline wherever a
@@ -154,7 +154,7 @@ ${STATUS_ADVISORY_SPLIT}`;
  * phase contract or a house-rules document — that binding is itself dishonest and tells the
  * reviewer to verify rules against something that isn't a rule-authority source. Carries no
  * paragraph not already in `INTEGRITY_DOCTRINE`. Pure static text (no port/slot/family refs) —
- * safe to splice into any `input.text` review-step source via `${CODE_INTEGRITY_DOCTRINE}`.
+ * safe to splice into any `input.prompt` review-step source via `${CODE_INTEGRITY_DOCTRINE}`.
  */
 export const CODE_INTEGRITY_DOCTRINE = `${RECURRENCE_VERIFICATION}
                     Inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
@@ -171,7 +171,7 @@ ${STATUS_ADVISORY_SPLIT}`;
  * generic checklist formula is layered on top — while genuine-defect, house-rule, required-gate,
  * and duplication blocking stay unconditional exactly as `REVIEW_VERDICT_DOCTRINE` states them.
  * Pure static text (no port/slot/family refs) — safe to splice a selected fragment unchanged into
- * any review-step `input.text` source via `${QUICK_VARIANT_DOCTRINE}` (or
+ * any review-step `input.prompt` source via `${QUICK_VARIANT_DOCTRINE}` (or
  * `DEFAULT_VARIANT_DOCTRINE`/`STRICT_VARIANT_DOCTRINE`), alongside `REVIEW_VERDICT_DOCTRINE`.
  *
  * Exported as four plain named consts, not a `VARIANT_DOCTRINE` taxonomy map keyed on variant
@@ -369,7 +369,7 @@ export const ownerItemSchema: SchemaHandle = schema.object(
  * Shared leftover-review doctrine: the two questions a reviewer applies to
  * every worker-proposed leftover before it may enter `slot:leftovers`. Pure
  * static text (no port/slot/family refs) — safe to splice into any
- * `input.text` review-step source via `${LEFTOVER_DOCTRINE}`. Kept
+ * `input.prompt` review-step source via `${LEFTOVER_DOCTRINE}`. Kept
  * separate from `INTEGRITY_DOCTRINE`/`CODE_INTEGRITY_DOCTRINE` so families
  * that do not adopt the leftover contract (refactor, auto-research) are
  * never silently bound to this second typed output.

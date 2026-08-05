@@ -3677,7 +3677,7 @@ mod exhaustion_disposition_tests {
     use crate::procedure::runtime::SignalSource;
 
     /// One bounded loop (budget exhausts after exactly one round, since
-    /// there is no `until`/`stop-if` to short-circuit it) followed by a
+    /// there is no `until`/`abort-if` to short-circuit it) followed by a
     /// step, so exhaustion's continue path has somewhere to prove it
     /// actually proceeds. `{ON_EXHAUSTED}` is substituted per test.
     fn fixture_toml(on_exhausted_line: &str) -> String {
@@ -3917,7 +3917,7 @@ output = ["slot:final"]
 
     #[test]
     fn block_still_stops_the_run_and_emits_no_signal() {
-        let trait_ref = fixture_trait("on-exhausted = \"block\"");
+        let trait_ref = fixture_trait("on-exhausted = \"abort\"");
         let session = start_session(&trait_ref, false);
 
         let after_loop = submit_current(
@@ -4150,19 +4150,19 @@ output = ["slot:final"]
         );
     }
 
-    /// P334 regression fixture: a `stop-if` guard with a declared `on-stop`
+    /// P334 regression fixture: a `abort-if` guard with a declared `on-abort`
     /// signal, exercised end to end (runtime emission → ledger-contract
     /// acceptance) — the layer the recurrence breaker's own unit tests
     /// (validate.rs) never reach, reusing this module's `start_session`/
     /// `submit_current` harness rather than a new one.
-    fn stop_if_fixture_trait() -> crate::r#trait::Trait {
+    fn abort_if_fixture_trait() -> crate::r#trait::Trait {
         toml::from_str(
             r#"
-id = "loop-stop-if-fixture"
+id = "loop-abort-if-fixture"
 schema-version = "0.2"
 version = "0.1.0"
 name = "Loop Stop-If Fixture"
-summary = "P334 regression fixture: loop stop-if/on-stop disposition and signal emission."
+summary = "P334 regression fixture: loop abort-if/on-abort disposition and signal emission."
 
 [[agent]]
 id = "worker"
@@ -4189,7 +4189,7 @@ allowed = [
 
 [[signal]]
 id = "recurring-blocker-unresolved"
-description = "The stop-if guard matched: the same blocker recurred past the breaker's round threshold."
+description = "The abort-if guard matched: the same blocker recurred past the breaker's round threshold."
 
 [prompt.review]
 text = "Produce the typed verdict object."
@@ -4202,7 +4202,7 @@ prompt = "prompt:review"
 output = ["slot:verdict"]
 
 [procedure]
-description = "One bounded loop that stops early on a stop-if match instead of spending its full iteration budget."
+description = "One bounded loop that stops early on an abort-if match instead of spending its full iteration budget."
 
 [[procedure.sequence]]
 id = "verdict-loop"
@@ -4210,25 +4210,25 @@ title = "Verdict loop"
 kind = "loop"
 sequence = "sequence:loop-body"
 max-iterations = 3
-on-stop = "signal:recurring-blocker-unresolved"
+on-abort = "signal:recurring-blocker-unresolved"
 
 [procedure.sequence.until]
 slot = "slot:verdict"
 field = "status"
 equals = "approved"
 
-[procedure.sequence.stop-if]
+[procedure.sequence.abort-if]
 slot = "slot:verdict"
 field = "status"
 equals = "revise"
 "#,
         )
-        .expect("stop-if fixture trait parses")
+        .expect("abort-if fixture trait parses")
     }
 
     #[test]
-    fn declared_on_stop_signal_is_emitted_in_place_of_the_canonical_signal() {
-        let trait_ref = stop_if_fixture_trait();
+    fn declared_on_abort_signal_is_emitted_in_place_of_the_canonical_signal() {
+        let trait_ref = abort_if_fixture_trait();
         let session = start_session(&trait_ref, false);
 
         let stopped = submit_current(
@@ -4240,7 +4240,7 @@ equals = "revise"
         assert_eq!(
             stopped.session.status,
             Status::Blocked,
-            "a stop-if match halts the run blocked"
+            "an abort-if match halts the run blocked"
         );
         assert_eq!(
             stopped
@@ -4248,7 +4248,7 @@ equals = "revise"
                 .stop_reason
                 .as_ref()
                 .map(|reason| reason.reason.as_str()),
-            Some("stop-if-matched"),
+            Some("abort-if-matched"),
             "the runtime's stop reason stays the accurate mechanism regardless of authoring"
         );
         let emitted: Vec<&str> = stopped
@@ -4260,7 +4260,7 @@ equals = "revise"
         assert_eq!(
             emitted,
             vec!["signal:recurring-blocker-unresolved"],
-            "the declared on-stop signal must be emitted in place of the canonical signal:stop-if-matched"
+            "the declared on-abort signal must be emitted in place of the canonical signal:abort-if-matched"
         );
 
         let report = crate::procedure::runtime::validate_run_ledger_contract(
@@ -4270,7 +4270,7 @@ equals = "revise"
         .expect("ledger contract check runs");
         assert!(
             report.diagnostics.is_empty(),
-            "the declared on-stop signal must be a ledger-contract-allowed emission: {:?}",
+            "the declared on-abort signal must be a ledger-contract-allowed emission: {:?}",
             report.diagnostics
         );
     }

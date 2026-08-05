@@ -636,7 +636,7 @@ fn validate_sequence_items_guard_preflight(
         let Some(item_obj) = item.as_object() else {
             continue;
         };
-        for field in ["until", "stop-if"] {
+        for field in ["until", "abort-if"] {
             validate_guard_shape_preflight(
                 item_obj.get(field),
                 &format!("{field_path}[{index}].{field}"),

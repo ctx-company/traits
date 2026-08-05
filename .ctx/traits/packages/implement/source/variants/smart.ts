@@ -1,5 +1,5 @@
 import { blockerSchema, commitTail, guardedProduction, planAmendmentSchema, SCOPE_SPLIT_DOCTRINE, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, method, port, procedure, prompt, schema, sequence, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { condition, input, intent, method, port, procedure, schema, sequence, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
 import {
     buildPlanReviewText,
     buildProducePrompt,
@@ -12,7 +12,7 @@ import {
     deriveParkReportStep,
     draft,
     gateTimedOut,
-    gateTimedOutStopIf,
+    gateTimedOutAbortIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
@@ -120,7 +120,7 @@ const smartProduceText = buildProducePrompt({
 const researchStep = sequence.prompt("research", {
     title: "Research prior art (smart-1)",
     agent: smart1,
-    text: prompt.text`
+    text: input.prompt`
         Before drafting for ${task}, research prior art: how comparable tasks in this codebase's history solved a similar problem, and any external precedent worth grounding the draft in. Use web-capable tools if available.
         Keep this to one pass — the loop budget is unchanged from the default flow; smart means a better-informed draft, not more rounds.
         Return your research notes: what you found, its relevance, and anything that should constrain the coming draft.`,
@@ -149,11 +149,11 @@ const building = guardedProduction({
     carry: leftovers,
     minRounds: 3,
     rounds: 5,
-    onExhausted: "block",
+    onExhausted: "abort",
     // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
     // round can fix — stop here rather than grinding toward a doomed park.
-    stopIf: gateTimedOutStopIf,
-    onStop: gateTimedOut,
+    abortIf: gateTimedOutAbortIf,
+    onAbort: gateTimedOut,
 });
 
 export default variant({

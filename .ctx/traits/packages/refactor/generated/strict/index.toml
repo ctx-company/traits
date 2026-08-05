@@ -548,7 +548,7 @@ title = "Doubly-reviewed verbatim refinement"
 kind = "loop"
 sequence = "sequence:refine-refactor"
 max-iterations = 6
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"

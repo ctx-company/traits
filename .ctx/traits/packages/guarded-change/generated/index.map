@@ -1,212 +1,212 @@
 {
   "agent:clerk": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 22,
-    "end": 22
+    "start": 5,
+    "end": 5
   },
   "agent:scribe": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 41,
-    "end": 41
+    "start": 24,
+    "end": 24
   },
   "agent:smart-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 10,
+    "end": 10
   },
   "agent:smart-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 15,
+    "end": 15
   },
   "agent:worker": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 37,
-    "end": 37
+    "start": 20,
+    "end": 20
   },
   "port:change-request": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 48,
-    "end": 48
+    "start": 31,
+    "end": 31
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 146,
-    "end": 146
+    "start": 129,
+    "end": 129
   },
   "port:target": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 52,
-    "end": 52
+    "start": 35,
+    "end": 35
   },
   "prompt:apply-fixes": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 228,
+    "end": 228
+  },
+  "prompt:commit-message": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
     "start": 245,
     "end": 245
   },
-  "prompt:commit-message": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 262,
-    "end": 262
-  },
   "prompt:draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 193,
-    "end": 193
+    "start": 176,
+    "end": 176
   },
   "prompt:implement": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 212,
-    "end": 212
+    "start": 195,
+    "end": 195
   },
   "prompt:review-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 225,
-    "end": 225
+    "start": 208,
+    "end": 208
   },
   "prompt:review-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 235,
-    "end": 235
+    "start": 218,
+    "end": 218
   },
   "prompt:review-draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 203,
-    "end": 203
+    "start": 186,
+    "end": 186
   },
   "prompt:understand": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 184,
-    "end": 184
+    "start": 167,
+    "end": 167
   },
   "resource:done-checklist": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 64,
-    "end": 64
+    "start": 47,
+    "end": 47
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 58,
-    "end": 58
+    "start": 41,
+    "end": 41
   },
   "schema:decision": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 114,
-    "end": 114
+    "start": 97,
+    "end": 97
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 111,
-    "end": 111
+    "start": 94,
+    "end": 94
   },
   "sequence:procedure/commit-message": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 259,
-    "end": 259
-  },
-  "sequence:procedure/draft": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 190,
-    "end": 190
-  },
-  "sequence:procedure/git-commit": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 276,
-    "end": 276
-  },
-  "sequence:procedure/git-stage": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 270,
-    "end": 270
-  },
-  "sequence:procedure/implement": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 209,
-    "end": 209
-  },
-  "sequence:procedure/refinement-loop": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 219,
-    "end": 219
-  },
-  "sequence:procedure/review-draft": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 200,
-    "end": 200
-  },
-  "sequence:procedure/understand": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 181,
-    "end": 181
-  },
-  "sequence:refine-work": {
-    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 221,
-    "end": 221
-  },
-  "sequence:refine-work/apply-fixes": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
     "start": 242,
     "end": 242
   },
+  "sequence:procedure/draft": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 173,
+    "end": 173
+  },
+  "sequence:procedure/git-commit": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 259,
+    "end": 259
+  },
+  "sequence:procedure/git-stage": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 253,
+    "end": 253
+  },
+  "sequence:procedure/implement": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 192,
+    "end": 192
+  },
+  "sequence:procedure/refinement-loop": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 202,
+    "end": 202
+  },
+  "sequence:procedure/review-draft": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 183,
+    "end": 183
+  },
+  "sequence:procedure/understand": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 164,
+    "end": 164
+  },
+  "sequence:refine-work": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 204,
+    "end": 204
+  },
+  "sequence:refine-work/apply-fixes": {
+    "file": ".ctx/traits/packages/guarded-change/source/index.ts",
+    "start": 225,
+    "end": 225
+  },
   "sequence:refine-work/review-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 222,
-    "end": 222
+    "start": 205,
+    "end": 205
   },
   "sequence:refine-work/review-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 232,
-    "end": 232
+    "start": 215,
+    "end": 215
   },
   "slot:commit-message": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 96,
-    "end": 96
+    "start": 79,
+    "end": 79
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 105,
-    "end": 105
+    "start": 88,
+    "end": 88
   },
   "slot:draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 82,
-    "end": 82
+    "start": 65,
+    "end": 65
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 135,
-    "end": 135
+    "start": 118,
+    "end": 118
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 140,
-    "end": 140
+    "start": 123,
+    "end": 123
   },
   "slot:reviewed-draft": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 87,
-    "end": 87
+    "start": 70,
+    "end": 70
   },
   "slot:scope-brief": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 76,
-    "end": 76
+    "start": 59,
+    "end": 59
   },
   "slot:stage-output": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 101,
-    "end": 101
+    "start": 84,
+    "end": 84
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 91,
-    "end": 91
+    "start": 74,
+    "end": 74
   },
   "trait:guarded-change": {
     "file": ".ctx/traits/packages/guarded-change/source/index.ts",
-    "start": 152,
-    "end": 152
+    "start": 135,
+    "end": 135
   }
 }

@@ -1,21 +1,4 @@
-import {
-    agent,
-    condition,
-    dependency,
-    intent,
-    method,
-    port,
-    procedure,
-    prompt,
-    ref,
-    resource,
-    schema,
-    sequence,
-    slot,
-    tone,
-    trait,
-    verbosity,
-} from "@ctx-traits/cdk";
+import { agent, condition, dependency, input, intent, method, port, procedure, ref, resource, schema, sequence, slot, tone, trait, verbosity } from "@ctx-traits/cdk";
 
 // --- Agents: roles as data. The host binds each to a model/harness in ctx.toml,
 // so the same trait runs across families; the two reviewers are different brains. ---
@@ -181,7 +164,7 @@ export default trait("guarded-change", {
             sequence.prompt("understand", {
                 title: "Distil the request (clerk)",
                 agent: clerk,
-                text: prompt.text`
+                text: input.prompt`
                     Distil the request "${changeRequest}" for ${target} into a scope brief.
                     State, concretely: what the change must accomplish, its acceptance criteria (how we will know it is done), and the specific files or areas in ${target} it touches. Inspect ${target} with your tools to ground this — do not guess.
                     Every later step works from this brief instead of the raw request, so anything you leave out is lost. Return only the brief.`,
@@ -190,7 +173,7 @@ export default trait("guarded-change", {
             sequence.prompt("draft", {
                 title: "Draft the change (smart-1)",
                 agent: smart1,
-                text: prompt.text`
+                text: input.prompt`
                     Create an implementation draft for the change described in ${brief}.
                     Hold it to the shared standards ${codingStandards} and the review rubric ${reviewRubric}.
                     The draft must cover: scope (exactly what the request asks, nothing more), files to touch, approach, the validation plan (which of the project's own tests/build/lint prove it — including a test that fails before the change and passes after), and risks.
@@ -200,7 +183,7 @@ export default trait("guarded-change", {
             sequence.prompt("review-draft", {
                 title: "Rewrite the draft (smart-2)",
                 agent: smart2,
-                text: prompt.text`
+                text: input.prompt`
                     Review the draft ${draft} for the change in ${brief} against the standards ${codingStandards} and the review rubric ${reviewRubric}.
                     Return a complete NEW draft of strictly higher quality — the improved draft itself, not review notes.
                     Tighten scope to the request, correct anything that violates the standards, and make the validation plan explicit: name the test that will fail before the change and pass after it.`,
@@ -209,7 +192,7 @@ export default trait("guarded-change", {
             sequence.prompt("implement", {
                 title: "Implement (worker)",
                 agent: worker,
-                text: prompt.text`
+                text: input.prompt`
                     Implement the change in ${brief} following the agreed draft ${reviewedDraft}.
                     Hold to the shared standards ${codingStandards}: never weaken or delete a test to pass, add no unjustified dependency, keep the diff scoped to the request.
                     Run the project's own gates — its tests, build, and linter — with your tools before reporting; include a test that fails before your change and passes after it.
@@ -222,7 +205,7 @@ export default trait("guarded-change", {
                     sequence.prompt("review-1", {
                         title: "Review work (smart-1)",
                         agent: smart1,
-                        text: prompt.text`
+                        text: input.prompt`
                             Review the implemented work for the change in ${brief} against the agreed draft ${reviewedDraft}. Current work summary: ${workSummary}.
                             Consult the standards ${codingStandards} and the review guidance ${reviewGuidance}, score against the rubric ${reviewRubric}, and inspect the actual working tree with your tools — never review the summary alone; re-run the project's gates if the summary does not prove they pass.
                             Classify every finding by severity per ${reviewGuidance}: a BLOCKER makes the change genuinely unmergeable (a correctness bug, a failing gate, a standards violation, or work the request did not ask for); everything else — naming, structure, taste, optional improvements, follow-up — is ADVISORY.
@@ -232,7 +215,7 @@ export default trait("guarded-change", {
                     sequence.prompt("review-2", {
                         title: "Review work (smart-2)",
                         agent: smart2,
-                        text: prompt.text`
+                        text: input.prompt`
                             Independently review the implemented work for the change in ${brief} against the agreed draft ${reviewedDraft}. Current work summary: ${workSummary}.
                             Consult the standards ${codingStandards} and the review guidance ${reviewGuidance}, score against the rubric ${reviewRubric}, and inspect the actual working tree with your tools — never review the summary alone.
                             Classify every finding by severity per ${reviewGuidance}: a BLOCKER makes the change genuinely unmergeable (a correctness bug, a failing gate, a standards violation, or work the request did not ask for); everything else is ADVISORY.
@@ -242,7 +225,7 @@ export default trait("guarded-change", {
                     sequence.prompt("apply-fixes", {
                         title: "Apply reviewer fixes (worker)",
                         agent: worker,
-                        text: prompt.text`
+                        text: input.prompt`
                             Apply the reviewer findings for the change in ${brief}: ${verdict1} and ${verdict2}.
                             Fix every BLOCKER named in either verdict — those are mandatory to merge. Address advisory notes only when the fix is cheap and safe; leaving advisory items for later is acceptable and never a blocker.
                             Where the two reviews conflict, prefer correctness and the standards ${codingStandards}.
@@ -259,7 +242,7 @@ export default trait("guarded-change", {
             sequence.prompt("commit-message", {
                 title: "Write the commit message (scribe)",
                 agent: scribe,
-                text: prompt.text`
+                text: input.prompt`
                     The refinement loop for the change in ${brief} has ended and the change is being committed. The final reviewer verdicts are ${verdict1} and ${verdict2} — read their status fields FIRST. The loop exits early once both approve, so a verdict still set to revise means the rounds ran out with that reviewer unsatisfied: say so plainly rather than implying a clean approval.
                     Write a concise commit message grounded in the done-checklist ${doneChecklist} and those verdicts: a short subject line naming the change, then a one-paragraph summary of what the verdicts certify changed and how it was validated.
                     If either verdict status is revise, end the message with an "Unresolved reviewer blockers:" section listing each open blocker in one line — the honest record that the budget ran out before the reviewers were satisfied. Never write that section when there are none.

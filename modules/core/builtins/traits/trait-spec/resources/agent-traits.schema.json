@@ -574,7 +574,7 @@
           "type": "array"
         }
       ],
-      "description": "A loop's `on-exhausted` declaration: the keywords `\"continue\"`/`\"block\"`,\nor one or more signal refs emitted when the loop continues past\nexhaustion. A one-element sequence collapses to `One` on decode so each\nmeaning has exactly one canonical spelling."
+      "description": "A loop's `on-exhausted` declaration: the keywords `\"continue\"`/`\"abort\"`,\nor one or more signal refs emitted when the loop continues past\nexhaustion. A one-element sequence collapses to `One` on decode so each\nmeaning has exactly one canonical spelling."
     },
     "Extensions": {
       "additionalProperties": false,
@@ -1735,6 +1735,17 @@
       "additionalProperties": false,
       "description": "A `[[procedure.sequence]]` item: one item in the procedure, owned by the\nprocedure rather than by a separate top-level table.\n\n`[[procedure.sequence]]` definition order is the default execution order.\nAn optional `id` allows `procedure.sequence-order` to customize ordering.",
       "properties": {
+        "abort-if": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuardExpr"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Loop terminal guard."
+        },
         "agent": {
           "description": "Optional abstract agent role that should serve this executable item.",
           "type": [
@@ -1783,13 +1794,6 @@
         "concurrent": {
           "description": "`for-each` concurrency request. Additive: `false`/absent is byte-identical\nto documents authored before concurrency existed.",
           "type": "boolean"
-        },
-        "emits": {
-          "description": "Declared signal refs this item may emit, either directly as refs or\nderived from deterministic output predicates.",
-          "items": {
-            "$ref": "#/$defs/SignalEmissionRule"
-          },
-          "type": "array"
         },
         "format": {
           "anyOf": [
@@ -1876,12 +1880,23 @@
             "null"
           ]
         },
+        "on-abort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExhaustionTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Names the signal(s) to emit when `abort-if` is the arm that halts the\nloop, so the trait's own terminal reason (e.g.\n`recurring-blocker-unresolved`) is distinguishable from exhaustion in\nthe ledger, the receipt, and `run-status` — the runtime still reports\nthe accurate mechanism (`abort-if-matched`) alongside it. Requires\n`abort-if`; the `\"continue\"`/`\"abort\"` keywords are meaningless here\n(an `abort-if` match always halts the loop) and are rejected."
+        },
         "on-complete": {
-          "description": "Runtime signal emitted when a for-each completes.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "Declared signal refs this item may emit, either directly as refs or\nderived from deterministic output predicates. On a for-each item this\nis instead the completion signal, emitted once (at most one entry\nallowed there).",
+          "items": {
+            "$ref": "#/$defs/SignalEmissionRule"
+          },
+          "type": "array"
         },
         "on-exhausted": {
           "anyOf": [
@@ -1892,7 +1907,7 @@
               "type": "null"
             }
           ],
-          "description": "Loop exhaustion policy: `\"continue\"` (the default when omitted),\n`\"block\"`, or one or more `signal:<id>` refs.\n\nContinuing treats exhaustion as a normal outcome — the sequence\nproceeds to the next item, and any declared signals are emitted as\nrecorded evidence a later guard may read (or ignore). Spending a\nbounded budget without matching `until` means the work is unfinished,\nwhich the following step is responsible for reading; it does not mean\nthe run is broken.\n\n`\"block\"` stops the run at exhaustion, for procedures where an unmet\nexit condition invalidates every step after the loop; no signal is\nemitted in that case. A run started with strict loops blocks every\nloop regardless of its declared policy, and suppresses signal\nemission even when the declaration names one."
+          "description": "Loop exhaustion policy: `\"continue\"` (the default when omitted),\n`\"abort\"`, or one or more `signal:<id>` refs.\n\nContinuing treats exhaustion as a normal outcome — the sequence\nproceeds to the next item, and any declared signals are emitted as\nrecorded evidence a later guard may read (or ignore). Spending a\nbounded budget without matching `until` means the work is unfinished,\nwhich the following step is responsible for reading; it does not mean\nthe run is broken.\n\n`\"abort\"` stops the run at exhaustion, for procedures where an unmet\nexit condition invalidates every step after the loop; no signal is\nemitted in that case. A run started with strict loops aborts every\nloop regardless of its declared policy, and suppresses signal\nemission even when the declaration names one."
         },
         "on-failure": {
           "anyOf": [
@@ -1904,17 +1919,6 @@
             }
           ],
           "description": "Legacy failure signal or structured forward recovery route."
-        },
-        "on-stop": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ExhaustionTarget"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Names the signal(s) to emit when `stop-if` is the arm that halts the\nloop, so the trait's own terminal reason (e.g.\n`recurring-blocker-unresolved`) is distinguishable from exhaustion in\nthe ledger, the receipt, and `run-status` — the runtime still reports\nthe accurate mechanism (`stop-if-matched`) alongside it. Requires\n`stop-if`; the `\"continue\"`/`\"block\"` keywords are meaningless here\n(a `stop-if` match always halts the loop) and are rejected."
         },
         "otherwise": {
           "description": "Optional named sequence ref selected when a branch guard is false.",
@@ -1951,17 +1955,6 @@
             "string",
             "null"
           ]
-        },
-        "stop-if": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GuardExpr"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Loop terminal guard."
         },
         "success-exit-code": {
           "description": "Exit codes treated as success for simple `cmd` shorthand.",

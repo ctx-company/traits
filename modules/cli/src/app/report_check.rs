@@ -1432,13 +1432,13 @@ fn sequence_item_receipt(
         .unwrap_or_default();
     let input = format_string_iter(item.input.ref_texts());
     let output = format_string_iter(item.output.ref_texts());
-    let emits = format_string_iter(item.emits.iter().map(|emit| emit.signal_ref()));
+    let on_complete = format_string_iter(item.on_complete.iter().map(|emit| emit.signal_ref()));
     format!(
-        "{construct_ref} kind={} {bound}{agent}, input={}, output={}, emits={}",
+        "{construct_ref} kind={} {bound}{agent}, input={}, output={}, on-complete={}",
         sequence_kind_label(kind),
         input,
         output,
-        emits,
+        on_complete,
     )
 }
 
@@ -1465,28 +1465,28 @@ fn sequence_bound_receipt(
             item.otherwise.as_deref().unwrap_or("none")
         ),
         ctx_traits_core::r#trait::procedure::SequenceKind::Loop => {
-            let on_stop = loop_on_stop_report(item);
+            let on_abort = loop_on_abort_report(item);
             match item.max_iterations {
                 Some(iterations) => format!(
-                    "provable=bounded max-iterations={} stop-if={} on-stop={}",
+                    "provable=bounded max-iterations={} abort-if={} on-abort={}",
                     iterations,
-                    item.stop_if.is_some(),
-                    on_stop
+                    item.abort_if.is_some(),
+                    on_abort
                 ),
                 None => item.max_iterations_from.as_ref().map_or_else(
                     || {
                         format!(
-                            "unbounded (will not run) max-iterations=missing stop-if={} on-stop={}",
-                            item.stop_if.is_some(),
-                            on_stop
+                            "unbounded (will not run) max-iterations=missing abort-if={} on-abort={}",
+                            item.abort_if.is_some(),
+                            on_abort
                         )
                     },
                     |source| {
                         format!(
-                            "provable=runtime-bounded max-iterations-from={} stop-if={} on-stop={}",
+                            "provable=runtime-bounded max-iterations-from={} abort-if={} on-abort={}",
                             source,
-                            item.stop_if.is_some(),
-                            on_stop
+                            item.abort_if.is_some(),
+                            on_abort
                         )
                     },
                 ),
@@ -1540,12 +1540,12 @@ pub(crate) fn sequence_kind_label(
     }
 }
 
-/// The loop bounds line's `on-stop=` value: `none` when undeclared, else the
-/// authored terminal signal(s) a `stop-if` match emits in place of the
-/// canonical `signal:stop-if-matched`.
-fn loop_on_stop_report(item: &ctx_traits_core::r#trait::procedure::SequenceItem) -> String {
+/// The loop bounds line's `on-abort=` value: `none` when undeclared, else the
+/// authored terminal signal(s) a `abort-if` match emits in place of the
+/// canonical `signal:abort-if-matched`.
+fn loop_on_abort_report(item: &ctx_traits_core::r#trait::procedure::SequenceItem) -> String {
     let signals = item
-        .on_stop
+        .on_abort
         .as_ref()
         .map(ctx_traits_core::r#trait::procedure::ExhaustionTarget::signals)
         .unwrap_or_default();
@@ -1583,12 +1583,12 @@ fn collect_control_bounds(
                     .map(|value| value.to_string())
                     .or_else(|| item.max_iterations_from.clone())
                     .unwrap_or_else(|| "missing".to_string());
-                let stop_if = if item.stop_if.is_some() {
-                    ", stop-if"
+                let abort_if = if item.abort_if.is_some() {
+                    ", abort-if"
                 } else {
                     ""
                 };
-                bounds.push(format!("{field}: loop iterations={iterations}{stop_if}"));
+                bounds.push(format!("{field}: loop iterations={iterations}{abort_if}"));
             }
             ctx_traits_core::r#trait::procedure::SequenceKind::ForEach => {
                 let limit = item
@@ -1733,12 +1733,12 @@ fn collect_sequence_control_warnings(
                 message: "for-each has no explicit limit; runtime bound is the finite over-slot item count".to_string(),
             });
         }
-        if item.until.is_some() && item.until == item.stop_if {
+        if item.until.is_some() && item.until == item.abort_if {
             warnings.push(ctx_traits_core::check::CheckWarning {
                 section: Section::Sequence,
                 code: "sequence-control.guard-conflict-static".to_string(),
                 field: Some(field.clone()),
-                message: "until and stop-if use the same guard; runtime will stop with guard-conflict if it matches".to_string(),
+                message: "until and abort-if use the same guard; runtime will stop with guard-conflict if it matches".to_string(),
             });
         }
         if let (Some(max_iterations), Some(until)) = (item.max_iterations, item.until.as_ref())
@@ -1756,10 +1756,11 @@ fn collect_sequence_control_warnings(
                     message: "iteration guards are zero-based; this guard cannot match before max-iterations is exhausted".to_string(),
                 });
         }
-        if let (Some(max_iterations), Some(stop_if)) = (item.max_iterations, item.stop_if.as_ref())
+        if let (Some(max_iterations), Some(abort_if)) =
+            (item.max_iterations, item.abort_if.as_ref())
             && guard_iteration_unsatisfiable(
                 trait_ref,
-                stop_if,
+                abort_if,
                 max_iterations,
                 &mut std::collections::BTreeSet::new(),
             )
@@ -1767,7 +1768,7 @@ fn collect_sequence_control_warnings(
             warnings.push(ctx_traits_core::check::CheckWarning {
                     section: Section::Sequence,
                     code: "sequence-control.guard-unsatisfiable".to_string(),
-                    field: Some(format!("{field}.stop-if")),
+                    field: Some(format!("{field}.abort-if")),
                     message: "iteration guards are zero-based; this guard cannot match before max-iterations is exhausted".to_string(),
                 });
         }

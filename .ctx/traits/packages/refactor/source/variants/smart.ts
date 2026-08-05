@@ -1,5 +1,5 @@
 import { planAmendmentSchema, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, procedure, prompt, schema, sequence, slot, variant } from "@ctx-traits/cdk";
+import { condition, input, intent, procedure, schema, sequence, slot, variant } from "@ctx-traits/cdk";
 import { agreedDesign, commitReport, gitStatus, survey, target, workSummary } from "../data.ts";
 import { commitMessageStep, gitCommitStep, gitStageStep, guardedCommitTail } from "../sequence/commit.ts";
 import { designStep, implementStep } from "../sequence/design.ts";
@@ -61,7 +61,7 @@ export default variant({
             sequence.prompt("research", {
                 title: "Research prior art (smart-1)",
                 agent: smart1,
-                text: prompt.text`
+                text: input.prompt`
                     Before surveying ${target}, research prior art: how comparable modules in this codebase solved a similar boundary problem, and any external precedent worth grounding the design in. Use web-capable tools if available.
                     Keep this to one pass — the loop budget is unchanged from the default flow; smart means a better-informed survey and design, not more rounds.
                     Return your research notes: what you found, its relevance, and anything that should constrain the coming design.`,
@@ -70,7 +70,7 @@ export default variant({
             sequence.prompt("survey", {
                 title: "Survey the target (smart-1)",
                 agent: smart1,
-                text: prompt.text`
+                text: input.prompt`
                     Survey ${target} for refactoring opportunities, informed by your research ${researchNotes}.
                     Read the target and its callers/callees with your tools — explore organically; the friction you encounter while reading IS the signal. Ground every observation in the architecture dialect (${architectureDialect}) and the smell catalog (${smellCatalog}); cite smell ids (S1-S10) or a named deep-module violation for each.
                     Sweep is mandatory and complete: (a) walk ALL ten smells S1-S10 in catalog order and for each report findings or explicitly "S<n>: none found"; (b) then assess the three dialect pillars — boundaries, data flow, entity containment.
@@ -93,7 +93,7 @@ export default variant({
                     sequence.prompt("apply-fixes", {
                         title: "Apply reviewer fixes and amendments (worker)",
                         agent: worker,
-                        text: prompt.text`
+                        text: input.prompt`
                             Apply the reviewer findings for ${target}: ${verdict1} and ${verdict2}.
                             Fix every BLOCKER named in either verdict — those are mandatory to merge. When a verdict carries amendments, those become the new binding contract: rewrite the agreed design to incorporate them exactly, then implement to the amended design. If verdict1 and verdict2 propose amendments that genuinely conflict with each other, do NOT adjudicate between them yourself: leave the agreed design unamended on the conflicting point, implement neither side of the conflict, and report the conflict verbatim (both proposed amendments and why they contradict) as an open item in the work summary — the conflict must remain unresolved and blocking until the reviewers reconcile it in a later round, never silently decided here. Advisory / deferred items go on the deferred-candidates list, not this round, unless the fix is cheap and safe. Prefer the dialect (${architectureDialect}). Re-run the repo validation gates.
                             Return exactly two outputs: agreed-design (the complete design text, amended by every non-conflicting amendment, unchanged on any conflicting point) and work-summary (what changed, files, net line delta, how behavior was preserved, gate results, open concerns — including any unresolved amendment conflict, named explicitly so the next review round blocks on it).`,

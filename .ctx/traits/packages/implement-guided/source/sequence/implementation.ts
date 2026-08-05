@@ -1,4 +1,4 @@
-import { condition, input, prompt, sequence } from "@ctx-traits/cdk";
+import { condition, input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { slot } from "../data.ts";
@@ -9,7 +9,7 @@ export default sequence.loop("building", {
         sequence.prompt("implement", {
             title: "Implement (worker)",
             agent: agent.worker,
-            text: prompt.text`
+            text: input.prompt`
                             Produce the work for the annotated assignment ${slot.annotations} against the draft ${slot.draft}.
                             If no reviewer verdict is attached to this frame, this is round 1: implement the draft in full. If a verdict IS attached, this is a fix round: fix every BLOCKER it names, and address advisory notes only when the fix is cheap and safe.
                             Run the project's own checks with your tools before reporting.
@@ -22,7 +22,7 @@ export default sequence.loop("building", {
         sequence.prompt("review", {
             title: "Review the work (smart)",
             agent: agent.smart,
-            text: prompt.text`
+            text: input.prompt`
                             Review the implemented work for the annotated assignment ${slot.annotations} against the draft ${slot.draft}. Current work summary: ${slot.workSummary}.
                             Inspect the actual working tree with your tools — never review the summary alone; re-run the project's checks if the summary does not prove they pass.
                             A BLOCKER makes the work genuinely unshippable: a correctness bug, a failing check, or work the annotations did not ask for. Everything else — naming, structure, taste, optional improvements — is ADVISORY.
@@ -35,5 +35,5 @@ export default sequence.loop("building", {
     iterations: 6,
     // A run that spends its rounds without an approving verdict has not been
     // reviewed clean, and must not reach the walkthrough or the commit tail.
-    onExhausted: "block",
+    onExhausted: "abort",
 });

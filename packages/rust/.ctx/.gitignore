@@ -1,0 +1,11 @@
+traits/worktrees/
+worktrees/
+config.toml
+config.ts
+traits/runtime.toml
+harness.toml
+traits/vendor/
+runs/
+debug/
+cache/
+node_modules/

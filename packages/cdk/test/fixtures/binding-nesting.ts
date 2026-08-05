@@ -1,4 +1,4 @@
-import { agent, port, procedure, prompt, schema, sequence, slot, trait } from "@ctx-traits/cdk";
+import { agent, input, port, procedure, schema, sequence, slot, trait } from "@ctx-traits/cdk";
 
 // Pins the two nested schema-ref shapes P398 requires beyond a single-level
 // `[schema:text]`/`(schema:a|schema:b)`: a nested list (`[[schema:text]]`,
@@ -27,7 +27,7 @@ export const bindingNesting = trait({
       title: "Classify Grouped Lines",
       agent: worker,
       input: groupedLines,
-      text: prompt.text`Classify each group in ${groupedLines} into a structured note.`,
+      text: input.prompt`Classify each group in ${groupedLines} into a structured note.`,
       output: notes,
     }),
   }),

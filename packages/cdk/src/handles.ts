@@ -136,7 +136,7 @@ export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"o
  * that lists it in `output:` auto-declares its backing slot and resolves
  * this handle's ref to it. Accepted anywhere a `SlotHandle` is (a sequence
  * step's `output:`, and — once attached — a later step's interpolated
- * `input.text`/`prompt.text`).
+ * `input.prompt`).
  */
 export type InstructionOutputHandle<Value = unknown> = CdkHandle<"instruction-output", Value>;
 /** A typed reference to a declared `[[session]]`, returned by `session(id, opts)`. */

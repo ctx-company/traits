@@ -6,7 +6,7 @@ import type {
   SignalHandle,
   SlotHandle,
 } from "@ctx-traits/cdk";
-import { condition, prompt, schema, sequence } from "@ctx-traits/cdk";
+import { condition, input, schema, sequence } from "@ctx-traits/cdk";
 
 /** The kit's feasibility triage verdict: whether a task is even worth spending a build loop on. */
 export type FeasibilityVerdictValue = {
@@ -57,7 +57,7 @@ export const feasibilityVerdictSchema: SchemaHandle<FeasibilityVerdictValue> = s
 /**
  * Static prompt doctrine for the feasibility gate's four audit angles.
  * Pure static text (no port/slot/family refs) — safe to splice into any
- * `input.text`/`prompt.text` review-step source via `${FEASIBILITY_DOCTRINE}`.
+ * `input.prompt` review-step source via `${FEASIBILITY_DOCTRINE}`.
  */
 export const FEASIBILITY_DOCTRINE =
   `Audit the task from exactly four angles before any build work begins. POSSIBLE: can this be done at all from inside a run — the capability, authority, and tooling a shell here actually has? BLOCKED: does it depend on something not landed? For every file, command, fixture, prerequisite API, or recipe the task references as EXISTING, verify with your own tools that it actually exists in this worktree — a task that says "extend X" where X is absent is blocked, not implementable, however small the rest of the scope looks. OVERSIZED: does the scope honestly fit one run's budget, or does it need splitting into smaller tasks first? AMBIGUOUS: does the task state a falsifiable Done-when, or would any implementation here be a guess at what "done" means? Default to feasible: raise a non-feasible verdict only on evidence you actually checked, never on suspicion or scope alone. Return the typed verdict: the tool-checked evidence, every missing thing named as its own entry (empty when feasible), and the one owner action that would clear a non-feasible verdict (empty string when feasible).`;
@@ -84,12 +84,12 @@ export type FeasibilityGateOptions = {
    */
   readonly mode: "block" | "warn";
   /** The signal(s) the gate emits when it parks a non-feasible verdict. Required in `"block"` mode; unused in `"warn"` mode. */
-  readonly onStop?: SignalHandle | readonly SignalHandle[];
+  readonly onAbort?: SignalHandle | readonly SignalHandle[];
 };
 
 /**
  * A 1-iteration triage step builder: a single prompt round auditing the
- * task, wrapped in a `sequence.loop` whose `until`/`stopIf` are exact
+ * task, wrapped in a `sequence.loop` whose `until`/`abortIf` are exact
  * logical complements of each other (`condition.fieldEquals(output,
  * "verdict", "feasible")` vs. its negation) — mutually exclusive by
  * construction, so no `guard-conflict` diagnostic is reachable and
@@ -102,12 +102,12 @@ export type FeasibilityGateOptions = {
  * ```ts
  * const feasibility = slot({ id: "feasibility", schema: feasibilityVerdictSchema, description: "..." });
  * const notFeasible = signal({ id: "not-feasible", description: "..." });
- * const gate = feasibilityGate({ id: "feasibility-check", agent: smart1, task, contract: taskBrief, output: feasibility, onStop: notFeasible });
+ * const gate = feasibilityGate({ id: "feasibility-check", agent: smart1, task, contract: taskBrief, output: feasibility, onAbort: notFeasible });
  * ```
  */
 export function feasibilityGate(options: FeasibilityGateOptions): SequenceHandle {
   const { id, agent, task, contract, output, mode } = options;
-  // `prompt.text` is a genuine tagged template: every `${}` interpolation
+  // `input.prompt` is a genuine tagged template: every `${}` interpolation
   // must itself be a typed ref (`PromptInterpolation`), never a plain
   // string — so `FEASIBILITY_DOCTRINE` cannot be spliced in via `${...}`.
   // Calling it with the exact `(strings, ...values)` shape a tagged
@@ -124,7 +124,7 @@ export function feasibilityGate(options: FeasibilityGateOptions): SequenceHandle
   const checkStep = sequence.prompt(`${id}-check`, {
     title: "Audit feasibility before building",
     agent,
-    text: prompt.text(strings, task, contract),
+    text: input.prompt(strings, task, contract),
     output,
   });
   // Warn mode: the bare audit step — same prompt, same typed verdict in the
@@ -133,16 +133,16 @@ export function feasibilityGate(options: FeasibilityGateOptions): SequenceHandle
   if (mode === "warn") {
     return checkStep;
   }
-  const onStop = options.onStop;
-  if (onStop === undefined) {
-    throw new Error(`feasibilityGate ${JSON.stringify(id)}: mode "block" requires onStop`);
+  const onAbort = options.onAbort;
+  if (onAbort === undefined) {
+    throw new Error(`feasibilityGate ${JSON.stringify(id)}: mode "block" requires onAbort`);
   }
   const feasible = condition.fieldEquals(output, "verdict", "feasible");
   return sequence.loop(id, {
     sequence: sequence.linear(`${id}-body`, [checkStep]),
     until: feasible,
     iterations: 1,
-    stopIf: condition.not(feasible),
-    onStop,
+    abortIf: condition.not(feasible),
+    onAbort,
   });
 }

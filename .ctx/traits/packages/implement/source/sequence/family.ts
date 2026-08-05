@@ -29,7 +29,7 @@ import type {
     SignalHandle,
     SlotHandle,
 } from "@ctx-traits/cdk";
-import { condition, operation, port, prompt, resource, schema, sequence, signal, slot } from "@ctx-traits/cdk";
+import { condition, input, operation, port, resource, schema, sequence, signal, slot } from "@ctx-traits/cdk";
 
 // P450 S3, repointed at the task board (2026-07-31): the board is the
 // owner's status surface (P486) — a run never writes it at all. Progress
@@ -44,7 +44,7 @@ export const ONE_TURN_DISCIPLINE =
 // supported tagged-template builder. This is intentionally not a CDK API.
 export function promptText(source: string, params: Record<string, PromptInterpolation>): PromptTemplate {
     const strings: string[] = [];
-    const values: Parameters<typeof prompt.text>[1][] = [];
+    const values: Parameters<typeof input.prompt>[1][] = [];
     let offset = 0;
     for (const match of source.matchAll(/\{([A-Za-z_$][A-Za-z0-9_$]*)\}/g)) {
         const value = params[match[1]];
@@ -54,7 +54,7 @@ export function promptText(source: string, params: Record<string, PromptInterpol
         offset = (match.index ?? 0) + match[0].length;
     }
     strings.push(source.slice(offset));
-    return prompt.text(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, ...values);
+    return input.prompt(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, ...values);
 }
 
 export function smart1Role(description: string): AgentHandle {
@@ -188,7 +188,7 @@ export const repoGatesPassed = slot({
  * fixed in the trait, not a defect in the work. Every family variant's
  * build loop stops on this arm the round a gate times out rather than
  * grinding toward a doomed park (measured: run-f60c3ef5's undeclared
- * check-step timeout). `gateTimedOutStopIf` is provably mutually exclusive
+ * check-step timeout). `gateTimedOutAbortIf` is provably mutually exclusive
  * with every `guardedProduction` `until` — each conjoins `repoGatesPassed.ok
  * == true`, which a timed-out gate (`command_execution_succeeded` forces
  * `ok=false` whenever `timed_out` is true) always falsifies — so no
@@ -198,7 +198,7 @@ export const gateTimedOut = signal({
     id: "gate-timed-out",
     description: "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix.",
 });
-export const gateTimedOutStopIf = condition.fieldEquals(repoGatesPassed, "timed-out", true);
+export const gateTimedOutAbortIf = condition.fieldEquals(repoGatesPassed, "timed-out", true);
 
 export const commitReport = port.output.text({
     id: "commit-report",
@@ -231,7 +231,7 @@ export const leftoversPort = port.output.of(schema.list(leftoverSchema), {
  * Terminal typed boundary for the park report (P414): the same `parkReport`
  * slot each review step replaces, exposed as an optional structured output
  * port. Non-empty only when the build loop exhausted unapproved — the run
- * then parks (`onExhausted: "block"` halts before the commit tail ever
+ * then parks (`onExhausted: "abort"` halts before the commit tail ever
  * runs) and this port is the durable, dispatch-preflight-readable evidence
  * of why. Empty (and thus omitted from structured final outputs) on every
  * approved run.
@@ -317,7 +317,7 @@ export function taskExtractionStep(agent: AgentHandle, taskBoard: ResourceHandle
     return sequence.prompt("task-extraction", {
         title: "Copy the task contract (clerk)",
         agent,
-        text: prompt.text`
+        text: input.prompt`
             Copy the task file for ${task} EXACTLY as written.
             Open the task-board directory named in ${taskBoard} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
             Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost.`,
@@ -482,15 +482,15 @@ export function reviewSeat(
         deviationReport?: SlotHandle;
         extraInstruction?: string;
         reviewRubric?: ResourceHandle;
-        emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
+        onComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
     } = {},
 ): GuardedProductionReviewSeat {
-    const { deviationReport, extraInstruction, reviewRubric, emits } = opts;
+    const { deviationReport, extraInstruction, reviewRubric, onComplete } = opts;
     return {
         agent,
         verdictSlot: verdictSlotHandle,
         extraOutputs: [leftovers],
-        ...(emits === undefined ? {} : { emits }),
+        ...(onComplete === undefined ? {} : { onComplete }),
         text: promptText(
             `${reviewerNumber === 2 ? "Independently review" : "Review"} the produced work for {task} against the draft {draft}. Current work summary: {workSummary}.
             {reviewDiff} lists every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. Open whatever it points at with your own tools; it omits untracked files. {repoGatesPassed} is this round's repository gate verdict (build, clippy, fmt, CDK typecheck); a false verdict is grounds for a blocker even if the diff otherwise looks correct. When it failed it carries a tail of the gate's own output: that tail IS the reason — cite it, and never attribute the failure to a cause it does not state. If the tail shows the gate could not run at all (a missing recipe, a command not found), that is a misconfigured repository, not a defect in the work, and it is not the worker's blocker to clear: the argv is fixed in the trait and no amount of implementation changes it. A gate whose timed-out field is true is a repo condition — the bound is the repository's own config, and the recorded reason says whether it went silent or ran past its backstop — never grounds for a blocker on its own; the loop stops on it before another round is spent. This gate is the repository's PER-ROUND gate and proves only what it runs — a repo may reserve heavier proof (full integration suites) for its landing gate, which runs once at merge. Never withhold approval for a check this round's gate does not run: judge the work against the task's own Done-when and this verdict, not against a suite that runs later.${
@@ -598,8 +598,8 @@ export function buildScribeText(verdict1: SlotHandle, verdict2: SlotHandle): Pro
  * `guardedProduction`/`commitTail` kit in `@ctx-traits/agents`.
  * `implement-phase` (the dogfood entry point) calls this exact function
  * rather than restoring a second copy; it differs from `implement-default`
- * in package identity, metadata, and the optional `reviewRubric`/`stopIf`/
- * `onStop`/`reviewExtraInstruction` opts, never in the procedure's own
+ * in package identity, metadata, and the optional `reviewRubric`/`abortIf`/
+ * `onAbort`/`reviewExtraInstruction` opts, never in the procedure's own
  * structure.
  */
 export function familyProcedure(opts: {
@@ -614,14 +614,14 @@ export function familyProcedure(opts: {
     verdict2: SlotHandle;
     reviewRubric?: ResourceHandle;
     parkReportOutput?: SlotHandle;
-    stopIf?: GuardValue;
-    onStop?: SignalHandle | readonly SignalHandle[];
+    abortIf?: GuardValue;
+    onAbort?: SignalHandle | readonly SignalHandle[];
     reviewExtraInstruction?: string;
     postReviewSteps?: readonly SequenceHandle[];
     ownerAnswer?: SlotHandle;
     ownerAnswerInstruction?: string;
-    review1Emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
-    review2Emits?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
+    review1OnComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
+    review2OnComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
     planRounds?: number;
     buildRounds?: number;
 }): readonly SequenceHandle[] {
@@ -637,14 +637,14 @@ export function familyProcedure(opts: {
         verdict2,
         reviewRubric,
         parkReportOutput,
-        stopIf,
-        onStop,
+        abortIf,
+        onAbort,
         reviewExtraInstruction,
         postReviewSteps,
         ownerAnswer,
         ownerAnswerInstruction,
-        review1Emits,
-        review2Emits,
+        review1OnComplete,
+        review2OnComplete,
         planRounds,
         buildRounds,
     } = opts;
@@ -652,10 +652,10 @@ export function familyProcedure(opts: {
     // 0047 mechanism 4: every variant stops on a timed-out gate, merged
     // alongside whatever early-stop arm the caller (e.g. phase's recurrence
     // breaker) already declares — `condition.any` so either arm alone stops
-    // the loop, `onStop` carrying every signal the matching arm could be.
-    const combinedStopIf = stopIf === undefined ? gateTimedOutStopIf : condition.any([stopIf, gateTimedOutStopIf]);
-    const priorOnStop = onStop === undefined ? [] : Array.isArray(onStop) ? onStop : [onStop];
-    const combinedOnStop = [...priorOnStop, gateTimedOut];
+    // the loop, `onAbort` carrying every signal the matching arm could be.
+    const combinedAbortIf = abortIf === undefined ? gateTimedOutAbortIf : condition.any([abortIf, gateTimedOutAbortIf]);
+    const priorOnAbort = onAbort === undefined ? [] : Array.isArray(onAbort) ? onAbort : [onAbort];
+    const combinedOnAbort = [...priorOnAbort, gateTimedOut];
 
     const planning: GuardedProductionHandle = guardedProduction({
         id: "planning",
@@ -675,8 +675,8 @@ export function familyProcedure(opts: {
             optionalInputs: [...(ownerAnswer === undefined ? [] : [ownerAnswer]), leftovers, repoGatesPassed],
         },
         review: [
-            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction, emits: review1Emits }),
-            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction, emits: review2Emits }),
+            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction, onComplete: review1OnComplete }),
+            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction, onComplete: review2OnComplete }),
         ],
         evidence: [repoGatesStep, captureDiffStep],
         afterReview: [...deriveParkReportStep([verdict1, verdict2], { parkReportSlot }), ...(postReviewSteps ?? [])],
@@ -684,9 +684,9 @@ export function familyProcedure(opts: {
         carry: leftovers,
         minRounds: 3,
         rounds: buildRounds ?? 5,
-        onExhausted: "block",
-        stopIf: combinedStopIf,
-        onStop: combinedOnStop,
+        onExhausted: "abort",
+        abortIf: combinedAbortIf,
+        onAbort: combinedOnAbort,
     });
 
     return [

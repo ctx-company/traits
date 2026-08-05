@@ -863,7 +863,7 @@ fn require_executable_loop_bound(
         && item.max_iterations.is_none()
         && item.max_iterations_from.is_none()
         && item.until.is_none()
-        && item.stop_if.is_none()
+        && item.abort_if.is_none()
     {
         let step = item.id.as_deref().unwrap_or("unnamed");
         return Err(crate::procedure::invalid_field(

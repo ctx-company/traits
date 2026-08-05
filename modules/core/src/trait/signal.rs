@@ -1,6 +1,6 @@
 //! Signal declarations: named events that procedure sequence items may emit.
 //!
-//! `[[signal]]` declares a signal identity. `procedure.sequence[].emits` lists
+//! `[[signal]]` declares a signal identity. `procedure.sequence[].on-complete` lists
 //! declared `signal:*` refs. Local signals must resolve to a local declaration;
 //! dependency-qualified refs must resolve to a dependency alias and declared
 //! dependency signal, or remain dependency-pending.

@@ -908,11 +908,11 @@ fn collect_item_effects(
     for guard in [
         item.when.as_ref(),
         item.until.as_ref(),
-        item.stop_if.as_ref(),
+        item.abort_if.as_ref(),
     ]
     .into_iter()
     .flatten()
-    .chain(item.emits.iter().filter_map(|rule| rule.when()))
+    .chain(item.on_complete.iter().filter_map(|rule| rule.when()))
     .chain(item.input.iter().filter_map(SequenceInput::guard))
     {
         let mut guard_slots = Vec::new();
@@ -1033,15 +1033,14 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
         || item.when.is_some()
         || item.otherwise.is_some()
         || item.until.is_some()
-        || item.stop_if.is_some()
+        || item.abort_if.is_some()
         || item.max_iterations.is_some()
         || item.max_iterations_from.is_some()
         || item.on_exhausted.is_some()
-        || item.on_stop.is_some()
+        || item.on_abort.is_some()
         || item.over.is_some()
         || item.item.is_some()
-        || item.max_items.is_some()
-        || item.on_complete.is_some();
+        || item.max_items.is_some();
 
     if kind != SequenceKind::Branch && kind != SequenceKind::Ask && (item.when.is_some() || item.otherwise.is_some()) {
         return Err(crate::manifest::Error::InvalidField {
@@ -1114,24 +1113,24 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || has_command_options
                 || item.agent.is_some()
                 || item.format.is_some()
-                || !item.emits.is_empty()
+                || !item.on_complete.is_empty()
                 || item.on_failure.is_some()
                 || item.otherwise.is_some()
                 || item.sequence.is_some()
                 || item.until.is_some()
-                || item.stop_if.is_some()
+                || item.abort_if.is_some()
                 || item.max_iterations.is_some()
                 || item.max_iterations_from.is_some()
                 || item.on_exhausted.is_some()
-                || item.on_stop.is_some()
+                || item.on_abort.is_some()
                 || item.over.is_some()
                 || item.item.is_some()
                 || item.max_items.is_some()
-                || item.on_complete.is_some()
+                || !item.on_complete.is_empty()
             {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
-                    message: "ask sequence item must declare prompt, a signal when guard, ordinary inputs, and one local replace output; it cannot declare agent, command, emits, format, failure-route, or control fields".to_string(),
+                    message: "ask sequence item must declare prompt, a signal when guard, ordinary inputs, and one local replace output; it cannot declare agent, command, on-complete, format, failure-route, or control fields".to_string(),
                 }.into());
             }
         }
@@ -1167,12 +1166,12 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || has_command_options
                 || item.agent.is_some()
                 || item.format.is_some()
-                || !item.emits.is_empty()
+                || !item.on_complete.is_empty()
                 || item.on_failure.is_some()
             {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
-                    message: "project sequence item must declare projection and no prompt/command/control/agent/format/emits/on-failure fields".to_string(),
+                    message: "project sequence item must declare projection and no prompt/command/control/agent/format/on-complete/on-failure fields".to_string(),
                 }
                 .into());
             }
@@ -1183,15 +1182,15 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || has_projection
                 || item.sequence.is_none()
                 || item.until.is_some()
-                || item.stop_if.is_some()
+                || item.abort_if.is_some()
                 || item.max_iterations.is_some()
                 || item.max_iterations_from.is_some()
                 || item.on_exhausted.is_some()
-                || item.on_stop.is_some()
+                || item.on_abort.is_some()
                 || item.over.is_some()
                 || item.item.is_some()
                 || item.max_items.is_some()
-                || item.on_complete.is_some()
+                || !item.on_complete.is_empty()
                 || item.on_failure.is_some()
                 || has_command_options
                 || item.format.is_some()
@@ -1200,7 +1199,7 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
                     message:
-                        "sequence item kind=sequence must declare only sequence plus ordinary input/output/emits fields"
+                        "sequence item kind=sequence must declare only sequence plus ordinary input/output/on-complete fields"
                             .to_string(),
                 }.into());
             }
@@ -1211,20 +1210,20 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || has_projection
                 || !item.input.is_empty()
                 || !item.output.is_empty()
-                || !item.emits.is_empty()
+                || !item.on_complete.is_empty()
                 || item.id.is_none()
                 || item.sequence.is_none()
                 || item.when.is_none()
                 || item.until.is_some()
-                || item.stop_if.is_some()
+                || item.abort_if.is_some()
                 || item.max_iterations.is_some()
                 || item.max_iterations_from.is_some()
                 || item.on_exhausted.is_some()
-                || item.on_stop.is_some()
+                || item.on_abort.is_some()
                 || item.over.is_some()
                 || item.item.is_some()
                 || item.max_items.is_some()
-                || item.on_complete.is_some()
+                || !item.on_complete.is_empty()
                 || item.on_failure.is_some()
                 || has_command_options
                 || item.format.is_some()
@@ -1244,7 +1243,7 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || item.over.is_some()
                 || item.item.is_some()
                 || item.max_items.is_some()
-                || item.on_complete.is_some()
+                || !item.on_complete.is_empty()
                 || has_command_options
                 || item.format.is_some()
                 || item.agent.is_some()
@@ -1254,14 +1253,14 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 // route their own failures. `on-failure` on a loop only ever
                 // meant "emit this on exhaustion", which conflated the two.
                 || item.on_failure.is_some()
-                // Control items never become `ReadyItem`, so `emits` on a
+                // Control items never become `ReadyItem`, so `on-complete` on a
                 // loop is a silent no-op; reject it rather than let it read
                 // as meaningful authoring.
-                || !item.emits.is_empty()
+                || !item.on_complete.is_empty()
             {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
-                    message: "loop sequence item must declare sequence, optional max-iterations/until/stop-if/on-exhausted/on-stop, and no prompt/command/for-each/on-failure/emits fields"
+                    message: "loop sequence item must declare sequence, optional max-iterations/until/abort-if/on-exhausted/on-abort, and no prompt/command/for-each/on-failure/on-complete fields"
                         .to_string(),
                 }.into());
             }
@@ -1274,11 +1273,11 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || item.over.is_none()
                 || item.item.is_none()
                 || item.until.is_some()
-                || item.stop_if.is_some()
+                || item.abort_if.is_some()
                 || item.max_iterations.is_some()
                 || item.max_iterations_from.is_some()
                 || item.on_exhausted.is_some()
-                || item.on_stop.is_some()
+                || item.on_abort.is_some()
                 || has_command_options
                 || item.format.is_some()
                 || item.agent.is_some()
@@ -1301,13 +1300,13 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 || item.max_branches.is_none()
                 || !item.input.is_empty()
                 || !item.output.is_empty()
-                || !item.emits.is_empty()
+                || !item.on_complete.is_empty()
                 || item.format.is_some()
                 || item.agent.is_some()
             {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
-                    message: "parallel sequence item must declare id, branches, max-branches, optional join/branch-failure/on-failure, and no prompt/command/sequence/branch/loop/for-each/input/output/emits/agent/format fields".to_string(),
+                    message: "parallel sequence item must declare id, branches, max-branches, optional join/branch-failure/on-failure, and no prompt/command/sequence/branch/loop/for-each/input/output/on-complete/agent/format fields".to_string(),
                 }.into());
             }
         }
@@ -1502,17 +1501,17 @@ fn validate_item_refs(
         validate_output_sink_operation(trait_ref, sink, &parsed, &format!("{base}.output[{j}]"))?;
     }
 
-    for (j, emit) in item.emits.iter().enumerate() {
+    for (j, emit) in item.on_complete.iter().enumerate() {
         validate_signal_ref(
             emit.signal_ref(),
-            &format!("{base}.emits[{j}]"),
+            &format!("{base}.on-complete[{j}]"),
             sets.signal_ids,
         )?;
         if let Some(when) = emit.when() {
             crate::r#trait::condition::validate_guard_expr(
                 trait_ref,
                 when,
-                &format!("{base}.emits[{j}].when"),
+                &format!("{base}.on-complete[{j}].when"),
                 sets.slot_ids,
                 sets.signal_ids,
                 false,
@@ -1521,15 +1520,10 @@ fn validate_item_refs(
             validate_output_predicates_read_declared_outputs(
                 when,
                 &item.output,
-                &format!("{base}.emits[{j}].when"),
+                &format!("{base}.on-complete[{j}].when"),
             )?;
         }
     }
-    validate_optional_signal(
-        item.on_complete.as_deref(),
-        &format!("{base}.on-complete"),
-        sets.signal_ids,
-    )?;
     if let Some(on_failure) = item.on_failure.as_ref() {
         let signal_path = match on_failure {
             FailureTarget::Signal(_) => format!("{base}.on-failure"),
@@ -1561,11 +1555,11 @@ fn validate_loop_item(
         .into());
     }
     let has_bound = item.max_iterations.is_some() || item.max_iterations_from.is_some();
-    if !has_bound && item.until.is_none() && item.stop_if.is_none() {
+    if !has_bound && item.until.is_none() && item.abort_if.is_none() {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{base}.max-iterations"),
             message:
-                "unbounded loop must declare until or stop-if — a loop with neither a bound nor an exit guard can never end"
+                "unbounded loop must declare until or abort-if — a loop with neither a bound nor an exit guard can never end"
                     .to_string(),
         }
         .into());
@@ -1618,11 +1612,11 @@ fn validate_loop_item(
         )?;
         validate_loop_guard_output_predicates(trait_ref, item, until, &format!("{base}.until"))?;
     }
-    if let Some(stop_if) = item.stop_if.as_ref() {
+    if let Some(abort_if) = item.abort_if.as_ref() {
         crate::r#trait::condition::validate_guard_expr(
             trait_ref,
-            stop_if,
-            &format!("{base}.stop-if"),
+            abort_if,
+            &format!("{base}.abort-if"),
             slot_ids,
             signal_ids,
             true,
@@ -1631,42 +1625,42 @@ fn validate_loop_item(
         validate_loop_guard_output_predicates(
             trait_ref,
             item,
-            stop_if,
-            &format!("{base}.stop-if"),
+            abort_if,
+            &format!("{base}.abort-if"),
         )?;
     }
     if let Some(on_exhausted) = item.on_exhausted.as_ref() {
         validate_exhaustion_target(on_exhausted, &format!("{base}.on-exhausted"), signal_ids)?;
     }
-    if let Some(on_stop) = item.on_stop.as_ref() {
-        validate_on_stop_requires_stop_if(item, base)?;
-        validate_stop_signal_target(on_stop, &format!("{base}.on-stop"), signal_ids)?;
+    if let Some(on_abort) = item.on_abort.as_ref() {
+        validate_on_abort_requires_abort_if(item, base)?;
+        validate_abort_signal_target(on_abort, &format!("{base}.on-abort"), signal_ids)?;
     }
     Ok(())
 }
 
-/// `on-stop` names which signal(s) a `stop-if` match emits, so it is
-/// meaningless on a loop that never declares `stop-if`.
-fn validate_on_stop_requires_stop_if(item: &SequenceItem, base: &str) -> crate::Result<()> {
-    if item.stop_if.is_none() {
+/// `on-abort` names which signal(s) a `abort-if` match emits, so it is
+/// meaningless on a loop that never declares `abort-if`.
+fn validate_on_abort_requires_abort_if(item: &SequenceItem, base: &str) -> crate::Result<()> {
+    if item.abort_if.is_none() {
         return Err(crate::manifest::Error::InvalidField {
-            field_path: format!("{base}.on-stop"),
-            message: "loop on-stop requires stop-if to be declared".to_string(),
+            field_path: format!("{base}.on-abort"),
+            message: "loop on-abort requires abort-if to be declared".to_string(),
         }
         .into());
     }
     Ok(())
 }
 
-/// A loop's `on-stop` declaration: unlike `on-exhausted`, a `stop-if` match
-/// always halts the loop, so the `"continue"`/`"block"` policy keywords are
+/// A loop's `on-abort` declaration: unlike `on-exhausted`, a `abort-if` match
+/// always halts the loop, so the `"continue"`/`"abort"` policy keywords are
 /// meaningless here and rejected — only signal refs are accepted.
-fn validate_stop_signal_target(
+fn validate_abort_signal_target(
     target: &ExhaustionTarget,
     field_path: &str,
     signal_ids: &BTreeSet<&str>,
 ) -> crate::Result<()> {
-    validate_signal_target(target, field_path, "on-stop", false, signal_ids)
+    validate_signal_target(target, field_path, "on-abort", false, signal_ids)
 }
 
 fn validate_exhaustion_target(
@@ -1679,10 +1673,10 @@ fn validate_exhaustion_target(
 
 /// Shared walk over an `ExhaustionTarget`'s One/Many entries, resolving
 /// each `signal:<id>` ref and rejecting duplicates — the one implementation
-/// `on-exhausted` and `on-stop` both drive, differing only in whether the
-/// `"continue"`/`"block"` policy keywords are legal entries (`on-exhausted`
-/// only; a `stop-if` match always halts the loop, so they are meaningless
-/// for `on-stop`) and in the field name their error messages cite.
+/// `on-exhausted` and `on-abort` both drive, differing only in whether the
+/// `"continue"`/`"abort"` policy keywords are legal entries (`on-exhausted`
+/// only; a `abort-if` match always halts the loop, so they are meaningless
+/// for `on-abort`) and in the field name their error messages cite.
 fn validate_signal_target(
     target: &ExhaustionTarget,
     field_path: &str,
@@ -1703,7 +1697,7 @@ fn validate_signal_target(
         .into()
     };
     let validate_entry = |value: &str| -> crate::Result<()> {
-        if matches!(value, "continue" | "block") {
+        if matches!(value, "continue" | "abort") {
             return if allow_policy_keywords { Ok(()) } else { Err(invalid(value)) };
         }
         if value.starts_with("signal:") {
@@ -1724,7 +1718,7 @@ fn validate_signal_target(
                 // is the whole declaration), mixing a keyword into a
                 // signal list is nonsensical regardless of which field
                 // otherwise allows the keyword alone.
-                if allow_policy_keywords && matches!(value.as_str(), "continue" | "block") {
+                if allow_policy_keywords && matches!(value.as_str(), "continue" | "abort") {
                     return Err(invalid(value));
                 }
                 validate_entry(value)?;
@@ -2081,6 +2075,13 @@ fn validate_for_each_item(
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{base}.max-items"),
             message: "max-items must be greater than zero".to_string(),
+        }
+        .into());
+    }
+    if item.on_complete.len() > 1 {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: format!("{base}.on-complete"),
+            message: "for-each on-complete accepts at most one signal".to_string(),
         }
         .into());
     }
@@ -3828,14 +3829,14 @@ mod tests {
     }
 
     #[test]
-    fn loop_rejects_emits() {
+    fn loop_rejects_on_complete() {
         let item = item_from_toml(
-            "id = \"refinement-loop\"\ntitle = \"Refine\"\nkind = \"loop\"\nsequence = \"sequence:refine-work\"\nmax-iterations = 3\nemits = [\"signal:done\"]\n",
+            "id = \"refinement-loop\"\ntitle = \"Refine\"\nkind = \"loop\"\nsequence = \"sequence:refine-work\"\nmax-iterations = 3\non-complete = [\"signal:done\"]\n",
         );
         let error = validate_item_shape(&item, SequenceKind::Loop, "procedure.sequence[0]")
-            .expect_err("loop items never become ReadyItem, so emits is a silent no-op");
+            .expect_err("loop items never become ReadyItem, so on-complete is a silent no-op");
         assert!(
-            format!("{error}").contains("emits"),
+            format!("{error}").contains("on-complete"),
             "error must name the offending field: {error}"
         );
     }
@@ -3858,7 +3859,7 @@ mod tests {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();
         validate_exhaustion_target(&ExhaustionTarget::One("continue".to_string()), "x.on-exhausted", &signal_ids)
             .expect("\"continue\" is a legal keyword");
-        validate_exhaustion_target(&ExhaustionTarget::One("block".to_string()), "x.on-exhausted", &signal_ids)
+        validate_exhaustion_target(&ExhaustionTarget::One("abort".to_string()), "x.on-exhausted", &signal_ids)
             .expect("\"block\" is a legal keyword");
     }
 
@@ -3940,70 +3941,70 @@ mod tests {
         .expect("distinct resolved signals are legal");
     }
 
-    fn loop_item_with_stop(stop_if: bool, on_stop: Option<&str>) -> SequenceItem {
-        let stop_if_line = if stop_if { "stop-if = { slot = \"slot:verdict\", field = \"status\", equals = \"revise\" }\n" } else { "" };
-        let on_stop_line = on_stop
-            .map(|value| format!("on-stop = \"{value}\"\n"))
+    fn loop_item_with_stop(abort_if: bool, on_abort: Option<&str>) -> SequenceItem {
+        let abort_if_line = if abort_if { "abort-if = { slot = \"slot:verdict\", field = \"status\", equals = \"revise\" }\n" } else { "" };
+        let on_abort_line = on_abort
+            .map(|value| format!("on-abort = \"{value}\"\n"))
             .unwrap_or_default();
         item_from_toml(&format!(
-            "id = \"refinement-loop\"\ntitle = \"Refine\"\nkind = \"loop\"\nsequence = \"sequence:refine-work\"\nmax-iterations = 3\n{stop_if_line}{on_stop_line}"
+            "id = \"refinement-loop\"\ntitle = \"Refine\"\nkind = \"loop\"\nsequence = \"sequence:refine-work\"\nmax-iterations = 3\n{abort_if_line}{on_abort_line}"
         ))
     }
 
     #[test]
-    fn loop_shape_allows_on_stop_field() {
+    fn loop_shape_allows_on_abort_field() {
         validate_item_shape(
             &loop_item_with_stop(true, Some("signal:recurring-blocker-unresolved")),
             SequenceKind::Loop,
             "procedure.sequence[0]",
         )
-        .expect("on-stop is a legal loop field at the shape level");
+        .expect("on-abort is a legal loop field at the shape level");
     }
 
     #[test]
-    fn on_stop_requires_stop_if() {
+    fn on_abort_requires_abort_if() {
         let item = loop_item_with_stop(false, Some("signal:recurring-blocker-unresolved"));
-        let error = validate_on_stop_requires_stop_if(&item, "procedure.sequence[0]")
-            .expect_err("on-stop without stop-if must be rejected");
+        let error = validate_on_abort_requires_abort_if(&item, "procedure.sequence[0]")
+            .expect_err("on-abort without abort-if must be rejected");
         assert!(
-            format!("{error}").contains("stop-if"),
-            "error must steer authors toward stop-if: {error}"
+            format!("{error}").contains("abort-if"),
+            "error must steer authors toward abort-if: {error}"
         );
     }
 
     #[test]
-    fn on_stop_allowed_alongside_stop_if() {
+    fn on_abort_allowed_alongside_abort_if() {
         let item = loop_item_with_stop(true, Some("signal:recurring-blocker-unresolved"));
-        validate_on_stop_requires_stop_if(&item, "procedure.sequence[0]")
-            .expect("on-stop declared alongside stop-if is legal");
+        validate_on_abort_requires_abort_if(&item, "procedure.sequence[0]")
+            .expect("on-abort declared alongside abort-if is legal");
     }
 
     #[test]
-    fn non_loop_item_rejects_on_stop() {
+    fn non_loop_item_rejects_on_abort() {
         let item = item_from_toml(
-            "id = \"stage\"\ntitle = \"Stage\"\nkind = \"sequence\"\nsequence = \"sequence:stage\"\non-stop = \"signal:done\"\n",
+            "id = \"stage\"\ntitle = \"Stage\"\nkind = \"sequence\"\nsequence = \"sequence:stage\"\non-abort = \"signal:done\"\n",
         );
         validate_item_shape(&item, SequenceKind::Sequence, "procedure.sequence[0]")
-            .expect_err("on-stop is loop-only");
+            .expect_err("on-abort is loop-only");
     }
 
     #[test]
-    fn validate_stop_signal_target_accepts_resolved_signal() {
+    fn validate_abort_signal_target_accepts_resolved_signal() {
         let signal_ids: BTreeSet<&str> = ["recurring-blocker-unresolved"].into_iter().collect();
-        validate_stop_signal_target(
+        validate_abort_signal_target(
             &ExhaustionTarget::One("signal:recurring-blocker-unresolved".to_string()),
-            "x.on-stop",
+            "x.on-abort",
             &signal_ids,
         )
         .expect("a declared local signal ref resolves");
     }
 
     #[test]
-    fn validate_stop_signal_target_rejects_unresolved_signal() {
+    fn validate_abort_signal_target_rejects_unresolved_signal() {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();
-        let error = validate_stop_signal_target(
+        let error = validate_abort_signal_target(
             &ExhaustionTarget::One("signal:missing".to_string()),
-            "x.on-stop",
+            "x.on-abort",
             &signal_ids,
         )
         .expect_err("an unresolved local signal ref must be rejected");
@@ -4014,14 +4015,14 @@ mod tests {
     }
 
     #[test]
-    fn validate_stop_signal_target_rejects_continue_keyword() {
+    fn validate_abort_signal_target_rejects_continue_keyword() {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();
-        let error = validate_stop_signal_target(
+        let error = validate_abort_signal_target(
             &ExhaustionTarget::One("continue".to_string()),
-            "x.on-stop",
+            "x.on-abort",
             &signal_ids,
         )
-        .expect_err("a stop-if match always halts the loop, so \"continue\" is meaningless here");
+        .expect_err("an abort-if match always halts the loop, so \"continue\" is meaningless here");
         assert!(
             format!("{error}").contains("policy keyword"),
             "error must explain why the keyword is rejected: {error}"
@@ -4029,25 +4030,25 @@ mod tests {
     }
 
     #[test]
-    fn validate_stop_signal_target_rejects_block_keyword() {
+    fn validate_abort_signal_target_rejects_abort_keyword() {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();
-        validate_stop_signal_target(&ExhaustionTarget::One("block".to_string()), "x.on-stop", &signal_ids)
-            .expect_err("\"block\" is equally meaningless for on-stop");
+        validate_abort_signal_target(&ExhaustionTarget::One("abort".to_string()), "x.on-abort", &signal_ids)
+            .expect_err("\"block\" is equally meaningless for on-abort");
     }
 
     #[test]
-    fn validate_stop_signal_target_rejects_empty_list() {
+    fn validate_abort_signal_target_rejects_empty_list() {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();
-        validate_stop_signal_target(&ExhaustionTarget::Many(Vec::new()), "x.on-stop", &signal_ids)
+        validate_abort_signal_target(&ExhaustionTarget::Many(Vec::new()), "x.on-abort", &signal_ids)
             .expect_err("an empty list is not a legal declaration");
     }
 
     #[test]
-    fn validate_stop_signal_target_rejects_duplicate_signals() {
+    fn validate_abort_signal_target_rejects_duplicate_signals() {
         let signal_ids: BTreeSet<&str> = ["a"].into_iter().collect();
-        let error = validate_stop_signal_target(
+        let error = validate_abort_signal_target(
             &ExhaustionTarget::Many(vec!["signal:a".to_string(), "signal:a".to_string()]),
-            "x.on-stop",
+            "x.on-abort",
             &signal_ids,
         )
         .expect_err("duplicate signal entries must be rejected");

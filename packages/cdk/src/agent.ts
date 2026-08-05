@@ -91,7 +91,7 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
  *   description: "Reviews a diff for correctness, risk, and scope.",
  *   summary: "Diff reviewer.",
  * });
- * sequence.prompt("review", { agent: reviewer, text: prompt.text`Review ${diff}.`, output: review });
+ * sequence.prompt("review", { agent: reviewer, text: input.prompt`Review ${diff}.`, output: review });
  * ```
  * @see {@link sequence}
  */

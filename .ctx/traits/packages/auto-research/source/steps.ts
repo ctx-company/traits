@@ -1,5 +1,5 @@
 import { CODE_INTEGRITY_DOCTRINE, QUICK_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, operation, prompt, sequence } from "@ctx-traits/cdk";
+import { condition, input, operation, sequence } from "@ctx-traits/cdk";
 import type { AutoResearchAgents } from "./agent.ts";
 import type { AutoResearchVariantFlags } from "./config.ts";
 import type { AutoResearchSlots } from "./slots.ts";
@@ -83,7 +83,7 @@ export function buildSteps(
     const setupStep = sequence.prompt("setup", {
         title: "Prepare and verify the isolated workbench",
         agent: setupWorker,
-        text: prompt.text`
+        text: input.prompt`
             Prepare the workbench for ${focusPort}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
             Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
             Do not modify files yet and do not invent metric evidence.`,
@@ -120,7 +120,7 @@ export function buildSteps(
         : sequence.prompt("propose", {
             title: "Propose one fresh bounded experiment",
             agent: proposer,
-            text: prompt.text`
+            text: input.prompt`
             Propose one small, falsifiable experiment for ${objective!}.
             The lower-is-better metric is ${metricField!}; current best is ${bestMetric}; trusted prior measurements are ${history}.
             Use only this typed handoff. Do not infer hidden conversation, claim a result, or decide keep/discard.
@@ -132,7 +132,7 @@ export function buildSteps(
         : sequence.prompt("apply", {
             title: "Apply the proposed candidate",
             agent: worker,
-            text: prompt.text`
+            text: input.prompt`
             Apply exactly the bounded change in ${proposal} for ${objective!} inside the isolated worktree.
             Inspect the current files first, preserve unrelated work, and do not run or report the experiment metric. The runtime executes the trusted measurement command next.
             Return a concise receipt naming the files changed.`,
@@ -274,7 +274,7 @@ export function buildSteps(
     const abortSummary = sequence.prompt("abort-summary", {
         title: "Report the preflight abort",
         agent: summarizer,
-        text: prompt.text`
+        text: input.prompt`
             Report an aborted auto-research run for ${focusPort} from ${readinessSlot}.
             Return status aborted, experiments 0, kept 0, no best, empty rows, and the exact readiness reason.`,
         output: summary,
@@ -282,7 +282,7 @@ export function buildSteps(
     const baselineFailureSummary = sequence.prompt("baseline-failure-summary", {
         title: "Report the unusable baseline",
         agent: summarizer,
-        text: prompt.text`
+        text: input.prompt`
             Report an aborted auto-research run for ${focusPort}. The trusted baseline command returned ${baselineResult}, whose status was not ok.
             Return status aborted, experiments 0, kept 0, no best, one baseline row containing the unchanged measurement with decision baseline, and the concrete measurement failure.`,
         output: summary,
@@ -359,7 +359,7 @@ process.stdout.write(JSON.stringify({
         ? sequence.prompt("scope", {
             title: "Scope one bounded benchmark-improvement attempt (smart-1)",
             agent: brSmart1!,
-            text: prompt.text`
+            text: input.prompt`
             Scope one small, falsifiable attempt to improve the lower-is-better benchmark over ${target!}.
             Current best metric is ${bestMetric}; trusted prior measurements are ${history}.
             Return the exact bounded area to touch and why it should improve the benchmark, staying inside ${target!}.`,
@@ -370,7 +370,7 @@ process.stdout.write(JSON.stringify({
         ? sequence.prompt("draft", {
             title: "Turn the scope into a concrete worker draft (smart-1)",
             agent: brSmart1!,
-            text: prompt.text`
+            text: input.prompt`
             Turn the scope ${scopeSlot!} for ${target!} into a concrete, actionable draft the worker can implement directly: exact files/areas and the precise change. Keep it to one bounded attempt.`,
             output: draftSlot!,
         })
@@ -379,7 +379,7 @@ process.stdout.write(JSON.stringify({
         ? sequence.prompt("implement", {
             title: "Implement the draft (worker)",
             agent: brWorker!,
-            text: prompt.text`
+            text: input.prompt`
             Implement the draft ${draftSlot!} for ${target!} inside the isolated worktree.
             Do not run or report the benchmark; the runtime executes the trusted benchmark command next.
             Return a concise receipt naming the files changed.`,
@@ -390,7 +390,7 @@ process.stdout.write(JSON.stringify({
         ? sequence.prompt("review", {
             title: "Review the implemented candidate (smart-1)",
             agent: brSmart1!,
-            text: prompt.text(
+            text: input.prompt(
                 `Review the implemented candidate for {target} against the draft {draft}. Work summary: {implementReceipt}.
                     A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. ${QUICK_VARIANT_DOCTRINE}
                     This is the ONLY review pass for this round — an unapproved candidate is reverted, never repaired.

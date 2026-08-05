@@ -27,20 +27,6 @@ direction = "input"
 schema = "schema:text"
 description = "Crate, module, or file path to refactor."
 
-[[port]]
-id = "work-report"
-direction = "output"
-schema = "schema:text"
-description = "Final report of the refactored state."
-value = "slot:work-summary"
-
-[[port]]
-id = "review-report"
-direction = "output"
-schema = "schema:text"
-description = "Final reviewer judgment of the refactored state."
-value = "slot:review-notes"
-
 [[slot]]
 id = "work-summary"
 schema = "schema:text"
@@ -93,10 +79,6 @@ output = ["slot:review-notes"]
 [procedure]
 description = "Implement a Rust refactor for the target, holding it to the rust pack's engineering-standards and gate-conventions, then review it once against the same doctrine."
 input = ["port:target"]
-output = [
-    "port:work-report",
-    "port:review-report",
-]
 
 [[procedure.sequence]]
 id = "implement"

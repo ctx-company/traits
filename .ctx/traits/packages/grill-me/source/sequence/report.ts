@@ -1,4 +1,4 @@
-import { input, prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 
 import { agent } from "../agent.ts";
 import { port, resource, slot } from "../data.ts";
@@ -6,7 +6,7 @@ import { port, resource, slot } from "../data.ts";
 export default sequence.prompt("report", {
     title: "Write the grill report (smart-2)",
     agent: agent.synthesist,
-    text: prompt.text`
+    text: input.prompt`
                     The interview on the plan ${port.plan} has ended; the final probe is ${slot.probe}. Read its status FIRST: exhausted means the decision tree was walked to the end; continue means the round budget ran out with branches unvisited, and the report must say so plainly rather than implying completeness. Hold to the doctrine ${resource.doctrine}.
                     The settled rounds are in the interview ledger attached to this frame. If no ledger is attached, the very first probe found nothing to ask — write the report from the plan alone and say exactly that.
                     Write the grill report in three parts:

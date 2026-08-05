@@ -1,5 +1,5 @@
 import { rustReviewerRole, rustWorkerRole } from "@ctx-traits/rust";
-import { dependency, port, procedure, prompt, ref, sequence, slot, trait } from "@ctx-traits/cdk";
+import { dependency, input, port, procedure, ref, sequence, slot, trait } from "@ctx-traits/cdk";
 
 const worker = rustWorkerRole("worker", "Implements the requested Rust refactor and holds it to the repo's own gates.");
 const reviewer = rustReviewerRole(
@@ -27,17 +27,6 @@ const reviewNotes = slot.text({
     hint: "Whether the gates actually pass, and any blocking defect found by inspecting the working tree directly.",
 });
 
-const workReport = port.output.text({
-    id: "work-report",
-    description: "Final report of the refactored state.",
-    value: workSummary,
-});
-const reviewReport = port.output.text({
-    id: "review-report",
-    description: "Final reviewer judgment of the refactored state.",
-    value: reviewNotes,
-});
-
 export default trait("refactor-rust", {
     version: "0.1.0",
     name: "Refactor (Rust)",
@@ -53,12 +42,11 @@ export default trait("refactor-rust", {
         description:
             "Implement a Rust refactor for the target, holding it to the rust pack's engineering-standards and gate-conventions, then review it once against the same doctrine.",
         input: target,
-        output: [workReport, reviewReport],
         sequence: [
             sequence.prompt("implement", {
                 title: "Implement the refactor (worker)",
                 agent: worker,
-                text: prompt.text`
+                text: input.prompt`
                     Implement the requested refactor for ${target}.
                     Hold the change to the engineering-standards ${engineeringStandards} and run the gates named in ${gateConventions} (fmt --check, check, clippy -D warnings) before reporting.
                     Return a work summary: what changed (files), the exact gate commands you ran, and their result.`,
@@ -68,7 +56,7 @@ export default trait("refactor-rust", {
             sequence.prompt("review", {
                 title: "Review the refactor (reviewer)",
                 agent: reviewer,
-                text: prompt.text`
+                text: input.prompt`
                     Review the refactored state of ${target} against the work summary ${workSummary}.
                     Consult the engineering-standards ${engineeringStandards} and gate-conventions ${gateConventions}, and inspect the actual working tree and gate output with your tools — never review the summary alone.
                     Return your judgment: whether the gates genuinely pass and the standards are held, naming any blocking defect found.`,

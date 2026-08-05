@@ -412,7 +412,7 @@ fn ts_string_literal(text: &str) -> String {
 
 fn starter_source_text(trait_id: &str, name: &str) -> String {
     format!(
-        r#"import {{ agent, port, procedure, prompt, sequence, slot, trait }} from "@ctx-traits/cdk";
+        r#"import {{ agent, input, port, procedure, sequence, slot, trait }} from "@ctx-traits/cdk";
 
 const summary = slot.text("summary");
 const output = port.output.text({{ id: "summary", value: summary }});
@@ -428,7 +428,7 @@ export const draft = trait({{
     sequence: sequence.prompt({{
       id: "run",
       agent: worker,
-      prompt: prompt.text`Describe the task for this trait.`,
+      prompt: input.prompt`Describe the task for this trait.`,
       output: summary,
     }}),
   }}),

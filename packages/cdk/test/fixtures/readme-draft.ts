@@ -1,4 +1,4 @@
-import { agent, method, port, procedure, prompt, sequence, slot, tone, trait, verbosity } from "@ctx-traits/cdk";
+import { agent, input, method, port, procedure, sequence, slot, tone, trait, verbosity } from "@ctx-traits/cdk";
 
 const codeDiff = port.input.text({ id: "code-diff" });
 const changeSummary = slot.text("change-summary");
@@ -26,21 +26,21 @@ export const prRiskTriage = trait({
         id: "summarize-code-diff",
         agent: worker,
         input: codeDiff,
-        prompt: prompt.text`Summarize what changed in ${codeDiff}.`,
+        prompt: input.prompt`Summarize what changed in ${codeDiff}.`,
         output: changeSummary,
       }),
       sequence.prompt({
         id: "find-risks-in-code-diff",
         agent: reviewer,
         input: [codeDiff, changeSummary],
-        prompt: prompt.text`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
+        prompt: input.prompt`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
         output: riskNotes,
       }),
       sequence.prompt({
         id: "write-pr-comment",
         agent: worker,
         input: [changeSummary, riskNotes],
-        prompt: prompt.text`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
+        prompt: input.prompt`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
         output: reviewComment,
       }),
     ],

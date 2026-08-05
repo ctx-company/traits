@@ -291,7 +291,7 @@ title = "Implement and review"
 kind = "loop"
 sequence = "sequence:build-round"
 max-iterations = 6
-on-exhausted = "block"
+on-exhausted = "abort"
 
 [procedure.sequence.until]
 slot = "slot:review-verdict"

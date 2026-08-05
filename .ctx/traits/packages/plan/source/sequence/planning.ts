@@ -1,12 +1,12 @@
 import type { AgentHandle, PortHandle, SlotHandle } from "@ctx-traits/cdk";
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 export function refineTaskStep(agent: AgentHandle, taskInput: PortHandle, grounding: SlotHandle) {
     return sequence.prompt("refine-task", {
         title: "Ground & refine the task in the codebase",
         agent,
-        text: prompt.text`
+        text: input.prompt`
             Task is described as: ${taskInput}, ground it in the codebase & refine it.
             Read the relevant parts of the repository with your tools:
                 - identify the concrete files, modules, and patterns the task touches
@@ -29,7 +29,7 @@ export function splitTasksStep(agent: AgentHandle, taskInput: PortHandle, ground
     return sequence.prompt("split", {
         title: "Split the work into task files",
         agent,
-        text: prompt.text(
+        text: input.prompt(
             `Task format doctrine: ${TASK_FORMAT_DOCTRINE}
             The work, as described: {task}
             Grounding notes: {grounding}

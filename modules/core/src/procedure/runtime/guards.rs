@@ -17,7 +17,7 @@ fn evaluate_control_guards_after_step(
         // An unbounded loop (0093) has no iteration ceiling to report; guard
         // evaluation only reads `iteration_index`, so `usize::MAX` stands in
         // as "no bound" rather than erroring a step that is only here to
-        // check `until`/`stop-if` — those guards are this frame's only exit.
+        // check `until`/`abort-if` — those guards are this frame's only exit.
         let max_iterations = match frame.max_iterations {
             Some(value) => value,
             None if frame.unbounded => usize::MAX,
@@ -41,12 +41,12 @@ fn evaluate_control_guards_after_step(
         let guard_path_len = (loop_index + 2).min(state.active_path.len());
         let guard_path = state.active_path[..guard_path_len].to_vec();
         let mut stop_check = None;
-        let stop_match = if let Some(stop_if) = frame.stop_if.as_ref() {
+        let stop_match = if let Some(abort_if) = frame.abort_if.as_ref() {
             let (matched, evaluations) =
                 evaluate_guard_expr(
                     trait_ref,
                     state,
-                    stop_if,
+                    abort_if,
                     &loop_context,
                     &guard_path,
                     current_outputs,
@@ -102,14 +102,14 @@ fn evaluate_control_guards_after_step(
                 stop_check,
             );
             // The runtime's stop *reason* stays the accurate mechanism
-            // (`stop-if-matched`) regardless of authoring; a declared
-            // `on-stop` only substitutes which signal(s) are emitted, so a
+            // (`abort-if-matched`) regardless of authoring; a declared
+            // `on-abort` only substitutes which signal(s) are emitted, so a
             // trait's own name for its terminal condition (e.g.
             // `recurring-blocker-unresolved`) reaches the ledger instead of
             // the canonical signal.
-            let declared_signals = frame.on_stop.as_ref().map(ExhaustionTarget::signals).unwrap_or_default();
+            let declared_signals = frame.on_abort.as_ref().map(ExhaustionTarget::signals).unwrap_or_default();
             let signals_to_emit: Vec<String> = if declared_signals.is_empty() {
-                vec![stop_if_matched_signal_ref()]
+                vec![abort_if_matched_signal_ref()]
             } else {
                 declared_signals.to_vec()
             };

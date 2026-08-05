@@ -778,7 +778,7 @@ impl FailureTarget {
     }
 }
 
-/// A loop's `on-exhausted` declaration: the keywords `"continue"`/`"block"`,
+/// A loop's `on-exhausted` declaration: the keywords `"continue"`/`"abort"`,
 /// or one or more signal refs emitted when the loop continues past
 /// exhaustion. A one-element sequence collapses to `One` on decode so each
 /// meaning has exactly one canonical spelling.
@@ -789,10 +789,10 @@ pub enum ExhaustionTarget {
     Many(Vec<String>),
 }
 
-/// Disposition an `ExhaustionTarget` resolves to: stop the run blocked, or
+/// Disposition an `ExhaustionTarget` resolves to: stop the run aborted, or
 /// continue and emit the given signals (possibly none).
 pub enum ExhaustionDisposition<'a> {
-    Block,
+    Abort,
     Continue { signals: &'a [String] },
 }
 
@@ -801,7 +801,7 @@ impl ExhaustionTarget {
     /// contract share a single keyword/signal split.
     pub fn disposition(&self) -> ExhaustionDisposition<'_> {
         match self {
-            Self::One(value) if value == "block" => ExhaustionDisposition::Block,
+            Self::One(value) if value == "abort" => ExhaustionDisposition::Abort,
             Self::One(value) if value == "continue" => ExhaustionDisposition::Continue { signals: &[] },
             Self::One(signal) => ExhaustionDisposition::Continue {
                 signals: std::slice::from_ref(signal),
@@ -811,14 +811,14 @@ impl ExhaustionTarget {
     }
 
     /// The declared signal refs this target names, regardless of
-    /// disposition: empty for `Block` (and for the bare `"continue"`
+    /// disposition: empty for `Abort` (and for the bare `"continue"`
     /// keyword), the named signal(s) otherwise. The single accessor every
     /// consumer that only wants "which signals does this declaration name"
-    /// (never the block/continue distinction itself) should call, rather
+    /// (never the abort/continue distinction itself) should call, rather
     /// than re-matching on `disposition()`.
     pub fn signals(&self) -> &[String] {
         match self.disposition() {
-            ExhaustionDisposition::Block => &[],
+            ExhaustionDisposition::Abort => &[],
             ExhaustionDisposition::Continue { signals } => signals,
         }
     }
@@ -946,9 +946,15 @@ pub struct SequenceItem {
     pub format: Option<crate::shared::SlugList>,
 
     /// Declared signal refs this item may emit, either directly as refs or
-    /// derived from deterministic output predicates.
-    #[serde(default, rename = "emits", skip_serializing_if = "Vec::is_empty")]
-    pub emits: Vec<SignalEmissionRule>,
+    /// derived from deterministic output predicates. On a for-each item this
+    /// is instead the completion signal, emitted once (at most one entry
+    /// allowed there).
+    #[serde(
+        default,
+        rename = "on-complete",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub on_complete: Vec<SignalEmissionRule>,
 
     /// Named sequence ref (`sequence:<id>`) for sequence/loop/for-each items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -967,8 +973,8 @@ pub struct SequenceItem {
     pub until: Option<GuardExpr>,
 
     /// Loop terminal guard.
-    #[serde(default, rename = "stop-if", skip_serializing_if = "Option::is_none")]
-    pub stop_if: Option<GuardExpr>,
+    #[serde(default, rename = "abort-if", skip_serializing_if = "Option::is_none")]
+    pub abort_if: Option<GuardExpr>,
 
     /// Required loop bound.
     #[serde(
@@ -989,7 +995,7 @@ pub struct SequenceItem {
     pub max_iterations_from: Option<String>,
 
     /// Loop exhaustion policy: `"continue"` (the default when omitted),
-    /// `"block"`, or one or more `signal:<id>` refs.
+    /// `"abort"`, or one or more `signal:<id>` refs.
     ///
     /// Continuing treats exhaustion as a normal outcome — the sequence
     /// proceeds to the next item, and any declared signals are emitted as
@@ -998,9 +1004,9 @@ pub struct SequenceItem {
     /// which the following step is responsible for reading; it does not mean
     /// the run is broken.
     ///
-    /// `"block"` stops the run at exhaustion, for procedures where an unmet
+    /// `"abort"` stops the run at exhaustion, for procedures where an unmet
     /// exit condition invalidates every step after the loop; no signal is
-    /// emitted in that case. A run started with strict loops blocks every
+    /// emitted in that case. A run started with strict loops aborts every
     /// loop regardless of its declared policy, and suppresses signal
     /// emission even when the declaration names one.
     #[serde(
@@ -1010,15 +1016,15 @@ pub struct SequenceItem {
     )]
     pub on_exhausted: Option<ExhaustionTarget>,
 
-    /// Names the signal(s) to emit when `stop-if` is the arm that halts the
+    /// Names the signal(s) to emit when `abort-if` is the arm that halts the
     /// loop, so the trait's own terminal reason (e.g.
     /// `recurring-blocker-unresolved`) is distinguishable from exhaustion in
     /// the ledger, the receipt, and `run-status` — the runtime still reports
-    /// the accurate mechanism (`stop-if-matched`) alongside it. Requires
-    /// `stop-if`; the `"continue"`/`"block"` keywords are meaningless here
-    /// (a `stop-if` match always halts the loop) and are rejected.
-    #[serde(default, rename = "on-stop", skip_serializing_if = "Option::is_none")]
-    pub on_stop: Option<ExhaustionTarget>,
+    /// the accurate mechanism (`abort-if-matched`) alongside it. Requires
+    /// `abort-if`; the `"continue"`/`"abort"` keywords are meaningless here
+    /// (an `abort-if` match always halts the loop) and are rejected.
+    #[serde(default, rename = "on-abort", skip_serializing_if = "Option::is_none")]
+    pub on_abort: Option<ExhaustionTarget>,
 
     /// `for-each` list slot ref.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1031,14 +1037,6 @@ pub struct SequenceItem {
     /// Required `for-each` bound.
     #[serde(default, rename = "max-items", skip_serializing_if = "Option::is_none")]
     pub max_items: Option<usize>,
-
-    /// Runtime signal emitted when a for-each completes.
-    #[serde(
-        default,
-        rename = "on-complete",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub on_complete: Option<String>,
 
     /// Legacy failure signal or structured forward recovery route.
     #[serde(

@@ -61,19 +61,19 @@ const prRiskTriage = trait({
       sequence.prompt({
         id: "summarize-code-diff",
         agent: worker,
-        input: input.text`Summarize what changed in ${codeDiff}.`,
+        input: input.prompt`Summarize what changed in ${codeDiff}.`,
         output: changeSummary,
       }),
       sequence.prompt({
         id: "find-risks-in-code-diff",
         agent: reviewer,
-        input: input.text`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
+        input: input.prompt`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
         output: riskNotes,
       }),
       sequence.prompt({
         id: "write-pr-comment",
         agent: worker,
-        input: input.text`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
+        input: input.prompt`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
         output: reviewComment,
       }),
     ],
@@ -93,10 +93,10 @@ Useful helpers:
 - `schema.extend(...schemas, additions?)` combines several object-schema field-record maps (or a plain fields map), throwing a field-specific collision error naming both sources instead of a plain `{ ...a, ...b }` spread's silent last-wins. `schema.optional(fieldValue)` marks an existing field/field record `required: false`. `schema.template(templateId, defaultSpots, build)` is a monomorphizing factory over `schema.object`: declare named default spots once, then call the returned specialization function with a fresh schema id and (optionally) per-spot overrides.
 - `slot.text(...)`, `slot.boolean(...)`, `slot.number(...)`, `slot.any(...)`, and `slot.of(...)` declare procedure slots.
 - `port.input.text(...)`, `port.output.text(...)`, `port.input.of(...)`, `port.output.of(...)`, and `port(...)` declare trait boundary ports.
-- `prompt.text\`...${typedRef}...\`` preserves typed interpolation refs for synth diagnostics.
-- `input.text\`...${typedRef}...\`` is the preferred prompt/ask step `input:` carrier — the same tagged-template builder as `prompt.text`, under the `input` namespace so it reads naturally at the step's `input:` field: `sequence.prompt("review", { agent, input: input.text\`Review ${diff}.\`, output })`. Every `${ref}` interpolated into the template is auto-derived as the step's input; non-interpolated dependencies (a resource read only by doctrine text, say) go in `include:` instead of a hand-written `input:` list.
+- `input.prompt\`...${typedRef}...\`` preserves typed interpolation refs for synth diagnostics.
+- `input.prompt\`...${typedRef}...\`` is the preferred prompt/ask step `input:` carrier — the same tagged-template builder as `input.prompt`, under the `input` namespace so it reads naturally at the step's `input:` field: `sequence.prompt("review", { agent, input: input.prompt\`Review ${diff}.\`, output })`. Every `${ref}` interpolated into the template is auto-derived as the step's input; non-interpolated dependencies (a resource read only by doctrine text, say) go in `include:` instead of a hand-written `input:` list.
 - `input.command\`cmd ${arg}\`` is the equivalent tagged-template carrier for a command/check step's `input:` — see `sequence.command`/`sequence.check` below.
-- `output.text\`...\`` and `output.of(schemaRef)\`...\`` build an instruction-output: pass one (or a list) as a prompt/ask step's `output:` and it auto-declares a backing slot (id: the step id, then `<step-id>-2`, `<step-id>-3`... for later ones on the same step — colliding with a hand-declared slot of the same id is a build error naming both), and appends the instruction text plus a versioned return-format instruction onto the step's compiled prompt. `output.of` names the schema in that instruction and types the slot; `output.text` declares a plain-text slot. Bind a `const` to the returned handle to interpolate it into a later step's `input.text` (`${producedHandle}`) or a port's `value:` — but only once the producing step has been authored: interpolating an instruction-output before its step exists is a build error.
+- `output.text\`...\`` and `output.of(schemaRef)\`...\`` build an instruction-output: pass one (or a list) as a prompt/ask step's `output:` and it auto-declares a backing slot (id: the step id, then `<step-id>-2`, `<step-id>-3`... for later ones on the same step — colliding with a hand-declared slot of the same id is a build error naming both), and appends the instruction text plus a versioned return-format instruction onto the step's compiled prompt. `output.of` names the schema in that instruction and types the slot; `output.text` declares a plain-text slot. Bind a `const` to the returned handle to interpolate it into a later step's `input.prompt` (`${producedHandle}`) or a port's `value:` — but only once the producing step has been authored: interpolating an instruction-output before its step exists is a build error.
 
   Before (hand-declared slot, hand-written return-format prose, redundant `input:` list):
 
@@ -105,7 +105,7 @@ Useful helpers:
   sequence.prompt("review", {
     agent: reviewer,
     input: [diff, focus],
-    text: prompt.text`Review ${diff} with a focus on ${focus}. Return exactly one structured review...`,
+    text: input.prompt`Review ${diff} with a focus on ${focus}. Return exactly one structured review...`,
     output: review,
   });
   ```
@@ -116,7 +116,7 @@ Useful helpers:
   const reviewOutput = output.of(reviewSchema)`Your verdict, citing every finding.`;
   sequence.prompt("review", {
     agent: reviewer,
-    input: input.text`Review ${diff} with a focus on ${focus}.`,
+    input: input.prompt`Review ${diff} with a focus on ${focus}.`,
     output: reviewOutput,
   });
   ```

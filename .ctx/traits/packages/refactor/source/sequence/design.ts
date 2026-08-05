@@ -1,11 +1,11 @@
 import type { AgentHandle, ResourceHandle } from "@ctx-traits/cdk";
-import { prompt, sequence } from "@ctx-traits/cdk";
+import { input, sequence } from "@ctx-traits/cdk";
 import { agreedDesign, refactorFrame, target, workSummary } from "../data.ts";
 
 export function designStep(agent: AgentHandle, dialect: ResourceHandle) {
     return sequence.prompt("design", {
         title: "Design the boundary (smart-1)", agent,
-        text: prompt.text`
+        text: input.prompt`
             Design the refactor for the framed problem ${refactorFrame} on ${target}.
             Optimize for both faces of the standard at once: the deepest practical module — few entry points hiding the full implementation — expressed in the house dialect in ${dialect} (Interface/Service pairing per responsibility, surface-agnostic layers over typed Request/Response, typed Event/Command enums normalized once at the edge, entity containment, Context carriage where values re-thread, typed module-owned errors, Response enums instead of display strings). Where depth and dialect pull apart, be opinionated about the trade and say why; weigh how much the design DELETES — replacement that consumes its predecessor beats addition beside it (S9).
             Return the complete agreed design ready to implement from: final boundaries and types, the interface signatures with one usage example per caller class, what complexity gets hidden, file-by-file migration steps, what stays byte-stable, the expected net line delta with what any growth buys, and the validation plan (the repo's standard gates). Close with an explicit "MUST" and "MUST-NOT" list — the concrete, checkable requirements a reviewer enforcing plan fidelity applies verbatim; do not leave fidelity to be inferred from prose elsewhere in the design. Stay within the framing's constraints.`,
@@ -16,7 +16,7 @@ export function designStep(agent: AgentHandle, dialect: ResourceHandle) {
 export function implementStep(agent: AgentHandle, dialect: ResourceHandle) {
     return sequence.prompt("implement", {
         title: "Implement the refactor (worker)", agent,
-        text: prompt.text`
+        text: input.prompt`
             Implement the agreed design ${agreedDesign} for ${target}.
             Behavior-preserving is the contract unless the design explicitly says otherwise: serialized shapes, digests, and CLI output stay byte-stable. Respect the dialect (${dialect}); do not widen any interface to make a caller compile — fix the caller.
             Prefer deletion: code your change supersedes is removed in the same change, never left beside its replacement (S9). Run the repo validation gates before reporting. Return a work summary: what changed (files), the net line delta and what any growth buys, how behavior was preserved, gate results, open concerns.`,

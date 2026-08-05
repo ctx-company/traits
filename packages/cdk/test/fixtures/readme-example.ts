@@ -37,19 +37,19 @@ const prRiskTriage = trait({
       sequence.prompt({
         id: "summarize-code-diff",
         agent: worker,
-        input: input.text`Summarize what changed in ${codeDiff}.`,
+        input: input.prompt`Summarize what changed in ${codeDiff}.`,
         output: changeSummary,
       }),
       sequence.prompt({
         id: "find-risks-in-code-diff",
         agent: reviewer,
-        input: input.text`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
+        input: input.prompt`Using ${codeDiff} and ${changeSummary}, list concrete risks.`,
         output: riskNotes,
       }),
       sequence.prompt({
         id: "write-pr-comment",
         agent: worker,
-        input: input.text`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
+        input: input.prompt`Write one concise PR review comment using ${changeSummary} and ${riskNotes}.`,
         output: reviewComment,
       }),
     ],
