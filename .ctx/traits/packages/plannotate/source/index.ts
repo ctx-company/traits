@@ -38,10 +38,6 @@ export default trait("plannotate", {
     },
     intent: {
         require: [intent.require.ReviewBeforeFinal, intent.require.RoleAttributedOutput],
-        // Deliberately does NOT declare intent.avoid.UnboundedLoop — the
-        // build loop having no iteration bound is this trait's thesis, not
-        // an oversight: it ends when the work is right (reviewer AND owner
-        // both approve), not on a round count picked to approximate "never".
         avoid: [intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
     },
     procedure: procedure({
