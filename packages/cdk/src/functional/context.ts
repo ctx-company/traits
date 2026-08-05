@@ -219,3 +219,97 @@ export function dispatchSlotForEach(slotHandle: unknown, title: string, opts: un
   }
   return slotForEachLowering(slotHandle, title, opts, body);
 }
+
+// ---------------------------------------------------------------------------
+// Trait-level frame (0107): `defineTrait`/`use*`/`ctx.input` state for a
+// full-file functional trait entry. Distinct from the scope stack above — a
+// trait function opens exactly one `BuildFrame` (for its own root-scope
+// steps, via `openBuild`/`closeBuild`) and exactly one `TraitFrame` (for
+// `defineTrait`'s payload and the `use*` gates), at the same time, for the
+// same call to `evaluateTraitFunction`.
+// ---------------------------------------------------------------------------
+
+/**
+ * One resource/signal/port/slot declared while a trait frame is active —
+ * recorded by `port.ts`/`slot.ts`/`procedure.ts`'s builders via
+ * `recordTraitMint`, so `functional/trait.ts`'s never-referenced check and
+ * `ctx.input` validation see exactly the declarations minted by THIS trait
+ * function's own run, not every declaration ever minted in the process (a
+ * process-global registry would leak unrelated declarations from other
+ * trait builds sharing the same process, e.g. in a test suite).
+ */
+export interface FrameMint {
+  readonly kind: "resource" | "signal" | "port" | "slot";
+  readonly id: string;
+  readonly ref: string;
+  readonly declaration: unknown;
+  readonly file: string | undefined;
+}
+
+/** Accumulated state for one `evaluateTraitFunction` call. Opaque to `context.ts` beyond its own bookkeeping — `functional/trait.ts` reads/writes the field contents. */
+export interface TraitFrame {
+  defineTraitCalled: boolean;
+  slug: string | undefined;
+  /** `defineTrait`'s own fields payload, validated but otherwise untyped here — see `functional/trait.ts`'s `DefineTraitFields`. */
+  fields: Record<string, unknown> | undefined;
+  /** Accumulated across every `useBehavior` call, keyed by `BehaviorFields` field name. */
+  readonly behavior: Record<string, unknown>;
+  /** Accumulated across every `useIntent` call, keyed by `IntentSpec` facet name. */
+  readonly intent: Record<string, unknown>;
+  /** Resource handles passed to `useResource`, in call order. */
+  readonly resources: unknown[];
+  /** Every `ctx.input.*` id (kebab-cased) accessed during the trait function's run. */
+  readonly inputAccessed: Set<string>;
+  /** Every resource/signal/port/slot minted while this frame was active. @see {@link FrameMint} */
+  readonly mints: FrameMint[];
+}
+
+let activeTraitFrame: TraitFrame | undefined;
+
+export function isTraitFrameActive(): boolean {
+  return activeTraitFrame !== undefined;
+}
+
+export function openTraitFrame(): void {
+  if (activeTraitFrame !== undefined) {
+    throw new Error("evaluateTraitFunction: a trait function is already being evaluated — one at a time");
+  }
+  activeTraitFrame = {
+    defineTraitCalled: false,
+    slug: undefined,
+    fields: undefined,
+    behavior: {},
+    intent: {},
+    resources: [],
+    inputAccessed: new Set(),
+    mints: [],
+  };
+}
+
+/** Closes and returns the active trait frame — throws if none is open. */
+export function closeTraitFrame(): TraitFrame {
+  const frame = activeTraitFrame;
+  if (frame === undefined) throw new Error("evaluateTraitFunction: no active trait function to close");
+  activeTraitFrame = undefined;
+  return frame;
+}
+
+/** The active trait frame, or a build error naming `caller` if none is open — every `defineTrait`/`use*` gate calls this first. */
+export function currentTraitFrame(caller: string): TraitFrame {
+  if (activeTraitFrame === undefined) {
+    throw new Error(`${caller} called outside a trait function — it must run inside evaluateTraitFunction's callback`);
+  }
+  return activeTraitFrame;
+}
+
+/**
+ * Records one minted resource/signal/port/slot declaration into the active
+ * trait frame — a no-op when no trait frame is active, so ordinary
+ * object-layer authoring (outside `evaluateTraitFunction`) pays no cost and
+ * leaves no trace. Called by `port.ts`/`slot.ts`/`procedure.ts`'s own
+ * builders right after they mint a declaration.
+ */
+export function recordTraitMint(kind: FrameMint["kind"], id: string, ref: string, declaration: unknown): void {
+  if (activeTraitFrame === undefined) return;
+  activeTraitFrame.mints.push({ kind, id, ref, declaration, file: captureAuthorFrame()?.file });
+}

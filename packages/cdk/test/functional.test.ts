@@ -6,15 +6,24 @@
 import {
   agent,
   condition,
+  defineTrait,
   effect,
+  evaluateTraitFunction,
   flow,
   input,
+  intent,
+  port,
   procedure,
+  resource,
   schema,
   slot,
   step,
   toDraftJson,
+  tone,
   trait,
+  useBehavior,
+  useIntent,
+  useResource,
 } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
@@ -228,5 +237,158 @@ describe("functional layer build rules (0106)", () => {
     });
     const built = toDraftJson(trait("functional-smoke", { name: "Functional Smoke", summary: "s", procedure: proc }));
     expect(built).toMatchObject({ id: "functional-smoke" });
+  });
+});
+
+describe("defineTrait/use*/derived manifest build rules (0107)", () => {
+  it("defineTrait never called is a build error", () => {
+    expect(() => evaluateTraitFunction(() => undefined)).toThrow(/defineTrait\(\.\.\.\) was never called/);
+  });
+
+  it("defineTrait called twice is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("first-call");
+        defineTrait("second-call");
+      })
+    ).toThrow(/defineTrait: called more than once/);
+  });
+
+  it("defineTrait with a bad slug is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("Not_A_Slug");
+      })
+    ).toThrow(/expected a lowercase slug/);
+  });
+
+  it("defineTrait with a computed (non-literal) field is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        // oxlint-disable-next-line -- intentionally not JSON-safe, exercising the build rule.
+        defineTrait("computed-field", { summary: (() => "nope") as never });
+      })
+    ).toThrow(/must be plain literal data/);
+  });
+
+  it("defineTrait with an unknown field is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        // oxlint-disable-next-line -- intentionally an unknown field, exercising the build rule.
+        defineTrait("unknown-field", { title: "nope" } as never);
+      })
+    ).toThrow(/unknown field\(s\) title/);
+  });
+
+  it("two useBehavior calls setting the same facet throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("behavior-overlap");
+        useBehavior({ tone: tone.Direct });
+        useBehavior({ tone: tone.Blunt });
+      })
+    ).toThrow(/"tone" was already set/);
+  });
+
+  it("useBehavior with an unknown key throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("behavior-unknown-key");
+        // oxlint-disable-next-line -- intentionally an unknown field, exercising the build rule.
+        useBehavior({ mood: "chipper" } as never);
+      })
+    ).toThrow(/unknown field\(s\) mood/);
+  });
+
+  it("useBehavior with an undefined array entry (an enum typo) throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("behavior-undefined-entry");
+        // oxlint-disable-next-line -- intentionally undefined, exercising the enum-typo catch.
+        useBehavior({ format: [tone.Direct, undefined] as never });
+      })
+    ).toThrow(/format\[1\] is undefined/);
+  });
+
+  it("useIntent require/avoid contradiction on the same slug throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("intent-contradiction");
+        useIntent({ require: [intent("cite-evidence")] });
+        useIntent({ avoid: [intent("cite-evidence")] });
+      })
+    ).toThrow(/"cite-evidence".*declared in both require and avoid/);
+  });
+
+  it("two useIntent calls setting the same facet throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("intent-overlap");
+        useIntent({ require: [intent("a")] });
+        useIntent({ require: [intent("b")] });
+      })
+    ).toThrow(/"require" was already set/);
+  });
+
+  it("useResource with a non-resource value throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("resource-not-a-handle");
+        // oxlint-disable-next-line -- intentionally not a resource handle, exercising the build rule.
+        useResource(slot.text("not-a-resource") as never);
+      })
+    ).toThrow(/is not a resource handle/);
+  });
+
+  it("an unknown ctx.input access throws, listing the declared input port ids", () => {
+    expect(() =>
+      evaluateTraitFunction((ctx) => {
+        defineTrait("unknown-input", { procedure: "p" });
+        port.input.text({ id: "diff" });
+        step.command("Read Focus", { input: input.command`echo ${ctx.input.focus as never}` });
+      })
+    ).toThrow(/ctx\.input: unknown input port\(s\) focus.*declared input ports are: diff/);
+  });
+
+  it("a declared-but-never-referenced resource is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("orphan-resource");
+        resource.inline("orphan", "Never used.");
+      })
+    ).toThrow(/declared but never referenced.*resource "orphan"/);
+  });
+
+  it("a non-slot return value is a build error naming the key", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("bad-return");
+        return { commitReport: "not-a-slot" };
+      })
+    ).toThrow(/return value "commitReport" must be a slot handle/);
+  });
+
+  it("a behavioral trait (no steps) builds a valid draft with no procedure", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("engineering-standards-shape", { summary: "Behavioral guidance only." });
+      useBehavior({ tone: tone.Direct });
+      useIntent({ require: [intent("cite-evidence")] });
+    });
+    expect(envelope.draft).toMatchObject({ id: "engineering-standards-shape" });
+    expect((envelope.draft as { procedure?: unknown; }).procedure).toBeUndefined();
+  });
+
+  it("a procedural trait with declared input and returned output builds a valid draft", () => {
+    const envelope = evaluateTraitFunction((ctx) => {
+      defineTrait("procedural-shape", { summary: "Reviews a diff.", procedure: "Review a diff." });
+      port.input.text({ id: "diff" });
+      const review = slot.text("review");
+      step.command("Review", { output: review, input: input.command`echo ${ctx.input.diff as never}` });
+      return { review };
+    });
+    expect(envelope.draft).toMatchObject({ id: "procedural-shape" });
+    const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string; }[]; };
+    const portIds = (draft.port ?? []).map((p) => `${p.id}:${p.direction}`).sort();
+    expect(portIds).toEqual(["diff:input", "review:output"]);
   });
 });

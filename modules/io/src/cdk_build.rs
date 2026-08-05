@@ -76,12 +76,102 @@ pub fn emit_draft_json(request: CdkBuildRequest) -> crate::Result<CdkBuildOutcom
         }
     })?;
     validate_source_imports(&source_path)?;
+    validate_define_trait_slug_literal(&source_path)?;
     run_node_module(
         request,
-        NODE_EMIT_DRAFT_SCRIPT,
+        NODE_EMIT_DRAFT_SCRIPT.as_str(),
         "@ctx-traits/cdk",
         "CDK build",
     )
+}
+
+/// P0107 — a dumb text scan (same posture as [`collect_structural_lints`]'s
+/// mechanical checks) that every `defineTrait(...)` call in the package's
+/// source files passes a quoted string literal as its first argument, not a
+/// computed expression. Runtime (`defineTrait` itself, in
+/// `packages/cdk/src/functional/trait.ts`) can only validate the resulting
+/// *value* is slug-shaped — it cannot see whether the source expression was
+/// a literal. This scan is what actually enforces literalness, the
+/// precondition the future sandboxed supply-chain scanner depends on.
+fn validate_define_trait_slug_literal(source_path: &Utf8Path) -> crate::Result<()> {
+    let source_root = source_root_for_entry(source_path).to_path_buf();
+    let source_root = canonicalize_path(&source_root);
+    let mut files = Vec::new();
+    collect_source_files(&source_root, &mut files).map_err(|source| {
+        crate::environment::Error::Filesystem {
+            path: source_root.to_string(),
+            source,
+        }
+    })?;
+    for file in files {
+        let text = std::fs::read_to_string(&file).map_err(|source| {
+            crate::environment::Error::Filesystem {
+                path: file.to_string(),
+                source,
+            }
+        })?;
+        // The call-site scan and the argument-literalness check must both
+        // read the same comment-stripped string: `find_call_sites` matches
+        // against `strip_comments(text)`, whose byte offsets do not align
+        // with the original `text` (block comments collapse to a single
+        // space, line comments lose their content, and multibyte comment
+        // content shifts byte lengths). Indexing the original text with
+        // stripped offsets previously misfired on any preceding comment.
+        let stripped = strip_comments(&text);
+        for call_start in find_call_sites_in_stripped(&stripped, "defineTrait") {
+            let after_paren = stripped[call_start..]
+                .find('(')
+                .map(|offset| call_start + offset + 1);
+            let Some(argument_start) = after_paren else {
+                continue;
+            };
+            let argument = stripped[argument_start..].trim_start();
+            if !matches!(argument.chars().next(), Some('\'' | '"')) {
+                return Err(crate::environment::Error::Process {
+                    command: None,
+                    path: Some(file.to_string()),
+                    exit_status: None,
+                    timed_out: false,
+                    message: format!(
+                        "defineTrait(...) in {file} must pass a quoted string literal as its slug argument, not a computed expression"
+                    ),
+                }
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Byte offsets, in `stripped` (an already comment-stripped source string —
+/// see [`strip_comments`]), of every whole-word occurrence of `name` that is
+/// immediately followed (ignoring whitespace) by `(` — a plain identifier
+/// scan, not a parser, matching [`relative_specifiers`]'s posture. Callers
+/// must index the SAME `stripped` string with the returned offsets; the
+/// original unstripped text has different byte offsets and must never be
+/// indexed with them.
+fn find_call_sites_in_stripped(stripped: &str, name: &str) -> Vec<usize> {
+    let mut sites = Vec::new();
+    let bytes = stripped.as_bytes();
+    let mut cursor = 0;
+    while let Some(relative) = stripped[cursor..].find(name) {
+        let start = cursor + relative;
+        let end = start + name.len();
+        let preceded_ok = start == 0
+            || !matches!(bytes[start - 1], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.');
+        let followed_ok = !matches!(
+            bytes.get(end),
+            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+        );
+        if preceded_ok && followed_ok {
+            let rest = stripped[end..].trim_start();
+            if rest.starts_with('(') {
+                sites.push(start);
+            }
+        }
+        cursor = end;
+    }
+    sites
 }
 
 /// Shared node-invoking runner behind every CDK-style build path (draft
@@ -762,10 +852,48 @@ where
     })
 }
 
-const NODE_EMIT_DRAFT_SCRIPT: &str = r#"
+/// Shared resolve-hook prelude embedded in both [`NODE_EMIT_DRAFT_SCRIPT`]
+/// and [`NODE_EMIT_CONFIG_SCRIPT`]: the ownership-propagation invariant that
+/// a file reached only through a bare-specifier resolution
+/// (`@ctx-traits/config`, not `./x` or `../x` or an already-absolute `file:`
+/// URL) is dependency-owned, not author-owned. The flag propagates to
+/// whatever a dependency-origin file itself imports, so a package's own
+/// internal relative imports (its `dist/index.js` requiring its own
+/// `dist/generated.js`) stay excluded too. Exists once so the two emit
+/// scripts cannot diverge on this semantics silently.
+const RESOLVE_TRACKER_PRELUDE: &str = r#"
+const dependencyUrls = new Set();
+function isBareSpecifier(specifier) {
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:');
+}
+"#;
+
+fn node_emit_draft_script() -> String {
+    const HEAD: &str = r#"
 import { pathToFileURL } from 'node:url';
+import { registerHooks } from 'node:module';
 
 const sourcePath = process.argv[process.argv.length - 1];
+// P0107 package-level provenance: every bare-specifier import resolved from
+// an author-owned file (not from inside an already-dependency-owned file) is
+// this trait's own package dependency edge — the import graph half of
+// "package-level, import graph + lockfile" provenance.
+const packageDependencies = new Set();
+"#;
+    const TAIL: &str = r#"
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const result = nextResolve(specifier, context);
+    const parentIsDependency = context.parentURL ? dependencyUrls.has(context.parentURL) : false;
+    if (isBareSpecifier(specifier)) {
+      if (!parentIsDependency) packageDependencies.add(specifier);
+      dependencyUrls.add(result.url);
+    } else if (parentIsDependency) {
+      dependencyUrls.add(result.url);
+    }
+    return result;
+  },
+});
 const module = await import(pathToFileURL(sourcePath).href);
 let draft;
 for (const name of ['default', 'draft', 'traitDraft', 'TRAIT']) {
@@ -782,14 +910,19 @@ let envelope;
 const cdk = await import('@ctx-traits/cdk');
 if (typeof cdk.isTraitFamilyHandle === 'function' && cdk.isTraitFamilyHandle(draft)) {
   envelope = await cdk.resolveTraitFamily(draft);
+} else if (typeof draft === 'function' && typeof cdk.evaluateTraitFunction === 'function') {
+  envelope = cdk.evaluateTraitFunction(draft);
 } else if (typeof cdk.toDraftJsonWithSourceMap === 'function') {
   envelope = cdk.toDraftJsonWithSourceMap(draft);
 }
 if (envelope === undefined) {
   envelope = { draft, __map: {}, authoredDeclarations: [] };
 }
+envelope.packageDependencies = Array.from(packageDependencies).sort();
 process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
 "#;
+    format!("{HEAD}{RESOLVE_TRACKER_PRELUDE}{TAIL}")
+}
 
 /// P457 `config build`: import the module, take its default export, and
 /// emit `{ config, sources }` where `sources` is every `file:` URL Node
@@ -797,24 +930,15 @@ process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
 /// `node:module`'s `registerHooks({ load })`, registered before the dynamic
 /// import so it sees the full transitive graph (including dynamic imports
 /// and re-exports a static specifier scan would miss).
-pub const NODE_EMIT_CONFIG_SCRIPT: &str = r#"
+fn node_emit_config_script() -> String {
+    const HEAD: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
 
 const sourcePath = process.argv[process.argv.length - 1];
 const sources = new Set();
-// A file reached only through a bare-specifier resolution (`@ctx-traits/config`,
-// not `./x` or `../x` or an already-absolute `file:` URL) is dependency-owned,
-// not author-owned — never manifested, regardless of whether node_modules holds
-// a copy or (the pnpm workspace/link shape) a symlink whose resolved realpath
-// no longer has a `node_modules` path component for the Rust side to match on.
-// The flag propagates to whatever a dependency-origin file itself imports, so a
-// package's own internal relative imports (its `dist/index.js` requiring its
-// own `dist/generated.js`) stay excluded too.
-const dependencyUrls = new Set();
-function isBareSpecifier(specifier) {
-  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:');
-}
+"#;
+    const TAIL: &str = r#"
 registerHooks({
   resolve(specifier, context, nextResolve) {
     const result = nextResolve(specifier, context);
@@ -839,6 +963,14 @@ if (config === undefined) {
 }
 process.stdout.write(`${JSON.stringify({ config, sources: Array.from(sources) }, null, 2)}\n`);
 "#;
+    format!("{HEAD}{RESOLVE_TRACKER_PRELUDE}{TAIL}")
+}
+
+static NODE_EMIT_DRAFT_SCRIPT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(node_emit_draft_script);
+
+pub static NODE_EMIT_CONFIG_SCRIPT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(node_emit_config_script);
 
 #[cfg(test)]
 mod structural_lint_tests {
@@ -997,5 +1129,79 @@ mod structural_lint_tests {
         );
         let lints = collect_structural_lints(&source.join("index.ts")).expect("collect lints");
         assert!(lints.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod define_trait_slug_literal_tests {
+    use super::*;
+
+    fn scratch_dir(name: &str) -> Utf8PathBuf {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!(
+                "ctx-define-trait-slug-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(dir.as_std_path());
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir
+    }
+
+    fn write(root: &Utf8Path, relative: &str, contents: &str) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap().as_std_path()).expect("create parent dir");
+        std::fs::write(path.as_std_path(), contents).expect("write fixture file");
+    }
+
+    #[test]
+    fn literal_slug_preceded_by_line_comment_with_paren_passes() {
+        let root = scratch_dir("line-comment-paren");
+        let source = root.join("source");
+        write(
+            &source,
+            "index.ts",
+            "// helper (see docs)\ndefineTrait(\"my-trait\", {});\n",
+        );
+        validate_define_trait_slug_literal(&source.join("index.ts"))
+            .expect("literal slug must pass despite a preceding comment containing '('");
+    }
+
+    #[test]
+    fn literal_slug_preceded_by_em_dash_comment_passes() {
+        let root = scratch_dir("em-dash-comment");
+        let source = root.join("source");
+        write(
+            &source,
+            "index.ts",
+            "// house style — see docs\ndefineTrait(\"my-trait\", {});\n",
+        );
+        validate_define_trait_slug_literal(&source.join("index.ts"))
+            .expect("literal slug must pass despite a preceding multibyte comment");
+    }
+
+    #[test]
+    fn computed_slug_is_rejected() {
+        let root = scratch_dir("computed-slug");
+        let source = root.join("source");
+        write(&source, "index.ts", "defineTrait(SLUG, {});\n");
+        let error = validate_define_trait_slug_literal(&source.join("index.ts"))
+            .expect_err("computed slug must be rejected");
+        assert!(error.to_string().contains("quoted string literal"));
+    }
+
+    #[test]
+    fn computed_slug_preceded_by_block_comment_with_paren_and_quote_is_rejected() {
+        let root = scratch_dir("block-comment-paren-quote");
+        let source = root.join("source");
+        write(
+            &source,
+            "index.ts",
+            "/* (\"a\") */\ndefineTrait(SLUG, {});\n",
+        );
+        let error = validate_define_trait_slug_literal(&source.join("index.ts"))
+            .expect_err("computed slug preceded by a comment must still be rejected");
+        assert!(error.to_string().contains("quoted string literal"));
     }
 }

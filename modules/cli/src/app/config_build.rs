@@ -63,7 +63,7 @@ pub(crate) fn handle_config_build(
             timeout_ms: ctx_traits_io::cdk_build::DEFAULT_BUILD_TIMEOUT_MS,
             capture_limit: ctx_traits_io::harness::DEFAULT_CAPTURE_LIMIT,
         },
-        ctx_traits_io::cdk_build::NODE_EMIT_CONFIG_SCRIPT,
+        ctx_traits_io::cdk_build::NODE_EMIT_CONFIG_SCRIPT.as_str(),
         "@ctx-traits/config",
         "config build",
     )?;

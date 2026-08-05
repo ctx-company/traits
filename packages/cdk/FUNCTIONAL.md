@@ -1,15 +1,15 @@
-# The functional authoring layer (0106)
+# The functional authoring layer (0106/0107)
 
 A registration-style DSL over the object-layer CDK: `step.*`/`agent.prompt`/`flow.*`
 register steps in the order they run, and `procedure.from(fields, body)` compiles the
 registered order into a `ProcedureHandle` — the same handle `procedure({...})` returns,
-usable in a `variant({ procedure })` shell unchanged.
+usable in a `variant({ procedure })` shell unchanged. 0107 adds the full-file trait
+entry — `export default function (ctx) { ... }` with `defineTrait`/`use*`/`ctx.input`
+inside — that needs no object-layer `trait({...})` shell at all.
 
-This is the bridge form task 0106 ships: the registration DSL, compiling 1:1 to the
-object layer, before full-file traits (`defineTrait`/`use*`/`ctx.input`, task 0107) land.
 Everything below is settled by
 [0102 — the functional authoring layer: the contract](../../.internal/tasks/0102-the-functional-authoring-layer-the-contract.md);
-this file only documents what 0106 actually ships.
+this file only documents what 0106/0107 actually ship.
 
 ## The one rule
 
@@ -167,9 +167,69 @@ step's title and (best-effort) the calling file:
   scope: build error naming the block — neither construct's object-layer emission has a
   `when` to carry the positional guard without changing arm routing.
 
+## The full-file trait entry (0107)
+
+`export default function (ctx) { ... }`, evaluated by `evaluateTraitFunction` (the emit
+harness calls this on a function default export — nothing an author calls directly).
+One shape for both behavioral traits (no steps) and procedural traits (steps registered
+via `step.*`/`agent.prompt`/`flow.*`, exactly as inside `procedure.from`): the object
+layer shell is no longer required either way.
+
+```ts
+import { defineTrait, input, port, slot, step, useBehavior, tone } from "@ctx-traits/cdk";
+
+export default function (ctx) {
+  defineTrait("diff-review", {
+    name: "Diff Review",
+    summary: "Reviews a diff for a stated focus.",
+    procedure: "Review a diff for the stated focus and return a summary.",
+  });
+  port.input.text({ id: "diff" });
+  useBehavior({ tone: tone.Direct });
+  const review = slot.text("review");
+  step.command("Review", { output: review, input: input.command`echo ${ctx.input.diff}` });
+  return { review };
+}
+```
+
+- **`defineTrait(slug, fields)`** — exactly once, plain literal data only (`name`,
+  `version`, `summary`, `metadata`, and `procedure`, a text description used only when
+  the function registers steps). Missing, duplicate, computed, or non-literal fields are
+  build errors. Runtime can only prove the resulting *value* is JSON-safe; the Rust-side
+  build (`modules/io/src/cdk_build.rs`) additionally text-scans that the slug argument
+  itself is a quoted string literal in the source — the guarantee runtime cannot see.
+- **`useBehavior(fields)` / `useIntent(fields)`** — spread composition per 0102: the
+  builder validates only the final object's outcome — unknown keys, `undefined` array
+  entries (the enum-typo catch), a facet already set by an earlier call in the same
+  trait function, and (for `useIntent`) a guidance slug declared in both `require` and
+  `avoid`. Union never subtracts.
+- **`useResource(handle)`** — adds one or more resource handles to the trait's explicit
+  resource declarations and marks them referenced, for a resource consumed only through
+  `useResource` (never interpolated into a prompt).
+- **`ctx.input.*`** — a declared input port (declared with `port.input.*` inside the
+  trait function, before first access) resolves by camelCase→kebab id:
+  `ctx.input.diff` reads the declared `port:diff` input port. An access with no matching
+  declared input port is a build error listing every declared input port id.
+- **The return statement** — `return { commitReport: receipt }` mints one output port
+  per key (kebab-cased id) bound to the returned slot; `undefined` (no return) means no
+  output ports — the behavioral shape. A non-slot return value is a build error naming
+  the key.
+- **The derived manifest** — `resource:`/`signal:`/`port:` are collected from actual
+  use (the same reachability collection `assembleSingleTraitDraft` already runs for the
+  object layer), not hand-written lists. A resource/signal/port/slot declared inside the
+  trait function but never referenced anywhere in the assembled trait — not returned, not
+  interpolated, not passed to `useResource` — is a build error naming its kind, id, and
+  authoring location.
+
+Two independent authorings of the same trait — once as a full-file function, once with
+the object-layer `trait({...})` shell directly — emit byte-identical draft JSON; this is
+what `test/functional.hand.ts`'s 0107 suite proves, the same claim 0106 makes for
+`procedure.from`.
+
 ## Out of scope here
 
-`defineTrait`/`use*`/the derived manifest and `ctx.input` land in 0107. The
-byte-identical pilot on an existing production trait (`quick`) is 0108; the rest of the
-family migrates in 0109. `$` field paths, new condition sugar, and `effect.session.*`
-are parked per the 0102 ledger.
+The byte-identical pilot on an existing production trait (`quick`) is 0108; the rest of
+the family migrates in 0109, including scoped `use*` inside `flow.*` blocks (parked) and
+unioning references across family leaves for the never-referenced check (0107 checks
+per-entry only). `$` field paths, new condition sugar, and `effect.session.*` are parked
+per the 0102 ledger.

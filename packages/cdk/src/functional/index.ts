@@ -9,3 +9,5 @@ export { attachProcedureFrom } from "./procedure.js";
 export type { ProcedureFromFields, ProcedureFromFunction } from "./procedure.js";
 export { effect, flow, step } from "./registrars.js";
 export type { FieldMatchArms, ForEachRegistrarOptions, GuardMatchArms, LoopParam, ParParam } from "./registrars.js";
+export { defineTrait, evaluateTraitFunction, useBehavior, useIntent, useResource } from "./trait.js";
+export type { DefineTraitFields, TraitFunctionContext } from "./trait.js";

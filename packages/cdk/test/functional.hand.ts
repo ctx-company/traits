@@ -13,9 +13,13 @@
 import {
   agent,
   condition,
+  defineTrait,
   effect,
+  evaluateTraitFunction,
   flow,
   input,
+  intent,
+  port,
   procedure,
   schema,
   sequence,
@@ -23,7 +27,10 @@ import {
   slot,
   step,
   toDraftJson,
+  tone,
   trait,
+  useBehavior,
+  useIntent,
 } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
@@ -505,6 +512,69 @@ describe("functional layer emits byte-identical canonical to the object layer (0
       });
       const proc = procedure({ description: "d", sequence: [loopItem] });
       return toDraftJson(trait("effect-loop", { name: "Effect Loop", summary: "s", procedure: proc }));
+    }
+
+    expectByteIdentical(viaFunctional(), viaObject());
+  });
+});
+
+describe("evaluateTraitFunction emits byte-identical canonical to the object layer (0107)", () => {
+  it("a procedural functional trait matches its object-layer equivalent", () => {
+    function viaFunctional() {
+      const envelope = evaluateTraitFunction((ctx) => {
+        defineTrait("diff-review", {
+          name: "Diff Review",
+          summary: "Reviews a diff.",
+          procedure: "Review a diff for the stated focus.",
+        });
+        port.input.text({ id: "diff" });
+        useBehavior({ tone: tone.Direct });
+        const review = slot.text("review");
+        step.command("Review", { output: review, input: input.command`echo ${ctx.input.diff as never}` });
+        return { review };
+      });
+      return envelope.draft;
+    }
+
+    function viaObject() {
+      const diff = port.input.text({ id: "diff" });
+      const review = slot.text("review");
+      const reviewStep = sequence.command("review", {
+        title: "Review",
+        output: review,
+        input: input.command`echo ${diff}`,
+      });
+      const output = port.output.of({ id: "review", schema: "schema:text", value: review });
+      const proc = procedure({ description: "Review a diff for the stated focus.", sequence: [reviewStep] });
+      return toDraftJson(trait("diff-review", {
+        name: "Diff Review",
+        summary: "Reviews a diff.",
+        behavior: { tone: tone.Direct },
+        port: output,
+        procedure: proc,
+      }));
+    }
+
+    expectByteIdentical(viaFunctional(), viaObject());
+  });
+
+  it("a behavioral functional trait (no steps) matches its object-layer equivalent", () => {
+    function viaFunctional() {
+      const envelope = evaluateTraitFunction(() => {
+        defineTrait("guidance-only", { name: "Guidance Only", summary: "Behavioral guidance." });
+        useBehavior({ tone: tone.Direct });
+        useIntent({ require: [intent("cite-evidence")] });
+      });
+      return envelope.draft;
+    }
+
+    function viaObject() {
+      return toDraftJson(trait("guidance-only", {
+        name: "Guidance Only",
+        summary: "Behavioral guidance.",
+        behavior: { tone: tone.Direct },
+        intent: { require: [intent("cite-evidence")] },
+      }));
     }
 
     expectByteIdentical(viaFunctional(), viaObject());

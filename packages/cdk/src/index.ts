@@ -17,8 +17,18 @@ export type {
   GuardValue,
   NumericComparisonValue,
 } from "./condition.js";
-export { effect, flow, step } from "./functional/index.js";
+export {
+  defineTrait,
+  effect,
+  evaluateTraitFunction,
+  flow,
+  step,
+  useBehavior,
+  useIntent,
+  useResource,
+} from "./functional/index.js";
 export type {
+  DefineTraitFields,
   FieldMatchArms,
   ForEachRegistrarOptions,
   GuardMatchArms,
@@ -26,6 +36,7 @@ export type {
   ParParam,
   ProcedureFromFields,
   ProcedureFromFunction,
+  TraitFunctionContext,
 } from "./functional/index.js";
 export type {
   AgentModelTier,
@@ -257,10 +268,12 @@ export {
   verbosity,
 } from "./trait.js";
 export type {
+  Behavior,
   BehaviorFields,
   CustomSlug,
   GuidanceInput,
   GuidanceItem,
+  Intent,
   IntentBuiltIn,
   IntentSpec,
   MethodBuiltIn,

@@ -1,4 +1,4 @@
-import { dispatchSlotForEach } from "./functional/context.js";
+import { dispatchSlotForEach, recordTraitMint } from "./functional/context.js";
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
 import type {
   DeclaredSlotHandle,
@@ -259,6 +259,7 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   const handle = withDeclaration("slot", `slot:${fields.id}`, declaration, {} as JsonObject, {
     declarations: collectMany([fields.schema]),
   });
+  recordTraitMint("slot", fields.id, `slot:${fields.id}`, declaration);
   const objectFields = objectSchemaFields(fields.schema);
   const declarations = collectMany([handle]);
   const resolved = objectFields === undefined

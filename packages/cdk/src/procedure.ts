@@ -1,3 +1,4 @@
+import { recordTraitMint } from "./functional/context.js";
 import type {
   CanonicalChecklistItem,
   CanonicalDependency,
@@ -377,6 +378,7 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
   const handle = withDeclaration("resource", `resource:${fields.id}`, declaration, {}, {
     declarations: collectMany([verdict]),
   }) as ChecklistHandle;
+  recordTraitMint("resource", fields.id, `resource:${fields.id}`, declaration);
 
   // Authoring affordances, not manifest fields: the declaration object is
   // emitted verbatim, so anything enumerable on it becomes an unknown field.
@@ -399,7 +401,9 @@ export const resource: ResourceFunction = Object.assign(
 
 function resourceOf(fields: ResourceFields): ResourceHandle {
   const declaration = compact({ ...fields });
-  return withDeclaration("resource", `resource:${String(fields.id)}`, declaration, {});
+  const handle = withDeclaration("resource", `resource:${String(fields.id)}`, declaration, {});
+  recordTraitMint("resource", String(fields.id), `resource:${String(fields.id)}`, declaration);
+  return handle;
 }
 
 function formatBulletList(title: string, items: readonly string[]): string {
@@ -450,7 +454,9 @@ export function rule(fields: RuleFields): CanonicalRule {
  */
 export function signal(fields: SignalFields): SignalHandle {
   const declaration = compact({ ...fields });
-  return withDeclaration("signal", `signal:${fields.id}`, declaration, {});
+  const handle = withDeclaration("signal", `signal:${fields.id}`, declaration, {});
+  recordTraitMint("signal", fields.id, `signal:${fields.id}`, declaration);
+  return handle;
 }
 
 function arrayOf(value: unknown): unknown[] {

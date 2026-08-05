@@ -103,6 +103,11 @@ export interface GuidanceItem<Id extends string = string> {
  */
 export type GuidanceInput<Id extends string> = Id | (string & {}) | GuidanceItem<Id | (string & {})>;
 
+/** Alias of {@link BehaviorFields} — the functional layer's (0107) name for a `[behavior]` fragment. */
+export type Behavior = BehaviorFields;
+/** Alias of {@link IntentSpec} — the functional layer's (0107) name for an `[intent]` fragment. */
+export type Intent = IntentSpec;
+
 export interface BehaviorFields {
   readonly tone?: Tone | readonly Tone[];
   readonly method?: Method | readonly Method[];

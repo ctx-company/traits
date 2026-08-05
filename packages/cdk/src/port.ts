@@ -1,3 +1,4 @@
+import { recordTraitMint } from "./functional/context.js";
 import type { JsonObject } from "./generated.js";
 import type { InstructionOutputHandle, PortHandle, SlotHandle } from "./handles.js";
 import type { CdkObject } from "./meta.js";
@@ -167,6 +168,7 @@ function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
   const handle = withDeclaration<CdkObject, "port", Value>("port", `port:${fields.id}`, declaration, {}, {
     declarations: collectMany([fields.schema, fields.value]),
   });
+  recordTraitMint("port", fields.id, `port:${fields.id}`, declaration);
   return handle;
 }
 
