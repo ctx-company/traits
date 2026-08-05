@@ -1,5 +1,5 @@
 import type {
-  FlattenedVariantLeaf,
+  FlattenedVariant,
   TraitFamilyMap,
   VariantHandle,
   VariantHandleBase,
@@ -18,7 +18,7 @@ import { assembleSingleTraitDraft } from "./trait.js";
 import type { SemVer, Slug, TraitFields } from "./trait.js";
 
 export type {
-  FlattenedVariantLeaf,
+  FlattenedVariant,
   TraitFamilyMap,
   VariantHandle,
   VariantImportHandle,
@@ -30,7 +30,7 @@ export type {
  * Fields for one complete variant definition: everything `trait()` accepts
  * except `id`/`version`/`schema-version` — those are injected from the
  * containing family (shared `id`/`version`, and the next canonical
- * schema version) when the leaf is resolved for build.
+ * schema version) when the variant is resolved for build.
  */
 export type VariantFields = Omit<TraitFields, "id" | "version" | "schema-version" | "variants">;
 
@@ -47,9 +47,9 @@ let variantSeq = 0;
 
 /**
  * Marks a value as the default child of its containing `variants` map level.
- * A leaf handle exposes the same marking as chainable `.default()`; a nested
- * map is a plain object literal with no method of its own, so mark it by
- * wrapping it: `strict: variant.default({ thorough: ..., brief: ... })`.
+ * A variant handle exposes the same marking as chainable `.default()`; a
+ * nested map is a plain object literal with no method of its own, so mark it
+ * by wrapping it: `strict: variant.default({ thorough: ..., brief: ... })`.
  * Both forms record the same mark, read by `flattenVariantMap`.
  */
 function markDefault<T extends object>(value: T): T {
@@ -83,10 +83,10 @@ function variantRecordOf(handle: VariantLeafHandle): VariantRecord {
 }
 
 /**
- * Declares one complete variant leaf definition — the same shape `trait()`
+ * Declares one complete variant definition — the same shape `trait()`
  * accepts, minus `id`/`version`/`schema-version`. Place it as a value in a
  * `variants` map (nested maps join keys with `:`); call `.default()` to mark
- * it the default leaf at its containing map level.
+ * it the default variant at its containing map level.
  * @example
  * ```ts
  * export default trait("review", {
@@ -121,7 +121,7 @@ variant.import = function importVariant(path: string): VariantImportHandle {
 variant.default = markDefault;
 
 interface FlattenResult {
-  readonly leaves: readonly FlattenedVariantLeaf[];
+  readonly variants: readonly FlattenedVariant[];
   readonly topology: VariantTopologyNode;
 }
 
@@ -135,7 +135,7 @@ function flattenVariantMap(map: TraitFamilyMap, segments: readonly string[]): Fl
   if (keys.length === 0) {
     throw new Error(`variants${describePath(segments)}: map has no children`);
   }
-  const leaves: FlattenedVariantLeaf[] = [];
+  const variants: FlattenedVariant[] = [];
   const children: Record<string, VariantTopologyNode> = {};
   let defaultKey: string | undefined;
   for (const key of keys) {
@@ -145,8 +145,8 @@ function flattenVariantMap(map: TraitFamilyMap, segments: readonly string[]): Fl
     const childSegments = [...segments, key];
     const node = map[key] as VariantLeafHandle | TraitFamilyMap;
     if (isVariantHandle(node)) {
-      leaves.push({ path: childSegments.join(":"), segments: childSegments, handle: node });
-      children[key] = { kind: "leaf", path: childSegments.join(":") };
+      variants.push({ path: childSegments.join(":"), segments: childSegments, handle: node });
+      children[key] = { kind: "variant", path: childSegments.join(":") };
       if (defaultMarks.has(node)) {
         if (defaultKey !== undefined) {
           throw new Error(`variants${describePath(segments)}: multiple default children (${defaultKey}, ${key})`);
@@ -155,7 +155,7 @@ function flattenVariantMap(map: TraitFamilyMap, segments: readonly string[]): Fl
       }
     } else {
       const nested = flattenVariantMap(node, childSegments);
-      leaves.push(...nested.leaves);
+      variants.push(...nested.variants);
       children[key] = nested.topology;
       if (defaultMarks.has(node)) {
         if (defaultKey !== undefined) {
@@ -168,7 +168,7 @@ function flattenVariantMap(map: TraitFamilyMap, segments: readonly string[]): Fl
   if (defaultKey === undefined) {
     throw new Error(`variants${describePath(segments)}: missing a default child (call \`.default()\` on exactly one)`);
   }
-  return { leaves, topology: { kind: "map", default: defaultKey, children } };
+  return { variants, topology: { kind: "map", default: defaultKey, children } };
 }
 
 function describePath(segments: readonly string[]): string {
@@ -179,7 +179,7 @@ function describePath(segments: readonly string[]): string {
  * Builds a `TraitFamilyHandle` from a `trait(id, { variants })` call: flattens
  * and validates the map, but does not resolve `variant.import(...)` modules
  * yet — that's `resolveTraitFamily`, called at build time once the family's
- * leaves are actually needed.
+ * variants are actually needed.
  */
 export function buildTraitFamily(fields: TraitFields): TraitFamilyHandle {
   const id = fields.id;
@@ -187,30 +187,30 @@ export function buildTraitFamily(fields: TraitFields): TraitFamilyHandle {
     throw new Error("trait(): a variant family requires an id");
   }
   const version = fields.version ?? "0.1.0";
-  const { leaves, topology } = flattenVariantMap(fields.variants as TraitFamilyMap, []);
+  const { variants, topology } = flattenVariantMap(fields.variants as TraitFamilyMap, []);
   // No `kind` here: sdk-generate validates `Meta.kind`'s literal union against
   // a fixed Rust-side allow-list, and a family handle never needs kind-based
   // dispatch — `metaOf(handle)?.family` alone identifies it.
   return withMeta(stableObject({}) as JsonObject, {
-    family: { id, version, topology, leaves },
+    family: { id, version, topology, variants },
   }) as unknown as TraitFamilyHandle;
 }
 
-/** One resolved leaf's complete draft, ready to synthesize. */
-export interface ResolvedFamilyLeaf {
+/** One resolved variant's complete draft, ready to synthesize. */
+export interface ResolvedFamilyVariant {
   readonly path: string;
   readonly draft: CanonicalTraitDraft;
   readonly sourceMap: SourceMap;
   readonly diagnostics: readonly CdkDiagnostic[];
 }
 
-/** The tagged family envelope a build tool writes: one draft/map per resolved leaf, plus the manifest topology. */
+/** The tagged family envelope a build tool writes: one draft/map per resolved variant, plus the manifest topology. */
 export interface FamilyEnvelope {
   readonly family: true;
   readonly id: string;
   readonly version: string;
   readonly topology: VariantTopologyNode;
-  readonly leaves: readonly ResolvedFamilyLeaf[];
+  readonly variants: readonly ResolvedFamilyVariant[];
 }
 
 /** Whether a value is the opaque handle returned by `trait(id, { variants })`. */
@@ -218,15 +218,15 @@ export function isTraitFamilyHandle(value: unknown): value is TraitFamilyHandle 
   return metaOf(value)?.family !== undefined;
 }
 
-/** The next canonical schema version, used for every native-variant leaf regardless of the family's authored `schema-version`. */
+/** The next canonical schema version, used for every native-variant regardless of the family's authored `schema-version`. */
 export const NATIVE_VARIANT_SCHEMA_VERSION = "0.3" as const;
 
 /**
- * Resolves every `variant.import(...)` leaf (relative to the module that
- * called it) and assembles each leaf's complete draft, injecting the shared
- * family `id`/`version`, the fixed native-variant schema version, and the
- * leaf's own colon-joined `variant` path. Returns the tagged envelope a build
- * tool writes as one canonical/map pair per leaf.
+ * Resolves every `variant.import(...)` variant (relative to the module that
+ * called it) and assembles each variant's complete draft, injecting the
+ * shared family `id`/`version`, the fixed native-variant schema version, and
+ * the variant's own colon-joined `variant` path. Returns the tagged envelope
+ * a build tool writes as one canonical/map pair per variant.
  */
 export async function resolveTraitFamily(handle: TraitFamilyHandle): Promise<FamilyEnvelope> {
   const family = metaOf(handle)?.family;
@@ -234,11 +234,11 @@ export async function resolveTraitFamily(handle: TraitFamilyHandle): Promise<Fam
     throw new Error("resolveTraitFamily: handle was not created by trait(id, { variants })");
   }
   const meta = family;
-  const leaves: ResolvedFamilyLeaf[] = [];
-  for (const leaf of meta.leaves) {
-    const resolved = await resolveLeafFields(leaf.handle);
+  const variants: ResolvedFamilyVariant[] = [];
+  for (const variant of meta.variants) {
+    const resolved = await resolveVariantFields(variant.handle);
     if (resolved.sourceAnchor === undefined) {
-      throw new Error(`variant(): could not capture the authoring source location for leaf ${leaf.path}`);
+      throw new Error(`variant(): could not capture the authoring source location for variant ${variant.path}`);
     }
     const resolvedFields = canonicalTraitFields(resolved.fields as TraitFields);
     const assembled = assembleSingleTraitDraft({
@@ -247,12 +247,13 @@ export async function resolveTraitFamily(handle: TraitFamilyHandle): Promise<Fam
       version: meta.version as SemVer,
       "schema-version": NATIVE_VARIANT_SCHEMA_VERSION,
     });
-    const draft = stableObject({ ...assembled.draft, variant: leaf.path });
+    const draft = stableObject({ ...assembled.draft, variant: variant.path });
     // Route through the same finalizer `toDraftJsonWithSourceMap` uses for an
-    // ordinary trait, so a family leaf gets the top-level `trait:<id>` anchor
-    // too — passing `source` explicitly (the leaf's own authored location)
-    // rather than letting `withMeta` auto-capture the build tool's frame.
-    const leafHandle = withMeta(stableObject({}) as JsonObject, {
+    // ordinary trait, so a family variant gets the top-level `trait:<id>`
+    // anchor too — passing `source` explicitly (the variant's own authored
+    // location) rather than letting `withMeta` auto-capture the build tool's
+    // frame.
+    const variantHandle = withMeta(stableObject({}) as JsonObject, {
       kind: "trait",
       declaration: assembled.draft,
       declarations: assembled.merged,
@@ -260,25 +261,25 @@ export async function resolveTraitFamily(handle: TraitFamilyHandle): Promise<Fam
       sourceMap: assembled.sourceMap,
       source: resolved.sourceAnchor,
     });
-    leaves.push({
-      path: leaf.path,
+    variants.push({
+      path: variant.path,
       draft,
-      sourceMap: sourceMapFor(leafHandle, draft),
+      sourceMap: sourceMapFor(variantHandle, draft),
       diagnostics: assembled.diagnostics,
     });
   }
-  return { family: true, id: meta.id, version: meta.version, topology: meta.topology, leaves };
+  return { family: true, id: meta.id, version: meta.version, topology: meta.topology, variants };
 }
 
-interface ResolvedLeafFields {
+interface ResolvedVariantFields {
   readonly fields: VariantFields;
   readonly sourceAnchor: SourceAnchor | undefined;
 }
 
-async function resolveLeafFields(
+async function resolveVariantFields(
   handle: VariantLeafHandle,
   seen: readonly string[] = [],
-): Promise<ResolvedLeafFields> {
+): Promise<ResolvedVariantFields> {
   const record = variantRecordOf(handle);
   if (record.kind === "definition") {
     return { fields: record.fields ?? {}, sourceAnchor: record.sourceAnchor };
@@ -300,5 +301,5 @@ async function resolveLeafFields(
         + `variant.import(...) handle, not a plain object or other value`,
     );
   }
-  return resolveLeafFields(exported, [...seen, modulePath]);
+  return resolveVariantFields(exported, [...seen, modulePath]);
 }

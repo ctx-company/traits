@@ -1880,7 +1880,7 @@ export type CanonicalTrait = {
   readonly "slot"?: readonly CanonicalSlot[] | undefined;
   readonly "summary": CanonicalSummary;
   /**
-   * Native family leaf identity. This is deliberately absent from 0.2
+   * Native family variant identity. This is deliberately absent from 0.2
    * documents, preserving their encoded bytes and digest semantics.
    */
   readonly "variant"?: string | undefined;
@@ -1991,7 +1991,7 @@ export type CanonicalTraitDraft = {
   readonly "slot"?: readonly CanonicalSlot[] | undefined;
   readonly "summary"?: CanonicalSummary | undefined;
   /**
-   * Native family leaf identity. This is deliberately absent from 0.2
+   * Native family variant identity. This is deliberately absent from 0.2
    * documents, preserving their encoded bytes and digest semantics.
    */
   readonly "variant"?: string | undefined;

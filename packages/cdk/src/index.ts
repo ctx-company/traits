@@ -247,8 +247,8 @@ export type {
 export { isTraitFamilyHandle, NATIVE_VARIANT_SCHEMA_VERSION, resolveTraitFamily, variant } from "./variant.js";
 export type {
   FamilyEnvelope,
-  FlattenedVariantLeaf,
-  ResolvedFamilyLeaf,
+  FlattenedVariant,
+  ResolvedFamilyVariant,
   TraitFamilyMap,
   VariantFields,
   VariantHandle,

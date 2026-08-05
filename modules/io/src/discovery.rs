@@ -83,10 +83,10 @@ pub struct TraitPackage {
 }
 
 /// One canonical manifest selected for package-local operations. Native
-/// families contribute one row per declared leaf; ordinary packages retain
-/// their root manifest and source-less packages remain discoverable.
+/// families contribute one row per declared variant; ordinary packages
+/// retain their root manifest and source-less packages remain discoverable.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraitPackageLeaf {
+pub struct TraitPackageVariant {
     pub trait_id: String,
     pub variant: Option<String>,
     pub trait_path: Utf8PathBuf,
@@ -184,20 +184,20 @@ pub fn trait_packages(repo_root: &Utf8Path) -> Result<Vec<TraitPackage>, crate::
             continue;
         }
         // A native family has no canonical at `generated/index.toml` — every
-        // leaf lives at `generated/<selector>/index.toml` instead. Without
+        // variant lives at `generated/<selector>/index.toml` instead. Without
         // this, discovery skipped the family entirely, so it produced no
         // candidate id, resolved to no row, and `ctx traits list` fell through
         // to reporting `implement`, `plan`, and `refactor` as `source-only`:
         // the three most useful packages in the repository, described as
         // unbuilt, by the first command anyone runs.
         //
-        // The DEFAULT leaf represents the package at its bare id, which is the
-        // same leaf a bare-id run resolves to — so `list` and `run` agree
-        // about what `implement` means.
-        if let Some(default_leaf) = family_default_manifest(repo_root, &name)? {
+        // The DEFAULT variant represents the package at its bare id, which
+        // is the same variant a bare-id run resolves to — so `list` and
+        // `run` agree about what `implement` means.
+        if let Some(default_variant) = family_default_manifest(repo_root, &name)? {
             packages.push(TraitPackage {
                 trait_id: name,
-                trait_path: default_leaf,
+                trait_path: default_variant,
             });
         }
     }
@@ -205,8 +205,9 @@ pub fn trait_packages(repo_root: &Utf8Path) -> Result<Vec<TraitPackage>, crate::
     Ok(packages)
 }
 
-/// The generated manifest of `package`'s default family leaf, or `None` when
-/// the package declares no `[family]` table or its default leaf is missing.
+/// The generated manifest of `package`'s default family variant, or `None`
+/// when the package declares no `[family]` table or its default variant is
+/// missing.
 ///
 /// Never an error: a package that is simply not a family, or a family whose
 /// declared default has not been built, is a discovery miss rather than a
@@ -220,11 +221,11 @@ pub(crate) fn family_default_manifest(
     let Some(family) = crate::family_manifest::read_family_table(&manifest_path)? else {
         return Ok(None);
     };
-    let Some(leaf) = family.leaves.get(&family.default) else {
+    let Some(variant) = family.variants.get(&family.default) else {
         return Ok(None);
     };
-    let leaf_path = package_root.join(&leaf.relative_path);
-    Ok(leaf_path.is_file().then_some(leaf_path))
+    let variant_path = package_root.join(&variant.relative_path);
+    Ok(variant_path.is_file().then_some(variant_path))
 }
 
 fn trait_package_dir_names(traits_root: &Utf8Path) -> Result<Vec<String>, crate::Error> {
@@ -269,26 +270,28 @@ fn trait_package_dir_names(traits_root: &Utf8Path) -> Result<Vec<String>, crate:
 
 /// Expand every discovered package root to the canonical manifests operated
 /// on by vendor/check evidence consumers.
-pub fn trait_package_leaves(repo_root: &Utf8Path) -> Result<Vec<TraitPackageLeaf>, crate::Error> {
-    let mut leaves = Vec::new();
+pub fn trait_package_variants(
+    repo_root: &Utf8Path,
+) -> Result<Vec<TraitPackageVariant>, crate::Error> {
+    let mut variants = Vec::new();
     let traits_root = crate::layout::trait_protocol_root_path(repo_root);
     for trait_id in trait_package_dir_names(&traits_root)? {
         let root = traits_root.join(&trait_id);
         let package_manifest = crate::layout::package_manifest_path(&root);
         match crate::family_manifest::read_family_table(&package_manifest)? {
             Some(family) => {
-                for (variant, leaf) in family.leaves {
-                    leaves.push(TraitPackageLeaf {
+                for (variant_name, variant) in family.variants {
+                    variants.push(TraitPackageVariant {
                         trait_id: trait_id.clone(),
-                        variant: Some(variant),
-                        trait_path: root.join(leaf.relative_path),
+                        variant: Some(variant_name),
+                        trait_path: root.join(variant.relative_path),
                     });
                 }
             }
             None => {
                 let trait_path = crate::layout::trait_manifest_path(repo_root, &trait_id)?;
                 if trait_path.is_file() {
-                    leaves.push(TraitPackageLeaf {
+                    variants.push(TraitPackageVariant {
                         trait_id,
                         variant: None,
                         trait_path,
@@ -297,10 +300,10 @@ pub fn trait_package_leaves(repo_root: &Utf8Path) -> Result<Vec<TraitPackageLeaf
             }
         }
     }
-    leaves.sort_by(|left, right| {
+    variants.sort_by(|left, right| {
         left.trait_id
             .cmp(&right.trait_id)
             .then_with(|| left.variant.cmp(&right.variant))
     });
-    Ok(leaves)
+    Ok(variants)
 }

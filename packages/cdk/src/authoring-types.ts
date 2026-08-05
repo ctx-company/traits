@@ -26,16 +26,16 @@ export type VariantLeafHandle = VariantHandle | VariantImportHandle;
  */
 export type TraitFamilyMap = { readonly [segment: string]: VariantLeafHandle | TraitFamilyMap; };
 
-/** One resolved leaf: its colon-joined path and the variant definition it resolved to. */
-export interface FlattenedVariantLeaf {
+/** One resolved variant: its colon-joined path and the variant definition it resolved to. */
+export interface FlattenedVariant {
   readonly path: string;
   readonly segments: readonly string[];
   readonly handle: VariantLeafHandle;
 }
 
-/** The recursive variant topology a package manifest records: each level's default and each leaf's path. */
+/** The recursive variant topology a package manifest records: each level's default and each variant's path. */
 export type VariantTopologyNode =
-  | { readonly kind: "leaf"; readonly path: string; }
+  | { readonly kind: "variant"; readonly path: string; }
   | {
     readonly kind: "map";
     readonly default: string;

@@ -39,9 +39,9 @@ struct CdkBuildEnvelope {
     authored_declarations: Vec<CdkAuthoredDeclaration>,
 }
 
-/// One resolved leaf emitted inside a `FamilyEnvelope` (`packages/cdk/src/variant.ts`).
+/// One resolved variant emitted inside a `FamilyEnvelope` (`packages/cdk/src/variant.ts`).
 #[derive(Debug, Clone, serde::Deserialize)]
-struct CdkFamilyLeafEnvelope {
+struct CdkFamilyVariantEnvelope {
     path: String,
     draft: serde_json::Value,
     #[serde(default, rename = "sourceMap")]
@@ -51,42 +51,49 @@ struct CdkFamilyLeafEnvelope {
 }
 
 /// The tagged family envelope `resolveTraitFamily` emits: `{ family: true,
-/// id, version, topology, leaves }`. Distinguished from [`CdkBuildEnvelope`]
+/// id, version, topology, variants }`. Distinguished from [`CdkBuildEnvelope`]
 /// structurally, by the presence of the `family` key rather than `draft`.
+///
+/// `#[serde(alias = "leaves")]` accepts an older `@ctx-traits/cdk` package
+/// that still emits the pre-rename `leaves` key, so a new binary keeps
+/// building against an outdated npm dependency (skew the other way — a new
+/// npm package against an old binary — is unhandled pre-v1).
 #[derive(Debug, Clone, serde::Deserialize)]
 struct CdkFamilyBuildEnvelope {
     id: String,
     version: String,
     topology: serde_json::Value,
-    leaves: Vec<CdkFamilyLeafEnvelope>,
+    #[serde(alias = "leaves")]
+    variants: Vec<CdkFamilyVariantEnvelope>,
 }
 
-/// One family leaf's complete synth result, keyed by its variant selector
-/// (e.g. `"quick"`). Consumed by [`publish_cdk_family`] to write the leaf's
-/// canonical output and refresh the package's `[family]` manifest table.
-pub(crate) struct CdkFamilyLeafOutcome {
-    pub(crate) selector: String,
+/// One family variant's complete synth result, keyed by its variant name
+/// (e.g. `"quick"`). Consumed by [`publish_cdk_family`] to write the
+/// variant's canonical output and refresh the package's `[family]` manifest
+/// table.
+pub(crate) struct CdkFamilyVariantOutcome {
+    pub(crate) name: String,
     pub(crate) response: ctx_traits_core::synth::Response,
     pub(crate) source_map: ctx_traits_core::source_map::SourceMap,
 }
 
 /// Complete synth result for a native trait family (`trait(id, {
-/// variants })`): one [`CdkFamilyLeafOutcome`] per resolved leaf, plus the
-/// shared family identity and topology needed to write the package
+/// variants })`): one [`CdkFamilyVariantOutcome`] per resolved variant, plus
+/// the shared family identity and topology needed to write the package
 /// manifest's `[family]` table.
 pub(crate) struct CdkFamilySynthOutcome {
     pub(crate) family_id: String,
     pub(crate) family_version: String,
     pub(crate) topology: serde_json::Value,
-    pub(crate) leaves: Vec<CdkFamilyLeafOutcome>,
+    pub(crate) variants: Vec<CdkFamilyVariantOutcome>,
 }
 
-pub(crate) fn family_leaf_aliases(family_id: &str, selector: &str) -> Vec<String> {
-    vec![format!("{family_id}-{selector}")]
+pub(crate) fn family_variant_aliases(family_id: &str, name: &str) -> Vec<String> {
+    vec![format!("{family_id}-{name}")]
 }
 
 /// Either shape a CDK build source can emit: an ordinary single-trait draft,
-/// or a native family's resolved leaves.
+/// or a native family's resolved variants.
 pub(crate) enum CdkSynthResult {
     Single(Box<CdkSynthOutcome>),
     Family(Box<CdkFamilySynthOutcome>),
@@ -100,9 +107,9 @@ pub(crate) fn synthesize_cdk_source(
         CdkSynthResult::Single(outcome) => Ok(*outcome),
         CdkSynthResult::Family(family) => Err(crate::Error::Command {
             message: format!(
-                "{source_path} declares a native trait family ({} leaves under \"{}\"); \
+                "{source_path} declares a native trait family ({} variants under \"{}\"); \
                  this command does not yet build native families",
-                family.leaves.len(),
+                family.variants.len(),
                 family.family_id
             ),
         }),
@@ -110,7 +117,7 @@ pub(crate) fn synthesize_cdk_source(
 }
 
 /// Build a CDK source, accepting either an ordinary single-trait draft or a
-/// native family's resolved leaves. See [`synthesize_cdk_source`] for the
+/// native family's resolved variants. See [`synthesize_cdk_source`] for the
 /// single-trait-only entry point existing callers use.
 pub(crate) fn synthesize_cdk_source_any(
     source_path: &Utf8Path,
@@ -190,9 +197,9 @@ fn is_family_envelope(emitted_json: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Parse a family envelope's leaves and synthesize each one through the same
-/// pure synth path a single-trait build uses, relativizing each leaf's
-/// source map against the shared `repo_root`.
+/// Parse a family envelope's variants and synthesize each one through the
+/// same pure synth path a single-trait build uses, relativizing each
+/// variant's source map against the shared `repo_root`.
 fn synthesize_cdk_family(
     source_path: &Utf8Path,
     repo_root: &Utf8Path,
@@ -201,28 +208,28 @@ fn synthesize_cdk_family(
 ) -> crate::Result<CdkFamilySynthOutcome> {
     let envelope: CdkFamilyBuildEnvelope = serde_json::from_value(emitted_json)
         .map_err(|source| crate::Error::json("decode CDK family build envelope", source))?;
-    let mut leaves = Vec::with_capacity(envelope.leaves.len());
-    for leaf in envelope.leaves {
-        ctx_traits_core::source_map::validate_source_map(&leaf.source_map)?;
-        let source_map = relativize_source_map(leaf.source_map, repo_root)?;
-        let provenance_warnings = leaf
+    let mut variants = Vec::with_capacity(envelope.variants.len());
+    for variant in envelope.variants {
+        ctx_traits_core::source_map::validate_source_map(&variant.source_map)?;
+        let source_map = relativize_source_map(variant.source_map, repo_root)?;
+        let provenance_warnings = variant
             .diagnostics
             .iter()
             .map(format_authoring_diagnostic)
             .collect::<Vec<_>>();
         let response = ctx_traits_core::synth::synthesize(ctx_traits_core::synth::Request {
             document_kind: ctx_traits_core::synth::DocumentKind::Trait,
-            draft_json: leaf.draft,
+            draft_json: variant.draft,
             output_format,
             provenance: ctx_traits_core::synth::ProvenanceSeed {
                 generator_package: Some("ctx-traits-cli-build".to_string()),
                 generator_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-                source_path: Some(format!("{source_path}#{}", leaf.path)),
+                source_path: Some(format!("{source_path}#{}", variant.path)),
                 warnings: provenance_warnings,
             },
         })?;
-        leaves.push(CdkFamilyLeafOutcome {
-            selector: leaf.path,
+        variants.push(CdkFamilyVariantOutcome {
+            name: variant.path,
             response,
             source_map,
         });
@@ -231,34 +238,34 @@ fn synthesize_cdk_family(
         family_id: envelope.id,
         family_version: envelope.version,
         topology: envelope.topology,
-        leaves,
+        variants,
     })
 }
 
-/// One family leaf's written build output, used to assemble the `[family]`
-/// manifest table.
-pub(crate) struct CdkFamilyLeafBuildEvidence {
-    pub(crate) selector: String,
+/// One family variant's written build output, used to assemble the
+/// `[family]` manifest table.
+pub(crate) struct CdkFamilyVariantBuildEvidence {
+    pub(crate) name: String,
     pub(crate) target_path: Utf8PathBuf,
     pub(crate) map_path: Utf8PathBuf,
     pub(crate) aliases: Vec<String>,
 }
 
 /// Complete evidence for one `ctx traits build` run over a native family
-/// source: every leaf's written output plus the package manifest now
+/// source: every variant's written output plus the package manifest now
 /// carrying the `[family]` table.
 pub(crate) struct CdkFamilyBuildEvidence {
     pub(crate) family_id: String,
     pub(crate) family_version: String,
     pub(crate) manifest_path: Utf8PathBuf,
-    pub(crate) leaves: Vec<CdkFamilyLeafBuildEvidence>,
+    pub(crate) variants: Vec<CdkFamilyVariantBuildEvidence>,
 }
 
-/// Publish a resolved native family: write each leaf's canonical output and
-/// source map under `generated/<selector>/`, then write/refresh the
+/// Publish a resolved native family: write each variant's canonical output
+/// and source map under `generated/<name>/`, then write/refresh the
 /// package's `[family]` manifest table so resolution (`run.rs`) and
-/// per-leaf run-config can find every leaf by its selector and legacy
-/// aliases (`<family-id>-<selector>`, skipped for the default leaf, which
+/// per-variant run-config can find every variant by its name and legacy
+/// aliases (`<family-id>-<name>`, skipped for the default variant, which
 /// already resolves via `family.default`).
 pub(crate) fn publish_cdk_family(
     source_path: &Utf8Path,
@@ -278,107 +285,108 @@ pub(crate) fn publish_cdk_family(
             ),
         })?
         .to_path_buf();
-    let default_selector = family
+    let default_name = family
         .topology
         .as_object()
         .and_then(|topology| topology.get("default"))
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| crate::Error::Command {
             message: format!(
-                "{source_path}: family topology is missing its top-level \"default\" selector"
+                "{source_path}: family topology is missing its top-level \"default\" name"
             ),
         })?
         .to_string();
     validate_family_manifest_identity(&package_root, &family.family_id, &family.family_version)?;
     let generated = package_root.join(ctx_traits_io::layout::GENERATED);
-    let mut leaves = Vec::with_capacity(family.leaves.len());
-    for leaf in &family.leaves {
-        let ctx_traits_core::synth::CanonicalDocument::Trait(built) = &leaf.response.canonical
+    let mut variants = Vec::with_capacity(family.variants.len());
+    for variant in &family.variants {
+        let ctx_traits_core::synth::CanonicalDocument::Trait(built) = &variant.response.canonical
         else {
             return Err(crate::Error::Command {
                 message: format!(
-                    "family leaf {:?} did not synthesize a trait document",
-                    leaf.selector
+                    "family variant {:?} did not synthesize a trait document",
+                    variant.name
                 ),
             });
         };
         if built.id.as_str() != family.family_id {
             return Err(crate::Error::Command {
                 message: format!(
-                    "family leaf {:?} built id {:?} does not match family id {:?}",
-                    leaf.selector,
+                    "family variant {:?} built id {:?} does not match family id {:?}",
+                    variant.name,
                     built.id.as_str(),
                     family.family_id
                 ),
             });
         }
-        if built.variant.as_deref() != Some(leaf.selector.as_str()) {
+        if built.variant.as_deref() != Some(variant.name.as_str()) {
             return Err(crate::Error::Command {
                 message: format!(
-                    "family leaf {:?} built variant {:?} does not match its own selector",
-                    leaf.selector, built.variant
+                    "family variant {:?} built variant {:?} does not match its own name",
+                    variant.name, built.variant
                 ),
             });
         }
-        let leaf_dir = generated.join(&leaf.selector);
-        let target_path = leaf_dir.join(format!("index.{}", output_format.extension()));
-        let map_path = leaf_dir.join(ctx_traits_io::layout::CANONICAL_SOURCE_MAP);
-        ctx_traits_io::write::write_build_output(&target_path, &leaf.response.output_text)?;
-        let map_json = serde_json::to_string_pretty(&leaf.source_map)
+        let variant_dir = generated.join(&variant.name);
+        let target_path = variant_dir.join(format!("index.{}", output_format.extension()));
+        let map_path = variant_dir.join(ctx_traits_io::layout::CANONICAL_SOURCE_MAP);
+        ctx_traits_io::write::write_build_output(&target_path, &variant.response.output_text)?;
+        let map_json = serde_json::to_string_pretty(&variant.source_map)
             .map(|mut text| {
                 text.push('\n');
                 text
             })
-            .map_err(|e| crate::Error::json("serialize CDK family leaf source map", e))?;
+            .map_err(|e| crate::Error::json("serialize CDK family variant source map", e))?;
         ctx_traits_io::write::write_build_output(&map_path, &map_json)?;
-        // Keep every historical hyphenated selector, including the default
-        // leaf. A bare family id remains the preferred default selector.
-        let aliases = family_leaf_aliases(&family.family_id, &leaf.selector);
-        leaves.push(CdkFamilyLeafBuildEvidence {
-            selector: leaf.selector.clone(),
+        // Keep every historical hyphenated name, including the default
+        // variant. A bare family id remains the preferred default name.
+        let aliases = family_variant_aliases(&family.family_id, &variant.name);
+        variants.push(CdkFamilyVariantBuildEvidence {
+            name: variant.name.clone(),
             target_path,
             map_path,
             aliases,
         });
     }
     let manifest_path = ctx_traits_io::layout::package_manifest_path(&package_root);
-    // Publishing refreshes generated paths and aliases, but leaf-owned budget
-    // sidecars are authored package configuration and must survive rebuilds.
+    // Publishing refreshes generated paths and aliases, but variant-owned
+    // budget sidecars are authored package configuration and must survive
+    // rebuilds.
     let existing_family = ctx_traits_io::family_manifest::read_family_table(&manifest_path)?;
-    let manifest_entries = leaves
+    let manifest_entries = variants
         .iter()
         .map(
-            |leaf| ctx_traits_io::family_manifest::FamilyLeafManifestEntry {
-                selector: leaf.selector.clone(),
-                relative_path: leaf
+            |variant| ctx_traits_io::family_manifest::FamilyVariantManifestEntry {
+                name: variant.name.clone(),
+                relative_path: variant
                     .target_path
                     .strip_prefix(&package_root)
-                    .unwrap_or(&leaf.target_path)
+                    .unwrap_or(&variant.target_path)
                     .to_string(),
-                aliases: leaf.aliases.clone(),
+                aliases: variant.aliases.clone(),
                 run_config: existing_family
                     .as_ref()
-                    .and_then(|table| table.leaves.get(&leaf.selector))
-                    .and_then(|leaf| leaf.run_config.clone()),
+                    .and_then(|table| table.variants.get(&variant.name))
+                    .and_then(|variant| variant.run_config.clone()),
             },
         )
         .collect::<Vec<_>>();
     ctx_traits_io::family_manifest::write_family_table(
         &manifest_path,
-        &default_selector,
+        &default_name,
         &manifest_entries,
     )?;
     Ok(CdkFamilyBuildEvidence {
         family_id: family.family_id.clone(),
         family_version: family.family_version.clone(),
         manifest_path,
-        leaves,
+        variants,
     })
 }
 
 /// Enforce the same `[package]` identity invariant [`build_cdk_package`]'s
 /// single-trait path enforces (`validate_package_manifest_identity` in
-/// `schema_synth_build.rs`), before a single leaf is written: a native
+/// `schema_synth_build.rs`), before a single variant is written: a native
 /// family package must already have a root `trait.toml` with a `[package]`
 /// table whose `id`/`version` match the family's declared id/version. A
 /// missing manifest, a manifest with no `[package]` table, or a mismatched
@@ -842,7 +850,7 @@ pub(crate) fn package_source_map(trait_path: &Utf8Path) -> crate::Result<Utf8Pat
     let repo_root = ctx_traits_io::export::infer_repo_root_from_trait_file(trait_path);
     let protocol_root = ctx_traits_io::layout::trait_protocol_root_path(repo_root);
     if package_root.parent() == Some(protocol_root.as_path()) {
-        if let Some(selector) = trait_path
+        if let Some(variant_name) = trait_path
             .parent()
             .filter(|parent| {
                 parent.parent().is_some_and(|generated| {
@@ -853,7 +861,7 @@ pub(crate) fn package_source_map(trait_path: &Utf8Path) -> crate::Result<Utf8Pat
         {
             return Ok(package_root
                 .join(ctx_traits_io::layout::GENERATED)
-                .join(selector)
+                .join(variant_name)
                 .join(ctx_traits_io::layout::CANONICAL_SOURCE_MAP));
         }
         let Some(trait_id) = package_root.file_name() else {

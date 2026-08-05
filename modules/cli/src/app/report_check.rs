@@ -2042,45 +2042,45 @@ fn native_family_drift_check(
         .as_object()
         .and_then(|topology| topology.get("default"))
         .and_then(serde_json::Value::as_str);
-    let synthesized_selectors = family
-        .leaves
+    let synthesized_names = family
+        .variants
         .iter()
-        .map(|leaf| leaf.selector.as_str())
+        .map(|variant| variant.name.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    let committed_selectors = committed
-        .leaves
+    let committed_names = committed
+        .variants
         .keys()
         .map(String::as_str)
         .collect::<std::collections::BTreeSet<_>>();
     let mut failures = Vec::new();
     if synthesized_default != Some(committed.default.as_str()) {
         failures.push(format!(
-            "default selector differs (synthesized={synthesized_default:?}, committed={:?})",
+            "default name differs (synthesized={synthesized_default:?}, committed={:?})",
             committed.default
         ));
     }
-    if synthesized_selectors != committed_selectors {
+    if synthesized_names != committed_names {
         failures.push(format!(
-            "selector set differs (synthesized={synthesized_selectors:?}, committed={committed_selectors:?})"
+            "variant set differs (synthesized={synthesized_names:?}, committed={committed_names:?})"
         ));
     }
 
-    for leaf in &family.leaves {
-        let expected_relative = format!("generated/{}/index.toml", leaf.selector);
+    for variant in &family.variants {
+        let expected_relative = format!("generated/{}/index.toml", variant.name);
         let expected_aliases =
-            crate::app::cdk_build::family_leaf_aliases(&family.family_id, &leaf.selector);
-        match committed.leaves.get(&leaf.selector) {
+            crate::app::cdk_build::family_variant_aliases(&family.family_id, &variant.name);
+        match committed.variants.get(&variant.name) {
             Some(entry) => {
                 if entry.relative_path != expected_relative {
                     failures.push(format!(
-                        "leaf {} path differs (expected {expected_relative}, committed {})",
-                        leaf.selector, entry.relative_path
+                        "variant {} path differs (expected {expected_relative}, committed {})",
+                        variant.name, entry.relative_path
                     ));
                 }
                 if entry.aliases != expected_aliases {
                     failures.push(format!(
-                        "leaf {} aliases differ (expected {expected_aliases:?}, committed {:?})",
-                        leaf.selector, entry.aliases
+                        "variant {} aliases differ (expected {expected_aliases:?}, committed {:?})",
+                        variant.name, entry.aliases
                     ));
                 }
             }
@@ -2088,53 +2088,56 @@ fn native_family_drift_check(
         }
         let canonical_path = package_root.join(&expected_relative);
         match ctx_traits_io::read::read_optional_text(&canonical_path) {
-            Ok(Some(text)) if text == leaf.response.output_text => {}
-            Ok(Some(_)) => {
-                failures.push(format!("leaf {} canonical bytes are stale", leaf.selector))
-            }
+            Ok(Some(text)) if text == variant.response.output_text => {}
+            Ok(Some(_)) => failures.push(format!(
+                "variant {} canonical bytes are stale",
+                variant.name
+            )),
             Ok(None) => failures.push(format!(
-                "leaf {} canonical output is missing",
-                leaf.selector
+                "variant {} canonical output is missing",
+                variant.name
             )),
             Err(error) => failures.push(format!(
-                "leaf {} canonical output is unreadable: {error}",
-                leaf.selector
+                "variant {} canonical output is unreadable: {error}",
+                variant.name
             )),
         }
         let map_path = package_root
             .join("generated")
-            .join(&leaf.selector)
+            .join(&variant.name)
             .join(ctx_traits_io::layout::CANONICAL_SOURCE_MAP);
-        let rebuilt_map = serialized_source_map(&leaf.source_map);
+        let rebuilt_map = serialized_source_map(&variant.source_map);
         match (
             ctx_traits_io::read::read_optional_text(&map_path),
             rebuilt_map,
         ) {
             (Ok(Some(committed)), Ok(rebuilt)) if committed == rebuilt => {}
             (Ok(Some(_)), Ok(_)) => {
-                failures.push(format!("leaf {} source map is stale", leaf.selector))
+                failures.push(format!("variant {} source map is stale", variant.name))
             }
-            (Ok(None), _) => failures.push(format!("leaf {} source map is missing", leaf.selector)),
+            (Ok(None), _) => {
+                failures.push(format!("variant {} source map is missing", variant.name))
+            }
             (Err(error), _) => failures.push(format!(
-                "leaf {} source map is unreadable: {error}",
-                leaf.selector
+                "variant {} source map is unreadable: {error}",
+                variant.name
             )),
             (_, Err(error)) => failures.push(format!(
-                "leaf {} source map could not be serialized: {error}",
-                leaf.selector
+                "variant {} source map could not be serialized: {error}",
+                variant.name
             )),
         }
     }
 
     let provenance = family
-        .leaves
+        .variants
         .first()
-        .map(|leaf| leaf.response.provenance.clone());
+        .map(|variant| variant.response.provenance.clone());
     CdkDriftCheck {
         summary: if failures.is_empty() {
             format!(
-                "{} family leaves and source maps byte-match rebuilt {source_path}",
-                family.leaves.len()
+                "{} family variants and source maps byte-match rebuilt {source_path}",
+                family.variants.len()
             )
         } else {
             format!(

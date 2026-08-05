@@ -1,5 +1,5 @@
 //! P531 Stage 1: `family:variant` resolves straight to a native family
-//! package's leaf (`generated/<selector>/index.toml`) via the `[family]`
+//! package's variant (`generated/<name>/index.toml`) via the `[family]`
 //! table `ctx traits build` writes (P530 Stage B) — not the legacy
 //! `family-variant` sibling-directory shape. Reuses the `family-fixture`
 //! source from `proof_cdk_native_family_build.rs`.
@@ -15,9 +15,9 @@ const summary = slot.text(\"summary\");\n\
 const output = port.output.text({ id: \"summary\", value: summary });\n\
 const worker = agent(\"worker\", { description: \"Completes the starter task.\" });\n\
 \n\
-const leaf = (name) => variant({\n\
+const variantFixture = (name) => variant({\n\
   name,\n\
-  summary: `The ${name} leaf.`,\n\
+  summary: `The ${name} variant.`,\n\
   procedure: procedure({\n\
     description: \"Describe what this trait should accomplish.\",\n\
     output,\n\
@@ -32,8 +32,8 @@ const leaf = (name) => variant({\n\
 \n\
 export const draft = trait(\"family-fixture\", {\n\
   variants: {\n\
-    default: leaf(\"default\").default(),\n\
-    quick: leaf(\"quick\"),\n\
+    default: variantFixture(\"default\").default(),\n\
+    quick: variantFixture(\"quick\"),\n\
   },\n\
 });\n"
 }
@@ -51,7 +51,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         utf8(&init).1
     );
 
-    // What this file proves is leaf resolution and start-time trust, not
+    // What this file proves is variant resolution and start-time trust, not
     // harness discovery — so the fixture's one role is pinned rather than
     // left to probe PATH. Unpinned, `ctx traits run` refuses before it ever
     // reaches the trust check on any machine with no coding agent installed,
@@ -82,7 +82,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
     );
 }
 
-fn add_family_leaf_dependencies(proj: &std::path::Path) {
+fn add_family_variant_dependencies(proj: &std::path::Path) {
     for (variant, alias) in [
         ("default", "family-dep-default"),
         ("quick", "family-dep-quick"),
@@ -104,22 +104,22 @@ fn add_family_leaf_dependencies(proj: &std::path::Path) {
         )
         .unwrap();
 
-        let leaf_path = proj.join(format!(
+        let variant_path = proj.join(format!(
             ".ctx/traits/packages/family-fixture/generated/{variant}/index.toml"
         ));
-        let mut leaf = fs::read_to_string(&leaf_path).unwrap();
-        leaf.push_str(&format!(
+        let mut variant_text = fs::read_to_string(&variant_path).unwrap();
+        variant_text.push_str(&format!(
             "\n[[dependency]]\nalias = \"{alias}\"\nid = \"{alias}\"\nversion = \"0.1.0\"\n\n[dependency.source]\npath = \"../{alias}\"\n"
         ));
-        fs::write(leaf_path, leaf).unwrap();
+        fs::write(variant_path, variant_text).unwrap();
     }
 }
 
 /// `family:quick` resolves straight to the family package's
-/// `generated/quick/index.toml` leaf — never to a `family-quick` sibling
+/// `generated/quick/index.toml` variant — never to a `family-quick` sibling
 /// directory, which does not exist in this fixture.
 #[test]
-fn variant_ref_resolves_to_family_leaf() {
+fn variant_ref_resolves_to_family_variant() {
     let scratch = ScratchRoot::new("native-family-resolve-variant");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -133,14 +133,14 @@ fn variant_ref_resolves_to_family_leaf() {
     let (stdout, stderr) = utf8(&check);
     assert!(
         check.status.success(),
-        "expected `ctx traits check family-fixture:quick` to resolve the quick leaf\nstdout: {stdout}\nstderr: {stderr}"
+        "expected `ctx traits check family-fixture:quick` to resolve the quick variant\nstdout: {stdout}\nstderr: {stderr}"
     );
 }
 
 /// Bare `family-fixture` (and `family-fixture:default`) resolve via
-/// `[family].default` to the same leaf.
+/// `[family].default` to the same variant.
 #[test]
-fn bare_id_resolves_to_family_default_leaf() {
+fn bare_id_resolves_to_family_default_variant() {
     let scratch = ScratchRoot::new("native-family-resolve-default");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -151,15 +151,15 @@ fn bare_id_resolves_to_family_default_leaf() {
         let (stdout, stderr) = utf8(&check);
         assert!(
             check.status.success(),
-            "expected `ctx traits check {id}` to resolve the default leaf\nstdout: {stdout}\nstderr: {stderr}"
+            "expected `ctx traits check {id}` to resolve the default variant\nstdout: {stdout}\nstderr: {stderr}"
         );
     }
 }
 
-/// Every published leaf alias resolves through the family manifest after the
+/// Every published variant alias resolves through the family manifest after the
 /// former sibling package has disappeared.
 #[test]
-fn legacy_hyphenated_alias_resolves_to_family_leaf() {
+fn legacy_hyphenated_alias_resolves_to_family_variant() {
     let scratch = ScratchRoot::new("native-family-resolve-alias");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -175,11 +175,56 @@ fn legacy_hyphenated_alias_resolves_to_family_leaf() {
     }
 }
 
+/// A package still on the pre-rename manifest shape (`[family.leaf.<selector>]`
+/// instead of `[family.variant.<name>]`) resolves exactly like a current one,
+/// by name and by legacy alias — the compat read 0026 requires so an
+/// already-published package never breaks underfoot.
+#[test]
+fn legacy_leaf_table_manifest_still_resolves() {
+    let scratch = ScratchRoot::new("native-family-resolve-legacy-leaf-table");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    build_family_fixture(&proj, &home);
+
+    let manifest_path = proj.join(".ctx/traits/packages/family-fixture/package.toml");
+    let manifest_text = fs::read_to_string(&manifest_path).unwrap();
+    let legacy_text = manifest_text
+        .replace("[family.variant.", "[family.leaf.")
+        .replace("[family.variant]", "[family.leaf]");
+    assert_ne!(
+        legacy_text, manifest_text,
+        "fixture manifest must contain [family.variant.*] tables to downgrade"
+    );
+    fs::write(&manifest_path, &legacy_text).unwrap();
+
+    let check = run_ctx(
+        &["traits", "check", "family-fixture:quick", "--json"],
+        &proj,
+        &home,
+    );
+    let (stdout, stderr) = utf8(&check);
+    assert!(
+        check.status.success(),
+        "expected `family-fixture:quick` to resolve against a legacy [family.leaf.*] manifest\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let alias_check = run_ctx(
+        &["traits", "check", "family-fixture-quick", "--json"],
+        &proj,
+        &home,
+    );
+    let (stdout, stderr) = utf8(&alias_check);
+    assert!(
+        alias_check.status.success(),
+        "expected the legacy alias to resolve against a legacy [family.leaf.*] manifest\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
 /// A variant name absent from the family's `[family]` table produces the
-/// typo/variant diagnostic listing the family's real leaves (read from
+/// typo/variant diagnostic listing the family's real variants (read from
 /// `[family]`, not scraped `-suffix` directories, since none exist here).
 #[test]
-fn unknown_variant_lists_family_leaves() {
+fn unknown_variant_lists_family_variants() {
     let scratch = ScratchRoot::new("native-family-resolve-unknown-variant");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -197,20 +242,20 @@ fn unknown_variant_lists_family_leaves() {
     );
     assert!(
         stderr.contains("default") && stderr.contains("quick"),
-        "expected the diagnostic to list the family's leaves (default, quick): {stderr}"
+        "expected the diagnostic to list the family's variants (default, quick): {stderr}"
     );
 }
 
-/// Operand-less vendor expands a native package root to every canonical leaf,
-/// records both variants in one package lock, preserves leaf-local evidence,
+/// Operand-less vendor expands a native package root to every canonical variant,
+/// records both variants in one package lock, preserves variant-local evidence,
 /// and verifies the resulting lock without one variant overwriting another.
 #[test]
-fn operandless_vendor_locks_every_family_leaf() {
+fn operandless_vendor_locks_every_family_variant() {
     let scratch = ScratchRoot::new("native-family-vendor");
     let home = scratch.home();
     let proj = home.join("repo");
     build_family_fixture(&proj, &home);
-    add_family_leaf_dependencies(&proj);
+    add_family_variant_dependencies(&proj);
 
     let vendor = run_ctx(&["traits", "vendor", "--json"], &proj, &home);
     let (stdout, stderr) = utf8(&vendor);
@@ -292,7 +337,7 @@ fn operandless_vendor_locks_every_family_leaf() {
         let (stdout, stderr) = utf8(&start);
         assert!(
             start.status.success(),
-            "approved {variant} leaf failed start-time trust\nstdout: {stdout}\nstderr: {stderr}"
+            "approved {variant} variant failed start-time trust\nstdout: {stdout}\nstderr: {stderr}"
         );
     }
     let stale = run_ctx(

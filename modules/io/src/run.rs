@@ -2646,15 +2646,15 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
 
     // Repo-authored always outranks every other tier outright, so every
     // repo-authored candidate shape for this id is checked first, before any
-    // lower-tier candidate is even built. A repo-authored family table's leaf
-    // for `variant` is checked first (P531 Stage 1: a folded family package
-    // resolves straight to that leaf's `generated/<selector>/` output,
-    // ahead of an ordinary same-named package shape), then the exact
+    // lower-tier candidate is even built. A repo-authored family table's
+    // variant for `variant` is checked first (P531 Stage 1: a folded family
+    // package resolves straight to that variant's `generated/<selector>/`
+    // output, ahead of an ordinary same-named package shape), then the exact
     // ordinary id ([`repo_authored_precheck`]), then a repo-authored family
     // table's legacy hyphenated alias. A malformed repo-authored package or
     // `[family]` table surfaces its own error immediately rather than ever
     // being masked by a lower-tier candidate.
-    if let Some(resolved) = resolve_local_family_leaf(&context, family, variant)? {
+    if let Some(resolved) = resolve_local_family_variant(&context, family, variant)? {
         return Ok(Some(resolved));
     }
     if let Some(resolved) = repo_authored_precheck(&context, id)? {
@@ -2685,13 +2685,14 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
     };
 
     // Below repo-authored, merge ordinary desugared-id candidates, vendored
-    // native-family-leaf candidates, and vendored family-alias candidates
+    // native-family-variant candidates, and vendored family-alias candidates
     // under one shared tier ordering (repo-vendored, user-global, built-in)
     // instead of resolving one kind fully across every tier before ever
     // consulting the others. This is what keeps a project-vendored family
-    // leaf or alias from losing to a global or built-in legacy package, and
-    // a global vendored family leaf or alias from losing to a built-in
-    // package: each candidate is tagged with the tier it was found at and
+    // variant or alias from losing to a global or built-in legacy package,
+    // and a global vendored family variant or alias from losing to a
+    // built-in package: each candidate is tagged with the tier it was found
+    // at and
     // the lowest tier wins, exactly as
     // [`crate::inventory::InventoryContext::resolve_tiers`] already does for
     // purely-ordinary ids.
@@ -2719,11 +2720,11 @@ pub fn try_resolve_trait_id(original_id: &str) -> crate::Result<Option<(Utf8Path
 /// repo-authored local package, or that package has no `[family]` table —
 /// letting the caller fall through to ordinary desugared-id resolution and
 /// then, if that also comes back empty, vendored family resolution
-/// ([`resolve_vendored_family_leaf`]). A repo-authored `[family]` table that
-/// exists but is malformed, or that names `variant` but is missing the
-/// leaf's canonical file, always surfaces its own error here rather than
+/// ([`resolve_vendored_family_variant`]). A repo-authored `[family]` table
+/// that exists but is malformed, or that names `variant` but is missing the
+/// variant's canonical file, always surfaces its own error here rather than
 /// ever being treated as absent.
-fn resolve_local_family_leaf(
+fn resolve_local_family_variant(
     context: &crate::inventory::InventoryContext,
     family: &str,
     variant: &str,
@@ -2740,30 +2741,31 @@ fn resolve_local_family_leaf(
     let Some(table) = crate::family_manifest::read_family_table(&root_manifest)? else {
         return Ok(None);
     };
-    let Some((_selector, leaf)) = table.leaf_for_variant(variant) else {
+    let Some((_name, resolved_variant)) = table.variant(variant) else {
         return Ok(None);
     };
-    let leaf_path = local_package_root.join(&leaf.relative_path);
-    if !leaf_path.is_file() {
+    let variant_path = local_package_root.join(&resolved_variant.relative_path);
+    if !variant_path.is_file() {
         return Err(crate::Error::Usage {
             message: format!(
-                "native family {family:?} declares leaf {variant:?} at {leaf_path}, but that canonical file does not exist"
+                "native family {family:?} declares variant {variant:?} at {variant_path}, but that canonical file does not exist"
             ),
         });
     }
-    Ok(Some((leaf_path, "trait-id".to_string())))
+    Ok(Some((variant_path, "trait-id".to_string())))
 }
 
 /// Build the merged candidate list for every tier *below* repo-authored —
 /// repo-vendored, user-global, built-in — combining ordinary desugared-id
-/// candidates, vendored native-family-leaf candidates for `family:variant`,
-/// and vendored family-alias candidates for the bare hyphenated `alias`
-/// (P535), each tagged with the tier it was found at. Callers sort by tier
-/// and take the lowest: this is what keeps a project-vendored family leaf or
-/// alias from losing to a global or built-in legacy package, and a global
-/// vendored family leaf or alias from losing to a built-in package, instead
-/// of any one candidate kind being resolved fully across every tier before
-/// the others are ever consulted.
+/// candidates, vendored native-family-variant candidates for
+/// `family:variant`, and vendored family-alias candidates for the bare
+/// hyphenated `alias` (P535), each tagged with the tier it was found at.
+/// Callers sort by tier and take the lowest: this is what keeps a
+/// project-vendored family variant or alias from losing to a global or
+/// built-in legacy package, and a global vendored family variant or alias
+/// from losing to a built-in package, instead of any one candidate kind
+/// being resolved fully across every tier before the others are ever
+/// consulted.
 ///
 /// Called only after the repo-authored prechecks in `try_resolve_trait_id`
 /// have all come back empty, so nothing here can shadow (or mask the error
@@ -2783,7 +2785,7 @@ fn merged_lower_tier_candidates(
     // Repo-authored is already confirmed absent by the caller's prechecks,
     // so any `RepoAuthored` candidate `resolve_tiers` reports here would be
     // a contradiction; it is filtered out defensively rather than trusted to
-    // outrank a real family-leaf or alias candidate.
+    // outrank a real family-variant or alias candidate.
     candidates.retain(|candidate| candidate.tier != crate::inventory::Tier::RepoAuthored);
 
     let family_valid =
@@ -2795,7 +2797,7 @@ fn merged_lower_tier_candidates(
         let repo_root = context.repo_root_for_paths();
         let project_scope = crate::distribution::DistributionScope::project(repo_root);
         if family_valid
-            && crate::distribution::vendored_family_leaf_exists(&project_scope, family, variant)?
+            && crate::distribution::vendored_family_variant_exists(&project_scope, family, variant)?
             && let Some((path, origin)) = crate::distribution::resolve_vendored_trait_variant(
                 &project_scope,
                 family,
@@ -2822,7 +2824,7 @@ fn merged_lower_tier_candidates(
 
     let global_scope = crate::distribution::DistributionScope::global()?;
     if family_valid
-        && crate::distribution::vendored_family_leaf_exists(&global_scope, family, variant)?
+        && crate::distribution::vendored_family_variant_exists(&global_scope, family, variant)?
         && let Some((path, origin)) = crate::distribution::resolve_vendored_trait_variant(
             &global_scope,
             family,
@@ -2851,13 +2853,13 @@ fn merged_lower_tier_candidates(
 
 /// Resolve a legacy hyphenated selector published in a *repo-authored* local
 /// native family's manifest only. Vendored family-alias candidates (P535)
-/// are resolved together with ordinary and family-leaf candidates by
+/// are resolved together with ordinary and family-variant candidates by
 /// [`merged_lower_tier_candidates`] instead, so a project- or global-tier
 /// alias competes under the same tier ordering as every other candidate
 /// kind rather than being checked only after ordinary resolution has
 /// already picked a winner across all tiers. The alias is manifest data
 /// rather than a guessed suffix, which keeps arbitrary package names from
-/// accidentally becoming family leaves.
+/// accidentally becoming family variants.
 fn resolve_local_family_alias(
     context: &crate::inventory::InventoryContext,
     alias: &str,
@@ -2894,16 +2896,16 @@ fn resolve_local_family_alias(
         let Some(table) = crate::family_manifest::read_family_table(&manifest)? else {
             continue;
         };
-        if let Some((_selector, leaf)) = table.leaf_for_alias(alias) {
-            let leaf_path = path.join(&leaf.relative_path);
-            if !leaf_path.is_file() {
+        if let Some((_name, variant)) = table.variant_for_alias(alias) {
+            let variant_path = path.join(&variant.relative_path);
+            if !variant_path.is_file() {
                 return Err(crate::Error::Usage {
                     message: format!(
-                        "native family alias {alias:?} declares canonical leaf at {leaf_path}, but that file does not exist"
+                        "native family alias {alias:?} declares canonical variant at {variant_path}, but that file does not exist"
                     ),
                 });
             }
-            return Ok(Some((leaf_path, "trait-id".to_string())));
+            return Ok(Some((variant_path, "trait-id".to_string())));
         }
     }
     Ok(None)
@@ -2939,7 +2941,7 @@ pub fn resolve_trait_path(
             );
             let variants: Vec<String> =
                 match crate::family_manifest::read_family_table(&family_root_manifest)? {
-                    // A native family package: list its declared leaves
+                    // A native family package: list its declared variants
                     // straight from the `[family]` table rather than
                     // scraping sibling `-suffix` directories.
                     Some(table) => table.variant_names(),

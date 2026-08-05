@@ -639,14 +639,14 @@ pub(crate) fn handle_export(inputs: ExportInputs<'_>) -> crate::Result<CommandOu
         }
     };
     // Export under the variant-qualified name, not the bare trait id. Every
-    // leaf of a native family shares one id — all five `implement` leaves are
-    // `implement` — so a bare-id path made them overwrite each other at
-    // `.agents/skills/implement/SKILL.md`, and the lock then held five
-    // entries for one file with five different digests. At most one could
-    // ever match, so the locked check failed permanently and the family could
-    // not be published. `<id>-<variant>` is the same spelling the family
-    // already declares as each leaf's alias (`implement-quick`, ...), so this
-    // introduces no new naming convention.
+    // variant of a native family shares one id — all five `implement`
+    // variants are `implement` — so a bare-id path made them overwrite each
+    // other at `.agents/skills/implement/SKILL.md`, and the lock then held
+    // five entries for one file with five different digests. At most one
+    // could ever match, so the locked check failed permanently and the
+    // family could not be published. `<id>-<variant>` is the same spelling
+    // the family already declares as each variant's alias
+    // (`implement-quick`, ...), so this introduces no new naming convention.
     let export_id = trait_ref.export_id();
     let identity = ctx_traits_io::export::Identity::new(
         export_id.clone(),

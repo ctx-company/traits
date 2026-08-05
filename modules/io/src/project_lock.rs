@@ -92,7 +92,7 @@ pub struct ResolvedTraitPath {
 impl ResolvedPackageLockPaths {
     /// Resolve a bare (variant-less) trait ID reference: the single entry
     /// with this `id` when there is exactly one, or the family's declared
-    /// default leaf when several leaves share it.
+    /// default variant when several variants share it.
     pub fn path_for_id(&self, id: &str) -> Option<&Utf8PathBuf> {
         let mut matches = self.traits.iter().filter(|t| t.id == id);
         let first = matches.next()?;
@@ -119,7 +119,7 @@ impl ResolvedPackageLockPaths {
             .map(|t| &t.path)
     }
 
-    /// Resolve a legacy hyphenated package alias published by a family leaf.
+    /// Resolve a legacy hyphenated package alias published by a family variant.
     pub fn path_for_alias(&self, alias: &str) -> Option<&Utf8PathBuf> {
         self.traits
             .iter()

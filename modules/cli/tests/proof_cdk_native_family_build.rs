@@ -1,7 +1,7 @@
 //! P530 Stage B: `ctx traits build` publishes a native trait family
 //! (`trait(id, { variants })`, `packages/cdk/src/variant.ts`'s
-//! `resolveTraitFamily`) by writing each leaf's canonical output under
-//! `generated/<selector>/` and refreshing the package's `[family]` manifest
+//! `resolveTraitFamily`) by writing each variant's canonical output under
+//! `generated/<name>/` and refreshing the package's `[family]` manifest
 //! table — not just detecting the envelope.
 
 use std::fs;
@@ -15,9 +15,9 @@ const summary = slot.text(\"summary\");\n\
 const output = port.output.text({ id: \"summary\", value: summary });\n\
 const worker = agent(\"worker\", { description: \"Completes the starter task.\" });\n\
 \n\
-const leaf = (name) => variant({\n\
+const variantFixture = (name) => variant({\n\
   name,\n\
-  summary: `The ${name} leaf.`,\n\
+  summary: `The ${name} variant.`,\n\
   procedure: procedure({\n\
     description: \"Describe what this trait should accomplish.\",\n\
     output,\n\
@@ -32,19 +32,19 @@ const leaf = (name) => variant({\n\
 \n\
 export const draft = trait(\"family-fixture\", {\n\
   variants: {\n\
-    default: leaf(\"default\").default(),\n\
-    quick: leaf(\"quick\"),\n\
+    default: variantFixture(\"default\").default(),\n\
+    quick: variantFixture(\"quick\"),\n\
   },\n\
 });\n"
 }
 
 /// `ctx traits build` on a `trait(id, { variants })` family source publishes
-/// every leaf's canonical output under `generated/<selector>/index.toml`
+/// every variant's canonical output under `generated/<name>/index.toml`
 /// (+ `index.map`) and writes a `[family]` table into the package's root
-/// `trait.toml` naming the default leaf and every leaf's generated path and
+/// `trait.toml` naming the default variant and every variant's generated path and
 /// legacy alias.
 #[test]
-fn build_publishes_native_family_leaves_and_manifest_table() {
+fn build_publishes_native_family_variants_and_manifest_table() {
     let scratch = ScratchRoot::new("cdk-native-family-build");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -86,27 +86,27 @@ fn build_publishes_native_family_leaves_and_manifest_table() {
     );
 
     let package_root = proj.join(format!(".ctx/traits/packages/{trait_id}"));
-    for selector in ["default", "quick"] {
-        let leaf_toml = package_root.join(format!("generated/{selector}/index.toml"));
-        let leaf_map = package_root.join(format!("generated/{selector}/index.map"));
+    for variant_name in ["default", "quick"] {
+        let variant_toml = package_root.join(format!("generated/{variant_name}/index.toml"));
+        let variant_map = package_root.join(format!("generated/{variant_name}/index.map"));
         assert!(
-            leaf_toml.is_file(),
+            variant_toml.is_file(),
             "expected {} to exist after build",
-            leaf_toml.display()
+            variant_toml.display()
         );
         assert!(
-            leaf_map.is_file(),
+            variant_map.is_file(),
             "expected {} to exist after build",
-            leaf_map.display()
+            variant_map.display()
         );
-        let leaf_text = fs::read_to_string(&leaf_toml).unwrap();
+        let variant_text = fs::read_to_string(&variant_toml).unwrap();
         assert!(
-            leaf_text.contains("id = \"family-fixture\""),
-            "leaf {selector} canonical missing family id: {leaf_text}"
+            variant_text.contains("id = \"family-fixture\""),
+            "variant {variant_name} canonical missing family id: {variant_text}"
         );
         assert!(
-            leaf_text.contains(&format!("variant = \"{selector}\"")),
-            "leaf {selector} canonical missing its own variant selector: {leaf_text}"
+            variant_text.contains(&format!("variant = \"{variant_name}\"")),
+            "variant {variant_name} canonical missing its own variant name: {variant_text}"
         );
     }
 
@@ -118,39 +118,39 @@ fn build_publishes_native_family_leaves_and_manifest_table() {
     assert_eq!(
         family.get("default").and_then(toml::Value::as_str),
         Some("default"),
-        "family.default should name the default leaf: {manifest_text}"
+        "family.default should name the default variant: {manifest_text}"
     );
-    let quick_leaf = family
-        .get("leaf")
-        .and_then(|leaf| leaf.get("quick"))
-        .unwrap_or_else(|| panic!("trait.toml missing family.leaf.quick: {manifest_text}"));
+    let quick_variant = family
+        .get("variant")
+        .and_then(|variant| variant.get("quick"))
+        .unwrap_or_else(|| panic!("trait.toml missing family.variant.quick: {manifest_text}"));
     assert_eq!(
-        quick_leaf.get("path").and_then(toml::Value::as_str),
+        quick_variant.get("path").and_then(toml::Value::as_str),
         Some("generated/quick/index.toml"),
-        "family.leaf.quick.path should point at the quick leaf's generated output: {manifest_text}"
+        "family.variant.quick.path should point at the quick variant's generated output: {manifest_text}"
     );
-    let quick_aliases = quick_leaf
+    let quick_aliases = quick_variant
         .get("aliases")
         .and_then(toml::Value::as_array)
-        .unwrap_or_else(|| panic!("family.leaf.quick.aliases missing: {manifest_text}"));
+        .unwrap_or_else(|| panic!("family.variant.quick.aliases missing: {manifest_text}"));
     assert!(
         quick_aliases
             .iter()
             .any(|alias| alias.as_str() == Some("family-fixture-quick")),
-        "family.leaf.quick.aliases should carry the legacy hyphenated id: {manifest_text}"
+        "family.variant.quick.aliases should carry the legacy hyphenated id: {manifest_text}"
     );
-    let default_leaf = family
-        .get("leaf")
-        .and_then(|leaf| leaf.get("default"))
-        .unwrap_or_else(|| panic!("trait.toml missing family.leaf.default: {manifest_text}"));
+    let default_variant = family
+        .get("variant")
+        .and_then(|variant| variant.get("default"))
+        .unwrap_or_else(|| panic!("trait.toml missing family.variant.default: {manifest_text}"));
     assert!(
-        default_leaf
+        default_variant
             .get("aliases")
             .and_then(toml::Value::as_array)
             .is_some_and(|aliases| aliases
                 .iter()
                 .any(|alias| alias.as_str() == Some("family-fixture-default"))),
-        "the default leaf must retain its legacy hyphenated selector: {manifest_text}"
+        "the default variant must retain its legacy hyphenated alias: {manifest_text}"
     );
 }
 
@@ -187,7 +187,7 @@ fn building_a_variant_name_republishes_its_complete_native_family() {
 
     fs::write(
         &source_path,
-        family_fixture_source().replace("The ${name} leaf.", "Rebuilt ${name} leaf."),
+        family_fixture_source().replace("The ${name} variant.", "Rebuilt ${name} variant."),
     )
     .unwrap();
     let rebuild = run_ctx(&["traits", "build", "family-fixture:quick"], &proj, &home);
@@ -198,18 +198,18 @@ fn building_a_variant_name_republishes_its_complete_native_family() {
     );
     assert!(
         stdout.contains("family: family-fixture")
-            && stdout.contains("leaf: default")
-            && stdout.contains("leaf: quick"),
+            && stdout.contains("variant: default")
+            && stdout.contains("variant: quick"),
         "named variant build did not report the complete family: {stdout}"
     );
-    for selector in ["default", "quick"] {
-        let leaf = fs::read_to_string(proj.join(format!(
-            ".ctx/traits/packages/{trait_id}/generated/{selector}/index.toml"
+    for variant_name in ["default", "quick"] {
+        let variant = fs::read_to_string(proj.join(format!(
+            ".ctx/traits/packages/{trait_id}/generated/{variant_name}/index.toml"
         )))
         .unwrap();
         assert!(
-            leaf.contains(&format!("summary = \"Rebuilt {selector} leaf.\"")),
-            "named variant build did not refresh {selector}: {leaf}"
+            variant.contains(&format!("summary = \"Rebuilt {variant_name} variant.\"")),
+            "named variant build did not refresh {variant_name}: {variant}"
         );
     }
 }
@@ -253,7 +253,7 @@ fn build_refuses_native_family_with_no_package_manifest() {
     );
     assert!(
         !package_root.join("generated").exists(),
-        "build must not write any leaf output on refusal"
+        "build must not write any variant output on refusal"
     );
 }
 
@@ -300,7 +300,7 @@ fn build_refuses_native_family_with_mismatched_package_identity() {
     let package_root = proj.join(format!(".ctx/traits/packages/{package_id}"));
     assert!(
         !package_root.join("generated").exists(),
-        "build must not write any leaf output on an identity-mismatch refusal"
+        "build must not write any variant output on an identity-mismatch refusal"
     );
     let manifest_text = fs::read_to_string(package_root.join("package.toml")).unwrap();
     assert!(
@@ -319,11 +319,11 @@ fn assert_family_check(proj: &std::path::Path, home: &std::path::Path, passes: b
     );
 }
 
-/// Checking the default leaf verifies the complete synthesized family, so a
+/// Checking the default variant verifies the complete synthesized family, so a
 /// clean default cannot hide drift in another canonical, the topology table,
-/// a missing leaf, or another leaf's source map.
+/// a missing variant, or another variant's source map.
 #[test]
-fn default_leaf_check_covers_complete_family_drift() {
+fn default_variant_check_covers_complete_family_drift() {
     let scratch = ScratchRoot::new("cdk-native-family-drift");
     let home = scratch.home();
     let proj = home.join("repo");
@@ -350,8 +350,8 @@ fn default_leaf_check_covers_complete_family_drift() {
     let manifest = root.join("package.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
     let with_run_config = manifest_text.replace(
-        "[family.leaf.quick]\npath = \"generated/quick/index.toml\"",
-        "[family.leaf.quick]\npath = \"generated/quick/index.toml\"\nrun-config = \"run-config/quick.toml\"",
+        "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
+        "[family.variant.quick]\npath = \"generated/quick/index.toml\"\nrun-config = \"run-config/quick.toml\"",
     );
     fs::create_dir_all(root.join("run-config")).unwrap();
     fs::write(
@@ -397,7 +397,7 @@ fn default_leaf_check_covers_complete_family_drift() {
     fs::write(&quick, &quick_text).unwrap();
 
     fs::remove_file(&quick).unwrap();
-    assert_family_check(&proj, &home, false, "missing leaf");
+    assert_family_check(&proj, &home, false, "missing variant");
     fs::write(&quick, &quick_text).unwrap();
 
     let map = root.join("generated/quick/index.map");
@@ -407,14 +407,14 @@ fn default_leaf_check_covers_complete_family_drift() {
     fs::write(&map, &map_text).unwrap();
 
     let expanded = family_fixture_source().replace(
-        "quick: leaf(\"quick\"),",
-        "quick: leaf(\"quick\"),\n    smart: leaf(\"smart\"),",
+        "quick: variantFixture(\"quick\"),",
+        "quick: variantFixture(\"quick\"),\n    smart: variantFixture(\"smart\"),",
     );
     fs::write(&source, expanded).unwrap();
     assert_family_check(
         &proj,
         &home,
         false,
-        "new synthesized leaf absent from manifest",
+        "new synthesized variant absent from manifest",
     );
 }

@@ -227,8 +227,8 @@ pub struct BaseLockEntry {
 ///
 /// A native family package (P530/P531; folded and shared via `path:` since
 /// P535, e.g. `.ctx/traits/packages/implement/`) contributes one entry per
-/// declared leaf, and every leaf shares the same canonical `id` — only
-/// `variant`/`is_default_variant`/`aliases` and each entry's own
+/// declared variant, and every variant shares the same canonical `id` —
+/// only `variant`/`is_default_variant`/`aliases` and each entry's own
 /// `canonical_path` tell them apart. Resolution must therefore never key
 /// purely on `id`: see `ResolvedTraitPath` in `ctx-traits-io`'s
 /// `project_lock` for the lookup that respects this.
@@ -237,17 +237,17 @@ pub struct BaseLockEntry {
 pub struct TraitLockEntry {
     /// Trait ID from its canonical document.
     pub id: String,
-    /// The native family leaf selector this entry was published from (e.g.
+    /// The native family variant name this entry was published from (e.g.
     /// `"quick"`, `"default"`), or `None` for an ordinary (non-family)
     /// trait. Omitted from output for the common non-family case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
-    /// `true` when `variant` is the family's declared default leaf — the
+    /// `true` when `variant` is the family's declared default variant — the
     /// entry a bare (variant-less) trait ID reference resolves to.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_default_variant: bool,
-    /// Legacy hyphenated package aliases this leaf publishes (e.g.
-    /// `"implement-quick"`), from the family's `[family.leaf.<selector>]`
+    /// Legacy hyphenated package aliases this variant publishes (e.g.
+    /// `"implement-quick"`), from the family's `[family.variant.<name>]`
     /// table. Empty for a non-family trait.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,

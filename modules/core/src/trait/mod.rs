@@ -307,7 +307,7 @@ pub struct Trait {
     pub name: Name,
     pub summary: Summary,
 
-    /// Native family leaf identity. This is deliberately absent from 0.2
+    /// Native family variant identity. This is deliberately absent from 0.2
     /// documents, preserving their encoded bytes and digest semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
@@ -421,18 +421,19 @@ pub struct Trait {
 
 impl Trait {
     /// The name this trait exports under: variant-qualified when it is a
-    /// family leaf, and the plain id otherwise.
+    /// family variant, and the plain id otherwise.
     ///
-    /// Every leaf of a native family shares one `id` — all five `implement`
-    /// leaves are `implement` — so exporting by id alone made them collide on
-    /// a single path, each overwriting the last, and the lock then recorded
-    /// several entries for one file with different digests. At most one could
-    /// match, so the locked check failed permanently.
+    /// Every variant of a native family shares one `id` — all five
+    /// `implement` variants are `implement` — so exporting by id alone made
+    /// them collide on a single path, each overwriting the last, and the
+    /// lock then recorded several entries for one file with different
+    /// digests. At most one could match, so the locked check failed
+    /// permanently.
     ///
     /// One definition, used by both the export path and the generated file's
     /// ownership marker: they must agree, or a re-export reads back a marker
     /// naming a different owner and refuses. `<id>-<variant>` is the spelling
-    /// the family already declares as each leaf's alias.
+    /// the family already declares as each variant's alias.
     pub fn export_id(&self) -> Id {
         match self.variant.as_deref() {
             Some(variant) => Id::new(format!("{}-{variant}", self.id.as_str()))

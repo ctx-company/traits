@@ -328,9 +328,9 @@ pub fn trait_manifest_path(repo_root: &Utf8Path, trait_id: &str) -> Result<Utf8P
 /// `source/` authoring entry.
 pub fn package_root_for_manifest(manifest: &Utf8Path) -> Option<&Utf8Path> {
     let manifest_dir = manifest.parent()?;
-    // A native family leaf lives at `generated/<selector>/index.toml`.  Its
+    // A native family variant lives at `generated/<selector>/index.toml`.  Its
     // package-owned resources, lockfile, and sidecars remain at the family
-    // root, not in the leaf directory.
+    // root, not in the variant directory.
     let family_generated_manifest = matches!(manifest.file_name(), Some("index.toml"))
         && manifest_dir
             .parent()
@@ -452,10 +452,10 @@ pub fn package_run_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// never become a legal place to write. This predicate answers only "does a
 /// manifest under here resolve UP to a package root", which vendored packages
 /// need for exactly the same reason authored ones do — their `package.toml`,
-/// lockfile, and `[family]` table live at the root while a family leaf sits at
-/// `generated/<selector>/index.toml`.
+/// lockfile, and `[family]` table live at the root while a family variant sits
+/// at `generated/<selector>/index.toml`.
 ///
-/// Without it a vendored family leaf resolved its package root into its own
+/// Without it a vendored family variant resolved its package root into its own
 /// `generated/` directory, found no manifest there, and reported
 /// `status=draft` for a package whose manifest says `ready` — which is the
 /// difference between an installed family being runnable and not.
@@ -464,7 +464,7 @@ pub fn package_run_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// Path-shape predicates ([`is_canonical_package_root`],
 /// [`is_vendored_package_root`], the built-in trees) all answer "is this one of
 /// the locations we know about". A package being STAGED for installation is in
-/// none of them — it is a temporary directory — so a family leaf inside it
+/// none of them — it is a temporary directory — so a family variant inside it
 /// resolved its package root into its own `generated/<selector>/` directory,
 /// found no `resources/` there, and recorded a resource-manifest digest over an
 /// empty file set. Verification then read the same package from its vendored

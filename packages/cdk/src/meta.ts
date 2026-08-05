@@ -9,7 +9,7 @@ export type {
   SynthFormat,
   SynthPlan,
 } from "./generated.js";
-import type { FlattenedVariantLeaf, SchemaValue, VariantTopologyNode } from "./authoring-types.js";
+import type { FlattenedVariant, SchemaValue, VariantTopologyNode } from "./authoring-types.js";
 import type {
   CanonicalAgent,
   CanonicalCondition,
@@ -163,15 +163,15 @@ export interface Meta {
   readonly unionMembers?: readonly SchemaValue[];
   /**
    * CDK-only provenance carried by a `trait(id, { variants })` family
-   * handle: the flattened, validated variant topology and leaf list —
+   * handle: the flattened, validated variant topology and variant list —
    * `variant.ts`'s `resolveTraitFamily` reads this to resolve imports and
-   * assemble each leaf's canonical draft. Never emitted directly.
+   * assemble each variant's canonical draft. Never emitted directly.
    */
   readonly family?: {
     readonly id: string;
     readonly version: string;
     readonly topology: VariantTopologyNode;
-    readonly leaves: readonly FlattenedVariantLeaf[];
+    readonly variants: readonly FlattenedVariant[];
   };
 }
 

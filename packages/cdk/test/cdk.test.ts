@@ -102,8 +102,8 @@ describe("draft synthesis", () => {
     });
     expect(isTraitFamilyHandle(family)).toBe(true);
     const resolved = await resolveTraitFamily(family);
-    expect(resolved.leaves.map((leaf) => leaf.path)).toEqual(["default", "quick"]);
-    expect(resolved.leaves[0]?.draft).toMatchObject({ id: "family", variant: "default" });
+    expect(resolved.variants.map((variant) => variant.path)).toEqual(["default", "quick"]);
+    expect(resolved.variants[0]?.draft).toMatchObject({ id: "family", variant: "default" });
   });
 
   it("is byte-stable", () => {
@@ -1453,8 +1453,8 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       },
     });
     const resolved = await resolveTraitFamily(family);
-    const one = resolved.leaves.find((leaf) => leaf.path === "one")?.draft;
-    const two = resolved.leaves.find((leaf) => leaf.path === "two")?.draft;
+    const one = resolved.variants.find((variant) => variant.path === "one")?.draft;
+    const two = resolved.variants.find((variant) => variant.path === "two")?.draft;
 
     expect(one?.procedure?.input).toEqual(["port:ordered-request"]);
     expect(one?.procedure?.output).toEqual(["port:direct-result", "port:bound-result"]);

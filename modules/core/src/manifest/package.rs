@@ -71,18 +71,23 @@ pub struct PackagePublish {
     pub exclude: Vec<String>,
 }
 
-/// The package-level selector map for a native trait family.
+/// The package-level name map for a native trait family.
+///
+/// `variant` accepts the legacy `leaf` key too (compat read for packages
+/// still on the pre-rename manifest shape); a manifest declaring both is a
+/// duplicate-field error rather than a silent preference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PackageFamily {
     pub default: String,
-    pub leaf: BTreeMap<String, PackageFamilyLeaf>,
+    #[serde(alias = "leaf")]
+    pub variant: BTreeMap<String, PackageFamilyVariant>,
 }
 
-/// One native family leaf's generated path and compatibility selectors.
+/// One native family variant's generated path and compatibility selectors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct PackageFamilyLeaf {
+pub struct PackageFamilyVariant {
     pub path: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
@@ -268,33 +273,33 @@ pub fn decode_package_manifest(text: &str, origin: &str) -> crate::Result<Option
     }
     super::dependency::validate_dependencies(&manifest.dependencies()?)?;
     if let Some(family) = &manifest.family {
-        if !family.leaf.contains_key(&family.default) {
+        if !family.variant.contains_key(&family.default) {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: "family.default".to_string(),
-                message: "must name a declared family.leaf".to_string(),
+                message: "must name a declared family.variant".to_string(),
             }
             .into());
         }
-        let mut selectors = std::collections::BTreeSet::new();
-        for (selector, leaf) in &family.leaf {
-            crate::shared::validate_slug_shape(selector, &format!("family.leaf.{selector}"))?;
-            selectors.insert(selector);
-            validate_family_relative_path(&leaf.path, &format!("family.leaf.{selector}.path"))?;
-            if let Some(config) = &leaf.run_config {
+        let mut names = std::collections::BTreeSet::new();
+        for (name, variant) in &family.variant {
+            crate::shared::validate_slug_shape(name, &format!("family.variant.{name}"))?;
+            names.insert(name);
+            validate_family_relative_path(&variant.path, &format!("family.variant.{name}.path"))?;
+            if let Some(config) = &variant.run_config {
                 validate_family_relative_path(
                     config,
-                    &format!("family.leaf.{selector}.run-config"),
+                    &format!("family.variant.{name}.run-config"),
                 )?;
             }
-            for alias in &leaf.aliases {
+            for alias in &variant.aliases {
                 crate::shared::validate_slug_shape(
                     alias,
-                    &format!("family.leaf.{selector}.aliases"),
+                    &format!("family.variant.{name}.aliases"),
                 )?;
-                if !selectors.insert(alias) {
+                if !names.insert(alias) {
                     return Err(crate::manifest::Error::InvalidField {
-                        field_path: format!("family.leaf.{selector}.aliases"),
-                        message: format!("duplicate family selector {alias:?}"),
+                        field_path: format!("family.variant.{name}.aliases"),
+                        message: format!("duplicate family name {alias:?}"),
                     }
                     .into());
                 }

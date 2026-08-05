@@ -1182,12 +1182,12 @@ fn trait_info_from_staged(staged: &StagedPackage) -> Vec<TraitInfo> {
 
 pub(crate) struct StagedTrait {
     pub(crate) id: String,
-    /// The native family leaf selector this trait resolved from, or `None`
+    /// The native family variant name this trait resolved from, or `None`
     /// for an ordinary (non-family) trait (P535).
     pub(crate) variant: Option<String>,
-    /// `true` when `variant` is the family's declared default leaf.
+    /// `true` when `variant` is the family's declared default variant.
     pub(crate) is_default_variant: bool,
-    /// Legacy hyphenated package aliases this leaf publishes.
+    /// Legacy hyphenated package aliases this variant publishes.
     pub(crate) aliases: Vec<String>,
     pub(crate) canonical_path: String,
     /// The discovered trait package's own root, relative to the staging
@@ -1220,12 +1220,12 @@ pub struct LocalTraitPackage {
     pub manifest_path: Utf8PathBuf,
     pub package_manifest: Option<ctx_traits_core::manifest::PackageManifest>,
     pub loaded: LoadedDependency,
-    /// The native family leaf selector this package resolved from (e.g.
+    /// The native family variant name this package resolved from (e.g.
     /// `"quick"`), or `None` for an ordinary (non-family) package (P535).
     pub variant: Option<String>,
-    /// `true` when `variant` is the family's declared default leaf.
+    /// `true` when `variant` is the family's declared default variant.
     pub is_default_variant: bool,
-    /// Legacy hyphenated package aliases this leaf publishes. Empty for a
+    /// Legacy hyphenated package aliases this variant publishes. Empty for a
     /// non-family package.
     pub aliases: Vec<String>,
 }
@@ -1266,7 +1266,7 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
         let package_manifest = read_package_manifest(&discovered_package.absolute_root)?;
         let relative_root_label = discovered_package.relative_root.as_str().trim_matches('/');
         if let Some(manifest) = &package_manifest
-            && let Some(family_packages) = family_leaf_local_packages(
+            && let Some(family_packages) = family_variant_local_packages(
                 &discovered_package.absolute_root,
                 relative_root_label,
                 manifest,
@@ -1304,7 +1304,8 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
     if packages.is_empty()
         && let Some(package_manifest) = read_package_manifest(root)?
     {
-        if let Some(family_packages) = family_leaf_local_packages(root, "self", &package_manifest)?
+        if let Some(family_packages) =
+            family_variant_local_packages(root, "self", &package_manifest)?
         {
             packages.extend(family_packages);
         } else if let Some(manifest_path) = canonical_manifest(root, true) {
@@ -1402,14 +1403,14 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
 }
 
 /// When `root`'s package manifest declares a native `[family]` table
-/// (P530/P531), enumerate one [`LocalTraitPackage`] per declared leaf instead
-/// of the single canonical document ordinary (non-family) packages resolve
-/// to — a folded family package (e.g. `.ctx/traits/packages/implement/`)
+/// (P530/P531), enumerate one [`LocalTraitPackage`] per declared variant
+/// instead of the single canonical document ordinary (non-family) packages
+/// resolve to — a folded family package (e.g. `.ctx/traits/packages/implement/`)
 /// otherwise has no single `generated/index.toml`, so treating it like an
 /// ordinary package would silently install zero or one of its variants
 /// (P535 risk). Returns `Ok(None)` when `root` is not a native family at
 /// all, letting the caller fall through to ordinary single-trait resolution.
-fn family_leaf_local_packages(
+fn family_variant_local_packages(
     root: &Utf8Path,
     relative_root_label: &str,
     package_manifest: &ctx_traits_core::manifest::PackageManifest,
@@ -1419,30 +1420,31 @@ fn family_leaf_local_packages(
         return Ok(None);
     };
     let mut packages = Vec::new();
-    for (selector, leaf) in &table.leaves {
-        let leaf_manifest_path = root.join(&leaf.relative_path);
-        // Family leaf ids are read from the leaf's own canonical document,
-        // not asserted against the family package's own `[package].id`: one
-        // folded package legitimately publishes several distinct trait ids
-        // (e.g. `implement` and `implement:quick`'s underlying id). Real
-        // folded packages instead share one `id` across every leaf and
-        // differ only by `variant` — `selector`/`is_default_variant`/
-        // `aliases` below are what let lock/resolution tell them apart
-        // (P535 fix: they used to collapse onto `loaded.id` alone).
+    for (name, variant) in &table.variants {
+        let variant_manifest_path = root.join(&variant.relative_path);
+        // Family variant ids are read from the variant's own canonical
+        // document, not asserted against the family package's own
+        // `[package].id`: one folded package legitimately publishes several
+        // distinct trait ids (e.g. `implement` and `implement:quick`'s
+        // underlying id). Real folded packages instead share one `id`
+        // across every variant and differ only by `variant` —
+        // `name`/`is_default_variant`/`aliases` below are what let
+        // lock/resolution tell them apart (P535 fix: they used to collapse
+        // onto `loaded.id` alone).
         let loaded = crate::dependency::load_dependency_package(
             relative_root_label,
             None,
             None,
-            &leaf_manifest_path,
+            &variant_manifest_path,
         )?;
         packages.push(LocalTraitPackage {
             root: root.to_path_buf(),
-            manifest_path: leaf_manifest_path,
+            manifest_path: variant_manifest_path,
             package_manifest: Some(package_manifest.clone()),
             loaded,
-            variant: Some(selector.clone()),
-            is_default_variant: selector == &table.default,
-            aliases: leaf.aliases.clone(),
+            variant: Some(name.clone()),
+            is_default_variant: name == &table.default,
+            aliases: variant.aliases.clone(),
         });
     }
     Ok(Some(packages))
@@ -3118,14 +3120,14 @@ pub fn approve_package(
 /// Whether `operand` (no `:`, so never a `family:variant` reference) names an
 /// *installed* package — any transport — whose locked evidence makes it a
 /// native family: at least one trait entry carrying explicit `variant`
-/// metadata (only ever populated for a family leaf; see `TraitLockEntry`).
+/// metadata (only ever populated for a family variant; see `TraitLockEntry`).
 /// Trait *count* is deliberately not evidence: an ordinary multi-trait npm
 /// package has no family structure and must keep resolving/approving its one
 /// named trait exactly as before P535. Used by `trust approve` (P535) to
 /// route a default-aliased vendored family package (e.g. a folded
 /// `implement` package installed via `path:`) through whole-package approval
 /// instead of ordinary named-trait resolution, which would only ever resolve
-/// to — and so only ever approve — the family's default leaf. Returns
+/// to — and so only ever approve — the family's default variant. Returns
 /// `Ok(None)` both when `operand` is colon-shaped and when no installed
 /// package matches it at all, so the caller falls through to its existing
 /// trait-then-package resolution unchanged in either case.
@@ -3260,10 +3262,10 @@ pub fn vendored_trait_ids(scope: &DistributionScope) -> crate::Result<Vec<Vendor
 /// publishing `variant` under `id` — i.e. more than one locked entry shares
 /// `id`, or the matching entry is itself marked with a `variant`. Gates
 /// [`crate::run`]'s family-first resolution seam so a *vendored* family
-/// leaf is tried there exactly when a *repo-authored* one already would be,
-/// without also short-circuiting an ordinary single-id vendored package
+/// variant is tried there exactly when a *repo-authored* one already would
+/// be, without also short-circuiting an ordinary single-id vendored package
 /// ahead of repo-authored shadow precedence.
-pub fn vendored_family_leaf_exists(
+pub fn vendored_family_variant_exists(
     scope: &DistributionScope,
     id: &str,
     variant: &str,
@@ -3313,11 +3315,11 @@ pub fn resolve_vendored_trait_id(
 }
 
 /// [`resolve_vendored_trait_id`], generalized with an optional native family
-/// variant selector (P535 fix): a folded family package's leaves (e.g.
+/// variant selector (P535 fix): a folded family package's variants (e.g.
 /// `.ctx/traits/packages/implement/`) all share one `id`, distinguished only
 /// by `variant`/`is_default_variant` — `variant: None` (or `Some("default")`)
-/// resolves the family's declared default leaf, `Some(other)` resolves that
-/// exact selector.
+/// resolves the family's declared default variant, `Some(other)` resolves
+/// that exact name.
 pub fn resolve_vendored_trait_variant(
     scope: &DistributionScope,
     id: &str,
@@ -3383,7 +3385,7 @@ pub fn resolve_vendored_trait_variant(
 }
 
 /// Resolve a legacy hyphenated package alias (e.g. `implement-quick`)
-/// published by a native family leaf, at `scope`, via that scope's locked
+/// published by a native family variant, at `scope`, via that scope's locked
 /// evidence (P535 fix — the pre-existing sibling-directory alias shape
 /// resolved only against repo-authored packages).
 pub fn resolve_vendored_trait_alias(
@@ -3669,11 +3671,11 @@ output = ["slot:notified"]
         .unwrap();
     }
 
-    /// A native family leaf's canonical document (P535 fix): unlike
-    /// `trait_doc`, every leaf of a real folded family package shares the
+    /// A native family variant's canonical document (P535 fix): unlike
+    /// `trait_doc`, every variant of a real folded family package shares the
     /// same `id` and is told apart only by `variant`, never by encoding the
-    /// selector into the id itself.
-    fn family_leaf_trait_doc(id: &str, variant: &str, summary: &str) -> String {
+    /// name into the id itself.
+    fn family_variant_trait_doc(id: &str, variant: &str, summary: &str) -> String {
         format!(
             r#"id = "{id}"
 schema-version = "0.3"
@@ -3699,10 +3701,10 @@ status = "ready"
 [family]
 default = "default"
 
-[family.leaf.default]
+[family.variant.default]
 path = "generated/default/index.toml"
 
-[family.leaf.quick]
+[family.variant.quick]
 path = "generated/quick/index.toml"
 aliases = ["family-demo-quick"]
 "#,
@@ -3710,12 +3712,12 @@ aliases = ["family-demo-quick"]
         .unwrap();
         std::fs::write(
             root.join("generated/default/index.toml").as_std_path(),
-            family_leaf_trait_doc("family-demo", "default", "default leaf"),
+            family_variant_trait_doc("family-demo", "default", "default variant"),
         )
         .unwrap();
         std::fs::write(
             root.join("generated/quick/index.toml").as_std_path(),
-            family_leaf_trait_doc("family-demo", "quick", "quick leaf"),
+            family_variant_trait_doc("family-demo", "quick", "quick variant"),
         )
         .unwrap();
     }
@@ -3814,9 +3816,9 @@ aliases = ["family-demo-quick"]
     }
 
     /// Installing a folded native family package records every declared
-    /// leaf as its own trait lock entry.
+    /// variant as its own trait lock entry.
     #[test]
-    fn install_path_family_package_records_every_leaf() {
+    fn install_path_family_package_records_every_variant() {
         let scratch = scratch_root("family");
         let producer = scratch.join("producer/family-demo");
         std::fs::create_dir_all(producer.as_std_path()).unwrap();
@@ -3839,23 +3841,31 @@ aliases = ["family-demo-quick"]
         let entry = lock.package_entry("family-demo").unwrap();
         assert_eq!(entry.traits.len(), 2);
         assert!(entry.traits.iter().all(|t| t.id == "family-demo"));
-        let default_leaf = entry
+        let default_variant = entry
             .traits
             .iter()
             .find(|t| t.is_default_variant)
-            .expect("exactly one leaf must be marked as the family default");
-        assert_eq!(default_leaf.variant.as_deref(), Some("default"));
-        let quick_leaf = entry
+            .expect("exactly one variant must be marked as the family default");
+        assert_eq!(default_variant.variant.as_deref(), Some("default"));
+        let quick_variant = entry
             .traits
             .iter()
             .find(|t| t.variant.as_deref() == Some("quick"))
-            .expect("quick leaf must be present with its selector recorded");
-        assert!(quick_leaf.aliases.iter().any(|a| a == "family-demo-quick"));
-        assert_ne!(default_leaf.canonical_digest, quick_leaf.canonical_digest);
+            .expect("quick variant must be present with its name recorded");
+        assert!(
+            quick_variant
+                .aliases
+                .iter()
+                .any(|a| a == "family-demo-quick")
+        );
+        assert_ne!(
+            default_variant.canonical_digest,
+            quick_variant.canonical_digest
+        );
 
-        // Bare id resolves the default leaf; `family:variant` and the
-        // legacy alias both resolve the quick leaf, from the vendored path
-        // package (P535 fix).
+        // Bare id resolves the default variant; `family:variant` and the
+        // legacy alias both resolve the quick variant, from the vendored
+        // path package (P535 fix).
         let (default_path, _) = resolve_vendored_trait_variant(&scope, "family-demo", None)
             .unwrap()
             .expect("bare id must resolve");

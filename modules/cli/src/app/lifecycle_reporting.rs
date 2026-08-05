@@ -133,7 +133,7 @@ pub(crate) fn handle_sync_all(
         });
     }
 
-    let packages = ctx_traits_io::discovery::trait_package_leaves(&cwd)?;
+    let packages = ctx_traits_io::discovery::trait_package_variants(&cwd)?;
     if packages.is_empty() {
         if json {
             print_json_report(&project_warnings, "project dependency sync warnings")?;
@@ -378,22 +378,25 @@ fn handle_trust_approve(
         );
     }
     let operand = operand.expect("clap enforces operand or --digest");
-    // A native family is approved WHOLE. Each leaf carries its own canonical
-    // digest, so a per-leaf trust model would make `trust approve implement`
-    // silently cover one variant and leave `implement:smart` unreviewed until
-    // a run refused. Nothing a reviewer inspects is per-leaf — the leaves are
-    // one authored package, built together and moving together — so the
-    // family root approves every leaf in one journaled act.
+    // A native family is approved WHOLE. Each variant carries its own
+    // canonical digest, so a per-variant trust model would make `trust
+    // approve implement` silently cover one variant and leave
+    // `implement:smart` unreviewed until a run refused. Nothing a reviewer
+    // inspects is per-variant — the variants are one authored package, built
+    // together and moving together — so the family root approves every
+    // variant in one journaled act.
     if !operand.contains(':')
-        && let Some(leaves) = family_leaf_files(&operand)?
+        && let Some(variants) = family_variant_files(&operand)?
     {
-        // ONE act, not one per leaf: `update_digests_locked` gives every
+        // ONE act, not one per variant: `update_digests_locked` gives every
         // update in a call the same sequence, and currency is per act, so all
-        // five leaves stay current together. Five separate calls would make
-        // each leaf supersede the previous and leave only the last approved.
-        let mut updates = Vec::with_capacity(leaves.len());
-        for leaf in &leaves {
-            let (trait_ref, trait_root, _source, canonical) = ctx_traits_io::run::load_trait(leaf)?;
+        // five variants stay current together. Five separate calls would
+        // make each variant supersede the previous and leave only the last
+        // approved.
+        let mut updates = Vec::with_capacity(variants.len());
+        for variant in &variants {
+            let (trait_ref, trait_root, _source, canonical) =
+                ctx_traits_io::run::load_trait(variant)?;
             let guard = ctx_traits_io::trust::evaluate_approval_guard(
                 trait_ref.id.as_str(),
                 trait_ref.variant.as_deref(),
@@ -424,7 +427,7 @@ fn handle_trust_approve(
             )
             .row(PanelRow::toned("family", operand.clone(), RowTone::Default))
             .row(PanelRow::toned(
-                "leaves approved",
+                "variants approved",
                 approved.to_string(),
                 RowTone::Default,
             ));
@@ -436,9 +439,9 @@ fn handle_trust_approve(
     // package installed via `path:`) must also be approved whole, exactly
     // like the repo-authored case just above: ordinary named-trait
     // resolution below only ever resolves a bare id to the family's default
-    // leaf, which would silently leave every other variant unreviewed. This
-    // must be checked before trait resolution — never after — so it is never
-    // shadowed by that single-leaf resolution succeeding first.
+    // variant, which would silently leave every other variant unreviewed.
+    // This must be checked before trait resolution — never after — so it is
+    // never shadowed by that single-variant resolution succeeding first.
     if !operand.contains(':') {
         let repo_root = match ctx_traits_io::state::discover_invocation_root()? {
             ctx_traits_io::state::InvocationRoot::Repo(root) => Some(root),
@@ -490,10 +493,10 @@ fn handle_trust_approve(
     }
 }
 
-/// Every leaf manifest of the local native family named by `operand`, or
-/// `None` when the operand is not a local family root. Ordered by selector so
-/// a batch approval is deterministic.
-fn family_leaf_files(operand: &str) -> crate::Result<Option<Vec<String>>> {
+/// Every variant manifest of the local native family named by `operand`, or
+/// `None` when the operand is not a local family root. Ordered by name so a
+/// batch approval is deterministic.
+fn family_variant_files(operand: &str) -> crate::Result<Option<Vec<String>>> {
     let context = ctx_traits_io::inventory::InventoryContext::discover()?;
     let root = ctx_traits_io::layout::trait_authoring_root_path(context.repo_root_for_paths())
         .join(operand);
@@ -504,9 +507,9 @@ fn family_leaf_files(operand: &str) -> crate::Result<Option<Vec<String>>> {
         return Ok(None);
     };
     let files = table
-        .leaves
+        .variants
         .values()
-        .map(|leaf| root.join(&leaf.relative_path).to_string())
+        .map(|variant| root.join(&variant.relative_path).to_string())
         .collect::<Vec<_>>();
     Ok((!files.is_empty()).then_some(files))
 }
@@ -832,13 +835,15 @@ pub(crate) fn current_trait_digests_with_roots() -> crate::Result<Vec<CurrentTra
         context.invocation(),
         ctx_traits_io::state::InvocationRoot::Repo(_)
     ) {
-        for leaf in ctx_traits_io::discovery::trait_package_leaves(context.repo_root_for_paths())? {
-            if leaf.variant.is_none() {
+        for entry in
+            ctx_traits_io::discovery::trait_package_variants(context.repo_root_for_paths())?
+        {
+            if entry.variant.is_none() {
                 continue;
             }
             let (trait_ref, trait_root, _source, canonical) =
-                ctx_traits_io::run::load_trait(leaf.trait_path.as_str())?;
-            let variant = trait_ref.variant.clone().or(leaf.variant);
+                ctx_traits_io::run::load_trait(entry.trait_path.as_str())?;
+            let variant = trait_ref.variant.clone().or(entry.variant);
             let id = trait_ref.id.as_str().to_string();
             targets.insert(
                 (id.clone(), variant.clone()),

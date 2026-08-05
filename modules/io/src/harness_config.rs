@@ -3003,7 +3003,7 @@ pub fn load_trait_run_config(trait_root: &Utf8Path) -> crate::Result<Option<Trai
     Ok(Some(config))
 }
 
-/// Load a native family's declared leaf sidecar before the package-root
+/// Load a native family's declared variant sidecar before the package-root
 /// compatibility sidecar. A declared sidecar is part of the family manifest,
 /// so a missing or malformed one is a hard configuration error.
 fn load_selected_trait_run_config(
@@ -3017,8 +3017,8 @@ fn load_selected_trait_run_config(
         ))?
         .and_then(|table| {
             table
-                .leaf_for_variant(variant.as_str())
-                .and_then(|(_, leaf)| leaf.run_config.clone())
+                .variant(variant.as_str())
+                .and_then(|(_, variant)| variant.run_config.clone())
         })
     } else {
         None

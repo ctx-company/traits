@@ -22,12 +22,12 @@ fn trait_doc(id: &str, summary: &str) -> String {
     )
 }
 
-/// A native family leaf's canonical document (P535 fix): unlike
-/// `trait_doc`, every leaf of a real folded family package (e.g.
+/// A native family variant's canonical document (P535 fix): unlike
+/// `trait_doc`, every variant of a real folded family package (e.g.
 /// `.ctx/traits/packages/implement/`) shares the SAME `id` and is told
-/// apart only by `variant` — never by encoding the selector into the id
+/// apart only by `variant` — never by encoding the variant name into the id
 /// itself.
-fn family_leaf_trait_doc(id: &str, variant: &str, summary: &str) -> String {
+fn family_variant_trait_doc(id: &str, variant: &str, summary: &str) -> String {
     format!(
         "id = \"{id}\"\n\
          schema-version = \"0.3\"\n\
@@ -40,7 +40,7 @@ fn family_leaf_trait_doc(id: &str, variant: &str, summary: &str) -> String {
 
 /// Extract the `canonical-digest=<value>` token `ctx traits check --json`
 /// prints in its `machine-trust` section summary, so a test can assert two
-/// resolutions landed on the exact same (or a different) vendored leaf
+/// resolutions landed on the exact same (or a different) vendored variant
 /// without depending on any other section's wording.
 fn canonical_digest_from_check(stdout: &str) -> &str {
     let start = stdout
@@ -245,15 +245,15 @@ fn ordinary_reconcile_ignores_producer_rebuild_but_explicit_update_accepts_it() 
 }
 
 /// Installing the folded `.ctx/traits/packages/implement/`-shaped native
-/// family package by relative path vendors every declared leaf, not just
-/// one — and every leaf shares one `id`, exactly the real folded packages'
-/// shape (differentiated by `variant`, never by encoding the selector into
-/// the id). `family-demo` must resolve the declared default leaf,
-/// `family-demo:quick` must resolve the quick leaf, and the legacy
-/// hyphenated alias `family-demo-quick` must resolve the same quick leaf —
+/// family package by relative path vendors every declared variant, not just
+/// one — and every variant shares one `id`, exactly the real folded packages'
+/// shape (differentiated by `variant`, never by encoding the variant name into
+/// the id). `family-demo` must resolve the declared default variant,
+/// `family-demo:quick` must resolve the quick variant, and the legacy
+/// hyphenated alias `family-demo-quick` must resolve the same quick variant —
 /// all from the vendored package, with distinct canonical digests.
 #[test]
-fn path_dependency_installs_every_family_leaf() {
+fn path_dependency_installs_every_family_variant() {
     let scratch = ScratchRoot::new("path-distribution-family");
     let home = scratch.home();
     let producer = home.join("producer/family-demo");
@@ -270,10 +270,10 @@ fn path_dependency_installs_every_family_leaf() {
          [family]\n\
          default = \"default\"\n\
          \n\
-         [family.leaf.default]\n\
+         [family.variant.default]\n\
          path = \"generated/default/index.toml\"\n\
          \n\
-         [family.leaf.quick]\n\
+         [family.variant.quick]\n\
          path = \"generated/quick/index.toml\"\n\
          aliases = [\"family-demo-quick\"]\n",
     )
@@ -282,7 +282,7 @@ fn path_dependency_installs_every_family_leaf() {
         producer.join("generated/default/index.toml"),
         format!(
             "{}\n[[resource]]\nid = \"default-resource\"\npath = \"resources/default.txt\"\ntrigger = \"on-demand\"\n\n[[resource]]\nid = \"consumer-resource\"\npath = \"consumer-resource.txt\"\nroot = \"repo\"\ntrigger = \"on-demand\"\n",
-            family_leaf_trait_doc("family-demo", "default", "default leaf")
+            family_variant_trait_doc("family-demo", "default", "default variant")
         ),
     )
     .unwrap();
@@ -290,7 +290,7 @@ fn path_dependency_installs_every_family_leaf() {
         producer.join("generated/quick/index.toml"),
         format!(
             "{}\n[[resource]]\nid = \"quick-resource\"\npath = \"resources/quick.txt\"\ntrigger = \"on-demand\"\n",
-            family_leaf_trait_doc("family-demo", "quick", "quick leaf")
+            family_variant_trait_doc("family-demo", "quick", "quick variant")
         ),
     )
     .unwrap();
@@ -324,7 +324,7 @@ fn path_dependency_installs_every_family_leaf() {
     let id_occurrences = add_stdout.matches("\"id\": \"family-demo\"").count();
     assert!(
         id_occurrences >= 2,
-        "install report is missing one of the two family-demo leaf entries: {add_stdout}"
+        "install report is missing one of the two family-demo variant entries: {add_stdout}"
     );
     let vendored_root = consumer.join(".ctx/traits/vendor/family-install");
     for path in [
@@ -351,7 +351,7 @@ fn path_dependency_installs_every_family_leaf() {
     assert_eq!(
         canonical_digests.len(),
         2,
-        "lock evidence must contain distinct canonical digests for both leaves: {lock_text}"
+        "lock evidence must contain distinct canonical digests for both variants: {lock_text}"
     );
 
     let list_stdout = require_success(
@@ -366,7 +366,7 @@ fn path_dependency_installs_every_family_leaf() {
         "vendored family did not retain package status=ready: {list_stdout}"
     );
 
-    // Bare id resolves the declared default leaf.
+    // Bare id resolves the declared default variant.
     let default_check = run_ctx(
         &["traits", "check", "family-demo", "--json"],
         &consumer,
@@ -375,11 +375,11 @@ fn path_dependency_installs_every_family_leaf() {
     let (default_stdout, default_stderr) = utf8(&default_check);
     assert!(
         default_check.status.success(),
-        "default leaf failed to check\nstdout: {default_stdout}\nstderr: {default_stderr}"
+        "default variant failed to check\nstdout: {default_stdout}\nstderr: {default_stderr}"
     );
     let default_digest = canonical_digest_from_check(&default_stdout);
 
-    // `family:variant` resolves the named leaf.
+    // `family:variant` resolves the named variant.
     let quick_check = run_ctx(
         &["traits", "check", "family-demo:quick", "--json"],
         &consumer,
@@ -396,7 +396,7 @@ fn path_dependency_installs_every_family_leaf() {
         "bare id and family-demo:quick must resolve different canonical digests"
     );
 
-    // The legacy hyphenated alias resolves the same quick leaf.
+    // The legacy hyphenated alias resolves the same quick variant.
     let alias_check = run_ctx(
         &["traits", "check", "family-demo-quick", "--json"],
         &consumer,
@@ -410,7 +410,7 @@ fn path_dependency_installs_every_family_leaf() {
     let alias_digest = canonical_digest_from_check(&alias_stdout);
     assert_eq!(
         quick_digest, alias_digest,
-        "legacy alias family-demo-quick did not resolve the same quick leaf as family-demo:quick"
+        "legacy alias family-demo-quick did not resolve the same quick variant as family-demo:quick"
     );
 
     for reference in ["family-demo", "family-demo:quick"] {

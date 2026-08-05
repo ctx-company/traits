@@ -619,9 +619,9 @@ fn package_trait_dependency_declarations(
     let package_manifest = crate::layout::package_manifest_path(trait_root);
     let trait_files = match crate::family_manifest::read_family_table(&package_manifest)? {
         Some(family) => family
-            .leaves
+            .variants
             .into_values()
-            .map(|leaf| trait_root.join(leaf.relative_path))
+            .map(|variant| trait_root.join(variant.relative_path))
             .collect(),
         None => vec![selected_trait_file.to_path_buf()],
     };

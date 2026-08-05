@@ -214,8 +214,8 @@ struct BuildReportJson<'a> {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-struct FamilyLeafReportJson {
-    selector: String,
+struct FamilyVariantReportJson {
+    name: String,
     target: String,
     source_map: String,
     aliases: Vec<String>,
@@ -228,11 +228,11 @@ struct FamilyBuildReportJson {
     family: String,
     version: String,
     manifest: String,
-    leaves: Vec<FamilyLeafReportJson>,
+    variants: Vec<FamilyVariantReportJson>,
 }
 
 /// Either shape `handle_build` writes: an ordinary single-trait package or a
-/// native family's published leaves. Produced by [`route_cdk_build`], which
+/// native family's published variants. Produced by [`route_cdk_build`], which
 /// synthesizes `path` exactly once and branches on the result — never both.
 enum CdkBuildRouted {
     Single(Box<BuildEvidence>),
@@ -241,8 +241,8 @@ enum CdkBuildRouted {
 
 /// Synthesize `path` exactly once via `synthesize_cdk_source_any`, then
 /// route the single Node/core synthesis result to the right publish path:
-/// a native family (`trait(id, { variants })`) publishes every leaf's
-/// canonical output under `generated/<selector>/` and writes the package's
+/// a native family (`trait(id, { variants })`) publishes every variant's
+/// canonical output under `generated/<name>/` and writes the package's
 /// `[family]` manifest table; an ordinary single-trait source finishes
 /// through the same write/identity-enforcement tail [`build_cdk_package`]
 /// uses. `handle_build` is the only caller — it must accept both source
@@ -265,8 +265,8 @@ fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result
     };
     if out.is_some() {
         return Err(crate::Error::Command {
-            message: "--out is not supported for native trait family sources; every leaf is \
-                      published under generated/<selector>/ by convention"
+            message: "--out is not supported for native trait family sources; every variant is \
+                      published under generated/<name>/ by convention"
                 .to_string(),
         });
     }
@@ -276,14 +276,14 @@ fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result
         family: evidence.family_id,
         version: evidence.family_version,
         manifest: evidence.manifest_path.to_string(),
-        leaves: evidence
-            .leaves
+        variants: evidence
+            .variants
             .into_iter()
-            .map(|leaf| FamilyLeafReportJson {
-                selector: leaf.selector,
-                target: leaf.target_path.to_string(),
-                source_map: leaf.map_path.to_string(),
-                aliases: leaf.aliases,
+            .map(|variant| FamilyVariantReportJson {
+                name: variant.name,
+                target: variant.target_path.to_string(),
+                source_map: variant.map_path.to_string(),
+                aliases: variant.aliases,
             })
             .collect(),
     }))
@@ -304,7 +304,7 @@ fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result
 /// `ctx traits new` has always done build-then-lock in one command
 /// (`new.rs`), which is why scaffolding never hit this; `build` simply
 /// skipped the second half. The projection upserts by `(id, variant)`, so
-/// calling it once per family leaf accumulates the whole family into one
+/// calling it once per family variant accumulates the whole family into one
 /// package-root lock rather than overwriting.
 ///
 /// Skipped, not failed, when the build did not write into a package the lock
@@ -343,10 +343,10 @@ pub(crate) fn handle_build(
     let evidence = match route_cdk_build(source_path.as_str(), format, out)? {
         CdkBuildRouted::Single(evidence) => *evidence,
         CdkBuildRouted::Family(family_report) => {
-            // Every leaf, so a family's lock carries the whole topology the
-            // approval guard and the drift gate both read (P532).
-            for leaf in &family_report.leaves {
-                record_lock_evidence(camino::Utf8Path::new(&leaf.target))?;
+            // Every variant, so a family's lock carries the whole topology
+            // the approval guard and the drift gate both read (P532).
+            for variant in &family_report.variants {
+                record_lock_evidence(camino::Utf8Path::new(&variant.target))?;
             }
             match OutputMode::select(json, false) {
                 OutputMode::Json => {
@@ -368,10 +368,10 @@ pub(crate) fn handle_build(
                                 &family_report.manifest,
                                 RowTone::Default,
                             ));
-                    for leaf in &family_report.leaves {
+                    for variant in &family_report.variants {
                         panel = panel.row(PanelRow::toned(
-                            "leaf",
-                            format!("{} -> {}", leaf.selector, leaf.target),
+                            "variant",
+                            format!("{} -> {}", variant.name, variant.target),
                             RowTone::Default,
                         ));
                     }
