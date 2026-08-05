@@ -118,6 +118,12 @@ interface SequenceCommonFields {
   readonly format?: string | readonly string[];
   readonly onComplete?: SignalOutputValue | readonly SignalOutputValue[];
   readonly onFailure?: FailureTargetValue;
+  /** Single-step entry guard: this step is skipped unless `when` matches
+   * (0106). Composes with the object layer's existing `branch`/`ask` guard
+   * spellings without replacing either — a `branch` item still spells its
+   * guard as `if`, and an `ask` item's `when` stays a signal ref; this field
+   * is the single-step-no-nesting home for every other step kind. */
+  readonly when?: GuardValue;
 }
 type PromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly kind?: "prompt";
@@ -161,10 +167,18 @@ type InputPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly argv?: never;
   readonly sequence?: never;
 };
+/**
+ * The options `agent.prompt(title, opts)` accepts (0106): every
+ * `sequence.prompt` field except `id`/`kind`/`agent`/`title`, which the
+ * registrar mints from the agent handle and the call's own `title`.
+ */
+export type PromptRegistrarOptions =
+  & Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind" | "agent" | "title">
+  & { readonly output?: SequenceOutputValue | readonly SequenceOutputValue[]; };
 /** A human-owned prompt. The required signal guard decides whether the frame
  * is exposed; its one local slot output is supplied through `session frame set`. */
 type AskSequenceFields =
-  & Omit<SequenceCommonFields, "agent" | "format" | "onComplete" | "onFailure" | "input">
+  & Omit<SequenceCommonFields, "agent" | "format" | "onComplete" | "onFailure" | "input" | "when">
   & {
     readonly kind: "ask";
     readonly when: RefHandle<"signal">;
@@ -191,7 +205,7 @@ type AskSequenceFields =
       readonly prompt?: never;
     }
   );
-type CommandSequenceFields =
+export type CommandSequenceFields =
   & Omit<SequenceCommonFields, "input">
   & {
     readonly kind?: "command";
@@ -288,7 +302,7 @@ export type GateOptions = {
  * never routes through ordinary command failure handling: the loop simply
  * continues and re-evaluates its `until` guard against the latest verdict.
  */
-type CheckSequenceFields =
+export type CheckSequenceFields =
   & Omit<SequenceCommonFields, "format" | "output" | "onFailure" | "input">
   & {
     readonly kind: "check";
@@ -329,7 +343,7 @@ type LinearSequenceFields = SequenceCommonFields & {
   readonly argv?: never;
   readonly onFailure?: never;
 };
-type LoopSequenceFields = SequenceCommonFields & {
+export type LoopSequenceFields = SequenceCommonFields & {
   readonly kind: "loop";
   /** The loop body as a named-reusable ref. Exactly one of `sequence`/`body` is required. */
   readonly sequence?: SequenceRefValue;
@@ -377,7 +391,7 @@ type LoopSequenceFields = SequenceCommonFields & {
   readonly argv?: never;
   readonly argvFrom?: never;
 };
-type ForEachSequenceFields = SequenceCommonFields & {
+export type ForEachSequenceFields = SequenceCommonFields & {
   readonly kind: "for-each";
   /** The per-item body as a named-reusable ref. Exactly one of `sequence`/`body` is required. */
   readonly sequence?: SequenceRefValue;
@@ -438,6 +452,7 @@ export type ParallelSequenceFields =
     | "format"
     | "onComplete"
     | "onFailure"
+    | "when"
   >
   & {
     readonly kind: "parallel";
@@ -475,6 +490,7 @@ export type BranchSequenceFields =
     | "format"
     | "onComplete"
     | "onFailure"
+    | "when"
   >
   & {
     readonly kind: "branch";
@@ -1284,6 +1300,10 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],
     "on-complete": onCompleteRules(fields.onComplete, outputRefs),
   };
+  if (kind !== "branch" && kind !== "ask" && kind !== "project" && kind !== "parallel") {
+    const singleStepWhen = (fields as { readonly when?: GuardValue; }).when;
+    if (singleStepWhen !== undefined) canonical.when = normalizeGuard(singleStepWhen);
+  }
   if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(promptWithOutputTemplates, fields.id);
   if (kind === "ask") {
     canonical.when = refText((fields as AskSequenceFields).when, `sequence.${fields.id}.when`);
@@ -1421,6 +1441,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     fields.prompt,
     fields.text,
     fields.argv,
+    (fields as { readonly when?: GuardValue; }).when,
     // Same reasoning as `branchFields`/`parallelFields` above, inlined here
     // since each is read once.
     (fields as Partial<CommandSequenceFields>).argvFrom,

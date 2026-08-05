@@ -1,3 +1,6 @@
+import { attachProcedureFrom } from "./functional/procedure.js";
+import { procedure as procedureBase } from "./procedure.js";
+
 export { agent, oracle, planner, reviewer, searcher, worker } from "./agent.js";
 export type {
   AgentFields,
@@ -14,6 +17,16 @@ export type {
   GuardValue,
   NumericComparisonValue,
 } from "./condition.js";
+export { effect, flow, step } from "./functional/index.js";
+export type {
+  FieldMatchArms,
+  ForEachRegistrarOptions,
+  GuardMatchArms,
+  LoopParam,
+  ParParam,
+  ProcedureFromFields,
+  ProcedureFromFunction,
+} from "./functional/index.js";
 export type {
   AgentModelTier,
   AgentTemplateDefinition,
@@ -168,7 +181,7 @@ export { output } from "./output.js";
 export type { OutputFunction } from "./output.js";
 export { port } from "./port.js";
 export type { PortDefaultCommand, PortDirectionHelpers, PortFields, PortFunction } from "./port.js";
-export { checklist, dependency, procedure, resource, rubric, rule, signal } from "./procedure.js";
+export { checklist, dependency, resource, rubric, rule, signal } from "./procedure.js";
 export type {
   ChecklistFields,
   DependencyFields,
@@ -183,6 +196,8 @@ export type {
   RuleFields,
   SignalFields,
 } from "./procedure.js";
+/** The object-layer `procedure(...)` builder, augmented with `procedure.from(fields, body)` (0106) — one exported symbol, both call shapes. */
+export const procedure = attachProcedureFrom(procedureBase);
 export { prompt } from "./prompt.js";
 export type { PromptFields, PromptFunction, PromptInterpolation } from "./prompt.js";
 export { ref } from "./ref.js";
@@ -201,16 +216,29 @@ export type {
   SchemaUnionHandle,
   SchemaValue,
 } from "./schema.js";
-export { sequence } from "./sequence.js";
+export { idFromTitle, sequence } from "./sequence.js";
 export type {
   ArgvItem,
   BranchSequenceFields,
+  CheckSequenceFields,
+  CommandSequenceFields,
+  ExhaustionPolicy,
   FailureRoute,
+  ForEachSequenceFields,
   GateOptions,
+  LoopSequenceFields,
+  ParallelBranchFailureEntry,
+  ParallelBranchFailurePolicy,
+  ParallelJoinOption,
+  ParallelOptions,
+  ParallelSequenceFields,
   ProjectProjection,
   ProjectSequenceFields,
+  PromptRegistrarOptions,
   SequenceFields,
   SequenceFunction,
+  SequenceInputValue,
+  SequenceOutputValue,
 } from "./sequence.js";
 export { session } from "./session.js";
 export type { SessionBinding, SessionFunction, SessionLifecycle, SessionOptions } from "./session.js";

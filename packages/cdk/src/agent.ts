@@ -1,8 +1,10 @@
+import { dispatchAgentPrompt } from "./functional/context.js";
 import { agentTemplates } from "./generated.js";
 import type { AgentTemplateDefinition } from "./generated.js";
-import type { AgentHandle } from "./handles.js";
-import { withDeclaration } from "./meta.js";
+import type { DeclaredAgentHandle, SequenceHandle } from "./handles.js";
+import { withDeclaration, withHiddenField } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
+import type { PromptRegistrarOptions } from "./sequence.js";
 import type { SessionBinding } from "./session.js";
 import { sessionFieldOf } from "./session.js";
 
@@ -41,14 +43,14 @@ export interface AgentTemplateFields {
   readonly session?: SessionBinding;
 }
 
-export type AgentTemplateFunction = (id: string, fields?: AgentTemplateFields) => AgentHandle;
+export type AgentTemplateFunction = (id: string, fields?: AgentTemplateFields) => DeclaredAgentHandle;
 
 export interface AgentFunction extends AgentTemplateFunctions {
-  (id: string, fields: Omit<AgentFields, "id">): AgentHandle;
-  (fields: AgentFields): AgentHandle;
+  (id: string, fields: Omit<AgentFields, "id">): DeclaredAgentHandle;
+  (fields: AgentFields): DeclaredAgentHandle;
 }
 
-function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclaration>[4] = {}): AgentHandle {
+function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclaration>[4] = {}): DeclaredAgentHandle {
   validateSlug(fields.id, "agent.id");
   const declaration = compact({
     id: fields.id,
@@ -63,10 +65,20 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
   // lets `collectMany` (walking `fields.agent` at the trait root) still find
   // and emit the shared `[[session]]` declaration exactly once, without
   // requiring the author to also list the handle at the trait root.
-  return withDeclaration("agent", `agent:${fields.id}`, declaration, {}, {
+  const handle = withDeclaration("agent", `agent:${fields.id}`, declaration, {}, {
     ...extraMeta,
     declarations: collectMany([fields.session]),
   });
+  // Non-enumerable so it never serializes into the canonical declaration
+  // (same `withHiddenField` pattern as `ChecklistHandle`'s `verdict`/
+  // `itemIds`) — the functional layer's `agent.prompt(title, opts)`
+  // registrar (0106), reachable from every mint path: `agent(...)`,
+  // `agent.worker(...)`/other templates, and the deprecated bare templates.
+  return withHiddenField(
+    handle,
+    "prompt",
+    (title: string, opts: PromptRegistrarOptions) => dispatchAgentPrompt(handle, title, opts) as SequenceHandle,
+  );
 }
 
 /**
@@ -95,9 +107,9 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
  * ```
  * @see {@link sequence}
  */
-function agentFn(id: string, fields: Omit<AgentFields, "id">): AgentHandle;
-function agentFn(fields: AgentFields): AgentHandle;
-function agentFn(first: string | AgentFields, second?: Omit<AgentFields, "id">): AgentHandle {
+function agentFn(id: string, fields: Omit<AgentFields, "id">): DeclaredAgentHandle;
+function agentFn(fields: AgentFields): DeclaredAgentHandle;
+function agentFn(first: string | AgentFields, second?: Omit<AgentFields, "id">): DeclaredAgentHandle {
   return agentOf(typeof first === "string" ? { ...second, id: first } as AgentFields : first);
 }
 
@@ -106,7 +118,7 @@ function agentTemplateOf(
   id: string,
   fields: AgentTemplateFields,
   extraMeta: Parameters<typeof withDeclaration>[4] = {},
-): AgentHandle {
+): DeclaredAgentHandle {
   return agentOf({
     id,
     description: fields.description ?? template.description,

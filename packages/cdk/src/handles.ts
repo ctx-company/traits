@@ -1,5 +1,7 @@
+import type { ForEachRegistrarOptions } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, RefKind } from "./generated.js";
 import type { CdkObject } from "./meta.js";
+import type { PromptRegistrarOptions } from "./sequence.js";
 
 declare const HANDLE_BRAND: unique symbol;
 declare const HANDLE_VALUE: unique symbol;
@@ -77,6 +79,12 @@ export type SlotHandle<Value = unknown> = Handle<"slot", Value>;
  */
 export type DeclaredSlotHandle<Value = unknown> = SlotHandle<Value> & {
   readonly optional: () => OptionalSlotRead<Value>;
+  /** `.forEach` is attached non-enumerably at mint time (0106, `slot.ts`) — `items.forEach` is THE for-each spelling (0102). */
+  readonly forEach: (
+    title: string,
+    opts: ForEachRegistrarOptions,
+    body: (item: SlotHandle) => void,
+  ) => SequenceHandle;
 };
 /**
  * A declared object-schema slot handle: `DeclaredSlotHandle`'s `.optional()`
@@ -103,6 +111,17 @@ export type PromptHandle<Input = unknown, Output = unknown> = Handle<
 >;
 export type ResourceHandle<Value = unknown> = Handle<"resource", Value>;
 export type AgentHandle = Handle<"agent">;
+/**
+ * An agent handle from a declaration builder — `agent(...)`, every
+ * `agent.*` template, and the deprecated bare templates — which additionally
+ * exposes `.prompt`, attached non-enumerably at mint time (0106, `agent.ts`).
+ * Kept distinct from the bare {@link AgentHandle} so a plain `ref.agent("x")`
+ * reference — which declares nothing and carries no augmentation — still
+ * satisfies every `AgentHandle` position (mirrors `DeclaredSlotHandle`).
+ */
+export type DeclaredAgentHandle = AgentHandle & {
+  readonly prompt: (title: string, opts: PromptRegistrarOptions) => SequenceHandle;
+};
 export type SchemaHandle<Value = unknown> = Handle<"schema", Value>;
 /** A built-in or collection schema reference with its represented value type. */
 export type SchemaRef<Value = unknown> = string & { readonly __ctxTraitSchemaValue?: Value; };

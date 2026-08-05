@@ -1,5 +1,13 @@
+import { dispatchSlotForEach } from "./functional/context.js";
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
-import type { DeclaredSlotHandle, DeclaredSlotWithFields, FieldRef, OutputSinkHandle, SlotHandle } from "./handles.js";
+import type {
+  DeclaredSlotHandle,
+  DeclaredSlotWithFields,
+  FieldRef,
+  OutputSinkHandle,
+  SequenceHandle,
+  SlotHandle,
+} from "./handles.js";
 import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
@@ -262,7 +270,16 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   // another. Attached non-enumerably so it can never serialize into the
   // canonical, and defined here (not on the proxy path alone) so object-schema
   // and scalar slots both carry it.
-  return withHiddenField(resolved, "optional", () => optionalSlotInput(resolved));
+  const withOptional = withHiddenField(resolved, "optional", () => optionalSlotInput(resolved));
+  // `.forEach` is the functional layer's `items.forEach` spelling (0106,
+  // 0102) — attached the same way as `.optional`, non-enumerable so it never
+  // reaches the canonical declaration.
+  return withHiddenField(
+    withOptional,
+    "forEach",
+    (title: string, opts: unknown, body: (item: SlotHandle) => void) =>
+      dispatchSlotForEach(withOptional, title, opts, body) as SequenceHandle,
+  );
 }
 
 /** One declared object-schema field's canonical shape, as it appears in `declaration.fields`. */
