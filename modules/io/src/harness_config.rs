@@ -6197,10 +6197,22 @@ fn base_for_role(
     }
 }
 
+/// The final collapse-to-`None` step of role resolution: a Harness-mode
+/// assignment with nothing to dispatch on does not exist. An api-transport
+/// seat (0079) IS dispatchable without any harness — `resolve_seat_dispatch`
+/// owns what happens when its key later fails to resolve (degrade to a
+/// declared harness, else `Unavailable`, which every standing-seat caller
+/// already treats as "no narration", never an error). Collapsing such a seat
+/// here instead made a harness-less `transport = "api"` narrator silently
+/// vanish from resolution — no seat, no titles, no narration, no diagnostic.
 fn finalize_assignment(assignment: ProfileAssignment) -> Option<ProfileAssignment> {
     match assignment.mode {
         RunAssignmentMode::Attach => Some(assignment),
-        RunAssignmentMode::Harness if assignment.harness.is_some() => Some(assignment),
+        RunAssignmentMode::Harness
+            if assignment.harness.is_some() || assignment.transport == Some(RunTransport::Api) =>
+        {
+            Some(assignment)
+        }
         RunAssignmentMode::Harness => None,
     }
 }
@@ -9022,6 +9034,42 @@ mod config_tests {
             harness: Some(harness.into()),
             ..ProfileAssignment::default()
         }
+    }
+
+    /// 0079 regression: a seat declaring ONLY `transport = "api"` (no
+    /// harness fallback) is dispatchable and must survive resolution —
+    /// `finalize_assignment` collapsing it to `None` made an api-only
+    /// narrator silently vanish (no titles, no narration, no diagnostic),
+    /// even though `resolve_seat_dispatch` was built to own exactly that
+    /// seat's key-missing degrade path.
+    #[test]
+    fn an_api_only_seat_survives_resolution_without_a_harness() {
+        let mut seat = ProfileAssignment {
+            transport: Some(RunTransport::Api),
+            model: Some("deepseek/deepseek-v4-flash".into()),
+            ..ProfileAssignment::default()
+        };
+        seat.api.base_url = Some("https://openrouter.ai/api/v1".into());
+        seat.api.wire = Some(ProviderWire::OpenaiCompat);
+        seat.api.api_key_env = Some("OPENROUTER_API_KEY".into());
+        let mut defaults = AgentDefaults::default();
+        defaults
+            .role
+            .insert("narrator".into(), RoleAssignmentValue::Single(seat));
+
+        let resolved = resolved_assignment_for_role(&defaults, "narrator", None)
+            .expect("an api-only seat must survive resolution without a harness");
+        assert_eq!(resolved.transport, Some(RunTransport::Api));
+        assert!(resolved.harness.is_none());
+
+        // A harness-less seat with NO api transport still collapses — the
+        // pre-0079 rule is unchanged for ordinary Cli seats.
+        let mut defaults = AgentDefaults::default();
+        defaults.role.insert(
+            "narrator".into(),
+            RoleAssignmentValue::Single(ProfileAssignment::default()),
+        );
+        assert!(resolved_assignment_for_role(&defaults, "narrator", None).is_none());
     }
 
     fn scope<'a>(variant: Option<&'a str>, repo_key: Option<&'a str>) -> RunScope<'a> {

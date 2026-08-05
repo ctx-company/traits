@@ -482,8 +482,9 @@ pub(crate) fn dispatch_api_seat(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiSeatResolution, SeatDispatch, append_confinement, append_exec_dir, resolve_api_seat,
-        resolve_seat_dispatch, standing_agent_argv, tool_less_standing_agent_argv,
+        ApiSeatResolution, SeatDispatch, append_confinement, append_exec_dir, dispatch_api_seat,
+        resolve_api_seat, resolve_seat_dispatch, standing_agent_argv,
+        tool_less_standing_agent_argv,
     };
     use ctx_traits_io::confinement::ConfinementPayloads;
     use ctx_traits_io::harness_config::ProviderWire;
@@ -866,5 +867,79 @@ mod tests {
             resolve_seat_dispatch(&assignment),
             SeatDispatch::NotConfigured
         ));
+    }
+
+    /// Live end-to-end probe of the narrator seat, exercising the EXACT
+    /// production seam a session title / narration turn uses: resolve the
+    /// machine's real runtime config, take the narrator assignment, classify
+    /// it through [`resolve_seat_dispatch`], and — for an api seat — perform
+    /// one real [`dispatch_api_seat`] round trip, asserting non-empty
+    /// narration text.
+    ///
+    /// `#[ignore]`: this reads the invoking machine's own config, needs the
+    /// declared api-key env and the network, and spends one (flash-tier)
+    /// model call — a diagnostic, not a gate test. Run it explicitly:
+    ///
+    /// ```text
+    /// cargo test -p ctx-traits-cli --lib narrator_seat_narrates_live -- --ignored --nocapture
+    /// ```
+    ///
+    /// Every stage prints what it resolved (key env NAME only, never the
+    /// value), so a failure names the broken link instead of just failing.
+    #[test]
+    #[ignore = "live probe: reads real config, needs network + api key, spends one model call"]
+    fn narrator_seat_narrates_live() {
+        let mut profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[])
+            .expect("runtime config resolves");
+        let assignment = profile
+            .resolved_narrator_assignment()
+            .expect("narrator assignment resolves")
+            .expect("a narrator seat is configured (none found in any config tier)");
+        eprintln!(
+            "narrator seat: transport={:?} harness={:?} model={:?} base-url={:?} wire={:?} api-key-env={:?}",
+            assignment.transport,
+            assignment.harness,
+            assignment.model,
+            assignment.api.base_url,
+            assignment.api.wire,
+            assignment.api.api_key_env,
+        );
+        let request = match resolve_seat_dispatch(&assignment) {
+            SeatDispatch::Api(request) => request,
+            SeatDispatch::Harness => panic!(
+                "seat degrades to its harness: api-key-env {:?} did not resolve in this environment",
+                assignment.api.api_key_env
+            ),
+            SeatDispatch::NotConfigured => panic!(
+                "narrator seat does not declare transport = \"api\" — nothing to probe on the native path"
+            ),
+            SeatDispatch::Unavailable { reason } => {
+                panic!("narrator seat unavailable: {reason}")
+            }
+        };
+        eprintln!(
+            "dispatching: model={} base-url={} wire={:?} connect-timeout={}ms read-timeout={}ms retries={}",
+            request.model,
+            request.base_url,
+            request.wire,
+            request.connect_timeout_ms,
+            request.read_timeout_ms,
+            request.retries,
+        );
+        let response = dispatch_api_seat(
+            &request,
+            Some("You are a run narrator. Reply with exactly one short plain sentence."),
+            "Narrate this event: the run's first step completed successfully.",
+            128,
+        )
+        .expect("live narration round trip succeeds");
+        eprintln!(
+            "narration: {:?} (input-tokens={:?} output-tokens={:?})",
+            response.text, response.input_tokens, response.output_tokens,
+        );
+        assert!(
+            !response.text.trim().is_empty(),
+            "provider returned an empty narration"
+        );
     }
 }
