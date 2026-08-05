@@ -13,8 +13,12 @@ use super::tui;
 use ctx_traits_io::debug_trace::{HarnessAttemptExit, HarnessAttemptStart, HarnessAttemptWriter};
 
 /// Newest-tail cap on the narration window, in Unicode characters (not
-/// bytes) so multibyte input is never split mid-codepoint.
-const MAX_NARRATION_WINDOW_CHARS: usize = 150;
+/// bytes) so multibyte input is never split mid-codepoint. Sized for a few
+/// complete sentences of thinking: every narration is a fresh spawn whose
+/// fixed per-call context dwarfs this window, so a miserly cap starves the
+/// model of evidence (inviting it to anchor on whatever else the prompt
+/// offers) while saving nothing.
+const MAX_NARRATION_WINDOW_CHARS: usize = 700;
 const NARRATION_CAPTURE_LIMIT: usize = 256 * 1024;
 const NARRATOR_WARM_MAX_TURNS: u64 = 32;
 const NARRATOR_WARM_MAX_PARSE_FAILURES: u8 = 3;
@@ -187,7 +191,6 @@ pub(crate) struct NarratorConfig {
     pub(crate) warm: Option<NarratorWarmConfig>,
     pub(crate) prompt_delivery: ctx_traits_io::harness::PromptDelivery,
     pub(crate) output_id: Option<String>,
-    pub(crate) task_label: String,
     pub(crate) timeout_ms: u64,
     /// Worktree-scoped execution directory for cold and persistent narrator
     /// subprocesses. `None` leaves the narrator on its inherited cwd.
@@ -572,10 +575,17 @@ impl TokenProgress {
 /// Terminal P455 step-summary dispatch: honors the existing pacing floor by
 /// sleeping out any remainder (no further chunks are expected once a step has
 /// been accepted, so there is nothing left to coalesce) before making the one
-/// required call — regardless of whether the bounded thinking-window tail is
-/// empty. `tokens` is already reserved by the caller
+/// call. `tokens` is already reserved by the caller
 /// ([`StreamNarrator::finish_with_step_summary`]) at enqueue time; this only
 /// completes that reservation with the call's observed delta.
+///
+/// A cached or concurrent outcome leaves both windows empty; a model called
+/// with nothing but the step's own title, role, and elapsed time can only
+/// paraphrase the title back ("Implementation (worker)" → "Implemented
+/// worker"), so that case renders the deterministic metadata row instead —
+/// no dispatch, and the reservation completes with a zero delta. A failed or
+/// declined ("-") call falls back to the same deterministic row, so every
+/// completed step gets an honest line rather than a blank or a parrot.
 fn finish_with_summary_call(
     context: StepSummaryContext,
     config: &NarratorConfig,
@@ -585,22 +595,35 @@ fn finish_with_summary_call(
     on_tokens: &NarratorTokenSink,
     push_step_summary: &StepSummarySink,
 ) {
+    let (narration_window, is_fallback) = windows.active();
+    if narration_window.trim().is_empty() {
+        tokens.end_call(0);
+        let row = deterministic_step_summary(&context);
+        push_step_summary(context, row);
+        return;
+    }
     if let Some(started) = last_narration_start {
         let floor = std::time::Duration::from_millis(NARRATION_MIN_INTERVAL_MS);
         if let Some(remaining) = floor.checked_sub(started.elapsed()) {
             thread::sleep(remaining);
         }
     }
-    let (narration_window, is_fallback) = windows.active();
     let prompt = step_summary_prompt(&context, &narration_window, is_fallback);
     let (result, call_total) = dispatch_narration(config, prompt);
     tokens.end_call(call_total);
     if call_total > 0 {
         on_tokens(call_total);
     }
-    if let Ok(summary) = result {
-        push_step_summary(context, summary);
-    }
+    let row = result.unwrap_or_else(|_| deterministic_step_summary(&context));
+    push_step_summary(context, row);
+}
+
+/// The no-model completed-step row: metadata that is true by construction,
+/// used when the narration window is empty (nothing to summarize) or a
+/// summary call failed or declined. Deliberately does not mention the step
+/// title — the row already renders under it.
+fn deterministic_step_summary(context: &StepSummaryContext) -> String {
+    format!("Completed in {}", tui::elapsed_text(context.elapsed))
 }
 
 /// Result of feeding one chunk into [`ingest_chunk`]: which of the two
@@ -687,7 +710,7 @@ fn narrate_once(
     tokens: &NarratorTokenTracker,
     on_tokens: &NarratorTokenSink,
 ) -> Result<String, String> {
-    let prompt = narrator_prompt(&config.task_label, window, is_fallback);
+    let prompt = narrator_prompt(window, is_fallback);
     tokens.begin_call();
     let (result, call_total) = dispatch_narration(config, prompt);
     tokens.end_call(call_total);
@@ -1025,7 +1048,16 @@ fn narrator_summary_from_output(
 /// bytes (the thinking/reasoning window); `Recent agent activity:` is honest
 /// over the fallback window, which holds assistant prose and tool activity
 /// rather than thinking.
-fn narrator_prompt(task_label: &str, window: &str, is_fallback: bool) -> String {
+///
+/// The prompt deliberately carries no step title or role: the panel already
+/// shows both, so a line that paraphrases them adds nothing — and a tiny
+/// model handed a clean label next to a fragmentary window anchors on the
+/// label ("Implementation (Worker)" → "Implementing worker"). The window is
+/// the only material. The `-` escape lets the model decline instead of
+/// inventing a line; [`sanitize_summary`] trims a bare `-` to nothing, which
+/// surfaces as an empty-summary error — a presentation no-op that holds the
+/// previous line, exactly like any other failed attempt.
+fn narrator_prompt(window: &str, is_fallback: bool) -> String {
     let label = if is_fallback {
         "Recent agent activity:"
     } else {
@@ -1036,20 +1068,25 @@ fn narrator_prompt(task_label: &str, window: &str, is_fallback: bool) -> String 
 Rules:\n\
 - Return only the status line.\n\
 - Use a leading verb such as Reading, Searching, Editing, Planning, Checking, or Writing.\n\
+- Describe only what the text below shows the agent actually doing.\n\
+- If it does not show what the agent is doing, return only the single character -\n\
 - Keep it under 80 characters.\n\
 - No quotes, bullets, markdown, or trailing punctuation.\n\
-Task: {task_label}\n\
 {label}\n{window}\n"
     )
 }
 
 /// P455 completed-step counterpart to [`narrator_prompt`]: same generic
-/// verb-class instruction, past tense, built only from the panel-held
+/// verb-class instruction, past tense, built from the panel-held
 /// [`StepSummaryContext`] and the narrator's own bounded thinking-window
-/// tail — never a slot value. An empty tail is expected for cached/concurrent
-/// outcomes; the step metadata alone is still enough to require the one call.
-/// `is_fallback` picks the window label exactly as in [`narrator_prompt`] —
-/// `Recent agent thinking:` would be a lie over the fallback window.
+/// tail — never a slot value. Only called with a non-empty tail:
+/// [`finish_with_summary_call`] renders the deterministic metadata row for
+/// empty windows instead of dispatching, since a model with nothing but the
+/// step's own metadata can only paraphrase the title back. The `Step:` line
+/// stays for tense and multi-agent context, with an explicit rule against
+/// restating it. `is_fallback` picks the window label exactly as in
+/// [`narrator_prompt`] — `Recent agent thinking:` would be a lie over the
+/// fallback window.
 fn step_summary_prompt(context: &StepSummaryContext, window: &str, is_fallback: bool) -> String {
     let tokens_line = context
         .work_tokens
@@ -1065,6 +1102,8 @@ fn step_summary_prompt(context: &StepSummaryContext, window: &str, is_fallback: 
 Rules:\n\
 - Return only the status line.\n\
 - Use a leading past-tense verb such as Read, Searched, Edited, Planned, Checked, or Wrote.\n\
+- Describe only what the text below shows was done; never restate or paraphrase the step name.\n\
+- If it does not show what was done, return only the single character -\n\
 - Keep it under 80 characters.\n\
 - No quotes, bullets, markdown, or trailing punctuation.\n\
 Step: {} ({})\n\
@@ -1080,9 +1119,13 @@ Elapsed: {}\n\
 /// Shared by the live present-continuous prompt, the P455 past-tense
 /// completed-step prompt, and the P552 one-time session-title prompt — kept
 /// tense/form-neutral so none of those callers' own instructions are
-/// contradicted by the system channel.
+/// contradicted by the system channel. The no-repeat rule exists for the
+/// warm narrator, whose one conversation spans up to
+/// [`NARRATOR_WARM_MAX_TURNS`] narrations: without it, a weak early line
+/// anchors every later turn toward the same shape. It is a harmless no-op
+/// for cold one-shot calls.
 pub(crate) fn narrator_system_prompt() -> &'static str {
-    "You compact agent activity for terminal presentation only. Return exactly one short status line or title in the tense or form the request specifies, no markdown, no JSON, no quotes, and no trailing punctuation. Never submit ctx.traits outputs or call tools."
+    "You compact agent activity for terminal presentation only. Return exactly one short status line or title in the tense or form the request specifies, no markdown, no JSON, no quotes, and no trailing punctuation. Never repeat one of your earlier lines verbatim. Never submit ctx.traits outputs or call tools."
 }
 
 /// P552 one-time session-title prompt: a short noun-phrase title for the
@@ -1182,7 +1225,15 @@ fn append_window(window: &mut String, text: &str) {
         .nth(drop)
         .map(|(index, _)| index)
         .unwrap_or(window.len());
-    window.drain(..start);
+    // Advance past the next whitespace so the retained tail opens on a word
+    // boundary — a window starting mid-word reads as noise to the narrator.
+    // A tail with no whitespace at all keeps the plain character cut.
+    let boundary = window[start..]
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace())
+        .map(|(offset, ch)| start + offset + ch.len_utf8())
+        .unwrap_or(start);
+    window.drain(..boundary);
 }
 
 /// Frame the complete NDJSON lines currently in `buffer` (leaving any
@@ -1652,9 +1703,9 @@ pub(crate) fn balanced_json_objects(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        IngestOutcome, NarrationWindows, NarratorConfig, NarratorTraceContext, TokenProgress,
-        collect_thinking_texts, ingest_chunk, narrate_cold, narrator_stdout_text, progress_texts,
-        session_title_prompt,
+        IngestOutcome, MAX_NARRATION_WINDOW_CHARS, NarrationWindows, NarratorConfig,
+        NarratorTraceContext, TokenProgress, append_window, collect_thinking_texts, ingest_chunk,
+        narrate_cold, narrator_stdout_text, progress_texts, session_title_prompt,
     };
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -1746,6 +1797,22 @@ mod tests {
         assert!(outcome.has_fallback);
         let lines: Vec<&str> = fallback_window.lines().filter(|l| !l.is_empty()).collect();
         assert_eq!(lines, vec!["Bash: ls -la"]);
+    }
+
+    /// After overflow, the retained newest-tail opens on a word boundary —
+    /// never mid-word, which reads as noise to the narrator.
+    #[test]
+    fn overflowed_window_reopens_on_a_word_boundary() {
+        let mut window = String::new();
+        append_window(&mut window, &"word ".repeat(MAX_NARRATION_WINDOW_CHARS / 5));
+        append_window(&mut window, &"tail ".repeat(MAX_NARRATION_WINDOW_CHARS / 5));
+        assert!(window.chars().count() <= MAX_NARRATION_WINDOW_CHARS);
+        let first = window.split_whitespace().next().unwrap();
+        assert!(
+            first == "word" || first == "tail",
+            "window must open on a whole word, got {first:?}"
+        );
+        assert!(!window.starts_with(char::is_whitespace));
     }
 
     /// Security-shaped assertion: a claude tool-result event never reaches
@@ -1866,7 +1933,6 @@ mod tests {
             warm: None,
             prompt_delivery: ctx_traits_io::harness::PromptDelivery::Arg,
             output_id: None,
-            task_label: "test step".to_string(),
             timeout_ms: 5_000,
             exec_dir: None,
             confinement: None,
