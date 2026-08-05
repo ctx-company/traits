@@ -1486,6 +1486,116 @@ fn resolve_drive_profile(
 // + the alternate screen stuck on the user's tty when such a worker
 // outlives main. `close()` is idempotent and late renders no-op on the
 // closed pane.
+/// The next missing input port to prompt for. `unresolved_inputs` is already
+/// sorted and every entry is `port:`-prefixed — see the `Status::AwaitingInput`
+/// derivation in `procedure::session` — so this only ever needs the first.
+fn next_missing_input_ref(unresolved: &[String]) -> Option<&str> {
+    unresolved.first().map(String::as_str)
+}
+
+/// Best-effort load of the missing port's own declared metadata, for the
+/// modal body only. `None` (an unresolvable trait file, or a ref this trait's
+/// current ports no longer declare) degrades to a bare-ref-text prompt rather
+/// than failing the drive — this is presentation, not the source of truth
+/// `ctx_traits_io::run::set` re-validates against.
+fn load_missing_input_port(
+    trait_file: Option<&str>,
+    port_ref: &str,
+) -> Option<ctx_traits_core::r#trait::Port> {
+    let id = port_ref.strip_prefix("port:").unwrap_or(port_ref);
+    let loaded =
+        ctx_traits_io::run::load_trait_source(trait_file, None, "run.awaiting-input").ok()?;
+    loaded
+        .trait_ref
+        .ports
+        .into_iter()
+        .find(|port| port.id == id)
+}
+
+/// The title/body a missing-input modal opens with. Pure so the text this
+/// asks the user to answer can be pinned by a unit test without a live panel.
+fn missing_input_prompt(
+    port_ref: &str,
+    port: Option<&ctx_traits_core::r#trait::Port>,
+) -> (String, String) {
+    let title = format!("Missing input: {port_ref}");
+    let Some(port) = port else {
+        return (title, String::new());
+    };
+    let mut body = String::new();
+    if let Some(display_title) = port.title.as_deref() {
+        body.push_str(display_title);
+    }
+    if !port.description.is_empty() {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(&port.description);
+    }
+    (title, body)
+}
+
+#[cfg(test)]
+mod awaiting_input_prompt_tests {
+    use super::{load_missing_input_port, missing_input_prompt, next_missing_input_ref};
+
+    fn test_port(
+        id: &str,
+        title: Option<&str>,
+        description: &str,
+    ) -> ctx_traits_core::r#trait::Port {
+        ctx_traits_core::r#trait::Port {
+            id: id.to_string(),
+            direction: ctx_traits_core::r#trait::PortDirection::Input,
+            schema: "schema:text".to_string(),
+            optional: false,
+            description: description.to_string(),
+            title: title.map(str::to_string),
+            format: Default::default(),
+            value: None,
+            default: None,
+        }
+    }
+
+    #[test]
+    fn next_missing_input_ref_picks_the_first_sorted_entry() {
+        let unresolved = vec!["port:a".to_string(), "port:b".to_string()];
+        assert_eq!(next_missing_input_ref(&unresolved), Some("port:a"));
+    }
+
+    #[test]
+    fn next_missing_input_ref_is_none_for_an_empty_list() {
+        assert_eq!(next_missing_input_ref(&[]), None);
+    }
+
+    #[test]
+    fn missing_input_prompt_falls_back_to_ref_text_with_no_port_metadata() {
+        let (title, body) = missing_input_prompt("port:missing", None);
+        assert_eq!(title, "Missing input: port:missing");
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn missing_input_prompt_joins_title_and_description() {
+        let port = test_port("missing", Some("User prompt"), "The prompt to run against.");
+        let (title, body) = missing_input_prompt("port:missing", Some(&port));
+        assert_eq!(title, "Missing input: port:missing");
+        assert_eq!(body, "User prompt\nThe prompt to run against.");
+    }
+
+    #[test]
+    fn missing_input_prompt_uses_description_alone_with_no_title() {
+        let port = test_port("missing", None, "The prompt to run against.");
+        let (_, body) = missing_input_prompt("port:missing", Some(&port));
+        assert_eq!(body, "The prompt to run against.");
+    }
+
+    #[test]
+    fn load_missing_input_port_degrades_to_none_for_an_unresolvable_trait_file() {
+        assert!(load_missing_input_port(Some("/nonexistent/trait.toml"), "port:missing").is_none());
+    }
+}
+
 struct RunPanelGuard(Option<run_view::RunPanel>);
 impl Drop for RunPanelGuard {
     fn drop(&mut self) {
@@ -1821,6 +1931,42 @@ fn drive_loop(
                 return Ok(report);
             }
             ctx_traits_core::procedure::session::Status::AwaitingInput => {
+                // A live panel can prompt for the value in place; a headless
+                // drive (MCP transport, dispatched sub-runs, the dogfood
+                // loop) has nobody to answer a modal, so it keeps today's
+                // fail-fast exit. `next_missing_input_ref` returning `None`
+                // (an empty `unresolved_inputs`) is unreachable in practice —
+                // `AwaitingInput` is only derived when that list is
+                // non-empty — but is handled the same way regardless.
+                if let (Some(panel), Some(port_ref)) = (
+                    run_panel.0.as_ref(),
+                    next_missing_input_ref(&outcome.session.unresolved_inputs),
+                ) {
+                    let port_ref = port_ref.to_string();
+                    let port = load_missing_input_port(input.file, &port_ref);
+                    let (title, body) = missing_input_prompt(&port_ref, port.as_ref());
+                    panel.note(format!("awaiting input: {port_ref}"));
+                    let answer = panel.request_input(title, body).recv().ok().flatten();
+                    let Some(text) = answer else {
+                        report.status = "awaiting-input".to_string();
+                        return Ok(report);
+                    };
+                    let set_result = ctx_traits_io::run::set(ctx_traits_io::run::SetRequest {
+                        trait_file: input.file,
+                        trait_id: None,
+                        session: input.session,
+                        session_store: input.session_store,
+                        target: &port_ref,
+                        value: serde_json::Value::String(text),
+                        out: None,
+                        caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+                        existing_input_evidence: "ctx traits run (live modal)",
+                    });
+                    if let Err(error) = set_result {
+                        panel.note(format!("input rejected for {port_ref}: {error}"));
+                    }
+                    continue;
+                }
                 report.status = "awaiting-input".to_string();
                 return Ok(report);
             }

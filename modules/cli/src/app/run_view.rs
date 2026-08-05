@@ -411,6 +411,14 @@ struct RunPanelState {
     /// `q`'s confirm-quit dialog (P551). While open, every drained key routes
     /// here instead of into `pending_keys` — the pane's own focus trap.
     modal: Option<tui_kit::Modal>,
+    /// `Some` only while `modal` is an [`RunPanel::request_input`] prompt —
+    /// distinguishes it from the plain `q` confirm-quit modal, which shares
+    /// the same `modal` slot but has no reply channel. The drive thread that
+    /// opened the prompt blocks on the receiver end; `poll_and_apply_keys`
+    /// sends the submitted text (or `None` on cancel) exactly once, on the
+    /// key that resolves the modal, and clears both fields together so a
+    /// stale sender is never left installed under an unrelated modal.
+    pending_input_reply: Option<mpsc::Sender<Option<String>>>,
     /// P244: the tree lines drawn by the LAST completed render, cached so
     /// [`RunPanel::close`] can commit exactly the last-drawn frame to
     /// scrollback via [`RatatuiPane::commit_inline_scrollback`] — a no-op
@@ -863,6 +871,7 @@ impl RunPanel {
             focus: FocusRing::new(vec![PROGRESS_PANE]),
             pending_keys: Vec::new(),
             modal: None,
+            pending_input_reply: None,
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
             title_state,
@@ -1196,6 +1205,37 @@ impl RunPanel {
             update_live_display(&mut state, after);
         }
         render_locked(&mut state);
+    }
+
+    /// Opens a text-input modal asking for a missing input port's value and
+    /// returns the receiver end of its reply channel. The pane's own input
+    /// thread (see `install_input_wake` in [`Self::new_with_pane`]) applies
+    /// keys and resolves the modal independently of whatever thread is
+    /// blocked reading the receiver — the drive loop parks on `recv()` while
+    /// this pane keeps painting and taking keystrokes, the same split the
+    /// guide chat's dispatch thread and the command-frame `tick_observer`
+    /// already rely on. `Ok(Some(text))` is a submitted answer, `Ok(None)`
+    /// is an explicit cancel (Esc), and `Err` means the pane's state lock is
+    /// gone (panel closed out from under the request) — a caller must treat
+    /// the latter two the same way (fall back to the non-interactive path).
+    pub(crate) fn request_input(
+        &self,
+        title: String,
+        body: String,
+    ) -> mpsc::Receiver<Option<String>> {
+        let _handoff = self.handoff_driver();
+        let (sender, receiver) = mpsc::channel();
+        if let Ok(mut state) = self.state.lock() {
+            state.modal = Some(tui_kit::Modal::text_input_with_body(
+                title,
+                body,
+                String::new(),
+                false,
+            ));
+            state.pending_input_reply = Some(sender);
+            render_locked(&mut state);
+        }
+        receiver
     }
 
     /// P551: append a one-line progress note (e.g. worktree setup activity)
@@ -1573,6 +1613,45 @@ fn live_view_key_action(key: &KeyEvent) -> Option<LiveViewKeyAction> {
     }
 }
 
+/// Routes one key through `state`'s open modal, if any — the `q` confirm-quit
+/// dialog and an [`RunPanel::request_input`] prompt share this one slot.
+/// Returns `true` iff a modal was open and consumed the key (the caller must
+/// not fall through to any other key handling for it), so the state machine
+/// itself can be exercised directly without a real terminal forwarding keys
+/// through `state.repaint`.
+fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
+    let Some(modal) = state.modal.as_mut() else {
+        return false;
+    };
+    match modal.handle_key(key) {
+        tui_kit::ModalOutcome::Confirmed => {
+            state.modal = None;
+            state.repaint.quit();
+            // P081: an observer's `q` returns to the dashboard
+            // automatically — this message is only accurate for the
+            // live view's own quit, which leaves no dashboard to
+            // return to.
+            if !state.observer {
+                eprintln!("live view closed; run continues — reattach with ctx traits dashboard");
+            }
+        }
+        tui_kit::ModalOutcome::Cancelled => {
+            state.modal = None;
+            if let Some(reply) = state.pending_input_reply.take() {
+                let _ = reply.send(None);
+            }
+        }
+        tui_kit::ModalOutcome::Submitted(text) => {
+            if let Some(reply) = state.pending_input_reply.take() {
+                state.modal = None;
+                let _ = reply.send(Some(text));
+            }
+        }
+        tui_kit::ModalOutcome::Pending => {}
+    }
+    true
+}
+
 fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     let mut changed = false;
     if let Some(ask) = state.ask.as_ref() {
@@ -1580,26 +1659,7 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     }
     let keys = state.repaint.poll_detach();
     for key in keys {
-        if let Some(modal) = state.modal.as_mut() {
-            match modal.handle_key(&key) {
-                tui_kit::ModalOutcome::Confirmed => {
-                    state.modal = None;
-                    state.repaint.quit();
-                    // P081: an observer's `q` returns to the dashboard
-                    // automatically — this message is only accurate for the
-                    // live view's own quit, which leaves no dashboard to
-                    // return to.
-                    if !state.observer {
-                        eprintln!(
-                            "live view closed; run continues — reattach with ctx traits dashboard"
-                        );
-                    }
-                }
-                tui_kit::ModalOutcome::Cancelled => {
-                    state.modal = None;
-                }
-                tui_kit::ModalOutcome::Pending | tui_kit::ModalOutcome::Submitted(_) => {}
-            }
+        if apply_open_modal_key(state, &key) {
             changed = true;
             continue;
         }
@@ -7201,6 +7261,121 @@ summary = "A test trait."
                 .map(|row| row.text.as_str())
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// `RunPanel::request_input`'s reply channel resolves on submit — a
+    /// caller blocked on the receiver (the drive loop) unblocks with the
+    /// typed text once `apply_open_modal_key` routes the terminating `Enter`
+    /// through the open `Modal::TextInput`.
+    #[test]
+    fn request_input_submit_resolves_the_reply_channel_with_the_typed_text() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "request-input-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Request Input Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let session = session_with_history_revisions(Vec::new(), Vec::new());
+        let panel = RunPanel::new_with_pane(
+            "request-input-test".to_string(),
+            trait_ref,
+            plan,
+            session,
+            RatatuiPane::new_detached_for_test(),
+        );
+
+        let receiver = panel.request_input(
+            "Missing input: port:missing".to_string(),
+            "The prompt to run against.".to_string(),
+        );
+        {
+            let state = panel.state.lock().expect("state lock");
+            assert!(state.modal.is_some(), "request_input must open a modal");
+            assert!(
+                state.pending_input_reply.is_some(),
+                "request_input must install a reply sender"
+            );
+        }
+
+        for ch in "hello".chars() {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Char(ch), crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+            );
+            assert!(state.modal.is_none(), "submit must close the modal");
+            assert!(
+                state.pending_input_reply.is_none(),
+                "submit must consume the reply sender"
+            );
+        }
+
+        assert_eq!(
+            receiver.recv().expect("reply sent"),
+            Some("hello".to_string())
+        );
+    }
+
+    /// The cancel (Esc) path resolves the SAME channel with `None`, rather
+    /// than leaving the drive loop's `recv()` blocked forever — this is the
+    /// path the live drive loop falls back to today's fail-fast
+    /// `awaiting-input` exit through.
+    #[test]
+    fn request_input_cancel_resolves_the_reply_channel_with_none() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "request-input-cancel-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Request Input Cancel Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let session = session_with_history_revisions(Vec::new(), Vec::new());
+        let panel = RunPanel::new_with_pane(
+            "request-input-cancel-test".to_string(),
+            trait_ref,
+            plan,
+            session,
+            RatatuiPane::new_detached_for_test(),
+        );
+
+        let receiver =
+            panel.request_input("Missing input: port:missing".to_string(), String::new());
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE),
+            );
+            assert!(state.modal.is_none(), "cancel must close the modal");
+        }
+
+        assert_eq!(receiver.recv().expect("reply sent"), None);
     }
 
     // P552: the CURRENT pane's in-flight line is not a special overlay
