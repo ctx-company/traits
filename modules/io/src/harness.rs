@@ -270,8 +270,28 @@ pub struct HarnessSession {
     stderr: mpsc::Receiver<Vec<u8>>,
 }
 
+/// Linux's per-argument hard cap (`MAX_ARG_STRLEN` = 131072 bytes) is tighter
+/// than macOS's ~1MiB shared `ARG_MAX`, so a prompt over this budget was
+/// already unspawnable via argv on Linux — refusing it here before spawn
+/// cannot regress a dispatch that previously worked anywhere.
+const ARGV_PROMPT_BUDGET_BYTES: usize = 128 * 1024;
+
 pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
     validate_argv(&request.argv)?;
+    if matches!(request.prompt_delivery, PromptDelivery::Arg)
+        && request.prompt.len() > ARGV_PROMPT_BUDGET_BYTES
+    {
+        return Err(crate::Error::Usage {
+            message: format!(
+                "refusing to dispatch {}: prompt is {} bytes, over the {}-byte argv budget \
+                 (would risk \"Argument list too long\"); the full prompt is in the debug \
+                 trace, not repeated here",
+                request.argv[0],
+                request.prompt.len(),
+                ARGV_PROMPT_BUDGET_BYTES,
+            ),
+        });
+    }
 
     let mut argv = request.argv.clone();
     if matches!(request.prompt_delivery, PromptDelivery::Arg) {
@@ -304,7 +324,7 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
     let mut child = command
         .spawn()
         .map_err(|source| crate::environment::Error::Filesystem {
-            path: argv.join(" "),
+            path: spawn_failure_path(&argv),
             source,
         })?;
     let pgid = child.id() as i32;
@@ -314,14 +334,14 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
         .stdout
         .take()
         .ok_or_else(|| crate::environment::Error::Filesystem {
-            path: argv.join(" "),
+            path: spawn_failure_path(&argv),
             source: std::io::Error::other("failed to open harness stdout"),
         })?;
     let stderr = child
         .stderr
         .take()
         .ok_or_else(|| crate::environment::Error::Filesystem {
-            path: argv.join(" "),
+            path: spawn_failure_path(&argv),
             source: std::io::Error::other("failed to open harness stderr"),
         })?;
     let limit = if request.capture_limit == 0 {
@@ -344,7 +364,7 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
                 .stdin
                 .take()
                 .ok_or_else(|| crate::environment::Error::Filesystem {
-                    path: argv.join(" "),
+                    path: spawn_failure_path(&argv),
                     source: std::io::Error::other("failed to open harness stdin"),
                 })?;
         if let Err(source) = stdin
@@ -357,7 +377,7 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
             let _ = stdout_handle.join();
             let _ = stderr_handle.join();
             return Err(crate::environment::Error::Filesystem {
-                path: argv.join(" "),
+                path: spawn_failure_path(&argv),
                 source,
             }
             .into());
@@ -375,7 +395,7 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
         match child
             .try_wait()
             .map_err(|source| crate::environment::Error::Filesystem {
-                path: argv.join(" "),
+                path: spawn_failure_path(&argv),
                 source,
             })? {
             Some(_) => break,
@@ -403,12 +423,12 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
     let status = child
         .wait()
         .map_err(|source| crate::environment::Error::Filesystem {
-            path: argv.join(" "),
+            path: spawn_failure_path(&argv),
             source,
         })?;
     let killed = crate::run_kill::was_killed();
     crate::run_kill::clear(pgid);
-    let command_text = argv.join(" ");
+    let command_text = spawn_failure_path(&argv);
     let stdout = stdout_handle
         .join()
         .map_err(|_| crate::environment::Error::Process {
@@ -502,7 +522,7 @@ impl HarnessSession {
             command
                 .spawn()
                 .map_err(|source| crate::environment::Error::Filesystem {
-                    path: argv.join(" "),
+                    path: spawn_failure_path(&argv),
                     source,
                 })?;
         crate::run_kill::register(child.id() as i32);
@@ -510,21 +530,21 @@ impl HarnessSession {
             .stdin
             .take()
             .ok_or_else(|| crate::environment::Error::Filesystem {
-                path: argv.join(" "),
+                path: spawn_failure_path(&argv),
                 source: std::io::Error::other("failed to open warm harness stdin"),
             })?;
         let stdout = child
             .stdout
             .take()
             .ok_or_else(|| crate::environment::Error::Filesystem {
-                path: argv.join(" "),
+                path: spawn_failure_path(&argv),
                 source: std::io::Error::other("failed to open warm harness stdout"),
             })?;
         let stderr = child
             .stderr
             .take()
             .ok_or_else(|| crate::environment::Error::Filesystem {
-                path: argv.join(" "),
+                path: spawn_failure_path(&argv),
                 source: std::io::Error::other("failed to open warm harness stderr"),
             })?;
 
@@ -542,7 +562,7 @@ impl HarnessSession {
             self.child
                 .try_wait()
                 .map_err(|source| crate::environment::Error::Filesystem {
-                    path: self.argv.join(" "),
+                    path: spawn_failure_path(&self.argv),
                     source,
                 })?
         {
@@ -564,7 +584,7 @@ impl HarnessSession {
             .stdin
             .take()
             .ok_or_else(|| crate::environment::Error::Filesystem {
-                path: self.argv.join(" "),
+                path: spawn_failure_path(&self.argv),
                 source: std::io::Error::other("warm harness stdin is unavailable"),
             })?;
         match write_stdin_with_deadline(stdin, prompt, timeout) {
@@ -573,7 +593,7 @@ impl HarnessSession {
                 self.stdin = Some(stdin);
                 let _ = self.child.kill();
                 return Err(crate::environment::Error::Filesystem {
-                    path: self.argv.join(" "),
+                    path: spawn_failure_path(&self.argv),
                     source,
                 }
                 .into());
@@ -640,7 +660,7 @@ impl HarnessSession {
                 self.child
                     .try_wait()
                     .map_err(|source| crate::environment::Error::Filesystem {
-                        path: self.argv.join(" "),
+                        path: spawn_failure_path(&self.argv),
                         source,
                     })?
             {
@@ -819,6 +839,17 @@ fn sandboxed_argv(argv: &[String], sandbox: Option<&SpawnSandbox>) -> Vec<String
             .collect(),
         None => argv.to_vec(),
     }
+}
+
+/// A spawn-failure `path:` value that names the command shape without ever
+/// repeating the prompt body: every caller of [`run`]/[`HarnessSession::spawn`]
+/// may push a payload-derived prompt onto `argv`, and `environment::Error::Filesystem`'s
+/// `path` field is rendered verbatim into callers' `raw-reason` text (e.g.
+/// merge's `unexpected failure during merge: {error}`).
+fn spawn_failure_path(argv: &[String]) -> String {
+    let bytes: usize = argv.iter().map(|arg| arg.len()).sum();
+    let head = argv.first().map(String::as_str).unwrap_or("<empty argv>");
+    format!("{head} …({} args, {bytes} bytes)", argv.len())
 }
 
 fn validate_argv(argv: &[String]) -> crate::Result<()> {
@@ -1161,5 +1192,82 @@ mod output_token_counter_tests {
             .expect("warm prompt succeeds");
         assert_eq!(outcome.exit_code, Some(0));
         assert!(ticks.load(Ordering::Relaxed) >= 3);
+    }
+
+    fn oversized_prompt() -> String {
+        "x".repeat(super::ARGV_PROMPT_BUDGET_BYTES + 1)
+    }
+
+    #[test]
+    fn oversized_arg_prompt_refuses_before_spawn() {
+        let prompt = oversized_prompt();
+        let error = super::run(HarnessRunRequest {
+            argv: vec!["does-not-matter".to_string()],
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            prompt: prompt.clone(),
+            prompt_delivery: PromptDelivery::Arg,
+            timeout_ms: 5_000,
+            idle_timeout_ms: None,
+            capture_limit: 0,
+            stream: false,
+            stdout_observer: None,
+            tick_observer: None,
+            exec_dir: None,
+            sandbox: None,
+        })
+        .expect_err("an over-budget argv prompt must refuse before spawn");
+        let message = error.to_string();
+        assert!(message.contains("does-not-matter"), "{message}");
+        assert!(message.contains(&(prompt.len()).to_string()), "{message}");
+        assert!(!message.contains(&prompt), "{message}");
+        assert!(!message.contains("os error 7"), "{message}");
+    }
+
+    #[test]
+    fn oversized_stdin_prompt_still_dispatches() {
+        let prompt = oversized_prompt();
+        let outcome = super::run(HarnessRunRequest {
+            argv: vec!["cat".to_string()],
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            prompt: prompt.clone(),
+            prompt_delivery: PromptDelivery::Stdin,
+            timeout_ms: 5_000,
+            idle_timeout_ms: None,
+            capture_limit: 0,
+            stream: false,
+            stdout_observer: None,
+            tick_observer: None,
+            exec_dir: None,
+            sandbox: None,
+        })
+        .expect("an over-budget stdin prompt bypasses the argv budget entirely");
+        assert_eq!(outcome.exit_code, Some(0));
+        assert_eq!(outcome.stdout, prompt);
+    }
+
+    #[test]
+    fn spawn_failure_of_a_missing_binary_redacts_the_small_prompt_too() {
+        let error = super::run(HarnessRunRequest {
+            argv: vec!["ctx-does-not-exist-anywhere".to_string()],
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            prompt: "small prompt body".to_string(),
+            prompt_delivery: PromptDelivery::Arg,
+            timeout_ms: 5_000,
+            idle_timeout_ms: None,
+            capture_limit: 0,
+            stream: false,
+            stdout_observer: None,
+            tick_observer: None,
+            exec_dir: None,
+            sandbox: None,
+        })
+        .expect_err("spawning a nonexistent binary must fail");
+        let message = error.to_string();
+        assert!(message.contains("ctx-does-not-exist-anywhere"), "{message}");
+        assert!(message.contains("2 args"), "{message}");
+        assert!(!message.contains("small prompt body"), "{message}");
     }
 }
