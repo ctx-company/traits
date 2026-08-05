@@ -4074,6 +4074,22 @@ fn journey_row_lines(rows: &[JourneyRow], width: u16) -> Vec<tui::Line> {
         .collect()
 }
 
+/// Loop-nesting depth for a step row, from its `position_path` — never a
+/// render-local counter, so a resumed run indents identically (0033). A
+/// container's own `position_path` carries only its *ancestor* loop
+/// segments (its own loop segment is pushed onto its children's paths by
+/// `child_location`, not its own), so counting segments directly nests
+/// headers and bodies monotonically with no container special-case.
+/// Clamped at two levels so a deeply nested procedure doesn't walk off a
+/// narrow pane.
+fn journey_step_depth(step: &RunStep) -> usize {
+    step.position_path
+        .iter()
+        .filter(|segment| segment.kind == "loop" || segment.kind == "for-each")
+        .count()
+        .min(2)
+}
+
 fn journey_step_line(step: &RunStep, width: u16) -> tui::Line {
     let (mark, tone) = match step.state {
         StepState::Done => ("✓", tui::Tone::Pass),
@@ -4133,10 +4149,23 @@ fn journey_step_line(step: &RunStep, width: u16) -> tui::Line {
         without_variant_or_metrics,
         without_agent.clone(),
     ];
-    let (label, fields) = candidates
-        .into_iter()
-        .find(|fields| journey_text_width(mark, &step.label, fields) <= width as usize)
-        .map(|fields| (step.label.clone(), fields))
+    let indent = 4 * journey_step_depth(step);
+    let indented_width = (width as usize).saturating_sub(indent);
+    let (indent, label, fields) = candidates
+        .iter()
+        .find(|fields| journey_text_width(mark, &step.label, fields) <= indented_width)
+        .cloned()
+        .map(|fields| (indent, step.label.clone(), fields))
+        .or_else(|| {
+            // Indentation is the first thing to drop, so a step that only
+            // fits at the full width renders flat rather than truncating
+            // its label to preserve a nesting cue (0033).
+            candidates
+                .iter()
+                .find(|fields| journey_text_width(mark, &step.label, fields) <= width as usize)
+                .cloned()
+                .map(|fields| (0, step.label.clone(), fields))
+        })
         .unwrap_or_else(|| {
             let tail = without_agent;
             let tail_width = tail
@@ -4147,11 +4176,15 @@ fn journey_step_line(step: &RunStep, width: u16) -> tui::Line {
             let budget = (width as usize)
                 .saturating_sub(tui::display_width(mark) + 1 + 3 + tui::display_width(&tail_width));
             (
+                0,
                 tui::truncate_display_width_end_recording(&step.label, budget),
                 tail,
             )
         });
     let mut line = tui::Line::blank();
+    if indent > 0 {
+        line.push(" ".repeat(indent), tui::Tone::Muted);
+    }
     line.push(mark, tone);
     line.push(" ", tui::Tone::Muted);
     line.push(label, tone);
@@ -7176,6 +7209,106 @@ summary = "A test trait."
         assert_eq!(
             line_text(&journey_step_line(&step, 120)),
             "~ deploy · [agent] reviewer@codex · [variant] fast ∙ branch-a · running · 00:00:05 · 1.2k tok · (2 open)"
+        );
+    }
+
+    fn loop_path_segment(iteration: usize) -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "loop".to_string(),
+            id: Some("round".to_string()),
+            index: 0,
+            iteration: Some(iteration),
+            item_index: None,
+        }
+    }
+
+    fn item_path_segment(id: &str) -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "item".to_string(),
+            id: Some(id.to_string()),
+            index: 0,
+            iteration: None,
+            item_index: None,
+        }
+    }
+
+    fn procedure_path_segment() -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "procedure".to_string(),
+            id: None,
+            index: 0,
+            iteration: None,
+            item_index: None,
+        }
+    }
+
+    #[test]
+    fn journey_step_indents_by_loop_nesting_depth_from_position_path() {
+        // Container paths never carry their own loop segment — a loop
+        // pushes its segment onto its *children's* paths, not its own
+        // (`child_location`) — so a top-level container sits flush left.
+        let mut top_level_container = step("round", StepState::Done, None);
+        top_level_container.loop_key = Some("round".to_string());
+        top_level_container.position_path = vec![procedure_path_segment()];
+        assert!(
+            !line_text(&journey_step_line(&top_level_container, 120)).starts_with(' '),
+            "a top-level loop container renders flat"
+        );
+
+        // A body step under that loop carries the loop's segment and
+        // indents one level.
+        let mut body_step = step("produce", StepState::Done, None);
+        body_step.position_path = vec![procedure_path_segment(), loop_path_segment(1)];
+        assert!(line_text(&journey_step_line(&body_step, 120)).starts_with("    ✓"));
+
+        // A nested loop container one level in carries its ancestor's
+        // segment and indents one level too — headers nest under their
+        // enclosing loop just like bodies do.
+        let mut nested_container = step("inner round", StepState::Done, None);
+        nested_container.loop_key = Some("inner round".to_string());
+        nested_container.position_path = vec![procedure_path_segment(), loop_path_segment(1)];
+        assert!(
+            line_text(&journey_step_line(&nested_container, 120)).starts_with("    ✓"),
+            "a nested loop container indents under its enclosing loop"
+        );
+    }
+
+    #[test]
+    fn journey_step_nesting_clamps_at_two_levels() {
+        let mut doubly_nested = step("inner", StepState::Done, None);
+        doubly_nested.position_path = vec![
+            loop_path_segment(0),
+            loop_path_segment(0),
+            item_path_segment("inner"),
+        ];
+        assert!(line_text(&journey_step_line(&doubly_nested, 120)).starts_with("        ✓"));
+
+        let mut triply_nested = step("deepest", StepState::Done, None);
+        triply_nested.position_path = vec![
+            loop_path_segment(0),
+            loop_path_segment(0),
+            loop_path_segment(0),
+            item_path_segment("deepest"),
+        ];
+        assert!(
+            line_text(&journey_step_line(&triply_nested, 120)).starts_with("        ✓"),
+            "a third loop level must clamp at the same indent as two levels"
+        );
+    }
+
+    #[test]
+    fn journey_step_drops_indentation_before_truncating_the_label() {
+        let mut nested = step("deploy the fleet", StepState::Running, None);
+        nested.position_path = vec![loop_path_segment(0), item_path_segment("deploy")];
+        nested.status = "running".to_string();
+        let rendered = line_text(&journey_step_line(&nested, 30));
+        assert!(
+            !rendered.starts_with(' '),
+            "indentation must drop before the label is truncated: {rendered}"
+        );
+        assert!(
+            rendered.contains("deploy the fleet"),
+            "the label must survive untruncated once indentation drops: {rendered}"
         );
     }
 
