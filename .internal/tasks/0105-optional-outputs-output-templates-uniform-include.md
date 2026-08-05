@@ -2,9 +2,10 @@
 
 **Status:** filed, ready · **Depends on:** 0103 · **Raised:** 2026-08-05 · **Touches:** packages/cdk/src/sequence.ts (output lowering, include merge), prompt builders, runtime output handling
 
-The one semantic addition the new surface needs. P447 already gave inputs the
-`{ slot, optional: true }` marker and command/check steps an `include:` field; this completes
-the symmetry on the output side and makes `include:` uniform across step kinds.
+The one semantic addition the new surface needs, per 0102's ledger (canonical/runtime
+additions: optional outputs). P447 already gave inputs the `{ slot, optional: true }` marker
+and command/check steps an `include:` field; this completes the symmetry on the output side and
+makes `include:` uniform across step kinds.
 
 ## Decisions
 
