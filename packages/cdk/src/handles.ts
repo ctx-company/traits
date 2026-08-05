@@ -79,6 +79,12 @@ export type DeclaredSlotHandle<Value = unknown> = SlotHandle<Value> & {
   readonly optional: () => OptionalSlotRead<Value>;
 };
 /**
+ * A declared object-schema slot handle: `DeclaredSlotHandle`'s `.optional()`
+ * plus `SlotWithFields`'s per-field `FieldRef` access — what `slot(...)`/
+ * `slot.of(...)` actually return for an object schema.
+ */
+export type DeclaredSlotWithFields<Value = unknown> = DeclaredSlotHandle<Value> & SlotWithFields<Value>;
+/**
  * A slot handle whose value is an object schema: exposes one `FieldRef`
  * per declared field (`slot.foo`, `slot["exit-code"]`) alongside the plain
  * `SlotHandle<Value>` surface. Scalar/list slots stay a bare `SlotHandle`.
@@ -139,6 +145,15 @@ export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"o
  * `input.prompt`).
  */
 export type InstructionOutputHandle<Value = unknown> = CdkHandle<"instruction-output", Value>;
+/**
+ * An `output.prompt` tagged-template value: the prose is the attaching
+ * step's instruction (appended to its compiled prompt), and each
+ * interpolated slot (optionally `.optional()`) IS the step's output
+ * contract — instructions and contract cannot drift apart, the output-side
+ * mirror of `input.prompt`. Accepted anywhere a step's `output:` accepts a
+ * slot handle; expands into ordinary output-sink entries at lowering.
+ */
+export type OutputTemplateHandle = CdkHandle<"output-template">;
 /** A typed reference to a declared `[[session]]`, returned by `session(id, opts)`. */
 export type SessionHandle = Handle<"session">;
 /** A typed reference to a declared `[[signal]]`, returned by `signal(fields)`. */

@@ -1116,6 +1116,10 @@ pub struct CallResponse {
     pub unexpected_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_required_outputs: Vec<String>,
+    /// Declared optional output sinks (P105) left unfilled this call. A
+    /// signed non-failure — never contributes to `correction` or rejection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unfilled_optional_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correction: Option<String>,
     pub updated_session_digest: Digest,
@@ -2234,6 +2238,7 @@ fn preflight_call_rejection(
         accepted_outputs: Vec::new(),
         rejected_outputs: Vec::new(),
         missing_required_outputs: Vec::new(),
+        unfilled_optional_outputs: Vec::new(),
         unexpected_outputs: Vec::new(),
         schema_validation: Vec::new(),
         signal_validation: Vec::new(),
@@ -2886,6 +2891,10 @@ pub fn call_response(session: Session, response_kind: CallResponseKind) -> CallR
         missing_required_outputs: report
             .as_ref()
             .map(|report| report.missing_required_outputs.clone())
+            .unwrap_or_default(),
+        unfilled_optional_outputs: report
+            .as_ref()
+            .map(|report| report.unfilled_optional_outputs.clone())
             .unwrap_or_default(),
         correction,
         updated_session_digest: session.state_digest.clone(),
@@ -3663,6 +3672,163 @@ output = ["slot:second-work"]
                         || value.value != serde_json::json!(answer)
                 }),
             "the following worker frame must not receive the prior owner answer"
+        );
+    }
+}
+
+/// P105 regression fixtures: a declared optional output sink left unfilled
+/// completes the step normally and is ledger-distinguishable from a missing
+/// required output, whose rejection behavior stays unchanged.
+#[cfg(test)]
+mod optional_output_sink_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"
+id = "optional-output-sink-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Optional Output Sink Fixture"
+summary = "P105 regression fixture for an optional output sink left unfilled."
+
+[[agent]]
+id = "worker"
+description = "Produces the required output and may skip the optional one."
+summary = "Fixture worker role."
+
+[[slot]]
+id = "required-out"
+schema = "schema:text"
+description = "Always-produced output."
+
+[[slot]]
+id = "optional-out"
+schema = "schema:text"
+description = "Optionally-produced output."
+
+[prompt.work]
+text = "Produce the required output; the optional one may be left unfilled."
+
+[procedure]
+description = "One prompt step with one required and one declared-optional output sink."
+
+[[procedure.sequence]]
+id = "work"
+title = "Work"
+agent = "agent:worker"
+prompt = "prompt:work"
+output = ["slot:required-out", { slot = "slot:optional-out", optional = true }]
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn start_session(trait_ref: &crate::r#trait::Trait) -> Session {
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-optional-output-sink",
+            "run-id": "run-optional-output-sink",
+            "provenance": {
+                "started-by": { "surface": "test", "caller": "optional-output-sink" },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        start_run_session(
+            trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    fn submit_current(
+        trait_ref: &crate::r#trait::Trait,
+        session: Session,
+        produced_slots: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> CallResponse {
+        let template = session
+            .next_frame
+            .as_ref()
+            .and_then(|frame| frame.call_template.as_ref())
+            .expect("current frame template")
+            .clone();
+        let submission = CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots,
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: Some(CallerProvenance {
+                surface: "test".to_string(),
+                caller: "optional-output-sink".to_string(),
+                agent: Some("worker".to_string()),
+                harness: None,
+            }),
+        };
+        submit_run_call(trait_ref, session, submission).expect("call is accepted")
+    }
+
+    #[test]
+    fn unfilled_optional_output_completes_the_step_without_rejection() {
+        let trait_ref = fixture_trait();
+        let response = submit_current(
+            &trait_ref,
+            start_session(&trait_ref),
+            [("slot:required-out".to_string(), serde_json::json!("done"))]
+                .into_iter()
+                .collect(),
+        );
+        assert!(
+            response.missing_required_outputs.is_empty(),
+            "the required output was produced; nothing should be reported missing"
+        );
+        assert_eq!(
+            response.unfilled_optional_outputs,
+            vec!["slot:optional-out".to_string()],
+            "the unfilled optional sink must be recorded as a signed non-failure"
+        );
+        assert!(
+            response.rejected_slot_values.is_empty(),
+            "an unfilled optional output must never be treated as a rejection"
+        );
+        assert!(
+            response.correction.is_none(),
+            "an unfilled optional output must not produce a correction"
+        );
+    }
+
+    #[test]
+    fn missing_required_output_still_fails_exactly_as_today() {
+        let trait_ref = fixture_trait();
+        let response = submit_current(
+            &trait_ref,
+            start_session(&trait_ref),
+            [(
+                "slot:optional-out".to_string(),
+                serde_json::json!("skipped-required"),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(
+            response.missing_required_outputs,
+            vec!["slot:required-out".to_string()],
+            "the required output was not produced and must be reported missing"
+        );
+        assert!(
+            response
+                .correction
+                .as_deref()
+                .is_some_and(|correction| correction.contains("provide required output(s)")),
+            "a missing required output must still surface the existing correction: {:?}",
+            response.correction
         );
     }
 }

@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
-import type { FieldRef, OutputSinkHandle, SlotHandle, SlotWithFields } from "./handles.js";
+import type { DeclaredSlotHandle, DeclaredSlotWithFields, FieldRef, OutputSinkHandle, SlotHandle } from "./handles.js";
 import { optionalSlot as optionalSlotInput } from "./input.js";
 import { attachMeta, metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
@@ -54,23 +54,28 @@ export interface SlotFunction {
    * `slot.foo`/`slot["exit-code"]` — for `condition.equals`/`fieldEquals`.
    * @example `slot({ id: "review", schema: schema.text() })`
    */
-  <Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): SlotWithFields<Value>;
+  <Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value>;
   /** Text-schema slot shorthand; a bare string is shorthand for `{ id: value }`. @example `slot.text("summary")` */
-  text(value: string | Omit<SlotFields, "schema">): SlotHandle<string>;
+  text(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string>;
   /** Boolean-schema slot shorthand. @example `slot.boolean("approved")` */
-  boolean(value: string | Omit<SlotFields, "schema">): SlotHandle<boolean>;
+  boolean(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<boolean>;
   /** Numeric-schema slot shorthand. @example `slot.number("retry-count")` */
-  number(value: string | Omit<SlotFields, "schema">): SlotHandle<number>;
+  number(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<number>;
   /** Any-JSON-schema slot shorthand, for output shapes not worth declaring precisely. @example `slot.any("raw")` */
-  any(value: string | Omit<SlotFields, "schema">): SlotHandle<JsonValue>;
+  any(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<JsonValue>;
   /** Curried list-slot factory: bind the element schema once, declare several slots of that list shape. @example `const findingsList = slot.array(schema.text()); const findings = findingsList("findings");` */
-  array<Value>(schemaValue: SchemaValue<Value>): (value: string | Omit<SlotFields, "schema">) => SlotHandle<Value[]>;
+  array<Value>(
+    schemaValue: SchemaValue<Value>,
+  ): (value: string | Omit<SlotFields, "schema">) => DeclaredSlotHandle<Value[]>;
   /** List-slot shorthand with the element schema and id/fields both given. @example `slot.array(schema.text(), "findings")` */
-  array<Value>(schemaValue: SchemaValue<Value>, value: string | Omit<SlotFields, "schema">): SlotHandle<Value[]>;
+  array<Value>(
+    schemaValue: SchemaValue<Value>,
+    value: string | Omit<SlotFields, "schema">,
+  ): DeclaredSlotHandle<Value[]>;
   /** List-of-text-slot shorthand, the common case of `slot.array(schema.text(), ...)`. @example `slot.texts("notes")` */
-  texts(value: string | Omit<SlotFields, "schema">): SlotHandle<string[]>;
+  texts(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string[]>;
   /** Full-form slot declaration, alias of the bare `slot(...)` call for when a named property reads better than a call expression. @example `slot.of({ id: "review", schema: schema.text() })` */
-  of<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): SlotWithFields<Value>;
+  of<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value>;
 }
 
 /**
@@ -144,12 +149,12 @@ export interface OperationFunction {
  * @see {@link operation.over}
  * @see {@link port}
  */
-function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): SlotWithFields<Value> {
+function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value> {
   // `slotOf` stays non-generic and its return may be an object-schema field
   // proxy (`objectSlotFieldProxy`) rather than a bare handle — neither is
-  // statically distinguishable from `SlotWithFields<Value>` without running
+  // statically distinguishable from `DeclaredSlotWithFields<Value>` without running
   // it, so this generic wrapper mints the phantom once.
-  return slotOf(fields) as SlotWithFields<Value>;
+  return slotOf(fields) as DeclaredSlotWithFields<Value>;
 }
 
 // `Object.assign`'s typing doesn't preserve a merged value's generic call
@@ -226,11 +231,11 @@ export const operation: OperationFunction = {
   },
 };
 
-function slotWithSchema(value: string | Omit<SlotFields, "schema">, schemaRef: SchemaValue): SlotHandle {
+function slotWithSchema(value: string | Omit<SlotFields, "schema">, schemaRef: SchemaValue): DeclaredSlotHandle {
   return slotOf({ ...(typeof value === "string" ? { id: value } : value), schema: schemaRef });
 }
 
-function slotOf(fields: SlotFields): SlotHandle {
+function slotOf(fields: SlotFields): DeclaredSlotHandle {
   validateSlug(fields.id, "slot.id");
   const declaration = compact({
     id: fields.id,

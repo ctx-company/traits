@@ -18,7 +18,9 @@ import type {
 import type {
   AgentHandle,
   InstructionOutputHandle,
+  OptionalSlotRead,
   OutputSinkHandle,
+  OutputTemplateHandle,
   PortHandle,
   PromptHandle,
   PromptTemplate,
@@ -34,10 +36,13 @@ import type { CommandTemplateValue, OptionalSlotInputValue } from "./input.js";
 import {
   attachInstructionOutput,
   attachMeta,
+  claimOutputTemplateAuthorship,
   instructionOutputContent,
   isInstructionOutputHandle,
+  isOutputTemplateHandle,
   metaOf,
   outputSinkDeclaration,
+  outputTemplateContent,
   recordDiagnostic,
   withDeclaration,
   withHiddenField,
@@ -85,7 +90,9 @@ export type SequenceOutputValue<Value = unknown> =
   | SlotHandle<Value>
   | SchemaHandle<Value>
   | OutputSinkHandle<Value>
-  | InstructionOutputHandle<Value>;
+  | InstructionOutputHandle<Value>
+  | OptionalSlotRead<Value>
+  | OutputTemplateHandle;
 export type ArgvItem = string | SlotHandle | PortHandle | ResourceHandle;
 type SignalOutputValue = string | RefHandle<"signal"> | {
   readonly signal: string | RefHandle<"signal">;
@@ -162,6 +169,8 @@ type AskSequenceFields =
     readonly kind: "ask";
     readonly when: RefHandle<"signal">;
     readonly output: SlotHandle;
+    /** See {@link CommandSequenceFields.include}. */
+    readonly include?: SequenceInputValue | readonly SequenceInputValue[];
     readonly agent?: never;
     readonly text?: never;
     readonly cmd?: never;
@@ -312,6 +321,8 @@ type CheckSequenceFields =
 type LinearSequenceFields = SequenceCommonFields & {
   readonly kind: "sequence";
   readonly sequence: SequenceRefValue;
+  /** See {@link CommandSequenceFields.include}. */
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   readonly prompt?: never;
   readonly text?: never;
   readonly cmd?: never;
@@ -358,6 +369,8 @@ type LoopSequenceFields = SequenceCommonFields & {
    * matching `until` is exhaustion, which `onExhausted` governs, and the items
    * inside the body route their own failures. */
   readonly onFailure?: never;
+  /** See {@link CommandSequenceFields.include}. */
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   readonly prompt?: never;
   readonly text?: never;
   readonly cmd?: never;
@@ -375,6 +388,8 @@ type ForEachSequenceFields = SequenceCommonFields & {
   readonly limit?: number;
   readonly maxItems?: number;
   readonly concurrent?: boolean;
+  /** See {@link CommandSequenceFields.include}. */
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   readonly prompt?: never;
   readonly text?: never;
   readonly cmd?: never;
@@ -407,6 +422,8 @@ export type ParallelOptions = {
   readonly join?: ParallelJoinOption;
   readonly branchFailure?: readonly ParallelBranchFailureEntry[];
   readonly onFailure?: FailureTargetValue;
+  /** See {@link CommandSequenceFields.include}. */
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
 };
 export type ParallelSequenceFields =
   & Omit<
@@ -428,6 +445,8 @@ export type ParallelSequenceFields =
     readonly join?: ParallelJoinOption;
     readonly branchFailure?: readonly ParallelBranchFailureEntry[];
     readonly onFailure?: FailureTargetValue;
+    /** See {@link CommandSequenceFields.include}. */
+    readonly include?: SequenceInputValue | readonly SequenceInputValue[];
     readonly prompt?: never;
     readonly text?: never;
     readonly cmd?: never;
@@ -462,6 +481,8 @@ export type BranchSequenceFields =
     readonly if: GuardValue;
     readonly then: BranchArmValue;
     readonly otherwise?: BranchArmValue;
+    /** See {@link CommandSequenceFields.include}. */
+    readonly include?: SequenceInputValue | readonly SequenceInputValue[];
     readonly prompt?: never;
     readonly text?: never;
     readonly cmd?: never;
@@ -1039,6 +1060,7 @@ export const sequence: SequenceFunction = {
       ...(options?.join === undefined ? {} : { join: options.join }),
       ...(options?.branchFailure === undefined ? {} : { branchFailure: options.branchFailure }),
       ...(options?.onFailure === undefined ? {} : { onFailure: options.onFailure }),
+      ...(options?.include === undefined ? {} : { include: options.include }),
     }),
   flow: { Continue: "continue", Abort: "abort" } as const,
 };
@@ -1165,10 +1187,22 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   }
   const project = isSequenceKind(fields, kind, "project") ? fields : undefined;
   const projections = project === undefined ? undefined : normalizeProjectProjections(project);
+  const agentRef = fields.agent === undefined ? undefined : refText(fields.agent, `sequence.${fields.id}.agent`);
   const instructionOutputRender = attachInstructionOutputs(fields.id, kind, fields.output);
   const promptWithInstructionOutputs = instructionOutputRender === undefined
     ? prompt
     : mergePromptInstructionOutputs(prompt, instructionOutputRender);
+  const outputTemplateRender = attachOutputTemplates(fields.id, kind, agentRef, fields.output);
+  const promptWithOutputTemplates = outputTemplateRender === undefined
+    ? promptWithInstructionOutputs
+    // Only the prose merges into the prompt: an output-template's refs are
+    // the step's own WRITE contract, not a READ the prompt interpolates, so
+    // they must never join `promptInput`'s inferred input list (P105).
+    : mergePromptInstructionOutputs(promptWithInstructionOutputs, {
+      ...outputTemplateRender,
+      refs: [],
+      optionalRefs: [],
+    });
   const output = projections === undefined ? outputList(fields.output) : projections.map((entry) => entry.output);
   const outputRefs = projections === undefined
     ? outputRefList(fields.output)
@@ -1180,7 +1214,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     )
     : undefined;
   const input = kind === "prompt" || kind === "ask"
-    ? promptInput(promptDeps, promptWithInstructionOutputs)
+    ? promptInput(promptDeps, promptWithOutputTemplates)
     : isSequenceKind(fields, kind, "command")
     ? commandInput(
       commandDeps,
@@ -1191,7 +1225,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     : kind === "check"
     ? commandInput(commandDeps, commandArgvFields, undefined, undefined)
     : isSequenceKind(fields, kind, "loop")
-    ? loopInput(fields.input, fields.iterations)
+    ? loopInput(mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"]), fields.iterations)
     : kind === "project"
     ? (() => {
       const slotSources = projections!
@@ -1200,13 +1234,15 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
       return slotSources.length === 0 ? undefined : uniqueInOrder(slotSources);
     })()
     : (() => {
-      const list = normalizeSequenceInputList(fields.input);
+      const list = normalizeSequenceInputList(
+        mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"]),
+      );
       return list.length === 0 ? undefined : list;
     })();
   const implicitPrompt = kind === "prompt" || kind === "ask"
     ? promptDeclaration(
       fields,
-      promptWithInstructionOutputs,
+      promptWithOutputTemplates,
       input?.filter((item) => !isOptionalInputItem(item)).map(inputItemRefText),
       outputRefs.filter((ref) => ref.startsWith("slot:")),
     )
@@ -1242,13 +1278,13 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     id: fields.id,
     title: fields.title ?? titleFromId(fields.id),
     kind: kind === "prompt" || kind === "command" ? undefined : kind,
-    agent: fields.agent === undefined ? undefined : refText(fields.agent, `sequence.${fields.id}.agent`),
+    agent: agentRef,
     input,
     output,
     format: fields.format === undefined || typeof fields.format === "string" ? fields.format : [...fields.format],
     "on-complete": onCompleteRules(fields.onComplete, outputRefs),
   };
-  if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(promptWithInstructionOutputs, fields.id);
+  if (kind === "prompt" || kind === "ask") canonical.prompt = promptRef(promptWithOutputTemplates, fields.id);
   if (kind === "ask") {
     canonical.when = refText((fields as AskSequenceFields).when, `sequence.${fields.id}.when`);
   }
@@ -1561,28 +1597,55 @@ function generatedLoopGateBodyId(scope: SequenceScope, loopId: string): string {
 function generatedLoopGateInvocationId(loopId: string): string {
   return `ctx-loop-gate-invoke-${loopId.length}-${loopId}`;
 }
+/** True for an `${slot.optional()}` output marker (P105): `{ slot, optional: true }`, mirroring `OptionalSlotInputValue` on the input side. */
+function isOptionalOutputItem(item: unknown): item is OptionalSlotRead {
+  return item !== null && typeof item === "object" && !Array.isArray(item) && "slot" in item
+    && (item as { readonly optional?: unknown; }).optional === true;
+}
 function outputText(value: SequenceOutputValue, path: string): string {
+  if (isOptionalOutputItem(value)) return refText(value.slot, path);
   const declaration = outputSinkDeclaration(value);
   return declaration !== undefined ? declaration.slot : refText(value, path);
+}
+/**
+ * Expands an `output.prompt` output-template item into its interpolated
+ * slots (each as an ordinary ref string or `{ slot, optional: true }`
+ * marker, in interpolation order) — every other item passes through
+ * unchanged. Shared by `outputList`/`outputRefList` so an output-template
+ * lowers identically wherever a step's `output:` list is read.
+ */
+function flattenOutputItems(
+  value: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
+): readonly SequenceOutputValue[] {
+  if (value === undefined) return [];
+  const items = Array.isArray(value) ? value : [value];
+  return items.flatMap((item) => {
+    const content = outputTemplateContent(item);
+    if (content === undefined) return [item];
+    const optionalRefs = new Set(content.optionalRefs ?? []);
+    return content.refs.map((ref) =>
+      (optionalRefs.has(ref) ? { slot: ref, optional: true } : ref) as unknown as SequenceOutputValue
+    );
+  });
 }
 function outputList(
   value: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
 ): CanonicalOutputSink[] | undefined {
   if (value === undefined) return undefined;
-  return (Array.isArray(value) ? value : [value]).map((item, index) =>
-    metaOf(item)?.kind === "output-sink"
+  return flattenOutputItems(value).map((item, index) => {
+    const path = `sequence.output[${index}]`;
+    if (isOptionalOutputItem(item)) return { slot: refText(item.slot, path), optional: true };
+    return metaOf(item)?.kind === "output-sink"
       // A `SlotHandle | operation.over(...)` output-sink item normalizes to
       // the canonical `{ slot, operation }` shape by construction (see
       // `slot.ts`'s `operation.over`) — `normalizeValue` itself walks
       // arbitrary JSON, so its return stays `JsonValue` at the boundary.
       ? normalizeValue(item) as CanonicalOutputSink
-      : outputText(item, `sequence.output[${index}]`)
-  );
+      : outputText(item, path);
+  });
 }
 function outputRefList(value: SequenceOutputValue | readonly SequenceOutputValue[] | undefined): string[] {
-  return value === undefined
-    ? []
-    : (Array.isArray(value) ? value : [value]).map((item, index) => outputText(item, `sequence.output[${index}]`));
+  return flattenOutputItems(value).map((item, index) => outputText(item, `sequence.output[${index}]`));
 }
 function promptRef(value: unknown, id: string): string {
   const meta = metaOf(value);
@@ -1759,7 +1822,7 @@ function mergePromptInstructionOutputs(
   const meta = metaOf(promptValue);
   if (meta?.kind !== "template") {
     throw new Error(
-      "output.text/output.of: the attaching step's prompt body must be an input.prompt value, "
+      "output.text/output.of/output.prompt: the attaching step's prompt body must be an input.prompt value, "
         + "not a named prompt(...) reference",
     );
   }
@@ -1774,6 +1837,59 @@ function mergePromptInstructionOutputs(
     declaration: { text },
     ...(meta.declarations === undefined ? {} : { declarations: meta.declarations }),
   }) as PromptTemplate;
+}
+/**
+ * Merges every `output.prompt` output-template in a step's `output:` list
+ * into the step's compiled prompt, and enforces the P105 build rules: a
+ * slot claimed twice across this step's own `output:` entries (template x
+ * template, or template x plain) is an error, and a slot claimed by
+ * `output.prompt` on two steps for different `agent:` values is an error
+ * (`claimOutputTemplateAuthorship`, meta.ts). Returns `undefined` when the
+ * step declares no output-template, so its prompt/refs stay byte-identical
+ * to hand-listing the same slots and hand-writing the same prose.
+ */
+function attachOutputTemplates(
+  stepId: string,
+  kind: SequenceFields["kind"],
+  agentRef: string | undefined,
+  outputValue: SequenceOutputValue | readonly SequenceOutputValue[] | undefined,
+): { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[]; } | undefined {
+  if (outputValue === undefined) return undefined;
+  const items = Array.isArray(outputValue) ? outputValue : [outputValue];
+  const templates = items.filter((item) => isOutputTemplateHandle(item));
+  if (templates.length === 0) return undefined;
+  if (kind !== "prompt" && kind !== "ask") {
+    throw new Error(`procedure.sequence ${stepId}: output.prompt is valid only on prompt/ask steps`);
+  }
+  const claimedBy = new Map<string, "template" | "plain">();
+  for (const item of items) {
+    if (isOutputTemplateHandle(item)) continue;
+    claimedBy.set(outputText(item, `sequence.${stepId}.output`), "plain");
+  }
+  let text = "";
+  const refs: string[] = [];
+  const optionalRefs: string[] = [];
+  for (const handle of templates) {
+    const content = outputTemplateContent(handle);
+    if (content === undefined) {
+      throw new Error(`procedure.sequence ${stepId}: expected an output.prompt value in output:`);
+    }
+    const templateOptionalRefs = new Set(content.optionalRefs ?? []);
+    content.refs.forEach((ref, index) => {
+      if (claimedBy.has(ref)) {
+        throw new Error(
+          `procedure.sequence ${stepId}: output slot ${ref} is claimed more than once across this step's `
+            + `output: entries`,
+        );
+      }
+      claimedBy.set(ref, "template");
+      claimOutputTemplateAuthorship(content.slots[index], agentRef, stepId);
+      refs.push(ref);
+      if (templateOptionalRefs.has(ref)) optionalRefs.push(ref);
+    });
+    text += (text === "" ? "" : "\n\n") + content.text;
+  }
+  return { text, refs: uniqueInOrder(refs), optionalRefs: uniqueInOrder(optionalRefs) };
 }
 /**
  * Merges a legacy `input:` dependency list (P447-era command/check surface)

@@ -973,6 +973,7 @@ fn execute_project_item(
             OutputSink::SlotOperation {
                 slot: projection.destination.clone(),
                 operation: projection.operation.clone(),
+                optional: false,
             }
         };
         let prior = accepted_value(state, &projection.destination).cloned();
@@ -1581,6 +1582,7 @@ pub fn apply_terminal_frame_failure(
             reason: reason.to_string(),
         }],
         missing_required_outputs: Vec::new(),
+        unfilled_optional_outputs: Vec::new(),
         unexpected_outputs: Vec::new(),
         schema_validation: Vec::new(),
         signal_validation: Vec::new(),

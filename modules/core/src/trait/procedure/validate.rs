@@ -550,6 +550,7 @@ fn validate_parallel_join(
             let sink = OutputSink::SlotOperation {
                 slot: destination.clone(),
                 operation: operation.clone(),
+                optional: false,
             };
             validate_output_sink_operation(
                 trait_ref,

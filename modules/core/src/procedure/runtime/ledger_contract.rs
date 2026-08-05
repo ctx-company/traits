@@ -3788,6 +3788,10 @@ struct SequenceContractItem {
     item_id: Option<String>,
     executable: bool,
     output_refs: Vec<String>,
+    /// Output refs declared optional (P105): the ledger contract must not
+    /// demand accepted evidence for these — an unfilled optional output is
+    /// a signed non-failure, not a contract violation.
+    optional_output_refs: BTreeSet<String>,
     on_complete: BTreeSet<String>,
 }
 
@@ -3807,12 +3811,18 @@ impl SequenceContract {
         for item in sequence {
             let output_refs: Vec<String> =
                 item.item.output.ref_texts().map(str::to_string).collect();
+            let optional_output_refs: BTreeSet<String> = output_refs
+                .iter()
+                .filter(|ref_text| item.item.output.is_optional_for(ref_text))
+                .cloned()
+                .collect();
             let contract_item = SequenceContractItem {
                 run_index: item.run_index,
                 declaration_index: item.declaration_index,
                 item_id: item.item.id.clone(),
                 executable: is_executable_item(item.item),
                 output_refs: output_refs.clone(),
+                optional_output_refs,
                 on_complete: item
                     .item
                     .on_complete

@@ -342,6 +342,7 @@ fn build_sequence_frame(
                     slot_ref: Reference::parse(sink.ref_text())?,
                     operation: sink.operation().clone(),
                     schema_ref: output_sink_schema_ref(trait_ref, sink)?,
+                    optional: sink.is_optional(),
                 })
             })
             .collect::<crate::Result<_>>()?,
@@ -431,6 +432,7 @@ pub fn apply_step_output(
         accepted_outputs: Vec::new(),
         rejected_outputs: Vec::new(),
         missing_required_outputs: Vec::new(),
+        unfilled_optional_outputs: Vec::new(),
         unexpected_outputs: Vec::new(),
         schema_validation: Vec::new(),
         signal_validation: Vec::new(),
@@ -615,7 +617,11 @@ pub fn apply_step_output(
 
     for expected in ready.item.output.ref_texts() {
         if !produced_outputs.contains(expected) {
-            report.missing_required_outputs.push(expected.to_string());
+            if ready.item.output.is_optional_for(expected) {
+                report.unfilled_optional_outputs.push(expected.to_string());
+            } else {
+                report.missing_required_outputs.push(expected.to_string());
+            }
         }
     }
 

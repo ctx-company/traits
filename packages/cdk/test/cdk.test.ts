@@ -1110,6 +1110,350 @@ describe("sequence.command / sequence.check include", () => {
   });
 });
 
+describe("optional outputs, output templates, uniform include (0105)", () => {
+  it("lowers `${slot.optional()}` in an output: position to { slot, optional: true }", () => {
+    const verdict = slot.text("verdict-optional");
+    const step = sequence.command({
+      id: "peek",
+      cmd: "printf peeked",
+      output: verdict.optional(),
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "output-optional",
+        name: "Output Optional",
+        description: "optional-output fixture.",
+        procedure: procedure({ description: "Peek.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([{ slot: "slot:verdict-optional", optional: true }]);
+  });
+
+  it("a required output in the same list keeps its plain ref shape", () => {
+    const required = slot.text("required-only");
+    const optional = slot.text("optional-only");
+    const step = sequence.command({
+      id: "peek-both",
+      cmd: "printf peeked",
+      output: [required, optional.optional()],
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "output-optional-mixed",
+        name: "Output Optional Mixed",
+        description: "optional-output fixture.",
+        procedure: procedure({ description: "Peek.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([
+      "slot:required-only",
+      { slot: "slot:optional-only", optional: true },
+    ]);
+  });
+
+  it("output.prompt appends its prose to the compiled prompt and its interpolations become the output contract", () => {
+    const verdict = slot.text("template-verdict");
+    const reasoning = slot.text("template-reasoning");
+    const step = sequence.prompt("review", {
+      input: input.prompt`Review the change.`,
+      output: output.prompt`State your verdict in ${verdict} and your reasoning in ${reasoning.optional()}.`,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "output-template",
+        name: "Output Template",
+        description: "output.prompt fixture.",
+        procedure: procedure({ description: "Review.", sequence: [step] }),
+      }),
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; readonly input?: unknown; }[]; };
+      readonly prompt?: Record<string, { readonly text?: string; }>;
+    };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([
+      "slot:template-verdict",
+      { slot: "slot:template-reasoning", optional: true },
+    ]);
+    expect(draft.prompt?.review?.text).toBe(
+      "Review the change.\n\nState your verdict in slot:template-verdict and your reasoning in "
+        + "slot:template-reasoning.",
+    );
+    // The template's own output-contract slots must never appear as a READ
+    // contract on the step that produces them (P105 blocker fix).
+    expect(draft.procedure?.sequence?.[0]?.input).toBeUndefined();
+  });
+
+  it("output.prompt emits byte-identical canonical to hand-listing the same slots and hand-writing the same prose", () => {
+    const templateVerdict = slot.text("byte-verdict");
+    const templated = sequence.prompt("templated", {
+      input: input.prompt`Review the change.`,
+      output: output.prompt`State your verdict in ${templateVerdict}.`,
+    });
+    const handVerdict = slot.text("byte-verdict");
+    // The valid hand-authored twin: prose names the slot in plain text (no
+    // `{ref}` interpolation — that would make the step read its own
+    // not-yet-produced output) and the slot is hand-listed in output: only.
+    const handWritten = sequence.prompt("templated", {
+      input: input.prompt`Review the change.\n\nState your verdict in slot:byte-verdict.`,
+      output: handVerdict,
+    });
+    // Both steps declare the same slot id, so build them into separate
+    // traits and compare only the emitted sequence item + prompt shape.
+    const templatedDraft = toDraftJson(
+      trait({
+        id: "byte-templated",
+        name: "Byte Templated",
+        description: "byte-equal fixture.",
+        procedure: procedure({ description: "Review.", sequence: [templated] }),
+      }),
+    ) as { readonly procedure?: unknown; readonly prompt?: unknown; };
+    const handDraft = toDraftJson(
+      trait({
+        id: "byte-templated",
+        name: "Byte Templated",
+        description: "byte-equal fixture.",
+        procedure: procedure({ description: "Review.", sequence: [handWritten] }),
+      }),
+    ) as { readonly procedure?: unknown; readonly prompt?: unknown; };
+
+    expect(templatedDraft.procedure).toEqual(handDraft.procedure);
+    expect(templatedDraft.prompt).toEqual(handDraft.prompt);
+  });
+
+  it("output.prompt with zero interpolations is a build error", () => {
+    expect(() => output.prompt`No slots here.`).toThrow(/at least one interpolated slot/);
+  });
+
+  it("a slot claimed by output.prompt and also listed plainly in the same step's output: is a build error", () => {
+    const verdict = slot.text("dup-template-plain");
+    expect(() =>
+      sequence.prompt("dup-review", {
+        input: input.prompt`Review.`,
+        output: [verdict, output.prompt`State your verdict in ${verdict}.`],
+      })
+    ).toThrow(/claimed more than once/);
+  });
+
+  it("a slot claimed by two output.prompt templates on the same step is a build error", () => {
+    const verdict = slot.text("dup-template-template");
+    expect(() =>
+      sequence.prompt("dup-review-2", {
+        input: input.prompt`Review.`,
+        output: [
+          output.prompt`First verdict in ${verdict}.`,
+          output.prompt`Second verdict in ${verdict}.`,
+        ],
+      })
+    ).toThrow(/claimed more than once/);
+  });
+
+  it("output.prompt is rejected on a non-prompt/ask step kind", () => {
+    const verdict = slot.text("wrong-kind-verdict");
+    expect(() =>
+      sequence.command({
+        id: "wrong-kind",
+        cmd: "printf peeked",
+        output: output.prompt`State your verdict in ${verdict}.`,
+      })
+    ).toThrow(/valid only on prompt\/ask steps/);
+  });
+
+  it("claims the same slot for the same agent across two steps without conflict", () => {
+    const reviewer = agent("template-reviewer", { description: "Reviews changes." });
+    const verdict = slot.text("shared-agent-verdict");
+    const first = sequence.prompt("first-pass", {
+      agent: reviewer,
+      input: input.prompt`Review pass one.`,
+      output: output.prompt`Your verdict in ${verdict}.`,
+    });
+    const second = sequence.prompt("second-pass", {
+      agent: reviewer,
+      input: input.prompt`Review pass two given ${verdict}.`,
+      output: output.prompt`Confirm your verdict in ${verdict}.`,
+    });
+
+    expect(() =>
+      toDraftJson(
+        trait({
+          id: "shared-agent-template",
+          name: "Shared Agent Template",
+          description: "same-agent fixture.",
+          procedure: procedure({ description: "Two passes.", sequence: [first, second] }),
+        }),
+      )
+    ).not.toThrow();
+  });
+
+  it("claims the same slot as an output-template contract for two different agents is a build error (two-seats testbed)", () => {
+    const seatOne = agent("seat-one", { description: "First seat." });
+    const seatTwo = agent("seat-two", { description: "Second seat." });
+    const verdict = slot.text("two-seats-verdict");
+    const firstSeat = sequence.prompt("seat-one-review", {
+      agent: seatOne,
+      input: input.prompt`Review as seat one.`,
+      output: output.prompt`Your verdict in ${verdict}.`,
+    });
+
+    expect(() =>
+      sequence.prompt("seat-two-review", {
+        agent: seatTwo,
+        input: input.prompt`Review as seat two.`,
+        output: output.prompt`Your verdict in ${verdict}.`,
+      })
+    ).toThrow(/already claims it for agent/);
+    void firstSeat;
+  });
+
+  it("collects a slot declaration reachable only through include on sequence.ask", () => {
+    const scope = slot.text("ask-include-scope");
+    const question = slot.text("ask-include-question");
+    const answer = slot.text("ask-include-answer");
+    const needsHuman = signal({ id: "ask-include-needs-human", description: "Needs a human answer." });
+    const draft = toDraftJson(
+      trait({
+        id: "ask-include",
+        name: "Ask Include",
+        description: "ask include fixture.",
+        procedure: procedure({
+          description: "Ask.",
+          sequence: [
+            sequence.ask("ask-with-include", {
+              prompt: input.prompt`Question: ${question}`,
+              when: needsHuman,
+              output: answer,
+              include: scope,
+            }),
+          ],
+        }),
+      }),
+    ) as {
+      readonly slot?: readonly { readonly id: string; }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+    };
+
+    expect(draft.slot?.some((entry) => entry.id === "ask-include-scope")).toBe(true);
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:ask-include-question", "slot:ask-include-scope"]);
+  });
+
+  it("collects a slot declaration reachable only through include on sequence.loop", () => {
+    const scope = slot.text("loop-include-scope");
+    const marker = slot.text("loop-include-marker");
+    const body = sequence.command({ id: "loop-include-body", cmd: "printf peeked", output: marker });
+    const draft = toDraftJson(
+      trait({
+        id: "loop-include",
+        name: "Loop Include",
+        description: "loop include fixture.",
+        procedure: procedure({
+          description: "Loop.",
+          sequence: [
+            sequence.loop("loop-with-include", { body: [body], iterations: 1, include: scope }),
+          ],
+        }),
+      }),
+    ) as {
+      readonly slot?: readonly { readonly id: string; }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+    };
+
+    expect(draft.slot?.some((entry) => entry.id === "loop-include-scope")).toBe(true);
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:loop-include-scope"]);
+  });
+
+  it("collects a slot declaration reachable only through include on sequence.forEach", () => {
+    const scope = slot.text("for-each-include-scope");
+    const items = slot.texts("for-each-include-items");
+    const marker = slot.text("for-each-include-marker");
+    const body = sequence.command({ id: "for-each-include-body", cmd: "printf peeked", output: marker });
+    const draft = toDraftJson(
+      trait({
+        id: "for-each-include",
+        name: "For Each Include",
+        description: "for-each include fixture.",
+        procedure: procedure({
+          description: "For each.",
+          sequence: [
+            sequence.forEach("for-each-with-include", {
+              over: items,
+              item: slot.any({ id: "for-each-include-item" }),
+              body: [body],
+              include: scope,
+            }),
+          ],
+        }),
+      }),
+    ) as {
+      readonly slot?: readonly { readonly id: string; }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+    };
+
+    expect(draft.slot?.some((entry) => entry.id === "for-each-include-scope")).toBe(true);
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:for-each-include-scope"]);
+  });
+
+  it("collects a slot declaration reachable only through include on sequence.branch", () => {
+    const scope = slot.text("branch-include-scope");
+    const marker = slot.text("branch-include-marker");
+    const gate = sequence.check("branch-include-gate", { cmd: "true", output: slot.boolean("branch-include-pass") });
+    const success = sequence.command({ id: "branch-include-success", cmd: "printf ok", output: marker });
+    const draft = toDraftJson(
+      trait({
+        id: "branch-include",
+        name: "Branch Include",
+        description: "branch include fixture.",
+        procedure: procedure({
+          description: "Branch.",
+          sequence: [
+            sequence.branch("branch-with-include", {
+              check: gate,
+              success: [success],
+              include: scope,
+            }),
+          ],
+        }),
+      }),
+    ) as {
+      readonly slot?: readonly { readonly id: string; }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+    };
+
+    expect(draft.slot?.some((entry) => entry.id === "branch-include-scope")).toBe(true);
+    const branchItem = draft.procedure?.sequence?.find((item) =>
+      (item as { readonly kind?: string; }).kind === "branch"
+    );
+    expect(branchItem?.input).toEqual(["slot:branch-include-scope"]);
+  });
+
+  it("collects a slot declaration reachable only through include on sequence.parallel", () => {
+    const scope = slot.text("parallel-include-scope");
+    const marker = slot.text("parallel-include-marker");
+    const branch = sequence.linear("parallel-include-branch", [
+      sequence.command({ id: "parallel-include-body", cmd: "printf peeked", output: marker }),
+    ]);
+    const draft = toDraftJson(
+      trait({
+        id: "parallel-include",
+        name: "Parallel Include",
+        description: "parallel include fixture.",
+        procedure: procedure({
+          description: "Parallel.",
+          sequence: [
+            sequence.parallel("parallel-with-include", [branch], { include: scope }),
+          ],
+        }),
+      }),
+    ) as {
+      readonly slot?: readonly { readonly id: string; }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+    };
+
+    expect(draft.slot?.some((entry) => entry.id === "parallel-include-scope")).toBe(true);
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:parallel-include-scope"]);
+  });
+});
+
 describe("CDK grammar v2 shape (P458 S1)", () => {
   it("lowers sequence.ask with its declared direct signal guard", () => {
     const needsHuman = signal({ id: "needs-human-input", description: "Needs a human answer." });

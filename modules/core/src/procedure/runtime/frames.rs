@@ -134,6 +134,15 @@ pub struct FrameOutputRequest {
     pub operation: WriteOperation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_ref: Option<String>,
+    /// True when this output sink is declared optional (P105): the agent may
+    /// leave it unfilled without the step being rejected. Absent/false marks
+    /// an ordinary required output, unchanged from every prior frame.
+    #[serde(default, skip_serializing_if = "is_false_flag")]
+    pub optional: bool,
+}
+
+fn is_false_flag(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -508,6 +517,11 @@ pub struct StepValidationReport {
     pub rejected_outputs: Vec<RejectedAttempt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_required_outputs: Vec<String>,
+    /// Declared optional output sinks (P105) left unfilled at step completion.
+    /// A signed non-failure, distinct from `missing_required_outputs`: it
+    /// never contributes to `rejected` and the step completes normally.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unfilled_optional_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unexpected_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

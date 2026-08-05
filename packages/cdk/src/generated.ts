@@ -957,10 +957,15 @@ export type CanonicalNamedSequenceMap = Readonly<Record<string, CanonicalNamedSe
  * 
  * Existing manifests serialize a plain typed ref string. New authoring may use
  * an inline table for slot write operations, e.g.
- * `{ slot = "slot:notes", operation = "append" }`.
+ * `{ slot = "slot:notes", operation = "append" }`, or may mark a slot sink
+ * optional (`{ slot = "slot:notes", optional = true }`, P105): an optional
+ * sink never gates step acceptance, and its absence at step completion is a
+ * signed non-failure rather than a missing-output rejection — the output-side
+ * mirror of [`SequenceInput::OptionalSlot`].
  */
 export type CanonicalOutputSink = string | {
   readonly "operation"?: CanonicalWriteOperation | undefined;
+  readonly "optional"?: boolean | undefined;
   readonly "slot": string;
 };
 

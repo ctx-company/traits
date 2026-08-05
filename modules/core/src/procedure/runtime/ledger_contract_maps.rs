@@ -546,6 +546,9 @@ fn validate_accepted_sequence_outputs(
             continue;
         };
         for output_ref in item.output_refs.iter().collect::<BTreeSet<_>>() {
+            if item.optional_output_refs.contains(output_ref) {
+                continue;
+            }
             let accepted =
                 Reference::parse(output_ref)
                     .ok()

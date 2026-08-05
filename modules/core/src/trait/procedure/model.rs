@@ -272,7 +272,11 @@ const REPLACE_OPERATION: WriteOperation = WriteOperation::Replace;
 ///
 /// Existing manifests serialize a plain typed ref string. New authoring may use
 /// an inline table for slot write operations, e.g.
-/// `{ slot = "slot:notes", operation = "append" }`.
+/// `{ slot = "slot:notes", operation = "append" }`, or may mark a slot sink
+/// optional (`{ slot = "slot:notes", optional = true }`, P105): an optional
+/// sink never gates step acceptance, and its absence at step completion is a
+/// signed non-failure rather than a missing-output rejection — the output-side
+/// mirror of [`SequenceInput::OptionalSlot`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 #[schemars(untagged)]
@@ -282,6 +286,8 @@ pub enum OutputSink {
         slot: String,
         #[serde(default, skip_serializing_if = "is_replace_operation")]
         operation: WriteOperation,
+        #[serde(default, skip_serializing_if = "is_false")]
+        optional: bool,
     },
 }
 
@@ -298,18 +304,36 @@ impl<'de> Deserialize<'de> for OutputSink {
                 slot: String,
                 #[serde(default)]
                 operation: WriteOperation,
+                #[serde(default)]
+                optional: Option<bool>,
             },
         }
 
         match RawOutputSink::deserialize(deserializer)? {
             RawOutputSink::Ref(ref_text) => Ok(Self::Ref(ref_text)),
-            RawOutputSink::SlotOperation { slot, operation } => match operation {
-                WriteOperation::Replace => Ok(Self::Ref(slot)),
-                WriteOperation::Append
-                | WriteOperation::Merge
-                | WriteOperation::SetField(_)
-                | WriteOperation::Increment => Ok(Self::SlotOperation { slot, operation }),
-            },
+            RawOutputSink::SlotOperation {
+                slot,
+                operation,
+                optional,
+            } => {
+                let optional = match optional {
+                    None => false,
+                    Some(true) => true,
+                    Some(false) => {
+                        return Err(de::Error::custom(
+                            "sequence output `optional` must be true; omit the field entirely for a required output",
+                        ));
+                    }
+                };
+                match (&operation, optional) {
+                    (WriteOperation::Replace, false) => Ok(Self::Ref(slot)),
+                    _ => Ok(Self::SlotOperation {
+                        slot,
+                        operation,
+                        optional,
+                    }),
+                }
+            }
         }
     }
 }
@@ -327,6 +351,10 @@ impl OutputSink {
             Self::Ref(_) => &REPLACE_OPERATION,
             Self::SlotOperation { operation, .. } => operation,
         }
+    }
+
+    pub fn is_optional(&self) -> bool {
+        matches!(self, Self::SlotOperation { optional: true, .. })
     }
 }
 
@@ -351,6 +379,13 @@ impl OutputSinkList {
 
     pub fn sink_for_ref(&self, ref_text: &str) -> Option<&OutputSink> {
         self.0.iter().find(|sink| sink.ref_text() == ref_text)
+    }
+
+    pub fn is_optional_for(&self, ref_text: &str) -> bool {
+        self.0
+            .iter()
+            .find(|sink| sink.ref_text() == ref_text)
+            .is_some_and(OutputSink::is_optional)
     }
 
     pub fn is_empty(&self) -> bool {

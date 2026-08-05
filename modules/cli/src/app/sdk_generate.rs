@@ -20,6 +20,7 @@ const CDK_STRUCTURAL_KINDS: &[&str] = &[
     "behavior",
     "output-sink",
     "instruction-output",
+    "output-template",
 ];
 
 struct Builtin {

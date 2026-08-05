@@ -78,7 +78,7 @@ export type DeclKind = "agent" | "condition" | "port" | "prompt" | "resource" | 
 
 export interface Meta {
   // dprint-ignore: sdk-generate validates this literal union from the source text.
-  readonly kind?: DeclKind | "trait" | "procedure" | "sequence-step" | "sequence-linear" | "template" | "schema-field" | "guard" | "ref" | "behavior" | "output-sink" | "instruction-output";
+  readonly kind?: DeclKind | "trait" | "procedure" | "sequence-step" | "sequence-linear" | "template" | "schema-field" | "guard" | "ref" | "behavior" | "output-sink" | "instruction-output" | "output-template";
   readonly ref?: string;
   readonly declaration?: MetaDeclaration;
   readonly declarations?: Partial<Record<DeclKind, readonly JsonObject[]>>;
@@ -110,6 +110,31 @@ export interface Meta {
     readonly refs?: readonly string[];
     readonly optionalRefs?: readonly string[];
   };
+  /**
+   * `output.prompt`'s own compiled instruction body (`kind:
+   * "output-template"` only): the text plus each interpolated slot's ref
+   * (and its resolved value, so the attaching step can validate authorship
+   * against the actual slot handle rather than only its ref string) —
+   * `refs` IS the step's output contract, not merely refs the text
+   * interpolated.
+   */
+  readonly outputTemplate?: {
+    readonly text: string;
+    readonly refs: readonly string[];
+    readonly optionalRefs?: readonly string[];
+    readonly slots: readonly unknown[];
+  };
+  /**
+   * CDK-only provenance recording which step's `output.prompt` first
+   * claimed this slot as an output-template contract, and for which agent —
+   * mutated onto the interpolated slot handle's OWN meta object in place
+   * (the same pattern `attachInstructionOutput` uses for its `ref`), so the
+   * claim's lifetime is scoped to the slot object itself rather than a
+   * module-level registry that would leak across independent trait builds
+   * in the same process. A second `output.prompt` claim on the same slot
+   * handle for a different agent is a build error (P105 build rule 3).
+   */
+  readonly outputTemplateClaim?: { readonly agent: string | undefined; readonly stepId: string; };
   readonly inlineBranchArms?: {
     readonly trueArm?: readonly SequenceHandle[];
     readonly falseArm?: readonly SequenceHandle[];
@@ -257,6 +282,52 @@ export function instructionOutputContent(
 } | undefined {
   const meta = metaOf(value);
   return meta?.kind === "instruction-output" ? meta.instructionOutput : undefined;
+}
+
+/** Narrows to an `output.prompt` output-template handle. */
+export function isOutputTemplateHandle(value: unknown): boolean {
+  return metaOf(value)?.kind === "output-template";
+}
+
+/** The compiled instruction text + interpolated slot refs an `output.prompt` handle carries, or `undefined` if it isn't one. */
+export function outputTemplateContent(
+  value: unknown,
+): {
+  readonly text: string;
+  readonly refs: readonly string[];
+  readonly optionalRefs?: readonly string[];
+  readonly slots: readonly unknown[];
+} | undefined {
+  const meta = metaOf(value);
+  return meta?.kind === "output-template" ? meta.outputTemplate : undefined;
+}
+
+/**
+ * Claims `slotValue` (an output.prompt interpolation site's resolved slot
+ * handle) as this step's output-template contract. Throws when the same
+ * slot handle was already claimed by a different step for a different
+ * agent — see {@link Meta.outputTemplateClaim}. A non-handle interpolation
+ * (a bare ref string) carries no meta to mutate and is silently skipped:
+ * authorship tracking degrades gracefully rather than blocking the author
+ * from writing `output.prompt` with a bare `"slot:x"` ref.
+ */
+export function claimOutputTemplateAuthorship(slotValue: unknown, agent: string | undefined, stepId: string): void {
+  const meta = metaOf(slotValue) as
+    | (Meta & { outputTemplateClaim?: { agent: string | undefined; stepId: string; }; })
+    | undefined;
+  if (meta === undefined) return;
+  const existing = meta.outputTemplateClaim;
+  if (existing !== undefined && existing.agent !== agent) {
+    throw new Error(
+      `procedure.sequence ${stepId}: output.prompt claims ${meta.ref ?? "this output slot"} for agent `
+        + `${agent ?? "(none)"}, but procedure.sequence ${existing.stepId} already claims it for agent `
+        + `${existing.agent ?? "(none)"} — an output-template contract belongs to exactly one agent`,
+    );
+  }
+  (meta as { outputTemplateClaim?: { agent: string | undefined; stepId: string; }; }).outputTemplateClaim = {
+    agent,
+    stepId,
+  };
 }
 
 /**
