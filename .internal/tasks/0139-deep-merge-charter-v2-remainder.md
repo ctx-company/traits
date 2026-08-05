@@ -1,0 +1,43 @@
+# 0139 — Deep-merge charter v2 remainder: harvest adjudication, rebuild-don't-reconcile
+
+**Status:** ready to implement (first step: audit what landed — merger transcripts, correction retries, timeout knobs, coverage-park naming, and the truncation doctrine all shipped since this was written; 0078.x landed the mechanical retry core; 0101/the 128KiB argv guard landed at HEAD) · **Raised:** 2026-08-05 (0032 migration from the retired `.plans/` board — was P463, owner-ordered from the ENOSPC-week postmortem)
+
+The original charter had three gaps; the tree has since closed several of its
+sub-items (transcripts now persist per merger call — `merger-transcript=` evidence
+is live; the correction retry with cold-start/resume semantics exists; the merger
+budget knob and honest timeout parks exist; the truncation root cause was fixed
+with the 16MiB listing ceiling). What remains genuinely open, verify-then-build:
+
+**(a) Harvest adjudication (in scope, not optional):** under `--deep`,
+seed-harvest conflicts route through the deep merger with the SAME typed
+proceed/refuse decision receipts as code conflicts — per-file three-way inputs
+(seed-time baseline / checkout / worktree bytes), decisions logged into merge
+evidence; a refusal or invalid receipt parks exactly as today. Without `--deep`,
+harvest parks mechanically, unchanged. This is what lets doc-writing runs land
+unattended.
+
+**(b) Rebuild-don't-reconcile:** the charter classifies conflicted files before
+prompting — a file the project's own declarations mark as GENERATED (projection
+outputs, lock evidence — anything a deterministic command regenerates from
+sources) is NEVER sent to the model; the merger reconciles the sources, the
+machinery re-runs the generating commands, and the regenerated artifacts land.
+Declaration-driven, never filename patterns or toolchain knowledge.
+
+## Watch
+
+- Fail-closed posture unchanged everywhere (invalid receipt ⇒ park; refusal ⇒
+  park with the partial decision log); no new judgment authority for the no-flag
+  path.
+- Transcripts are debug-store artifacts (operational, never canonical/digested).
+- Inherited doctrine from the truncation postmortem: ANY internal capture that
+  feeds state decisions must fail loudly on truncation, never parse a cut listing.
+
+## Done when
+
+A seeded-doc conflict lands under `--deep` with a per-file decision receipt in
+merge evidence (and still parks without the flag); a conflict touching a
+declared-generated file never reaches the model — sources reconcile, the artifact
+regenerates, and the landing's evidence records the regeneration; the already-
+landed sub-items are listed in the task's closing note rather than rebuilt.
+
+Full original contract: `archived/board/execution-plan.md` (Group 106, P463).
