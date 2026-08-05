@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::structural_step_key;
+use super::planned::structural_step_key;
 use crate::app::tui;
 
 /// P552: the trait name and accepted-input text a session-title prompt is

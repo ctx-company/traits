@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::KeyEvent;
 use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
 
+use super::guide::AskPane;
 use super::model::{
     ASK_FOOTER_HINT, CURRENT_MIN_OUTER_ROWS, CURRENT_PANE, HISTORY_MIN_OUTER_ROWS, HistoryOutcome,
     HistoryStep, JourneyRow, JourneyRowKind, LIVE_PANE_IDS, MergeRowState, MergeRowView,
@@ -18,7 +19,7 @@ use super::planned::status_tone;
 use super::projection::{active_step_index, completed_narration, display_narration};
 use super::session_text::active_label;
 use super::{
-    AskPane, FollowTarget, GuideChatHandle, RunPanelState, StreamRow, StreamRowKind,
+    FollowTarget, GuideChatHandle, RunPanelState, StreamRow, StreamRowKind,
     apply_scroll_and_derive_follow, capped_repeat_delta, poll_and_apply_keys,
     repeat_row_scroll_key,
 };
