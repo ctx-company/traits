@@ -1,11 +1,6 @@
-// Demo trait: the owner sits inside the build loop as a typed participant,
-// via plannotator — annotating a plan the run refines against, and holding
-// the outer gate the machine reviewer cannot open for it.
-//
-// A standalone package, not a member of the `implement` family and not a
-// variant of it: the spine differs where it matters (two owner gates and an
-// unbounded loop), so forking a variant here would produce a file that reads
-// like the original and behaves nothing like it. Not a built-in either — it
+// The owner sits inside the build loop as a typed participant, via
+// plannotator — annotating the plan the run refines against, and holding the
+// outer gate the machine reviewer cannot open for it. Standalone package: it
 // hard-depends on a third-party binary this project neither ships nor owns.
 import { intent, method, procedure, sequence, tone, trait, verbosity } from "@ctx-traits/cdk";
 
@@ -15,8 +10,7 @@ import plan from "./sequence/plan.ts";
 import { brief as summaryBrief, commit as summaryCommit, outputPorts } from "./sequence/summary.ts";
 
 // First step, before any prompt frame: a missing binary fails here, not
-// after a model call has already been spent drafting a plan it can never
-// have annotated.
+// after a model call has already been spent.
 const preflightBinary = sequence.command("preflight-binary", {
     title: "Confirm plannotator is installed",
     argv: ["sh", "-c", "command -v plannotator"],
@@ -24,7 +18,7 @@ const preflightBinary = sequence.command("preflight-binary", {
 });
 
 export default trait("plannotate", {
-    version: "0.1.0",
+    version: "0.2.0",
     name: "Plannotate",
     summary:
         "Draft a plan, put the owner inside plannotator to annotate it, refine against the annotations, then loop worker and reviewer with no round limit until both the reviewer and the owner approve — writing a tracked brief and committing.",
@@ -42,7 +36,7 @@ export default trait("plannotate", {
     },
     procedure: procedure({
         description:
-            "Confirm plannotator is installed, draft a plan and put the owner inside plannotator to annotate it, refine the plan against the annotations, loop the worker and reviewer with no iteration bound until the reviewer and the owner both approve — the owner summoned only on a round the reviewer already approved — then write a tracked brief and commit.",
+            "Confirm plannotator is installed, draft a plan and put the owner inside plannotator to annotate it, refine the plan against the annotations, loop the worker and reviewer with no iteration bound until the reviewer and the owner both approve — the owner summoned only on a round the reviewer already approved, briefed by a fresh smart frame grounded in the working tree — then write a tracked brief and commit.",
         output: [...outputPorts],
         sequence: [preflightBinary, ...plan, implementLoop, ...summaryBrief, ...summaryCommit],
     }),

@@ -17,7 +17,7 @@ import implementation from "./sequence/implementation.ts";
 import walkthrough from "./sequence/walkthrough.ts";
 
 export default trait("implement-guided", {
-    version: "0.1.0",
+    version: "0.1.1",
     name: "Implement Guided",
     summary:
         "Take the assignment as annotations from the annotation tool, draft it, implement it under bounded review, explain the approved diff hunk by hunk, then commit and push through the gate.",

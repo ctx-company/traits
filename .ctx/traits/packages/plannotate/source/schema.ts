@@ -17,32 +17,17 @@ export const reviewVerdict = cdkSchema.object(
             description:
                 "Non-blocking notes: naming, structure, taste, optional improvements. Never affects status and never forces another round.",
         }),
-        briefing: cdkSchema.field(cdkSchema.text(), {
-            description:
-                "A short markdown briefing of this round for the owner: what changed, what this verdict found, and (when status is approved) what the owner is being asked to confirm. Written to be read cold — the owner has not seen the working tree.",
-        }),
     },
     {
         description:
-            "Typed review verdict for the current work state, plus the round's owner-facing briefing. The loop blocks only on blockers, so taste and cosmetics never cause churn.",
+            "Typed review verdict for the current work state. The loop blocks only on blockers, so taste and cosmetics never cause churn.",
     },
 );
 
-// `schema:any` rides the Envelope IO route (modules/io/src/run.rs:4203-4211),
-// which never JSON-parses command stdout — a garbage line would land in the
-// slot unrejected, the exact "quietly wrong and the loop spins" failure the
-// task's Watch forbids. A declared `schema.object` rides the Typed route
-// instead and rejects non-JSON/non-object stdout loudly. It doesn't need to
-// declare `hookSpecificOutput` (camelCase, so it couldn't be a CDK field id
-// anyway — every field id must be a lowercase kebab slug per
-// `packages/cdk/src/normalize.ts`'s `validateSlug`): inline-field validation
-// only checks declared fields and ignores undeclared keys
-// (`modules/core/src/procedure/runtime/schema_validation.rs:640-676`), so the
-// real envelope's `hookSpecificOutput` passes through untouched while a
-// non-object/non-JSON line is rejected. `plan-review`'s prompt reads
-// `hookSpecificOutput.decision.behavior`/`.message` straight out of the
-// interpolated JSON text, the same nested path the core fixture at
-// `modules/core/src/procedure/session.rs:4374` mirrors.
+// Declares only an optional marker field: the object-shape check rejects
+// non-JSON/non-object stdout loudly, while the undeclared
+// `hookSpecificOutput.decision.behavior`/`.message` path passes through
+// untouched for `plan-review` to read from the interpolated JSON text.
 export const planDecision = cdkSchema.object(
     "plan-decision",
     {
@@ -76,8 +61,16 @@ export const brief = cdkSchema.object(
             description: "A short kebab-case filename stem for the tracked brief, e.g. the assignment's own slug.",
         }),
         markdown: cdkSchema.field(cdkSchema.text(), {
-            description: "The brief itself: what was built, why, and how it was validated — for the tracked record.",
+            description:
+                "The brief itself: what was built, why, how it was validated, and what the review found — for the tracked record.",
+        }),
+        "commit-message": cdkSchema.field(cdkSchema.text(), {
+            description:
+                "Commit message for the approved work: a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated.",
         }),
     },
-    { description: "The run's final brief: a tracked markdown record plus the filename stem to save it under." },
+    {
+        description:
+            "The run's final record: a tracked markdown brief, the filename stem to save it under, and the commit message.",
+    },
 );

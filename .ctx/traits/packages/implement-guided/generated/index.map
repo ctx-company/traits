@@ -1,33 +1,18 @@
 {
   "agent:scribe": {
     "file": ".ctx/traits/packages/implement-guided/source/agent.ts",
-    "start": 12,
-    "end": 12
+    "start": 14,
+    "end": 14
   },
-  "agent:smart": {
+  "agent:smart-1": {
     "file": ".ctx/traits/packages/implement-guided/source/agent.ts",
-    "start": 3,
-    "end": 3
+    "start": 5,
+    "end": 5
   },
   "agent:worker": {
     "file": ".ctx/traits/packages/implement-guided/source/agent.ts",
-    "start": 8,
-    "end": 8
-  },
-  "port:change-walkthrough": {
-    "file": ".ctx/traits/packages/implement-guided/source/data.ts",
-    "start": 16,
-    "end": 16
-  },
-  "port:commit-report": {
-    "file": ".ctx/traits/packages/implement-guided/source/data.ts",
-    "start": 17,
-    "end": 17
-  },
-  "port:push-report": {
-    "file": ".ctx/traits/packages/implement-guided/source/data.ts",
-    "start": 18,
-    "end": 18
+    "start": 10,
+    "end": 10
   },
   "prompt:commit-message": {
     "file": ".ctx/traits/packages/implement-guided/source/sequence/commit.ts",
