@@ -563,8 +563,8 @@ describe("schema authoring sugar", () => {
     expect(JSON.stringify(draft)).not.toMatch(/templateId|sugar-note-template/);
     expect(draft).toMatchObject({
       schema: [
-        { id: "sugar-text-note", fields: { value: { schema: "schema:text" } } },
         { id: "sugar-number-note", fields: { value: { schema: "schema:number" } } },
+        { id: "sugar-text-note", fields: { value: { schema: "schema:text" } } },
       ],
     });
   });
@@ -1420,7 +1420,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     expect(draft.procedure?.output).toEqual(["port:project-response"]);
   });
 
-  it("infers only leaf-local ports in authored order, including direct output sinks", async () => {
+  it("infers only leaf-local ports in stable id order, including direct output sinks", async () => {
     const request = port.input.text({ id: "ordered-request", default: { cmd: "default-request" } });
     const result = slot.text("ordered-result");
     const direct = port.output.text({ id: "direct-result" });
@@ -1459,11 +1459,11 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const two = resolved.variants.find((variant) => variant.path === "two")?.draft;
 
     expect(one?.procedure?.input).toEqual(["port:ordered-request"]);
-    expect(one?.procedure?.output).toEqual(["port:direct-result", "port:bound-result"]);
+    expect(one?.procedure?.output).toEqual(["port:bound-result", "port:direct-result"]);
     expect(one?.port?.map(({ id }) => id)).toEqual([
-      "ordered-request",
-      "direct-result",
       "bound-result",
+      "direct-result",
+      "ordered-request",
       "unproduced-result",
     ]);
     expect(two?.procedure?.output).toBeUndefined();
@@ -1523,16 +1523,17 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       }),
     );
 
-    // This is the exact order and membership formerly authored on procedure().
+    // Stable id order (0104), not authoring order — the membership matches
+    // what was formerly authored on procedure().
     expect(draft.procedure?.input).toEqual([
-      "port:parity-required",
-      "port:parity-optional",
       "port:parity-defaulted",
+      "port:parity-optional",
+      "port:parity-required",
     ]);
     expect(draft.procedure?.output).toEqual([
-      "port:parity-prompt-output",
-      "port:parity-project-output",
       "port:parity-direct-output",
+      "port:parity-project-output",
+      "port:parity-prompt-output",
     ]);
     expect(draft.procedure?.output).not.toContain("port:parity-unproduced");
     expect(__map["port:parity-prompt-output"]).toBeDefined();
@@ -1547,6 +1548,56 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     expect(() => sequence.loop("neither", { iterations: 1 } as Parameters<typeof sequence.loop>[1])).toThrow(
       /expected exactly one of sequence or body/,
     );
+  });
+
+  it("rejects two steps in one scope whose titles derive the same id (0104)", () => {
+    expect(() =>
+      toDraftJson(
+        trait("duplicate-titles", {
+          name: "Duplicate Titles",
+          procedure: procedure({
+            description: "Two steps with colliding derived ids.",
+            sequence: [
+              sequence.prompt("first-step", { title: "Do The Thing", text: input.prompt`One.` }),
+              sequence.prompt("second-step", { title: "do the thing", text: input.prompt`Two.` }),
+            ],
+          }),
+        }),
+      )
+    ).toThrow(/procedure: steps titled "Do The Thing" and "do the thing" both derive id "do-the-thing"/);
+  });
+
+  it("rejects colliding derived titles inside a nested sequence.linear scope (0104)", () => {
+    expect(() =>
+      sequence.linear("nested-collision", [
+        sequence.prompt("alpha", { title: "Same Title", text: input.prompt`One.` }),
+        sequence.prompt("beta", { title: "Same Title", text: input.prompt`Two.` }),
+      ])
+    ).toThrow(/sequence:nested-collision: steps titled "Same Title" and "Same Title" both derive id "same-title"/);
+  });
+
+  it("rejects a generated branch-arm id colliding with an authored sequence id (0104)", () => {
+    const shadow = sequence.linear("ctx-branch-arm-p-5-route-then", [
+      sequence.prompt("shadow-step", { text: input.prompt`Shadow.` }),
+    ]);
+    expect(() =>
+      toDraftJson(
+        trait("branch-arm-collision", {
+          name: "Branch Arm Collision",
+          procedure: procedure({
+            description: "An authored id shadows a generated branch-arm id.",
+            sequence: [
+              sequence.loop("shadow-runner", { sequence: shadow, iterations: 1 }),
+              sequence.branch("route", {
+                check: condition.output.is("yes"),
+                success: [sequence.prompt("do-it", { text: input.prompt`Collide.` })],
+                failure: [sequence.prompt("finish", { text: input.prompt`Finish.` })],
+              }),
+            ],
+          }),
+        }),
+      )
+    ).toThrow(/generated sequence id ctx-branch-arm-p-5-route-then collides with an existing declaration/);
   });
 
   it("synthesizes the forEach closure's item slot as <step-id>-item regardless of the callback parameter name", () => {

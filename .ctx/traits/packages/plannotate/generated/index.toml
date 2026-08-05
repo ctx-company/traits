@@ -44,37 +44,45 @@ schema = "schema:text"
 description = "What to build, in the caller's own words. The scope contract plan-draft drafts from."
 
 [[slot]]
-id = "preflight-output"
+id = "brief"
+schema = "schema:brief"
+description = "The final record: slug, brief markdown, and commit message, before the file-writing and commit command steps run."
+
+[[slot]]
+id = "brief-display-output"
 schema = "schema:text"
-description = "Output evidence that plannotator is on PATH, from the preflight command step."
+description = "Output evidence from the command step that displays the brief to the owner (no --gate; no decision attached)."
+
+[[slot]]
+id = "brief-markdown"
+schema = "schema:text"
+description = "brief.markdown, lifted flat for the file-writing and display command steps."
+
+[[slot]]
+id = "brief-slug"
+schema = "schema:text"
+description = "brief.slug, lifted flat for the file-writing and display command steps."
+
+[[slot]]
+id = "brief-write-output"
+schema = "schema:text"
+description = "Output evidence from the command step that writes the brief file."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "brief.commit-message, lifted flat for the git commit command step's argv."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
 
 [[slot]]
 id = "draft"
 schema = "schema:text"
 description = "The implementation draft for the assignment, before the owner has annotated it."
 hint = "Scope, files to touch, approach, validation plan, risks. A plan, not an implementation."
-
-[[slot]]
-id = "plan-decision"
-schema = "schema:plan-decision"
-description = "plannotator's plan-mode verdict on the draft: approve, or deny with annotation text."
-
-[[slot]]
-id = "plan"
-schema = "schema:text"
-description = "The refined plan: the draft with every plan-mode annotation visibly addressed. The contract the build loop implements."
-hint = "Every deny/annotation from plan-decision must be provably reflected here, not just acknowledged."
-
-[[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's report of the implemented state; replaced in full each round."
-hint = "What changed (files), how it was validated, and open concerns."
-
-[[slot]]
-id = "review-verdict"
-schema = "schema:review-verdict"
-description = "The reviewer's verdict for the current round."
 
 [[slot]]
 id = "owner-briefing"
@@ -87,34 +95,25 @@ schema = "schema:owner-decision"
 description = "plannotator's gate verdict on the round briefing, only once a review has approved and the owner has been summoned. Absent (Missing) every round the owner is not summoned, and on round 1."
 
 [[slot]]
-id = "brief"
-schema = "schema:brief"
-description = "The final record: slug, brief markdown, and commit message, before the file-writing and commit command steps run."
+id = "plan"
+schema = "schema:text"
+description = "The refined plan: the draft with every plan-mode annotation visibly addressed. The contract the build loop implements."
+hint = "Every deny/annotation from plan-decision must be provably reflected here, not just acknowledged."
 
 [[slot]]
-id = "brief-slug"
-schema = "schema:text"
-description = "brief.slug, lifted flat for the file-writing and display command steps."
+id = "plan-decision"
+schema = "schema:plan-decision"
+description = "plannotator's plan-mode verdict on the draft: approve, or deny with annotation text."
 
 [[slot]]
-id = "brief-markdown"
+id = "preflight-output"
 schema = "schema:text"
-description = "brief.markdown, lifted flat for the file-writing and display command steps."
+description = "Output evidence that plannotator is on PATH, from the preflight command step."
 
 [[slot]]
-id = "brief-write-output"
-schema = "schema:text"
-description = "Output evidence from the command step that writes the brief file."
-
-[[slot]]
-id = "brief-display-output"
-schema = "schema:text"
-description = "Output evidence from the command step that displays the brief to the owner (no --gate; no decision attached)."
-
-[[slot]]
-id = "commit-message"
-schema = "schema:text"
-description = "brief.commit-message, lifted flat for the git commit command step's argv."
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "The reviewer's verdict for the current round."
 
 [[slot]]
 id = "stage-output"
@@ -122,51 +121,10 @@ schema = "schema:text"
 description = "Output evidence from the git staging command step."
 
 [[slot]]
-id = "commit-output"
+id = "work-summary"
 schema = "schema:text"
-description = "Output evidence from the git commit command step: committed hash and subject."
-
-[[schema]]
-id = "decision"
-schema = "schema:text"
-allowed = [
-    "approved",
-    "revise",
-]
-
-[[schema]]
-id = "review-verdict"
-description = "Typed review verdict for the current work state. The loop blocks only on blockers, so taste and cosmetics never cause churn."
-
-[schema.fields.advisory]
-schema = "schema:text"
-description = "Non-blocking notes: naming, structure, taste, optional improvements. Never affects status and never forces another round."
-
-[schema.fields.blockers]
-schema = "schema:text"
-description = "The blocking defects that must be fixed before this work can ship: a correctness bug, a failing check, work the plan did not ask for, or an owner annotation from ownerDecision that is not yet satisfied. Present when status is revise; empty or absent when approved."
-
-[schema.fields.status]
-schema = "schema:decision"
-required = true
-description = "approved when no blocking defect remains (advisory notes may still exist) AND every owner annotation from a prior round is addressed; revise when at least one blocking defect or unaddressed owner annotation remains. Set to approved if and only if blockers is empty."
-
-[[schema]]
-id = "plan-decision"
-description = "plannotator's plan-mode hook JSON. Only declares an optional marker field so the object-shape check rejects non-JSON/non-object stdout loudly; the undeclared `hookSpecificOutput.decision.behavior`/`.message` path is read directly from the raw JSON text by `plan-review`'s prompt."
-
-[schema.fields.session-id]
-schema = "schema:text"
-description = "plannotator's session identifier for the plan-mode hook exchange, when present in the payload."
-
-[[schema]]
-id = "owner-decision"
-description = "plannotator's `annotate --gate --json` verdict on one round's briefing."
-
-[schema.fields.decision]
-schema = "schema:text"
-required = true
-description = """"approved", "denied", or "dismissed" — plannotator's gate verdict on the round briefing. Only "approved" advances the build loop; denied and dismissed both leave it unsatisfied and the loop continues."""
+description = "Worker's report of the implemented state; replaced in full each round."
+hint = "What changed (files), how it was validated, and open concerns."
 
 [[schema]]
 id = "brief"
@@ -186,6 +144,48 @@ description = "The brief itself: what was built, why, how it was validated, and 
 schema = "schema:text"
 required = true
 description = "A short kebab-case filename stem for the tracked brief, e.g. the assignment's own slug."
+
+[[schema]]
+id = "decision"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[schema]]
+id = "owner-decision"
+description = "plannotator's `annotate --gate --json` verdict on one round's briefing."
+
+[schema.fields.decision]
+schema = "schema:text"
+required = true
+description = """"approved", "denied", or "dismissed" — plannotator's gate verdict on the round briefing. Only "approved" advances the build loop; denied and dismissed both leave it unsatisfied and the loop continues."""
+
+[[schema]]
+id = "plan-decision"
+description = "plannotator's plan-mode hook JSON. Only declares an optional marker field so the object-shape check rejects non-JSON/non-object stdout loudly; the undeclared `hookSpecificOutput.decision.behavior`/`.message` path is read directly from the raw JSON text by `plan-review`'s prompt."
+
+[schema.fields.session-id]
+schema = "schema:text"
+description = "plannotator's session identifier for the plan-mode hook exchange, when present in the payload."
+
+[[schema]]
+id = "review-verdict"
+description = "Typed review verdict for the current work state. The loop blocks only on blockers, so taste and cosmetics never cause churn."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: naming, structure, taste, optional improvements. Never affects status and never forces another round."
+
+[schema.fields.blockers]
+schema = "schema:text"
+description = "The blocking defects that must be fixed before this work can ship: a correctness bug, a failing check, work the plan did not ask for, or an owner annotation from ownerDecision that is not yet satisfied. Present when status is revise; empty or absent when approved."
+
+[schema.fields.status]
+schema = "schema:decision"
+required = true
+description = "approved when no blocking defect remains (advisory notes may still exist) AND every owner annotation from a prior round is addressed; revise when at least one blocking defect or unaddressed owner annotation remains. Set to approved if and only if blockers is empty."
 
 [[agent]]
 id = "smart-1"

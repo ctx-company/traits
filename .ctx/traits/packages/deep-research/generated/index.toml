@@ -13,10 +13,11 @@ tag = [
 ]
 
 [[port]]
-id = "topic"
+id = "depth"
 direction = "input"
-schema = "schema:text"
-description = "Research topic or question supplied by the just research recipe."
+schema = "schema:research-depth-level"
+optional = true
+description = "Optional research-depth level (basic, standard, or rigorous). Defaults to standard when omitted."
 
 [[port]]
 id = "quality"
@@ -24,13 +25,6 @@ direction = "input"
 schema = "schema:research-quality-level"
 optional = true
 description = "Optional evidence-quality level (basic, standard, or rigorous). Defaults to standard when omitted."
-
-[[port]]
-id = "depth"
-direction = "input"
-schema = "schema:research-depth-level"
-optional = true
-description = "Optional research-depth level (basic, standard, or rigorous). Defaults to standard when omitted."
 
 [[port]]
 id = "research-report"
@@ -41,30 +35,16 @@ title = "Research Delivery"
 format = ["markdown"]
 value = "slot:delivery-report"
 
-[[slot]]
-id = "topic-slug"
+[[port]]
+id = "topic"
+direction = "input"
 schema = "schema:text"
-description = "Kebab-case campaign directory name derived from the natural-language topic."
+description = "Research topic or question supplied by the just research recipe."
 
 [[slot]]
-id = "streams"
-schema = "[schema:research-stream]"
-description = "The executable stream collection consumed directly by serial for-each: three to six non-overlapping streams."
-
-[[slot]]
-id = "manifest-streams"
-schema = "[schema:research-stream]"
-description = "Independently authored comparison list of three to six non-overlapping streams, used only by the plan cardinality gate. Not consumed by execution; until P432 lands count-to-count equality, its role is a second independent 3-6 count proof rather than a duplicate-detection check."
-
-[[slot]]
-id = "deliverables-manifest"
-schema = "schema:deliverables-manifest"
-description = "Typed output and evidence contract for the campaign."
-
-[[slot]]
-id = "plan-receipt"
+id = "cardinality-check-receipt"
 schema = "schema:text"
-description = "Paths of the plan and manifest files written from the typed plan."
+description = "Deterministic checkpoint marker for the stream-count cardinality guard."
 
 [[slot]]
 id = "current-stream"
@@ -72,39 +52,9 @@ schema = "schema:research-stream"
 description = "Current serial for-each stream binding."
 
 [[slot]]
-id = "findings"
-schema = "[schema:research-finding]"
-description = "Ordered receipts from completed research streams."
-
-[[slot]]
-id = "triangulation"
-schema = "schema:text"
-description = "Cross-stream contradiction, corroboration, source-quality, and gap analysis."
-
-[[slot]]
-id = "quality-verdict"
-schema = "schema:quality-verdict"
-description = "Canonical quality verdict for current evidence."
-
-[[slot]]
-id = "quality-score"
-schema = "schema:number"
-description = "Numeric projection of quality-verdict.overall-score, emitted with the verdict because ordered object-field guards are not supported."
-
-[[slot]]
-id = "synthesis-draft"
-schema = "schema:text"
-description = "Current synthesis receipt and paths, revised in place by the verification loop."
-
-[[slot]]
-id = "verification-verdict"
-schema = "schema:verification-verdict"
-description = "Latest bounded Chain-of-Verification verdict."
-
-[[slot]]
-id = "final-review-verdict"
-schema = "schema:verification-verdict"
-description = "Independent final review of the completed research package."
+id = "deliverables-manifest"
+schema = "schema:deliverables-manifest"
+description = "Typed output and evidence contract for the campaign."
 
 [[slot]]
 id = "delivery-report"
@@ -112,27 +62,59 @@ schema = "schema:text"
 description = "Final campaign path, quality score, limitations, and deliverable summary."
 
 [[slot]]
-id = "cardinality-check-receipt"
+id = "final-review-verdict"
+schema = "schema:verification-verdict"
+description = "Independent final review of the completed research package."
+
+[[slot]]
+id = "findings"
+schema = "[schema:research-finding]"
+description = "Ordered receipts from completed research streams."
+
+[[slot]]
+id = "manifest-streams"
+schema = "[schema:research-stream]"
+description = "Independently authored comparison list of three to six non-overlapping streams, used only by the plan cardinality gate. Not consumed by execution; until P432 lands count-to-count equality, its role is a second independent 3-6 count proof rather than a duplicate-detection check."
+
+[[slot]]
+id = "plan-receipt"
 schema = "schema:text"
-description = "Deterministic checkpoint marker for the stream-count cardinality guard."
+description = "Paths of the plan and manifest files written from the typed plan."
 
-[[resource]]
-id = "research-standards"
-path = "resources/research-standards.md"
-hint = "Canonical research process, citation, source-rating, verification, quality-gate, output-layout, and Mermaid guidance distilled from the source system."
-trigger = "on-demand"
+[[slot]]
+id = "quality-score"
+schema = "schema:number"
+description = "Numeric projection of quality-verdict.overall-score, emitted with the verdict because ordered object-field guards are not supported."
 
-[[resource]]
-id = "quality-rubric"
-path = "resources/quality-rubric.md"
-hint = "Reviewer guidance mapped onto the quality-verdict schema's canonical dimensions."
-trigger = "on-demand"
+[[slot]]
+id = "quality-verdict"
+schema = "schema:quality-verdict"
+description = "Canonical quality verdict for current evidence."
 
-[[resource]]
-id = "source-quality-guide"
-path = "resources/source-quality-guide.md"
-hint = "Domain examples for applying the canonical A-E source-quality scale."
-trigger = "on-demand"
+[[slot]]
+id = "streams"
+schema = "[schema:research-stream]"
+description = "The executable stream collection consumed directly by serial for-each: three to six non-overlapping streams."
+
+[[slot]]
+id = "synthesis-draft"
+schema = "schema:text"
+description = "Current synthesis receipt and paths, revised in place by the verification loop."
+
+[[slot]]
+id = "topic-slug"
+schema = "schema:text"
+description = "Kebab-case campaign directory name derived from the natural-language topic."
+
+[[slot]]
+id = "triangulation"
+schema = "schema:text"
+description = "Cross-stream contradiction, corroboration, source-quality, and gap analysis."
+
+[[slot]]
+id = "verification-verdict"
+schema = "schema:verification-verdict"
+description = "Latest bounded Chain-of-Verification verdict."
 
 [[resource]]
 id = "citation-style"
@@ -144,6 +126,12 @@ trigger = "on-demand"
 id = "evidence-table-template"
 path = "resources/evidence-table-template.csv"
 hint = "Verbatim CSV template for claim-to-source evidence tracking."
+trigger = "on-demand"
+
+[[resource]]
+id = "quality-rubric"
+path = "resources/quality-rubric.md"
+hint = "Reviewer guidance mapped onto the quality-verdict schema's canonical dimensions."
 trigger = "on-demand"
 
 [[resource]]
@@ -159,130 +147,22 @@ hint = "Navigation README template for a completed research campaign."
 trigger = "on-demand"
 
 [[resource]]
+id = "research-standards"
+path = "resources/research-standards.md"
+hint = "Canonical research process, citation, source-rating, verification, quality-gate, output-layout, and Mermaid guidance distilled from the source system."
+trigger = "on-demand"
+
+[[resource]]
 id = "source-note-template"
 path = "resources/source-note-template.md"
 hint = "Verbatim per-source provenance, credibility, evidence, and limitation template."
 trigger = "on-demand"
 
-[[schema]]
-id = "research-quality-level"
-schema = "schema:text"
-allowed = [
-    "basic",
-    "standard",
-    "rigorous",
-]
-description = "Requested evidence-quality level; standard is the default."
-
-[[schema]]
-id = "research-depth-level"
-schema = "schema:text"
-allowed = [
-    "basic",
-    "standard",
-    "rigorous",
-]
-description = "Requested research depth; standard is the default."
-
-[[schema]]
-id = "research-stream"
-description = "One non-overlapping serial research stream. Runtime status, attempts, heartbeats, and completion markers are deliberately absent."
-
-[schema.fields.focus]
-schema = "schema:text"
-required = true
-description = "Complete research question and scope assigned to this stream."
-
-[schema.fields.id]
-schema = "schema:text"
-required = true
-description = "Unique stable stream identifier."
-
-[schema.fields.min-citations]
-schema = "schema:integer"
-required = true
-description = "Minimum cited sources expected from this stream."
-
-[schema.fields.target]
-schema = "schema:text"
-required = true
-description = "Relative findings path, normally under 03_findings/."
-
-[[schema]]
-id = "research-deliverable"
-description = "One expected research artifact. Completion markers are omitted because typed step outputs and the run ledger own completion."
-
-[schema.fields.category]
-schema = "schema:text"
-required = true
-description = "Output-tree category for this deliverable."
-allowed = [
-    "plan",
-    "summary",
-    "report",
-    "findings",
-    "sources",
-    "visuals",
-    "metadata",
-]
-
-[schema.fields.comment]
-schema = "schema:text"
-description = "Optional planning note."
-
-[schema.fields.id]
-schema = "schema:text"
-required = true
-description = "Unique deliverable identifier."
-
-[schema.fields.min-bytes]
-schema = "schema:integer"
-required = true
-description = "Minimum accepted file size checked by independent review."
-
-[schema.fields.min-citations]
-schema = "schema:integer"
-required = true
-description = "Minimum accepted citation count checked by independent review."
-
-[schema.fields.required]
-schema = "schema:boolean"
-required = true
-description = "Whether final delivery requires this artifact."
-
-[schema.fields.target]
-schema = "schema:text"
-required = true
-description = "Relative output path under research/<topic>/."
-
-[[schema]]
-id = "research-quality-criteria"
-description = "Campaign-wide evidence and citation thresholds."
-
-[schema.fields.citation-format]
-schema = "schema:text"
-required = true
-description = "Citation format selected for the campaign."
-
-[schema.fields.max-c-rated-percent]
-schema = "schema:number"
-required = true
-description = "Maximum percentage of C-rated sources."
-
-[schema.fields.min-total-sources]
-schema = "schema:integer"
-required = true
-description = "Minimum source count for the campaign."
-
-[schema.fields.require-multiple-corroboration]
-schema = "schema:boolean"
-required = true
-description = "Whether critical claims require independent corroboration."
-
-[schema.fields.target-a-b-rated-percent]
-schema = "schema:number"
-required = true
-description = "Target percentage of A- or B-rated sources."
+[[resource]]
+id = "source-quality-guide"
+path = "resources/source-quality-guide.md"
+hint = "Domain examples for applying the canonical A-E source-quality scale."
+trigger = "on-demand"
 
 [[schema]]
 id = "deliverables-manifest"
@@ -438,6 +318,63 @@ required = true
 description = "Required normalized score: 7.0 for basic, 8.5 for standard, or 9.2 for rigorous."
 
 [[schema]]
+id = "research-deliverable"
+description = "One expected research artifact. Completion markers are omitted because typed step outputs and the run ledger own completion."
+
+[schema.fields.category]
+schema = "schema:text"
+required = true
+description = "Output-tree category for this deliverable."
+allowed = [
+    "plan",
+    "summary",
+    "report",
+    "findings",
+    "sources",
+    "visuals",
+    "metadata",
+]
+
+[schema.fields.comment]
+schema = "schema:text"
+description = "Optional planning note."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Unique deliverable identifier."
+
+[schema.fields.min-bytes]
+schema = "schema:integer"
+required = true
+description = "Minimum accepted file size checked by independent review."
+
+[schema.fields.min-citations]
+schema = "schema:integer"
+required = true
+description = "Minimum accepted citation count checked by independent review."
+
+[schema.fields.required]
+schema = "schema:boolean"
+required = true
+description = "Whether final delivery requires this artifact."
+
+[schema.fields.target]
+schema = "schema:text"
+required = true
+description = "Relative output path under research/<topic>/."
+
+[[schema]]
+id = "research-depth-level"
+schema = "schema:text"
+allowed = [
+    "basic",
+    "standard",
+    "rigorous",
+]
+description = "Requested research depth; standard is the default."
+
+[[schema]]
 id = "research-finding"
 description = "One stream's durable finding receipt."
 
@@ -472,6 +409,69 @@ required = true
 description = "Relative findings file written for the stream."
 
 [[schema]]
+id = "research-quality-criteria"
+description = "Campaign-wide evidence and citation thresholds."
+
+[schema.fields.citation-format]
+schema = "schema:text"
+required = true
+description = "Citation format selected for the campaign."
+
+[schema.fields.max-c-rated-percent]
+schema = "schema:number"
+required = true
+description = "Maximum percentage of C-rated sources."
+
+[schema.fields.min-total-sources]
+schema = "schema:integer"
+required = true
+description = "Minimum source count for the campaign."
+
+[schema.fields.require-multiple-corroboration]
+schema = "schema:boolean"
+required = true
+description = "Whether critical claims require independent corroboration."
+
+[schema.fields.target-a-b-rated-percent]
+schema = "schema:number"
+required = true
+description = "Target percentage of A- or B-rated sources."
+
+[[schema]]
+id = "research-quality-level"
+schema = "schema:text"
+allowed = [
+    "basic",
+    "standard",
+    "rigorous",
+]
+description = "Requested evidence-quality level; standard is the default."
+
+[[schema]]
+id = "research-stream"
+description = "One non-overlapping serial research stream. Runtime status, attempts, heartbeats, and completion markers are deliberately absent."
+
+[schema.fields.focus]
+schema = "schema:text"
+required = true
+description = "Complete research question and scope assigned to this stream."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Unique stable stream identifier."
+
+[schema.fields.min-citations]
+schema = "schema:integer"
+required = true
+description = "Minimum cited sources expected from this stream."
+
+[schema.fields.target]
+schema = "schema:text"
+required = true
+description = "Relative findings path, normally under 03_findings/."
+
+[[schema]]
 id = "verification-verdict"
 description = "One Chain-of-Verification review verdict."
 
@@ -501,10 +501,10 @@ summary = "Fast research planning and evidence-probe role."
 system = "Use web retrieval when available, cite inspected sources, distinguish evidence from inference, and never invent access or citations."
 
 [[agent]]
-id = "worker"
-description = "Researches one typed stream at a time, writes only its declared findings target, and returns a structured finding receipt."
-summary = "Serial evidence-collection role."
-system = "Follow the stream contract exactly, preserve source provenance, search for counterevidence, and write no runtime task or heartbeat files."
+id = "reviewer"
+description = "Independently verifies critical claims, deliverables, contradictions, and citation support in a fresh review session."
+summary = "Independent research-verification role."
+system = "Do not trust the synthesis summary. Inspect the written research and cited sources, and approve only supportable, complete work."
 
 [[agent]]
 id = "synthesis"
@@ -513,10 +513,10 @@ summary = "Research synthesis and correction role."
 system = "Prefer supportable conclusions over completeness theater; expose contradictions, uncertainty, and evidence gaps plainly."
 
 [[agent]]
-id = "reviewer"
-description = "Independently verifies critical claims, deliverables, contradictions, and citation support in a fresh review session."
-summary = "Independent research-verification role."
-system = "Do not trust the synthesis summary. Inspect the written research and cited sources, and approve only supportable, complete work."
+id = "worker"
+description = "Researches one typed stream at a time, writes only its declared findings target, and returns a structured finding receipt."
+summary = "Serial evidence-collection role."
+system = "Follow the stream contract exactly, preserve source provenance, search for counterevidence, and write no runtime task or heartbeat files."
 
 [prompt.assess-quality]
 text = """
@@ -802,9 +802,9 @@ output = ["slot:synthesis-draft"]
 [procedure]
 description = "Plan typed research contracts from topic plus optional quality and depth, research streams serially, triangulate and gate evidence, synthesize, verify in a bounded loop, and deliver a structured research campaign."
 input = [
-    "port:topic",
-    "port:quality",
     "port:depth",
+    "port:quality",
+    "port:topic",
 ]
 output = ["port:research-report"]
 

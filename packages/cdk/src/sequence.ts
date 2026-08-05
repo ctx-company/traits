@@ -1434,6 +1434,7 @@ function sequenceLinear(
 ): SequenceLinearHandle {
   validateSlug(id, "sequence.id");
   const scopedItems = items.flatMap((item) => materializeSequenceItem(item, { kind: "sequence", id }));
+  validateNoDuplicateTitles(scopedItems, `sequence:${id}`);
   const sequenceItems = scopedItems.map(normalizeMaterializedSequenceItem);
   const declaration = compact({ id, description: options.description, sequence: sequenceItems });
   return withDeclaration("sequence", `sequence:${id}`, declaration, {}, {
@@ -2076,4 +2077,41 @@ function validateArgv(argv: readonly string[], path: string): string[] {
 }
 function titleFromId(id: string): string {
   return id.split("-").filter(Boolean).map((part) => part[0]?.toUpperCase() + part.slice(1)).join(" ") || id;
+}
+
+/**
+ * Derives a step id from its declared title: lowercase, non-alphanumeric
+ * runs collapsed to a single hyphen, validated against the shared slug
+ * grammar (`validateSlug`, normalize.ts) — never re-slugified per call site.
+ * `titleFromId`'s inverse; the entry point 0106's functional (title-only)
+ * steps will call to mint their own id.
+ */
+export function idFromTitle(title: string): string {
+  const id = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  validateSlug(id, `idFromTitle(${JSON.stringify(title)})`);
+  return id;
+}
+
+/**
+ * Build error when two steps in the same scope (a `sequence:` array, or a
+ * procedure's top-level sequence) derive the same id from their titles —
+ * per 0104, uniquifying by counter would smuggle authoring-order-dependence
+ * back into generated ids, so this fails loudly instead.
+ */
+export function validateNoDuplicateTitles(items: readonly SequenceHandle[], scopeLabel: string): void {
+  const seen = new Map<string, string>();
+  for (const item of items) {
+    const title = typeof item.title === "string" ? item.title : undefined;
+    if (title === undefined) continue;
+    const id = idFromTitle(title);
+    const existing = seen.get(id);
+    if (existing !== undefined) {
+      throw new Error(
+        `${scopeLabel}: steps titled ${JSON.stringify(existing)} and ${JSON.stringify(title)} both derive id ${
+          JSON.stringify(id)
+        }`,
+      );
+    }
+    seen.set(id, title);
+  }
 }

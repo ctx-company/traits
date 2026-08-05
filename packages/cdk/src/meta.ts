@@ -91,7 +91,6 @@ export interface Meta {
    */
   readonly optionalRefs?: readonly string[];
   readonly diagnostics?: readonly CdkDiagnostic[];
-  readonly order?: number;
   readonly defaultOutput?: boolean;
   readonly defaultOutputPaths?: readonly (readonly (string | number)[])[];
   readonly source?: SourceAnchor;
@@ -177,7 +176,6 @@ export interface Meta {
 
 export const META: unique symbol = Symbol("ctx.traits.cdk.meta");
 const CDK_SOURCE_PATH = decodeURIComponent(new URL(import.meta.url).pathname);
-let declarationOrder = 0;
 const authoredDeclarations: { readonly kind: DeclKind; readonly ref: string; readonly declaration: JsonObject; }[] = [];
 const processDiagnostics: CdkDiagnostic[] = [];
 
@@ -306,7 +304,6 @@ export function withDeclaration<
   const handle = withMeta(
     publicSurface,
     {
-      order: nextDeclarationOrder(),
       ...extraMeta,
       kind,
       ref,
@@ -395,11 +392,6 @@ export function withHiddenField<T extends object, Field extends string, Value>(
 ): T & { readonly [K in Field]: Value; } {
   Object.defineProperty(value, field, { value: fieldValue, enumerable: false });
   return value as T & { readonly [K in Field]: Value; };
-}
-
-export function nextDeclarationOrder(): number {
-  declarationOrder += 1;
-  return declarationOrder;
 }
 
 /**

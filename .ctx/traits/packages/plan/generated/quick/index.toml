@@ -51,25 +51,25 @@ description = "Paths of the task files written under .internal/tasks/."
 value = "slot:result"
 
 [[slot]]
+id = "result"
+schema = "schema:text"
+description = "Confirmation of the task files written (paths)."
+
+[[slot]]
 id = "task-files"
 schema = "schema:text"
 description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
 hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
 
-[[slot]]
-id = "result"
-schema = "schema:text"
-description = "Confirmation of the task files written (paths)."
+[[agent]]
+id = "scribe"
+description = "Writes the task files to .internal/tasks/."
+summary = "Write role."
 
 [[agent]]
 id = "smart-1"
 description = "Distills the task directly into house-format task files."
 summary = "Distill role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the task files to .internal/tasks/."
-summary = "Write role."
 
 [prompt.distill]
 text = """

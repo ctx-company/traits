@@ -215,7 +215,7 @@ clause.
 
 Authoring notes:
 
-- Auto-collected declarations preserve authoring order. Reordering declarations in `source/index.ts` can change canonical TOML order and digests, matching the old manual-array behavior.
+- Declaration-array emission order is stable and id-derived, not authoring order (0104) — reordering declarations in `source/index.ts` never changes canonical TOML order or digests. Step arrays inside one `sequence:` literal stay positional; see `NORMALIZATION.md`.
 - `schema.object(...)` field entries default to `required: true` and serialize that explicitly. Raw TOML still defaults omitted `required` to `false`, so generated canonical files stay unambiguous.
 
 Command-step shorthand such as `sequence.command({ id: "run-npm-lint", cmd: "npm run lint", output })` lowers to explicit argv in the draft and rejects shell-only syntax. Actual process execution belongs to the controlled CLI/IO runtime and requires explicit command permission.

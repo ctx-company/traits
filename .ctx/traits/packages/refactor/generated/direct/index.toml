@@ -41,20 +41,6 @@ schema = "schema:text"
 description = "Ordered checklist: one actionable item per annotation with file, location, and change."
 
 [[schema]]
-id = "line-point"
-description = "One end of an exact text range."
-
-[schema.fields.column]
-schema = "schema:integer"
-required = true
-description = "1-based column within the line."
-
-[schema.fields.number]
-schema = "schema:integer"
-required = true
-description = "1-based line number."
-
-[[schema]]
 id = "annotation"
 description = "One human annotation captured by ctx-annotate."
 
@@ -80,6 +66,20 @@ description = "The typed ctx-annotate output document."
 [schema.fields.annotations]
 schema = "[schema:annotation]"
 required = true
+
+[[schema]]
+id = "line-point"
+description = "One end of an exact text range."
+
+[schema.fields.column]
+schema = "schema:integer"
+required = true
+description = "1-based column within the line."
+
+[schema.fields.number]
+schema = "schema:integer"
+required = true
+description = "1-based line number."
 
 [[agent]]
 id = "smart-1"

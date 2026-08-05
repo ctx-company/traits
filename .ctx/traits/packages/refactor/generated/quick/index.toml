@@ -26,12 +26,6 @@ id = "rubber-stamp-review"
 id = "interface-widening"
 
 [[port]]
-id = "target"
-direction = "input"
-schema = "schema:text"
-description = 'Module, file path, or entity to refactor; append an optional emphasis after a dash (e.g. "modules/cli/src/app/run_view.rs", "crate::lockfile — typed errors only").'
-
-[[port]]
 id = "commit-report"
 direction = "output"
 schema = "schema:text"
@@ -39,26 +33,21 @@ optional = true
 description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
 value = "slot:commit-output"
 
+[[port]]
+id = "target"
+direction = "input"
+schema = "schema:text"
+description = 'Module, file path, or entity to refactor; append an optional emphasis after a dash (e.g. "modules/cli/src/app/run_view.rs", "crate::lockfile — typed errors only").'
+
 [[slot]]
 id = "checklist"
 schema = "schema:text"
 description = "Actionable checklist for the target: concrete steps, no framing or design prose."
 
 [[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's report of the refactored state; revised once after the single review pass."
-hint = "What changed (files), how behavior was preserved, gate results, open concerns."
-
-[[slot]]
 id = "commit-message"
 schema = "schema:text"
 description = "Refactor commit message; injected directly into the git commit command step."
-
-[[slot]]
-id = "stage-output"
-schema = "schema:text"
-description = "Output evidence from the git staging command step."
 
 [[slot]]
 id = "commit-output"
@@ -76,29 +65,22 @@ id = "review-verdict"
 schema = "schema:review-verdict"
 description = "smart-1's single review verdict for the implemented checklist."
 
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the refactored state; revised once after the single review pass."
+hint = "What changed (files), how behavior was preserved, gate results, open concerns."
+
 [[resource]]
 id = "architecture-dialect"
 path = "resources/architecture-dialect.md"
 hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
 trigger = "on-activation"
-
-[[schema]]
-id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state."
-
-[schema.fields.evidence]
-schema = "schema:text"
-description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
-
-[schema.fields.status]
-schema = "schema:text"
-required = true
-description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
-
-[schema.fields.step]
-schema = "schema:text"
-required = true
-description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
 id = "blocker"
@@ -152,6 +134,24 @@ required = true
 description = "Repo-relative files and paths involved."
 
 [[schema]]
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
+
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
 id = "review-verdict"
 description = "Typed single-pass review verdict. The loop blocks only on blockers; forgivable plan-fidelity gaps are recorded, not silently dropped."
 
@@ -177,6 +177,11 @@ allowed = [
 ]
 
 [[agent]]
+id = "scribe"
+description = "Writes the refactor commit message from the checklist and review record; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
 id = "smart-1"
 description = "Turns the target into an actionable checklist and reviews the implemented work once."
 summary = "Checklist and reviewer."
@@ -185,11 +190,6 @@ summary = "Checklist and reviewer."
 id = "worker"
 description = "Implements the checklist and applies the reviewer's single pass."
 summary = "Implementation role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the refactor commit message from the checklist and review record; git staging and committing run as command steps."
-summary = "Commit-message role."
 
 [prompt.apply-fixes]
 text = """

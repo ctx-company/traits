@@ -47,12 +47,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "task"
-direction = "input"
-schema = "schema:text"
-description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
-
-[[port]]
 id = "commit-report"
 direction = "output"
 schema = "schema:text"
@@ -73,16 +67,16 @@ format = [
 ]
 value = "slot:park-report"
 
-[[slot]]
-id = "review-diff"
+[[port]]
+id = "task"
+direction = "input"
 schema = "schema:text"
-description = "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
-hint = "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content."
+description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
 
 [[slot]]
-id = "repo-gates-passed"
-schema = "schema:repo-gates-result"
-description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
 
 [[slot]]
 id = "draft"
@@ -91,31 +85,25 @@ description = "smart-1's implementation draft for the task — the contract the 
 hint = "Scope (restated from the task file), files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
 
 [[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's report of the implemented state; revised in place after each refinement pass."
-hint = "What changed (files), how it was validated, and open concerns. Revised after every apply-fixes pass."
-
-[[slot]]
-id = "commit-output"
-schema = "schema:text"
-description = "Output evidence from the git commit command step: committed hash and subject."
-
-[[slot]]
-id = "review-verdict"
-schema = "schema:review-verdict"
-description = "smart-1's refinement verdict for the current work state."
-
-[[slot]]
 id = "park-report"
 schema = "[schema:review-verdict]"
 description = "This round's typed park record (P414): empty when the round's verdict is approved, exactly one entry — the round's own verdict, copied unchanged — when it is revise. Written each round by a deterministic project step (deriveParkReportStep), never model-authored, so it can never disagree with the verdict it comes from."
 
 [[slot]]
-id = "shipping-status"
+id = "repo-gates-passed"
+schema = "schema:repo-gates-result"
+description = "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it."
+
+[[slot]]
+id = "review-diff"
 schema = "schema:text"
-description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
-hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+description = "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
+hint = "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:review-verdict"
+description = "smart-1's refinement verdict for the current work state."
 
 [[slot]]
 id = "shipping-message"
@@ -127,30 +115,24 @@ id = "shipping-stage-output"
 schema = "schema:text"
 description = "Verbatim output of the git-add staging command."
 
+[[slot]]
+id = "shipping-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the implemented state; revised in place after each refinement pass."
+hint = "What changed (files), how it was validated, and open concerns. Revised after every apply-fixes pass."
+
 [[resource]]
 id = "task-board"
 path = ".internal/tasks"
 root = "repo"
 hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
-
-[[schema]]
-id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state."
-
-[schema.fields.evidence]
-schema = "schema:text"
-description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
-
-[schema.fields.status]
-schema = "schema:text"
-required = true
-description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
-
-[schema.fields.step]
-schema = "schema:text"
-required = true
-description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
 id = "blocker"
@@ -202,6 +184,24 @@ description = "The defect and the concrete failure it causes."
 schema = "schema:text"
 required = true
 description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
+
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
 id = "repo-gates-result"
@@ -278,6 +278,11 @@ id = "gate-timed-out"
 description = "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix."
 
 [[agent]]
+id = "scribe"
+description = "Writes the commit message for the completed task from the task contract; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
 id = "smart-1"
 description = "Strong model: drafts the implementation plan, and is the sole reviewer in the refinement loop."
 summary = "Drafting and reviewer role."
@@ -286,11 +291,6 @@ summary = "Drafting and reviewer role."
 id = "worker"
 description = "Implements the draft and applies reviewer fixes."
 summary = "Implementation role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the commit message for the completed task from the task contract; git staging and committing run as command steps."
-summary = "Commit-message role."
 
 [prompt.building-produce]
 text = """

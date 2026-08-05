@@ -57,25 +57,25 @@ description = "Codebase grounding for the described work: the concrete files and
 hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan."
 
 [[slot]]
+id = "result"
+schema = "schema:text"
+description = "Confirmation of the task files written (paths)."
+
+[[slot]]
 id = "task-files"
 schema = "schema:text"
 description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
 hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
 
-[[slot]]
-id = "result"
-schema = "schema:text"
-description = "Confirmation of the task files written (paths)."
+[[agent]]
+id = "scribe"
+description = "Writes the task files to .internal/tasks/."
+summary = "Bootstrap-writer role."
 
 [[agent]]
 id = "smart-1"
 description = "Strong model: refines the task, grounds it in the codebase, and splits it into task files."
 summary = "Refinement + grounding role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the task files to .internal/tasks/."
-summary = "Bootstrap-writer role."
 
 [prompt.refine-task]
 text = """

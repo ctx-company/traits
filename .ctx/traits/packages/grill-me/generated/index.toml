@@ -49,12 +49,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "plan"
-direction = "input"
-schema = "schema:text"
-description = "The plan, design, or decision to grill — inline text, or the repo-relative path of a file (a task file, a draft, a spec) the interview reads first."
-
-[[port]]
 id = "grill-report"
 direction = "output"
 schema = "schema:text"
@@ -63,16 +57,22 @@ title = "Grill Report"
 format = ["text"]
 value = "slot:report"
 
-[[slot]]
-id = "probe"
-schema = "schema:interview-probe"
-description = "The current round's probe: the single question under interrogation, or the typed exhausted signal that ends the interview."
+[[port]]
+id = "plan"
+direction = "input"
+schema = "schema:text"
+description = "The plan, design, or decision to grill — inline text, or the repo-relative path of a file (a task file, a draft, a spec) the interview reads first."
 
 [[slot]]
 id = "ledger"
 schema = "schema:text"
 description = "The cumulative interview ledger: every settled round, appended one entry at a time by the scout and reproduced verbatim between rounds. The report's single source of truth."
 hint = 'One "### Q<n> — fact|decision" block per round, in interview order: the question, the recommended answer, then the resolution — "Answered:" with evidence (paths, commands, observed values) for a fact, "Owner decision:" with options and tradeoffs for a judgment call. Prior entries are reproduced verbatim; the ledger only grows.'
+
+[[slot]]
+id = "probe"
+schema = "schema:interview-probe"
+description = "The current round's probe: the single question under interrogation, or the typed exhausted signal that ends the interview."
 
 [[slot]]
 id = "report"
@@ -120,14 +120,14 @@ description = "Strong questioning model: walks the plan's decision tree in depen
 summary = "Interrogator role."
 
 [[agent]]
-id = "worker"
-description = "Tool-equipped scout: settles fact questions by exploring the repository and environment, sharpens decision questions into options for the owner without ever deciding them, and keeps the interview ledger."
-summary = "Scout and ledger-keeper role."
-
-[[agent]]
 id = "smart-2"
 description = "Strong synthesis model from a second family: reads the finished interview cold and writes the grill report — the shared understanding, the owner decision sheet, and an honest account of anything the interview never reached."
 summary = "Report role."
+
+[[agent]]
+id = "worker"
+description = "Tool-equipped scout: settles fact questions by exploring the repository and environment, sharpens decision questions into options for the owner without ever deciding them, and keeps the interview ledger."
+summary = "Scout and ledger-keeper role."
 
 [prompt.probe]
 text = """

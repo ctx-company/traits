@@ -48,16 +48,31 @@ schema = "schema:annotation-set"
 description = "The assignment, as typed annotations returned by the annotation tool. The scope contract every later step works from — this trait never asks a model to restate it."
 
 [[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Scribe's commit message for the approved work; also saved to .git/CTX_COMMITMSG for the commit command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
 id = "draft"
 schema = "schema:text"
 description = "The implementation draft for the annotated assignment — the contract the build loop implements."
 hint = "Scope, files to touch, approach, validation plan, risks. A plan, not an implementation."
 
 [[slot]]
-id = "work-summary"
+id = "hunk-notes"
 schema = "schema:text"
-description = "Worker's report of the implemented state; replaced in full each round."
-hint = "What changed (files), how it was validated, and open concerns."
+description = "A markdown walkthrough of the approved change: one section per hunk, each with the hunk in a fenced code block followed by its intent and explanation."
+hint = "Markdown source, written to be read by a human reviewing the change — not a data structure."
+
+[[slot]]
+id = "push-output"
+schema = "schema:text"
+description = "Output evidence from the gated push via ctx-gate run -- git push, including the gate's own verdict."
 
 [[slot]]
 id = "review-verdict"
@@ -71,38 +86,15 @@ description = "The approved change as unified-diff hunks, captured after the loo
 hint = "git diff HEAD output with @@ hunk headers; tracked files only — a brand-new untracked file does not appear until it is staged."
 
 [[slot]]
-id = "hunk-notes"
-schema = "schema:text"
-description = "A markdown walkthrough of the approved change: one section per hunk, each with the hunk in a fenced code block followed by its intent and explanation."
-hint = "Markdown source, written to be read by a human reviewing the change — not a data structure."
-
-[[slot]]
-id = "commit-message"
-schema = "schema:text"
-description = "Scribe's commit message for the approved work; also saved to .git/CTX_COMMITMSG for the commit command step."
-
-[[slot]]
 id = "stage-output"
 schema = "schema:text"
 description = "Output evidence from the git staging command step."
 
 [[slot]]
-id = "commit-output"
+id = "work-summary"
 schema = "schema:text"
-description = "Output evidence from the git commit command step: committed hash and subject."
-
-[[slot]]
-id = "push-output"
-schema = "schema:text"
-description = "Output evidence from the gated push via ctx-gate run -- git push, including the gate's own verdict."
-
-[[schema]]
-id = "annotation-source"
-
-[schema.fields.kind]
-schema = "schema:text"
-required = true
-description = 'Where the annotated text came from, e.g. "stdin".'
+description = "Worker's report of the implemented state; replaced in full each round."
+hint = "What changed (files), how it was validated, and open concerns."
 
 [[schema]]
 id = "annotation"
@@ -131,6 +123,14 @@ schema = "schema:annotation-source"
 description = "Provenance of the annotated text. Recorded, not acted on."
 
 [[schema]]
+id = "annotation-source"
+
+[schema.fields.kind]
+schema = "schema:text"
+required = true
+description = 'Where the annotated text came from, e.g. "stdin".'
+
+[[schema]]
 id = "decision"
 schema = "schema:text"
 allowed = [
@@ -156,6 +156,11 @@ required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise when at least one blocking defect remains. Set to approved if and only if blockers is empty."
 
 [[agent]]
+id = "scribe"
+description = "Writes the commit message for the approved work; staging, committing and pushing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
 id = "smart-1"
 description = "Strong model: drafts the implementation from the annotations, reviews the work each round, and explains the finished diff hunk by hunk."
 summary = "Drafting, review, and explanation role."
@@ -164,11 +169,6 @@ summary = "Drafting, review, and explanation role."
 id = "worker"
 description = "Implements the draft and applies reviewer fixes each round."
 summary = "Implementation role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the commit message for the approved work; staging, committing and pushing run as command steps."
-summary = "Commit-message role."
 
 [prompt.commit-message]
 text = """

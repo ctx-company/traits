@@ -63,40 +63,17 @@ schema = "schema:text"
 description = "The change to make, in plain language — a bug to fix, a feature to add, a refactor to perform."
 
 [[port]]
-id = "target"
-direction = "input"
-schema = "schema:text"
-description = "Where the change applies — the repository path, module, or area the request concerns."
-
-[[port]]
 id = "commit-report"
 direction = "output"
 schema = "schema:text"
 description = "Final commit evidence from the git commit command step."
 value = "slot:commit-output"
 
-[[slot]]
-id = "scope-brief"
+[[port]]
+id = "target"
+direction = "input"
 schema = "schema:text"
-description = "The request and target distilled into concrete scope + acceptance criteria; later steps work from this instead of re-reading the raw inputs."
-hint = "What the change must accomplish, how we will know it is done, and the files/areas it touches."
-
-[[slot]]
-id = "draft"
-schema = "schema:text"
-description = "smart-1's implementation draft for the change."
-hint = "Scope, files to touch, approach, validation plan (including the test that must fail first), risks. A plan, not an implementation."
-
-[[slot]]
-id = "reviewed-draft"
-schema = "schema:text"
-description = "smart-2's full replacement draft — the contract the worker implements."
-
-[[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's report of the implemented state and gate results; revised in place after each refinement pass."
-hint = "What changed (files), the exact gate commands run and their result, and open concerns."
+description = "Where the change applies — the repository path, module, or area the request concerns."
 
 [[slot]]
 id = "commit-message"
@@ -104,14 +81,15 @@ schema = "schema:text"
 description = "Scribe's commit message for the approved change; also saved to .git/CTX_COMMITMSG for the commit command step."
 
 [[slot]]
-id = "stage-output"
-schema = "schema:text"
-description = "Output evidence from the git staging command step."
-
-[[slot]]
 id = "commit-output"
 schema = "schema:text"
 description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "smart-1's implementation draft for the change."
+hint = "Scope, files to touch, approach, validation plan (including the test that must fail first), risks. A plan, not an implementation."
 
 [[slot]]
 id = "review-verdict-1"
@@ -123,16 +101,38 @@ id = "review-verdict-2"
 schema = "schema:review-verdict"
 description = "smart-2's refinement verdict for the current work state."
 
-[[resource]]
-id = "review-rubric"
-path = "resources/review-rubric.md"
-hint = "The rubric reviewers score every change against; agents read this file with their own tools."
-trigger = "on-activation"
+[[slot]]
+id = "reviewed-draft"
+schema = "schema:text"
+description = "smart-2's full replacement draft — the contract the worker implements."
+
+[[slot]]
+id = "scope-brief"
+schema = "schema:text"
+description = "The request and target distilled into concrete scope + acceptance criteria; later steps work from this instead of re-reading the raw inputs."
+hint = "What the change must accomplish, how we will know it is done, and the files/areas it touches."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the implemented state and gate results; revised in place after each refinement pass."
+hint = "What changed (files), the exact gate commands run and their result, and open concerns."
 
 [[resource]]
 id = "done-checklist"
 path = "resources/done-checklist.md"
 hint = "The definition of done the commit message is grounded in; agents read this file with their own tools."
+trigger = "on-activation"
+
+[[resource]]
+id = "review-rubric"
+path = "resources/review-rubric.md"
+hint = "The rubric reviewers score every change against; agents read this file with their own tools."
 trigger = "on-activation"
 
 [[schema]]
@@ -166,6 +166,11 @@ description = "Fast extraction model: distils the change request and target into
 summary = "Context-extraction role."
 
 [[agent]]
+id = "scribe"
+description = "Writes the commit message for the approved change; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
 id = "smart-1"
 description = "Strong drafting model: turns the scope brief into an implementation draft, and reviews the work in the refinement loop."
 summary = "Drafting and first reviewer role."
@@ -179,11 +184,6 @@ summary = "Draft-rewriting and second reviewer role."
 id = "worker"
 description = "Implements the reviewed draft, runs the project's own gates, and applies reviewer fixes."
 summary = "Implementation role."
-
-[[agent]]
-id = "scribe"
-description = "Writes the commit message for the approved change; git staging and committing run as command steps."
-summary = "Commit-message role."
 
 [prompt.apply-fixes]
 text = """

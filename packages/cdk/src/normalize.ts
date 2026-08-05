@@ -58,7 +58,6 @@ export type SynthPlan<T = Draftable> = Omit<GeneratedSynthPlan, "draft"> & {
   readonly draft: DraftOf<T>;
 };
 
-const UNORDERED_DECLARATION_BASE = Number.MAX_SAFE_INTEGER / 2;
 const declKinds: readonly DeclKind[] = [
   "agent",
   "condition",
@@ -538,14 +537,19 @@ export function withoutKeys(value: Record<string, unknown>, keys: readonly strin
 }
 // dprint-ignore: sdk-generate validates this declaration record from the source text.
 export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session) }; }
+/**
+ * Merges declaration sets and emits each kind's array in a stable order that
+ * depends only on declared ids, never on authoring/registration order — see
+ * `NORMALIZATION.md`. Two declarations sharing an id must be byte-identical
+ * (a re-collected reference to the same declaration); anything else is a
+ * genuine id collision and throws.
+ */
 export function mergeDeclarationSets(
   ...sets: readonly Partial<Record<DeclKind, readonly JsonObject[]>>[]
 ): Partial<Record<DeclKind, readonly JsonObject[]>> {
   const result: Partial<Record<DeclKind, JsonObject[]>> = {};
   for (const kind of declKinds) {
     const byId = new Map<string, JsonObject>();
-    const ordered: { id: string; declaration: JsonObject; order: number; }[] = [];
-    let fallbackOrder = 0;
     for (const set of sets) {
       for (const declaration of set[kind] ?? []) {
         const id = declaration.id;
@@ -565,20 +569,26 @@ export function mergeDeclarationSets(
             `conflicting ${kind} declaration for id ${id} (${anchor(existingSource)} vs ${anchor(conflictingSource)})`,
           );
         }
-        if (!byId.has(id)) {
-          ordered.push({ id, declaration: stable, order: meta?.order ?? UNORDERED_DECLARATION_BASE + fallbackOrder++ });
-        }
         byId.set(id, stable);
       }
     }
     if (byId.size > 0) {
-      result[kind] = ordered.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((entry) =>
-        entry.declaration
-      );
+      result[kind] = [...byId.keys()].sort((a, b) => a.localeCompare(b)).map((id) => byId.get(id) as JsonObject);
     }
   }
   return result;
 }
+/** Renders a source anchor for a build-error message; shared by every collision error in this module. */
+function anchorText(source: SourceAnchor | undefined): string {
+  return source === undefined ? "unknown location" : `${source.file}:${source.start}`;
+}
+
+/**
+ * Assigns stable ids to generated branch-arm/loop-gate-body sequences from
+ * their deterministic base id — never a counter suffix, per `NORMALIZATION.md`.
+ * A generated id colliding with another declaration (generated or authored)
+ * is a build error naming both source anchors, not a silent uniquify.
+ */
 export function resolveGeneratedBranchArmIds(
   values: readonly unknown[],
   ...sets: readonly Partial<Record<DeclKind, readonly JsonObject[]>>[]
@@ -586,6 +596,7 @@ export function resolveGeneratedBranchArmIds(
   const generated = new Map<JsonObject, number>();
   const bindings: JsonObject[] = [];
   const occupied = new Set<string>();
+  const occupiedSource = new Map<string, SourceAnchor | undefined>();
   const seen = new Set<object>();
   const visit = (value: unknown): void => {
     if (value === undefined || value === null) return;
@@ -606,7 +617,10 @@ export function resolveGeneratedBranchArmIds(
   for (const set of sets) {
     for (const declaration of set.sequence ?? []) {
       const id = declaration.id;
-      if (typeof id === "string" && metaOf(declaration)?.generatedBranchArm === undefined) occupied.add(id);
+      if (typeof id === "string" && metaOf(declaration)?.generatedBranchArm === undefined) {
+        occupied.add(id);
+        occupiedSource.set(id, metaOf(declaration)?.source);
+      }
     }
   }
   const allocated = new Map<JsonObject, string>();
@@ -619,9 +633,16 @@ export function resolveGeneratedBranchArmIds(
   ) {
     const generatedMeta = metaOf(declaration)?.generatedBranchArm;
     if (generatedMeta === undefined) continue;
-    let id = generatedMeta.baseId;
-    for (let suffix = 2; occupied.has(id); suffix += 1) id = `${generatedMeta.baseId}-${suffix}`;
+    const id = generatedMeta.baseId;
+    if (occupied.has(id)) {
+      throw new Error(
+        `generated sequence id ${id} collides with an existing declaration (${anchorText(occupiedSource.get(id))} vs ${
+          anchorText(metaOf(declaration)?.source)
+        })`,
+      );
+    }
     occupied.add(id);
+    occupiedSource.set(id, metaOf(declaration)?.source);
     allocated.set(declaration, id);
     (declaration as { id: JsonValue; }).id = id;
     const meta = metaOf(declaration);
@@ -688,7 +709,6 @@ function declarationWithPreservedMeta(kind: DeclKind, value: unknown): JsonObjec
       declarations: meta?.declarations,
       refs: meta?.refs,
       diagnostics: meta?.diagnostics,
-      order: meta?.order,
       source: meta?.source,
       sourceMap: meta?.sourceMap,
     }) as import("./meta.js").Meta,

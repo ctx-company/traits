@@ -71,12 +71,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "task"
-direction = "input"
-schema = "schema:text"
-description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
-
-[[port]]
 id = "commit-report"
 direction = "output"
 schema = "schema:text"
@@ -110,11 +104,21 @@ format = [
 ]
 value = "slot:park-report"
 
-[[slot]]
-id = "task-brief"
+[[port]]
+id = "task"
+direction = "input"
 schema = "schema:text"
-description = "The task file's contents, copied exactly as written — the scope contract every later step works from instead of the board."
-hint = "Verbatim copy of the whole task file: title, status line, body, Watch, and Done when. No paraphrasing."
+description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
+
+[[slot]]
+id = "building-sealed"
+schema = "schema:boolean"
+description = "Runtime slot building-sealed."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
 
 [[slot]]
 id = "draft"
@@ -123,26 +127,19 @@ description = "The implementation draft for the task — the contract the produc
 hint = "Scope, files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation."
 
 [[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's cumulative account of the implemented state, extended each produce round — the worker's cross-round memory."
-hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round, append: what changed (files), how it was validated, open concerns, and per-blocker progress against the verdict's step list (which step, what changed, evidence). Compact rounds older than the attached verdict to a line each so the document stays bounded."
-
-[[slot]]
 id = "leftovers"
 schema = "[schema:leftover]"
 description = "Adjudicated leftovers: legitimate follow-on work the shipped result does not require, surviving the reviewer's two-question test. Replaced by each review step; an empty list is a valid, signed claim that none exist."
 
 [[slot]]
-id = "commit-output"
-schema = "schema:text"
-description = "Output evidence from the git commit command step: committed hash and subject."
+id = "park-report"
+schema = "[schema:review-verdict-smart]"
+description = "This round's typed park record (P414): empty when the round's verdict is approved, exactly one entry — the round's own verdict, copied unchanged — when it is revise. Written each round by a deterministic project step, never model-authored, so it can never disagree with the verdict it comes from."
 
 [[slot]]
-id = "review-diff"
-schema = "schema:text"
-description = "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
-hint = "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content."
+id = "planning-verdict"
+schema = "schema:reviewer-verdict"
+description = 'Reviewer verdict for the "planning" produce-review round.'
 
 [[slot]]
 id = "repo-gates-passed"
@@ -156,6 +153,12 @@ description = "Prior art and precedent gathered before the draft: how comparable
 hint = "Better inputs, not more rounds — this step runs once, before the draft, and is never repeated."
 
 [[slot]]
+id = "review-diff"
+schema = "schema:text"
+description = "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
+hint = "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict-smart"
 description = "smart-1's refinement verdict for the current work state."
@@ -164,27 +167,6 @@ description = "smart-1's refinement verdict for the current work state."
 id = "review-verdict-2"
 schema = "schema:review-verdict-smart"
 description = "smart-2's refinement verdict for the current work state."
-
-[[slot]]
-id = "park-report"
-schema = "[schema:review-verdict-smart]"
-description = "This round's typed park record (P414): empty when the round's verdict is approved, exactly one entry — the round's own verdict, copied unchanged — when it is revise. Written each round by a deterministic project step, never model-authored, so it can never disagree with the verdict it comes from."
-
-[[slot]]
-id = "planning-verdict"
-schema = "schema:reviewer-verdict"
-description = 'Reviewer verdict for the "planning" produce-review round.'
-
-[[slot]]
-id = "building-sealed"
-schema = "schema:boolean"
-description = "Runtime slot building-sealed."
-
-[[slot]]
-id = "shipping-status"
-schema = "schema:text"
-description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
-hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
 
 [[slot]]
 id = "shipping-message"
@@ -196,52 +178,30 @@ id = "shipping-stage-output"
 schema = "schema:text"
 description = "Verbatim output of the git-add staging command."
 
+[[slot]]
+id = "shipping-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "task-brief"
+schema = "schema:text"
+description = "The task file's contents, copied exactly as written — the scope contract every later step works from instead of the board."
+hint = "Verbatim copy of the whole task file: title, status line, body, Watch, and Done when. No paraphrasing."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's cumulative account of the implemented state, extended each produce round — the worker's cross-round memory."
+hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round, append: what changed (files), how it was validated, open concerns, and per-blocker progress against the verdict's step list (which step, what changed, evidence). Compact rounds older than the attached verdict to a line each so the document stays bounded."
+
 [[resource]]
 id = "task-board"
 path = ".internal/tasks"
 root = "repo"
 hint = "Repo-root directory for the task board: one markdown file per task, named NNNN-kebab-slug.md; agents read task files with their own tools and never inline them."
 trigger = "on-demand"
-
-[[schema]]
-id = "decision"
-schema = "schema:text"
-allowed = [
-    "approved",
-    "revise",
-]
-
-[[schema]]
-id = "reviewer-verdict"
-description = "Minimal produce-review verdict: decision status plus the blockers that justify a revise."
-
-[schema.fields.blockers]
-schema = "[schema:text]"
-required = true
-description = "The blocking defects that justify a revise verdict; empty when status is approved."
-
-[schema.fields.status]
-schema = "schema:decision"
-required = true
-description = "approved when no blocker remains; revise when at least one blocker remains."
-
-[[schema]]
-id = "blocker-step"
-description = "One step of a blocker's required fix, with verified progress state."
-
-[schema.fields.evidence]
-schema = "schema:text"
-description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
-
-[schema.fields.status]
-schema = "schema:text"
-required = true
-description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
-
-[schema.fields.step]
-schema = "schema:text"
-required = true
-description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
 id = "blocker"
@@ -295,28 +255,63 @@ required = true
 description = "Repo-relative files and paths involved."
 
 [[schema]]
-id = "plan-amendment"
-description = "One typed amendment under smart authority: the plan change, the contradiction it resolves, its rationale, and its provenance. Becomes the binding contract once recorded."
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
 
-[schema.fields.change]
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
 schema = "schema:text"
 required = true
-description = "The change being made to the plan."
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
 
-[schema.fields.contradiction-resolved]
+[schema.fields.step]
 schema = "schema:text"
 required = true
-description = "The contradiction between the plan and the observed work that this amendment resolves."
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
-[schema.fields.provenance]
+[[schema]]
+id = "decision"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+
+[[schema]]
+id = "leftover"
+description = "One adjudicated leftover: real follow-on work that the shipped result does not require, with its reason class, prerequisites, standalone-evidence, and completion check."
+
+[schema.fields.done-when]
 schema = "schema:text"
 required = true
-description = "Who or what authorized this amendment and how it was recorded."
+description = "The falsifiable check that will confirm this item is complete once someone takes it up."
 
-[schema.fields.rationale]
+[schema.fields.evidence]
 schema = "schema:text"
 required = true
-description = "Why this change is the right resolution."
+description = "Why the shipped result stands alone without this item — the second question's verified answer."
+
+[schema.fields.needs]
+schema = "[schema:text]"
+required = true
+description = "What must happen before this item can be done; may be empty."
+
+[schema.fields.reason]
+schema = "schema:text"
+required = true
+description = "Why this follow-on work is outside the run: needs-unlanded (depends on work not yet landed) or needs-human (requires an owner or authority action this run cannot take)."
+allowed = [
+    "needs-unlanded",
+    "needs-human",
+]
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The follow-on work item, stated concretely in exactly one sentence."
 
 [[schema]]
 id = "owner-item"
@@ -354,37 +349,28 @@ required = true
 description = 'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.'
 
 [[schema]]
-id = "leftover"
-description = "One adjudicated leftover: real follow-on work that the shipped result does not require, with its reason class, prerequisites, standalone-evidence, and completion check."
+id = "plan-amendment"
+description = "One typed amendment under smart authority: the plan change, the contradiction it resolves, its rationale, and its provenance. Becomes the binding contract once recorded."
 
-[schema.fields.done-when]
+[schema.fields.change]
 schema = "schema:text"
 required = true
-description = "The falsifiable check that will confirm this item is complete once someone takes it up."
+description = "The change being made to the plan."
 
-[schema.fields.evidence]
+[schema.fields.contradiction-resolved]
 schema = "schema:text"
 required = true
-description = "Why the shipped result stands alone without this item — the second question's verified answer."
+description = "The contradiction between the plan and the observed work that this amendment resolves."
 
-[schema.fields.needs]
-schema = "[schema:text]"
-required = true
-description = "What must happen before this item can be done; may be empty."
-
-[schema.fields.reason]
+[schema.fields.provenance]
 schema = "schema:text"
 required = true
-description = "Why this follow-on work is outside the run: needs-unlanded (depends on work not yet landed) or needs-human (requires an owner or authority action this run cannot take)."
-allowed = [
-    "needs-unlanded",
-    "needs-human",
-]
+description = "Who or what authorized this amendment and how it was recorded."
 
-[schema.fields.what]
+[schema.fields.rationale]
 schema = "schema:text"
 required = true
-description = "The follow-on work item, stated concretely in exactly one sentence."
+description = "Why this change is the right resolution."
 
 [[schema]]
 id = "repo-gates-result"
@@ -463,24 +449,33 @@ schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
+[[schema]]
+id = "reviewer-verdict"
+description = "Minimal produce-review verdict: decision status plus the blockers that justify a revise."
+
+[schema.fields.blockers]
+schema = "[schema:text]"
+required = true
+description = "The blocking defects that justify a revise verdict; empty when status is approved."
+
+[schema.fields.status]
+schema = "schema:decision"
+required = true
+description = "approved when no blocker remains; revise when at least one blocker remains."
+
 [[signal]]
 id = "gate-timed-out"
 description = "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix."
 
 [[agent]]
-id = "worker"
-description = "Implements the draft and applies reviewer fixes."
-summary = "Implementation role."
+id = "clerk"
+description = "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board."
+summary = "Context-extraction role."
 
 [[agent]]
 id = "scribe"
 description = "Writes the commit message for the completed task from the task contract; git staging and committing run as command steps."
 summary = "Commit-message role."
-
-[[agent]]
-id = "clerk"
-description = "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board."
-summary = "Context-extraction role."
 
 [[agent]]
 id = "smart-1"
@@ -491,6 +486,11 @@ summary = "Drafting and first-reviewer role."
 id = "smart-2"
 description = "Independent strong review model: reviews the built work each build round, separately from smart-1."
 summary = "Second-reviewer role."
+
+[[agent]]
+id = "worker"
+description = "Implements the draft and applies reviewer fixes."
+summary = "Implementation role."
 
 [prompt.building-produce]
 text = """

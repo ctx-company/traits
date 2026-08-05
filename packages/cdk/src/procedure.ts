@@ -20,7 +20,7 @@ import {
   validateSlug,
 } from "./normalize.js";
 import { schema } from "./schema.js";
-import { materializeSequenceItem, normalizeMaterializedSequenceItem } from "./sequence.js";
+import { materializeSequenceItem, normalizeMaterializedSequenceItem, validateNoDuplicateTitles } from "./sequence.js";
 
 /** Scalar-or-array predicate list, matching the canonical `PredicateList` authoring shape. */
 type PredicateFields = string | readonly string[];
@@ -142,6 +142,7 @@ export function procedure(fields: ProcedureFields): ProcedureHandle {
   const sequenceValues = arrayOf(fields.sequence).flatMap((item) =>
     materializeSequenceItem(item as SequenceHandle, { kind: "procedure" })
   );
+  validateNoDuplicateTitles(sequenceValues, "procedure");
   const items = sequenceValues.map(normalizeMaterializedSequenceItem);
   const sourceMap = sourceMapForSequenceItems("procedure", sequenceValues, items);
   return withMeta(
