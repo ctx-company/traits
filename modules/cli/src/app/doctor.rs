@@ -114,7 +114,7 @@ struct ConfigDoctorValue {
 }
 
 pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()>> {
-    let report = ctx_traits_io::harness_config::resolve_config_report(Utf8Path::new("."))?;
+    let mut report = ctx_traits_io::harness_config::resolve_config_report(Utf8Path::new("."))?;
     let mut knobs = std::collections::BTreeMap::new();
     fn add_as(
         knobs: &mut std::collections::BTreeMap<String, ConfigDoctorValue>,
@@ -743,6 +743,43 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         ctx_traits_io::harness_config::active_repo_qualifier_key()
             .unwrap_or_else(|| "none (ad-hoc invocation)".to_string()),
     );
+    // 0034: every declared `[trait.<id>]` seat, plus a warning for any
+    // declared id that names no installed trait — a config may legitimately
+    // outlive a trait (0034's Watch), so this is a warning, never a
+    // decode/validation failure.
+    for (trait_id, trait_defaults) in &report.runtime.trait_defaults {
+        for role in trait_defaults.agent.role.keys() {
+            add_assignment_rows(
+                &mut knobs,
+                &report.winners,
+                &format!("trait.{trait_id}.agent.role.{role}"),
+                &trait_defaults.agent.role[role],
+            );
+        }
+        for (variant, value) in &trait_defaults.variant {
+            for role in value.agent.role.keys() {
+                add_assignment_rows(
+                    &mut knobs,
+                    &report.winners,
+                    &format!("trait.{trait_id}.variant.{variant}.agent.role.{role}"),
+                    &value.agent.role[role],
+                );
+            }
+        }
+    }
+    if !report.runtime.trait_defaults.is_empty()
+        && let Ok(repo_root) = ctx_traits_io::repository::discover_repo_root()
+        && let Ok(installed) = ctx_traits_io::discovery::trait_inventory_ids(&repo_root)
+    {
+        let installed: std::collections::BTreeSet<_> = installed.into_iter().collect();
+        for trait_id in report.runtime.trait_defaults.keys() {
+            if !installed.contains(trait_id) {
+                report.tier_warnings.push(format!(
+                    "[trait.{trait_id}] names no installed trait in this repository"
+                ));
+            }
+        }
+    }
     // P475: seat budgets, for the union of every configured role and the
     // four standing seats, resolve through the same
     // `ResolvedRuntimeAssignments::budget_for_seat` path drive/merge/narrator

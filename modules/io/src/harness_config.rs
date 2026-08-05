@@ -663,6 +663,30 @@ pub struct PortDefaults {
 pub struct TraitDefaults {
     #[serde(default)]
     pub defaults: PortDefaults,
+    /// 0034: `[trait.<id>.agent…]` — a trait-scoped seat, same
+    /// [`AgentDefaults`] shape `RepoOverride` already holds. Beats a matching
+    /// `[repo.<key>]` qualifier (the more specific scope) and folds
+    /// field-wise onto the global seat via [`fold_role`]/[`combine_role_level`],
+    /// the one shared fold every consumer reads the flattened result of. A
+    /// non-empty `agent.variant` here is a hard config error — the canonical
+    /// spelling for a trait-scoped variant is `variant.<vid>.agent`, not
+    /// `agent.variant.<vid>`, so the grammar has exactly one spelling.
+    #[serde(default)]
+    pub agent: AgentDefaults,
+    /// 0034: `[trait.<id>.variant.<vid>.agent…]` — one variant of this
+    /// trait. Reusable by 0037 for `[trait.<id>.variant.<vid>.budget]`.
+    #[serde(default)]
+    pub variant: BTreeMap<String, TraitVariantDefaults>,
+}
+
+/// One `[trait.<id>.variant.<vid>]` block (0034): a trait-and-variant-scoped
+/// `AgentDefaults`. A non-empty `agent.variant` here is likewise a hard
+/// config error — see [`TraitDefaults::agent`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TraitVariantDefaults {
+    #[serde(default)]
+    pub agent: AgentDefaults,
 }
 
 /// Narrow caller-selected runtime profile for `ctx traits import
@@ -2543,6 +2567,7 @@ fn resolve_runtime_assignments_impl(
     validate_registry(&registry)?;
     validate_agent_defaults(&runtime_config.agent)?;
     validate_repo_overrides(&runtime_config.repo)?;
+    validate_trait_overrides(&runtime_config.trait_defaults)?;
     let mut budget = runtime_config
         .run
         .as_ref()
@@ -2551,10 +2576,13 @@ fn resolve_runtime_assignments_impl(
     // `resolve_runtime_config` (via `resolve_config_report`) already folded
     // declared named build caches into `worktree.build_cache` (P428).
     let worktree = runtime_config.worktree;
+    // 0034: the running trait's own `[trait.<id>]` block, if declared —
+    // shared by the port-defaults loop below and the qualifier fold further
+    // down, so both read the same lookup.
+    let trait_defaults_entry =
+        trait_ref.and_then(|trait_ref| runtime_config.trait_defaults.get(trait_ref.id.as_str()));
     let mut port_defaults = BTreeMap::new();
-    if let Some(defaults) =
-        trait_ref.and_then(|trait_ref| runtime_config.trait_defaults.get(trait_ref.id.as_str()))
-    {
+    if let Some(defaults) = trait_defaults_entry {
         for (port, value) in &defaults.defaults.port {
             let field = format!(
                 "trait.{}.defaults.port.{port}",
@@ -2623,20 +2651,33 @@ fn resolve_runtime_assignments_impl(
     let scope = RunScope {
         variant: trait_ref
             .and_then(|trait_ref| {
-                resolve_run_variant(trait_ref, &runtime_config.agent, repo_override)
+                resolve_run_variant(
+                    trait_ref,
+                    &runtime_config.agent,
+                    repo_override,
+                    trait_defaults_entry,
+                )
             })
             .map(std::borrow::Cow::Owned),
         repo_key: repo_key.map(std::borrow::Cow::Owned),
+        trait_id: trait_ref.map(|trait_ref| std::borrow::Cow::Borrowed(trait_ref.id.as_str())),
     };
     let (mut agent_defaults, qualifier_by_role) = flatten_agent_defaults(
         &runtime_config.pre_environment_agent,
         &runtime_config.repo,
+        trait_defaults_entry,
         &scope,
     );
     // `$CTX_CONFIG` is the final default layer. Apply it only after the
-    // personal repo qualifier fold so its role and variant leaves win.
-    let (environment_agent, _) =
-        flatten_agent_defaults(&runtime_config.environment_agent, &BTreeMap::new(), &scope);
+    // personal repo qualifier fold so its role and variant leaves win. No
+    // trait-scope fold here: `$CTX_CONFIG` already wins over every scope by
+    // being merged in last.
+    let (environment_agent, _) = flatten_agent_defaults(
+        &runtime_config.environment_agent,
+        &BTreeMap::new(),
+        None,
+        &scope,
+    );
     merge_agent_defaults(&mut agent_defaults, environment_agent);
     // 0025: expand `count`/list-form roles into stable seat aliases now that
     // every scope layer (variant, repo, $CTX_CONFIG) has folded in — the
@@ -2680,6 +2721,11 @@ fn resolve_runtime_assignments_impl(
 struct RunScope<'a> {
     variant: Option<std::borrow::Cow<'a, str>>,
     repo_key: Option<std::borrow::Cow<'a, str>>,
+    /// 0034: the running trait's id, for `trait:<id>`/`trait:<id>+variant:<v>`
+    /// qualifier labels. `None` for a caller with no trait context (merge,
+    /// generate, run-info), making trait qualifiers inert exactly like repo
+    /// qualifiers on those same ad-hoc invocations.
+    trait_id: Option<std::borrow::Cow<'a, str>>,
 }
 
 /// The invocation repository's P426 registry key for repo-qualifier
@@ -2716,14 +2762,17 @@ pub fn active_repo_qualifier_key() -> Option<String> {
 ///
 /// The candidate key set is `defaults.variant` (the base `[agent.variant.*]`
 /// table) unioned with `repo_override.agent.variant` when the active repo key
-/// matched a declared `[repo."<key>"]` block — a variant declared solely
-/// under the repo-scoped table (`[repo."<key>".agent.variant.<v>]` with no
-/// base-level `[agent.variant.<v>]` sibling) must still be derivable, or the
-/// `(repo,role,variant)` rung could never be reached for that config shape.
+/// matched a declared `[repo."<key>"]` block, and with the running trait's
+/// own `[trait.<id>.variant.*]` table (0034) — a variant declared solely
+/// under the repo- or trait-scoped table (with no base-level
+/// `[agent.variant.<v>]` sibling) must still be derivable, or the
+/// `(repo,role,variant)`/`(trait,variant,role)` rung could never be reached
+/// for that config shape.
 fn resolve_run_variant(
     trait_ref: &ctx_traits_core::Trait,
     defaults: &AgentDefaults,
     repo_override: Option<&RepoOverride>,
+    trait_defaults: Option<&TraitDefaults>,
 ) -> Option<String> {
     if let Some(variant) = trait_ref
         .metadata
@@ -2740,6 +2789,11 @@ fn resolve_run_variant(
             repo_override
                 .into_iter()
                 .flat_map(|repo_override| repo_override.agent.variant.keys()),
+        )
+        .chain(
+            trait_defaults
+                .into_iter()
+                .flat_map(|trait_defaults| trait_defaults.variant.keys()),
         )
         .filter(|key| id.ends_with(&format!("-{key}")))
         .max_by_key(|key| key.len())
@@ -2785,12 +2839,16 @@ fn combine_role_level(
 }
 
 /// Fold every declared level for one role — base, `(role,variant)`,
-/// `(repo,role)`, `(repo,role,variant)`, in that least-to-most-specific order
-/// — into the effective value plus the qualifier label of whichever level
-/// actually won (`None` when only the base table contributed).
+/// `(repo,role)`, `(repo,role,variant)`, `(trait,role)`, `(trait,variant,role)`
+/// (0034), in that least-to-most-specific order — into the effective value
+/// plus the qualifier label of whichever level actually won (`None` when only
+/// the base table contributed). Trait rungs land after repo rungs so a trait
+/// wins over a matching `[repo.<key>]` (the task's decision: trait is the
+/// more specific qualifier).
 fn fold_role(
     defaults: &AgentDefaults,
     repo_override: Option<&RepoOverride>,
+    trait_defaults: Option<&TraitDefaults>,
     scope: &RunScope,
     role: &str,
 ) -> (Option<RoleAssignmentValue>, Option<String>) {
@@ -2823,25 +2881,45 @@ fn fold_role(
             qualifier = Some(format!("repo:{repo_key}+variant:{variant}"));
         }
     }
+    if let Some(trait_defaults) = trait_defaults {
+        let trait_id = scope.trait_id.as_deref().unwrap_or_default();
+        if let Some(level) = trait_defaults.agent.role.get(role) {
+            current = Some(combine_role_level(current, level, defaults, role));
+            qualifier = Some(format!("trait:{trait_id}"));
+        }
+        if let Some(variant) = scope.variant.as_deref()
+            && let Some(level) = trait_defaults
+                .variant
+                .get(variant)
+                .and_then(|value| value.agent.role.get(role))
+        {
+            current = Some(combine_role_level(current, level, defaults, role));
+            qualifier = Some(format!("trait:{trait_id}+variant:{variant}"));
+        }
+    }
     (current, qualifier)
 }
 
-/// The whole fold (P451): resolve every declared qualifier table against
-/// `scope` into one effective `AgentDefaults`, plus a `role -> qualifier`
-/// map for evidence (only for roles a qualified level actually won). Returns
-/// `defaults` unchanged with no extra winners when neither `defaults.variant`
-/// nor `repo` declares anything at all — the structural guarantee behind "an
-/// unqualified config resolves exactly as before".
+/// The whole fold (P451, extended 0034 for trait scope): resolve every
+/// declared qualifier table against `scope` into one effective
+/// `AgentDefaults`, plus a `role -> qualifier` map for evidence (only for
+/// roles a qualified level actually won). Returns `defaults` unchanged with
+/// no extra winners when neither `defaults.variant`, `repo`, nor
+/// `trait_defaults` declares anything at all — the structural guarantee
+/// behind "an unqualified config resolves exactly as before".
 fn flatten_agent_defaults(
     defaults: &AgentDefaults,
     repo: &BTreeMap<String, RepoOverride>,
+    trait_defaults: Option<&TraitDefaults>,
     scope: &RunScope,
 ) -> (AgentDefaults, BTreeMap<String, String>) {
-    if defaults.variant.is_empty() && repo.is_empty() {
+    let trait_defaults =
+        trait_defaults.filter(|value| !value.agent.role.is_empty() || !value.variant.is_empty());
+    if defaults.variant.is_empty() && repo.is_empty() && trait_defaults.is_none() {
         return (defaults.clone(), BTreeMap::new());
     }
     let repo_override = scope.repo_key.as_deref().and_then(|key| repo.get(key));
-    if scope.variant.is_none() && repo_override.is_none() {
+    if scope.variant.is_none() && repo_override.is_none() && trait_defaults.is_none() {
         return (defaults.clone(), BTreeMap::new());
     }
 
@@ -2859,11 +2937,19 @@ fn flatten_agent_defaults(
             role_names.extend(value.role.keys().cloned());
         }
     }
+    if let Some(trait_defaults) = trait_defaults {
+        role_names.extend(trait_defaults.agent.role.keys().cloned());
+        if let Some(variant) = scope.variant.as_deref()
+            && let Some(value) = trait_defaults.variant.get(variant)
+        {
+            role_names.extend(value.agent.role.keys().cloned());
+        }
+    }
 
     let mut role = BTreeMap::new();
     let mut qualifier_by_role = BTreeMap::new();
     for name in role_names {
-        let (value, qualifier) = fold_role(defaults, repo_override, scope, &name);
+        let (value, qualifier) = fold_role(defaults, repo_override, trait_defaults, scope, &name);
         if let Some(value) = value {
             role.insert(name.clone(), value);
         }
@@ -3910,6 +3996,15 @@ fn apply_environment_defaults(
                 source.clone(),
             );
         }
+        merge_trait_agent_defaults(
+            &mut runtime.trait_defaults,
+            trait_id,
+            &defaults.agent,
+            &defaults.variant,
+            layer,
+            source.clone(),
+            winners,
+        );
     }
     let role_keys: Vec<_> = document.agent.role.iter().collect();
     let variant_role_keys = variant_role_assignments(&document.agent.variant);
@@ -4935,6 +5030,15 @@ fn merge_project_config(
                 source.clone(),
             );
         }
+        merge_trait_agent_defaults(
+            &mut base.trait_defaults,
+            trait_id,
+            &defaults.agent,
+            &defaults.variant,
+            layer,
+            source.clone(),
+            winners,
+        );
     }
     let setup_declared = repo_requirement(&next, ConfigLeaf::WorktreeSetup);
     let confinement_enabled = repo_requirement(&next, ConfigLeaf::WorktreeConfinementEnabled);
@@ -5210,6 +5314,15 @@ fn merge_machine_config(
                 source.clone(),
             );
         }
+        merge_trait_agent_defaults(
+            &mut base.trait_defaults,
+            &trait_id,
+            &defaults.agent,
+            &defaults.variant,
+            layer,
+            source.clone(),
+            winners,
+        );
     }
     if next.schema_version.is_some() {
         base.schema_version = next.schema_version;
@@ -5284,6 +5397,60 @@ fn merge_machine_config(
             );
         }
         merge_agent_defaults(&mut target.agent, repo_override.agent);
+    }
+}
+
+/// Merge one document's `[trait.<id>.agent…]`/`[trait.<id>.variant.<vid>.agent…]`
+/// blocks (0034) into `base`, recording winners under `trait.<id>.agent.role.<r>`
+/// / `trait.<id>.variant.<v>.agent.role.<r>` — reusing the same
+/// `merge_agent_defaults`/`record_assignment_winners`/`reconcile_assignment_winners`
+/// machinery every other qualifier scope (`agent.variant.*`, `repo.<key>.agent…`)
+/// already merges through, rather than a fourth reimplementation. Shared by
+/// all three tier-merge sites (environment, project, machine).
+fn merge_trait_agent_defaults(
+    base: &mut BTreeMap<String, TraitDefaults>,
+    trait_id: &str,
+    agent: &AgentDefaults,
+    variant: &BTreeMap<String, TraitVariantDefaults>,
+    layer: ConfigLayer,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
+    let target = base.entry(trait_id.to_string()).or_default();
+    reconcile_assignment_winners(
+        winners,
+        &target.agent,
+        agent,
+        &format!("trait.{trait_id}.agent"),
+    );
+    for (role, assignment) in &agent.role {
+        record_assignment_winners(
+            winners,
+            &format!("trait.{trait_id}.agent.role.{role}"),
+            assignment,
+            layer,
+            source.clone(),
+        );
+    }
+    merge_agent_defaults(&mut target.agent, agent.clone());
+    for (variant_id, value) in variant {
+        let variant_target = target.variant.entry(variant_id.clone()).or_default();
+        reconcile_assignment_winners(
+            winners,
+            &variant_target.agent,
+            &value.agent,
+            &format!("trait.{trait_id}.variant.{variant_id}.agent"),
+        );
+        for (role, assignment) in &value.agent.role {
+            record_assignment_winners(
+                winners,
+                &format!("trait.{trait_id}.variant.{variant_id}.agent.role.{role}"),
+                assignment,
+                layer,
+                source.clone(),
+            );
+        }
+        merge_agent_defaults(&mut variant_target.agent, value.agent.clone());
     }
 }
 
@@ -6205,6 +6372,47 @@ fn validate_repo_overrides(repo: &BTreeMap<String, RepoOverride>) -> crate::Resu
         let prefix = format!("repo.{key}.agent");
         validate_role_map(&value.agent.role, &format!("{prefix}.role"), false)?;
         validate_variant_maps(&value.agent.variant, &prefix)?;
+    }
+    Ok(())
+}
+
+/// Validate every declared `[trait.<id>]` block's `agent`/`variant.<v>.agent`
+/// tables (0034): its own `agent.role` table (partial mode — `(trait,role)`
+/// is itself a qualifier level, never required to stand alone) and its
+/// nested `variant.<vid>.agent.role` tables. Unlike a repo qualifier, a
+/// trait-scoped `agent.variant` (or `variant.<vid>.agent.variant`) is a hard
+/// config error: the canonical spelling for a trait-scoped variant is
+/// `trait.<id>.variant.<vid>.agent`, variant ABOVE agent, not `agent.variant`
+/// below it — so the grammar has exactly one spelling, never two that could
+/// silently disagree.
+fn validate_trait_overrides(trait_defaults: &BTreeMap<String, TraitDefaults>) -> crate::Result<()> {
+    for (trait_id, value) in trait_defaults {
+        let prefix = format!("trait.{trait_id}.agent");
+        if !value.agent.variant.is_empty() {
+            return invalid_config(
+                format!("{prefix}.variant"),
+                format!(
+                    "trait-scoped variants are declared as [trait.{trait_id}.variant.<vid>.agent…], not [trait.{trait_id}.agent.variant.<vid>…]"
+                ),
+            );
+        }
+        validate_role_map(&value.agent.role, &format!("{prefix}.role"), false)?;
+        for (variant_id, variant_value) in &value.variant {
+            let variant_prefix = format!("trait.{trait_id}.variant.{variant_id}.agent");
+            if !variant_value.agent.variant.is_empty() {
+                return invalid_config(
+                    format!("{variant_prefix}.variant"),
+                    format!(
+                        "trait-scoped variants cannot nest another variant.<vid> under [trait.{trait_id}.variant.{variant_id}.agent…]"
+                    ),
+                );
+            }
+            validate_role_map(
+                &variant_value.agent.role,
+                &format!("{variant_prefix}.role"),
+                false,
+            )?;
+        }
     }
     Ok(())
 }
@@ -8604,9 +8812,18 @@ mod config_tests {
     }
 
     fn scope<'a>(variant: Option<&'a str>, repo_key: Option<&'a str>) -> RunScope<'a> {
+        scope_with_trait(variant, repo_key, None)
+    }
+
+    fn scope_with_trait<'a>(
+        variant: Option<&'a str>,
+        repo_key: Option<&'a str>,
+        trait_id: Option<&'a str>,
+    ) -> RunScope<'a> {
         RunScope {
             variant: variant.map(std::borrow::Cow::Borrowed),
             repo_key: repo_key.map(std::borrow::Cow::Borrowed),
+            trait_id: trait_id.map(std::borrow::Cow::Borrowed),
         }
     }
 
@@ -8622,6 +8839,7 @@ mod config_tests {
         let (flattened, winners) = flatten_agent_defaults(
             &defaults,
             &BTreeMap::new(),
+            None,
             &scope(Some("smart"), Some("repo-x")),
         );
         assert_eq!(flattened, defaults);
@@ -8645,8 +8863,12 @@ mod config_tests {
                 )]),
             },
         );
-        let (flattened, winners) =
-            flatten_agent_defaults(&defaults, &BTreeMap::new(), &scope(Some("smart"), None));
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            None,
+            &scope(Some("smart"), None),
+        );
         let RoleAssignmentValue::Single(resolved) = &flattened.role["reviewer"] else {
             panic!("expected single table");
         };
@@ -8675,8 +8897,12 @@ mod config_tests {
                 )]),
             },
         );
-        let (flattened, winners) =
-            flatten_agent_defaults(&defaults, &BTreeMap::new(), &scope(Some("quick"), None));
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            None,
+            &scope(Some("quick"), None),
+        );
         let RoleAssignmentValue::List(seats) = &flattened.role["reviewer"] else {
             panic!("expected list-backed role");
         };
@@ -8710,7 +8936,7 @@ mod config_tests {
         );
 
         let (matching, matching_winners) =
-            flatten_agent_defaults(&defaults, &repo, &scope(None, Some("repo-a")));
+            flatten_agent_defaults(&defaults, &repo, None, &scope(None, Some("repo-a")));
         let RoleAssignmentValue::Single(resolved) = &matching.role["worker"] else {
             panic!("expected single table");
         };
@@ -8718,7 +8944,7 @@ mod config_tests {
         assert_eq!(matching_winners["worker"], "repo:repo-a");
 
         let (other, other_winners) =
-            flatten_agent_defaults(&defaults, &repo, &scope(None, Some("repo-b")));
+            flatten_agent_defaults(&defaults, &repo, None, &scope(None, Some("repo-b")));
         assert_eq!(other, defaults);
         assert!(other_winners.is_empty());
     }
@@ -8745,8 +8971,12 @@ mod config_tests {
                 ..RepoOverride::default()
             },
         );
-        let (flattened, winners) =
-            flatten_agent_defaults(&defaults, &repo, &scope(Some("smart"), Some("repo-a")));
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &repo,
+            None,
+            &scope(Some("smart"), Some("repo-a")),
+        );
         let RoleAssignmentValue::Single(resolved) = &flattened.role["reviewer"] else {
             panic!("expected single table");
         };
@@ -8775,8 +9005,12 @@ mod config_tests {
                 )]),
             },
         );
-        let (flattened, _) =
-            flatten_agent_defaults(&defaults, &BTreeMap::new(), &scope(Some("smart"), None));
+        let (flattened, _) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            None,
+            &scope(Some("smart"), None),
+        );
         let RoleAssignmentValue::Single(resolved) = &flattened.role["reviewer"] else {
             panic!("expected single table");
         };
@@ -8805,8 +9039,12 @@ mod config_tests {
                 )]),
             },
         );
-        let (flattened, _) =
-            flatten_agent_defaults(&defaults, &BTreeMap::new(), &scope(Some("smart"), None));
+        let (flattened, _) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            None,
+            &scope(Some("smart"), None),
+        );
         let RoleAssignmentValue::Single(resolved) = &flattened.role["narrator"] else {
             panic!("expected single table");
         };
@@ -8826,7 +9064,7 @@ mod config_tests {
 
         let trait_ref = minimal_trait("implement-phase-smart", Some("declared"));
         assert_eq!(
-            resolve_run_variant(&trait_ref, &defaults, None),
+            resolve_run_variant(&trait_ref, &defaults, None, None),
             Some("declared".to_string())
         );
 
@@ -8834,7 +9072,7 @@ mod config_tests {
         // Both "smart" and "phase-smart" match the id's suffix; the longer
         // declared key wins.
         assert_eq!(
-            resolve_run_variant(&trait_ref, &defaults, None),
+            resolve_run_variant(&trait_ref, &defaults, None, None),
             Some("phase-smart".to_string())
         );
     }
@@ -8843,7 +9081,310 @@ mod config_tests {
     fn resolve_run_variant_none_when_no_declared_suffix_matches() {
         let defaults = AgentDefaults::default();
         let trait_ref = minimal_trait("implement", None);
-        assert_eq!(resolve_run_variant(&trait_ref, &defaults, None), None);
+        assert_eq!(resolve_run_variant(&trait_ref, &defaults, None, None), None);
+    }
+
+    // -----------------------------------------------------------------
+    // 0034: `[trait.<id>]` seat overrides
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn fold_role_trait_scope_single_table_inherits_fields() {
+        let mut base = single("global-harness");
+        base.reasoning_effort = Some("low".into());
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([("worker".into(), RoleAssignmentValue::Single(base))]),
+            ..AgentDefaults::default()
+        };
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::Single(single("opencode")),
+        );
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            Some(&trait_defaults),
+            &scope_with_trait(None, None, Some("deep-research")),
+        );
+        let RoleAssignmentValue::Single(resolved) = &flattened.role["worker"] else {
+            panic!("expected single table");
+        };
+        assert_eq!(resolved.harness.as_deref(), Some("opencode"));
+        // Inherited from the global table: the trait override only named a
+        // harness (the task's own deep-research example).
+        assert_eq!(resolved.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(winners["worker"], "trait:deep-research");
+    }
+
+    #[test]
+    fn fold_role_trait_scope_narrows_count_before_seat_expansion() {
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "smart".into(),
+                RoleAssignmentValue::Single(ProfileAssignment {
+                    count: Some(2),
+                    ..single("global-harness")
+                }),
+            )]),
+            ..AgentDefaults::default()
+        };
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.agent.role.insert(
+            "smart".into(),
+            RoleAssignmentValue::Single(ProfileAssignment {
+                count: Some(1),
+                ..ProfileAssignment::default()
+            }),
+        );
+        let (mut flattened, _) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            Some(&trait_defaults),
+            &scope_with_trait(None, None, Some("plan")),
+        );
+        expand_role_seats(&mut flattened);
+        assert!(flattened.role.contains_key("smart"));
+        assert!(!flattened.role.contains_key("smart-2"));
+    }
+
+    #[test]
+    fn fold_role_trait_wins_over_repo() {
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "worker".into(),
+                RoleAssignmentValue::Single(single("global-harness")),
+            )]),
+            ..AgentDefaults::default()
+        };
+        let mut repo = BTreeMap::new();
+        repo.insert(
+            "repo-a".to_string(),
+            RepoOverride {
+                agent: AgentDefaults {
+                    role: BTreeMap::from([(
+                        "worker".into(),
+                        RoleAssignmentValue::Single(single("repo-harness")),
+                    )]),
+                    ..AgentDefaults::default()
+                },
+                ..RepoOverride::default()
+            },
+        );
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::Single(single("trait-harness")),
+        );
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &repo,
+            Some(&trait_defaults),
+            &scope_with_trait(None, Some("repo-a"), Some("deep-research")),
+        );
+        let RoleAssignmentValue::Single(resolved) = &flattened.role["worker"] else {
+            panic!("expected single table");
+        };
+        assert_eq!(resolved.harness.as_deref(), Some("trait-harness"));
+        assert_eq!(winners["worker"], "trait:deep-research");
+    }
+
+    #[test]
+    fn fold_role_trait_variant_wins_over_plain_trait() {
+        let defaults = AgentDefaults::default();
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::Single(single("trait-harness")),
+        );
+        trait_defaults.variant.insert(
+            "quick".into(),
+            TraitVariantDefaults {
+                agent: AgentDefaults {
+                    role: BTreeMap::from([(
+                        "worker".into(),
+                        RoleAssignmentValue::Single(single("trait-quick-harness")),
+                    )]),
+                    ..AgentDefaults::default()
+                },
+            },
+        );
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            Some(&trait_defaults),
+            &scope_with_trait(Some("quick"), None, Some("implement")),
+        );
+        let RoleAssignmentValue::Single(resolved) = &flattened.role["worker"] else {
+            panic!("expected single table");
+        };
+        assert_eq!(resolved.harness.as_deref(), Some("trait-quick-harness"));
+        assert_eq!(winners["worker"], "trait:implement+variant:quick");
+    }
+
+    #[test]
+    fn fold_role_trait_list_wins_whole() {
+        let defaults = AgentDefaults {
+            role: BTreeMap::from([(
+                "worker".into(),
+                RoleAssignmentValue::Single(single("global-harness")),
+            )]),
+            ..AgentDefaults::default()
+        };
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::List(vec![single("seat-one"), single("seat-two")]),
+        );
+        let (flattened, winners) = flatten_agent_defaults(
+            &defaults,
+            &BTreeMap::new(),
+            Some(&trait_defaults),
+            &scope_with_trait(None, None, Some("deep-research")),
+        );
+        let RoleAssignmentValue::List(seats) = &flattened.role["worker"] else {
+            panic!("expected list-backed role");
+        };
+        assert_eq!(seats.len(), 2);
+        assert_eq!(seats[0].harness.as_deref(), Some("seat-one"));
+        assert_eq!(winners["worker"], "trait:deep-research");
+    }
+
+    #[test]
+    fn validate_trait_overrides_rejects_nested_agent_variant() {
+        let mut trait_defaults = BTreeMap::new();
+        let mut value = TraitDefaults::default();
+        value
+            .agent
+            .variant
+            .insert("quick".into(), VariantOverride::default());
+        trait_defaults.insert("implement".into(), value);
+        assert!(validate_trait_overrides(&trait_defaults).is_err());
+
+        let mut trait_defaults = BTreeMap::new();
+        let mut value = TraitDefaults::default();
+        let mut variant_value = TraitVariantDefaults::default();
+        variant_value
+            .agent
+            .variant
+            .insert("nested".into(), VariantOverride::default());
+        value.variant.insert("quick".into(), variant_value);
+        trait_defaults.insert("implement".into(), value);
+        assert!(validate_trait_overrides(&trait_defaults).is_err());
+    }
+
+    #[test]
+    fn validate_trait_overrides_accepts_plain_role_and_variant_tables() {
+        let mut trait_defaults = BTreeMap::new();
+        let mut value = TraitDefaults::default();
+        value.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::Single(single("opencode")),
+        );
+        value.variant.insert(
+            "quick".into(),
+            TraitVariantDefaults {
+                agent: AgentDefaults {
+                    role: BTreeMap::from([(
+                        "worker".into(),
+                        RoleAssignmentValue::Single(single("quick-harness")),
+                    )]),
+                    ..AgentDefaults::default()
+                },
+            },
+        );
+        trait_defaults.insert("implement".into(), value);
+        assert!(validate_trait_overrides(&trait_defaults).is_ok());
+    }
+
+    #[test]
+    fn sidecar_config_rejects_agent_and_trait_tables() {
+        assert!(
+            toml::from_str::<TraitRunConfig>("[agent.role.worker]\nharness = \"x\"\n").is_err()
+        );
+        assert!(
+            toml::from_str::<TraitRunConfig>(
+                "[trait.example.agent.role.worker]\nharness = \"x\"\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn decodes_trait_scoped_seat_toml_shapes() {
+        let runtime: RuntimeConfig = toml::from_str(concat!(
+            "[trait.deep-research.agent.role.worker]\n",
+            "harness = \"opencode\"\n",
+            "\n",
+            "[trait.plan.agent.role.smart]\n",
+            "count = 1\n",
+        ))
+        .expect("trait-scoped seat decodes");
+        assert_eq!(
+            runtime.trait_defaults["deep-research"].agent.role["worker"],
+            RoleAssignmentValue::Single(single("opencode"))
+        );
+        let RoleAssignmentValue::Single(smart) =
+            &runtime.trait_defaults["plan"].agent.role["smart"]
+        else {
+            panic!("expected single table");
+        };
+        assert_eq!(smart.count, Some(1));
+
+        let variant: RuntimeConfig = toml::from_str(
+            "[trait.implement.variant.quick.agent.role.worker]\nharness = \"opencode\"\n",
+        )
+        .expect("trait+variant seat decodes");
+        assert_eq!(
+            variant.trait_defaults["implement"].variant["quick"]
+                .agent
+                .role["worker"],
+            RoleAssignmentValue::Single(single("opencode"))
+        );
+    }
+
+    #[test]
+    fn merge_machine_config_records_trait_agent_winners() {
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        let mut next = RuntimeConfig::default();
+        let mut trait_value = TraitDefaults::default();
+        trait_value.agent.role.insert(
+            "worker".into(),
+            RoleAssignmentValue::Single(single("trait-harness")),
+        );
+        trait_value.variant.insert(
+            "quick".into(),
+            TraitVariantDefaults {
+                agent: AgentDefaults {
+                    role: BTreeMap::from([(
+                        "worker".into(),
+                        RoleAssignmentValue::Single(single("trait-quick-harness")),
+                    )]),
+                    ..AgentDefaults::default()
+                },
+            },
+        );
+        next.trait_defaults.insert("implement".into(), trait_value);
+        merge_machine_config(
+            &mut effective,
+            next,
+            ConfigLayer::UserGlobal,
+            Some("global".into()),
+            &mut winners,
+        );
+        assert!(winners.contains_key("trait.implement.agent.role.worker.harness"));
+        assert!(winners.contains_key("trait.implement.variant.quick.agent.role.worker.harness"));
+        assert_eq!(
+            effective.trait_defaults["implement"].agent.role["worker"],
+            RoleAssignmentValue::Single(single("trait-harness"))
+        );
+        assert_eq!(
+            effective.trait_defaults["implement"].variant["quick"]
+                .agent
+                .role["worker"],
+            RoleAssignmentValue::Single(single("trait-quick-harness"))
+        );
     }
 
     #[test]
