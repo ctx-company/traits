@@ -1518,3 +1518,1419 @@ pub(super) fn render_outputs_box(lines: &mut Vec<tui::Line>, outputs: &[RunOutpu
     bottom.push(format!("└{}┘", "─".repeat(inner_width)), tui::Tone::Muted);
     lines.push(bottom);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::guide::{GuideChat, GuideExchange};
+    use super::super::model::{CURRENT_PANE, HISTORY_PANE, JOURNEY_PANE, PROGRESS_PANE};
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn activity_event(frame_id: &str, kind: ActivityKind, text: Option<&str>) -> ActivityEvent {
+        ActivityEvent {
+            sequence: 0,
+            frame_id: frame_id.to_string(),
+            kind,
+            text: text.map(str::to_string),
+            tool: None,
+            tokens: None,
+        }
+    }
+
+    // P549: a fresh stage-boundary event (`Dispatching`) starts a Running
+    // row; a `ValidatingOutput` FrameRecorded event closes that same row
+
+    fn step(key: &str, state: StepState, summary: Option<&str>) -> RunStep {
+        RunStep {
+            key: key.to_string(),
+            label: key.to_string(),
+            role: "worker".to_string(),
+            harness: None,
+            tags: Vec::new(),
+            status: "done".to_string(),
+            state,
+            active: false,
+            counts_progress: true,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            elapsed: Some(Duration::from_secs(5)),
+            output_tokens: Some(1_200),
+            loop_key: None,
+            on_active_path: false,
+            position_path: Vec::new(),
+            run_index: 0,
+            structured_count: 0,
+            summary: summary.map(str::to_string),
+            summary_at: summary.map(|_| Duration::from_secs(7)),
+        }
+    }
+
+    fn history_step(label: &str, elapsed: Option<Duration>, summary: Option<&str>) -> HistoryStep {
+        HistoryStep {
+            label: label.to_string(),
+            kind: None,
+            outcome: None,
+            elapsed,
+            output_tokens: Some(1_200),
+            summary: summary.map(str::to_string),
+            summary_at: summary.map(|_| Duration::from_secs(7)),
+        }
+    }
+
+    fn view_with(steps: Vec<RunStep>) -> RunView {
+        RunView {
+            header: RunHeader {
+                session_id: "session-0123456789abcdef".to_string(),
+                run_id: "run-fedcba9876543210".to_string(),
+                input: "not provided".to_string(),
+                harnesses: "unassigned".to_string(),
+                done: 0,
+                total: 0,
+                phase: "in-progress".to_string(),
+                completed: false,
+                stopped: None,
+                stop_detail: None,
+                state_digest: String::new(),
+                harness_count: 0,
+                elapsed: None,
+                output_tokens: None,
+                narrator_tokens: None,
+                guide_tokens: None,
+                structured_count: 0,
+                structured_label: None,
+                structured_verdict: None,
+            },
+            steps,
+            history: Vec::new(),
+            narration: None,
+            outputs: Vec::new(),
+            merge_rows: Vec::new(),
+        }
+    }
+
+    fn line_text(line: &tui::Line) -> String {
+        line.segments().map(|(text, _)| text).collect()
+    }
+
+    fn loop_path_segment(iteration: usize) -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "loop".to_string(),
+            id: Some("round".to_string()),
+            index: 0,
+            iteration: Some(iteration),
+            item_index: None,
+        }
+    }
+
+    fn item_path_segment(id: &str) -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "item".to_string(),
+            id: Some(id.to_string()),
+            index: 0,
+            iteration: None,
+            item_index: None,
+        }
+    }
+
+    fn procedure_path_segment() -> ctx_traits_core::procedure::runtime::PathSegment {
+        ctx_traits_core::procedure::runtime::PathSegment {
+            kind: "procedure".to_string(),
+            id: None,
+            index: 0,
+            iteration: None,
+            item_index: None,
+        }
+    }
+
+    fn sample_lines(n: usize) -> Vec<tui::Line> {
+        (0..n)
+            .map(|index| {
+                let mut line = tui::Line::blank();
+                line.push(format!("line{index}"), tui::Tone::Default);
+                line
+            })
+            .collect()
+    }
+
+    fn sample_journey_rows(n: usize) -> Vec<JourneyRow> {
+        sample_lines(n)
+            .into_iter()
+            .map(|line| JourneyRow(JourneyRowKind::Line(line)))
+            .collect()
+    }
+
+    fn sample_event_rows(n: usize) -> Vec<EventRow> {
+        (0..n)
+            .map(|index| {
+                EventRow::new(
+                    Some(Duration::from_secs(index as u64)),
+                    format!("event{index}"),
+                    tui::Tone::Default,
+                )
+            })
+            .collect()
+    }
+
+    // P552: a narrow terminal stacks every populated pane instead of
+    // dropping any of them — the pre-P552 `live_pane_tree` silently omitted
+    // `history` at narrow widths (reviewer blocker `live-run-pane-contract-
+
+    // P549: a fresh stage-boundary event (`Dispatching`) starts a Running
+    // row; a `ValidatingOutput` FrameRecorded event closes that same row
+    // (by `frame_id`) as Done, freezing its elapsed time.
+    #[test]
+    fn fold_merge_event_opens_running_then_closes_done_on_the_same_row() {
+        let mut rows: Vec<MergeRowView> = Vec::new();
+        let started = Instant::now();
+        fold_merge_event(
+            &mut rows,
+            &activity_event(
+                "merge:gates",
+                ActivityKind::Dispatching,
+                Some("starting gates"),
+            ),
+            started,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, MergeRowState::Running);
+        assert!(rows[0].finished.is_none());
+
+        let finished = started + Duration::from_secs(5);
+        fold_merge_event(
+            &mut rows,
+            &activity_event(
+                "merge:gates",
+                ActivityKind::ValidatingOutput,
+                Some("gates passed"),
+            ),
+            finished,
+        );
+        assert_eq!(rows.len(), 1, "same frame_id must fold into one row");
+        assert_eq!(rows[0].state, MergeRowState::Done);
+        assert_eq!(rows[0].detail.as_deref(), Some("gates passed"));
+        assert_eq!(rows[0].finished, Some(finished));
+    }
+
+    // P549: `Stalled` on any frame_id OTHER than "merge:lock" is a terminal
+    // park/failure — the row must read Failed, never Running.
+    #[test]
+    fn fold_merge_event_stalled_marks_failed_except_at_the_lock_frame() {
+        let mut rows: Vec<MergeRowView> = Vec::new();
+        let now = Instant::now();
+        fold_merge_event(
+            &mut rows,
+            &activity_event(
+                "merge:gates",
+                ActivityKind::Stalled,
+                Some("post-run gate failed"),
+            ),
+            now,
+        );
+        assert_eq!(rows[0].state, MergeRowState::Failed);
+
+        fold_merge_event(
+            &mut rows,
+            &activity_event(
+                "merge:lock",
+                ActivityKind::Stalled,
+                Some("waiting for the merge lock"),
+            ),
+            now,
+        );
+        let lock_row = rows
+            .iter()
+            .find(|row| row.frame_id == "merge:lock")
+            .unwrap();
+        assert_eq!(lock_row.state, MergeRowState::Running);
+    }
+
+    // P549 blocker `merge-rows-do-not-track-stage-progression`: on a
+    // happy-path merge, most stages record no ledger frame until the NEXT
+    // stage's first event arrives — the only progression signal a live
+    // merge has. A stage entered earlier must read Done once a later
+    // stage's row appears, not stay Running forever; `merge:gates` (the
+    // final `StageEntered` before this trace's terminal `Merged`-frame
+    // stand-in) is left Running here on purpose — this test traces
+    // `StageEntered` events only, exactly what a park-free happy path emits
+    // for every stage but the last, whose own terminal frame closes it.
+    #[test]
+    fn fold_merge_event_closes_the_prior_stage_row_when_the_next_stage_starts() {
+        let mut rows: Vec<MergeRowView> = Vec::new();
+        let now = Instant::now();
+        let stage_order = [
+            "merge:lock",
+            "merge:preflight",
+            "merge:rebase",
+            "merge:reconciliation",
+            "merge:gates",
+            "merge:post-run",
+            "merge:cleanup",
+        ];
+        for (index, frame_id) in stage_order.iter().enumerate() {
+            fold_merge_event(
+                &mut rows,
+                &activity_event(
+                    frame_id,
+                    ActivityKind::Dispatching,
+                    Some(&format!("starting {frame_id}")),
+                ),
+                now + Duration::from_secs(index as u64),
+            );
+        }
+        assert_eq!(rows.len(), stage_order.len());
+        for frame_id in &stage_order[..stage_order.len() - 1] {
+            let row = rows.iter().find(|row| &row.frame_id == frame_id).unwrap();
+            assert_eq!(
+                row.state,
+                MergeRowState::Done,
+                "{frame_id} must read Done once a later stage's row appeared"
+            );
+            assert!(row.finished.is_some());
+        }
+        let last = rows.last().unwrap();
+        assert_eq!(last.frame_id, "merge:cleanup");
+        assert_eq!(
+            last.state,
+            MergeRowState::Running,
+            "the most recently entered stage stays Running until its own terminal frame"
+        );
+        assert!(last.finished.is_none());
+    }
+
+    #[test]
+    fn story_row_line_keeps_typed_verdicts_and_omits_unknown_command_facts() {
+        use ctx_traits_core::procedure::run::PlannedSequenceKind;
+
+        let check = HistoryStep {
+            label: "check".to_string(),
+            kind: Some(PlannedSequenceKind::Check),
+            outcome: Some(HistoryOutcome::Check {
+                ok: false,
+                exit_code: Some(7),
+            }),
+            elapsed: Some(Duration::from_secs(5)),
+            output_tokens: Some(10),
+            summary: Some("summary must not suppress verdict".to_string()),
+            summary_at: Some(Duration::from_secs(9)),
+        };
+        let rendered = story_row_line(&check);
+        assert_eq!(rendered.tone, tui::Tone::Fail);
+        assert!(rendered.tail.contains("failed (exit 7)"));
+        assert!(!rendered.tail.contains("summary"));
+
+        let command = HistoryStep {
+            label: "command".to_string(),
+            kind: Some(PlannedSequenceKind::Command),
+            outcome: None,
+            elapsed: Some(Duration::from_secs(5)),
+            output_tokens: Some(10),
+            summary: None,
+            summary_at: None,
+        };
+        let rendered = story_row_line(&command);
+        assert_eq!(rendered.tail, "command");
+        assert!(!rendered.tail.contains("00:00:05"));
+
+        let check = |ok, exit_code, summary: Option<&str>| {
+            story_row_line(&HistoryStep {
+                label: "check".to_string(),
+                kind: Some(PlannedSequenceKind::Check),
+                outcome: Some(HistoryOutcome::Check { ok, exit_code }),
+                elapsed: Some(Duration::from_secs(5)),
+                output_tokens: Some(10),
+                summary: summary.map(str::to_string),
+                summary_at: None,
+            })
+        };
+        let passed = check(true, Some(0), None);
+        assert_eq!(passed.tone, tui::Tone::Muted);
+        assert!(passed.tail.contains("passed"));
+        assert!(!passed.tail.contains("exit"));
+        let failed = check(false, Some(9), Some("must not replace verdict"));
+        assert_eq!(failed.tone, tui::Tone::Fail);
+        assert!(failed.tail.contains("failed (exit 9)"));
+        assert!(!failed.tail.contains("replace verdict"));
+
+        let unknown_check = story_row_line(&HistoryStep {
+            label: "check".to_string(),
+            kind: Some(PlannedSequenceKind::Check),
+            outcome: None,
+            elapsed: None,
+            output_tokens: None,
+            summary: None,
+            summary_at: None,
+        });
+        assert_eq!(unknown_check.tone, tui::Tone::Muted);
+        assert_eq!(unknown_check.tail, "check");
+
+        let command = |succeeded, exit_code| {
+            story_row_line(&HistoryStep {
+                label: "command".to_string(),
+                kind: Some(PlannedSequenceKind::Command),
+                outcome: Some(HistoryOutcome::Command {
+                    succeeded,
+                    exit_code,
+                }),
+                elapsed: Some(Duration::from_secs(5)),
+                output_tokens: Some(10),
+                summary: Some("summary".to_string()),
+                summary_at: None,
+            })
+        };
+        let succeeded = command(true, Some(0));
+        assert_eq!(succeeded.tone, tui::Tone::Muted);
+        assert!(succeeded.tail.contains("succeeded"));
+        let failed = command(false, Some(2));
+        assert_eq!(failed.tone, tui::Tone::Fail);
+        assert!(failed.tail.contains("failed (exit 2)"));
+    }
+
+    #[test]
+    fn progress_lines_show_compact_session_and_run_identifiers() {
+        let lines = progress_lines(&view_with(Vec::new()));
+        assert_eq!(line_text(&lines[0]), "session 0123456789ab");
+        assert_eq!(line_text(&lines[1]), "run fedcba987654");
+    }
+
+    #[test]
+    fn post_run_morph_requires_completion_and_observed_merge_work() {
+        let merge_row = MergeRowView {
+            frame_id: "merge:post-run".to_string(),
+            label: "post-run".to_string(),
+            state: MergeRowState::Done,
+            detail: None,
+            started: Instant::now(),
+            finished: Some(Instant::now()),
+        };
+        let mut incomplete = view_with(Vec::new());
+        incomplete.merge_rows.push(merge_row.clone());
+        assert!(post_run_lines(&incomplete).is_none());
+
+        let mut no_work = view_with(Vec::new());
+        no_work.header.completed = true;
+        assert!(post_run_lines(&no_work).is_none());
+
+        incomplete.header.completed = true;
+        assert!(post_run_lines(&incomplete).is_some());
+    }
+
+    #[test]
+    fn compact_identifier_handles_short_and_nonstandard_values() {
+        assert_eq!(compact_identifier("session-short", "session-"), "short");
+        assert_eq!(compact_identifier("custom-id", "session-"), "custom-id");
+    }
+
+    // P470's plan projection still only supplies journey rows; history is
+    // now populated from accepted ledger executions.
+    #[test]
+    fn story_history_lines_only_covers_done_steps_in_plan_order() {
+        let mut view = view_with(vec![
+            step("a", StepState::Done, None),
+            step("b", StepState::Running, None),
+            step("c", StepState::Done, Some("finished cleanly")),
+            step("d", StepState::Pending, None),
+        ]);
+        view.history = vec![
+            history_step("a", Some(Duration::from_secs(5)), None),
+            history_step("c", Some(Duration::from_secs(7)), Some("finished cleanly")),
+        ];
+        let lines = story_history_lines(&view);
+        assert_eq!(lines.len(), 2);
+    }
+
+    // A step with a landed P455 summary joins its row; one without falls
+    // back to the truthful facts line — never a placeholder.
+    #[test]
+    fn story_row_line_prefers_summary_over_facts_fallback() {
+        let with_summary = story_row_line(&history_step(
+            "a",
+            Some(Duration::from_secs(5)),
+            Some("did the thing"),
+        ));
+        assert_eq!(with_summary.at, Some(Duration::from_secs(7)));
+        assert!(with_summary.tail.contains("did the thing"));
+
+        let without_summary =
+            story_row_line(&history_step("b", Some(Duration::from_secs(5)), None));
+        assert_eq!(without_summary.at, Some(Duration::from_secs(5)));
+        assert!(without_summary.tail.contains('5')); // elapsed
+        assert!(without_summary.tail.contains("tok")); // tokens
+    }
+
+    #[test]
+    fn stream_row_line_tones_narration_and_model_text_differently() {
+        let narration = stream_row_line(&StreamRow {
+            at: Duration::from_secs(3),
+            kind: StreamRowKind::Narration,
+            text: "thinking about it".to_string(),
+        });
+        let model_text = stream_row_line(&StreamRow {
+            at: Duration::from_secs(3),
+            kind: StreamRowKind::ModelText,
+            text: "raw delta".to_string(),
+        });
+        assert_eq!(narration.at, Some(Duration::from_secs(3)));
+        assert_eq!(model_text.at, Some(Duration::from_secs(3)));
+        assert_eq!(narration.tone, tui::Tone::Default);
+        assert_eq!(model_text.tone, tui::Tone::Muted);
+    }
+
+    // P552: every history/current-activity row shares one formatter
+    // (`event_row_line`) that reserves the fixed `HH:MM:SS ` prefix and
+    // truncates only the tail, by display width, so wide/combining Unicode
+    // never desyncs the truncation point from a plain byte/char count.
+    #[test]
+    fn event_row_line_truncates_only_the_tail_by_display_width() {
+        tui_select::clear_ledger();
+        let row = EventRow {
+            at: Some(Duration::from_secs(5)),
+            tail: "a".repeat(50),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 20);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:00:05 "));
+        assert!(rendered.ends_with("..."));
+        assert!(tui::display_width(&rendered) <= 20);
+        // Task 0023: the truncation was recorded, so a selection spanning
+        // this row expands back to the full untruncated tail on copy.
+        assert_eq!(
+            tui_select::substitute_ledger(&rendered),
+            format!("00:00:05 {}", row.tail)
+        );
+        tui_select::clear_ledger();
+    }
+
+    #[test]
+    fn event_row_line_wide_unicode_tail_truncates_by_display_width_not_char_count() {
+        tui_select::clear_ledger();
+        // Each "文" is 2 display columns; a char-count truncation would
+        // overflow the requested width, a display-width one will not.
+        let row = EventRow {
+            at: Some(Duration::from_secs(1)),
+            tail: "文".repeat(30),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 25);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(tui::display_width(&rendered) <= 25);
+        assert!(rendered.ends_with("..."));
+        assert_eq!(
+            tui_select::substitute_ledger(&rendered),
+            format!("00:00:01 {}", row.tail)
+        );
+        tui_select::clear_ledger();
+    }
+
+    #[test]
+    fn event_row_line_leaves_a_short_tail_unmarked() {
+        let row = EventRow {
+            at: Some(Duration::from_secs(9)),
+            tail: "short".to_string(),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 80);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:00:09 short"));
+        assert!(!rendered.ends_with("..."));
+    }
+
+    #[test]
+    fn event_row_line_without_timestamp_uses_the_full_tail_budget() {
+        let row = EventRow {
+            at: None,
+            tail: "a".repeat(30),
+            tone: tui::Tone::Default,
+        };
+        let line = event_row_line(&row, 20);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(!rendered.contains("00:00:00"));
+        assert!(!rendered.starts_with(EVENT_PREFIX_SEP));
+        assert_eq!(rendered, "a".repeat(17) + "...");
+        assert_eq!(tui::display_width(&rendered), 20);
+    }
+
+    // P552: the CURRENT pane's in-flight line is not a special overlay
+    // outside the event model — it folds into an `EventRow` using the
+    // current run-relative timestamp, so it renders through the exact same
+    // `event_row_line` prefix/truncation contract as every recorded event.
+    #[test]
+    fn overlay_event_row_uses_the_shared_event_contract() {
+        let narration = RunNarration {
+            label: "narrator".to_string(),
+            text: "文".repeat(30),
+            muted: false,
+            finished: false,
+        };
+        let row = overlay_event_row(&narration, None, Duration::from_secs(65))
+            .expect("narration text differs from last recorded row");
+        assert_eq!(row.at, Some(Duration::from_secs(65)));
+        assert!(row.tail.starts_with("narrator: "));
+        let line = event_row_line(&row, 25);
+        let rendered: String = line.segments().map(|(text, _)| text).collect();
+        assert!(rendered.starts_with("00:01:05 "));
+        assert!(tui::display_width(&rendered) <= 25);
+        assert!(rendered.ends_with("..."));
+    }
+
+    #[test]
+    fn overlay_event_row_suppresses_a_duplicate_of_the_last_recorded_row() {
+        let narration = RunNarration {
+            label: "narrator".to_string(),
+            text: "same text".to_string(),
+            muted: false,
+            finished: true,
+        };
+        assert!(overlay_event_row(&narration, Some("same text"), Duration::from_secs(1)).is_none());
+    }
+
+    // P552: each logical history/current-activity input becomes exactly one
+    // physical row — no `wrapped_lines` pass may re-split it.
+    #[test]
+    fn event_row_lines_produces_exactly_one_row_per_input() {
+        let rows = vec![
+            EventRow {
+                at: Some(Duration::from_secs(1)),
+                tail: "one".to_string(),
+                tone: tui::Tone::Default,
+            },
+            EventRow {
+                at: Some(Duration::from_secs(2)),
+                tail: "x".repeat(200),
+                tone: tui::Tone::Default,
+            },
+        ];
+        let lines = event_row_lines(&rows, 30);
+        assert_eq!(lines.len(), rows.len());
+    }
+
+    // P470 blocker `tree-follow-anchor-unit-mismatch`: the follow anchor
+    // handed to the pane must be the RENDERED ROW index of the active step's
+    // `render_step_summary` line, never its `view.steps` item index — each
+    // step group is 3 rows (summary + two port lines) under a multi-row
+    // header, so the two coordinate spaces disagree for any step past the
+    // first.
+    #[test]
+    fn render_tree_lines_with_active_row_returns_a_row_index_not_a_step_index() {
+        let mut active_step = step("c", StepState::Running, None);
+        active_step.active = true;
+        let view = view_with(vec![
+            step("a", StepState::Done, None),
+            step("b", StepState::Done, None),
+            active_step,
+            step("d", StepState::Pending, None),
+        ]);
+        let (lines, active_row, _ladder) = journey_lines_with_active_row(&view);
+        let active_row = active_row.expect("an active step must yield a row anchor");
+        assert_eq!(active_row, 2, "each preceding step contributes one row");
+        let rendered = journey_row_lines(&lines, 120);
+        let label = rendered[active_row]
+            .segments()
+            .nth(2)
+            .map(|(text, _)| text.to_string());
+        assert_eq!(
+            label,
+            Some("c".to_string()),
+            "row {active_row} must be the active step's own render_step_summary line"
+        );
+    }
+
+    #[test]
+    fn journey_content_omits_the_pane_title() {
+        let lines = journey_lines(&view_with(vec![step("work", StepState::Running, None)]));
+        assert!(
+            journey_row_lines(&lines, 120)
+                .iter()
+                .all(|line| line_text(line) != "journey"),
+            "the pane border is the only journey title"
+        );
+    }
+
+    #[test]
+    fn journey_step_full_line_labels_agent_variant_and_facts() {
+        let mut step = step("deploy", StepState::Running, None);
+        step.role = "reviewer".to_string();
+        step.harness = Some("codex".to_string());
+        step.tags = vec!["fast".to_string(), "branch-a".to_string()];
+        step.status = "running".to_string();
+        step.structured_count = 2;
+        assert_eq!(
+            line_text(&journey_step_line(&step, 120)),
+            "~ deploy · [agent] reviewer@codex · [variant] fast ∙ branch-a · running · 00:00:05 · 1.2k tok · (2 open)"
+        );
+    }
+
+    #[test]
+    fn journey_step_indents_by_loop_nesting_depth_from_position_path() {
+        // Container paths never carry their own loop segment — a loop
+        // pushes its segment onto its *children's* paths, not its own
+        // (`child_location`) — so a top-level container sits flush left.
+        let mut top_level_container = step("round", StepState::Done, None);
+        top_level_container.loop_key = Some("round".to_string());
+        top_level_container.position_path = vec![procedure_path_segment()];
+        assert!(
+            !line_text(&journey_step_line(&top_level_container, 120)).starts_with(' '),
+            "a top-level loop container renders flat"
+        );
+
+        // A body step under that loop carries the loop's segment and
+        // indents one level.
+        let mut body_step = step("produce", StepState::Done, None);
+        body_step.position_path = vec![procedure_path_segment(), loop_path_segment(1)];
+        assert!(line_text(&journey_step_line(&body_step, 120)).starts_with("    ✓"));
+
+        // A nested loop container one level in carries its ancestor's
+        // segment and indents one level too — headers nest under their
+        // enclosing loop just like bodies do.
+        let mut nested_container = step("inner round", StepState::Done, None);
+        nested_container.loop_key = Some("inner round".to_string());
+        nested_container.position_path = vec![procedure_path_segment(), loop_path_segment(1)];
+        assert!(
+            line_text(&journey_step_line(&nested_container, 120)).starts_with("    ✓"),
+            "a nested loop container indents under its enclosing loop"
+        );
+    }
+
+    #[test]
+    fn journey_step_nesting_clamps_at_two_levels() {
+        let mut doubly_nested = step("inner", StepState::Done, None);
+        doubly_nested.position_path = vec![
+            loop_path_segment(0),
+            loop_path_segment(0),
+            item_path_segment("inner"),
+        ];
+        assert!(line_text(&journey_step_line(&doubly_nested, 120)).starts_with("        ✓"));
+
+        let mut triply_nested = step("deepest", StepState::Done, None);
+        triply_nested.position_path = vec![
+            loop_path_segment(0),
+            loop_path_segment(0),
+            loop_path_segment(0),
+            item_path_segment("deepest"),
+        ];
+        assert!(
+            line_text(&journey_step_line(&triply_nested, 120)).starts_with("        ✓"),
+            "a third loop level must clamp at the same indent as two levels"
+        );
+    }
+
+    #[test]
+    fn journey_step_drops_indentation_before_truncating_the_label() {
+        let mut nested = step("deploy the fleet", StepState::Running, None);
+        nested.position_path = vec![loop_path_segment(0), item_path_segment("deploy")];
+        nested.status = "running".to_string();
+        let rendered = line_text(&journey_step_line(&nested, 30));
+        assert!(
+            !rendered.starts_with(' '),
+            "indentation must drop before the label is truncated: {rendered}"
+        );
+        assert!(
+            rendered.contains("deploy the fleet"),
+            "the label must survive untruncated once indentation drops: {rendered}"
+        );
+    }
+
+    #[test]
+    fn journey_step_degrades_by_display_width_without_losing_state() {
+        let mut step = step("文文 deploy", StepState::Running, None);
+        step.harness = Some("codex".to_string());
+        step.tags = vec!["fast".to_string(), "branch-a".to_string()];
+        step.status = "running".to_string();
+        step.structured_count = 2;
+        for (width, absent) in [
+            (120, ""),
+            (65, "[agent]"),
+            (45, "branch-a"),
+            (30, "worker@codex"),
+            (25, "文文 deploy"),
+        ] {
+            let rendered = line_text(&journey_step_line(&step, width));
+            assert!(rendered.contains('~'));
+            assert!(rendered.contains("running"));
+            assert!(rendered.contains("(2 open)"));
+            assert!(tui::display_width(&rendered) <= width as usize);
+            if !absent.is_empty() {
+                assert!(!rendered.contains(absent), "{rendered}");
+            }
+        }
+    }
+
+    #[test]
+    fn journey_steps_are_one_row_and_never_render_ports() {
+        let view = view_with(vec![
+            step("first", StepState::Done, None),
+            step("second", StepState::Pending, None),
+        ]);
+        let rows = journey_lines(&view);
+        let rendered = journey_row_lines(&rows, 120);
+        assert_eq!(rendered.len(), 2);
+        assert!(rendered.iter().all(|line| {
+            let text = line_text(line);
+            !text.starts_with("    in ") && !text.starts_with("    out ")
+        }));
+    }
+
+    #[test]
+    fn render_tree_lines_with_active_row_is_none_when_no_step_is_selectable() {
+        let (_, active_row, ladder) = journey_lines_with_active_row(&view_with(Vec::new()));
+        assert_eq!(active_row, None);
+        assert!(
+            ladder.is_empty(),
+            "no active step must yield an empty ladder"
+        );
+    }
+
+    // P552: a narrow terminal stacks every populated pane instead of
+    // dropping any of them — the pre-P552 `live_pane_tree` silently omitted
+    // `history` at narrow widths (reviewer blocker `live-run-pane-contract-
+    // absent`); this proves the replacement never does.
+    #[test]
+    fn narrow_full_data_stacks_every_pane_without_omission() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(5);
+        let history = sample_event_rows(10);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::Visible(&title_row_line(None, "trait", None)),
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+        );
+    }
+
+    // Normal-width full data: the bounded-progress 2x2 grid — progress is
+    // bounded to its own content height, journey receives the rest of the
+    // left column, history retains up to half the right column, and current
+    // receives the remainder while keeping its content floor.
+    #[test]
+    fn wide_full_data_produces_bounded_progress_2x2_grid() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+        );
+        let layout = tree.resolve(area);
+        let progress_rect = layout.rect(PROGRESS_PANE).expect("progress");
+        let journey_rect = layout.rect(JOURNEY_PANE).expect("journey");
+        let history_rect = layout.rect(HISTORY_PANE).expect("history");
+        let current_rect = layout.rect(CURRENT_PANE).expect("current");
+        assert_eq!(progress_rect.height, 5, "3 content rows + 2 borders");
+        assert!(
+            journey_rect.height > progress_rect.height,
+            "journey must receive the rest of the left column"
+        );
+        assert_eq!(history_rect.height, area.height / 2);
+        assert_eq!(current_rect.height, area.height - history_rect.height);
+        assert!(history_rect.height >= HISTORY_MIN_OUTER_ROWS);
+        assert!(current_rect.height >= CURRENT_MIN_OUTER_ROWS);
+        assert!(tui_panes::pane_inner(current_rect).height >= 6);
+        assert_eq!(progress_rect.x, journey_rect.x, "left column shares an x");
+        assert_eq!(history_rect.x, current_rect.x, "right column shares an x");
+        assert!(
+            history_rect.x > progress_rect.x,
+            "right column is to the right"
+        );
+        assert_eq!(journey_rect.y + journey_rect.height, area.y + area.height);
+        assert_eq!(current_rect.y + current_rect.height, area.y + area.height);
+        assert_eq!(journey_rect.x + journey_rect.width, history_rect.x);
+        assert_eq!(current_rect.x + current_rect.width, area.x + area.width);
+    }
+
+    #[test]
+    fn post_run_replaces_the_complete_right_column_after_completion() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(100);
+        let post_run = sample_lines(20);
+        let area = Rect::new(0, 0, 120, 24);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: Some(&post_run),
+            title: PaneTitleRow::None,
+        };
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        let layout = tree.resolve(area);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, CURRENT_PANE]
+        );
+        assert_eq!(tree.title(CURRENT_PANE), Some("post-run"));
+        assert!(layout.rect(HISTORY_PANE).is_none());
+        let post_run_rect = layout.rect(CURRENT_PANE).expect("post-run");
+        assert_eq!(post_run_rect.y, area.y);
+        assert_eq!(post_run_rect.height, area.height);
+        assert_eq!(
+            post_run_rect.x,
+            layout.rect(PROGRESS_PANE).expect("progress").x + 72
+        );
+    }
+
+    #[test]
+    fn wide_short_history_yields_unused_rows_to_current_activity() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(4);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+
+        assert_eq!(layout.rect(HISTORY_PANE).expect("history").height, 6);
+        assert_eq!(layout.rect(CURRENT_PANE).expect("current").height, 18);
+    }
+
+    #[test]
+    fn wide_current_activity_length_does_not_change_history_allocation() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let short_current = sample_event_rows(1);
+        let long_current = sample_event_rows(100);
+        let area = Rect::new(0, 0, 120, 24);
+        let short_data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&short_current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let long_data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&long_current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+
+        let short = pane_tree(&LIVE_PANE_IDS, area, &short_data).resolve(area);
+        let long = pane_tree(&LIVE_PANE_IDS, area, &long_data).resolve(area);
+        assert_eq!(short.rect(HISTORY_PANE), long.rect(HISTORY_PANE));
+    }
+
+    #[test]
+    fn smallest_supported_wide_body_keeps_history_and_current_floors() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(100);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, HISTORY_MIN_OUTER_ROWS + CURRENT_MIN_OUTER_ROWS);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+        let history = layout.rect(HISTORY_PANE).expect("history");
+        let current = layout.rect(CURRENT_PANE).expect("current");
+
+        assert_eq!(history.height, HISTORY_MIN_OUTER_ROWS);
+        assert_eq!(current.height, CURRENT_MIN_OUTER_ROWS);
+        assert_eq!(history.y + history.height, current.y);
+        assert_eq!(current.y + current.height, area.y + area.height);
+    }
+
+    // Dashboard preview supplies only progress/journey — this must produce
+    // exactly those two leaves, never four.
+    #[test]
+    fn preview_data_produces_exactly_progress_and_journey() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(5);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: None,
+            current: None,
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(tree.leaf_ids(), vec![PROGRESS_PANE, JOURNEY_PANE]);
+        assert_eq!(tree.title(PROGRESS_PANE), Some("information"));
+        assert_eq!(tree.title(JOURNEY_PANE), Some("journey"));
+    }
+
+    #[test]
+    fn information_title_and_pane_ids_survive_the_narrow_breakpoint() {
+        let progress = sample_lines(5);
+        let journey = sample_journey_rows(5);
+        let history = sample_event_rows(5);
+        let current = sample_event_rows(5);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        for width in [108, 109] {
+            let area = Rect::new(0, 0, width, 30);
+            let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+            assert_eq!(tree.title(PROGRESS_PANE), Some("information"));
+            assert_eq!(
+                tree.leaf_ids(),
+                vec![PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+            );
+            let layout = tree.resolve(area);
+            for id in tree.leaf_ids() {
+                assert!(
+                    layout
+                        .rect(id)
+                        .is_some_and(|rect| rect.width > 0 && rect.height > 0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_full_data_tiles_the_supplied_area_to_its_edges() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(5);
+        let history = sample_event_rows(10);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let layout = pane_tree(&LIVE_PANE_IDS, area, &data).resolve(area);
+        let panes = [PROGRESS_PANE, JOURNEY_PANE, HISTORY_PANE, CURRENT_PANE]
+            .map(|id| layout.rect(id).expect("all supplied panes resolve"));
+        assert!(
+            panes
+                .iter()
+                .all(|rect| rect.x + rect.width == area.x + area.width)
+        );
+        assert_eq!(panes[0].y, area.y);
+        assert_eq!(panes[3].y + panes[3].height, area.y + area.height);
+        assert!(
+            panes
+                .windows(2)
+                .all(|pair| pair[0].y + pair[0].height == pair[1].y)
+        );
+    }
+
+    // Source-driven omission (a legacy session with no activity sidecar):
+    // only the missing pane is dropped, and focus reconciliation never
+    // lands on an undrawn pane.
+    #[test]
+    fn source_omission_drops_only_the_missing_pane_leaving_focus_valid() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(5);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: None,
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        let area = Rect::new(0, 0, 120, 24);
+        let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+        assert_eq!(
+            tree.leaf_ids(),
+            vec![PROGRESS_PANE, JOURNEY_PANE, CURRENT_PANE]
+        );
+        let layout = tree.resolve(area);
+        let ids = drawable_pane_ids(&tree, &layout);
+        let mut focus = FocusRing::new(vec![HISTORY_PANE]);
+        focus.reconcile(ids.clone(), CURRENT_PANE);
+        assert!(focus.current().is_some_and(|id| ids.contains(&id)));
+    }
+
+    #[test]
+    fn focus_ring_contains_only_drawable_panes_at_small_sizes() {
+        let progress = sample_lines(3);
+        let journey = sample_journey_rows(50);
+        let history = sample_event_rows(100);
+        let current = sample_event_rows(4);
+        let data = PaneData {
+            progress: Some(&progress),
+            journey: Some(&journey),
+            history: Some(&history),
+            current: Some(&current),
+            post_run: None,
+            title: PaneTitleRow::None,
+        };
+        for area in [
+            Rect::new(0, 0, 80, 6),
+            Rect::new(0, 0, 80, 7),
+            Rect::new(0, 0, 120, 6),
+            Rect::new(0, 0, 120, 7),
+        ] {
+            let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
+            let layout = tree.resolve(area);
+            let ids = drawable_pane_ids(&tree, &layout);
+            let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+            focus.reconcile(ids.clone(), CURRENT_PANE);
+            for _ in 0..ids.len() {
+                assert!(ids.contains(&focus.current().expect("drawable focus")));
+                focus.next();
+            }
+        }
+    }
+
+    #[test]
+    fn tiny_narrow_frame_keeps_current_activity_drawable() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let overlay = EventRow {
+            at: Some(Duration::from_secs(0)),
+            tail: "unique current activity".to_string(),
+            tone: tui::Tone::Default,
+        };
+        let mut scrolls = PaneScrolls::new();
+        let mut progress_follow = true;
+        let mut journey_follow = true;
+        let mut history_follow = true;
+        let mut current_follow = true;
+        let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+        let mut keys = Vec::new();
+        // P552: narrow now stacks all four panes (never omitting any),
+        // so this terminal must be tall enough for all four Min-bounded
+        // constraints (3+3+3+`CURRENT_MIN_OUTER_ROWS`) plus the title/
+        // footer rows — a 6-row terminal (the pre-P552 two-pane fixture)
+        // could no longer fit even the four panes' own minimums.
+        let mut terminal = Terminal::new(TestBackend::new(80, 22)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: &tui::Line::blank(),
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        journey_ladder: &[],
+                        history_rows: &[],
+                        current_rows: std::slice::from_ref(&overlay),
+                        post_run_lines: None,
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                        ask: None,
+                    },
+                )
+            })
+            .expect("draw");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("unique current"));
+    }
+
+    /// P552: pending titles use a stable visible row; resolved titles render
+    /// bold with the trait name and start clock following them.
+    #[test]
+    fn title_row_is_pending_before_success_and_bold_after() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+
+        let mut scrolls = PaneScrolls::new();
+        let mut progress_follow = true;
+        let mut journey_follow = true;
+        let mut history_follow = true;
+        let mut current_follow = true;
+        let mut focus = FocusRing::new(vec![PROGRESS_PANE]);
+        let mut keys = Vec::new();
+        let pending_title_line = title_row_line(None, "implement-phase", Some(3_723));
+        let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: &pending_title_line,
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        journey_ladder: &[],
+                        history_rows: &[],
+                        current_rows: &[],
+                        post_run_lines: None,
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                        ask: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let pending_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert_eq!(
+            pending_row.trim_end(),
+            "(Generating session title…) · implement-phase · Started at 01:02:03"
+        );
+
+        let title_state = ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+            attempts: 1,
+            title: "Refactor the merge story".to_string(),
+        };
+        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: &title_line,
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        journey_ladder: &[],
+                        history_rows: &[],
+                        current_rows: &[],
+                        post_run_lines: None,
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                        ask: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let rendered_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert!(rendered_row.contains("Refactor the merge story"));
+        assert!(rendered_row.contains("implement-phase"));
+        assert!(rendered_row.contains("Started at 01:02:03"));
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .cell((0, 0))
+                .expect("title cell")
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        let title_state = ctx_traits_core::procedure::session::SessionTitleState::Terminal {
+            attempts: 3,
+            reason: "attempt-limit-exhausted".to_string(),
+        };
+        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
+        terminal
+            .draw(|frame| {
+                render_live_panes(
+                    frame,
+                    LiveFrame {
+                        title_line: &title_line,
+                        progress_lines: &[],
+                        journey_lines: &[],
+                        journey_ladder: &[],
+                        history_rows: &[],
+                        current_rows: &[],
+                        post_run_lines: None,
+                        scrolls: &mut scrolls,
+                        progress_follow: &mut progress_follow,
+                        journey_follow: &mut journey_follow,
+                        history_follow: &mut history_follow,
+                        current_follow: &mut current_follow,
+                        focus: &mut focus,
+                        pending_keys: &mut keys,
+                        modal: None,
+                        ask: None,
+                    },
+                );
+            })
+            .expect("draw");
+        let terminal_row: String = (0..terminal.backend().buffer().area.width)
+            .map(|x| terminal.backend().buffer().cell((x, 0)).unwrap().symbol())
+            .collect();
+        assert_eq!(
+            terminal_row.trim_end(),
+            "implement-phase · Started at 01:02:03"
+        );
+    }
+
+    #[test]
+    fn epoch_clock_utc_wraps_seconds_of_day() {
+        assert_eq!(epoch_clock_utc(3_723), "01:02:03");
+        assert_eq!(epoch_clock_utc(86_400), "00:00:00");
+    }
+
+    #[test]
+    fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
+        for area in [
+            Rect::new(0, 0, 160, 40),
+            Rect::new(0, 0, 70, 20),
+            Rect::new(0, 0, 70, 6),
+        ] {
+            let regions = live_frame_regions(area);
+            assert_eq!(regions[1].width, area.width);
+            assert!(regions[0].height >= 3, "body must retain usable rows");
+            assert_eq!(regions[1].height, 1);
+            assert!(regions[0].bottom() <= regions[1].y);
+        }
+    }
+
+    #[test]
+    fn ask_footer_renders_every_hint_at_narrow_width_boundary() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        for width in [NARROW_WIDTH_THRESHOLD - 1, NARROW_WIDTH_THRESHOLD] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 12)).expect("test terminal");
+            let mut scrolls = PaneScrolls::new();
+            let mut progress_follow = true;
+            let mut journey_follow = true;
+            let mut history_follow = true;
+            let mut current_follow = true;
+            let mut focus = FocusRing::new(vec![CURRENT_PANE]);
+            let mut keys = Vec::new();
+            let ask = AskPane::default();
+            terminal
+                .draw(|frame| {
+                    render_live_panes(
+                        frame,
+                        LiveFrame {
+                            title_line: &tui::Line::blank(),
+                            progress_lines: &[],
+                            journey_lines: &[],
+                            journey_ladder: &[],
+                            history_rows: &[],
+                            current_rows: &[],
+                            post_run_lines: None,
+                            scrolls: &mut scrolls,
+                            progress_follow: &mut progress_follow,
+                            journey_follow: &mut journey_follow,
+                            history_follow: &mut history_follow,
+                            current_follow: &mut current_follow,
+                            focus: &mut focus,
+                            pending_keys: &mut keys,
+                            modal: None,
+                            ask: Some(&GuideChatHandle(Arc::new(Mutex::new(GuideChat {
+                                ask,
+                                dispatch: Arc::new(|_, _| Ok(String::new())),
+                                tokens: Default::default(),
+                                results: None,
+                                wake: None,
+                                context: String::new(),
+                            })))),
+                        },
+                    );
+                })
+                .expect("draw");
+            let rendered: String = (0..width)
+                .map(|x| terminal.backend().buffer().cell((x, 11)).unwrap().symbol())
+                .collect();
+            for hint in [
+                "[?] ask",
+                "[up/down] scroll",
+                "[pg] page",
+                "[home/end] jump",
+                "[tab] pane",
+                "[d] dash",
+                "[q] exit",
+                "[ctrl-c] kill",
+            ] {
+                assert!(
+                    rendered.contains(hint),
+                    "width {width} omits {hint}: {rendered}"
+                );
+            }
+            assert!(!rendered.contains("Ask the guide"));
+        }
+    }
+
+    #[test]
+    fn pending_guide_exchange_has_single_label() {
+        let ask = AskPane {
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 1,
+                answer: None,
+            }],
+            ..AskPane::default()
+        };
+        assert_eq!(ask_lines(&ask), ["You: question", "Guide: thinking..."]);
+    }
+
+    #[test]
+    fn guide_header_tokens_labels_live_and_reconstructed_usage() {
+        let mut view = view_with(Vec::new());
+        view.header.output_tokens = Some(1_000);
+        view.header.narrator_tokens = Some(2_000);
+        view.header.guide_tokens = Some(3_000);
+        let mut lines = Vec::new();
+        render_header(&mut lines, &view.header);
+        let rendered = lines.iter().map(line_text).collect::<String>();
+        assert!(rendered.contains("1.0k"));
+        assert!(rendered.contains("narrator 2.0k"));
+        assert!(rendered.contains("guide 3.0k"));
+        view.header.completed = true;
+        let mut completed = Vec::new();
+        render_header(&mut completed, &view.header);
+        assert!(
+            completed
+                .iter()
+                .map(line_text)
+                .collect::<String>()
+                .contains("guide 3.0k")
+        );
+    }
+}

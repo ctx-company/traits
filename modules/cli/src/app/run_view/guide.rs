@@ -271,3 +271,208 @@ pub(super) fn guide_snapshot(view: &RunView) -> (String, String) {
         .join("; ");
     (step, statuses)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ask_pane_routes_open_edit_answer_and_collapse_visibility() {
+        let mut ask = AskPane::default();
+        assert!(ask_lines(&ask).is_empty());
+        assert_eq!(
+            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?'))),
+            Some(true)
+        );
+        assert!(ask.open);
+        assert!(matches!(
+            ask.input
+                .handle_key(false, &KeyEvent::from(KeyCode::Char('é'))),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask.input.cursor(), 1);
+        assert!(matches!(
+            ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask.input.cursor(), 0);
+        ask.generation = 1;
+        ask.in_flight = true;
+        ask.exchanges.push(GuideExchange {
+            question: "é".to_string(),
+            generation: 1,
+            answer: None,
+        });
+        assert!(apply_ask_result(&mut ask, 1, Ok("answer".to_string())));
+        assert_eq!(ask_lines(&ask), ["You: é", "Guide: answer"]);
+        assert_eq!(
+            apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc)),
+            Some(true)
+        );
+        assert!(!ask.open);
+        assert_eq!(ask_lines(&ask), ["You: é", "Guide: answer"]);
+    }
+
+    #[test]
+    fn text_input_inline_ask_unicode_editing_survives_close_and_reopen() {
+        let mut ask = AskPane::default();
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        for key in ['文', 'é'] {
+            assert!(matches!(
+                ask.input
+                    .handle_key(false, &KeyEvent::from(KeyCode::Char(key))),
+                tui_kit::ModalOutcome::Pending
+            ));
+        }
+        assert!(matches!(
+            ask.input.handle_key(false, &KeyEvent::from(KeyCode::Left)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert!(matches!(
+            ask.input
+                .handle_key(false, &KeyEvent::from(KeyCode::Backspace)),
+            tui_kit::ModalOutcome::Pending
+        ));
+        assert_eq!(ask.input.text(), "é");
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        assert_eq!(ask.input.text(), "é");
+        assert_eq!(ask.input.cursor(), 0);
+    }
+
+    #[test]
+    fn ask_pane_normalizes_and_bounds_multiline_answers() {
+        let answer = format!(
+            "first\n\nsecond\tthird {}",
+            "x".repeat(MAX_GUIDE_ANSWER_CHARS)
+        );
+        let display = displayable_guide_answer(&answer);
+        assert_eq!(
+            display.split_whitespace().take(3).collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+        assert!(!display.contains(['\n', '\r']));
+        assert!(display.chars().count() <= MAX_GUIDE_ANSWER_CHARS + 3);
+        assert!(display.ends_with("..."));
+    }
+
+    #[test]
+    fn ask_pane_sanitizes_untrusted_answer_controls() {
+        let answer = format!(
+            "\x1b[31mfirst\x1b[0m\nsecond\u{0007}\u{202e}third {}",
+            "x".repeat(MAX_GUIDE_ANSWER_CHARS)
+        );
+        let display = displayable_guide_answer(&answer);
+
+        assert_eq!(
+            display.split_whitespace().take(3).collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+        assert!(!display.contains('\x1b'));
+        assert!(!display.chars().any(|ch| ch.is_control()));
+        assert!(!display.contains('\u{202e}'));
+        assert!(display.chars().count() <= MAX_GUIDE_ANSWER_CHARS + 3);
+        assert!(display.ends_with("..."));
+    }
+
+    #[test]
+    fn guide_call_lifecycle_retains_hidden_completion_and_rejects_unknown_generation() {
+        let mut ask = AskPane {
+            open: true,
+            in_flight: true,
+            generation: 7,
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 7,
+                answer: None,
+            }],
+            ..AskPane::default()
+        };
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        assert!(ask.in_flight, "collapsing must not permit another call");
+        assert!(apply_ask_result(&mut ask, 7, Ok("settled".to_string())));
+        assert!(!ask.open);
+        assert_eq!(ask.exchanges[0].answer.as_deref(), Some("settled"));
+        assert!(!ask.in_flight);
+        assert!(!apply_ask_result(&mut ask, 8, Ok("stale".to_string())));
+    }
+
+    #[test]
+    fn stale_guide_result_does_not_clear_current_in_flight() {
+        let mut ask = AskPane {
+            in_flight: true,
+            generation: 2,
+            exchanges: vec![
+                GuideExchange {
+                    question: "first".to_string(),
+                    generation: 1,
+                    answer: Some("answered".to_string()),
+                },
+                GuideExchange {
+                    question: "second".to_string(),
+                    generation: 2,
+                    answer: None,
+                },
+            ],
+            ..AskPane::default()
+        };
+        assert!(!apply_ask_result(&mut ask, 1, Ok("stale".to_string())));
+        assert_eq!(ask.exchanges[0].answer.as_deref(), Some("answered"));
+        assert!(ask.exchanges[1].answer.is_none());
+        assert!(ask.in_flight);
+    }
+
+    #[test]
+    fn guide_call_lifecycle_blocks_reopen_submission_until_the_reserved_call_settles() {
+        let mut ask = AskPane {
+            open: true,
+            in_flight: true,
+            generation: 3,
+            exchanges: vec![GuideExchange {
+                question: "question".to_string(),
+                generation: 3,
+                answer: None,
+            }],
+            ..AskPane::default()
+        };
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Esc));
+        apply_ask_presentation_key(&mut ask, &KeyEvent::from(KeyCode::Char('?')));
+        assert!(ask.open);
+        assert!(ask.in_flight);
+        // The presentation router consumes Enter while the reservation is
+        // live, so reopening cannot launch another call.
+        // A live router checks this guard before it can reserve another call.
+        assert!(ask.in_flight);
+        assert!(apply_ask_result(&mut ask, 3, Ok("settled".to_string())));
+        assert!(!ask.in_flight);
+    }
+
+    #[test]
+    fn guide_chat_scroll_uses_rendered_viewport_rows() {
+        let chat = GuideChatHandle::test_handle();
+        {
+            let mut state = chat.lock();
+            state.ask.open = true;
+            state.ask.scroll.set_len(30);
+            state.ask.body_rows = 3;
+            state.ask.scroll.apply(tui_kit::ScrollDelta::End, 3);
+            state.ask.follow = true;
+        }
+        chat.handle_key(&KeyEvent::from(KeyCode::Up), 3);
+        {
+            let state = chat.lock();
+            assert_eq!(state.ask.scroll.window(3), 26..29);
+            assert!(!state.ask.follow);
+        }
+        chat.handle_key(&KeyEvent::from(KeyCode::Down), 3);
+        assert!(chat.lock().ask.follow);
+
+        // A resize changes both the clamp and the tail position; the same one
+        // row key must use the new rendered body height, not a fixed value.
+        chat.lock().ask.scroll.apply(tui_kit::ScrollDelta::End, 7);
+        chat.handle_key(&KeyEvent::from(KeyCode::Up), 7);
+        let state = chat.lock();
+        assert_eq!(state.ask.scroll.window(7), 22..29);
+        assert!(!state.ask.follow);
+    }
+}
