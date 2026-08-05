@@ -1,6 +1,6 @@
 # 0028 — Version-to-version migration: mechanical, then assisted
 
-**Status:** mechanical tier implemented, assisted tier deferred (seam designed only) · **Raised:** 2026-07-29
+**Status:** design needed · **Raised:** 2026-07-29
 
 A trait authored against schema version N must be migratable to N+1. Two tiers:
 
@@ -27,28 +27,6 @@ Options, to be decided:
 
 Option 2 is likely right: it keeps the model's input authored-by-a-human rather
 than authored-by-a-previous-model, which is the actual failure mode.
-
-**Decided: Option 2.** Implemented in `ctx_traits_core::migrate` (module
-doc-comment carries the same rationale): mechanical steps compose N→M over
-one document; the assisted pass (not yet built) would run at most once,
-against the final target schema, over the original author's prose captured
-before any mechanical rewrite.
-
-## Implementation (2026-08-05)
-
-- `ctx_traits_core::migrate`: pure planning (`plan_migration`), an ordered
-  `MIGRATION_STEPS` registry (one entry today: 0.2→0.3, a pure
-  `schema-version` bump — every 0.3-gated feature is additive), round-trip
-  validation via `encoding::decode_trait`, and `AssistedItem`/
-  `assisted_needed` as the designed (unpopulated) assisted seam.
-- `ctx traits migrate <trait>` CLI subcommand (plan/apply/`--json`),
-  mirroring the `doctor migrate-state`/`migrate-config` plan/apply shape:
-  plan mode prints a diff and digest before/after without writing; `--apply`
-  writes and reports the canonical-digest move plus the
-  `ctx traits trust approve` follow-up.
-- Not built: the assisted model pass itself (blocks `--apply` today via a
-  refusal if `assisted_needed` is ever nonempty — currently always empty,
-  since the only registered step is a pure bump).
 
 ## Watch
 
