@@ -7,22 +7,21 @@ status = "ready"
 [family]
 default = "default"
 
-[family.leaf]
+[family.variant]
 
-[family.leaf.default]
+[family.variant.default]
 path = "generated/default/index.toml"
 aliases = ["plan-default"]
-run-config = "run-config/default.toml"
 
-[family.leaf.direct]
+[family.variant.direct]
 path = "generated/direct/index.toml"
 aliases = ["plan-direct"]
 
-[family.leaf.quick]
+[family.variant.quick]
 path = "generated/quick/index.toml"
 aliases = ["plan-quick"]
 
-[family.leaf.complex]
+[family.variant.complex]
 path = "generated/complex/index.toml"
 aliases = ["plan-complex"]
 

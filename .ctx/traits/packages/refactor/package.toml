@@ -7,27 +7,25 @@ status = "ready"
 [family]
 default = "default"
 
-[family.leaf]
+[family.variant]
 
-[family.leaf.direct]
+[family.variant.direct]
 path = "generated/direct/index.toml"
 aliases = ["refactor-direct"]
-run-config = "run-config/direct.toml"
 
-[family.leaf.default]
+[family.variant.default]
 path = "generated/default/index.toml"
 aliases = ["refactor-default"]
-run-config = "run-config/default.toml"
 
-[family.leaf.quick]
+[family.variant.quick]
 path = "generated/quick/index.toml"
 aliases = ["refactor-quick"]
 
-[family.leaf.smart]
+[family.variant.smart]
 path = "generated/smart/index.toml"
 aliases = ["refactor-smart"]
 
-[family.leaf.strict]
+[family.variant.strict]
 path = "generated/strict/index.toml"
 aliases = ["refactor-strict"]
 

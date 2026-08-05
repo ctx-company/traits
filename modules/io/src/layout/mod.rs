@@ -72,9 +72,18 @@ pub const PACKAGE_MANIFEST: &str = "package.toml";
 /// structurally different; a package holding a family of variants is a
 /// package, not a trait.
 pub const LEGACY_PACKAGE_MANIFEST: &str = "trait.toml";
-/// Optional committed per-package run-config sidecar (P312): budget only,
-/// never canonical trait bytes and never read from `generated/`.
+/// Legacy package-root run-config sidecar (P312), still read. Superseded by
+/// [`PACKAGE_RUNTIME_CONFIG`] (0036): budget only, never canonical trait
+/// bytes and never read from `generated/`.
 pub const PACKAGE_RUN_CONFIG: &str = "config.toml";
+/// Committed per-package budget document (0036). Shares its filename with
+/// the machine-tier [`RUNTIME_CONFIG`], disambiguated by location, not name:
+/// permission narrows as authority moves away from the machine owner —
+/// machine tier gets the full schema, package tier ([`crate::harness_config::PackageRuntimeConfig`])
+/// gets `[budget]` only. Supersedes both [`PACKAGE_RUN_CONFIG`] and the
+/// family manifest's per-variant `run-config` declarations; both remain a
+/// compatibility read when this file is absent.
+pub const PACKAGE_RUNTIME_CONFIG: &str = "runtime.toml";
 /// Legacy canonical document name (flat vendored packages, pre-v2 layouts).
 pub const TRAIT_MANIFEST: &str = "trait.toml";
 /// Legacy source-map name (pre-v2 layouts).
@@ -434,6 +443,13 @@ pub fn resolve_package_manifest(package_root: &Utf8Path) -> Option<Utf8PathBuf> 
 /// as "no sidecar" rather than an error.
 pub fn package_run_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
     package_root.join(PACKAGE_RUN_CONFIG)
+}
+
+/// Path of the committed per-package `runtime.toml` ([`PACKAGE_RUNTIME_CONFIG`])
+/// for a resolved package root. The file may not exist; callers treat
+/// absence as "fall back to the legacy sidecar/declared forms".
+pub fn package_runtime_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
+    package_root.join(PACKAGE_RUNTIME_CONFIG)
 }
 
 /// Whether a path is exactly a package root under a `.ctx/traits` tree.

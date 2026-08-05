@@ -147,13 +147,28 @@ pub(crate) fn build_check_report(
                 check_warnings.extend(cdk_drift.warnings.clone());
             }
             check_warnings.extend(dependency_evidence.warnings.clone());
-            let run_config = ctx_traits_io::harness_config::load_trait_run_config(trait_root)?;
-            if run_config.is_some() {
+            let active_run_config =
+                ctx_traits_io::harness_config::describe_active_package_run_config(
+                    Some(&trait_ref),
+                    trait_root,
+                )?;
+            if let Some((tier, run_config_path)) = active_run_config.as_ref() {
+                let message = match tier {
+                    ctx_traits_io::harness_config::PackageRunConfigTier::Runtime => format!(
+                        "package {run_config_path} is active: its budget sets vendored execution caps below CLI flags but above built-in defaults; review it since a vendored trait's budget may raise execution caps, and CLI budget flags always override it"
+                    ),
+                    ctx_traits_io::harness_config::PackageRunConfigTier::LegacyDeclared => format!(
+                        "legacy declared run-config {run_config_path} is active: migrate this package to runtime.toml (0036); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
+                    ),
+                    ctx_traits_io::harness_config::PackageRunConfigTier::LegacySidecar => format!(
+                        "legacy package sidecar {run_config_path} is active: migrate this package to runtime.toml (0036); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
+                    ),
+                };
                 check_warnings.push(ctx_traits_core::check::CheckWarning {
                     section: Section::RunConfig,
                     code: "run-config-sidecar-active".to_string(),
                     field: None,
-                    message: "package config.toml is active: its [budget] sets vendored execution caps below CLI flags but above built-in defaults; review it since a vendored trait's budget may raise execution caps, and CLI budget flags always override it".to_string(),
+                    message,
                 });
             }
 
@@ -434,10 +449,10 @@ pub(crate) fn build_check_report(
                 )
                 .with_section(
                     Section::RunConfig,
-                    if run_config.is_some() {
-                        "package config.toml active"
+                    if active_run_config.is_some() {
+                        "package run config active"
                     } else {
-                        "no package config.toml sidecar"
+                        "no package run config"
                     },
                     true,
                 )

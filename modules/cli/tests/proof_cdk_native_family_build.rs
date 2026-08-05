@@ -374,21 +374,26 @@ fn default_variant_check_covers_complete_family_drift() {
         "rebuild with authored run-config failed: {}",
         utf8(&rebuild).1
     );
-    let with_run_config = fs::read_to_string(&manifest).unwrap();
+    let post_rebuild_manifest = fs::read_to_string(&manifest).unwrap();
     assert!(
-        with_run_config.contains("run-config = \"run-config/quick.toml\""),
-        "rebuild must preserve authored run-config: {with_run_config}"
+        !post_rebuild_manifest.contains("run-config"),
+        "rebuild must stop emitting run-config declarations: {post_rebuild_manifest}"
     );
-    assert_family_check(&proj, &home, true, "authored run-config");
+    let runtime_toml = fs::read_to_string(root.join("runtime.toml")).unwrap();
+    assert!(
+        runtime_toml.contains("[variant.quick]") && runtime_toml.contains("max-frames = 10"),
+        "rebuild must consolidate the authored run-config into runtime.toml: {runtime_toml}"
+    );
+    assert_family_check(&proj, &home, true, "consolidated runtime.toml");
 
-    let missing_alias = with_run_config.replace("aliases = [\"family-fixture-quick\"]\n", "");
+    let missing_alias = post_rebuild_manifest.replace("aliases = [\"family-fixture-quick\"]\n", "");
     assert_ne!(
-        missing_alias, with_run_config,
+        missing_alias, post_rebuild_manifest,
         "fixture must contain quick alias"
     );
     fs::write(&manifest, missing_alias).unwrap();
     assert_family_check(&proj, &home, false, "missing generated alias");
-    fs::write(&manifest, &with_run_config).unwrap();
+    fs::write(&manifest, &post_rebuild_manifest).unwrap();
 
     let quick = root.join("generated/quick/index.toml");
     let quick_text = fs::read_to_string(&quick).unwrap();
@@ -416,5 +421,137 @@ fn default_variant_check_covers_complete_family_drift() {
         &home,
         false,
         "new synthesized variant absent from manifest",
+    );
+}
+
+/// Consolidation must carry an authored `[defaults.port]` on the default
+/// variant's declared run-config forward into `runtime.toml`, not silently
+/// drop it — `[defaults.port]` is a live capability of the new shape, not
+/// out-of-scope authored configuration.
+#[test]
+fn rebuild_consolidation_carries_default_variant_defaults_forward() {
+    let scratch = ScratchRoot::new("cdk-native-family-consolidate-defaults");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+    let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
+    assert!(init.status.success(), "init failed: {}", utf8(&init).1);
+    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    fs::write(&source, family_fixture_source()).unwrap();
+    let build = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(build.status.success(), "build failed: {}", utf8(&build).1);
+
+    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let manifest = root.join("package.toml");
+    let manifest_text = fs::read_to_string(&manifest).unwrap();
+    let with_run_config = manifest_text.replace(
+        "[family.variant.default]\npath = \"generated/default/index.toml\"",
+        "[family.variant.default]\npath = \"generated/default/index.toml\"\nrun-config = \"run-config/default.toml\"",
+    );
+    assert_ne!(
+        with_run_config, manifest_text,
+        "fixture must declare a default variant path to rewrite"
+    );
+    fs::create_dir_all(root.join("run-config")).unwrap();
+    fs::write(
+        root.join("run-config/default.toml"),
+        "schema-version = \"0.1\"\n\n[budget]\nmax-frames = 10\n\n[defaults.port]\nplan = \"sidecar\"\n",
+    )
+    .unwrap();
+    fs::write(&manifest, &with_run_config).unwrap();
+    let rebuild = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(
+        rebuild.status.success(),
+        "rebuild with authored default-variant defaults failed: {}",
+        utf8(&rebuild).1
+    );
+    let runtime_toml = fs::read_to_string(root.join("runtime.toml")).unwrap();
+    assert!(
+        runtime_toml.contains("[defaults.port]") && runtime_toml.contains("plan = \"sidecar\""),
+        "rebuild must carry the default variant's [defaults.port] into runtime.toml: {runtime_toml}"
+    );
+}
+
+/// A non-default variant's declared run-config cannot carry `[defaults.port]`
+/// forward — `runtime.toml`'s `[variant.<vid>]` tables are budget-only, so
+/// this is unrepresentable in the new shape and must hard-error rather than
+/// silently drop the authored defaults.
+#[test]
+fn rebuild_consolidation_rejects_non_default_variant_defaults() {
+    let scratch = ScratchRoot::new("cdk-native-family-consolidate-defaults-reject");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+    let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
+    assert!(init.status.success(), "init failed: {}", utf8(&init).1);
+    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    fs::write(&source, family_fixture_source()).unwrap();
+    let build = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(build.status.success(), "build failed: {}", utf8(&build).1);
+
+    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let manifest = root.join("package.toml");
+    let manifest_text = fs::read_to_string(&manifest).unwrap();
+    let with_run_config = manifest_text.replace(
+        "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
+        "[family.variant.quick]\npath = \"generated/quick/index.toml\"\nrun-config = \"run-config/quick.toml\"",
+    );
+    fs::create_dir_all(root.join("run-config")).unwrap();
+    fs::write(
+        root.join("run-config/quick.toml"),
+        "schema-version = \"0.1\"\n\n[budget]\nmax-frames = 10\n\n[defaults.port]\nplan = \"sidecar\"\n",
+    )
+    .unwrap();
+    fs::write(&manifest, &with_run_config).unwrap();
+    let rebuild = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(
+        !rebuild.status.success(),
+        "rebuild must refuse to consolidate a non-default variant's [defaults.port]"
+    );
+    let (stdout, stderr) = utf8(&rebuild);
+    assert!(
+        (stdout.contains("quick") && stdout.contains("defaults.port"))
+            || (stderr.contains("quick") && stderr.contains("defaults.port")),
+        "refusal must name the offending variant and field\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !root.join("runtime.toml").exists(),
+        "refused consolidation must not partially write runtime.toml"
     );
 }

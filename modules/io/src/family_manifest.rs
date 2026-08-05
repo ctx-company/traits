@@ -18,7 +18,6 @@ pub struct FamilyVariantManifestEntry {
     pub name: String,
     pub relative_path: String,
     pub aliases: Vec<String>,
-    pub run_config: Option<String>,
 }
 
 /// A parsed `[family]` table: the default variant's name plus every
@@ -215,7 +214,11 @@ fn validate_relative_path(
 ///
 /// Always emits `[family.variant.<name>]`; a legacy `[family.leaf.*]` table
 /// on disk is dropped once this rewrites the document, migrating the store
-/// to the new shape on next publish.
+/// to the new shape on next publish. `run-config` is never emitted (0036:
+/// budgets moved to the package's `runtime.toml`) — same drop-on-rewrite
+/// precedent as `[family.leaf]`. A publish consolidates an existing
+/// declaration into `runtime.toml` before calling this, so dropping it here
+/// never orphans an authored budget.
 pub fn write_family_table(
     manifest_path: &Utf8Path,
     default_name: &str,
@@ -242,10 +245,6 @@ pub fn write_family_table(
                 aliases.push(alias.as_str());
             }
             document["family"]["variant"][&variant.name]["aliases"] = toml_edit::value(aliases);
-        }
-        if let Some(run_config) = &variant.run_config {
-            document["family"]["variant"][&variant.name]["run-config"] =
-                toml_edit::value(run_config.as_str());
         }
     }
     crate::write::write_text(manifest_path, &document.to_string())?;

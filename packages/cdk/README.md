@@ -129,6 +129,32 @@ Useful helpers:
 
 The CDK boundary is unchanged: builders emit draft JSON, `ctx traits build` validates and builds canonical TOML, and consumers read canonical artifacts without executing TypeScript.
 
+## Run budgets
+
+There is no CDK authoring API for run budgets — hand-author a `runtime.toml`
+at the package root, next to `package.toml`:
+
+```toml
+frame-seconds = 1200
+total-seconds = 3600
+
+[variant.quick]
+frame-seconds = 900
+```
+
+Top-level keys are the package's default budget; a `[variant.<vid>]` table
+overlays them for one variant (stated keys replace, omitted keys inherit the
+default).
+
+**Permission narrows as authority moves away from the machine owner.** A
+machine owner's own `.ctx/traits/runtime.toml` accepts the full runtime
+schema — harness, model, worktree, assignment. A package's `runtime.toml`
+accepts `[budget]` fields (plus `[defaults.port]`) only; any other key is a
+hard decode error naming the field. Do not widen the package schema for
+symmetry with the machine tier — the asymmetry is the point: a vendored
+trait can tune its own execution caps, never bind lifecycle, harness, or
+model selection.
+
 ## Package layout
 
 A variant with more than one source module follows one authoring pattern.

@@ -7,25 +7,25 @@ status = "ready"
 [family]
 default = "default"
 
-[family.leaf]
+[family.variant]
 
-[family.leaf.quick]
+[family.variant.quick]
 path = "generated/quick/index.toml"
 aliases = ["implement-quick"]
 
-[family.leaf.default]
+[family.variant.default]
 path = "generated/default/index.toml"
 aliases = ["implement-default"]
 
-[family.leaf.smart]
+[family.variant.smart]
 path = "generated/smart/index.toml"
 aliases = ["implement-smart"]
 
-[family.leaf.strict]
+[family.variant.strict]
 path = "generated/strict/index.toml"
 aliases = ["implement-strict"]
 
-[family.leaf.phase]
+[family.variant.phase]
 path = "generated/phase/index.toml"
 aliases = ["implement-phase"]
 

@@ -1,9 +1,0 @@
-schema-version = "0.1"
-
-# Package-shipped budget defaults for the default leaf.
-[budget]
-max-frames = 1000
-frame-seconds = 1200
-total-seconds = 10800
-max-retries = 3
-idle-seconds = 1200

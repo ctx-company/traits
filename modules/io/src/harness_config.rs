@@ -658,6 +658,115 @@ pub struct PortDefaults {
     pub port: BTreeMap<String, String>,
 }
 
+/// Committed per-package `runtime.toml` (0036): the AUTHOR's budget-only
+/// successor to [`TraitRunConfig`]'s `config.toml` sidecar and to a family
+/// manifest's per-variant `run-config` declarations. Top-level budget keys
+/// are the package default; a `[variant.<vid>]` table overlays them (stated
+/// replaces, omitted inherits — [`overlay_budget`]).
+///
+/// Decoded manually rather than via `#[serde(flatten)]`, because serde
+/// silently disables `deny_unknown_fields` under `flatten` — the schema must
+/// keep rejecting `[assign]`, `[worktree]`, harness, or model exactly as the
+/// legacy sidecar did. **Permission narrows as authority moves away from the
+/// machine owner**: the machine tier (`.ctx/traits/runtime.toml`) gets the
+/// full schema, the package tier gets `[budget]` (plus `[defaults.port]`)
+/// only — do not widen this for symmetry with the machine tier.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PackageRuntimeConfig {
+    pub schema_version: Option<String>,
+    pub budget: RunProfileBudget,
+    pub defaults: PortDefaults,
+    /// `[variant.<vid>]`: budget-only overlay tables, keyed by variant id.
+    /// Never contains an entry for the family's default variant — its
+    /// budget is expressed at the top level.
+    pub variant: BTreeMap<String, RunProfileBudget>,
+}
+
+impl PackageRuntimeConfig {
+    fn decode(text: &str, path: &Utf8Path) -> crate::Result<Self> {
+        let table: toml::Table =
+            toml::from_str(text).map_err(|source| crate::parse::Error::TomlDecode {
+                context: path.to_string(),
+                source,
+            })?;
+        let mut schema_version = None;
+        let mut defaults = PortDefaults::default();
+        let mut variant = BTreeMap::new();
+        let mut budget_table = toml::Table::new();
+        for (key, value) in table {
+            match key.as_str() {
+                "schema-version" => {
+                    schema_version = value.as_str().map(str::to_string);
+                }
+                "defaults" => {
+                    defaults =
+                        value
+                            .try_into()
+                            .map_err(|source| crate::parse::Error::TomlDecode {
+                                context: format!("{path} [defaults]"),
+                                source,
+                            })?;
+                }
+                "variant" => {
+                    let table = value
+                        .as_table()
+                        .cloned()
+                        .ok_or_else(|| crate::Error::Usage {
+                            message: format!("{path}: `variant` must be a table"),
+                        })?;
+                    for (name, entry) in table {
+                        let entry_table =
+                            entry
+                                .as_table()
+                                .cloned()
+                                .ok_or_else(|| crate::Error::Usage {
+                                    message: format!("{path}: [variant.{name}] must be a table"),
+                                })?;
+                        let budget: RunProfileBudget =
+                            toml::Value::Table(entry_table)
+                                .try_into()
+                                .map_err(|source| crate::parse::Error::TomlDecode {
+                                    context: format!("{path} [variant.{name}]"),
+                                    source,
+                                })?;
+                        variant.insert(name, budget);
+                    }
+                }
+                _ => {
+                    budget_table.insert(key, value);
+                }
+            }
+        }
+        let budget: RunProfileBudget =
+            toml::Value::Table(budget_table)
+                .try_into()
+                .map_err(|source| crate::parse::Error::TomlDecode {
+                    context: path.to_string(),
+                    source,
+                })?;
+        Ok(Self {
+            schema_version,
+            budget,
+            defaults,
+            variant,
+        })
+    }
+}
+
+/// Which tier supplied the resolved package-level run config, most-current
+/// first. Surfaced to `ctx traits check` (`run-config-sidecar-active`) so an
+/// author can tell whether a package is already on the current `runtime.toml`
+/// shape or still needs migrating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageRunConfigTier {
+    /// Committed `runtime.toml` ([`PackageRuntimeConfig`]).
+    Runtime,
+    /// Legacy family-manifest-declared per-variant `run-config` file.
+    LegacyDeclared,
+    /// Legacy package-root `config.toml` sidecar ([`TraitRunConfig`]).
+    LegacySidecar,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TraitDefaults {
@@ -2606,7 +2715,7 @@ fn resolve_runtime_assignments_impl(
     }
 
     if let Some(trait_root) = trait_root
-        && let Some((sidecar, sidecar_path)) =
+        && let Some((sidecar, sidecar_path, _tier)) =
             load_selected_trait_run_config(trait_ref, trait_root)?
     {
         // The package sidecar remains a compatibility fallback. Project
@@ -3072,10 +3181,11 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
     }
 }
 
-/// Load the optional package-root `config.toml` sidecar. Returns `Ok(None)`
-/// only when the file is absent; a malformed or out-of-scope sidecar (e.g.
-/// an `[assign]` or `[worktree]` table) is always a hard structured
-/// `deny_unknown_fields` decode error, never silently ignored.
+/// Load the optional package-root `config.toml` sidecar (legacy, P312;
+/// superseded by [`PackageRuntimeConfig`]). Returns `Ok(None)` only when the
+/// file is absent; a malformed or out-of-scope sidecar (e.g. an `[assign]`
+/// or `[worktree]` table) is always a hard structured `deny_unknown_fields`
+/// decode error, never silently ignored.
 pub fn load_trait_run_config(trait_root: &Utf8Path) -> crate::Result<Option<TraitRunConfig>> {
     let path = crate::layout::package_run_config_path(trait_root);
     let Some(text) = crate::read::read_optional_text(&path)? else {
@@ -3089,13 +3199,49 @@ pub fn load_trait_run_config(trait_root: &Utf8Path) -> crate::Result<Option<Trai
     Ok(Some(config))
 }
 
-/// Load a native family's declared variant sidecar before the package-root
-/// compatibility sidecar. A declared sidecar is part of the family manifest,
-/// so a missing or malformed one is a hard configuration error.
+/// Which package-level run-config tier is active for a resolved trait, and
+/// the path it was read from — surfaced to `ctx traits check`. `Ok(None)`
+/// means no package tier is active (built-in defaults apply).
+pub fn describe_active_package_run_config(
+    trait_ref: Option<&ctx_traits_core::Trait>,
+    trait_root: &Utf8Path,
+) -> crate::Result<Option<(PackageRunConfigTier, Utf8PathBuf)>> {
+    Ok(load_selected_trait_run_config(trait_ref, trait_root)?.map(|(_, path, tier)| (tier, path)))
+}
+
+/// Resolve the effective package-tier run config for the selected variant,
+/// in precedence order: committed `runtime.toml` ([`PackageRuntimeConfig`],
+/// top-level budget overlaid by the selected `[variant.<vid>]`) beats a
+/// native family's declared per-variant sidecar (part of the family
+/// manifest, so a missing or malformed one is a hard configuration error),
+/// which beats the legacy package-root `config.toml` sidecar. A package
+/// carrying `runtime.toml` uses it exclusively — the legacy forms are never
+/// consulted once it exists.
 fn load_selected_trait_run_config(
     trait_ref: Option<&ctx_traits_core::Trait>,
     trait_root: &Utf8Path,
-) -> crate::Result<Option<(TraitRunConfig, Utf8PathBuf)>> {
+) -> crate::Result<Option<(TraitRunConfig, Utf8PathBuf, PackageRunConfigTier)>> {
+    let runtime_path = crate::layout::package_runtime_config_path(trait_root);
+    if let Some(text) = crate::read::read_optional_text(&runtime_path)? {
+        let config = PackageRuntimeConfig::decode(&text, &runtime_path)?;
+        let mut budget = config.budget;
+        if let Some(variant_budget) = trait_ref
+            .and_then(|trait_ref| trait_ref.variant.as_deref())
+            .and_then(|variant| config.variant.get(variant))
+        {
+            overlay_budget(&mut budget, variant_budget);
+        }
+        return Ok(Some((
+            TraitRunConfig {
+                schema_version: config.schema_version,
+                budget,
+                defaults: config.defaults,
+            },
+            runtime_path,
+            PackageRunConfigTier::Runtime,
+        )));
+    }
+
     let selected = if let Some(variant) = trait_ref.and_then(|trait_ref| trait_ref.variant.as_ref())
     {
         crate::family_manifest::read_family_table(&crate::layout::package_manifest_path(
@@ -3116,18 +3262,80 @@ fn load_selected_trait_run_config(
                 message: format!("declared native-family run config does not exist: {path}"),
             });
         }
-        let text = crate::read::read_text(&path)?;
-        let config: TraitRunConfig =
-            toml::from_str(&text).map_err(|source| crate::parse::Error::TomlDecode {
-                context: path.to_string(),
-                source,
-            })?;
-        return Ok(Some((config, path)));
+        let config = decode_trait_run_config_at(&path)?;
+        return Ok(Some((config, path, PackageRunConfigTier::LegacyDeclared)));
     }
     Ok(load_trait_run_config(trait_root)?.map(|config| {
         let path = crate::layout::package_run_config_path(trait_root);
-        (config, path)
+        (config, path, PackageRunConfigTier::LegacySidecar)
     }))
+}
+
+/// Decode a [`TraitRunConfig`] (legacy budget-only sidecar shape) from an
+/// explicit file path. Shared by the declared per-variant lookup above and
+/// by the rebuild-time consolidation into `runtime.toml`
+/// ([`render_package_runtime_config`]), which reads the same legacy files
+/// before their `run-config` declarations are dropped.
+pub fn decode_trait_run_config_at(path: &Utf8Path) -> crate::Result<TraitRunConfig> {
+    let text = crate::read::read_text(path)?;
+    let config: TraitRunConfig =
+        toml::from_str(&text).map_err(|source| crate::parse::Error::TomlDecode {
+            context: path.to_string(),
+            source,
+        })?;
+    Ok(config)
+}
+
+/// Render a [`PackageRuntimeConfig`]-shaped document from a resolved default
+/// budget plus per-variant overlays: the one-time rebuild consolidation
+/// `publish_cdk_family` runs when an existing family declares `run-config`
+/// files and no `runtime.toml` exists yet, so a rebuild never orphans
+/// authored budgets once the declarations are dropped. `default_defaults` is
+/// the default variant's `[defaults.port]` table (empty when none was
+/// authored) — carried forward at top level per the same schema decision
+/// that keeps `[defaults.port]` live in [`PackageRuntimeConfig`].
+pub fn render_package_runtime_config(
+    default_budget: &RunProfileBudget,
+    default_defaults: &PortDefaults,
+    variant_budgets: &BTreeMap<String, RunProfileBudget>,
+) -> String {
+    let mut text = String::new();
+    push_budget_lines(&mut text, default_budget);
+    if !default_defaults.port.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("[defaults.port]\n");
+        for (port, value) in &default_defaults.port {
+            text.push_str(&format!("{port} = {value:?}\n"));
+        }
+    }
+    for (name, budget) in variant_budgets {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&format!("[variant.{name}]\n"));
+        push_budget_lines(&mut text, budget);
+    }
+    text
+}
+
+fn push_budget_lines(text: &mut String, budget: &RunProfileBudget) {
+    let fields: [(&str, Option<u64>); 8] = [
+        ("max-frames", budget.max_frames),
+        ("frame-seconds", budget.frame_seconds),
+        ("total-seconds", budget.total_seconds),
+        ("max-retries", budget.max_retries),
+        ("attach-wait-seconds", budget.attach_wait_seconds),
+        ("idle-seconds", budget.idle_seconds),
+        ("command-seconds", budget.command_seconds),
+        ("command-idle-seconds", budget.command_idle_seconds),
+    ];
+    for (key, value) in fields {
+        if let Some(value) = value {
+            text.push_str(&format!("{key} = {value}\n"));
+        }
+    }
 }
 
 /// Load and validate a caller-selected narrow runtime profile from an
@@ -9308,6 +9516,103 @@ mod config_tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn package_runtime_config_decodes_top_level_budget_and_variant_overlay() {
+        let config = PackageRuntimeConfig::decode(
+            "frame-seconds = 1200\ntotal-seconds = 3600\n\n[variant.quick]\nframe-seconds = 900\n",
+            Utf8Path::new("runtime.toml"),
+        )
+        .expect("runtime.toml decodes");
+        assert_eq!(config.budget.frame_seconds, Some(1200));
+        assert_eq!(config.budget.total_seconds, Some(3600));
+        let quick = &config.variant["quick"];
+        assert_eq!(quick.frame_seconds, Some(900));
+        // Variant overlay leaves everything it doesn't state unset — the
+        // overlay itself happens via `overlay_budget`, not at decode time.
+        assert_eq!(quick.total_seconds, None);
+    }
+
+    #[test]
+    fn package_runtime_config_variant_overlay_inherits_omitted_keys_via_overlay_budget() {
+        let config = PackageRuntimeConfig::decode(
+            "frame-seconds = 1200\ntotal-seconds = 3600\nmax-retries = 3\n\n[variant.quick]\nframe-seconds = 900\n",
+            Utf8Path::new("runtime.toml"),
+        )
+        .expect("runtime.toml decodes");
+        let mut effective = config.budget.clone();
+        overlay_budget(&mut effective, &config.variant["quick"]);
+        assert_eq!(effective.frame_seconds, Some(900));
+        assert_eq!(effective.total_seconds, Some(3600));
+        assert_eq!(effective.max_retries, Some(3));
+    }
+
+    #[test]
+    fn package_runtime_config_rejects_unknown_top_level_field() {
+        for text in [
+            "[assign.worker]\nharness = \"x\"\n",
+            "[worktree]\nbranch = \"x\"\n",
+            "harness = \"opencode\"\n",
+            "model = \"x\"\n",
+        ] {
+            let error = PackageRuntimeConfig::decode(text, Utf8Path::new("runtime.toml"))
+                .expect_err("out-of-scope field must be a hard decode error");
+            let message = error.to_string();
+            assert!(
+                message.contains("unknown field"),
+                "expected an unknown-field error, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_runtime_config_rejects_unknown_variant_field() {
+        assert!(
+            PackageRuntimeConfig::decode(
+                "[variant.quick]\nharness = \"opencode\"\n",
+                Utf8Path::new("runtime.toml"),
+            )
+            .is_err()
+        );
+        // A variant table is budget-only: no nested `variant` or `defaults`.
+        assert!(
+            PackageRuntimeConfig::decode(
+                "[variant.quick.variant]\nframe-seconds = 900\n",
+                Utf8Path::new("runtime.toml"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn package_runtime_config_decodes_top_level_defaults() {
+        let config = PackageRuntimeConfig::decode(
+            "[defaults.port]\nplan = \"sidecar\"\n",
+            Utf8Path::new("runtime.toml"),
+        )
+        .expect("defaults.port decodes");
+        assert_eq!(config.defaults.port["plan"], "sidecar");
+    }
+
+    #[test]
+    fn render_package_runtime_config_carries_default_defaults_forward() {
+        let mut defaults = PortDefaults::default();
+        defaults
+            .port
+            .insert("plan".to_string(), "sidecar".to_string());
+        let text = render_package_runtime_config(
+            &RunProfileBudget {
+                max_frames: Some(10),
+                ..RunProfileBudget::default()
+            },
+            &defaults,
+            &BTreeMap::new(),
+        );
+        let config = PackageRuntimeConfig::decode(&text, Utf8Path::new("runtime.toml"))
+            .expect("rendered runtime.toml decodes");
+        assert_eq!(config.budget.max_frames, Some(10));
+        assert_eq!(config.defaults.port["plan"], "sidecar");
     }
 
     #[test]
