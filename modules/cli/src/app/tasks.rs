@@ -200,6 +200,140 @@ pub(crate) fn handle_tasks_proposals(
     Ok(CommandOutput::new(()))
 }
 
+/// `ctx tasks reconcile` (0064): the full reconcile pass, non-interactively
+/// and list-only, same precedent as `handle_tasks_proposals` — accepting a
+/// proposal stays `ctx tasks update`. Reuses the session-inventory assembly
+/// `handle_tasks_proposals` already built, extended with the ancestry,
+/// digest, and counter-park facts [`super::task_proposals::derive_reconcile_report`]
+/// hardens `MarkDone` against.
+pub(crate) fn handle_tasks_reconcile(
+    board: Option<&str>,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    let dir = board_dir(board)?;
+    let provider = FilesTaskBoard::open_read(dir.clone());
+    let summaries = provider.list(true).map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let sync_report = provider.sync().map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let mut resolved = std::collections::BTreeMap::new();
+    for summary in &summaries {
+        if let Ok(Some(task)) = provider.get(&summary.key) {
+            resolved.insert(summary.key.clone(), task);
+        }
+    }
+
+    let inventory = ctx_traits_io::run_session::current_repo_run_inventory().map_err(|e| {
+        crate::Error::Command {
+            message: e.to_string(),
+        }
+    })?;
+    let facts = session_facts_from_inventory(&inventory);
+    let report = super::task_proposals::derive_reconcile_report(
+        &facts,
+        &summaries,
+        &resolved,
+        &sync_report.duplicate_keys,
+    );
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            print_json_report(&Envelope::ok(&report), "tasks reconcile report")?;
+        }
+        OutputMode::Human(mode) => {
+            let mut panel = Panel::new(
+                "ctx",
+                format!("tasks reconcile — {dir}"),
+                PanelStatus::Passed(format!(
+                    "{} proposal(s), {} ambiguous",
+                    report.proposals.len(),
+                    report.ambiguous.len()
+                )),
+            );
+            for proposal in &report.proposals {
+                let value = match proposal {
+                    super::task_proposals::ReconcileProposal::MarkDone { evidence, .. } => evidence
+                        .iter()
+                        .map(|e| format!("run {} merged as {} — mark done?", e.run_id, e.sha))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                    super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => {
+                        format!(
+                            "remove depends-on {} ({}) — {}",
+                            remove.to,
+                            status_text(remove.to_status),
+                            remove.evidence
+                        )
+                    }
+                };
+                panel = panel.row(PanelRow::toned(
+                    proposal.task_key().to_string(),
+                    value,
+                    RowTone::Default,
+                ));
+            }
+            for finding in &report.ambiguous {
+                panel = panel.row(PanelRow::toned(
+                    finding.task_key.clone(),
+                    format!("ambiguous — {}", finding.reason),
+                    RowTone::Warn,
+                ));
+            }
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+
+    Ok(CommandOutput::new(()))
+}
+
+/// [`super::task_proposals::SessionFact`] rows from a ledger inventory scan:
+/// the shared assembly `handle_tasks_proposals` and `handle_tasks_reconcile`
+/// both build on, extended here with the ancestry, digest, and park-report
+/// facts reconcile alone needs. One `git merge-base --is-ancestor` per
+/// distinct landed sha — never per session — so a task cited by several
+/// merged runs against the same sha checks ancestry once.
+pub(crate) fn session_facts_from_inventory(
+    inventory: &[ctx_traits_io::run_session::RunInventoryRow],
+) -> Vec<super::task_proposals::SessionFact> {
+    let mut ancestry_cache: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    let mut facts = Vec::new();
+    for row in inventory {
+        let ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } = &row.status
+        else {
+            continue;
+        };
+        let landed_sha = super::task_proposals::merged_landed_sha(session);
+        let landed_is_ancestor = landed_sha.as_ref().map(|sha| {
+            *ancestry_cache.entry(sha.clone()).or_insert_with(|| {
+                ctx_traits_io::git_process::is_ancestor(sha, "HEAD").unwrap_or(false)
+            })
+        });
+        let blocked_with_park_report = session.status
+            == ctx_traits_core::procedure::session::Status::Blocked
+            && ctx_traits_io::run_session::session_park_report(session).is_some();
+        facts.push(super::task_proposals::SessionFact {
+            run_id: session.run_id.as_str().to_string(),
+            task_key: session.provenance.task_key.clone(),
+            task_digest: session
+                .provenance
+                .task_digest
+                .as_ref()
+                .map(|d| d.to_string()),
+            landed_sha,
+            landed_is_ancestor,
+            blocked_with_park_report,
+            terminal_epoch: session
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| outcome.recorded_at_epoch),
+        });
+    }
+    facts
+}
+
 pub(crate) fn handle_tasks_list(
     board: Option<&str>,
     archived: bool,

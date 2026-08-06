@@ -149,6 +149,20 @@ pub enum TasksCommand {
         #[arg(long)]
         json: bool,
     },
+    /// The full reconcile pass (0064): stale statuses and
+    /// satisfied-but-unmet dependencies against checkable repository
+    /// evidence (git ancestry, ledger task binding, park reports), listed
+    /// only — never writes. Accepting a proposal stays `tasks update
+    /// <task> ...` on the CLI, matching `Proposals`'s own precedent.
+    Reconcile {
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// List tasks on the board.
     List {
         /// Board directory. Defaults to `.internal/tasks`.

@@ -1622,6 +1622,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             Some(cli::TasksCommand::Proposals { board, json }) => {
                 crate::app::tasks::handle_tasks_proposals(board.as_deref(), json)
             }
+            Some(cli::TasksCommand::Reconcile { board, json }) => {
+                crate::app::tasks::handle_tasks_reconcile(board.as_deref(), json)
+            }
             Some(cli::TasksCommand::List { board, archived, json }) => {
                 crate::app::tasks::handle_tasks_list(board.as_deref(), archived, json)
             }

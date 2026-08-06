@@ -25,7 +25,6 @@ use ctx_traits_core::task::provider::{ResolvedTask, TaskProvider};
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
 const IMPLEMENT_FAMILY_ID: &str = "implement";
 const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
-const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
 
 fn provider_error(error: ctx_traits_core::task::provider::ProviderError) -> crate::Error {
     crate::Error::Usage {
@@ -322,25 +321,6 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
     )
 }
 
-/// The typed park-report entry a blocked session's final review round
-/// accepted onto `slot:park-report`, if any — read from `accepted_slot_values`
-/// (the SAME evidence a completed session's `port:park-report` final output
-/// is itself projected from at completion time), never a re-derivation from
-/// `completion.final-outputs` (a blocked session never reaches normal
-/// completion, so that projection never runs for it). A slot's LATEST
-/// accepted value replaces the prior round's per `parkReport`'s own
-/// "Replaced by each review step" contract, so the last matching entry in
-/// this append-ordered evidence list is the one that stood when the run
-/// blocked.
-fn session_park_report(session: &Session) -> Option<serde_json::Value> {
-    let value = session
-        .accepted_slot_values
-        .iter()
-        .rev()
-        .find(|value| value.ref_text == PARK_REPORT_SLOT_REF)?;
-    value.value.as_array()?.first().cloned()
-}
-
 /// Scan this repository's session ledgers for a BLOCKED `implement-*` run
 /// whose park report cites `wall_id`, and that has not since been cleared by
 /// a later completed run of the same originating task. Ledgers with no
@@ -438,7 +418,7 @@ fn standing_wall_in_sessions(
         if session.status != Status::Blocked {
             continue;
         }
-        let Some(park_report) = session_park_report(session) else {
+        let Some(park_report) = crate::run_session::session_park_report(session) else {
             continue;
         };
         let Some(entry_wall_id) = park_report.get("wall-id").and_then(|v| v.as_str()) else {

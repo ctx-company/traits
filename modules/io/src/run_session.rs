@@ -596,6 +596,125 @@ pub fn task_value_from_pairs<'a>(
         .map(str::to_string)
 }
 
+const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
+const FEASIBILITY_SLOT_REF: &str = "slot:feasibility";
+
+/// One operational step of a [`ParkBlocker`]'s fix, mirroring
+/// `blockerStepSchema` (`packages/agents/src/index.ts:207`) field-for-field.
+/// Tolerant: every field defaults, so a report missing an optional field
+/// parses instead of vanishing whole (0064's Watch §3 — a schema-drifted
+/// report demotes gracefully, it never crashes the reader).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ParkBlockerStep {
+    pub step: String,
+    pub status: String,
+    pub evidence: String,
+}
+
+/// One blocking defect off a park report's `blockers` list, mirroring
+/// `blockerSchema` (`packages/agents/src/index.ts:227`) field-for-field —
+/// the input 0064's split-from-park-report reads to propose one child task
+/// per open blocker. Tolerant, same rationale as [`ParkBlockerStep`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ParkBlocker {
+    pub id: String,
+    #[serde(rename = "where")]
+    pub location: String,
+    pub what: String,
+    #[serde(rename = "root-cause")]
+    pub root_cause: String,
+    #[serde(rename = "required-fix")]
+    pub required_fix: String,
+    pub steps: Vec<ParkBlockerStep>,
+    #[serde(rename = "done-when")]
+    pub done_when: String,
+}
+
+impl ParkBlocker {
+    /// Whether this blocker still has fix work outstanding — any step not
+    /// `status == "done"`, or no steps recorded at all (a blocker with an
+    /// empty step list is never treated as already resolved).
+    pub fn is_open(&self) -> bool {
+        self.steps.iter().any(|step| step.status != "done") || self.steps.is_empty()
+    }
+}
+
+/// A blocked run's park report, mirroring `reviewVerdictSchema`
+/// (`packages/agents/src/index.ts:418`) field-for-field but reduced to what
+/// 0064's reconcile/split mechanics read. Tolerant, same rationale as
+/// [`ParkBlockerStep`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ParkReportEntry {
+    pub status: String,
+    pub blockers: Vec<ParkBlocker>,
+    #[serde(rename = "wall-id")]
+    pub wall_id: String,
+}
+
+/// The kit's feasibility triage verdict, mirroring `feasibilityVerdictSchema`
+/// (`packages/agents/src/feasibility.ts:12`) field-for-field. Tolerant, same
+/// rationale as [`ParkBlockerStep`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct FeasibilityVerdict {
+    pub verdict: String,
+    pub evidence: String,
+    pub missing: Vec<String>,
+    #[serde(rename = "owner-action")]
+    pub owner_action: String,
+}
+
+/// The typed park-report entry a blocked session's final review round
+/// accepted onto `slot:park-report`, if any — read from `accepted_slot_values`
+/// (the SAME evidence a completed session's `port:park-report` final output
+/// is itself projected from at completion time), never a re-derivation from
+/// `completion.final-outputs` (a blocked session never reaches normal
+/// completion, so that projection never runs for it). A slot's LATEST
+/// accepted value replaces the prior round's per `parkReport`'s own
+/// "Replaced by each review step" contract, so the last matching entry in
+/// this append-ordered evidence list is the one that stood when the run
+/// blocked. Extracted out of `dispatch_preflight.rs` (0064) to live beside
+/// [`session_task`]; that module now calls this shared function.
+pub fn session_park_report(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<serde_json::Value> {
+    let value = session
+        .accepted_slot_values
+        .iter()
+        .rev()
+        .find(|value| value.ref_text == PARK_REPORT_SLOT_REF)?;
+    value.value.as_array()?.first().cloned()
+}
+
+/// [`session_park_report`], deserialized into the tolerant typed mirror
+/// (0064). `None` when there is no park report, or the report present does
+/// not even parse as a JSON object — never a hard error, per the same
+/// tolerant-reader rationale as [`ParkBlockerStep`].
+pub fn typed_park_report(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<ParkReportEntry> {
+    serde_json::from_value(session_park_report(session)?).ok()
+}
+
+/// The typed feasibility-triage verdict a session accepted onto
+/// `slot:feasibility`, if any, by the same latest-wins rule as
+/// [`session_park_report`]. `None` for a session that never ran feasibility
+/// triage, or whose accepted value does not parse.
+pub fn typed_feasibility_verdict(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<FeasibilityVerdict> {
+    let value = session
+        .accepted_slot_values
+        .iter()
+        .rev()
+        .find(|value| value.ref_text == FEASIBILITY_SLOT_REF)?;
+    let entry = value.value.as_array().and_then(|arr| arr.first()).cloned();
+    serde_json::from_value(entry.unwrap_or_else(|| value.value.clone())).ok()
+}
+
 /// The `port:task` value accepted by a session, if any (P472; previously
 /// duplicated as a private helper in `dispatch_preflight.rs` and inlined
 /// again in `run.rs` — both now delegate to [`task_value_from_pairs`]).
@@ -1274,5 +1393,97 @@ mod short_session_display_tests {
         let resolved =
             resolve_session_path(&short, Some(store.as_str())).expect("resolves uniquely");
         assert_eq!(resolved, store.join(format!("{id}.json")));
+    }
+}
+
+/// 0064: the tolerant park-report/feasibility mirrors deserialize a shape
+/// matching `reviewVerdictSchema`/`blockerSchema`/`feasibilityVerdictSchema`
+/// (`packages/agents/src/index.ts`, `packages/agents/src/feasibility.ts`)
+/// field-for-field, including when optional fields are absent.
+#[cfg(test)]
+mod park_report_mirror_tests {
+    use super::*;
+
+    #[test]
+    fn a_full_review_verdict_parses_with_its_blocker_field_names() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [{
+                "id": "leaky-cache",
+                "where": "modules/io/src/cache.rs",
+                "what": "cache never evicts",
+                "root-cause": "no eviction policy",
+                "required-fix": "bound the cache",
+                "steps": [
+                    {"step": "add an LRU cap", "status": "open", "evidence": ""},
+                    {"step": "add a unit test", "status": "done", "evidence": "cache_evicts_test"},
+                ],
+                "done-when": "cache_evicts_test passes",
+            }],
+            "wall-id": "",
+        });
+        let entry: ParkReportEntry = serde_json::from_value(value).expect("parses");
+        assert_eq!(entry.status, "revise");
+        assert_eq!(entry.blockers.len(), 1);
+        let blocker = &entry.blockers[0];
+        assert_eq!(blocker.id, "leaky-cache");
+        assert_eq!(blocker.location, "modules/io/src/cache.rs");
+        assert_eq!(blocker.root_cause, "no eviction policy");
+        assert_eq!(blocker.required_fix, "bound the cache");
+        assert_eq!(blocker.done_when, "cache_evicts_test passes");
+        assert_eq!(blocker.steps.len(), 2);
+        assert!(blocker.is_open());
+    }
+
+    #[test]
+    fn a_blocker_whose_every_step_is_done_is_not_open() {
+        let value = serde_json::json!({
+            "id": "x",
+            "where": "",
+            "what": "",
+            "root-cause": "",
+            "required-fix": "",
+            "steps": [{"step": "a", "status": "done", "evidence": "e"}],
+            "done-when": "",
+        });
+        let blocker: ParkBlocker = serde_json::from_value(value).expect("parses");
+        assert!(!blocker.is_open());
+    }
+
+    #[test]
+    fn a_blocker_report_missing_optional_fields_still_parses_tolerantly() {
+        let value = serde_json::json!({
+            "status": "revise",
+            "blockers": [{"id": "bare", "what": "missing everything else"}],
+        });
+        let entry: ParkReportEntry = serde_json::from_value(value).expect("parses tolerantly");
+        assert_eq!(entry.blockers.len(), 1);
+        assert_eq!(entry.blockers[0].id, "bare");
+        assert_eq!(entry.blockers[0].location, "");
+        assert!(entry.blockers[0].steps.is_empty());
+        // No steps recorded at all is still "open" — never treated as
+        // already resolved for lack of a step list.
+        assert!(entry.blockers[0].is_open());
+    }
+
+    #[test]
+    fn an_unparseable_report_shape_never_panics() {
+        let value = serde_json::json!("not an object at all");
+        let entry: Option<ParkReportEntry> = serde_json::from_value(value).ok();
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn a_feasibility_verdict_parses_with_its_field_names() {
+        let value = serde_json::json!({
+            "verdict": "oversized",
+            "evidence": "checked every referenced file",
+            "missing": ["a shared abstraction", "a smaller scope"],
+            "owner-action": "split the task",
+        });
+        let verdict: FeasibilityVerdict = serde_json::from_value(value).expect("parses");
+        assert_eq!(verdict.verdict, "oversized");
+        assert_eq!(verdict.missing.len(), 2);
+        assert_eq!(verdict.owner_action, "split the task");
     }
 }

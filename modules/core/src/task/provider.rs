@@ -91,6 +91,15 @@ pub struct NewTask {
     pub depends_on: Vec<String>,
     /// A child key (`NNNN.M`) is assigned when this names a parent.
     pub parent: Option<String>,
+    /// 0064: a split child's done-when, carried from the park-report
+    /// blocker it was proposed from (`ParkBlocker::done_when`). Empty for
+    /// every other caller, matching every `TaskDocument::validation` that
+    /// was never set at creation.
+    pub validation: String,
+    /// 0064: a split child's operational steps, mapped from the park-report
+    /// blocker's own `steps` list one-for-one. Empty for every other
+    /// caller.
+    pub steps: Vec<Step>,
 }
 
 /// A partial update: only the fields set to `Some` (or non-empty) change.

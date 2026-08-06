@@ -739,6 +739,34 @@ enum TaskAction {
         digest: String,
         evidence: Vec<super::task_proposals::MergedRunEvidence>,
     },
+    /// `R`: one step of the reconcile review queue (0064). `digest` is
+    /// captured at modal-open against the proposal's own task (`task_key`
+    /// for `MarkDone`, `from` for `RemoveDependsOn`) — same stale-write
+    /// discipline as every other write. Reject (`Cancelled`) and accept
+    /// (`Confirmed`) alike advance to the next queued proposal.
+    ReconcileStep {
+        proposal: super::task_proposals::ReconcileProposal,
+        digest: String,
+    },
+    /// `S` when the selected task's latest bound blocked run carries a park
+    /// report or an oversized feasibility verdict: one step of the
+    /// split-from-park-report queue. `Cancelled` skips this child and
+    /// advances; `Confirmed` creates it under `parent`.
+    SplitStep {
+        parent: String,
+        child: PendingSplitChild,
+    },
+}
+
+/// One split child proposed from a park report's open blocker (or an
+/// oversized feasibility verdict's `missing` entry), pending the owner's
+/// individual confirmation (0064).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingSplitChild {
+    title: String,
+    content: String,
+    validation: String,
+    steps: Vec<ctx_traits_core::task::Step>,
 }
 
 /// `a`'s modal grammar: `done` or `cancelled` (`canceled` too), optionally
@@ -978,6 +1006,20 @@ struct State {
     /// as `tasks_visible`. Never in the draw path, discarded with `State` on
     /// exit; nothing about a proposal persists between looks.
     task_proposals: HashMap<String, super::task_proposals::DoneProposal>,
+    /// 0064: the reconcile pass's remaining proposal queue, one confirm
+    /// modal at a time — `R` builds a fresh
+    /// [`super::task_proposals::ReconcileReport`] and populates this;
+    /// [`open_next_reconcile_step`] pops the front on every resolution
+    /// (accept or reject alike) until empty. Never persisted beyond the
+    /// pass, same as `task_proposals`.
+    reconcile_queue: Vec<super::task_proposals::ReconcileProposal>,
+    /// 0064: the ambiguous findings from the last `R` pass, surfaced in the
+    /// completion message once the queue drains.
+    reconcile_ambiguous: Vec<super::task_proposals::AmbiguousFinding>,
+    /// 0064: the split-from-park-report queue — one confirm modal per open
+    /// blocker (or oversized feasibility `missing` entry), stepped through
+    /// the same way as `reconcile_queue`.
+    split_queue: Vec<PendingSplitChild>,
     message: Option<String>,
     quit: bool,
     /// SESSIONS scope (P439): current repository/ad-hoc invocation only
@@ -1178,6 +1220,9 @@ impl State {
             collapsed_task_groups: HashSet::new(),
             task_preview: None,
             task_proposals: HashMap::new(),
+            reconcile_queue: Vec::new(),
+            reconcile_ambiguous: Vec::new(),
+            split_queue: Vec::new(),
             message: None,
             quit: false,
             all_repos: false,
@@ -2762,6 +2807,7 @@ fn handle_key(
         KeyCode::Char(' ') if state.screen == Screen::Tasks => toggle_selected_task_group(state),
         KeyCode::Char('s') if state.screen == Screen::Tasks => sync_tasks_board(state),
         KeyCode::Char('S') if state.screen == Screen::Tasks => open_task_split_modal(state),
+        KeyCode::Char('R') if state.screen == Screen::Tasks => open_task_reconcile(state),
         KeyCode::Char('a') if state.screen == Screen::Tasks => open_task_archive_modal(state),
         KeyCode::Char('e') if state.screen == Screen::Tasks => open_task_edit_modal(state),
         KeyCode::Char('y') if state.screen == Screen::Tasks => open_task_mark_done_modal(state),
@@ -4632,6 +4678,19 @@ fn apply_action(
     tag: Action,
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
+    // Reconcile/split queue steps handle `Cancelled` themselves — a reject
+    // still advances the queue and opens the next modal, unlike every other
+    // `Action`, where `Cancelled` is a dead end. So these two route BEFORE
+    // the generic early return below, not through it.
+    match tag {
+        Action::Task(TaskAction::ReconcileStep { proposal, digest }) => {
+            return apply_reconcile_step(state, proposal, digest, outcome);
+        }
+        Action::Task(TaskAction::SplitStep { parent, child }) => {
+            return apply_split_step(state, parent, child, outcome);
+        }
+        _ => {}
+    }
     if outcome == ModalOutcome::Cancelled {
         state.message = Some(cancel_message(&tag));
         return Ok(());
@@ -6032,19 +6091,35 @@ fn push_task_relation_lines(
     }
 }
 
-/// `S`: split — a text-input modal for the child's title.
+/// `S`: split. When the selected task's latest bound `Blocked`
+/// `implement-*` session carries a park report (or an oversized feasibility
+/// verdict), one child per open blocker (or `missing` entry) is proposed,
+/// confirmed one at a time (0064). Absent that evidence, falls back to
+/// today's manual text-input modal for the child's title unchanged.
 fn open_task_split_modal(state: &mut State) {
     let Some(summary) = selected_task(state) else {
         state.message = Some("no task selected".to_string());
         return;
     };
     let parent = summary.key.clone();
-    state.modal_host.open(
-        Action::Task(TaskAction::Split {
-            parent: parent.clone(),
-        }),
-        Modal::text_input(format!("split {parent} — child title"), "", false),
-    );
+    let children = match latest_blocked_split_source(state, &parent) {
+        Some(SplitSource::Park(report)) => split_children_from_park(&report),
+        Some(SplitSource::OversizedFeasibility(verdict)) => {
+            split_children_from_feasibility(&verdict)
+        }
+        None => Vec::new(),
+    };
+    if children.is_empty() {
+        state.modal_host.open(
+            Action::Task(TaskAction::Split {
+                parent: parent.clone(),
+            }),
+            Modal::text_input(format!("split {parent} — child title"), "", false),
+        );
+        return;
+    }
+    state.split_queue = children;
+    open_next_split_step(state, &parent);
 }
 
 /// `a`: archive — a text-input modal for the closing status (`done` or
@@ -6188,6 +6263,349 @@ fn fetch_task_digest(key: &str) -> crate::Result<String> {
     Ok(resolved.digest)
 }
 
+/// `R`: builds a fresh [`super::task_proposals::ReconcileReport`] from a
+/// live board read (`list(true)` so archived tasks are considered, per
+/// 0064's Watch) plus this repository's ledger inventory, and opens the
+/// first proposal's review modal. An empty report reports so inline, no
+/// modal opened.
+fn open_task_reconcile(state: &mut State) {
+    let dir = match super::tasks::board_dir(None) {
+        Ok(dir) => dir,
+        Err(error) => {
+            state.message = Some(format!("reconcile failed: {error}"));
+            return;
+        }
+    };
+    let provider = FilesTaskBoard::open_read(dir.clone());
+    let summaries = match provider.list(true) {
+        Ok(summaries) => summaries,
+        Err(error) => {
+            state.message = Some(format!("reconcile failed: {error}"));
+            return;
+        }
+    };
+    let sync_report = provider.sync().unwrap_or_default();
+    let mut resolved = BTreeMap::new();
+    for summary in &summaries {
+        if let Ok(Some(task)) = provider.get(&summary.key) {
+            resolved.insert(summary.key.clone(), task);
+        }
+    }
+    let inventory = match ctx_traits_io::run_session::current_repo_run_inventory() {
+        Ok(inventory) => inventory,
+        Err(error) => {
+            state.message = Some(format!("reconcile failed: {error}"));
+            return;
+        }
+    };
+    let facts = super::tasks::session_facts_from_inventory(&inventory);
+    let report = super::task_proposals::derive_reconcile_report(
+        &facts,
+        &summaries,
+        &resolved,
+        &sync_report.duplicate_keys,
+    );
+    state.reconcile_ambiguous = report.ambiguous;
+    state.reconcile_queue = report.proposals;
+    if state.reconcile_queue.is_empty() {
+        state.message = Some(reconcile_completion_message(state));
+        return;
+    }
+    open_next_reconcile_step(state);
+}
+
+/// Pops the next queued reconcile proposal (if any) and opens its review
+/// modal, fetching a fresh digest against the proposal's own task —
+/// `apply_reconcile_step` calls this again after every resolution
+/// (`Confirmed` or `Cancelled` alike), so the queue always ends either
+/// empty or on an open modal.
+fn open_next_reconcile_step(state: &mut State) {
+    while !state.reconcile_queue.is_empty() {
+        let proposal = state.reconcile_queue.remove(0);
+        let task_key = proposal.task_key().to_string();
+        let digest = match fetch_task_digest(&task_key) {
+            Ok(digest) => digest,
+            Err(error) => {
+                state.message = Some(format!("reconcile: skipping {task_key} — {error}"));
+                continue;
+            }
+        };
+        let (title, body) = match &proposal {
+            super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
+                let mut body = String::new();
+                for e in evidence {
+                    body.push_str(&format!(
+                        "run {} for {task_key} merged as {} (verified ancestor of main) — mark done?\n",
+                        e.run_id, e.sha
+                    ));
+                }
+                (format!("reconcile: mark {task_key} done"), body)
+            }
+            super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => (
+                format!("reconcile: {}", remove.from),
+                format!(
+                    "remove depends-on {} ({}) — {}?",
+                    remove.to,
+                    super::tasks::status_text(remove.to_status),
+                    remove.evidence
+                ),
+            ),
+        };
+        state.modal_host.open(
+            Action::Task(TaskAction::ReconcileStep { proposal, digest }),
+            Modal::confirm(title, body),
+        );
+        return;
+    }
+    state.message = Some(reconcile_completion_message(state));
+}
+
+fn reconcile_completion_message(state: &State) -> String {
+    if state.reconcile_ambiguous.is_empty() {
+        "reconcile: no ambiguous findings".to_string()
+    } else {
+        format!(
+            "reconcile: {} ambiguous — {}",
+            state.reconcile_ambiguous.len(),
+            state
+                .reconcile_ambiguous
+                .iter()
+                .map(|finding| format!("{} ({})", finding.task_key, finding.reason))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+/// `Confirmed`/`Cancelled` alike for a reconcile step: a reject just skips
+/// (no write), an accept writes through the provider — `MarkDone` reuses
+/// [`apply_task_mark_done`], `RemoveDependsOn` calls `update` directly with
+/// `remove_depends_on` set. Either way, advances to the next queued
+/// proposal.
+fn apply_reconcile_step(
+    state: &mut State,
+    proposal: super::task_proposals::ReconcileProposal,
+    digest: String,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    if outcome == ModalOutcome::Confirmed {
+        match proposal {
+            super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
+                apply_task_mark_done(state, task_key, digest, evidence)?;
+            }
+            super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => {
+                let dir = super::tasks::board_dir(None)?;
+                let provider = FilesTaskBoard::open_read_write(dir);
+                match provider.update(
+                    &remove.from,
+                    TaskUpdate {
+                        remove_depends_on: vec![remove.to.clone()],
+                        expected_digest: Some(digest),
+                        ..Default::default()
+                    },
+                ) {
+                    Ok(outcome) => {
+                        state.message = Some(format!(
+                            "reconcile: removed depends-on {} from {}{}",
+                            remove.to,
+                            remove.from,
+                            effects_summary(&outcome.effects)
+                        ));
+                        sync_tasks_board(state);
+                    }
+                    Err(error) => {
+                        state.message = Some(format!("reconcile step refused: {error}"));
+                    }
+                }
+            }
+        }
+    } else {
+        state.message = Some("reconcile: skipped".to_string());
+    }
+    open_next_reconcile_step(state);
+    Ok(())
+}
+
+/// The source a split-from-park-report queue is built from: the latest
+/// bound `Blocked` `implement-*` session's typed park report, or (absent a
+/// park report) its typed feasibility verdict when that verdict is
+/// `oversized`.
+enum SplitSource {
+    Park(ctx_traits_io::run_session::ParkReportEntry),
+    OversizedFeasibility(ctx_traits_io::run_session::FeasibilityVerdict),
+}
+
+/// The split source for `task_key`'s latest (by terminal epoch) bound
+/// `Blocked` `implement-*` session, if any — read fresh from each
+/// candidate's ledger (never cached), since this only runs on an `S`
+/// keypress, not the tick path.
+fn latest_blocked_split_source(state: &State, task_key: &str) -> Option<SplitSource> {
+    let join = task_session_join(state);
+    let mut best: Option<(u64, SplitSource)> = None;
+    for row in join
+        .get(task_key)
+        .into_iter()
+        .flatten()
+        .filter_map(|idx| state.sessions.get(*idx))
+        .filter(|row| row.status == Some(ctx_traits_core::procedure::session::Status::Blocked))
+    {
+        let Ok(session) = ctx_traits_io::run_session::read_run_session(&row.ledger_path) else {
+            continue;
+        };
+        if !ctx_traits_io::dispatch_preflight::is_implement_family(&session.trait_id) {
+            continue;
+        }
+        let epoch = session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.recorded_at_epoch)
+            .unwrap_or(0);
+        let source = if let Some(report) = ctx_traits_io::run_session::typed_park_report(&session) {
+            Some(SplitSource::Park(report))
+        } else {
+            ctx_traits_io::run_session::typed_feasibility_verdict(&session)
+                .filter(|verdict| verdict.verdict == "oversized")
+                .map(SplitSource::OversizedFeasibility)
+        };
+        if let Some(source) = source
+            && best
+                .as_ref()
+                .is_none_or(|(best_epoch, _)| epoch > *best_epoch)
+        {
+            best = Some((epoch, source));
+        }
+    }
+    best.map(|(_, source)| source)
+}
+
+/// Blocker `what` truncated to a title-sized prefix (task titles are
+/// conventionally one line) — the blocker's full text still lands in the
+/// child's `content`, so nothing is lost, only what heads the row.
+fn split_child_title(text: &str) -> String {
+    const MAX: usize = 96;
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= MAX {
+        return trimmed.to_string();
+    }
+    let truncated: String = trimmed.chars().take(MAX).collect();
+    format!("{}…", truncated.trim_end())
+}
+
+/// One [`PendingSplitChild`] per open blocker, title from `what`, content
+/// from `what` + `root-cause` + `required-fix`, `validation` from
+/// `done-when`, steps mapped one-for-one onto [`ctx_traits_core::task::Step`].
+/// A blocker whose fix is already fully done (`ParkBlocker::is_open` false)
+/// proposes no child — reconcile's own park-report reader already treats
+/// its steps as evidence, and a closed blocker in a parked run is nothing
+/// left to split off.
+fn split_children_from_park(
+    report: &ctx_traits_io::run_session::ParkReportEntry,
+) -> Vec<PendingSplitChild> {
+    report
+        .blockers
+        .iter()
+        .filter(|blocker| blocker.is_open())
+        .map(|blocker| PendingSplitChild {
+            title: split_child_title(&blocker.what),
+            content: format!(
+                "{}\n\nRoot cause: {}\n\nRequired fix: {}",
+                blocker.what.trim(),
+                blocker.root_cause.trim(),
+                blocker.required_fix.trim()
+            ),
+            validation: blocker.done_when.clone(),
+            steps: blocker
+                .steps
+                .iter()
+                .enumerate()
+                .map(|(index, step)| ctx_traits_core::task::Step {
+                    id: format!("step-{}", index + 1),
+                    title: step.step.clone(),
+                    done: step.status == "done",
+                    content: step.evidence.clone(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// One [`PendingSplitChild`] per `missing` entry of an oversized feasibility
+/// verdict — no steps or done-when, since the verdict names what is
+/// missing, not how to fix it.
+fn split_children_from_feasibility(
+    verdict: &ctx_traits_io::run_session::FeasibilityVerdict,
+) -> Vec<PendingSplitChild> {
+    verdict
+        .missing
+        .iter()
+        .map(|missing| PendingSplitChild {
+            title: split_child_title(missing),
+            content: format!("{}\n\n{}", missing.trim(), verdict.evidence.trim()),
+            validation: String::new(),
+            steps: Vec::new(),
+        })
+        .collect()
+}
+
+/// Pops the next queued split child and opens its confirm modal, or reports
+/// completion when the queue drains.
+fn open_next_split_step(state: &mut State, parent: &str) {
+    if state.split_queue.is_empty() {
+        state.message = Some(format!("split from park report: done for {parent}"));
+        return;
+    }
+    let child = state.split_queue.remove(0);
+    let mut body = child.content.clone();
+    if !child.validation.trim().is_empty() {
+        body.push_str("\n\ndone-when:\n");
+        body.push_str(child.validation.trim());
+    }
+    state.modal_host.open(
+        Action::Task(TaskAction::SplitStep {
+            parent: parent.to_string(),
+            child: child.clone(),
+        }),
+        Modal::confirm(format!("split {parent} — create {:?}?", child.title), body),
+    );
+}
+
+/// `Confirmed`/`Cancelled` alike for a split-queue step: a reject skips this
+/// child with no write; an accept creates it via `TaskProviderMut::create`
+/// with `parent` set, carrying `validation`/`steps` through (0064's one
+/// provider-surface change). Either way, advances to the next queued child.
+fn apply_split_step(
+    state: &mut State,
+    parent: String,
+    child: PendingSplitChild,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    if outcome == ModalOutcome::Confirmed {
+        let dir = super::tasks::board_dir(None)?;
+        let provider = FilesTaskBoard::open_read_write(dir);
+        match provider.create(NewTask {
+            title: child.title.clone(),
+            content: child.content.clone(),
+            status: None,
+            depends_on: Vec::new(),
+            parent: Some(parent.clone()),
+            validation: child.validation.clone(),
+            steps: child.steps.clone(),
+        }) {
+            Ok(created) => {
+                state.message = Some(format!("created {} under {parent}", created.key));
+                sync_tasks_board(state);
+            }
+            Err(error) => {
+                state.message = Some(format!("split refused: {error}"));
+            }
+        }
+    } else {
+        state.message = Some(format!("split: skipped {:?}", child.title));
+    }
+    open_next_split_step(state, &parent);
+    Ok(())
+}
+
 fn apply_task_action(
     state: &mut State,
     action: TaskAction,
@@ -6213,6 +6631,9 @@ fn apply_task_action(
     };
     match action {
         TaskAction::MarkDone { .. } => unreachable!("handled above"),
+        TaskAction::ReconcileStep { .. } | TaskAction::SplitStep { .. } => {
+            unreachable!("apply_action routes reconcile/split queue steps before reaching here")
+        }
         TaskAction::Split { parent } => {
             let title = text.trim();
             if title.is_empty() {
@@ -7280,7 +7701,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
             state.trust_marks.len(),
         ),
         Screen::Tasks => format!(
-            "{navigation}  space expand  s sync  S split  a archive  e edit  y mark done  d dispatch  r reload  Tab/1-5 screens  q quit"
+            "{navigation}  space expand  s sync  S split  R reconcile  a archive  e edit  y mark done  d dispatch  r reload  Tab/1-5 screens  q quit"
         ),
     };
     let hint = format!("{hint}  [{}]", state.current_list().position_text());
@@ -10785,6 +11206,93 @@ mod tests {
             Some(TaskVisibleRow::GroupHeader { .. }) => panic!("selection landed on a header"),
             None => panic!("selection landed out of bounds"),
         }
+    }
+
+    // --- 0064 split-from-park-report mapping ---------------------------
+
+    fn park_blocker(id: &str, what: &str, open: bool) -> ctx_traits_io::run_session::ParkBlocker {
+        ctx_traits_io::run_session::ParkBlocker {
+            id: id.to_string(),
+            location: "modules/x.rs".to_string(),
+            what: what.to_string(),
+            root_cause: "missing invariant".to_string(),
+            required_fix: "establish the invariant".to_string(),
+            steps: vec![ctx_traits_io::run_session::ParkBlockerStep {
+                step: "fix it".to_string(),
+                status: if open { "open" } else { "done" }.to_string(),
+                evidence: String::new(),
+            }],
+            done_when: "the fix is verified".to_string(),
+        }
+    }
+
+    #[test]
+    fn split_children_from_park_skips_already_closed_blockers() {
+        let report = ctx_traits_io::run_session::ParkReportEntry {
+            status: "revise".to_string(),
+            blockers: vec![
+                park_blocker("open-one", "an open defect", true),
+                park_blocker("closed-one", "a resolved defect", false),
+            ],
+            wall_id: String::new(),
+        };
+        let children = split_children_from_park(&report);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "an open defect");
+        assert!(children[0].content.contains("missing invariant"));
+        assert_eq!(children[0].validation, "the fix is verified");
+        assert_eq!(children[0].steps.len(), 1);
+        assert_eq!(children[0].steps[0].title, "fix it");
+        assert!(!children[0].steps[0].done);
+    }
+
+    #[test]
+    fn split_children_from_feasibility_uses_missing_entries() {
+        let verdict = ctx_traits_io::run_session::FeasibilityVerdict {
+            verdict: "oversized".to_string(),
+            evidence: "checked every reference".to_string(),
+            missing: vec!["a shared cache abstraction".to_string()],
+            owner_action: "split the task".to_string(),
+        };
+        let children = split_children_from_feasibility(&verdict);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].title, "a shared cache abstraction");
+        assert!(children[0].content.contains("checked every reference"));
+        assert!(children[0].validation.is_empty());
+    }
+
+    #[test]
+    fn split_child_title_truncates_long_blocker_text() {
+        let long = "x".repeat(200);
+        let title = split_child_title(&long);
+        assert!(title.chars().count() <= 97);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn split_child_title_leaves_short_text_untouched() {
+        assert_eq!(split_child_title("  a short title  "), "a short title");
+    }
+
+    #[test]
+    fn reconcile_completion_message_names_every_ambiguous_finding() {
+        let mut state = State::new();
+        state.reconcile_ambiguous = vec![super::super::task_proposals::AmbiguousFinding {
+            task_key: "0100".to_string(),
+            reason: "no ancestry evidence".to_string(),
+        }];
+        let message = reconcile_completion_message(&state);
+        assert!(message.contains("0100"));
+        assert!(message.contains("no ancestry evidence"));
+    }
+
+    #[test]
+    fn reconcile_completion_message_is_clean_when_nothing_ambiguous() {
+        let state = State::new();
+        assert_eq!(
+            reconcile_completion_message(&state),
+            "reconcile: no ambiguous findings"
+        );
     }
 }
 #[test]

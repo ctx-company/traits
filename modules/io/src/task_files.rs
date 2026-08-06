@@ -366,12 +366,12 @@ impl Board {
             origin: None,
             content: new_task.content,
             scope: String::new(),
-            validation: String::new(),
+            validation: new_task.validation,
             relations: Relations {
                 depends_on: new_task.depends_on,
                 parent: new_task.parent,
             },
-            steps: Vec::new(),
+            steps: new_task.steps,
         };
         let file_name = format!("{key}-{}.toml", slugify(&document.title));
         let dir = if archived {
@@ -873,6 +873,8 @@ mod tests {
                 status: None,
                 depends_on: Vec::new(),
                 parent: None,
+                validation: String::new(),
+                steps: Vec::new(),
             })
             .unwrap();
         assert_eq!(created.key, "0006");
@@ -885,6 +887,8 @@ mod tests {
                 status: None,
                 depends_on: Vec::new(),
                 parent: Some("0005".to_string()),
+                validation: String::new(),
+                steps: Vec::new(),
             })
             .unwrap();
         assert_eq!(child.key, "0005.1");
@@ -896,9 +900,38 @@ mod tests {
                 status: None,
                 depends_on: Vec::new(),
                 parent: Some("0005".to_string()),
+                validation: String::new(),
+                steps: Vec::new(),
             })
             .unwrap();
         assert_eq!(second_child.key, "0005.2");
+    }
+
+    #[test]
+    fn create_round_trips_validation_and_steps() {
+        let board_dir = tempdir();
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let steps = vec![ctx_traits_core::task::Step {
+            id: "step-1".to_string(),
+            title: "do the thing".to_string(),
+            done: false,
+            content: "operational detail".to_string(),
+        }];
+        let created = write
+            .create(NewTask {
+                title: "Split Child".to_string(),
+                content: "why this exists".to_string(),
+                status: None,
+                depends_on: Vec::new(),
+                parent: None,
+                validation: "done when the thing is done".to_string(),
+                steps: steps.clone(),
+            })
+            .unwrap();
+        let resolved = write.get(&created.key).unwrap().unwrap();
+        assert_eq!(resolved.document.validation, "done when the thing is done");
+        assert_eq!(resolved.document.steps, steps);
+        assert_eq!(resolved.open_steps, steps);
     }
 
     #[test]

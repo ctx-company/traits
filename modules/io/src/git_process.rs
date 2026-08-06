@@ -114,3 +114,21 @@ pub fn message_error(message: impl Into<String>) -> crate::Error {
     }
     .into()
 }
+
+/// Whether `sha` is an ancestor of `of` (typically `"HEAD"`) at the process
+/// working directory's repository, via `git merge-base --is-ancestor`.
+/// `Ok(false)` covers both "not an ancestor" (exit 1) and "unknown or
+/// unresolvable revision" (exit 128) alike — 0064's reconcile pass treats an
+/// unresolvable sha as ambiguity, never a hard error that kills the whole
+/// pass, so this never distinguishes the two exit codes for that caller.
+pub fn is_ancestor(sha: &str, of: &str) -> crate::Result<bool> {
+    let output = run(Request {
+        exec_dir: None,
+        cwd: Some("project-root"),
+        args: &["merge-base", "--is-ancestor", sha, of],
+        success_exit_code: &[0, 1, 128],
+        timeout_ms: PLUMBING_TIMEOUT_MS,
+        capture_limit: 4096,
+    })?;
+    Ok(output.exit_code == Some(0))
+}
