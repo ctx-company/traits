@@ -1579,24 +1579,6 @@ pub(crate) fn trait_package_output_paths(trait_id: &str, out: Option<&str>) -> (
     }
 }
 
-pub(crate) fn safe_assist_context_text(value: &str) -> String {
-    if value.len() > 240 {
-        return "redacted long assist context evidence".to_string();
-    }
-    let findings = ctx_traits_core::audit::scan_hidden_content(
-        value,
-        "assist-context",
-        Some("context-evidence"),
-    );
-    if findings
-        .iter()
-        .any(|finding| !matches!(finding.severity, ctx_traits_core::audit::Severity::Advisory))
-    {
-        "redacted hidden/deceptive content in assist context evidence".to_string()
-    } else {
-        value.to_string()
-    }
-}
 
 pub(crate) fn attach_assist_check_report(
     candidate: ctx_traits_core::assist::Candidate,

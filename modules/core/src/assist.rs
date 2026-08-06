@@ -1,7 +1,7 @@
 //! Common LLM-assistance boundary for trait authoring.
 //!
 //! Defines one reusable candidate envelope shared by `generate`, `refine`,
-//! `compose`, and `import --llm-assisted`. Core creates request plans and
+//! and `import --llm-assisted`. Core creates request plans and
 //! evaluates candidates deterministically; provider/model calls live only in
 //! CLI/IO/adapters with explicit user command intent.
 //!
@@ -39,6 +39,9 @@ use crate::r#trait::{Trait, TrustVerdict};
 pub enum Operation {
     Generate,
     Refine,
+    /// No CLI entry point; reachable only via the wasm ABI's `compose_json`
+    /// (`modules/wasm-core/src/abi.rs`), which maps `"compose"` to this
+    /// variant and reports it in the capability report.
     Compose,
     Import,
     Explain,

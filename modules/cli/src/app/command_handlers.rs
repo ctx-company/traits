@@ -178,8 +178,7 @@ use crate::app::{
 
 pub(crate) use crate::app::explain_inspect::build_file_evidence_from_io;
 pub(crate) use crate::app::generate::{
-    apply_assist_check_drift, attach_assist_check_report, print_assist_candidate,
-    safe_assist_context_text, trait_package_output_paths,
+    attach_assist_check_report, print_assist_candidate, trait_package_output_paths,
 };
 pub(crate) use crate::app::launch_reports::print_lock_update;
 pub(crate) use crate::app::run::run_envelope;
@@ -535,23 +534,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 let file = resolve_optional_trait_target(trait_arg.as_deref(), file.as_deref())?;
                 handle_inspect(file.as_deref(), dry_plan, profile.as_deref())
             }
-            Some(cli::TraitsCommand::Compose {
-                ids,
-                profile,
-                out,
-                model,
-                check,
-                candidate,
-                json,
-            }) => crate::app::compose::handle(
-                &ids,
-                profile.as_deref(),
-                out.as_deref(),
-                model.as_deref(),
-                candidate.as_deref(),
-                check,
-                json,
-            ),
             Some(cli::TraitsCommand::TuiDemo) => {
                 crate::app::tui_demo::run()?;
                 Ok(CommandOutput::new(()))

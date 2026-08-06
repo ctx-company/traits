@@ -746,47 +746,6 @@ pub enum TraitsCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Compose a structured merge plan from local trait files.
-    ///
-    /// Contract is LLM-assisted by default and always. Deterministic core
-    /// supplies structured merge plans, conflict records, source boundaries,
-    /// provenance, and validation around the model call. If no provider
-    /// adapter is available, the command reports an explicit unsupported-
-    /// provider result after building the deterministic context.
-    #[command(hide = true)]
-    Compose {
-        /// Trait IDs or local trait file paths to compose. At least one is
-        /// required. Trait-ID-to-file resolution is not yet implemented; pass
-        /// local trait file paths until registry resolution exists.
-        #[arg(required = true)]
-        ids: Vec<String>,
-
-        /// Render profile hint (e.g. agent-skills).
-        #[arg(long)]
-        profile: Option<String>,
-
-        /// Output path for a draft composition report. Output always carries
-        /// package status=draft and machine trust=unreviewed until review and activation.
-        #[arg(long)]
-        out: Option<String>,
-
-        /// Provider/model ID for LLM-assisted composition.
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Run additional validation checks on the composition plan.
-        #[arg(long)]
-        check: bool,
-
-        /// Path to a raw candidate output file (JSON/TOML/YAML). When
-        /// supplied, gates evaluate the candidate without a provider call.
-        #[arg(long)]
-        candidate: Option<String>,
-
-        /// Emit structured JSON.
-        #[arg(long)]
-        json: bool,
-    },
     /// Discover the project manifest in the current directory.
     #[command(hide = true)]
     Manifest,

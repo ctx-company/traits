@@ -77,7 +77,7 @@ fn classify(name: &str) -> Result<&'static str, String> {
         | "publish" | "import" => "dependencies",
         "doctor" | "cache" | "config" | "task" => "maintain",
         "claim-gate" | "hygiene" | "cost" | "prepare-public" | "context-contracts" | "policy"
-        | "evidence" | "compatibility" | "subagent" | "inspect" | "compose" | "manifest"
+        | "evidence" | "compatibility" | "subagent" | "inspect" | "manifest"
         | "schema" | "sdk-generate" | "synth" | "generate-evals" | "import-refresh"
         | "run-info" | "session" | "mcp" | "drive" | "call" | "run-status" | "run-frame"
         | "next" | "set" | "deactivate" | "deprecate" | "eval" | "prompt" | "preview"
