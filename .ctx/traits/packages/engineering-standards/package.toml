@@ -1,9 +1,0 @@
-[package]
-id = "engineering-standards"
-version = "0.1.0"
-name = "Engineering Standards"
-status = "ready"
-
-[publish]
-name = "@ctx-traits/engineering-standards"
-access = "public"

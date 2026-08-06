@@ -63,6 +63,7 @@ mod story_view;
 mod structured_output;
 pub mod surface;
 mod task;
+mod task_checks;
 mod task_proposals;
 mod tasks;
 mod trait_editor;

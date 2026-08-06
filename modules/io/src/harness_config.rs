@@ -1005,6 +1005,7 @@ enum ConfigLeaf {
     PublishExclude,
     RegistryBase,
     TasksDispatchTrait,
+    TasksAutoClose,
     HarnessDynamic,
     AgentDynamic,
     HostDynamic,
@@ -1059,6 +1060,7 @@ impl ConfigLeaf {
         Self::PublishExclude,
         Self::RegistryBase,
         Self::TasksDispatchTrait,
+        Self::TasksAutoClose,
         Self::HarnessDynamic,
         Self::AgentDynamic,
         Self::HostDynamic,
@@ -1113,6 +1115,7 @@ impl ConfigLeaf {
             Self::PublishExclude => "publish.exclude",
             Self::RegistryBase => "registry.base",
             Self::TasksDispatchTrait => "tasks.dispatch-trait",
+            Self::TasksAutoClose => "tasks.auto-close",
             Self::HarnessDynamic => "harness.*",
             Self::AgentDynamic => "agent.*",
             Self::HostDynamic => "host.*",
@@ -1136,6 +1139,7 @@ impl ConfigLeaf {
             | Self::GitLongSeconds
             | Self::RegistryBase
             | Self::TasksDispatchTrait
+            | Self::TasksAutoClose
             // These maps are resolved by machine-scoped qualifier handling,
             // not by repository requirement precedence.
             | Self::HarnessDynamic
@@ -1230,6 +1234,11 @@ pub struct RegistryTable {
 pub struct TasksTable {
     #[serde(default)]
     pub dispatch_trait: Option<String>,
+    /// `[tasks] auto-close` (0144): how a task's declared checks translate
+    /// into a close action, beneath each document's own `auto_close`
+    /// override. `None` when unconfigured.
+    #[serde(default)]
+    pub auto_close: Option<ctx_traits_core::task::AutoClosePolicy>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -1582,6 +1591,13 @@ impl RuntimeConfig {
         self.tasks
             .as_ref()
             .and_then(|tasks| tasks.dispatch_trait.clone())
+    }
+
+    /// 0144 `[tasks] auto-close`: how a task's declared checks translate
+    /// into a close action, beneath each document's own `auto_close`
+    /// override. `None` when unconfigured.
+    pub fn effective_auto_close(&self) -> Option<ctx_traits_core::task::AutoClosePolicy> {
+        self.tasks.as_ref().and_then(|tasks| tasks.auto_close)
     }
 }
 
@@ -4139,6 +4155,7 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::PublishExclude
         | ConfigLeaf::RegistryBase
         | ConfigLeaf::TasksDispatchTrait
+        | ConfigLeaf::TasksAutoClose
         | ConfigLeaf::HarnessDynamic
         | ConfigLeaf::AgentDynamic
         | ConfigLeaf::HostDynamic
@@ -4398,7 +4415,16 @@ fn apply_environment_defaults(
             .tasks
             .get_or_insert_with(TasksTable::default)
             .dispatch_trait = next.dispatch_trait.clone();
-        record_winner(winners, "tasks.dispatch-trait", layer, source);
+        record_winner(winners, "tasks.dispatch-trait", layer, source.clone());
+    }
+    if let Some(next) = &document.tasks
+        && next.auto_close.is_some()
+    {
+        runtime
+            .tasks
+            .get_or_insert_with(TasksTable::default)
+            .auto_close = next.auto_close;
+        record_winner(winners, "tasks.auto-close", layer, source);
     }
 }
 
@@ -5552,7 +5578,11 @@ fn merge_project_config(
         let target = base.tasks.get_or_insert_with(TasksTable::default);
         if tasks.dispatch_trait.is_some() {
             target.dispatch_trait = tasks.dispatch_trait;
-            record_winner(winners, "tasks.dispatch-trait", layer, source);
+            record_winner(winners, "tasks.dispatch-trait", layer, source.clone());
+        }
+        if tasks.auto_close.is_some() {
+            target.auto_close = tasks.auto_close;
+            record_winner(winners, "tasks.auto-close", layer, source);
         }
     }
 }
@@ -8213,7 +8243,10 @@ mod config_tests {
             effective.effective_dispatch_trait().as_deref(),
             Some("implement:quick")
         );
-        assert_eq!(winners["tasks.dispatch-trait"].source.as_deref(), Some("repo"));
+        assert_eq!(
+            winners["tasks.dispatch-trait"].source.as_deref(),
+            Some("repo")
+        );
 
         // A later layer without a `[tasks]` table must not clear it.
         merge_project_config(
@@ -8226,6 +8259,42 @@ mod config_tests {
         assert_eq!(
             effective.effective_dispatch_trait().as_deref(),
             Some("implement:quick")
+        );
+    }
+
+    /// 0144, following the `tasks.dispatch-trait` precedent above: `[tasks]
+    /// auto-close` parsed from a repo config file must survive the project
+    /// merge from the repo layer.
+    #[test]
+    fn tasks_auto_close_survives_the_project_merge_from_a_repo_layer() {
+        let configured: RuntimeConfig =
+            toml::from_str("[tasks]\nauto-close = \"checked\"\n").unwrap();
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_project_config(
+            &mut effective,
+            configured,
+            ConfigLayer::Repo,
+            Some("repo".to_string()),
+            &mut winners,
+        );
+        assert_eq!(
+            effective.effective_auto_close(),
+            Some(ctx_traits_core::task::AutoClosePolicy::Checked)
+        );
+        assert_eq!(winners["tasks.auto-close"].source.as_deref(), Some("repo"));
+
+        // A later layer without a `[tasks]` table must not clear it.
+        merge_project_config(
+            &mut effective,
+            RuntimeConfig::default(),
+            ConfigLayer::UserGlobal,
+            Some("global".to_string()),
+            &mut winners,
+        );
+        assert_eq!(
+            effective.effective_auto_close(),
+            Some(ctx_traits_core::task::AutoClosePolicy::Checked)
         );
     }
 

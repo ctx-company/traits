@@ -254,11 +254,15 @@ pub(crate) fn handle_tasks_reconcile(
             );
             for proposal in &report.proposals {
                 let value = match proposal {
-                    super::task_proposals::ReconcileProposal::MarkDone { evidence, .. } => evidence
-                        .iter()
-                        .map(|e| format!("run {} merged as {} — mark done?", e.run_id, e.sha))
-                        .collect::<Vec<_>>()
-                        .join("; "),
+                    super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
+                        let mut value = evidence
+                            .iter()
+                            .map(|e| format!("run {} merged as {} — mark done?", e.run_id, e.sha))
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        value.push_str(&mark_done_checks_annotation(task_key, &resolved));
+                        value
+                    }
                     super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => {
                         format!(
                             "remove depends-on {} ({}) — {}",
@@ -286,6 +290,45 @@ pub(crate) fn handle_tasks_reconcile(
     }
 
     Ok(CommandOutput::new(()))
+}
+
+/// 0144: what `handle_tasks_reconcile`'s human report says about a
+/// `MarkDone` candidate's declared checks, WITHOUT running them —
+/// `ctx tasks reconcile` is a read-only report, never a write, so the
+/// trust-surfacing posture here is "name the commands and the resolved
+/// disposition," not "execute them." Actually applying a proposal (and, for
+/// a `checked`/`merge` policy, running its checks) happens through
+/// `ctx tasks update` or the dashboard's `y`/`R`, both of which show the
+/// same commands immediately before they run. Empty string when the task
+/// has no declared checks — the existing report is unchanged in that case.
+fn mark_done_checks_annotation(
+    task_key: &str,
+    resolved: &std::collections::BTreeMap<String, ctx_traits_core::task::provider::ResolvedTask>,
+) -> String {
+    let Some(document) = resolved.get(task_key).map(|task| &task.document) else {
+        return String::new();
+    };
+    if document.checks.is_empty() {
+        return String::new();
+    }
+    let config_default =
+        ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
+            .ok()
+            .and_then(|config| config.effective_auto_close());
+    let policy =
+        super::task_proposals::resolve_auto_close_policy(document.auto_close, config_default);
+    let commands = document
+        .checks
+        .iter()
+        .map(|check| format!("{}: {}", check.name, check.command))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match policy {
+        Some(policy) => {
+            format!(" [auto-close={policy:?}, declared checks not yet run — {commands}]")
+        }
+        None => format!(" [declared checks, no auto-close policy configured — {commands}]"),
+    }
 }
 
 /// [`super::task_proposals::SessionFact`] rows from a ledger inventory scan:
@@ -456,6 +499,7 @@ pub(crate) fn handle_tasks_update(
         set_steps_done,
         expected_digest: Some(resolved.digest),
         release_dependents,
+        set_closure: None,
     };
 
     let outcome = provider
@@ -635,6 +679,54 @@ mod tests {
 
     fn write_task(dir: &Utf8PathBuf, file_name: &str, toml: &str) {
         std::fs::write(dir.join(file_name), toml).unwrap();
+    }
+
+    #[test]
+    fn mark_done_checks_annotation_is_empty_for_a_task_with_no_declared_checks() {
+        let documents: std::collections::BTreeMap<_, _> = [(
+            "0001".to_string(),
+            ctx_traits_core::task::TaskDocument {
+                schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+                key: "0001".to_string(),
+                title: "t".to_string(),
+                status: None,
+                raised: None,
+                closed: None,
+                wall: None,
+                origin: None,
+                content: String::new(),
+                scope: String::new(),
+                validation: String::new(),
+                relations: ctx_traits_core::task::Relations::default(),
+                steps: Vec::new(),
+                checks: Vec::new(),
+                auto_close: None,
+                closure: None,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let resolved: std::collections::BTreeMap<_, _> = documents
+            .into_iter()
+            .map(|(key, document)| {
+                (
+                    key.clone(),
+                    ctx_traits_core::task::provider::resolve_task(
+                        &[(key.clone(), document)].into_iter().collect(),
+                        &key,
+                        false,
+                        "sha256:x".to_string(),
+                    ),
+                )
+            })
+            .collect();
+        assert_eq!(mark_done_checks_annotation("0001", &resolved), "");
+    }
+
+    #[test]
+    fn mark_done_checks_annotation_names_every_command_for_an_unknown_task() {
+        let resolved = std::collections::BTreeMap::new();
+        assert_eq!(mark_done_checks_annotation("0001", &resolved), "");
     }
 
     /// `tasks update --status done --release-dependents --json` (0063.6):

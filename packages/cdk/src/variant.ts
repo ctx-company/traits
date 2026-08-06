@@ -63,8 +63,12 @@ function registerVariant<H extends VariantHandleBase>(record: VariantRecord): H 
   const handle = {
     [VARIANT_HANDLE]: id,
     default(): H {
-      return markDefault(handle) as unknown as H;
+      return markDefault(handle);
     },
+    // The single audited cast: `H` is the caller's opaque handle shape
+    // (`VariantHandle`/`VariantImportHandle`/`VariantLeafHandle`), which
+    // this factory can't structurally satisfy beyond the brand + `default()`
+    // every variant handle shares (P485 Phase 2).
   } as unknown as H;
   return handle;
 }
@@ -191,9 +195,9 @@ export function buildTraitFamily(fields: TraitFields): TraitFamilyHandle {
   // No `kind` here: sdk-generate validates `Meta.kind`'s literal union against
   // a fixed Rust-side allow-list, and a family handle never needs kind-based
   // dispatch — `metaOf(handle)?.family` alone identifies it.
-  return withMeta(stableObject({}) as JsonObject, {
+  return withMeta<JsonObject, string, unknown, "trait-family">(stableObject({}) as JsonObject, {
     family: { id, version, topology, variants },
-  }) as unknown as TraitFamilyHandle;
+  });
 }
 
 /** One resolved variant's complete draft, ready to synthesize. */

@@ -1,9 +1,0 @@
-[package]
-id = "implement-guided"
-version = "0.1.1"
-name = "Implement Guided"
-status = "ready"
-
-[publish]
-name = "@ctx-traits/implement-guided"
-access = "public"

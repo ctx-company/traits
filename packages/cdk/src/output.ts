@@ -76,7 +76,7 @@ function buildInstructionOutput(
   values: readonly PromptInterpolation[],
   schema: { readonly ref: string; readonly value: SchemaValue; } | undefined,
 ): InstructionOutputHandle {
-  const built = promptTemplate(strings, values) as unknown as { readonly text?: unknown; };
+  const built = promptTemplate(strings, values);
   const builtMeta = metaOf(built);
   const text = typeof built.text === "string" ? built.text : "";
   const refs = builtMeta?.refs;

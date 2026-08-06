@@ -44,6 +44,78 @@ pub struct Step {
     pub content: String,
 }
 
+/// A declared check on a task document (0144): a command that, when it can
+/// run and passes, is evidence the task is actually done — not just marked
+/// so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Check {
+    pub name: String,
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// A regex the combined stdout+stderr must match for the check to pass.
+    /// Without it, a zero exit code is the whole verdict — declaring this is
+    /// how a test-filter check protects itself against matching nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect: Option<String>,
+}
+
+/// `[tasks] auto-close` (0144): how a task's declared checks translate into
+/// a close action. Per-document `TaskDocument.auto_close` overrides the
+/// `[tasks]` config leaf in either direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoClosePolicy {
+    /// Checks (if any) strengthen the existing confirm proposal; nothing
+    /// closes without the owner's key press.
+    Confirm,
+    /// All declared checks must run and pass for the task to close itself;
+    /// any failure or un-runnable check downgrades to a proposal naming why.
+    Checked,
+    /// Closes on any hardened `MarkDone` candidate regardless of checks;
+    /// checks that did run are recorded, an empty set records `unchecked`.
+    Merge,
+}
+
+/// One check's recorded outcome, stored on [`Closure`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CheckRecord {
+    pub name: String,
+    pub command: String,
+    pub outcome: CheckOutcome,
+    /// Human-readable detail: exit code, matched/unmatched `expect`, timeout,
+    /// or the un-runnable reason. Never implies stronger verification than
+    /// what actually ran.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+}
+
+/// The closed set of outcomes a single check can record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckOutcome {
+    Passed,
+    Failed,
+    /// The check could not be executed at all (timeout, over the count cap,
+    /// worktree failure) — never silently treated as a pass or a fail.
+    Unrunnable,
+}
+
+/// How a task closed, recorded on the archived document (0144). `checks`
+/// empty under `AutoClosePolicy::Merge` renders as `unchecked` — proof that
+/// no checks ran, not that they passed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Closure {
+    pub mode: AutoClosePolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<CheckRecord>,
+}
+
 /// Typed relations to other task documents.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -97,6 +169,19 @@ pub struct TaskDocument {
     pub relations: Relations,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,
+    /// 0144: declared checks a run's proposal can be verified against
+    /// before closing. Empty means "no checks declared" — the existing
+    /// confirm-only flow, byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<Check>,
+    /// 0144: per-document override of the `[tasks] auto-close` config leaf,
+    /// in either direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_close: Option<AutoClosePolicy>,
+    /// 0144: recorded proof of how this task closed. `None` for every task
+    /// closed before this feature, and for any task still open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closure: Option<Closure>,
 }
 
 impl TaskDocument {
@@ -186,6 +271,9 @@ mod tests {
                 done: true,
                 content: "Refresh `output_ports` after any projection.\n".to_string(),
             }],
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         }
     }
 
@@ -228,12 +316,57 @@ mod tests {
         assert!(!text.contains("closed"));
         assert!(!text.contains("scope"));
         assert!(!text.contains("validation"));
+        assert!(!text.contains("checks"));
+        assert!(!text.contains("auto-close") && !text.contains("auto_close"));
+        assert!(!text.contains("closure"));
         let parsed = parse(&text).expect("parse");
         assert_eq!(parsed.wall, None);
         assert_eq!(parsed.origin, None);
         assert_eq!(parsed.closed, None);
         assert_eq!(parsed.scope, "");
         assert_eq!(parsed.validation, "");
+        assert!(parsed.checks.is_empty());
+        assert_eq!(parsed.auto_close, None);
+        assert_eq!(parsed.closure, None);
+    }
+
+    #[test]
+    fn round_trips_checks_auto_close_and_closure() {
+        let mut document = sample();
+        document.checks = vec![Check {
+            name: "unit tests".to_string(),
+            command: "cargo test -p ctx-traits-core".to_string(),
+            timeout_ms: Some(60_000),
+            expect: Some("test result: ok".to_string()),
+        }];
+        document.auto_close = Some(AutoClosePolicy::Checked);
+        document.closure = Some(Closure {
+            mode: AutoClosePolicy::Checked,
+            commit: Some("abc1234".to_string()),
+            checks: vec![CheckRecord {
+                name: "unit tests".to_string(),
+                command: "cargo test -p ctx-traits-core".to_string(),
+                outcome: CheckOutcome::Passed,
+                detail: "exit 0, expect matched".to_string(),
+            }],
+        });
+        let text = serialize(&document).expect("serialise");
+        let parsed = parse(&text).expect("parse");
+        assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn closure_with_empty_checks_round_trips_under_merge_mode() {
+        let mut document = sample();
+        document.closure = Some(Closure {
+            mode: AutoClosePolicy::Merge,
+            commit: Some("deadbee".to_string()),
+            checks: Vec::new(),
+        });
+        let text = serialize(&document).expect("serialise");
+        let parsed = parse(&text).expect("parse");
+        assert_eq!(parsed, document);
+        assert!(parsed.closure.unwrap().checks.is_empty());
     }
 
     #[test]

@@ -436,7 +436,7 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     // statically checked without rewriting that assembly — one documented
     // cast at this return boundary; the type's payoff is at the consumer
     // boundary (`toDraftJson`'s `DraftOf<T>`).
-  }) as unknown as CanonicalTraitDraft;
+  }) as CanonicalTraitDraft;
   return {
     draft,
     merged,

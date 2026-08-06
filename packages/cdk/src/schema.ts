@@ -390,6 +390,7 @@ function schemaRating(
   minOrMax: number,
   max?: number,
 ): SchemaEnumSpec<readonly number[]> | SchemaHandle {
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- the two-overload contract guarantees `max` is supplied when `idOrMin` is a string
   if (typeof idOrMin === "string") return schemaEnum(idOrMin, ratingValues(minOrMax, max!));
   return schemaEnum(ratingValues(idOrMin, minOrMax));
 }
@@ -410,6 +411,7 @@ function schemaEnum(
   // second-overload caller has always supplied `values` — the non-null
   // assertion below is the resulting single documented gap, not a cast.
   return typeof idOrValues === "string"
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- see the comment above: values is guaranteed by the overload contract
     ? schemaEnumDeclaration(idOrValues, values!, fields)
     : schemaEnumSpec(idOrValues);
 }
@@ -498,6 +500,9 @@ export function ctxSchemaResource(id: string, resourceId: string, fields: JsonOb
 
 function schemaEnumSpec<T extends readonly EnumLiteral[]>(values: T): SchemaEnumSpec<T> {
   const schemaRef = enumSchemaRef(values, "schema.enum");
+  // `Array.from` always returns a mutable array; `T` may be a readonly tuple subtype of
+  // `readonly EnumLiteral[]`, which the checker can't confirm generically — the unknown detour
+  // documents that gap rather than a false claim of structural overlap.
   const allowed = Array.from(values) as unknown as T;
   return withMeta({ schema: schemaRef, allowed }, { kind: "schema-field" });
 }

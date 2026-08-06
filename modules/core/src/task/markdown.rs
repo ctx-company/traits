@@ -97,6 +97,9 @@ pub fn import(text: &str) -> Result<TaskDocument, Error> {
             parent: None,
         },
         steps,
+        checks: Vec::new(),
+        auto_close: None,
+        closure: None,
     })
 }
 

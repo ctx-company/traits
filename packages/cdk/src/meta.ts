@@ -372,7 +372,7 @@ export function withDeclaration<
   publicSurface: T,
   extraMeta: Meta = {},
 ): WithHandleValue<T & Brand<HandleKind>, Value> {
-  const handle = withMeta(
+  const handle = withMeta<T, MetaKind, Value, HandleKind>(
     publicSurface,
     {
       ...extraMeta,
@@ -382,13 +382,15 @@ export function withDeclaration<
       // over a per-kind field record); the type's payoff is at the reader
       // boundary (`Meta.declaration: MetaDeclaration`), not this single
       // producer — same reasoning as `assembleSingleTraitDraft`'s draft cast
-      // (P481 §4.5).
+      // (P481 §4.5). This is the one audited `declaration` cast every
+      // declaration builder routes through (P485 Phase 2) — callers no
+      // longer assert their own `Handle<K, Value>` shape at each call site.
       declaration: declaration as unknown as MetaDeclaration,
     } as Meta & { readonly kind?: MetaKind; },
   );
   attachMeta(declaration, metaOf(handle) as Meta);
   if (isDeclarationKind(kind)) authoredDeclarations.push({ kind, ref, declaration });
-  return handle as unknown as WithHandleValue<T & Brand<HandleKind>, Value>;
+  return handle;
 }
 
 /** Records a build-only authoring advisory without changing emitted values. */

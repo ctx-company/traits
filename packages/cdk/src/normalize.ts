@@ -212,14 +212,14 @@ export function runtimeDelegation(
   surface: RuntimeSurface = "wasm-core",
 ): RuntimeDelegationPlan {
   const operationName = operation.replaceAll("-", "_");
-  return compact({
+  return compactAs<RuntimeDelegationPlan>({
     surface,
     operation,
-    wasmExport: surface === "cli-json" ? undefined : `${operationName}_json`,
-    cliCommand: surface === "cli-json" ? ["ctx", "traits", operation, "--json"] : undefined,
+    ...(surface === "cli-json" ? {} : { wasmExport: `${operationName}_json` }),
+    ...(surface === "cli-json" ? { cliCommand: ["ctx", "traits", operation, "--json"] } : {}),
     request,
     note: "delegates-to-rust-core" as const,
-  }) as unknown as RuntimeDelegationPlan;
+  });
 }
 
 export function normalizeValue(value: unknown): JsonValue | undefined {

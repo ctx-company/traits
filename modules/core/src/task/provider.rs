@@ -117,6 +117,11 @@ pub struct TaskUpdate {
     pub set_parent: Option<Option<String>>,
     pub set_wall: Option<Option<String>>,
     pub set_origin: Option<Option<String>>,
+    /// 0144: recorded proof of how this write closed the task. Refused with
+    /// [`WriteError::InvalidField`] unless this same update also sets a
+    /// closing status — a closure record with nothing it closed is
+    /// meaningless.
+    pub set_closure: Option<super::Closure>,
     /// `(step id, new done value)` pairs, applied in order. The step stays
     /// inside its owning document — this never adds, removes, or reorders
     /// steps (0059's line: standalone work is a child task).
@@ -332,6 +337,9 @@ mod tests {
             validation: String::new(),
             relations: Relations::default(),
             steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         }
     }
 

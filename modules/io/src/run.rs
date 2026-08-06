@@ -2618,6 +2618,9 @@ mod startup_observer_tests {
             validation: String::new(),
             relations: ctx_traits_core::task::Relations::default(),
             steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         };
         let expected_digest = ctx_traits_core::digest::Digest::source(
             &ctx_traits_core::task::serialize(&expected_document).unwrap(),
@@ -2656,6 +2659,9 @@ mod startup_observer_tests {
             validation: String::new(),
             relations: ctx_traits_core::task::Relations::default(),
             steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         };
         let edited_text = ctx_traits_core::task::serialize(&edited_document).unwrap();
         std::fs::write(root.join(".internal/tasks/0050-example.toml"), &edited_text).unwrap();

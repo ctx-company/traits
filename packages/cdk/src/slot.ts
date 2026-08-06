@@ -288,6 +288,15 @@ interface SchemaFieldSummary {
   readonly schema: string;
 }
 
+/** Narrows a JSON field map to `declaration.fields`' actual per-field shape without a cast — every value must itself declare a `schema` ref. */
+function isSchemaFieldSummaryRecord(fields: JsonObject): fields is JsonObject & Record<string, SchemaFieldSummary> {
+  return Object.values(fields).every(
+    (value) =>
+      typeof value === "object" && value !== null && !Array.isArray(value)
+      && typeof (value as JsonObject).schema === "string",
+  );
+}
+
 /**
  * The declared fields of an object schema (`schema.object`/`extend`/
  * `template`), keyed by field id, or `undefined` when `schemaValue` isn't a
@@ -297,8 +306,9 @@ interface SchemaFieldSummary {
 function objectSchemaFields(schemaValue: SchemaValue): Record<string, SchemaFieldSummary> | undefined {
   const fields = (metaOf(schemaValue)?.declaration as { readonly fields?: JsonObject; } | undefined)?.fields;
   return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
+      || !isSchemaFieldSummaryRecord(fields)
     ? undefined
-    : fields as unknown as Record<string, SchemaFieldSummary>;
+    : fields;
 }
 
 /**
@@ -319,8 +329,9 @@ function objectSchemaFieldsByRef(
     | undefined;
   const fields = declaration?.fields;
   return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
+      || !isSchemaFieldSummaryRecord(fields)
     ? undefined
-    : fields as unknown as Record<string, SchemaFieldSummary>;
+    : fields;
 }
 
 /**

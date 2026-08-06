@@ -212,6 +212,7 @@ function combineAbortIfArms(
   arms: readonly { readonly title: string; readonly condition: unknown; }[],
 ): BranchCheckValue | undefined {
   if (arms.length === 0) return undefined;
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- length === 1 checked above
   if (arms.length === 1) return arms[0]!.condition as BranchCheckValue;
   return condition.any(
     arms.map((arm) =>
@@ -250,6 +251,7 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
   };
   const { scope } = runInScope("loop", label, () => body(loopParam));
   checkDuplicateTitles(scope.items, label);
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- runInScope("loop", ...) always populates scope.loop
   const loopState = scope.loop!;
   const id = loopState.idOverride ?? mintId(title);
   if (!loopState.maxIterationsCalled) {
@@ -293,6 +295,7 @@ function flowWhen(
     return undefined;
   }
   const idOverride = typeof thirdArg === "function" ? undefined : (thirdArg as IdOverride).id;
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- the public overloads guarantee maybeBody is supplied whenever thirdArg isn't the body itself
   const body = typeof thirdArg === "function" ? thirdArg : maybeBody!;
   const id = idOverride ?? mintId(title);
   const label = `flow.when(${JSON.stringify(title)})`;
@@ -399,7 +402,9 @@ function flowMatch(
   const otherwiseItems = otherwiseArm === undefined ? undefined : runArmScope(title, "[flow.Otherwise]", otherwiseArm);
   let nested: SequenceHandle | undefined;
   for (let index = entries.length - 1; index >= 0; index -= 1) {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- index stays within [0, entries.length)
     const [value, cb] = entries[index]!;
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- every value in entries was checked to be a function above
     const armItems = runArmScope(title, JSON.stringify(value), cb!);
     const branchId = index === 0 ? id : `${id}-${idFromTitle(value)}`;
     const failureArm = nested === undefined ? otherwiseItems : [nested];
@@ -410,7 +415,9 @@ function flowMatch(
       ...(failureArm === undefined ? {} : { failure: failureArm as [SequenceHandle, ...SequenceHandle[]] }),
     });
   }
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- entries.length === 0 threw above, so the loop ran at least once and assigned nested
   registerItem(`flow.match(${JSON.stringify(title)})`, nested!, title);
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
   return nested!;
 }
 

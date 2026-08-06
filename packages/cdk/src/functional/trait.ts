@@ -334,6 +334,7 @@ export function evaluateTraitFunction(
     );
   }
   const inputPorts = [...traitFrame.inputAccessed].map((id) =>
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- every id in inputAccessed passed the unknownInputs check above, so it is a key of declaredInputPorts
     reconstructDeclaredPortHandle(declaredInputPorts.get(id)!)
   );
 

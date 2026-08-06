@@ -352,6 +352,9 @@ mod tests {
             validation: String::new(),
             relations: Relations::default(),
             steps: Vec::<Step>::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         }
     }
 

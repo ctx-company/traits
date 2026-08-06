@@ -399,6 +399,7 @@ describe("schema authoring sugar", () => {
         value: schema.text(),
       }),
     });
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- base was declared with an `inner` field immediately above
     const wrapped = schema.object("sugar-optional-nested-wrapped", { inner: schema.optional(base.inner!) });
 
     const draft = toDraftJson(
@@ -2134,6 +2135,7 @@ describe("session", () => {
     ];
 
     for (
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- namespacedHandles and bareHandles are built as parallel arrays of equal length above
       const [namespaced, bare] of namespacedHandles.map((handle, index) => [handle, bareHandles[index]!] as const)
     ) {
       expect(toDraftJson(namespaced).session).toBe(

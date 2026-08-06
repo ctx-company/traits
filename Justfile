@@ -43,6 +43,20 @@ ts-lint:
 	pnpm --dir packages/agents run lint
 	pnpm --dir packages/rust run lint
 	pnpm --dir packages/harness-client run lint
+	just ts-lint-casts
+
+# `as unknown as` double-casts bypass the type checker entirely (unlike a
+# single `as T`, which the checker still constrains). oxlint 1.73's
+# type-aware `no-unsafe-type-assertion` rule would catch this, but it needs
+# the `oxlint-tsgolint` preview package — not adopted yet, so this grep is
+# the gate until that lands.
+ts-lint-casts:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if grep -rn "as unknown as" packages/*/src --include="*.ts" | grep -v "/generated\.ts:"; then
+		echo "error: 'as unknown as' double-casts are banned in packages/*/src — see lines above" >&2
+		exit 1
+	fi
 
 ts-format-check:
 	pnpm --dir packages/cdk run format:check

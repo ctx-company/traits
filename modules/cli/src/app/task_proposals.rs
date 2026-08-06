@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use ctx_traits_core::procedure::session::{MergeStatus, Session};
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{DuplicateKey, ResolvedTask, TaskSummary};
+use ctx_traits_core::task::{AutoClosePolicy, Check, CheckOutcome, CheckRecord};
 use serde::Serialize;
 
 /// One merged bound run cited as evidence for a [`DoneProposal`].
@@ -383,6 +384,92 @@ fn harden_mark_done(
     Ok(())
 }
 
+/// A hardened `MarkDone` candidate's declared checks resolve to this: either
+/// the write closes itself (0144), or the candidate stays a proposal — the
+/// existing confirm flow, unchanged or strengthened. Check execution
+/// happens in the caller (the dashboard/CLI reconcile path); this stays
+/// pure over already-in-hand results, unit-testable with literals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseDisposition {
+    /// The write should carry `set_closure` with these check records (empty
+    /// under `AutoClosePolicy::Merge` with no declared checks — the
+    /// `unchecked` case).
+    AutoClose { checks: Vec<CheckRecord> },
+    /// Stays a proposal. `reason` is `None` for the plain today's-flow
+    /// proposal (no checks declared, or checks have not run yet under
+    /// `checked`), `Some` when checks strengthen or block it.
+    Proposal { reason: Option<String> },
+}
+
+fn first_non_pass(results: &[CheckRecord]) -> Option<&CheckRecord> {
+    results.iter().find(|r| r.outcome != CheckOutcome::Passed)
+}
+
+fn failure_reason(check: &CheckRecord) -> String {
+    format!(
+        "check {:?} did not pass ({:?}): {}",
+        check.name, check.outcome, check.detail
+    )
+}
+
+/// The whole 0144 Done-when table for one hardened `MarkDone` candidate.
+/// `results` is `None` when the checks have not been executed for this
+/// look (e.g. `checked` mode before the caller has run them); `Some` once
+/// the caller has a verdict for every declared check.
+pub fn close_disposition(
+    policy: AutoClosePolicy,
+    checks: &[Check],
+    results: Option<&[CheckRecord]>,
+) -> CloseDisposition {
+    match policy {
+        AutoClosePolicy::Merge => CloseDisposition::AutoClose {
+            checks: results.map(<[CheckRecord]>::to_vec).unwrap_or_default(),
+        },
+        AutoClosePolicy::Confirm => {
+            if checks.is_empty() {
+                return CloseDisposition::Proposal { reason: None };
+            }
+            match results {
+                None => CloseDisposition::Proposal { reason: None },
+                Some(results) => CloseDisposition::Proposal {
+                    reason: Some(match first_non_pass(results) {
+                        Some(failing) => failure_reason(failing),
+                        None => format!("all {} checks passed", results.len()),
+                    }),
+                },
+            }
+        }
+        AutoClosePolicy::Checked => {
+            if checks.is_empty() {
+                return CloseDisposition::Proposal { reason: None };
+            }
+            match results {
+                None => CloseDisposition::Proposal {
+                    reason: Some("declared checks have not run yet".to_string()),
+                },
+                Some(results) => match first_non_pass(results) {
+                    Some(failing) => CloseDisposition::Proposal {
+                        reason: Some(failure_reason(failing)),
+                    },
+                    None => CloseDisposition::AutoClose {
+                        checks: results.to_vec(),
+                    },
+                },
+            }
+        }
+    }
+}
+
+/// Resolve the effective policy for one task: its own `auto_close`
+/// override wins over the `[tasks] auto-close` config leaf in either
+/// direction; `None` when neither is set (today's confirm-only flow).
+pub fn resolve_auto_close_policy(
+    document_override: Option<AutoClosePolicy>,
+    config_default: Option<AutoClosePolicy>,
+) -> Option<AutoClosePolicy> {
+    document_override.or(config_default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,6 +744,9 @@ mod tests {
                 parent: None,
             },
             steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         }
     }
 
@@ -883,5 +973,195 @@ mod tests {
         assert!(report.proposals.is_empty());
         assert_eq!(report.ambiguous.len(), 1);
         assert_eq!(report.ambiguous[0].task_key, "0100");
+    }
+
+    /// 0144 tamper protection: a run whose merged branch edited its own
+    /// task's `checks` post-dispatch drifts the digest exactly like any
+    /// other post-dispatch edit — `harden_mark_done` demotes the candidate
+    /// to ambiguous, so no disposition (auto-close or otherwise) is ever
+    /// computed for it. No new mechanism was needed; this pins the
+    /// scenario the draft calls out explicitly.
+    #[test]
+    fn editing_checks_post_dispatch_demotes_the_candidate_never_reaching_auto_close() {
+        let mut original = task_document("0100", vec![]);
+        original.checks = vec![Check {
+            name: "unit tests".to_string(),
+            command: "cargo test".to_string(),
+            timeout_ms: None,
+            expect: None,
+        }];
+        let dispatch_time_digest = ctx_traits_core::digest::Digest::source(
+            &ctx_traits_core::task::serialize(&original).unwrap(),
+        )
+        .to_string();
+
+        // The run's merged branch replaced the declared checks with a
+        // no-op before proposing done — the stored document's digest no
+        // longer matches what the run was dispatched against.
+        let mut tampered = original.clone();
+        tampered.checks = vec![Check {
+            name: "always true".to_string(),
+            command: "true".to_string(),
+            timeout_ms: None,
+            expect: None,
+        }];
+        let documents: BTreeMap<_, _> = [tampered.clone()]
+            .into_iter()
+            .map(|d| (d.key.clone(), d))
+            .collect();
+        let summaries = vec![summary("0100", DerivedStatus::Ready, false)];
+        let resolved = [(
+            "0100".to_string(),
+            resolved_task(&documents, "0100", "irrelevant-current-digest"),
+        )]
+        .into_iter()
+        .collect();
+
+        let mut run = fact("run-1", "0100", Some("deadbeef"));
+        run.task_digest = Some(dispatch_time_digest);
+        let report = derive_reconcile_report(&[run], &summaries, &resolved, &[]);
+
+        assert!(
+            report.proposals.is_empty(),
+            "a candidate whose checks were edited post-dispatch must never reach a disposition"
+        );
+        assert_eq!(report.ambiguous.len(), 1);
+        assert_eq!(report.ambiguous[0].task_key, "0100");
+    }
+
+    // --- close_disposition ------------------------------------------
+
+    fn passed(name: &str) -> CheckRecord {
+        CheckRecord {
+            name: name.to_string(),
+            command: "true".to_string(),
+            outcome: CheckOutcome::Passed,
+            detail: "exit 0".to_string(),
+        }
+    }
+
+    fn failed(name: &str) -> CheckRecord {
+        CheckRecord {
+            name: name.to_string(),
+            command: "false".to_string(),
+            outcome: CheckOutcome::Failed,
+            detail: "exited 1".to_string(),
+        }
+    }
+
+    fn one_check() -> Vec<Check> {
+        vec![Check {
+            name: "c".to_string(),
+            command: "true".to_string(),
+            timeout_ms: None,
+            expect: None,
+        }]
+    }
+
+    #[test]
+    fn checked_with_no_declared_checks_is_todays_plain_proposal() {
+        let disposition = close_disposition(AutoClosePolicy::Checked, &[], None);
+        assert_eq!(disposition, CloseDisposition::Proposal { reason: None });
+    }
+
+    #[test]
+    fn checked_with_all_passing_checks_auto_closes() {
+        let results = vec![passed("c")];
+        let disposition = close_disposition(AutoClosePolicy::Checked, &one_check(), Some(&results));
+        assert_eq!(
+            disposition,
+            CloseDisposition::AutoClose {
+                checks: results.clone()
+            }
+        );
+    }
+
+    #[test]
+    fn checked_with_one_failing_check_stays_a_proposal_naming_it() {
+        let results = vec![passed("a"), failed("b")];
+        let checks = vec![
+            Check {
+                name: "a".to_string(),
+                command: "true".to_string(),
+                timeout_ms: None,
+                expect: None,
+            },
+            Check {
+                name: "b".to_string(),
+                command: "false".to_string(),
+                timeout_ms: None,
+                expect: None,
+            },
+        ];
+        let disposition = close_disposition(AutoClosePolicy::Checked, &checks, Some(&results));
+        match disposition {
+            CloseDisposition::Proposal { reason: Some(r) } => assert!(r.contains("\"b\"")),
+            other => panic!("expected a Proposal naming check b, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn checked_with_declared_checks_not_yet_run_stays_a_proposal() {
+        let disposition = close_disposition(AutoClosePolicy::Checked, &one_check(), None);
+        assert!(matches!(
+            disposition,
+            CloseDisposition::Proposal { reason: Some(_) }
+        ));
+    }
+
+    #[test]
+    fn confirm_never_auto_closes_even_with_all_checks_passing() {
+        let results = vec![passed("c")];
+        let disposition = close_disposition(AutoClosePolicy::Confirm, &one_check(), Some(&results));
+        assert_eq!(
+            disposition,
+            CloseDisposition::Proposal {
+                reason: Some("all 1 checks passed".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn confirm_with_no_checks_is_todays_plain_proposal() {
+        let disposition = close_disposition(AutoClosePolicy::Confirm, &[], None);
+        assert_eq!(disposition, CloseDisposition::Proposal { reason: None });
+    }
+
+    #[test]
+    fn merge_auto_closes_with_no_declared_checks_recording_unchecked() {
+        let disposition = close_disposition(AutoClosePolicy::Merge, &[], None);
+        assert_eq!(
+            disposition,
+            CloseDisposition::AutoClose { checks: Vec::new() }
+        );
+    }
+
+    #[test]
+    fn merge_auto_closes_even_when_a_check_failed() {
+        let results = vec![failed("c")];
+        let disposition = close_disposition(AutoClosePolicy::Merge, &one_check(), Some(&results));
+        assert_eq!(
+            disposition,
+            CloseDisposition::AutoClose {
+                checks: results.clone()
+            }
+        );
+    }
+
+    #[test]
+    fn document_override_beats_config_default_in_either_direction() {
+        assert_eq!(
+            resolve_auto_close_policy(Some(AutoClosePolicy::Merge), Some(AutoClosePolicy::Confirm)),
+            Some(AutoClosePolicy::Merge)
+        );
+        assert_eq!(
+            resolve_auto_close_policy(None, Some(AutoClosePolicy::Checked)),
+            Some(AutoClosePolicy::Checked)
+        );
+        assert_eq!(
+            resolve_auto_close_policy(Some(AutoClosePolicy::Confirm), None),
+            Some(AutoClosePolicy::Confirm)
+        );
+        assert_eq!(resolve_auto_close_policy(None, None), None);
     }
 }

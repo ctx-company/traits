@@ -25,6 +25,8 @@ export interface AgentDefaults {
 
 export type AgentModelTier = "top" | "fast";
 
+export type AutoClosePolicy = "confirm" | "checked" | "merge";
+
 export interface BuildCacheConfig {
   env: string;
 }
@@ -211,6 +213,7 @@ export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 
 export interface TasksTable {
+  autoClose?: AutoClosePolicy;
   dispatchTrait?: string;
 }
 

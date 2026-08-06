@@ -226,6 +226,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
       ? [produceStep, ...(evidence ?? []), ...reviewSteps, ...(afterReview ?? [])]
       : [
         sequence.project(`${id}-unseal`, {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
           projections: [{ source: operation.literal(false), destination: sealed! }],
         }),
         produceStep,
@@ -233,6 +234,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
         ...reviewSteps,
         ...(afterReview ?? []),
         sequence.project(`${id}-seal`, {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
           projections: [{ source: operation.literal(true), destination: sealed! }],
         }),
       ],
@@ -243,12 +245,14 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
   // otherwise emit a `{all: [...]}` guard group where a single-seat caller
   // used to get a bare `equals` predicate.
   const perSeatApproved = verdicts.map((verdict) => condition.equals(verdict.status, "approved"));
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- length === 1 checked above
   const approved = perSeatApproved.length === 1 ? perSeatApproved[0]! : condition.all(perSeatApproved);
   const until = carry === undefined
     ? alsoRequire === undefined ? approved : condition.all([approved, alsoRequire])
     : condition.all([
       approved,
       ...(alsoRequire === undefined ? [] : [alsoRequire]),
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
       condition.equals(sealed!, true),
       condition.count(carry).where("needs", []).equals(0),
       ...(minRounds === undefined

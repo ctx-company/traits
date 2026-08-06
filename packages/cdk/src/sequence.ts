@@ -923,13 +923,17 @@ function sequenceBranch(id: string, fields: Omit<GateBranchFields, "id" | "kind"
     ...(success === undefined ? {} : { then: success }),
     ...(failure === undefined ? {} : { otherwise: failure }),
   };
-  const branchItem = sequenceOf(branchFields as unknown as BranchSequenceFields);
+  // `rest`'s own type (`Omit<GateBranchFields, "id" | "kind" | "check" | "success" | "failure">`) already
+  // structurally overlaps `BranchSequenceFields` enough for a single assertion — no `unknown` detour needed.
+  const branchItem = sequenceOf(branchFields as BranchSequenceFields);
   if (gateStep !== undefined) attachMeta(branchItem, { ...metaOf(branchItem), precedingGateStep: gateStep });
   return branchItem;
 }
 
 function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceHandle {
-  const producerFields = producer as unknown as {
+  // Single narrowing cast, not a double-unknown one — `producer`'s own type already carries `readonly
+  // [key: string]: unknown` (CdkObject), so its own fields are structurally readable at this narrower shape.
+  const producerFields = producer as {
     readonly id?: string;
     readonly output?: readonly string[];
     readonly "on-complete"?: readonly (string | { readonly signal: string; })[];
@@ -952,7 +956,7 @@ function sequenceGate(producer: SequenceHandle, options: GateOptions): SequenceH
     throw new Error(`sequence.gate ${id}: rounds must be a positive integer`);
   }
   if (options.editStep !== undefined) {
-    const editFields = options.editStep as unknown as { readonly output?: readonly string[]; };
+    const editFields = options.editStep as { readonly output?: readonly string[]; };
     if (!editFields.output?.includes(proposalRef)) {
       throw new Error(`sequence.gate ${id}: editStep must replace ${proposalRef}`);
     }
@@ -1246,6 +1250,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     ? loopInput(mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"]), fields.iterations)
     : kind === "project"
     ? (() => {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- kind === "project" implies fields.project was supplied, so projections was built above
       const slotSources = projections!
         .map((entry) => entry.source)
         .filter((source): source is string => typeof source === "string");
@@ -1339,6 +1344,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     };
   }
   if (kind === "project") {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- kind === "project" implies fields.project was supplied, so projections was built above
     canonical.projection = projections!.map((entry) =>
       compactAs<CanonicalProjection>({
         source: entry.source,
@@ -1357,6 +1363,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     canonical.sequence = thenArm === undefined
       ? undefined
       : refText(thenArm, `sequence.${fields.id}.then`);
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- kind === "branch" implies isSequenceKind(fields, kind, "branch") above, so branch is defined
     canonical.when = normalizeGuard(branch!.if);
     canonical.otherwise = otherwiseArm === undefined
       ? undefined
@@ -1423,7 +1430,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   // `never`, and intersecting that with for-each's real `FailureTargetValue`
   // collapses the field to `never` — which reads as "no loop has one" but
   // actually makes the shared collection site below untypable.
-  const controlFields = fields as unknown as
+  const controlFields = fields as
     & Omit<Partial<LoopSequenceFields>, "onFailure">
     & Partial<ForEachSequenceFields>;
   // Same declaration-source-collection reasoning as `controlFields` above:
@@ -1646,6 +1653,9 @@ function flattenOutputItems(
     const content = outputTemplateContent(item);
     if (content === undefined) return [item];
     const optionalRefs = new Set(content.optionalRefs ?? []);
+    // A bare ref string or `{ slot, optional: true }` marker is what this list lowers to at the JSON
+    // boundary — neither is a branded `SlotHandle`/`OptionalSlotRead`, so the checker can't verify the
+    // shape structurally; the `unknown` detour documents that gap rather than hiding it behind a plain `as`.
     return content.refs.map((ref) =>
       (optionalRefs.has(ref) ? { slot: ref, optional: true } : ref) as unknown as SequenceOutputValue
     );
@@ -1849,8 +1859,8 @@ function mergePromptInstructionOutputs(
         + "not a named prompt(...) reference",
     );
   }
-  const baseText = typeof (promptValue as unknown as { readonly text?: unknown; }).text === "string"
-    ? (promptValue as unknown as { readonly text: string; }).text
+  const baseText = typeof (promptValue as { readonly text?: unknown; }).text === "string"
+    ? (promptValue as { readonly text: string; }).text
     : "";
   const text = `${baseText}\n\n${render.text}`;
   return withMeta({ text }, {

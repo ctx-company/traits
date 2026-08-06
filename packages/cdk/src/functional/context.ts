@@ -102,6 +102,7 @@ export function closeBuild(): readonly RegisteredItem[] {
   }
   const [root] = build.scopes;
   activeBuild = undefined;
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- scopes.length === 1 checked above
   return root!.items;
 }
 

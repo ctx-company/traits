@@ -372,6 +372,9 @@ impl Board {
                 parent: new_task.parent,
             },
             steps: new_task.steps,
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         };
         let file_name = format!("{key}-{}.toml", slugify(&document.title));
         let dir = if archived {
@@ -420,6 +423,15 @@ impl Board {
             return Err(WriteError::InvalidField {
                 field: "release_dependents",
                 reason: "releasing dependents requires this update to set a closing status \
+                         (done or cancelled)"
+                    .to_string(),
+            });
+        }
+
+        if update.set_closure.is_some() && !closing {
+            return Err(WriteError::InvalidField {
+                field: "set_closure",
+                reason: "recording a closure requires this update to set a closing status \
                          (done or cancelled)"
                     .to_string(),
             });
@@ -506,10 +518,14 @@ impl Board {
                 document.closed = Some(crate::audit_journal::today_date_utc());
             } else if !closing && was_archived {
                 document.closed = None;
+                document.closure = None;
             }
             if effects_config.archive_on_close {
                 archive_target = closing;
             }
+        }
+        if let Some(closure) = update.set_closure {
+            document.closure = Some(closure);
         }
 
         let file_name = current_path
@@ -857,6 +873,78 @@ mod tests {
     }
 
     #[test]
+    fn closure_is_persisted_and_survives_the_archive_move() {
+        use ctx_traits_core::task::{AutoClosePolicy, CheckOutcome, CheckRecord, Closure};
+
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let closure = Closure {
+            mode: AutoClosePolicy::Checked,
+            commit: Some("abc1234".to_string()),
+            checks: vec![CheckRecord {
+                name: "unit tests".to_string(),
+                command: "cargo test".to_string(),
+                outcome: CheckOutcome::Passed,
+                detail: "exit 0".to_string(),
+            }],
+        };
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    set_closure: Some(closure.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let fetched = write.get("0001").unwrap().expect("still resolves archived");
+        assert_eq!(fetched.document.closure, Some(closure));
+
+        let archived_text = std::fs::read_to_string(
+            board_dir
+                .join(ARCHIVED_DIR)
+                .join("0001-first.toml")
+                .as_std_path(),
+        )
+        .unwrap();
+        assert!(archived_text.contains("mode = \"checked\""));
+    }
+
+    #[test]
+    fn set_closure_without_a_closing_status_is_refused() {
+        use ctx_traits_core::task::{AutoClosePolicy, Closure};
+
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let error = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    set_closure: Some(Closure {
+                        mode: AutoClosePolicy::Merge,
+                        commit: None,
+                        checks: Vec::new(),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            WriteError::InvalidField {
+                field: "set_closure",
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn create_assigns_top_level_and_child_keys() {
         let board_dir = tempdir();
         write_task(
@@ -1061,6 +1149,9 @@ mod tests {
             validation: "the validation".to_string(),
             relations: Relations::default(),
             steps: Vec::new(),
+            checks: Vec::new(),
+            auto_close: None,
+            closure: None,
         };
         let canonical = ctx_traits_core::task::serialize(&document).unwrap();
         write_task(&board_dir, "0001-a.toml", &canonical);

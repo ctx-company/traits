@@ -6236,6 +6236,7 @@ fn open_task_mark_done_modal(state: &mut State) {
         body.push_str("\ndone-when:\n");
         body.push_str(resolved.document.validation.trim());
     }
+    append_declared_checks_notice(&mut body, &resolved.document.checks);
     state.modal_host.open(
         Action::Task(TaskAction::MarkDone {
             key: key.clone(),
@@ -6244,6 +6245,20 @@ fn open_task_mark_done_modal(state: &mut State) {
         }),
         Modal::confirm(format!("mark {key} done"), body),
     );
+}
+
+/// 0144 trust surfacing: name the exact declared-check commands in the
+/// confirm modal body, before `Confirmed` ever runs them — the same posture
+/// as dispatching a trait per the task's own Watch. A task with no declared
+/// checks leaves `body` untouched.
+fn append_declared_checks_notice(body: &mut String, checks: &[ctx_traits_core::task::Check]) {
+    if checks.is_empty() {
+        return;
+    }
+    body.push_str("\n\ndeclared checks (run on confirm):\n");
+    for check in checks {
+        body.push_str(&format!("- {}: {}\n", check.name, check.command));
+    }
 }
 
 /// The snapshot digest a modal-open captures for a task, by a fresh read —
@@ -6338,6 +6353,11 @@ fn open_next_reconcile_step(state: &mut State) {
                         "run {} for {task_key} merged as {} (verified ancestor of main) — mark done?\n",
                         e.run_id, e.sha
                     ));
+                }
+                if let Ok(dir) = super::tasks::board_dir(None)
+                    && let Ok(Some(resolved)) = FilesTaskBoard::open_read(dir).get(task_key)
+                {
+                    append_declared_checks_notice(&mut body, &resolved.document.checks);
                 }
                 (format!("reconcile: mark {task_key} done"), body)
             }
@@ -6715,6 +6735,48 @@ fn apply_task_action(
     }
 }
 
+/// 0144: the effective `auto-close` policy for one task — its own
+/// `auto_close` override wins over the `[tasks] auto-close` config leaf in
+/// either direction ([`super::task_proposals::resolve_auto_close_policy`]).
+/// `None` when neither is set — the existing confirm-only flow, unchanged.
+fn resolve_task_close_policy(
+    document: &ctx_traits_core::task::TaskDocument,
+) -> Option<ctx_traits_core::task::AutoClosePolicy> {
+    let config_default =
+        ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
+            .ok()
+            .and_then(|config| config.effective_auto_close());
+    super::task_proposals::resolve_auto_close_policy(document.auto_close, config_default)
+}
+
+/// Run `document.checks` against `sha` in a clean worktree, mapping a
+/// whole-set failure (`UnrunnableSet`) to a single `Unrunnable` record so
+/// [`super::task_proposals::close_disposition`] always has a uniform
+/// `Vec<CheckRecord>` to reason about. Only called when there is at least
+/// one declared check — the no-checks flow never reaches here.
+fn run_declared_checks(
+    checks: &[ctx_traits_core::task::Check],
+    sha: &str,
+) -> Vec<ctx_traits_core::task::CheckRecord> {
+    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
+        return vec![ctx_traits_core::task::CheckRecord {
+            name: "(check set)".to_string(),
+            command: String::new(),
+            outcome: ctx_traits_core::task::CheckOutcome::Unrunnable,
+            detail: "could not resolve the repository root".to_string(),
+        }];
+    };
+    match super::task_checks::run_checks(checks, &repo_root, sha) {
+        Ok(records) => records,
+        Err(unrunnable) => vec![ctx_traits_core::task::CheckRecord {
+            name: "(check set)".to_string(),
+            command: String::new(),
+            outcome: ctx_traits_core::task::CheckOutcome::Unrunnable,
+            detail: unrunnable.reason,
+        }],
+    }
+}
+
 /// `y`'s `Confirmed` write: `status: done` with the digest captured at
 /// modal-open, folding the newest cited evidence into `origin` when the
 /// document has none yet (0063.8's own ruling — `origin` today means "which
@@ -6723,6 +6785,16 @@ fn apply_task_action(
 /// left untouched, and the evidence still lands in the message below
 /// either way). Declared close effects (0063.6) run as usual, reported the
 /// same way `Archive`/`Edit` already report them.
+///
+/// 0144: when the task declares checks and an `auto-close` policy resolves
+/// (document override or `[tasks] auto-close`), the checks run here against
+/// the cited sha before the write, and their disposition
+/// ([`super::task_proposals::close_disposition`]) decides the outcome — a
+/// disposition of `AutoClose` writes `set_closure` alongside `status:
+/// done`; `Proposal` (a failing or un-runnable check under `checked`)
+/// refuses the write and names why, leaving the task open for a later,
+/// corrected attempt. A task with no declared checks, or no policy
+/// configured, takes the exact path it took before this feature.
 fn apply_task_mark_done(
     state: &mut State,
     key: String,
@@ -6735,10 +6807,9 @@ fn apply_task_mark_done(
     };
     let dir = super::tasks::board_dir(None)?;
     let provider = FilesTaskBoard::open_read_write(dir);
-    let has_origin = provider
-        .get(&key)
-        .ok()
-        .flatten()
+    let current = provider.get(&key).ok().flatten();
+    let has_origin = current
+        .as_ref()
         .is_some_and(|resolved| resolved.document.origin.is_some());
     let set_origin = if has_origin {
         None
@@ -6748,12 +6819,42 @@ fn apply_task_mark_done(
             latest.run_id, latest.sha
         )))
     };
+
+    let mut set_closure = None;
+    if let Some(resolved) = &current
+        && !resolved.document.checks.is_empty()
+        && let Some(policy) = resolve_task_close_policy(&resolved.document)
+    {
+        let results = run_declared_checks(&resolved.document.checks, &latest.sha);
+        match super::task_proposals::close_disposition(
+            policy,
+            &resolved.document.checks,
+            Some(&results),
+        ) {
+            super::task_proposals::CloseDisposition::AutoClose { checks } => {
+                set_closure = Some(ctx_traits_core::task::Closure {
+                    mode: policy,
+                    commit: Some(latest.sha.clone()),
+                    checks,
+                });
+            }
+            super::task_proposals::CloseDisposition::Proposal { reason } => {
+                state.message = Some(format!(
+                    "{key}: not closed — {}",
+                    reason.unwrap_or_else(|| "declared checks did not clear".to_string())
+                ));
+                return Ok(());
+            }
+        }
+    }
+
     match provider.update(
         &key,
         TaskUpdate {
             status: Some(TaskDocStatus::Done),
             expected_digest: Some(digest),
             set_origin,
+            set_closure,
             ..Default::default()
         },
     ) {
@@ -10601,6 +10702,9 @@ mod tests {
                 validation: String::new(),
                 relations: ctx_traits_core::task::Relations::default(),
                 steps: Vec::new(),
+                checks: Vec::new(),
+                auto_close: None,
+                closure: None,
             },
             derived_status: derived,
             relations: ctx_traits_core::task::graph::ResolvedRelations::default(),
@@ -11295,6 +11399,27 @@ mod tests {
             reconcile_completion_message(&state),
             "reconcile: no ambiguous findings"
         );
+    }
+
+    #[test]
+    fn declared_checks_notice_lists_every_command_before_confirm() {
+        let mut body = "existing body".to_string();
+        let checks = vec![ctx_traits_core::task::Check {
+            name: "unit tests".to_string(),
+            command: "cargo test -p ctx-traits-core".to_string(),
+            timeout_ms: None,
+            expect: None,
+        }];
+        append_declared_checks_notice(&mut body, &checks);
+        assert!(body.contains("declared checks (run on confirm):"));
+        assert!(body.contains("unit tests: cargo test -p ctx-traits-core"));
+    }
+
+    #[test]
+    fn declared_checks_notice_is_a_no_op_with_no_declared_checks() {
+        let mut body = "existing body".to_string();
+        append_declared_checks_notice(&mut body, &[]);
+        assert_eq!(body, "existing body");
     }
 }
 #[test]
