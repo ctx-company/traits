@@ -16,6 +16,10 @@ checks — commands that pass or fail. When every declared check passes against 
 result, there is nothing left for a human to judge, and the task may close itself with the
 proof attached. Tasks without checks keep the one-key confirm forever.
 
+Amended 2026-08-07 (owner): the close policy is ordinary task configuration, a `[tasks]`
+config key exactly like `dispatch-trait` (0063.4) — including a merge-only mode for owners
+who accept merge as sufficient, recorded honestly as unchecked.
+
 """
 scope = """
 ## Decisions
@@ -34,9 +38,21 @@ scope = """
   the contract you write when filing the task — not something a run adds to its own task
   later. A run must never be able to weaken or write the checks that would close its own
   task.
-- **Auto-close is opt-in per board.** A config switch turns the behavior on; off, declared
-  checks still run but only upgrade the proposal ("all 3 checks passed — mark done?"),
-  which is also the natural first milestone to ship.
+- **The close policy is a `[tasks]` config key, following `dispatch-trait`'s precedent**
+  (0063.4): `[tasks] auto-close = "confirm" | "checked" | "merge"`.
+  - `"confirm"` (default) — today's behavior. Declared checks still run, but only
+    strengthen the proposal ("all 3 checks passed — mark done?"). The natural first
+    milestone to ship.
+  - `"checked"` — a task WITH declared checks closes itself when its run merged and every
+    check passed; a task without checks, or with any check failing, falls back to the
+    proposal.
+  - `"merge"` — every bound task closes on merge alone. The owner's explicit blanket
+    trust; the archived document records `unchecked` (or the check results, when checks
+    were declared and ran) so a self-closed task never looks more verified than it was.
+- **A task document may override the configured policy for itself** (e.g. a risky task
+  pinning `confirm` under a `merge`-mode config, or one gold-plated task opting into
+  `checked` early) — the same default-plus-override shape as the dispatch modal seeding
+  a trait id the owner can still edit.
 - **Checks run where merges are observed** — the owner's machine, on the merged state, in
   a clean checkout or worktree. Never inside the run that wants its task closed, and never
   against the run's own branch.
@@ -59,10 +75,12 @@ validation = """
 
 ## Done when
 
-A task with declared checks, whose run merges and whose checks all pass, closes with the
-check results and merged commit recorded on the archived document; one failing or
-un-runnable check downgrades to the ordinary proposal showing which check failed and why;
-a task without checks behaves exactly as today; the board switch defaults off and, when
-off, passing checks strengthen the proposal instead of closing; a run cannot edit its own
-task's checks.
+Under `checked`, a task with declared checks, whose run merges and whose checks all pass,
+closes with the check results and merged commit recorded on the archived document; one
+failing or un-runnable check downgrades to the ordinary proposal showing which check
+failed and why; a task without checks behaves exactly as today. Under the default
+`confirm`, passing checks strengthen the proposal instead of closing. Under `merge`, a
+bound task closes on merge with `unchecked` recorded when no checks ran. A task document's
+own policy overrides the configured one in both directions, and a run cannot edit its own
+task's checks or close policy.
 """
