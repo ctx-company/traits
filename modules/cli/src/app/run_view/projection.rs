@@ -967,7 +967,7 @@ pub(super) fn completed_narration(view: &RunView) -> Option<&RunNarration> {
         .completed
         .then_some(view.narration.as_ref())
         .flatten()
-        .filter(|narration| narration.finished)
+        .filter(|n| n.finished)
 }
 
 /// The narration to paint under the active step. While the run is live this is
@@ -975,38 +975,18 @@ pub(super) fn completed_narration(view: &RunView) -> Option<&RunNarration> {
 /// gating it on completion killed all live output (Group 44 regression). After
 /// completion only the finished settle line remains, rendered by the tail.
 pub(super) fn display_narration(view: &RunView) -> Option<&RunNarration> {
-    if view.header.completed {
-        view.narration
-            .as_ref()
-            .filter(|narration| narration.finished)
-    } else if view.header.stopped.is_some() {
-        // A stopped run's "live" narration is stale passthrough from the last
-        // frame; the header's stop line carries the truth instead.
-        None
-    } else {
-        view.narration.as_ref()
+    match view.header {
+        _ if view.header.completed => view.narration.as_ref().filter(|n| n.finished),
+        _ if view.header.stopped.is_some() => None, // A stopped run's "live" narration is stale passthrough from the last frame
+        _ => view.narration.as_ref(),
     }
 }
 
 pub(super) fn active_step_index(view: &RunView) -> Option<usize> {
-    view.steps
-        .iter()
-        .position(|step| step.active)
-        .or_else(|| {
-            view.steps
-                .iter()
-                .position(|step| step.state == StepState::Running)
-        })
-        .or_else(|| {
-            view.steps
-                .iter()
-                .position(|step| step.state == StepState::Failed)
-        })
-        .or_else(|| {
-            view.steps
-                .iter()
-                .rposition(|step| step.state == StepState::Done)
-        })
+    (view.steps.iter().position(|step| step.active))
+        .or_else(|| (view.steps.iter()).position(|step| step.state == StepState::Running))
+        .or_else(|| (view.steps.iter()).position(|step| step.state == StepState::Failed))
+        .or_else(|| (view.steps.iter()).rposition(|step| step.state == StepState::Done))
 }
 
 #[cfg(test)]
