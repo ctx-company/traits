@@ -350,7 +350,7 @@ export function stableObject<T extends JsonObject>(value: T): T {
 
 /** Mutable-in, canonical-readonly-out counterpart to {@link compact}, for producers (e.g. `sequence.ts`) that build a canonical type's body via incremental key writes on a `Mutable<T>` before returning the readonly `T`. */
 export function compactAs<T>(value: Mutable<T>): T {
-  return compact(value as Record<string, unknown>) as unknown as T;
+  return compact(value as Record<string, unknown>) as unknown as T; // audited-unknown-cast: compactAs<T> is the one generic producer-side mint every compactAs caller routes through
 }
 
 /** `-readonly` counterpart to a canonical document type, for incremental construction. */

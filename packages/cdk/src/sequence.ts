@@ -1657,7 +1657,7 @@ function flattenOutputItems(
     // boundary — neither is a branded `SlotHandle`/`OptionalSlotRead`, so the checker can't verify the
     // shape structurally; the `unknown` detour documents that gap rather than hiding it behind a plain `as`.
     return content.refs.map((ref) =>
-      (optionalRefs.has(ref) ? { slot: ref, optional: true } : ref) as unknown as SequenceOutputValue
+      (optionalRefs.has(ref) ? { slot: ref, optional: true } : ref) as unknown as SequenceOutputValue // audited-unknown-cast: ref string / optional marker are not branded handles, see comment above
     );
   });
 }

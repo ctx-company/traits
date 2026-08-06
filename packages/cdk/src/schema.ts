@@ -503,7 +503,7 @@ function schemaEnumSpec<T extends readonly EnumLiteral[]>(values: T): SchemaEnum
   // `Array.from` always returns a mutable array; `T` may be a readonly tuple subtype of
   // `readonly EnumLiteral[]`, which the checker can't confirm generically — the unknown detour
   // documents that gap rather than a false claim of structural overlap.
-  const allowed = Array.from(values) as unknown as T;
+  const allowed = Array.from(values) as unknown as T; // audited-unknown-cast: mutable array -> generic readonly T, see comment above
   return withMeta({ schema: schemaRef, allowed }, { kind: "schema-field" });
 }
 
@@ -563,13 +563,9 @@ function normalizedFieldRecords(fields: SchemaObjectFields, fieldPath: string): 
     validateSlug(fieldId, `${fieldPath}.${fieldId}`);
     const record = schemaFieldDeclaration(field, `${fieldPath}.${fieldId}`);
     const sources = schemaFieldDeclarationSources(field);
-    // `SchemaFieldRecord` has no index signature (it's a closed field shape,
-    // not a JSON-boundary blob), so `attachMeta`'s `CdkObject` constraint
-    // needs this one crossing — same "closed canonical shape carries hidden
-    // metadata" pattern as `GuardHandle` (P483).
-    normalized[fieldId] = attachMeta(record as unknown as JsonObject, {
+    normalized[fieldId] = attachMeta(record, {
       declarations: collectMany(sources),
-    }) as unknown as SchemaFieldRecord;
+    });
   }
   return normalized;
 }
@@ -620,15 +616,15 @@ function schemaOptional<Field extends SchemaObjectField>(
   // mint the phantom once at their own return.
   type Result = SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false; };
   if (metaOf(fieldValue)?.ref !== undefined || typeof fieldValue === "string") {
-    return { schema: fieldValue as SchemaValue, required: false } as unknown as Result;
+    return { schema: fieldValue as SchemaValue, required: false } as Result;
   }
   const optionalField = { ...(fieldValue as SchemaFieldFields | SchemaEnumSpec), required: false as const };
   const declarations = metaOf(fieldValue)?.declarations;
   return (
     declarations === undefined
       ? optionalField
-      : attachMeta(optionalField as unknown as JsonObject, { declarations })
-  ) as unknown as Result;
+      : attachMeta(optionalField, { declarations })
+  ) as unknown as Result; // audited-unknown-cast: phantom-mint over inferred generic, see comment above
 }
 
 /**
@@ -657,7 +653,7 @@ function schemaTemplate<Spots extends Record<string, SchemaValue>, Fields extend
       params[spotName] = refText(spotValue, `schema.template.${templateId}.${spotName}`);
     }
     const meta = metaOf(handle);
-    attachMeta(handle as unknown as JsonObject, { ...meta, templateInfo: { templateId, params } });
+    attachMeta(handle, { ...meta, templateInfo: { templateId, params } });
     // `schemaObject` only ever builds the template's default `Fields` shape
     // — a per-spot `Overrides`-specialized return type is a compile-time-only
     // promise to callers (`ResolvedFields` reads back the same runtime
@@ -699,11 +695,13 @@ export function schemaArray<Value>(value: SchemaValue<Value>): SchemaRef<Value[]
   // `withMeta`'s `Value`/`HANDLE_VALUE` mechanism (that only reaches
   // `Brand`-based `Handle<K, Value>` shapes) — a distinct phantom family, so
   // this crossing stays a survivor rather than folding into §3.4's mint.
+  // `handle` is a boxed-string CdkObject at runtime (SchemaRefBox); `SchemaRef<V>`'s phantom rides on
+  // the primitive `string` family instead, so the checker sees two unrelated types here — genuine gap.
   return withMeta(handle, {
     kind: "ref",
     ref: schemaRef,
     declarations: collectMany([value]),
-  }) as unknown as SchemaRef<Value[]>;
+  }) as unknown as SchemaRef<Value[]>; // audited-unknown-cast: boxed-string CdkObject -> branded string phantom, see comment above
 }
 
 /**
@@ -797,7 +795,7 @@ function schemaFieldDeclaration(field: SchemaObjectField, fieldPath: string): Sc
     description: (fieldObject as SchemaFieldFields).description,
     hint: (fieldObject as SchemaFieldFields).hint,
     allowed: allowedValues === undefined ? undefined : normalizeAllowedValues(allowedValues, `${fieldPath}.allowed`),
-  }) as unknown as SchemaFieldRecord;
+  }) as unknown as SchemaFieldRecord; // audited-unknown-cast: JsonObject (explicit-undefined arms) -> closed field shape, see comment above
 }
 
 function schemaEnumSpecValue(value: unknown): SchemaEnumSpec | undefined {

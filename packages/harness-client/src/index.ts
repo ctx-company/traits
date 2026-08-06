@@ -7,6 +7,7 @@ import type {
   HostFacts,
   InjectedTrait,
   PromptResponse,
+  ResolveCandidate,
   ResolveResponse,
 } from "./types.js";
 
@@ -74,8 +75,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Every field `ctx_traits_core::resolve::Candidate` mirrors — see {@link ResolveCandidate}. */
+function isResolveCandidate(value: unknown): value is ResolveCandidate {
+  return isRecord(value)
+    && typeof value["trait-id"] === "string"
+    && typeof value["version"] === "string"
+    && typeof value["active"] === "boolean"
+    && typeof value["load-level"] === "string"
+    && typeof value["estimated-tokens"] === "number"
+    && typeof value["priority"] === "number"
+    && typeof value["score"] === "number"
+    && typeof value["budget-decision"] === "string"
+    && typeof value["estimate-source"] === "string"
+    && (value["reason-codes"] === undefined
+      || (Array.isArray(value["reason-codes"]) && value["reason-codes"].every((code) => typeof code === "string")));
+}
+
 /**
- * Minimal structural check for `ctx traits resolve --json`'s response shape. A
+ * Full structural check for `ctx traits resolve --json`'s response shape. A
  * structurally-incompatible response (e.g. a CLI version skew, or a non-JSON error
  * object) must never silently become "no selection" — it must throw.
  */
@@ -83,33 +100,51 @@ function asResolveResponse(raw: unknown, context: string): ResolveResponse {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
   }
-  if (raw["selected"] !== undefined) {
-    if (!Array.isArray(raw["selected"])) {
-      throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "selected" is not an array`);
-    }
-    for (const candidate of raw["selected"]) {
-      if (!isRecord(candidate) || typeof candidate["trait-id"] !== "string") {
-        throw new CtxCliError(
-          `ctx.traits: malformed response shape from ${context}: a "selected" entry has no string "trait-id"`,
-        );
-      }
-    }
+  if (raw["selected"] !== undefined && !Array.isArray(raw["selected"])) {
+    throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "selected" is not an array`);
   }
-  return raw as unknown as ResolveResponse;
+  if (raw["rejected"] !== undefined && !Array.isArray(raw["rejected"])) {
+    throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "rejected" is not an array`);
+  }
+  if (!isResolveResponse(raw)) {
+    throw new CtxCliError(
+      `ctx.traits: malformed response shape from ${context}: a "selected"/"rejected" entry does not match ResolveCandidate`,
+    );
+  }
+  return raw;
 }
 
-/** Minimal structural check for `ctx traits prompt <id> --json`'s response shape. */
+function isResolveResponse(value: Record<string, unknown>): value is Record<string, unknown> & ResolveResponse {
+  return (value["selected"] === undefined || (value["selected"] as readonly unknown[]).every(isResolveCandidate))
+    && (value["rejected"] === undefined || (value["rejected"] as readonly unknown[]).every(isResolveCandidate));
+}
+
+/** Full structural check for `ctx traits prompt <id> --json`'s response shape. */
 function asPromptResponse(raw: unknown, context: string): PromptResponse {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
   }
-  if (raw["text"] !== undefined && typeof raw["text"] !== "string") {
+  if (typeof raw["text"] !== "string") {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "text" is not a string`);
   }
-  if (raw["digests"] !== undefined && !isRecord(raw["digests"])) {
-    throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "digests" is not an object`);
+  const digests = raw["digests"];
+  if (
+    !isRecord(digests) || typeof digests["source"] !== "string" || typeof digests["canonical"] !== "string"
+    || typeof digests["model-view"] !== "string"
+    || (digests["resource-manifest"] !== undefined && digests["resource-manifest"] !== null
+      && typeof digests["resource-manifest"] !== "string")
+  ) {
+    throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "digests" is not well-formed`);
   }
-  return raw as unknown as PromptResponse;
+  return {
+    text: raw["text"],
+    digests: {
+      source: digests["source"],
+      canonical: digests["canonical"],
+      "model-view": digests["model-view"],
+      ...(digests["resource-manifest"] === undefined ? {} : { "resource-manifest": digests["resource-manifest"] }),
+    },
+  };
 }
 
 /**
@@ -136,7 +171,17 @@ function unwrapEnvelope<T>(raw: unknown, context: string, checkValue: (value: un
   return checkValue(envelope.value, context);
 }
 
-/** Minimal structural check for `ContextPlanReport`'s (`ContextPlanValue`) shape. */
+/** Every field `ContextPlanRowReport` mirrors — see {@link ContextPlanRow}. */
+function isContextPlanRow(value: unknown): value is ContextPlanRow {
+  return isRecord(value)
+    && typeof value["trait-id"] === "string"
+    && typeof value["model-view-digest"] === "string"
+    && typeof value["action"] === "string"
+    && (value["stale-reason"] === undefined || typeof value["stale-reason"] === "string")
+    && typeof value["text"] === "string";
+}
+
+/** Full structural check for `ContextPlanReport`'s (`ContextPlanValue`) shape. */
 function asContextPlanValue(raw: unknown, context: string): ContextPlanValue {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
@@ -145,18 +190,27 @@ function asContextPlanValue(raw: unknown, context: string): ContextPlanValue {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "rows" is not an array`);
   }
   for (const row of raw["rows"]) {
-    if (
-      !isRecord(row)
-      || typeof row["trait-id"] !== "string"
-      || typeof row["model-view-digest"] !== "string"
-      || typeof row["text"] !== "string"
-    ) {
+    if (!isContextPlanRow(row)) {
       throw new CtxCliError(
-        `ctx.traits: malformed response shape from ${context}: a "rows" entry has no string "trait-id"/"model-view-digest"/"text"`,
+        `ctx.traits: malformed response shape from ${context}: a "rows" entry does not match ContextPlanRow`,
       );
     }
   }
-  return raw as unknown as ContextPlanValue;
+  if (
+    typeof raw["host"] !== "string" || typeof raw["host-session"] !== "string"
+    || typeof raw["committed"] !== "boolean" || typeof raw["note"] !== "string"
+  ) {
+    throw new CtxCliError(
+      `ctx.traits: malformed response shape from ${context}: missing/mistyped "host"/"host-session"/"committed"/"note"`,
+    );
+  }
+  return {
+    host: raw["host"],
+    "host-session": raw["host-session"],
+    committed: raw["committed"],
+    rows: raw["rows"] as readonly ContextPlanRow[],
+    note: raw["note"],
+  };
 }
 
 /**

@@ -69,7 +69,7 @@ function registerVariant<H extends VariantHandleBase>(record: VariantRecord): H 
     // (`VariantHandle`/`VariantImportHandle`/`VariantLeafHandle`), which
     // this factory can't structurally satisfy beyond the brand + `default()`
     // every variant handle shares (P485 Phase 2).
-  } as unknown as H;
+  } as unknown as H; // audited-unknown-cast: opaque caller-supplied handle shape, see comment above
   return handle;
 }
 

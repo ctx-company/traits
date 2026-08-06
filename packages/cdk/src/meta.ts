@@ -385,7 +385,7 @@ export function withDeclaration<
       // (P481 §4.5). This is the one audited `declaration` cast every
       // declaration builder routes through (P485 Phase 2) — callers no
       // longer assert their own `Handle<K, Value>` shape at each call site.
-      declaration: declaration as unknown as MetaDeclaration,
+      declaration: declaration as unknown as MetaDeclaration, // audited-unknown-cast: the one declaration-producing cast every builder routes through, see comment above
     } as Meta & { readonly kind?: MetaKind; },
   );
   attachMeta(declaration, metaOf(handle) as Meta);
@@ -439,8 +439,12 @@ function isDeclarationKind(value: string): value is DeclKind {
  * for internal composition values (a spread-composed object-schema field
  * entry, for instance) that are not themselves a top-level authored
  * declaration and don't need their own authoring location recorded.
+ * `T extends object` (not `CdkObject`) deliberately: `Object.defineProperty`
+ * needs no index signature, and this lets closed canonical shapes (no index
+ * signature of their own, e.g. `SchemaFieldRecord`/`GuardHandle`) round-trip
+ * through here without a `CdkObject` detour cast at every call site.
  */
-export function attachMeta<T extends CdkObject>(value: T, meta: Meta): T {
+export function attachMeta<T extends object>(value: T, meta: Meta): T {
   Object.defineProperty(value, META, { value: meta, enumerable: false, configurable: true });
   return value;
 }
