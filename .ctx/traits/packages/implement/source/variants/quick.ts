@@ -13,48 +13,27 @@
 // park-report projection (0047) is the one addition since: a deterministic,
 // zero-prompt `project` step, never a spliced doctrine block, so it stays
 // lean by this same rule.
-import { commitTail, guardedProduction } from "@ctx-traits/agents";
-import { condition, input, intent, method, procedure, sequence, variant, tone, verbosity } from "@ctx-traits/cdk";
+//
+// Functional authoring (0109): ported from the 0108 pilot
+// (variants/quick-functional.ts, now retired) with the F2/F3 gaps it
+// recorded resolved — the seven baseline hand-chosen ids restored via the
+// registrars' `id:` override, and the park-report triad restored via
+// `step.project`.
+import { condition, effect, flow, input, procedure, step, variant } from "@ctx-traits/cdk";
 
+import { FAMILY_BEHAVIOR, QUICK_INTENT } from "../core.ts";
 import {
-    captureDiffStep,
     deriveParkReportStep,
+    familyCommitTail,
     gateTimedOut,
+    gateTimedOutAbortIf,
     repoGatesPassed,
-    repoGatesStep,
     reviewDiff,
 } from "../sequence/family.ts";
 import { agent } from "./quick/agent.ts";
 import * as port from "./quick/port.ts";
 import * as resource from "./quick/resource.ts";
 import * as slot from "./quick/slot.ts";
-
-// 0047 mechanism 1's agent layer: audit the task for feasibility before the
-// draft step spends anything. Quick has no extraction step, so the contract
-// ref is the task-board resource itself — the agent reads the task file
-// with its own tools rather than from a pre-extracted brief.
-// DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-// const feasibilityCheck = feasibilityGate({
-//     id: "feasibility",
-//     agent: agent.smart,
-//     task: port.task,
-//     contract: resource.taskBoard,
-//     output: slot.feasibility,
-//     // Owner ruling 2026-07-31 (first live firing, run-bba65cb5): the audit
-//     // is WARNING-ONLY for now — the typed verdict is recorded for the
-//     // reviewer and the owner, but never stops the run.
-//     mode: "warn",
-// });
-
-const draftStep = sequence.prompt("draft-writing", {
-    title: "Draft the work",
-    agent: agent.smart,
-    text: input.prompt`
-        Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
-        Cover: scope, files to touch, approach, validation plan, risks.
-        Reference files by path. Do not implement anything.`,
-    output: slot.draft,
-});
 
 const quickProduceText = input.prompt`
     Implement ${port.task} following the draft ${slot.draft}.
@@ -71,89 +50,80 @@ const quickReviewText = input.prompt`
     Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
     Escalation: set escalation to needs-owner if and only if the run as a whole cannot reach an approvable state (the task file is a placeholder, lacks a falsifiable Done-when, names a prerequisite task not landed in this tree, or is marked superseded/cancelled) — never merely because one blocker is outside this round's reach. Record the one owner action that would clear it in escalation-reason; otherwise set escalation to none and leave escalation-reason empty.`;
 
-const building = guardedProduction({
-    id: "building",
-    produces: slot.workSummary,
-    produce: {
-        agent: agent.worker,
-        text: quickProduceText,
-        optionalInputs: [repoGatesPassed],
-    },
-    review: {
-        agent: agent.smart,
-        verdictSlot: slot.verdict,
-        text: quickReviewText,
-        // The reviewer reads its OWN previous verdict, attached as frame
-        // context (never interpolated — core refuses an optional ref a prompt
-        // requires). Without this the verdict slot is write-only from the
-        // reviewer's side: every round replaces it, so a blocker raised in
-        // round N is invisible in round N+1 and vanishes unfixed. Measured on
-        // run-3d5ef0a1ff, where `implement-fold-not-landed` was raised once
-        // and never seen again.
-        extraInputs: [slot.verdict.optional()],
-    },
-    evidence: [repoGatesStep, captureDiffStep],
-    afterReview: deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport }),
-    alsoRequire: condition.equals(repoGatesPassed.ok, true),
-    rounds: 10,
-    // Ten rounds without an approving verdict is a blocked run, not a commit:
-    // the scribe and the git tail are unreachable, and the run parks.
-    onExhausted: "abort",
-    // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
-    // round can fix — end the round's routing immediately with a
-    // repo-condition park reason instead of burning further rounds.
-    // `alsoRequire` conjoins `ok == true`, so this arm is provably mutually
-    // exclusive with `until` (an absent field is NotMatched, and a `false`
-    // ok already forces the loop to continue rather than exit).
-    abortIf: condition.fieldEquals(repoGatesPassed, "timed-out", true),
-    onAbort: gateTimedOut,
-});
-
 const quickScribeText = input.prompt`The review has ended approved and the work is being committed.
     Write a concise commit message from the draft ${slot.draft} and the verdict ${slot.verdict}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
     Return exactly that message. Do not run git commands and do not write files.`;
+
+const procedureBody = procedure.from(
+    {
+        description:
+            "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
+    },
+    () => {
+        agent.smart.prompt("Draft the work", {
+            id: "draft-writing",
+            input: input.prompt`
+        Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
+        Cover: scope, files to touch, approach, validation plan, risks.
+        Reference files by path. Do not implement anything.`,
+            output: slot.draft,
+        });
+
+        flow.loop("Building", (loop) => {
+            loop.maxIterations(10, { onExhausted: "abort" });
+
+            agent.worker.prompt("Building Produce", {
+                input: quickProduceText,
+                output: slot.workSummary,
+                include: [slot.verdict.optional(), slot.workSummary.optional(), repoGatesPassed.optional()],
+            });
+
+            step.check("Run the repository gate chain", {
+                id: "repo-gates",
+                argv: ["just", "test"],
+                output: repoGatesPassed,
+            });
+
+            step.command("Capture the changed-file inventory", {
+                id: "capture-diff",
+                argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
+                output: reviewDiff,
+            });
+
+            agent.smart.prompt("Building Review", {
+                input: quickReviewText,
+                output: slot.verdict,
+                include: [slot.verdict.optional()],
+            });
+
+            deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport });
+
+            flow.when("Gate Timed Out", gateTimedOutAbortIf, flow.Abort);
+            effect.onAbort(gateTimedOut);
+
+            flow.until(condition.all([
+                condition.equals(slot.verdict.status, "approved"),
+                condition.equals(repoGatesPassed.ok, true),
+            ]));
+        });
+
+        familyCommitTail({
+            id: "shipping",
+            scribe: { agent: agent.scribe, text: quickScribeText },
+            receipt: slot.commitOutput,
+        });
+    },
+);
 
 export default variant({
     name: "Implement (Quick)",
     summary:
         "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "lean"] },
-    behavior: {
-        tone: [tone.Direct, tone.Technical],
-        method: method.EvidenceFirst,
-        verbosity: verbosity.Brief,
-    },
-    intent: {
-        require: [
-            intent.focus.Correctness,
-            intent.require.Leanness,
-            intent.require.ReuseOverReimplement,
-            intent.require.ReviewBeforeFinal,
-        ],
-        avoid: [
-            intent.avoid.OverEngineering,
-            intent.avoid.ScopeCreep,
-            intent.avoid.RubberStampReview,
-        ],
-    },
+    behavior: FAMILY_BEHAVIOR,
+    intent: QUICK_INTENT,
     resource: [resource.taskBoard],
     signal: [gateTimedOut],
     port: [port.commitReport, port.parkReportPort],
-    procedure: procedure({
-        description:
-            "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
-        sequence: [
-            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-            // feasibilityCheck,
-            draftStep,
-            building,
-            ...commitTail({
-                id: "shipping",
-                scribe: { agent: agent.scribe, text: quickScribeText },
-                summary: slot.workSummary,
-                verdict: building.verdict,
-                receipt: slot.commitOutput,
-            }),
-        ],
-    }),
+    procedure: procedureBody,
 });

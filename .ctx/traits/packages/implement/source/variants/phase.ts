@@ -4,7 +4,8 @@
 // extraction/draft/implement/refinement-loop/commit sequence here — that
 // machinery lives once in ../sequence/family.ts.
 import { blockerSchema, DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, method, operation, port, procedure, prompt, resource, schema, sequence, signal, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { condition, operation, port, procedure, prompt, resource, schema, sequence, signal, slot, variant } from "@ctx-traits/cdk";
+import { FAMILY_BEHAVIOR, FAMILY_INTENT } from "../core.ts";
 import {
     clerk,
     commitReport,
@@ -187,53 +188,33 @@ export default variant({
     metadata: {
         tag: ["dogfood", "implementation", "review", "multi-agent"],
     },
-    behavior: {
-        tone: [tone.Direct, tone.Technical],
-        method: method.EvidenceFirst,
-        verbosity: verbosity.Brief,
-    },
-    intent: {
-        require: [
-            intent.focus.Correctness,
-            intent.require.Robustness,
-            intent.require.Pragmatism,
-            intent.require.Elegance,
-            intent.require.Leanness,
-            intent.require.ReuseOverReimplement,
-            intent.require.ReviewBeforeFinal,
-            intent.require.BoundedRefinement,
-        ],
-        avoid: [
-            intent.avoid.Accretion,
-            intent.avoid.OverEngineering,
-            intent.avoid.GoldPlating,
-            intent.avoid.Duplication,
-            intent.avoid.ScopeCreep,
-            intent.avoid.UnboundedLoop,
-            intent.avoid.RubberStampReview,
-        ],
-    },
+    behavior: FAMILY_BEHAVIOR,
+    intent: FAMILY_INTENT,
     resource: [taskBoard, reviewRubric],
     signal: [gateTimedOut],
     port: [commitReport, leftoversPort, parkReportPort],
-    procedure: procedure({
-        description:
-            "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
-        sequence: familyProcedure({
-            clerk,
-            smart1,
-            smart2,
-            worker,
-            scribe,
-            taskBoard,
-            variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
-            verdict1,
-            verdict2,
-            reviewRubric,
-            parkReportOutput: parkReport,
-            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-            reviewExtraInstruction:
-                `Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status.`,
-        }),
-    }),
+    procedure: procedure.from(
+        {
+            description:
+                "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
+        },
+        () => {
+            familyProcedure({
+                clerk,
+                smart1,
+                smart2,
+                worker,
+                scribe,
+                taskBoard,
+                variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
+                verdict1,
+                verdict2,
+                reviewRubric,
+                parkReportOutput: parkReport,
+                // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+                reviewExtraInstruction:
+                    `Report "recurrence-rounds" only when a carried blocker has the same still-open step statuses with zero delta from the prior verdict: 1 for a first-raised blocker, 0 when blockers is empty, and reset to 1 whenever progress changes a carried step status.`,
+            });
+        },
+    ),
 });

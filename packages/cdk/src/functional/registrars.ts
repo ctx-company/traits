@@ -17,6 +17,7 @@ import type {
   ForEachSequenceFields,
   LoopSequenceFields,
   ParallelBranchFailurePolicy,
+  ProjectSequenceFields,
   PromptRegistrarOptions,
 } from "../sequence.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
@@ -97,14 +98,22 @@ function forbidPositionalUntil(title: string, containerLabel: string, frame: Aut
   );
 }
 
+/** Common optional override on every `step.*`/`agent.*.prompt` registrar (0109 F2): the emitted canonical id, when it must differ from `idFromTitle(title)`. */
+export interface IdOverride {
+  readonly id?: string;
+}
+
 // ---------------------------------------------------------------------------
 // step.*
 // ---------------------------------------------------------------------------
 
 export const step = {
-  command(title: string, opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> = {} as never): SequenceHandle {
+  command(
+    title: string,
+    opts: Omit<CommandSequenceFields, "id" | "kind" | "title"> & IdOverride = {} as never,
+  ): SequenceHandle {
     requireBuild(`step.command(${JSON.stringify(title)})`);
-    const id = mintId(title);
+    const id = opts.id ?? mintId(title);
     const fields = withPositionalWhen({ ...opts, title });
     const item = sequence.command(id, fields as Omit<CommandSequenceFields, "id" | "kind">);
     registerItem(`step.command(${JSON.stringify(title)})`, item, title);
@@ -112,13 +121,26 @@ export const step = {
   },
   check(
     title: string,
-    opts: Omit<CheckSequenceFields, "id" | "kind" | "title">,
+    opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
   ): SequenceHandle & { readonly pass: SlotHandle<boolean>; } {
     requireBuild(`step.check(${JSON.stringify(title)})`);
-    const id = mintId(title);
+    const id = opts.id ?? mintId(title);
     const fields = withPositionalWhen({ ...opts, title });
     const item = sequence.check(id, fields as Omit<CheckSequenceFields, "id" | "kind">);
     registerItem(`step.check(${JSON.stringify(title)})`, item, title);
+    return item;
+  },
+  /** `step.project` (0109 F3): the functional home for a deterministic, zero-prompt `project` step — mirrors `sequence.project`'s `projections` field, with the same `id:` override escape as every other `step.*` registrar. */
+  project(
+    title: string,
+    opts: Omit<ProjectSequenceFields, "id" | "kind" | "title"> & IdOverride,
+  ): SequenceHandle {
+    requireBuild(`step.project(${JSON.stringify(title)})`);
+    const frame = captureAuthorFrame();
+    forbidPositionalUntil(title, "step.project", frame);
+    const id = opts.id ?? mintId(title);
+    const item = sequence.project(id, { ...opts, title } as Omit<ProjectSequenceFields, "id" | "kind">);
+    registerItem(`step.project(${JSON.stringify(title)})`, item, title);
     return item;
   },
 };
@@ -129,8 +151,9 @@ export const step = {
 
 installAgentPromptLowering((agentHandle, title, opts) => {
   requireBuild(`agent.prompt(${JSON.stringify(title as string)})`);
-  const id = mintId(title as string);
-  const fields = withPositionalWhen({ ...(opts as PromptRegistrarOptions), title, agent: agentHandle as AgentHandle });
+  const promptOpts = opts as PromptRegistrarOptions;
+  const id = promptOpts.id ?? mintId(title as string);
+  const fields = withPositionalWhen({ ...promptOpts, title, agent: agentHandle as AgentHandle });
   const item = sequence.prompt({ ...fields, id } as never);
   registerItem(`agent.prompt(${JSON.stringify(title as string)})`, item, title as string);
   return item;
@@ -181,6 +204,8 @@ installSlotForEachLowering((slotHandle, title, opts, body) => {
 export interface LoopParam {
   /** Required, callable once — a loop with no way out is not authorable (0102). */
   maxIterations(n: number, opts?: { readonly onExhausted?: ExhaustionPolicy; }): void;
+  /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
+  id(overrideId: string): void;
 }
 
 function combineAbortIfArms(
@@ -197,7 +222,6 @@ function combineAbortIfArms(
 
 function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandle {
   requireBuild(`flow.loop(${JSON.stringify(title)})`);
-  const id = mintId(title);
   const frame = captureAuthorFrame();
   const label = `flow.loop(${JSON.stringify(title)})`;
   const loopParam: LoopParam = {
@@ -213,10 +237,21 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
       scope.loop.maxIterationsValue = n;
       if (opts?.onExhausted !== undefined) scope.loop.onExhausted = opts.onExhausted;
     },
+    id(overrideId) {
+      const scope = nearestScope("loop");
+      if (scope?.loop === undefined) {
+        throw buildError(title, "loop.id(...) called outside its own flow.loop body", frame);
+      }
+      if (scope.loop.idOverride !== undefined) {
+        throw buildError(title, "loop.id(...) called more than once", frame);
+      }
+      scope.loop.idOverride = overrideId;
+    },
   };
   const { scope } = runInScope("loop", label, () => body(loopParam));
   checkDuplicateTitles(scope.items, label);
   const loopState = scope.loop!;
+  const id = loopState.idOverride ?? mintId(title);
   if (!loopState.maxIterationsCalled) {
     throw buildError(title, "loop.maxIterations(...) is required — no-way-out is not authorable", frame);
   }
@@ -240,10 +275,12 @@ const FLOW_ABORT_ARM = "abort" as const;
 
 function flowWhen(title: string, cond: BranchCheckValue, arm: typeof FLOW_ABORT_ARM): void;
 function flowWhen(title: string, cond: BranchCheckValue, body: () => void): SequenceHandle;
+function flowWhen(title: string, cond: BranchCheckValue, opts: IdOverride, body: () => void): SequenceHandle;
 function flowWhen(
   title: string,
   cond: BranchCheckValue,
-  thirdArg: typeof FLOW_ABORT_ARM | (() => void),
+  thirdArg: typeof FLOW_ABORT_ARM | IdOverride | (() => void),
+  maybeBody?: () => void,
 ): SequenceHandle | void {
   requireBuild(`flow.when(${JSON.stringify(title)})`);
   const frame = captureAuthorFrame();
@@ -255,9 +292,11 @@ function flowWhen(
     loopScope.loop.abortIfArms.push({ title, condition: cond });
     return undefined;
   }
-  const id = mintId(title);
+  const idOverride = typeof thirdArg === "function" ? undefined : (thirdArg as IdOverride).id;
+  const body = typeof thirdArg === "function" ? thirdArg : maybeBody!;
+  const id = idOverride ?? mintId(title);
   const label = `flow.when(${JSON.stringify(title)})`;
-  const { scope } = runInScope("when", label, thirdArg);
+  const { scope } = runInScope("when", label, body);
   checkDuplicateTitles(scope.items, label);
   if (scope.items.length === 0) throw buildError(title, "flow.when block registered no steps", frame);
   // Success-only block: an object-layer `branch` has no `when` of its own, so the positional

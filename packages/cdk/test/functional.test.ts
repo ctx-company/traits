@@ -238,6 +238,62 @@ describe("functional layer build rules (0106)", () => {
     const built = toDraftJson(trait("functional-smoke", { name: "Functional Smoke", summary: "s", procedure: proc }));
     expect(built).toMatchObject({ id: "functional-smoke" });
   });
+
+  it("an `id:` override wins over idFromTitle(title) on every step.*/agent.prompt/flow.when/flow.loop registrar (0109 F2)", () => {
+    const worker = agent.worker("id-override-worker");
+    const out = slot.text("id-override-out");
+    const flagSlot = slot.text("id-override-flag");
+    const proc = procedure.from({ description: "d" }, () => {
+      step.command("Capture the changed-file inventory", { id: "capture-diff", cmd: "echo hi", output: out });
+      step.check("Run the repository gate chain", { id: "repo-gates", cmd: "echo ok", output: flagSlot as never });
+      worker.prompt("Draft the work (smart-1)", { id: "draft-writing", input: input.prompt`Draft.`, output: out });
+      flow.when(
+        "Check working tree status",
+        condition.not(condition.empty(out)),
+        { id: "shipping-maybe-commit" },
+        () => {
+          step.command("Commit the work", { id: "shipping-commit", cmd: "echo commit", output: out });
+        },
+      );
+      flow.loop("Refinement Loop", (loop) => {
+        loop.maxIterations(1);
+        loop.id("building");
+        step.command("Round", { cmd: "echo round", output: out });
+        flow.until(condition.not(condition.empty(out)));
+      });
+    });
+    const built = toDraftJson(
+      trait("id-override-smoke", { name: "Id Override Smoke", summary: "s", procedure: proc }),
+    ) as { procedure: { sequence: readonly { id: string; }[]; }; };
+    const ids = built.procedure.sequence.map((item) => item.id);
+    expect(ids).toEqual(["capture-diff", "repo-gates", "draft-writing", "shipping-maybe-commit", "building"]);
+  });
+
+  it("step.project (0109 F3) authors a deterministic project step with the same id-override escape", () => {
+    const source = slot.text("project-source");
+    const destination = slot.text("project-destination");
+    const proc = procedure.from({ description: "d" }, () => {
+      step.project("Park Report Clear", { id: "park-report-clear", projections: [{ source, destination }] });
+    });
+    const built = toDraftJson(
+      trait("step-project-smoke", { name: "Step Project Smoke", summary: "s", procedure: proc }),
+    ) as { procedure: { sequence: readonly { id: string; kind: string; }[]; }; };
+    expect(built.procedure.sequence).toMatchObject([{ id: "park-report-clear", kind: "project" }]);
+  });
+
+  it("step.project registered after flow.until in its own loop is a build error", () => {
+    const gate = slot.text("project-until-gate");
+    const target = slot.text("project-until-target");
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Loop", (loop) => {
+          loop.maxIterations(2);
+          flow.until(condition.not(condition.empty(gate)));
+          step.project("Late Project", { projections: [{ source: gate, destination: target }] });
+        });
+      })
+    ).toThrow(/step\.project registered after flow\.until/);
+  });
 });
 
 describe("defineTrait/use*/derived manifest build rules (0107)", () => {

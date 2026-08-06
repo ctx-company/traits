@@ -61,6 +61,8 @@ export interface LoopScopeState {
   onExhausted?: LoopExitPolicy;
   readonly onComplete: unknown[];
   readonly onAbort: unknown[];
+  /** Overrides the loop's own emitted id (0109 F2) — set via `loop.id(...)`. */
+  idOverride?: string;
 }
 
 export interface ParallelScopeState {

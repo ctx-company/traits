@@ -170,11 +170,13 @@ type InputPromptSequenceFields = Omit<SequenceCommonFields, "input"> & {
 /**
  * The options `agent.prompt(title, opts)` accepts (0106): every
  * `sequence.prompt` field except `id`/`kind`/`agent`/`title`, which the
- * registrar mints from the agent handle and the call's own `title`.
+ * registrar mints from the agent handle and the call's own `title` — plus an
+ * optional `id` override (0109 F2) for the rare case where the emitted
+ * canonical id must differ from `idFromTitle(title)`.
  */
 export type PromptRegistrarOptions =
   & Omit<PromptSequenceFields | TextPromptSequenceFields | InputPromptSequenceFields, "id" | "kind" | "agent" | "title">
-  & { readonly output?: SequenceOutputValue | readonly SequenceOutputValue[]; };
+  & { readonly output?: SequenceOutputValue | readonly SequenceOutputValue[]; readonly id?: string; };
 /** A human-owned prompt. The required signal guard decides whether the frame
  * is exposed; its one local slot output is supplied through `session frame set`. */
 type AskSequenceFields =

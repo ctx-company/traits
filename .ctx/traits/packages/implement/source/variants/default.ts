@@ -1,5 +1,6 @@
 import { DEFAULT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { intent, method, procedure, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { procedure, variant } from "@ctx-traits/cdk";
+import { FAMILY_BEHAVIOR, FAMILY_INTENT } from "../core.ts";
 import {
     clerk,
     commitReport,
@@ -31,48 +32,28 @@ export default variant({
     summary:
         "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
-    behavior: {
-        tone: [tone.Direct, tone.Technical],
-        method: method.EvidenceFirst,
-        verbosity: verbosity.Brief,
-    },
-    intent: {
-        require: [
-            intent.focus.Correctness,
-            intent.require.Robustness,
-            intent.require.Pragmatism,
-            intent.require.Elegance,
-            intent.require.Leanness,
-            intent.require.ReuseOverReimplement,
-            intent.require.ReviewBeforeFinal,
-            intent.require.BoundedRefinement,
-        ],
-        avoid: [
-            intent.avoid.Accretion,
-            intent.avoid.OverEngineering,
-            intent.avoid.GoldPlating,
-            intent.avoid.Duplication,
-            intent.avoid.ScopeCreep,
-            intent.avoid.UnboundedLoop,
-            intent.avoid.RubberStampReview,
-        ],
-    },
+    behavior: FAMILY_BEHAVIOR,
+    intent: FAMILY_INTENT,
     resource: [taskBoard],
     signal: [gateTimedOut],
     port: [commitReport, leftoversPort, parkReportPort],
-    procedure: procedure({
-        description:
-            "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
-        sequence: familyProcedure({
-            clerk,
-            smart1,
-            smart2,
-            worker,
-            scribe,
-            taskBoard,
-            variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
-            verdict1,
-            verdict2,
-        }),
-    }),
+    procedure: procedure.from(
+        {
+            description:
+                "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation.",
+        },
+        () => {
+            familyProcedure({
+                clerk,
+                smart1,
+                smart2,
+                worker,
+                scribe,
+                taskBoard,
+                variantDoctrine: DEFAULT_VARIANT_DOCTRINE,
+                verdict1,
+                verdict2,
+            });
+        },
+    ),
 });

@@ -1,27 +1,28 @@
-import { blockerSchema, commitTail, deviationReportSchema, guardedProduction, STRICT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, intent, method, procedure, schema, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { deviationReportSchema, STRICT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
+import { condition, procedure, schema, slot, variant } from "@ctx-traits/cdk";
+import { FAMILY_BEHAVIOR, STRICT_INTENT } from "../core.ts";
 import {
     buildDraftPromptText,
+    buildingEvidence,
     buildPlanReviewText,
     buildScribeText,
-    captureDiffStep,
     clerk,
     commitOutput,
     commitReport,
     declareTaskBoard,
     deriveParkReportStep,
     draft,
+    familyCommitTail,
+    functionalGuardedProduction,
     gateTimedOut,
     gateTimedOutAbortIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
-    ownerItemSchema,
     parkReport,
     parkReportPort,
     promptText,
     repoGatesPassed,
-    repoGatesStep,
     reviewSeat,
     scribe,
     smart1Role,
@@ -64,8 +65,8 @@ const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 // implement-strict-only: the produce-first merged verbatim-execution prompt
 // (round 1: implement the draft verbatim; a fix round: fix blockers while
 // staying verbatim, or STOP rather than actually depart). Not promoted to
-// the shared kit or `implement-default/source/shared.ts` — no second
-// consumer wants verbatim-or-STOP semantics.
+// the shared kit or family.ts — no second consumer wants verbatim-or-STOP
+// semantics.
 const strictProduceText = promptText(
     `Implement {task} following the draft {draft} VERBATIM: execute exactly as specified, with no improvisation and no ACTUAL departure from what is written, however minor.
     If no reviewer verdict is attached to this frame, this is round 1. If one IS attached, this is a fix round: fix every BLOCKER it names that falls within this task's stated scope and Done-when while staying strictly verbatim to the draft — never introduce a new ACTUAL departure to satisfy a finding. If a blocker can only be fixed by actually departing from the draft, do not deviate: STOP and say so plainly in the work summary so the loop can exhaust and block rather than silently adapting.
@@ -82,91 +83,67 @@ const strictProduceText = promptText(
     { task, draft, taskBrief },
 );
 
-const planning = guardedProduction({
-    id: "planning",
-    produces: draft,
-    produce: { agent: smart1, text: buildDraftPromptText() },
-    review: { agent: smart2, text: buildPlanReviewText() },
-    rounds: 2,
-    onExhausted: "continue",
-});
-const building = guardedProduction({
-    id: "building",
-    produces: [workSummary, deviationReport],
-    produce: {
-        agent: worker,
-        text: strictProduceText,
-        optionalInputs: [leftovers, repoGatesPassed, deviationReport],
+const procedureBody = procedure.from(
+    {
+        description:
+            "Implement one task from the task board end to end with verbatim draft execution: extract its contract, draft the approach, implement it exactly as written with a typed deviation record, refine against two independent reviewers, commit — blocking rather than adapting when the draft is unsatisfiable.",
     },
-    review: [
-        reviewSeat(smart1, 1, STRICT_VARIANT_DOCTRINE, verdict1, { deviationReport, extraInstruction: STRICT_DEVIATION_BLOCKER }),
-        reviewSeat(smart2, 2, STRICT_VARIANT_DOCTRINE, verdict2, { deviationReport, extraInstruction: STRICT_DEVIATION_BLOCKER }),
-    ],
-    evidence: [repoGatesStep, captureDiffStep],
-    afterReview: deriveParkReportStep([verdict1, verdict2], { parkReportSlot: parkReport }),
-    alsoRequire: condition.equals(repoGatesPassed.ok, true),
-    carry: leftovers,
-    minRounds: 3,
-    rounds: 5,
-    onExhausted: "abort",
-    // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
-    // round can fix — stop here rather than grinding toward a doomed park.
-    abortIf: gateTimedOutAbortIf,
-    onAbort: gateTimedOut,
-});
+    () => {
+        taskExtractionStep(clerk, taskBoard);
+        // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+        // feasibilityStep(smart1);
+
+        functionalGuardedProduction({
+            id: "planning",
+            loopTitle: "Planning",
+            produces: draft,
+            produce: { agent: smart1, text: buildDraftPromptText() },
+            review: { agent: smart2, text: buildPlanReviewText() },
+            rounds: 2,
+            onExhausted: "continue",
+        });
+
+        functionalGuardedProduction({
+            id: "building",
+            loopTitle: "Building",
+            produces: [workSummary, deviationReport],
+            produce: {
+                agent: worker,
+                text: strictProduceText,
+                optionalInputs: [leftovers, repoGatesPassed, deviationReport],
+            },
+            review: [
+                reviewSeat(smart1, 1, STRICT_VARIANT_DOCTRINE, verdict1, { deviationReport: deviationReport, extraInstruction: STRICT_DEVIATION_BLOCKER }),
+                reviewSeat(smart2, 2, STRICT_VARIANT_DOCTRINE, verdict2, { deviationReport: deviationReport, extraInstruction: STRICT_DEVIATION_BLOCKER }),
+            ],
+            evidence: buildingEvidence,
+            afterReview: () => deriveParkReportStep([verdict1, verdict2], { parkReportSlot: parkReport }),
+            alsoRequire: condition.equals(repoGatesPassed.ok, true),
+            carry: leftovers,
+            minRounds: 3,
+            rounds: 5,
+            onExhausted: "abort",
+            abortIf: gateTimedOutAbortIf,
+            onAbort: gateTimedOut,
+        });
+
+        familyCommitTail({
+            id: "shipping",
+            scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
+            receipt: commitOutput,
+        });
+    },
+);
 
 export default variant({
     name: "Implement (Strict)",
     summary:
         "Verbatim dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement the draft exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
-    behavior: {
-        tone: [tone.Direct, tone.Technical],
-        method: method.EvidenceFirst,
-        verbosity: verbosity.Brief,
-    },
-    intent: {
-        require: [
-            intent.focus.Correctness,
-            intent.require.Robustness,
-            intent.require.Pragmatism,
-            intent.require.Elegance,
-            intent.require.Leanness,
-            intent.require.ReuseOverReimplement,
-            intent.require.ReviewBeforeFinal,
-            intent.require.BoundedRefinement,
-            intent.require.VerbatimExecution,
-        ],
-        avoid: [
-            intent.avoid.Accretion,
-            intent.avoid.OverEngineering,
-            intent.avoid.GoldPlating,
-            intent.avoid.Duplication,
-            intent.avoid.ScopeCreep,
-            intent.avoid.UnboundedLoop,
-            intent.avoid.RubberStampReview,
-            intent.avoid.SilentDeviation,
-        ],
-    },
+    behavior: FAMILY_BEHAVIOR,
+    intent: STRICT_INTENT,
     resource: [taskBoard],
     signal: [gateTimedOut],
     port: [commitReport, leftoversPort, parkReportPort],
-    procedure: procedure({
-        description:
-            "Implement one task from the task board end to end with verbatim draft execution: extract its contract, draft the approach, implement it exactly as written with a typed deviation record, refine against two independent reviewers, commit — blocking rather than adapting when the draft is unsatisfiable.",
-        sequence: [
-            taskExtractionStep(clerk, taskBoard),
-            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-            // feasibilityStep(smart1),
-            planning,
-            building,
-            ...commitTail({
-                id: "shipping",
-                scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
-                summary: workSummary,
-                verdict: building.verdict,
-                receipt: commitOutput,
-            }),
-        ],
-    }),
+    procedure: procedureBody,
 });

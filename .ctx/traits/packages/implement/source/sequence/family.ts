@@ -1,25 +1,23 @@
 // Shared implementation concepts used by the native implement family leaves.
 import {
     clerkRole,
-    commitTail,
     feasibilityGate,
     feasibilityVerdictSchema,
-    guardedProduction,
     LEFTOVER_DOCTRINE,
     leftoverSchema,
     ownerItemSchema,
     reviewerRole,
     REVIEW_VERDICT_DOCTRINE,
+    reviewerVerdict,
     reviewVerdictSchema,
     scribeRole,
     SCOPE_SPLIT_DOCTRINE,
     workerRole,
 } from "@ctx-traits/agents";
+import type { GuardedProductionProduceRole, GuardedProductionReviewSeat, GuardedProductionRole } from "@ctx-traits/agents";
 import type {
     AgentHandle,
     GuardValue,
-    GuardedProductionHandle,
-    GuardedProductionReviewSeat,
     PromptTemplate,
     PromptInterpolation,
     ResourceHandle,
@@ -29,7 +27,7 @@ import type {
     SignalHandle,
     SlotHandle,
 } from "@ctx-traits/cdk";
-import { condition, input, operation, port, resource, schema, sequence, signal, slot } from "@ctx-traits/cdk";
+import { condition, effect, flow, input, operation, port, resource, schema, sequence, signal, slot, step } from "@ctx-traits/cdk";
 
 // P450 S3, repointed at the task board (2026-07-31): the board is the
 // owner's status surface (P486) — a run never writes it at all. Progress
@@ -313,16 +311,15 @@ export function verdictSlot(id: string, reviewerLabel: string, schemaHandle: Sch
     });
 }
 
-export function taskExtractionStep(agent: AgentHandle, taskBoard: ResourceHandle) {
-    return sequence.prompt("task-extraction", {
-        title: "Copy the task contract (clerk)",
-        agent,
-        text: input.prompt`
+/** Functional-layer form (0109 F2): `task-extraction`'s hand-chosen id never matched `idFromTitle` of its own title, so it needs the `id:` override — the same known gap as the seven baseline steps, just uncounted in the 0108 pilot since quick never called this step. */
+export function taskExtractionStep(agentHandle: AgentHandle, taskBoardHandle: ResourceHandle): void {
+    agentHandle.prompt("Copy the task contract (clerk)", {
+        id: "task-extraction",
+        input: input.prompt`
             Copy the task file for ${task} EXACTLY as written.
-            Open the task-board directory named in ${taskBoard} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
+            Open the task-board directory named in ${taskBoardHandle} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
             Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost.`,
         output: taskBrief,
-        input: [task, taskBoard],
     });
 }
 
@@ -337,16 +334,6 @@ export function buildDraftPromptText(): PromptTemplate {
             ${ONE_TURN_DISCIPLINE}`,
         { task, taskBrief },
     );
-}
-
-export function draftStep(agent: AgentHandle) {
-    return sequence.prompt("draft-writing", {
-        title: "Draft the work (smart-1)",
-        agent,
-        text: buildDraftPromptText(),
-        output: draft,
-        input: [task, taskBrief],
-    });
 }
 
 /**
@@ -366,50 +353,57 @@ export function buildPlanReviewText(): PromptTemplate {
     );
 }
 
-export const repoGatesStep = sequence.check("repo-gates", {
-    title: "Run the repository gate chain",
-    // Runs BEFORE the diff capture: cargo build can legitimately rewrite
-    // Cargo.lock, and reviewer evidence must reflect the tree as gated, not
-    // a pre-gate snapshot the gate step itself invalidates.
-    //
-    // P569: repointed from the retired `implement-phase-gates` recipe to the
-    // repository's single gate. The argv is carried in this step's own output
-    // record, so whatever this names is what the worker is told to re-run —
-    // there is no second place a gate command can be declared and drift.
-    argv: ["just", "test"],
-    // No `timeoutMs` here by design (0058). How long a gate may take is a
-    // property of the machine and the project — repo size, load, how many
-    // runs share the box — never of the recipe, and a portable trait runs
-    // against a TypeScript project and a Rust workspace alike. This number
-    // lived here through three retunes (undeclared → the runtime's 120s
-    // default killed every gate; 30 min parked three runs at round 1 once
-    // main grew) before moving to `[run] command-seconds` /
-    // `command-idle-seconds`, where the runtime now bounds it by SILENCE
-    // rather than duration: a gate still printing is working however long it
-    // takes, and one that has gone quiet is killed quickly.
-    output: repoGatesPassed,
-});
-
-export const captureDiffStep = sequence.command({
-    id: "capture-diff",
-    title: "Capture the changed-file inventory",
-    // `--stat` ONLY, never `--patch` (changed 2026-07-28). A patch prints the
-    // full body of every deleted file, so a round that removes generated
-    // artifacts pays for them in full: run-e20bc187's round-2 diff was 471,929
-    // bytes / ~125k tokens, of which ~6,700 lines were the `generated/`
-    // index.toml and index.map bodies of five folded packages — machine output
-    // no reviewer needs to read, drowning 331 lines of actual change. It blew
-    // the 256 KiB capture limit, and a truncated slot-feeding capture is a
-    // typed failure (run.rs:1901), so the run died holding a completed fold.
-    //
-    // The inventory is the evidence now: every changed path with its
-    // insertion/deletion delta, no exclusions. The reviewer picks what to open
-    // with its own tools — it can see that a `generated/` file changed without
-    // being handed six thousand lines of it, and it is told plainly below that
-    // this is an index, not the change itself.
-    argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
-    output: reviewDiff,
-});
+/**
+ * The building loop's per-round evidence: the repository gate chain, then
+ * the changed-file inventory. Called directly into a `flow.loop` body
+ * (0109 F3: a pre-built `SequenceHandle` cannot be lifted into a functional
+ * scope, so this registers fresh steps every call rather than returning
+ * handles).
+ */
+export function buildingEvidence(): void {
+    step.check("Run the repository gate chain", {
+        id: "repo-gates",
+        // Runs BEFORE the diff capture: cargo build can legitimately rewrite
+        // Cargo.lock, and reviewer evidence must reflect the tree as gated, not
+        // a pre-gate snapshot the gate step itself invalidates.
+        //
+        // P569: repointed from the retired `implement-phase-gates` recipe to the
+        // repository's single gate. The argv is carried in this step's own output
+        // record, so whatever this names is what the worker is told to re-run —
+        // there is no second place a gate command can be declared and drift.
+        argv: ["just", "test"],
+        // No `timeoutMs` here by design (0058). How long a gate may take is a
+        // property of the machine and the project — repo size, load, how many
+        // runs share the box — never of the recipe, and a portable trait runs
+        // against a TypeScript project and a Rust workspace alike. This number
+        // lived here through three retunes (undeclared → the runtime's 120s
+        // default killed every gate; 30 min parked three runs at round 1 once
+        // main grew) before moving to `[run] command-seconds` /
+        // `command-idle-seconds`, where the runtime now bounds it by SILENCE
+        // rather than duration: a gate still printing is working however long it
+        // takes, and one that has gone quiet is killed quickly.
+        output: repoGatesPassed,
+    });
+    step.command("Capture the changed-file inventory", {
+        id: "capture-diff",
+        // `--stat` ONLY, never `--patch` (changed 2026-07-28). A patch prints the
+        // full body of every deleted file, so a round that removes generated
+        // artifacts pays for them in full: run-e20bc187's round-2 diff was 471,929
+        // bytes / ~125k tokens, of which ~6,700 lines were the `generated/`
+        // index.toml and index.map bodies of five folded packages — machine output
+        // no reviewer needs to read, drowning 331 lines of actual change. It blew
+        // the 256 KiB capture limit, and a truncated slot-feeding capture is a
+        // typed failure (run.rs:1901), so the run died holding a completed fold.
+        //
+        // The inventory is the evidence now: every changed path with its
+        // insertion/deletion delta, no exclusions. The reviewer picks what to open
+        // with its own tools — it can see that a `generated/` file changed without
+        // being handed six thousand lines of it, and it is told plainly below that
+        // this is an index, not the change itself.
+        argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
+        output: reviewDiff,
+    });
+}
 
 /**
  * The produce-first merged produce prompt (P450 §4.3): implements the draft
@@ -549,29 +543,31 @@ ${
  * validates. Callers pass one verdict (quick's single-review procedure) or
  * every verdict reviewed this round (default/smart/strict/phase's dual
  * review) through the same helper shape.
+ *
+ * Functional-layer form (0109 F3): calls `step.project`/`flow.when`
+ * directly into the current build scope instead of returning handles — a
+ * pre-built `SequenceHandle[]` has no way to be lifted into a functional
+ * loop body. Every id/title below is auto-derived from its own title text
+ * (`idFromTitle`), matching this function's own former hand-chosen ids
+ * exactly, so no `id:` override is needed here.
  */
 export function deriveParkReportStep(
     verdicts: SlotHandle | SlotHandle[],
     opts: { parkReportSlot?: SlotHandle } = {},
-): SequenceHandle[] {
+): void {
     const targetParkReport = opts.parkReportSlot ?? parkReport;
     const verdictList = Array.isArray(verdicts) ? verdicts : [verdicts];
-    return [
-        sequence.project("park-report-clear", {
-            projections: [{ source: operation.literal([]), destination: targetParkReport }],
-        }),
-        ...verdictList.map((verdict, index) => {
-            const suffix = verdictList.length > 1 ? `-${index + 1}` : "";
-            return sequence.when(`park-report-record${suffix}`, {
-                if: condition.fieldEquals(verdict, "status", "revise"),
-                then: [
-                    sequence.project(`park-report-append${suffix}`, {
-                        projections: [{ source: verdict, destination: operation.over(targetParkReport, operation.Append) }],
-                    }),
-                ],
+    step.project("Park Report Clear", {
+        projections: [{ source: operation.literal([]), destination: targetParkReport }],
+    });
+    verdictList.forEach((verdict, index) => {
+        const titleSuffix = verdictList.length > 1 ? ` ${index + 1}` : "";
+        flow.when(`Park Report Record${titleSuffix}`, condition.fieldEquals(verdict, "status", "revise"), () => {
+            step.project(`Park Report Append${titleSuffix}`, {
+                projections: [{ source: verdict, destination: operation.over(targetParkReport, operation.Append) }],
             });
-        }),
-    ];
+        });
+    });
 }
 
 /**
@@ -592,15 +588,146 @@ export function buildScribeText(verdict1: SlotHandle, verdict2: SlotHandle): Pro
 }
 
 /**
+ * The functional-layer equivalent of `@ctx-traits/agents`' `guardedProduction`
+ * (0109): a bounded loop whose body is `[unseal] → produce → [evidence] →
+ * review(s) → [afterReview] → [seal]`, exiting once every seat's verdict is
+ * approved (and, when given, `alsoRequire`/the carry-empty/min-rounds
+ * conjunction). Registers via `flow.loop`/`step.*`/`agent.*.prompt` directly
+ * instead of returning a handle: a pre-built `guardedProduction`
+ * `SequenceHandle` cannot be lifted into a functional scope (0102 F3), so
+ * `evidence`/`afterReview` are registrar-calling callbacks, not step arrays.
+ * Mirrors `guardedProduction`'s own algorithm line for line —
+ * `@ctx-traits/agents/process.ts` stays untouched (0109 scope).
+ */
+export function functionalGuardedProduction(options: {
+    readonly id: string;
+    readonly loopTitle: string;
+    readonly produces: SlotHandle | readonly SlotHandle[];
+    readonly produce: GuardedProductionProduceRole;
+    readonly review: GuardedProductionReviewSeat | readonly GuardedProductionReviewSeat[];
+    readonly evidence?: () => void;
+    readonly afterReview?: () => void;
+    readonly alsoRequire?: GuardValue;
+    readonly carry?: SlotHandle;
+    readonly minRounds?: number;
+    readonly rounds: number;
+    readonly onExhausted?: "continue" | "abort";
+    readonly abortIf?: GuardValue;
+    readonly onAbort?: SignalHandle;
+}): { readonly verdict: SlotHandle; readonly verdicts: readonly SlotHandle[]; } {
+    const { id, loopTitle, produces, produce, review, evidence, afterReview, alsoRequire, carry, minRounds, rounds, onExhausted, abortIf, onAbort } =
+        options;
+    const seats = Array.isArray(review) ? review : [review];
+    const idSuffix = (index: number) => (seats.length > 1 ? `-${index + 1}` : "");
+    const titleSuffix = (index: number) => (seats.length > 1 ? ` ${index + 1}` : "");
+    const verdicts = seats.map((seat, index) =>
+        seat.verdictSlot ?? slot.of({
+            id: `${id}-verdict${idSuffix(index)}`,
+            schema: seat.verdictSchema ?? reviewerVerdict,
+            description: `Reviewer verdict for the "${id}" produce-review round.`,
+        })
+    );
+    const producesList = (Array.isArray(produces) ? produces : [produces]) as readonly SlotHandle[];
+    const sealed = carry === undefined ? undefined : slot.boolean(`${id}-sealed`);
+
+    flow.loop(loopTitle, (loop) => {
+        loop.maxIterations(rounds, onExhausted === undefined ? undefined : { onExhausted });
+
+        if (sealed !== undefined) {
+            step.project(`${loopTitle} Unseal`, { projections: [{ source: operation.literal(false), destination: sealed }] });
+        }
+
+        produce.agent.prompt(`${loopTitle} Produce`, {
+            id: `${id}-produce`,
+            input: produce.text,
+            output: produces,
+            include: [...verdicts, ...producesList, ...(produce.optionalInputs ?? [])].map((s) => s.optional()),
+        });
+
+        evidence?.();
+
+        seats.forEach((seat, index) => {
+            seat.agent.prompt(`${loopTitle} Review${titleSuffix(index)}`, {
+                id: `${id}-review${idSuffix(index)}`,
+                input: seat.text,
+                output: seat.extraOutputs ? [verdicts[index], ...seat.extraOutputs] : verdicts[index],
+                include: [verdicts[index].optional(), ...(seat.extraInputs ?? [])],
+                ...(seat.onComplete === undefined ? {} : { onComplete: seat.onComplete }),
+            });
+        });
+
+        afterReview?.();
+
+        if (sealed !== undefined) {
+            step.project(`${loopTitle} Seal`, { projections: [{ source: operation.literal(true), destination: sealed }] });
+        }
+
+        if (abortIf !== undefined) {
+            flow.when("Gate Timed Out", abortIf, flow.Abort);
+            if (onAbort !== undefined) effect.onAbort(onAbort);
+        }
+
+        const perSeatApproved = verdicts.map((verdict) => condition.equals(verdict.status, "approved"));
+        const approved = perSeatApproved.length === 1 ? perSeatApproved[0] : condition.all(perSeatApproved);
+        const until = sealed === undefined
+            ? alsoRequire === undefined ? approved : condition.all([approved, alsoRequire])
+            : condition.all([
+                approved,
+                ...(alsoRequire === undefined ? [] : [alsoRequire]),
+                condition.equals(sealed, true),
+                condition.count(carry).where("needs", []).equals(0),
+                ...(minRounds === undefined
+                    ? []
+                    : [condition.any([condition.count(carry).equals(0), condition.iterationAtLeast(minRounds - 1)])]),
+            ]);
+        flow.until(until);
+    });
+
+    return { verdict: verdicts[0], verdicts };
+}
+
+/**
+ * The functional-layer equivalent of `@ctx-traits/agents`' `commitTail`
+ * (0109): the clean-tree-guarded git tail. Simplified to the shape every
+ * caller actually uses — a caller-owned `{agent, text}` scribe role; the
+ * kit's own default-scribe-prose fallback has no consumer in this family and
+ * is not reproduced (leanness).
+ */
+export function familyCommitTail(opts: { id: string; scribe: GuardedProductionRole; receipt: SlotHandle; }): void {
+    const { id, scribe, receipt } = opts;
+    const status = slot.text({
+        id: `${id}-status`,
+        description:
+            "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
+        hint:
+            "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
+    });
+    const message = slot.text({ id: `${id}-message`, description: "The commit message the scribe writes for the completed work." });
+    const stageOutput = slot.text({ id: `${id}-stage-output`, description: "Verbatim output of the git-add staging command." });
+
+    step.command("Check working tree status", { id: `${id}-status`, input: input.command`git status --porcelain`, output: status });
+
+    flow.when("Shipping Maybe Commit", condition.not(condition.equals(status, "")), () => {
+        scribe.agent.prompt("Write the commit message (scribe)", { id: `${id}-message`, input: scribe.text, output: message });
+        step.command("Stage all changes except runtime state", {
+            id: `${id}-stage`,
+            input: input.command`git add -A -- :!.agents/runs`,
+            output: stageOutput,
+        });
+        step.command("Commit the work", { id: `${id}-commit`, input: input.command`git commit -m ${message}`, output: receipt });
+    });
+}
+
+/**
  * The complete family procedure (P450): task extraction, a cheap
  * reviewed planning composite, a produce-first doubly-reviewed build
- * composite, and the commit tail — built entirely from the
- * `guardedProduction`/`commitTail` kit in `@ctx-traits/agents`.
- * `implement-phase` (the dogfood entry point) calls this exact function
- * rather than restoring a second copy; it differs from `implement-default`
- * in package identity, metadata, and the optional `reviewRubric`/`abortIf`/
- * `onAbort`/`reviewExtraInstruction` opts, never in the procedure's own
- * structure.
+ * composite, and the commit tail — built entirely from
+ * `functionalGuardedProduction`/`familyCommitTail`. `implement-phase` (the
+ * dogfood entry point) calls this exact function rather than restoring a
+ * second copy; it differs from `implement-default` in package identity,
+ * metadata, and the optional `reviewRubric`/`parkReportOutput`/
+ * `reviewExtraInstruction` opts, never in the procedure's own structure.
+ * Must run inside a `procedure.from` build scope (registers steps directly).
  */
 export function familyProcedure(opts: {
     clerk: AgentHandle;
@@ -614,95 +741,51 @@ export function familyProcedure(opts: {
     verdict2: SlotHandle;
     reviewRubric?: ResourceHandle;
     parkReportOutput?: SlotHandle;
-    abortIf?: GuardValue;
-    onAbort?: SignalHandle | readonly SignalHandle[];
     reviewExtraInstruction?: string;
-    postReviewSteps?: readonly SequenceHandle[];
-    ownerAnswer?: SlotHandle;
-    ownerAnswerInstruction?: string;
-    review1OnComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
-    review2OnComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
-    planRounds?: number;
-    buildRounds?: number;
-}): readonly SequenceHandle[] {
-    const {
-        clerk,
-        smart1,
-        smart2,
-        worker,
-        scribe,
-        taskBoard,
-        variantDoctrine,
-        verdict1,
-        verdict2,
-        reviewRubric,
-        parkReportOutput,
-        abortIf,
-        onAbort,
-        reviewExtraInstruction,
-        postReviewSteps,
-        ownerAnswer,
-        ownerAnswerInstruction,
-        review1OnComplete,
-        review2OnComplete,
-        planRounds,
-        buildRounds,
-    } = opts;
+}): void {
+    const { clerk, smart1, smart2, worker, scribe, taskBoard, variantDoctrine, verdict1, verdict2, reviewRubric, parkReportOutput, reviewExtraInstruction } =
+        opts;
     const parkReportSlot = parkReportOutput ?? parkReport;
-    // 0047 mechanism 4: every variant stops on a timed-out gate, merged
-    // alongside whatever early-stop arm the caller (e.g. phase's recurrence
-    // breaker) already declares — `condition.any` so either arm alone stops
-    // the loop, `onAbort` carrying every signal the matching arm could be.
-    const combinedAbortIf = abortIf === undefined ? gateTimedOutAbortIf : condition.any([abortIf, gateTimedOutAbortIf]);
-    const priorOnAbort = onAbort === undefined ? [] : Array.isArray(onAbort) ? onAbort : [onAbort];
-    const combinedOnAbort = [...priorOnAbort, gateTimedOut];
 
-    const planning: GuardedProductionHandle = guardedProduction({
+    taskExtractionStep(clerk, taskBoard);
+    // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+    // feasibilityStep(smart1);
+
+    functionalGuardedProduction({
         id: "planning",
+        loopTitle: "Planning",
         produces: draft,
         produce: { agent: smart1, text: buildDraftPromptText() },
         review: { agent: smart2, text: buildPlanReviewText() },
-        rounds: planRounds ?? 2,
+        rounds: 2,
         onExhausted: "continue",
     });
 
-    const building: GuardedProductionHandle = guardedProduction({
+    functionalGuardedProduction({
         id: "building",
+        loopTitle: "Building",
         produces: workSummary,
-        produce: {
-            agent: worker,
-            text: buildProducePrompt({ extraFixInstruction: ownerAnswerInstruction }),
-            optionalInputs: [...(ownerAnswer === undefined ? [] : [ownerAnswer]), leftovers, repoGatesPassed],
-        },
+        produce: { agent: worker, text: buildProducePrompt(), optionalInputs: [leftovers, repoGatesPassed] },
         review: [
-            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction, onComplete: review1OnComplete }),
-            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction, onComplete: review2OnComplete }),
+            reviewSeat(smart1, 1, variantDoctrine, verdict1, { reviewRubric, extraInstruction: reviewExtraInstruction }),
+            reviewSeat(smart2, 2, variantDoctrine, verdict2, { reviewRubric, extraInstruction: reviewExtraInstruction }),
         ],
-        evidence: [repoGatesStep, captureDiffStep],
-        afterReview: [...deriveParkReportStep([verdict1, verdict2], { parkReportSlot }), ...(postReviewSteps ?? [])],
+        evidence: buildingEvidence,
+        afterReview: () => deriveParkReportStep([verdict1, verdict2], { parkReportSlot }),
         alsoRequire: condition.equals(repoGatesPassed.ok, true),
         carry: leftovers,
         minRounds: 3,
-        rounds: buildRounds ?? 5,
+        rounds: 5,
         onExhausted: "abort",
-        abortIf: combinedAbortIf,
-        onAbort: combinedOnAbort,
+        abortIf: gateTimedOutAbortIf,
+        onAbort: gateTimedOut,
     });
 
-    return [
-        taskExtractionStep(clerk, taskBoard),
-        // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-        // feasibilityStep(smart1),
-        planning,
-        building,
-        ...commitTail({
-            id: "shipping",
-            scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
-            summary: workSummary,
-            verdict: building.verdict,
-            receipt: commitOutput,
-        }),
-    ];
+    familyCommitTail({
+        id: "shipping",
+        scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
+        receipt: commitOutput,
+    });
 }
 
 export { ownerItemSchema };

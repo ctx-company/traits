@@ -1,25 +1,26 @@
-import { blockerSchema, commitTail, guardedProduction, planAmendmentSchema, SCOPE_SPLIT_DOCTRINE, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, input, intent, method, port, procedure, schema, sequence, slot, variant, tone, verbosity } from "@ctx-traits/cdk";
+import { planAmendmentSchema, SCOPE_SPLIT_DOCTRINE, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
+import { condition, input, port, procedure, schema, slot, variant } from "@ctx-traits/cdk";
+import { FAMILY_BEHAVIOR, FAMILY_INTENT } from "../core.ts";
 import {
     buildPlanReviewText,
     buildProducePrompt,
     buildScribeText,
-    captureDiffStep,
+    buildingEvidence,
     clerk,
     commitOutput,
     commitReport,
     declareTaskBoard,
     deriveParkReportStep,
     draft,
+    familyCommitTail,
+    functionalGuardedProduction,
     gateTimedOut,
     gateTimedOutAbortIf,
     leftovers,
     leftoversPort,
     ONE_TURN_DISCIPLINE,
-    ownerItemSchema,
     promptText,
     repoGatesPassed,
-    repoGatesStep,
     reviewSeat,
     scribe,
     smart1Role,
@@ -92,7 +93,7 @@ const parkReportPort = port.output.of(schema.list(verdictSchema), {
 });
 
 // implement-smart-only: the research-informed draft produce text (single
-// consumer — not promoted to the shared kit or family shared.ts).
+// consumer — not promoted to the shared kit or family.ts).
 const smartDraftText = promptText(
     `Create an implementation draft for {task}, informed by your research {researchNotes}.
     Work from the task contract {taskBrief} — a verbatim copy of the task file, your scope contract. Do not re-read the board.
@@ -117,96 +118,74 @@ const smartProduceText = buildProducePrompt({
     returnContract: SMART_PRODUCE_RETURN_CONTRACT,
 });
 
-const researchStep = sequence.prompt("research", {
-    title: "Research prior art (smart-1)",
-    agent: smart1,
-    text: input.prompt`
+const procedureBody = procedure.from(
+    {
+        description:
+            "Implement one task from the task board end to end with a research-informed draft: research, extract its contract, draft the approach, implement it, refine against two independent reviewers with typed amendments, then summarize and commit.",
+    },
+    () => {
+        taskExtractionStep(clerk, taskBoard);
+        // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
+        // feasibilityStep(smart1);
+
+        smart1.prompt("Research prior art (smart-1)", {
+            id: "research",
+            input: input.prompt`
         Before drafting for ${task}, research prior art: how comparable tasks in this codebase's history solved a similar problem, and any external precedent worth grounding the draft in. Use web-capable tools if available.
         Keep this to one pass — the loop budget is unchanged from the default flow; smart means a better-informed draft, not more rounds.
         Return your research notes: what you found, its relevance, and anything that should constrain the coming draft.`,
-    output: researchNotes,
-});
+            output: researchNotes,
+        });
 
-const planning = guardedProduction({
-    id: "planning",
-    produces: draft,
-    produce: { agent: smart1, text: smartDraftText },
-    review: { agent: smart2, text: buildPlanReviewText() },
-    rounds: 2,
-    onExhausted: "continue",
-});
-const building = guardedProduction({
-    id: "building",
-    produces: [draft, workSummary],
-    produce: { agent: worker, text: smartProduceText, optionalInputs: [leftovers, repoGatesPassed] },
-    review: [
-        reviewSeat(smart1, 1, SMART_VARIANT_DOCTRINE, verdict1, { extraInstruction: CROSS_REVIEWER_CONFLICT_BLOCKER }),
-        reviewSeat(smart2, 2, SMART_VARIANT_DOCTRINE, verdict2, { extraInstruction: CROSS_REVIEWER_CONFLICT_BLOCKER }),
-    ],
-    evidence: [repoGatesStep, captureDiffStep],
-    afterReview: deriveParkReportStep([verdict1, verdict2], { parkReportSlot: parkReport }),
-    alsoRequire: condition.equals(repoGatesPassed.ok, true),
-    carry: leftovers,
-    minRounds: 3,
-    rounds: 5,
-    onExhausted: "abort",
-    // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
-    // round can fix — stop here rather than grinding toward a doomed park.
-    abortIf: gateTimedOutAbortIf,
-    onAbort: gateTimedOut,
-});
+        functionalGuardedProduction({
+            id: "planning",
+            loopTitle: "Planning",
+            produces: draft,
+            produce: { agent: smart1, text: smartDraftText },
+            review: { agent: smart2, text: buildPlanReviewText() },
+            rounds: 2,
+            onExhausted: "continue",
+        });
+
+        functionalGuardedProduction({
+            id: "building",
+            loopTitle: "Building",
+            produces: [draft, workSummary],
+            produce: { agent: worker, text: smartProduceText, optionalInputs: [leftovers, repoGatesPassed] },
+            review: [
+                reviewSeat(smart1, 1, SMART_VARIANT_DOCTRINE, verdict1, { extraInstruction: CROSS_REVIEWER_CONFLICT_BLOCKER }),
+                reviewSeat(smart2, 2, SMART_VARIANT_DOCTRINE, verdict2, { extraInstruction: CROSS_REVIEWER_CONFLICT_BLOCKER }),
+            ],
+            evidence: buildingEvidence,
+            afterReview: () => deriveParkReportStep([verdict1, verdict2], { parkReportSlot: parkReport }),
+            alsoRequire: condition.equals(repoGatesPassed.ok, true),
+            carry: leftovers,
+            minRounds: 3,
+            rounds: 5,
+            onExhausted: "abort",
+            // 0047 mechanism 4: a true timed-out gate is a repo condition no worker
+            // round can fix — stop here rather than grinding toward a doomed park.
+            abortIf: gateTimedOutAbortIf,
+            onAbort: gateTimedOut,
+        });
+
+        familyCommitTail({
+            id: "shipping",
+            scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
+            receipt: commitOutput,
+        });
+    },
+);
 
 export default variant({
     name: "Implement (Smart)",
     summary:
         "Research-informed dogfood implementation procedure: research prior art, extract the task contract from the task board, draft the approach, implement it, refine against two independent reviewers who may amend the draft, and commit.",
     metadata: { tag: ["dogfood", "implementation", "review", "multi-agent"] },
-    behavior: {
-        tone: [tone.Direct, tone.Technical],
-        method: method.EvidenceFirst,
-        verbosity: verbosity.Brief,
-    },
-    intent: {
-        require: [
-            intent.focus.Correctness,
-            intent.require.Robustness,
-            intent.require.Pragmatism,
-            intent.require.Elegance,
-            intent.require.Leanness,
-            intent.require.ReuseOverReimplement,
-            intent.require.ReviewBeforeFinal,
-            intent.require.BoundedRefinement,
-        ],
-        avoid: [
-            intent.avoid.Accretion,
-            intent.avoid.OverEngineering,
-            intent.avoid.GoldPlating,
-            intent.avoid.Duplication,
-            intent.avoid.ScopeCreep,
-            intent.avoid.UnboundedLoop,
-            intent.avoid.RubberStampReview,
-        ],
-    },
+    behavior: FAMILY_BEHAVIOR,
+    intent: FAMILY_INTENT,
     resource: [taskBoard],
     signal: [gateTimedOut],
     port: [commitReport, leftoversPort, parkReportPort],
-    procedure: procedure({
-        description:
-            "Implement one task from the task board end to end with a research-informed draft: research, extract its contract, draft the approach, implement it, refine against two independent reviewers with typed amendments, then summarize and commit.",
-        sequence: [
-            taskExtractionStep(clerk, taskBoard),
-            // DISABLED 2026-08-01 (owner): feasibility gate + stall handoff are parked until polished — re-enable by restoring these lines.
-            // feasibilityStep(smart1),
-            researchStep,
-            planning,
-            building,
-            ...commitTail({
-                id: "shipping",
-                scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
-                summary: workSummary,
-                verdict: building.verdict,
-                receipt: commitOutput,
-            }),
-        ],
-    }),
+    procedure: procedureBody,
 });
