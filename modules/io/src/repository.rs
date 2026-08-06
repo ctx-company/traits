@@ -202,6 +202,7 @@ mod tests {
             stderr_truncated: false,
             timed_out: false,
             timeout_reason: None,
+            timeout_kind: None,
             success: false,
             capture_limit: 4096,
         }
@@ -229,6 +230,7 @@ mod tests {
             stderr_truncated: false,
             timed_out: false,
             timeout_reason: None,
+            timeout_kind: None,
             success: false,
             capture_limit: 4096,
         };

@@ -285,6 +285,24 @@ pub struct InspectOutcome {
     pub command_failure: Option<CommandStepFailure>,
 }
 
+/// The command bound that killed a step (0058/0066.4), named by its config
+/// key so a report can say "command-idle-seconds (2s)" instead of a bare
+/// "timed out". Distinct from the frame/total/max-frames bounds drive stamps
+/// on `DriveReport`, so a command kill and a frame kill can never read alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundFired {
+    pub name: &'static str,
+    pub millis: u64,
+    pub kind: crate::command::TimeoutKind,
+}
+
+impl BoundFired {
+    /// Render as the report vocabulary uses it: `command-idle-seconds (2s)`.
+    pub fn describe(&self) -> String {
+        format!("{} ({}s)", self.name, self.millis / 1_000)
+    }
+}
+
 /// Evidence from a command step that failed while advancing the controlled run.
 #[derive(Debug, Clone)]
 pub struct CommandStepFailure {
@@ -293,6 +311,9 @@ pub struct CommandStepFailure {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub report: String,
+    /// Which named bound fired, when `timed_out`. `None` for a non-timeout
+    /// failure (the command ran to completion and exited non-zero).
+    pub bound_fired: Option<BoundFired>,
 }
 
 pub struct CallRequest<'a> {
@@ -4128,6 +4149,17 @@ fn run_call_response_kind(
     }
 }
 
+/// A resolved command bound, named by the config key that produced it
+/// (0058/0066.4): a step-declared `timeout-ms`/`idle-timeout-ms` names
+/// itself, a repository-policy bound names `command-seconds`/
+/// `command-idle-seconds`. Carried alongside the resolved millis so a fired
+/// bound can be reported by its own name rather than a generic timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedBound {
+    pub millis: u64,
+    pub name: &'static str,
+}
+
 /// 0084: resolve the effective wall/idle bounds for a command step. A step
 /// that declares a bound owns it; otherwise the repository's configured
 /// bound applies, and a step with neither gets `None` (the runner's own
@@ -4136,17 +4168,35 @@ fn run_call_response_kind(
 fn resolve_command_bounds(
     policy: Option<&crate::harness_config::EffectiveRunPolicy>,
     command: &ctx_traits_core::procedure::runtime::CommandFrame,
-) -> (Option<u64>, Option<u64>) {
-    let timeout_ms = command.timeout_ms.or_else(|| {
-        policy
-            .and_then(|policy| policy.command_seconds)
-            .map(|seconds| seconds.saturating_mul(1_000))
-    });
-    let idle_timeout_ms = command.idle_timeout_ms.or_else(|| {
-        policy
-            .and_then(|policy| policy.command_idle_seconds)
-            .map(|seconds| seconds.saturating_mul(1_000))
-    });
+) -> (Option<ResolvedBound>, Option<ResolvedBound>) {
+    let timeout_ms = command
+        .timeout_ms
+        .map(|millis| ResolvedBound {
+            millis,
+            name: "timeout-ms",
+        })
+        .or_else(|| {
+            policy
+                .and_then(|policy| policy.command_seconds)
+                .map(|seconds| ResolvedBound {
+                    millis: seconds.saturating_mul(1_000),
+                    name: "command-seconds",
+                })
+        });
+    let idle_timeout_ms = command
+        .idle_timeout_ms
+        .map(|millis| ResolvedBound {
+            millis,
+            name: "idle-timeout-ms",
+        })
+        .or_else(|| {
+            policy
+                .and_then(|policy| policy.command_idle_seconds)
+                .map(|seconds| ResolvedBound {
+                    millis: seconds.saturating_mul(1_000),
+                    name: "command-idle-seconds",
+                })
+        });
     (timeout_ms, idle_timeout_ms)
 }
 
@@ -4200,8 +4250,20 @@ mod resolve_command_bounds_tests {
     fn step_only_wins_over_absent_config() {
         let command = command_frame(Some(60_000), Some(5_000));
         let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(None, &command);
-        assert_eq!(timeout_ms, Some(60_000));
-        assert_eq!(idle_timeout_ms, Some(5_000));
+        assert_eq!(
+            timeout_ms,
+            Some(ResolvedBound {
+                millis: 60_000,
+                name: "timeout-ms"
+            })
+        );
+        assert_eq!(
+            idle_timeout_ms,
+            Some(ResolvedBound {
+                millis: 5_000,
+                name: "idle-timeout-ms"
+            })
+        );
     }
 
     #[test]
@@ -4209,8 +4271,20 @@ mod resolve_command_bounds_tests {
         let command = command_frame(None, None);
         let policy = policy(Some(120), Some(10));
         let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
-        assert_eq!(timeout_ms, Some(120_000));
-        assert_eq!(idle_timeout_ms, Some(10_000));
+        assert_eq!(
+            timeout_ms,
+            Some(ResolvedBound {
+                millis: 120_000,
+                name: "command-seconds"
+            })
+        );
+        assert_eq!(
+            idle_timeout_ms,
+            Some(ResolvedBound {
+                millis: 10_000,
+                name: "command-idle-seconds"
+            })
+        );
     }
 
     #[test]
@@ -4218,8 +4292,20 @@ mod resolve_command_bounds_tests {
         let command = command_frame(Some(3_600_000), Some(30_000));
         let policy = policy(Some(120), Some(10));
         let (timeout_ms, idle_timeout_ms) = resolve_command_bounds(Some(&policy), &command);
-        assert_eq!(timeout_ms, Some(3_600_000));
-        assert_eq!(idle_timeout_ms, Some(30_000));
+        assert_eq!(
+            timeout_ms,
+            Some(ResolvedBound {
+                millis: 3_600_000,
+                name: "timeout-ms"
+            })
+        );
+        assert_eq!(
+            idle_timeout_ms,
+            Some(ResolvedBound {
+                millis: 30_000,
+                name: "idle-timeout-ms"
+            })
+        );
     }
 
     #[test]
@@ -4311,8 +4397,9 @@ fn advance_command_frames(
             .or(Some(Utf8Path::new(".")))
             .and_then(|dir| crate::harness_config::resolve_runtime_config(dir).ok())
             .map(|config| config.effective_run_policy());
-        let (timeout_ms, idle_timeout_ms) =
-            resolve_command_bounds(command_policy.as_ref(), command);
+        let (wall_bound, idle_bound) = resolve_command_bounds(command_policy.as_ref(), command);
+        let timeout_ms = wall_bound.map(|bound| bound.millis);
+        let idle_timeout_ms = idle_bound.map(|bound| bound.millis);
         let capture_limit = command
             .capture_bytes
             .map_or(COMMAND_CAPTURE_LIMIT, |bytes| bytes as usize);
@@ -4469,7 +4556,24 @@ fn advance_command_frames(
             } else {
                 "trusted local command failed".to_string()
             };
-            let report = format_command_report(&outcome);
+            let bound_fired = outcome.timeout_kind.map(|kind| match kind {
+                crate::command::TimeoutKind::Idle => idle_bound.unwrap_or(ResolvedBound {
+                    millis: crate::command::DEFAULT_COMMAND_IDLE_MS,
+                    name: "default idle window",
+                }),
+                crate::command::TimeoutKind::Wall => wall_bound.unwrap_or(ResolvedBound {
+                    millis: crate::command::DEFAULT_COMMAND_WALL_MS,
+                    name: "default wall clock",
+                }),
+            });
+            let bound_fired = bound_fired.map(|bound| BoundFired {
+                name: bound.name,
+                millis: bound.millis,
+                kind: outcome
+                    .timeout_kind
+                    .expect("bound_fired is only Some when timeout_kind is Some"),
+            });
+            let report = format_command_report_with_bound(&outcome, bound_fired.as_ref());
             let response = ctx_traits_core::procedure::session::submit_run_call(
                 trait_ref,
                 session,
@@ -4537,6 +4641,7 @@ fn advance_command_frames(
                     exit_code: outcome.exit_code,
                     timed_out: outcome.timed_out,
                     report,
+                    bound_fired,
                 }),
             });
         }
@@ -4774,12 +4879,22 @@ fn classify_command_output_route(
 }
 
 fn format_command_report(outcome: &crate::command::RunOutput) -> String {
-    // 0058: when a bound fired, name WHICH one. "no output within its idle
-    // window" and "exceeded its wall-clock ceiling" are different repository
-    // conditions, and neither is the worker's defect.
+    format_command_report_with_bound(outcome, None)
+}
+
+fn format_command_report_with_bound(
+    outcome: &crate::command::RunOutput,
+    bound_fired: Option<&BoundFired>,
+) -> String {
+    // 0058/0066.4: when a bound fired, name WHICH one and its configured
+    // value — "no output within its idle window — command-idle-seconds (2s)"
+    // — never a bare "timed out". Neither is the worker's defect.
     let timeout_line = outcome
         .timeout_reason
-        .map(|reason| format!("timeout: {reason}\n"))
+        .map(|reason| match bound_fired {
+            Some(bound) => format!("timeout: {reason} — {}\n", bound.describe()),
+            None => format!("timeout: {reason}\n"),
+        })
         .unwrap_or_default();
     format!(
         "{timeout_line}exit-code: {:?}\nstdout-truncated: {}\nstderr-truncated: {}\nstdout:\n{}\nstderr:\n{}",

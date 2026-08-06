@@ -146,7 +146,23 @@ pub(crate) fn handle_refine(input: RefineInputs<'_>) -> crate::Result<CommandOut
                     None,
                     Some(observer),
                 ) {
-                    Ok(outcome) => outcome,
+                    Ok(crate::app::generate::BuiltinTraitRun::Completed(outcome)) => outcome,
+                    Ok(crate::app::generate::BuiltinTraitRun::Killed(killed)) => {
+                        if apply {
+                            return Err(crate::app::generate::report_bound_kill(
+                                &killed,
+                                &candidate_path,
+                                "refine --apply",
+                                json,
+                            ));
+                        }
+                        let bound = killed.bound_fired.unwrap_or(killed.status);
+                        return blocked_assist_candidate(
+                            candidate,
+                            json,
+                            format!("refine run killed by run bound {bound}"),
+                        );
+                    }
                     Err(error) => {
                         return blocked_assist_candidate(candidate, json, error.to_string());
                     }

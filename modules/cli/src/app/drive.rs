@@ -298,6 +298,13 @@ pub struct DriveReport {
     /// with no merge intent, so output stays byte-identical to before P460.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merge: Option<crate::app::merge::MergeReport>,
+    /// 0066.4: the named bound that ended this drive, when a bound (not a
+    /// normal completion) is why it stopped — `"command-idle-seconds (2s)"`,
+    /// `"frame-seconds (2s)"`, `"total-seconds (…)"`, `"max-frames (…)"`.
+    /// The one channel both the command-kill and frame/total/max-frames legs
+    /// write through, so the two can never be reported as each other.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_fired: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1069,6 +1076,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             activity: Vec::new(),
             credits_pause: None,
             merge: None,
+            bound_fired: None,
         };
         push_capability(
             &mut report,
@@ -1408,6 +1416,7 @@ fn busy_report(input: &DriveInputs<'_>) -> DriveReport {
         activity: Vec::new(),
         credits_pause: None,
         merge: None,
+        bound_fired: None,
     }
 }
 
@@ -1760,6 +1769,7 @@ fn drive_loop(
         activity: Vec::new(),
         credits_pause: None,
         merge: None,
+        bound_fired: None,
     };
     report
         .capabilities
@@ -1840,6 +1850,7 @@ fn drive_loop(
             >= budget.total_seconds
         {
             report.status = "total-budget-exhausted".to_string();
+            report.bound_fired = Some(format!("total-seconds ({}s)", budget.total_seconds));
             push_capability(
                 &mut report,
                 ctx_traits_core::response::CapabilityReport::unsupported(
@@ -1879,6 +1890,7 @@ fn drive_loop(
         // been consumed.
         if report.frames_attempted >= budget.max_frames && pending_wave_cache.is_empty() {
             report.status = "max-frames-exhausted".to_string();
+            report.bound_fired = Some(format!("max-frames ({})", budget.max_frames));
             push_capability(
                 &mut report,
                 ctx_traits_core::response::CapabilityReport::unsupported(
@@ -2592,6 +2604,7 @@ fn drive_loop(
             // additional physical dispatch so stale races cannot bypass them.
             if dispatch_attempt > 0 && started.elapsed().as_secs() >= budget.total_seconds {
                 report.status = "total-budget-exhausted".to_string();
+                report.bound_fired = Some(format!("total-seconds ({}s)", budget.total_seconds));
                 push_capability(
                     &mut report,
                     ctx_traits_core::response::CapabilityReport::unsupported(
@@ -2606,6 +2619,7 @@ fn drive_loop(
                 && pending_wave_cache.is_empty()
             {
                 report.status = "max-frames-exhausted".to_string();
+                report.bound_fired = Some(format!("max-frames ({})", budget.max_frames));
                 push_capability(
                     &mut report,
                     ctx_traits_core::response::CapabilityReport::unsupported(
@@ -2868,6 +2882,15 @@ fn drive_loop(
                         "frame-timeout".to_string()
                     } else {
                         "harness-failed".to_string()
+                    };
+                    report.bound_fired = if run.idle_timed_out {
+                        budget
+                            .idle_seconds
+                            .map(|seconds| format!("idle-seconds ({seconds}s)"))
+                    } else if run.timed_out {
+                        Some(format!("frame-seconds ({}s)", budget.frame_seconds))
+                    } else {
+                        None
                     };
                     let status = report.status.clone();
                     // P402 (`concurrent-terminal-failure-bypasses-p264`): a
@@ -8667,6 +8690,7 @@ fn command_failure_event(
         duration_ms: None,
     });
     report.status = "command-step-failed".to_string();
+    report.bound_fired = failure.bound_fired.as_ref().map(|bound| bound.describe());
     push_capability(
         report,
         ctx_traits_core::response::CapabilityReport::unsupported(

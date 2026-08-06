@@ -208,7 +208,7 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     let scratch_root = crate::app::assist_round::scratch_package_root(&trait_id);
     let round_progress = RoundProgressObserver::new();
     let observer: crate::app::drive::FrameObserver<'_> = &|event| round_progress.observe(event);
-    let outcome = run_builtin_trait_observed(
+    let outcome = match run_builtin_trait_observed(
         "generate-trait",
         vec![
             runtime_input("name", name),
@@ -219,7 +219,12 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
         model,
         None,
         Some(observer),
-    )?;
+    )? {
+        BuiltinTraitRun::Completed(outcome) => outcome,
+        BuiltinTraitRun::Killed(killed) => {
+            return Err(report_bound_kill(&killed, &scratch_root, "generate", json));
+        }
+    };
     let envelope: GenerateEnvelope = serde_json::from_str(&outcome.output)
         .map_err(|error| crate::Error::json("decode generate loop envelope", error))?;
 
@@ -534,6 +539,25 @@ pub(crate) struct BuiltinTraitOutcome {
     pub(crate) round_records: Vec<ctx_traits_core::assist::RoundRecord>,
 }
 
+/// A drive that ended without completing (0066.4): a run bound killed it
+/// before the meta-trait's own loop reached a verdict. Carries whatever
+/// round evidence the session accumulated before the kill, plus the named
+/// bound so the CLI join point can report it rather than a generic timeout.
+pub(crate) struct BuiltinTraitKilled {
+    pub(crate) status: String,
+    pub(crate) bound_fired: Option<String>,
+    pub(crate) round_records: Vec<ctx_traits_core::assist::RoundRecord>,
+}
+
+/// [`run_builtin_trait_observed`]'s typed result: either the drive completed
+/// with a terminal output, or a run bound killed it first. Replaces a flat
+/// `Error::Command` on non-completion so a loop join point can fold a kill
+/// into round evidence instead of losing the round history (0066.4).
+pub(crate) enum BuiltinTraitRun {
+    Completed(BuiltinTraitOutcome),
+    Killed(BuiltinTraitKilled),
+}
+
 const ROUND_REPORT_SLOT_REF: &str = "slot:round-report";
 
 /// Decode the session's accepted `slot:round-report` revisions, in
@@ -571,14 +595,22 @@ pub(crate) fn run_builtin_trait(
     model: Option<&str>,
     run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
 ) -> crate::Result<BuiltinTraitOutcome> {
-    run_builtin_trait_observed(
+    match run_builtin_trait_observed(
         trait_id,
         input_values,
         assignments,
         model,
         run_profile,
         None,
-    )
+    )? {
+        BuiltinTraitRun::Completed(outcome) => Ok(outcome),
+        // Non-loop builtins (critique, explain, generate-evals) have no
+        // round-evidence join point to fold a kill into; preserve the prior
+        // flat-failure behavior for them.
+        BuiltinTraitRun::Killed(killed) => Err(crate::Error::Command {
+            message: format!("{trait_id} run did not complete: {}", killed.status),
+        }),
+    }
 }
 
 pub(crate) fn run_builtin_trait_observed(
@@ -588,7 +620,7 @@ pub(crate) fn run_builtin_trait_observed(
     model: Option<&str>,
     run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
     frame_observer: Option<crate::app::drive::FrameObserver<'_>>,
-) -> crate::Result<BuiltinTraitOutcome> {
+) -> crate::Result<BuiltinTraitRun> {
     let agent_role = match trait_id {
         "generate-trait" => "generator",
         "refine-trait" => "refiner",
@@ -691,20 +723,30 @@ pub(crate) fn run_builtin_trait_observed(
         startup: None,
         frame_observer,
     })?;
-    if report.status != "completed" {
-        return Err(crate::Error::Command {
-            message: format!("{trait_id} run did not complete: {}", report.status),
-        });
-    }
+    let session_id = session;
     let session = ctx_traits_io::run::status(ctx_traits_io::run::InspectRequest {
         trait_file: Some(trait_file.as_str()),
         trait_id: None,
-        session: session.as_str(),
+        session: session_id.as_str(),
         session_store: None,
         elapsed_seconds: None,
     })?
     .session;
     let round_records = round_records_from_session(&session)?;
+    // 0066.4: every built-in meta-trait runner drives a session that exists
+    // only to carry this one call — never a user-facing run someone would
+    // later `ctx traits drive --session` or inspect with `ctx traits story`.
+    // Leaving it in the store after this function returns (success or kill)
+    // strands a phantom session; the candidate/scratch artifacts a caller
+    // still needs live under the scratch package root, not the ledger.
+    ctx_traits_io::run_session::delete_run_session(session_id.as_str(), None)?;
+    if report.status != "completed" {
+        return Ok(BuiltinTraitRun::Killed(BuiltinTraitKilled {
+            status: report.status,
+            bound_fired: report.bound_fired,
+            round_records,
+        }));
+    }
     let outputs = session
         .completion
         .as_ref()
@@ -725,10 +767,10 @@ pub(crate) fn run_builtin_trait_observed(
         value => serde_json::to_string(value)
             .map_err(|e| crate::Error::json("serialize built-in trait output", e))?,
     };
-    Ok(BuiltinTraitOutcome {
+    Ok(BuiltinTraitRun::Completed(BuiltinTraitOutcome {
         output,
         round_records,
-    })
+    }))
 }
 
 fn builtin_assignments(
@@ -971,6 +1013,70 @@ impl LoopEnvelope for GenerateEnvelope {
     }
     fn failing_rung(&self) -> Option<&str> {
         self.failing_rung.as_deref()
+    }
+}
+
+/// Fold a run-bound kill into the uniform round-evidence shape (0066.4): the
+/// rounds the session actually accepted before the kill, plus one more
+/// failed round recording the kill itself, named with the bound that fired.
+/// The honest rung for a mid-command kill is `Build` — the earliest rung,
+/// since the driver cannot see which rung was in flight when the bound cut
+/// the round short.
+fn killed_round_evidence(killed: &BuiltinTraitKilled) -> ctx_traits_core::assist::RoundEvidence {
+    let mut rounds = killed.round_records.clone();
+    let round = u32::try_from(rounds.len() + 1).unwrap_or(u32::MAX);
+    let bound = killed
+        .bound_fired
+        .clone()
+        .unwrap_or_else(|| killed.status.clone());
+    rounds.push(ctx_traits_core::assist::RoundRecord {
+        round,
+        rung: ctx_traits_core::assist::Rung::Build,
+        converged: false,
+        diagnostics: vec![ctx_traits_core::assist::Diagnostic {
+            gate: ctx_traits_core::assist::Gate::Build,
+            code: ctx_traits_core::assist::DiagnosticCode::RoundKilledByBound,
+            field: None,
+            message: format!(
+                "round killed mid-ladder by run bound {bound} (drive status: {})",
+                killed.status
+            ),
+        }],
+    });
+    let rounds_spent = u32::try_from(rounds.len()).unwrap_or(u32::MAX);
+    ctx_traits_core::assist::RoundEvidence {
+        converged: false,
+        rounds_spent,
+        rounds_bound: None,
+        failing_rung: Some(ctx_traits_core::assist::Rung::Build),
+        rounds,
+    }
+}
+
+/// Print the killed-round evidence and build the non-zero-exit error for a
+/// bound-killed loop join point (0066.4): the one function `handle_generate`,
+/// `handle_refine`, and `handle_import`'s `--llm-assisted` path all share, so
+/// a command-kill and a frame-kill are reported identically at every call
+/// site rather than each join point inventing its own wording.
+pub(crate) fn report_bound_kill(
+    killed: &BuiltinTraitKilled,
+    scratch_path: &camino::Utf8Path,
+    verb: &str,
+    json: bool,
+) -> crate::Error {
+    let evidence = killed_round_evidence(killed);
+    if let Err(error) = print_round_evidence(&evidence, scratch_path, json) {
+        return error;
+    }
+    let bound = killed
+        .bound_fired
+        .as_deref()
+        .unwrap_or(killed.status.as_str());
+    crate::Error::Command {
+        message: format!(
+            "{verb} killed by run bound {bound}: candidate preserved at {scratch_path}; {} round(s) spent",
+            killed.round_records.len() + 1
+        ),
     }
 }
 

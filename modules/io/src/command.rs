@@ -135,6 +135,10 @@ pub struct RunOutput {
     /// exited on its own. The two are different repository conditions and a
     /// reviewer must not read either as the worker's defect.
     pub timeout_reason: Option<&'static str>,
+    /// Same condition as `timeout_reason`, typed rather than pre-rendered to
+    /// prose, so a caller can name the bound (its config key and value)
+    /// itself instead of re-deriving idle-vs-wall from the text.
+    pub timeout_kind: Option<TimeoutKind>,
     pub success: bool,
     /// The effective capture ceiling this run actually applied (after the
     /// `capture_limit: 0` → [`DEFAULT_CAPTURE_LIMIT`] sentinel is resolved),
@@ -199,6 +203,7 @@ pub fn run_with_env(
     let (stderr, stderr_truncated) = lossy_utf8(raw.stderr, raw.stderr_truncated);
     Ok(RunOutput {
         timeout_reason: raw.timeout_kind.map(TimeoutKind::reason),
+        timeout_kind: raw.timeout_kind,
         exit_code: raw.exit_code,
         stdout,
         stdout_truncated,

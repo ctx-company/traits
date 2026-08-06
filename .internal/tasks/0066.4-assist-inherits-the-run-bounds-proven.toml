@@ -47,5 +47,5 @@ session or scratch residue survives the kill.
 """
 
 [relations]
-parent = "0066"
 depends-on = ["0066.1"]
+parent = "0066"

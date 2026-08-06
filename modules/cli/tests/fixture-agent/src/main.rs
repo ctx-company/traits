@@ -135,10 +135,25 @@ fn role_scribe() -> ExitCode {
 /// `requested_output_field`) rather than hard-coded, since generate's
 /// candidate lands in slot `candidate-source` and import's in slot
 /// `candidate`.
+/// 0066.4's bound-kill fixtures reuse this role rather than adding new ones:
+/// `CTX_FIXTURE_GENERATOR_SLEEP_MS` blocks before answering at all (proves a
+/// frame-seconds kill), `CTX_FIXTURE_GENERATOR_CANDIDATE` substitutes the
+/// returned candidate source (proves a command-idle-seconds kill, once the
+/// substituted source hangs the CDK build step that consumes it) — both
+/// no-ops when unset, so every other consumer of this role is unaffected.
 fn role_generator(prompt: Option<String>) -> ExitCode {
+    if let Ok(millis) = env::var("CTX_FIXTURE_GENERATOR_SLEEP_MS")
+        && let Ok(millis) = millis.parse::<u64>()
+    {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+    }
     let field = requested_output_field(&prompt.unwrap_or_default())
         .unwrap_or_else(|| "candidate-source".to_string());
-    println!("{{\"{field}\":{}}}", invalid_candidate_json());
+    let candidate = match env::var("CTX_FIXTURE_GENERATOR_CANDIDATE") {
+        Ok(source) => json_string(&source),
+        Err(_) => invalid_candidate_json(),
+    };
+    println!("{{\"{field}\":{candidate}}}");
     ExitCode::SUCCESS
 }
 
@@ -159,7 +174,16 @@ fn role_refiner(prompt: Option<String>) -> ExitCode {
 /// evaluates it. Hand-escaped, not a dependency: this binary is deliberately
 /// std-only.
 fn invalid_candidate_json() -> String {
-    let source = "this is not valid TypeScript or JSON {{{";
-    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+    json_string("this is not valid TypeScript or JSON {{{")
+}
+
+/// JSON-string-encode `source`, hand-escaped (this binary is deliberately
+/// std-only, no `serde_json` dependency).
+fn json_string(source: &str) -> String {
+    let escaped = source
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
     format!("\"{escaped}\"")
 }

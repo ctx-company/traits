@@ -796,7 +796,15 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                         run_profile_document.as_ref(),
                         Some(observer),
                     ) {
-                        Ok(outcome) => outcome,
+                        Ok(crate::app::generate::BuiltinTraitRun::Completed(outcome)) => outcome,
+                        Ok(crate::app::generate::BuiltinTraitRun::Killed(killed)) => {
+                            return Err(crate::app::generate::report_bound_kill(
+                                &killed,
+                                &candidate_path,
+                                "import --llm-assisted",
+                                json,
+                            ));
+                        }
                         Err(error) => {
                             return blocked_assist_candidate(candidate, json, error.to_string());
                         }

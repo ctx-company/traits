@@ -3208,6 +3208,17 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
     if next.idle_seconds.is_some() {
         base.idle_seconds = next.idle_seconds;
     }
+    // 0066.4: these two were added to `RunProfileBudget` by 0058 but never
+    // wired into this overlay — a repo's declared `[run] command-seconds`/
+    // `command-idle-seconds` decoded into `next` and then silently vanished
+    // on every merge, so `resolve_command_bounds` never saw anything but the
+    // built-in default regardless of what a repo configured.
+    if next.command_seconds.is_some() {
+        base.command_seconds = next.command_seconds;
+    }
+    if next.command_idle_seconds.is_some() {
+        base.command_idle_seconds = next.command_idle_seconds;
+    }
 }
 
 /// Load the optional package-root `config.toml` sidecar (legacy, P312;
@@ -5561,6 +5572,11 @@ fn overlay_run_table(
             next.budget.attach_wait_seconds.is_some(),
         ),
         ("idle-seconds", next.budget.idle_seconds.is_some()),
+        ("command-seconds", next.budget.command_seconds.is_some()),
+        (
+            "command-idle-seconds",
+            next.budget.command_idle_seconds.is_some(),
+        ),
     ] {
         if present {
             record_winner(winners, format!("run.{key}"), layer, source.clone());

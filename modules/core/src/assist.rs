@@ -154,6 +154,12 @@ pub enum DiagnosticCode {
     ImportReportDrift,
     IdentityChanged,
     BaselineDiscarded,
+    /// 0066.4: a run bound (a command step's idle/wall ceiling, or the
+    /// drive's frame/total/max-frames ceiling) killed the round before it
+    /// reached a rung verdict. The diagnostic message names the bound and
+    /// its value; the round's `rung` records `Build` (killed mid-ladder,
+    /// the earliest rung the loop cannot see past).
+    RoundKilledByBound,
 }
 
 impl DiagnosticCode {

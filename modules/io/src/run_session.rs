@@ -219,6 +219,25 @@ pub fn write_run_session(
     Ok(())
 }
 
+/// Remove a persisted session ledger by id (0066.4): an ephemeral drive
+/// (built-in meta-trait runner, `run_builtin_trait_observed`) consumes its
+/// session in-process and must not leave it parked in the store afterward —
+/// a phantom session a later `ctx traits story`/`drive --session` would find
+/// with nothing left to do. Missing-file is not an error: the session may
+/// already be gone (e.g. a second cleanup attempt on the same path).
+pub fn delete_run_session(session: &str, store: Option<&str>) -> crate::Result<()> {
+    let path = resolve_session_path(session, store)?;
+    match std::fs::remove_file(path.as_std_path()) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::environment::Error::Filesystem {
+            path: path.to_string(),
+            source,
+        }
+        .into()),
+    }
+}
+
 /// List persisted session-ledger paths (`*.json`) directly under a session
 /// store directory, sorted by file name. Shared by any caller that must walk
 /// the store rather than resolve a single known session id: the role work

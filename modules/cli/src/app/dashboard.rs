@@ -11072,6 +11072,7 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
+        std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         camino::Utf8PathBuf::from_path_buf(dir).unwrap()
     }
@@ -11087,6 +11088,7 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
+        std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let mut state = State::new_without_worker();
         state.tasks_cache_root = Some(camino::Utf8PathBuf::from_path_buf(dir).unwrap());
