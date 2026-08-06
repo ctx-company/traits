@@ -298,6 +298,12 @@ struct RunPanelState {
     /// before success and permanently for a missing-narrator/failed/killed
     /// attempt.
     title_state: Option<ctx_traits_core::procedure::session::SessionTitleState>,
+    /// Whether an unresolved `title_state` can still advance — `true` for a
+    /// live (non-observer) panel, since it IS the driver; re-derived from the
+    /// P423 driver-lock probe on every observer poll (see
+    /// [`Self::refresh_from_ledger`]) so an abandoned claim (the driver that
+    /// made it has since exited) stops claiming "(Generating…)" forever.
+    title_generation_live: bool,
     ask: Option<GuideChatHandle>,
     guide_ledger_path: Option<camino::Utf8PathBuf>,
     /// Detached guide workers wake through this non-owning handle after they
@@ -452,6 +458,10 @@ impl RunPanel {
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
             title_state,
+            // A live drive is its own driver, so generation is always
+            // possible here; observer construction narrows this immediately
+            // below, before the first render.
+            title_generation_live: true,
             ask: None,
             guide_ledger_path: None,
             wake_state: Weak::new(),
@@ -508,6 +518,7 @@ impl RunPanel {
         if let Ok(mut state) = panel.state.lock() {
             state.observer = true;
             state.ledger_path = Some(ledger_path.clone());
+            state.title_generation_live = super::dashboard::session_driver_live(&ledger_path);
             apply_ledger_seed(&mut state, &ledger_path);
             rebuild_view(&mut state, None);
             render_locked(&mut state);
@@ -532,12 +543,14 @@ impl RunPanel {
         ledger_path: &camino::Utf8Path,
     ) {
         let _handoff = self.handoff_driver();
-        let terminal = super::dashboard::session_is_terminal(session, ledger_path);
+        let generation_live = super::dashboard::session_driver_live(ledger_path);
+        let terminal = super::dashboard::session_is_terminal_given_live(session, generation_live);
         let Ok(mut state) = self.state.lock() else {
             return;
         };
         state.session = session.clone();
         state.title_state = session.provenance.session_title.clone();
+        state.title_generation_live = generation_live;
         apply_ledger_seed(&mut state, ledger_path);
         if terminal && !state.observer_finished {
             state.observer_finished = true;
@@ -2146,7 +2159,7 @@ summary = "A test trait."
             .expect("draw");
 
         let area = Rect::new(0, 0, 120, 11);
-        let title_line = title_row_line(None, "trait", None);
+        let title_line = title_row_line(None, true, "trait", None);
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),

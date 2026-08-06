@@ -2888,10 +2888,30 @@ pub(crate) fn session_is_terminal(
     session: &ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
 ) -> bool {
-    let live = matches!(
+    session_is_terminal_given_live(session, session_driver_live(ledger_path))
+}
+
+/// The ONE authoritative liveness probe backing both [`session_is_terminal`]
+/// and title-generation gating ([`super::run_view::title_row_line`]): a
+/// contended P423 driver flock is the sole source of truth for "is a driver
+/// currently attached to this ledger" (see `ctx_traits_io::run_control`'s own
+/// module docs). Split out so a caller that needs the raw signal — not
+/// folded through [`ctx_traits_core::procedure::activity::SessionState`]'s
+/// terminal classification — can read it without a second probe call.
+pub(crate) fn session_driver_live(ledger_path: &camino::Utf8Path) -> bool {
+    matches!(
         ctx_traits_io::run_control::probe(ledger_path),
         Ok(ctx_traits_io::run_control::DriverProbe::Held(_))
-    );
+    )
+}
+
+/// [`session_is_terminal`] for a caller that already probed `live` itself
+/// (e.g. also needs it for title-generation gating) and must not pay for a
+/// second `flock` probe on the same ledger this tick.
+pub(crate) fn session_is_terminal_given_live(
+    session: &ctx_traits_core::procedure::session::Session,
+    live: bool,
+) -> bool {
     ctx_traits_core::procedure::activity::SessionState::derive(
         &session.status,
         session.last_drive_outcome.as_ref().map(|o| &o.outcome),
@@ -6611,6 +6631,26 @@ mod tests {
     // ask-refusal branch in `poll_and_apply_keys`) — see run_view.rs's own
     // tests for that coverage. This dashboard no longer routes ask keys or
     // renders a guide chat pane itself.
+
+    // 0143: `session_driver_live` is the ONE probe title-generation gating
+    // (`run_view::title_row_line`) and `session_is_terminal` both rely on —
+    // a ledger path with no driver-lock sibling at all (never driven, or a
+    // driver that has since exited and released the flock) must read as not
+    // live, never fail-open into "generation still possible".
+    #[test]
+    fn session_driver_live_is_false_with_no_lock_held() {
+        let directory = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir")
+            .join(format!(
+                "ctx-dashboard-driver-live-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(directory.as_std_path());
+        std::fs::create_dir_all(directory.as_std_path()).expect("create scratch directory");
+        let ledger_path = directory.join("ledger.json");
+        assert!(!session_driver_live(&ledger_path));
+    }
 
     fn row(class: SessionClass) -> SessionRow {
         row_with_id("s1", class)

@@ -55,6 +55,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
     }
     let title_line = title_row_line(
         state.title_state.as_ref(),
+        state.title_generation_live,
         &state.trait_name,
         state.session.provenance.started_at_epoch,
     );
@@ -102,8 +103,20 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
 }
 
 /// One visible title row for every live or attached lifecycle state.
+///
+/// `generation_live` is the ONE authoritative signal for whether an
+/// unresolved (`None`/`InFlight`/`Retryable`) claim can still advance: `true`
+/// only while a driver actually holds this ledger's P423 flock (a live drive
+/// or the current invocation itself). A claim left behind by a driver that
+/// has since exited — the ordinary case for a resumed-later or abandoned
+/// session, never advanced by anything once nothing holds the lock — renders
+/// the same blank row `Terminal` gets, instead of a "(Generating…)" claim
+/// that can never come true. See `close_out_unanswered_session_title` in
+/// `drive.rs` for the writer-side half: it stops NEW orphans from forming by
+/// closing out a claim this drive's own worker never answered.
 pub(crate) fn title_row_line(
     title_state: Option<&ctx_traits_core::procedure::session::SessionTitleState>,
+    generation_live: bool,
     trait_name: &str,
     started_at_epoch: Option<u64>,
 ) -> tui::Line {
@@ -118,10 +131,15 @@ pub(crate) fn title_row_line(
         Some(ctx_traits_core::procedure::session::SessionTitleState::Terminal { .. }) => {}
         None
         | Some(ctx_traits_core::procedure::session::SessionTitleState::InFlight { .. })
-        | Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { .. }) => {
+        | Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { .. })
+            if generation_live =>
+        {
             line.push("(Generating session title…)".to_string(), tui::Tone::Muted);
             line.push(" \u{b7} ", tui::Tone::Muted);
         }
+        None
+        | Some(ctx_traits_core::procedure::session::SessionTitleState::InFlight { .. })
+        | Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { .. }) => {}
     }
     line.push(trait_name.to_string(), tui::Tone::Default);
     if let Some(epoch) = started_at_epoch {
@@ -2296,7 +2314,7 @@ mod tests {
             history: Some(&history),
             current: Some(&current),
             post_run: None,
-            title: PaneTitleRow::Visible(&title_row_line(None, "trait", None)),
+            title: PaneTitleRow::Visible(&title_row_line(None, true, "trait", None)),
         };
         let area = Rect::new(0, 0, 80, 24);
         let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
@@ -2686,7 +2704,7 @@ mod tests {
         let mut current_follow = true;
         let mut focus = FocusRing::new(vec![PROGRESS_PANE]);
         let mut keys = Vec::new();
-        let pending_title_line = title_row_line(None, "implement-phase", Some(3_723));
+        let pending_title_line = title_row_line(None, true, "implement-phase", Some(3_723));
         let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("test terminal");
         terminal
             .draw(|frame| {
@@ -2725,7 +2743,7 @@ mod tests {
             attempts: 1,
             title: "Refactor the merge story".to_string(),
         };
-        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
+        let title_line = title_row_line(Some(&title_state), true, "implement-phase", Some(3_723));
         terminal
             .draw(|frame| {
                 render_live_panes(
@@ -2772,7 +2790,7 @@ mod tests {
             attempts: 3,
             reason: "attempt-limit-exhausted".to_string(),
         };
-        let title_line = title_row_line(Some(&title_state), "implement-phase", Some(3_723));
+        let title_line = title_row_line(Some(&title_state), true, "implement-phase", Some(3_723));
         terminal
             .draw(|frame| {
                 render_live_panes(
@@ -2805,6 +2823,54 @@ mod tests {
             terminal_row.trim_end(),
             "implement-phase · Started at 01:02:03"
         );
+    }
+
+    // 0143: an orphaned claim (worker never answered, no driver left to
+    // answer it) must render the same blank row `Terminal` gets, never a
+    // "(Generating…)" claim that can never come true.
+    #[test]
+    fn dead_driver_hides_generating_claim_for_every_unresolved_state() {
+        let dead_states = [
+            None,
+            Some(
+                ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                    owner: "stale-owner".to_string(),
+                    attempts: 1,
+                },
+            ),
+            Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { attempts: 1 }),
+        ];
+        for state in &dead_states {
+            let line = title_row_line(state.as_ref(), false, "implement-phase", None);
+            assert_eq!(
+                line_text(&line),
+                "implement-phase",
+                "state {state:?} with a dead driver must render the blank/terminal row"
+            );
+        }
+    }
+
+    // A live driver still gets the pending claim shown — this is the only
+    // case that can still actually resolve.
+    #[test]
+    fn live_driver_still_shows_generating_claim_for_every_unresolved_state() {
+        let live_states = [
+            None,
+            Some(
+                ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                    owner: "driver-owner".to_string(),
+                    attempts: 1,
+                },
+            ),
+            Some(ctx_traits_core::procedure::session::SessionTitleState::Retryable { attempts: 1 }),
+        ];
+        for state in &live_states {
+            let line = title_row_line(state.as_ref(), true, "implement-phase", None);
+            assert!(
+                line_text(&line).starts_with("(Generating session title…)"),
+                "state {state:?} with a live driver must still show the pending claim"
+            );
+        }
     }
 
     #[test]

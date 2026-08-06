@@ -1107,9 +1107,16 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     );
     // Last chance to write down a title that arrived after the final frame —
     // and the only chance for a run short enough to have no frame boundary
-    // left once the worker answered.
+    // left once the worker answered. If the worker STILL hasn't answered
+    // (its detached thread is about to be torn down along with this
+    // process, whether or not it eventually would have finished), close the
+    // claim out instead of leaving it `InFlight` forever — nothing ever
+    // re-drives a concluded session's ledger, so an unclosed claim here is
+    // permanent, not merely delayed (0143 investigation).
+    let title_claim_owner = driver_lock.title_claim_owner().to_string();
     let mut report = flush_after_drive_loop(drive_result, || {
         pending_title.flush(&ledger_path, None);
+        close_out_unanswered_session_title(&ledger_path, &title_claim_owner);
     })?;
     report.activity = activity.snapshot();
     // P479 terminal sweep: one more checkpoint after the loop returns,
@@ -3967,6 +3974,29 @@ impl PendingSessionTitle {
             Ok(false) => {}
             Err(err) => eprintln!("session title could not be persisted: {err}"),
         }
+    }
+}
+
+/// P552/0143: close out a title claim this drive's own dispatch made
+/// (`claim_owner`) but whose worker never delivered an outcome to
+/// [`PendingSessionTitle::flush`] by drive end — the ordinary case, since
+/// this CLI invocation returns to its caller (and the detached narrator
+/// thread is torn down with it) regardless of whether that thread has
+/// finished. Reuses [`ctx_traits_io::run_session::record_session_title_failure`]'s
+/// own existing 0076 attempt ladder (`Retryable` under the limit, `Terminal`
+/// at it) rather than inventing a second failure path. A no-op — by
+/// [`record_session_title_failure`]'s own owner check — whenever there is
+/// nothing left to close: no claim was made this drive, the worker already
+/// answered (`pending_title.flush` above already resolved it to
+/// `Resolved`/`Retryable`/`Terminal`), or a newer driver has since taken over
+/// the claim.
+fn close_out_unanswered_session_title(ledger_path: &camino::Utf8Path, claim_owner: &str) {
+    if let Err(err) = ctx_traits_io::run_session::record_session_title_failure(
+        ledger_path,
+        claim_owner,
+        "drive ended before the narrator call returned".to_string(),
+    ) {
+        eprintln!("session title claim could not be closed out: {err}");
     }
 }
 
@@ -9037,7 +9067,10 @@ mod resolve_progress_tests {
 
 #[cfg(test)]
 mod session_title_flush_tests {
-    use super::{PendingSessionTitle, SessionTitleOutcome, flush_after_drive_loop};
+    use super::{
+        PendingSessionTitle, SessionTitleOutcome, close_out_unanswered_session_title,
+        flush_after_drive_loop,
+    };
     use camino::{Utf8Path, Utf8PathBuf};
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::runtime::FinalState;
@@ -9255,6 +9288,123 @@ mod session_title_flush_tests {
                 .expect("reclaim attempt"),
             ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 2 }
         );
+    }
+
+    // 0143: the orphaned-claim leak this task fixes — a claim made this
+    // drive, whose worker never delivered an outcome before drive end, used
+    // to stay `InFlight` forever (nothing ever re-drives a concluded
+    // session's ledger to reap it).
+    #[test]
+    fn unanswered_worker_at_drive_end_closes_the_claim_retryable() {
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let pending = PendingSessionTitle::default();
+        // The worker never calls `pending.put` — this drive's process is
+        // ending regardless.
+        let result: crate::Result<()> = Ok(());
+
+        flush_after_drive_loop(result, || {
+            pending.flush(&ledger_path, None);
+            close_out_unanswered_session_title(&ledger_path, "driver-owner");
+        })
+        .expect("no drive-loop error");
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert!(
+            matches!(
+                session.provenance.session_title,
+                Some(
+                    ctx_traits_core::procedure::session::SessionTitleState::Retryable {
+                        attempts: 1
+                    }
+                )
+            ),
+            "unanswered first attempt must close out retryable under the 0076 ladder, not stay InFlight forever: {:?}",
+            session.provenance.session_title
+        );
+    }
+
+    #[test]
+    fn unanswered_worker_at_the_final_claimed_attempt_closes_out_terminal() {
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        for expected_attempt in 1..=ctx_traits_io::run_session::SESSION_TITLE_ATTEMPT_LIMIT {
+            assert_eq!(
+                ctx_traits_io::run_session::claim_session_title_attempt(
+                    &ledger_path,
+                    "driver-owner"
+                )
+                .expect("claim title"),
+                ctx_traits_io::run_session::SessionTitleClaim::Claimed {
+                    attempts: expected_attempt
+                }
+            );
+            if expected_attempt < ctx_traits_io::run_session::SESSION_TITLE_ATTEMPT_LIMIT {
+                ctx_traits_io::run_session::record_session_title_failure(
+                    &ledger_path,
+                    "driver-owner",
+                    "prior attempt failed".to_string(),
+                )
+                .expect("record retryable failure");
+            }
+        }
+
+        close_out_unanswered_session_title(&ledger_path, "driver-owner");
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert!(matches!(
+            session.provenance.session_title,
+            Some(ctx_traits_core::procedure::session::SessionTitleState::Terminal { .. })
+        ));
+    }
+
+    #[test]
+    fn close_out_is_a_no_op_once_the_worker_already_answered() {
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::Success {
+            owner: "driver-owner".to_string(),
+            title: "Resolved before drive end".to_string(),
+        });
+        pending.flush(&ledger_path, None);
+
+        close_out_unanswered_session_title(&ledger_path, "driver-owner");
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert_eq!(
+            session
+                .provenance
+                .session_title
+                .and_then(|state| state.resolved_title().map(str::to_string)),
+            Some("Resolved before drive end".to_string()),
+            "a claim the worker already answered must never be overwritten by close-out"
+        );
+    }
+
+    #[test]
+    fn close_out_is_a_no_op_for_an_owner_that_never_claimed() {
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+
+        close_out_unanswered_session_title(&ledger_path, "driver-owner");
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert_eq!(session.provenance.session_title, None);
     }
 }
 
