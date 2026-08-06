@@ -26,7 +26,7 @@
 //! `Session(..)` / `Trait(..)`) so both screens share one `ModalHost`.
 //! MERGES is untouched by this phase.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -50,6 +50,13 @@ use super::tui;
 use super::tui_kit::{self, MarkSet, Modal, ModalHost, ModalOutcome, ScrollDelta, ScrollList};
 use super::tui_panes::{self, FocusRing, PaneId, PaneLayoutResult, PaneScrolls, PaneTree};
 use super::tui_ratatui::{self, RatatuiPane, render_line};
+
+use ctx_traits_core::task::TaskStatus as TaskDocStatus;
+use ctx_traits_core::task::graph::DerivedStatus;
+use ctx_traits_core::task::provider::{
+    NewTask, ResolvedTask, TaskProvider, TaskProviderMut, TaskSummary, TaskUpdate,
+};
+use ctx_traits_io::task_files::FilesTaskBoard;
 
 mod worker;
 
@@ -91,6 +98,9 @@ const MERGES_RIGHT_MIN: u16 = 40;
 const TRUST_LEFT_MIN: u16 = 50;
 const TRUST_RIGHT_MIN: u16 = 40;
 
+const TASKS_LEFT_MIN: u16 = 50;
+const TASKS_RIGHT_MIN: u16 = 40;
+
 const PANE_SESSIONS_LIST: PaneId = "sessions-list";
 const PANE_SESSIONS_PROGRESS: PaneId = "sessions-progress";
 const PANE_SESSIONS_JOURNEY: PaneId = "sessions-journey";
@@ -127,6 +137,8 @@ const PANE_MERGES_LIST: PaneId = "merges-list";
 const PANE_MERGES_PREVIEW: PaneId = "merges-preview";
 const PANE_TRUST_LIST: PaneId = "trust-list";
 const PANE_TRUST_PREVIEW: PaneId = "trust-preview";
+const PANE_TASKS_LIST: PaneId = "tasks-list";
+const PANE_TASKS_PREVIEW: PaneId = "tasks-preview";
 
 /// Truly bare interactive `ctx traits`: stdin and the rendering terminal
 /// (stderr, matching `--progress tui`'s existing check) are both TTYs and
@@ -152,6 +164,7 @@ enum Screen {
     Traits,
     Merges,
     Trust,
+    Tasks,
 }
 
 impl Screen {
@@ -161,15 +174,17 @@ impl Screen {
             Screen::Traits => "TRAITS",
             Screen::Merges => "MERGES",
             Screen::Trust => "TRUST",
+            Screen::Tasks => "TASKS",
         }
     }
 
-    fn all() -> [Screen; 4] {
+    fn all() -> [Screen; 5] {
         [
             Screen::Sessions,
             Screen::Traits,
             Screen::Merges,
             Screen::Trust,
+            Screen::Tasks,
         ]
     }
 }
@@ -239,6 +254,11 @@ struct SessionRow {
     /// pre-P552 ledger, or a title attempt that never resolved (missing
     /// narrator, failed call).
     title: Option<String>,
+    /// The ledger's `provenance.task_key` (0063): which board task, if any,
+    /// this run was dispatched against. `None` for an unreadable ledger or a
+    /// run never keyed to a task — the TASKS screen's only join key onto
+    /// `state.sessions`.
+    task_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -498,6 +518,72 @@ struct TrustPreviewFacts {
     family_members: Vec<(String, trust_story::TrustClass)>,
 }
 
+/// TASKS' board cache (0063): the provider's own `list`/`get` results plus
+/// its `sync` report, captured once per `s` keypress. `resolved` is keyed by
+/// task key and only ever holds keys `summaries` also names — a `get` that
+/// races a concurrent edit and returns `None`/an error simply leaves that key
+/// absent, which the detail pane renders as "relations unavailable".
+struct TasksBoardSnapshot {
+    summaries: Vec<TaskSummary>,
+    resolved: BTreeMap<String, ResolvedTask>,
+    sync_report: ctx_traits_core::task::provider::SyncReport,
+    synced_at: std::time::Instant,
+}
+
+/// The five fixed TASKS groups (0063's own "Done when": "blocked, ready,
+/// in-flight, parked, done"). `Done`/`Cancelled` both land in `Done` — the
+/// spec names exactly five groups, not six.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+enum TaskGroup {
+    InFlight,
+    Parked,
+    Blocked,
+    Ready,
+    Done,
+}
+
+impl TaskGroup {
+    fn order() -> [TaskGroup; 5] {
+        [
+            TaskGroup::InFlight,
+            TaskGroup::Parked,
+            TaskGroup::Blocked,
+            TaskGroup::Ready,
+            TaskGroup::Done,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            TaskGroup::InFlight => "in-flight",
+            TaskGroup::Parked => "parked",
+            TaskGroup::Blocked => "blocked",
+            TaskGroup::Ready => "ready",
+            TaskGroup::Done => "done",
+        }
+    }
+}
+
+/// TASKS' visible-row projection, mirroring [`VisibleRow`]: a group header
+/// (toggled by Enter/space, no verb of its own) or a real task, addressed by
+/// its key — never an index, since the board is keyed by string and a sync
+/// can reorder or drop rows entirely.
+enum TaskVisibleRow {
+    GroupHeader {
+        group: TaskGroup,
+        count: usize,
+        collapsed: bool,
+    },
+    Task(String),
+}
+
+/// The TASKS detail pane, mirroring [`TraitPreview`]: rebuilt on selection
+/// change and on every sync, never in the draw path.
+struct TaskPreview {
+    key: String,
+    lines: Vec<RLine<'static>>,
+}
+
 /// The reconstructed live-view pane for one session (P469 §3.2): the same
 /// `Vec<RLine>` backs both the SESSIONS master-detail preview and the
 /// attached full view — they differ only in the rect they're drawn into and
@@ -601,6 +687,18 @@ enum Action {
     Session(SessionAction),
     Trait(TraitAction),
     Merge(MergeAction),
+    Task(TaskAction),
+}
+
+/// TASKS' `S`/`a` write tags (0063): the modal itself carries the typed text
+/// (a child title for split, `done`/`cancelled` for archive), resolved to
+/// `ModalOutcome::Submitted` on confirm. Dispatch (`d`) never opens a
+/// `Task` modal — a blocked task refuses inline, and a permitted dispatch
+/// reuses `SessionAction::Spawn` unchanged.
+#[derive(Clone)]
+enum TaskAction {
+    Split { parent: String },
+    Archive { key: String },
 }
 
 #[derive(Clone)]
@@ -728,6 +826,23 @@ struct State {
     list_traits: ScrollList,
     list_merges: ScrollList,
     list_trust: ScrollList,
+    list_tasks: ScrollList,
+    /// TASKS' board cache (0063): keypress-driven and renderer-owned, never
+    /// part of [`DashboardSnapshot`]/the worker — the polled session
+    /// inventory and the task board are two caches with two cadences, and
+    /// keeping them structurally separate is what makes "last synced" mean
+    /// only the board. `None` until the first `s` keypress on TASKS — the
+    /// screen never reads the board automatically on open.
+    tasks_board: Option<TasksBoardSnapshot>,
+    /// TASKS' visible list projection (group headers + task rows), mirroring
+    /// [`State::sessions_visible`]/[`rebuild_visible_sessions`] — rebuilt on
+    /// every sync and every collapse toggle, never in the draw path.
+    tasks_visible: Vec<TaskVisibleRow>,
+    /// Which [`TaskGroup`]s are collapsed to their count-row form. Nothing
+    /// starts collapsed — an empty board cache means an empty list either
+    /// way.
+    collapsed_task_groups: HashSet<TaskGroup>,
+    task_preview: Option<TaskPreview>,
     message: Option<String>,
     quit: bool,
     /// SESSIONS scope (P439): current repository/ad-hoc invocation only
@@ -918,6 +1033,11 @@ impl State {
             list_traits: ScrollList::new(),
             list_merges: ScrollList::new(),
             list_trust: ScrollList::new(),
+            list_tasks: ScrollList::new(),
+            tasks_board: None,
+            tasks_visible: Vec::new(),
+            collapsed_task_groups: HashSet::new(),
+            task_preview: None,
             message: None,
             quit: false,
             all_repos: false,
@@ -957,6 +1077,7 @@ impl State {
             Screen::Traits => &self.list_traits,
             Screen::Merges => &self.list_merges,
             Screen::Trust => &self.list_trust,
+            Screen::Tasks => &self.list_tasks,
         }
     }
 
@@ -966,6 +1087,7 @@ impl State {
             Screen::Traits => &mut self.list_traits,
             Screen::Merges => &mut self.list_merges,
             Screen::Trust => &mut self.list_trust,
+            Screen::Tasks => &mut self.list_tasks,
         }
     }
 
@@ -1131,6 +1253,16 @@ impl State {
                     preview.progress_lines.len(),
                 );
                 self.session_preview = Some(preview.clone());
+            }
+        }
+        // The session-inventory overlay (in-flight/parked) refreshes on this
+        // same 2s cadence against whatever board snapshot `sync_tasks_board`
+        // last captured — a `None` cache (never synced) rebuilds to nothing,
+        // same as `rebuild_visible_tasks` does on its own.
+        if self.tasks_board.is_some() {
+            rebuild_visible_tasks(self);
+            if self.screen == Screen::Tasks {
+                refresh_task_preview_for_selection(self);
             }
         }
     }
@@ -1762,60 +1894,72 @@ fn sessions_from_inventory_tagged(
                 session.provenance.started_at_epoch.unwrap_or(0),
             );
         }
-        let (state_text, phase, elapsed_text, tokens_text, run_id, class, status, outcome, title) =
-            match &row.status {
-                ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
-                    let outcome = session
-                        .last_drive_outcome
-                        .as_ref()
-                        .map(|outcome| outcome.outcome.clone());
-                    let class = classify_session(live, &session.status, outcome.as_ref());
-                    let state_text = if live {
-                        "live".to_string()
-                    } else {
-                        run_view::session_status(&session.status).to_string()
-                    };
-                    let mut phase = parked_ask_presentation(session, repo_path)
-                        .unwrap_or_else(|| run_view::phase_text(session));
-                    if let Some(warning) = ctx_traits_io::run::trait_source_drift_from(
-                        session,
-                        repo_path.map(camino::Utf8Path::new),
-                    )
-                    .warning()
-                    {
-                        phase.push_str(&format!("; {warning}"));
-                    }
-                    let elapsed_text =
-                        tui::elapsed_text(Duration::from_secs(session.ledger.elapsed_seconds));
-                    let token_usage = session
-                        .last_drive_outcome
-                        .as_ref()
-                        .and_then(|outcome| outcome.token_usage.as_ref());
-                    let tokens_text = dashboard_tokens_text(token_usage);
-                    (
-                        state_text,
-                        phase,
-                        elapsed_text,
-                        tokens_text,
-                        session.run_id.as_str().to_string(),
-                        class,
-                        Some(session.status.clone()),
-                        outcome,
-                        persisted_session_title(session, &row.ledger_path),
-                    )
+        let (
+            state_text,
+            phase,
+            elapsed_text,
+            tokens_text,
+            run_id,
+            class,
+            status,
+            outcome,
+            title,
+            task_key,
+        ) = match &row.status {
+            ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
+                let outcome = session
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| outcome.outcome.clone());
+                let class = classify_session(live, &session.status, outcome.as_ref());
+                let state_text = if live {
+                    "live".to_string()
+                } else {
+                    run_view::session_status(&session.status).to_string()
+                };
+                let mut phase = parked_ask_presentation(session, repo_path)
+                    .unwrap_or_else(|| run_view::phase_text(session));
+                if let Some(warning) = ctx_traits_io::run::trait_source_drift_from(
+                    session,
+                    repo_path.map(camino::Utf8Path::new),
+                )
+                .warning()
+                {
+                    phase.push_str(&format!("; {warning}"));
                 }
-                ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
-                    "unreadable".to_string(),
-                    error.clone(),
-                    "-".to_string(),
-                    "-".to_string(),
-                    String::new(),
-                    SessionClass::Unreadable,
-                    None,
-                    None,
-                    None,
-                ),
-            };
+                let elapsed_text =
+                    tui::elapsed_text(Duration::from_secs(session.ledger.elapsed_seconds));
+                let token_usage = session
+                    .last_drive_outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.token_usage.as_ref());
+                let tokens_text = dashboard_tokens_text(token_usage);
+                (
+                    state_text,
+                    phase,
+                    elapsed_text,
+                    tokens_text,
+                    session.run_id.as_str().to_string(),
+                    class,
+                    Some(session.status.clone()),
+                    outcome,
+                    persisted_session_title(session, &row.ledger_path),
+                    session.provenance.task_key.clone(),
+                )
+            }
+            ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
+                "unreadable".to_string(),
+                error.clone(),
+                "-".to_string(),
+                "-".to_string(),
+                String::new(),
+                SessionClass::Unreadable,
+                None,
+                None,
+                None,
+                None,
+            ),
+        };
         rows.push(SessionRow {
             session_id: row.session_id.clone(),
             ledger_path: row.ledger_path.clone(),
@@ -1830,6 +1974,7 @@ fn sessions_from_inventory_tagged(
             status,
             outcome,
             title,
+            task_key,
         });
     }
     rows.sort_by_key(|row| {
@@ -2403,6 +2548,7 @@ fn handle_key(
         KeyCode::Char('2') => state.switch_screen(Screen::Traits),
         KeyCode::Char('3') => state.switch_screen(Screen::Merges),
         KeyCode::Char('4') => state.switch_screen(Screen::Trust),
+        KeyCode::Char('5') => state.switch_screen(Screen::Tasks),
         KeyCode::Char('r') => state.reload(),
         KeyCode::Char(' ') if state.screen == Screen::Sessions => toggle_selected_group(state),
         KeyCode::Char('n') if state.screen == Screen::Sessions => {
@@ -2462,6 +2608,11 @@ fn handle_key(
                 open_trust_marked_modal(state, ctx_traits_io::trust::TrustState::Verified);
             }
         }
+        KeyCode::Char(' ') if state.screen == Screen::Tasks => toggle_selected_task_group(state),
+        KeyCode::Char('s') if state.screen == Screen::Tasks => sync_tasks_board(state),
+        KeyCode::Char('S') if state.screen == Screen::Tasks => open_task_split_modal(state),
+        KeyCode::Char('a') if state.screen == Screen::Tasks => open_task_archive_modal(state),
+        KeyCode::Char('d') if state.screen == Screen::Tasks => dispatch_selected_task(state),
         _ => {}
     }
     Ok(())
@@ -2543,6 +2694,7 @@ fn handle_navigation_key(state: &mut State, key: &crossterm::event::KeyEvent) ->
             Screen::Traits => refresh_trait_preview_for_selection(state),
             Screen::Merges => refresh_merge_preview_for_selection(state),
             Screen::Trust => refresh_trust_preview_for_selection(state),
+            Screen::Tasks => refresh_task_preview_for_selection(state),
         }
         return true;
     }
@@ -2591,6 +2743,7 @@ fn list_pane_id(screen: Screen) -> PaneId {
         Screen::Traits => PANE_TRAITS_LIST,
         Screen::Merges => PANE_MERGES_LIST,
         Screen::Trust => PANE_TRUST_LIST,
+        Screen::Tasks => PANE_TASKS_LIST,
     }
 }
 
@@ -2602,6 +2755,7 @@ fn preview_pane_id(screen: Screen) -> PaneId {
         Screen::Traits => PANE_TRAITS_PREVIEW,
         Screen::Merges => PANE_MERGES_PREVIEW,
         Screen::Trust => PANE_TRUST_PREVIEW,
+        Screen::Tasks => PANE_TASKS_PREVIEW,
     }
 }
 
@@ -4317,6 +4471,7 @@ fn apply_action(
         Action::Session(action) => apply_session_action(pane, state, action, outcome),
         Action::Trait(action) => apply_trait_action(state, action, outcome),
         Action::Merge(action) => apply_merge_action(state, action, outcome),
+        Action::Task(action) => apply_task_action(state, action, outcome),
     }
 }
 
@@ -5135,6 +5290,465 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// TASKS (0063)
+// ---------------------------------------------------------------------------
+
+/// Pure `(derived status, joined session rows) -> TaskGroup` mapping,
+/// decided in exactly one place: any joined row currently live outranks
+/// everything (in-flight), any joined row currently pending outranks a
+/// blocked/ready/done board status (parked), and only once neither applies
+/// does the board's own derived status decide. A run keyed to a parent while
+/// doing a child's work joins the parent only — a child with no joined runs
+/// of its own is simply not in-flight, which is the accepted shape (0063's
+/// own Watch), not a bug here.
+fn task_group(derived: DerivedStatus, joined: &[&SessionRow]) -> TaskGroup {
+    let group_of =
+        |row: &&SessionRow| session_group(row.class, row.status.as_ref(), row.outcome.as_ref());
+    if joined.iter().any(|row| group_of(row) == SessionGroup::Live) {
+        return TaskGroup::InFlight;
+    }
+    if joined
+        .iter()
+        .any(|row| group_of(row) == SessionGroup::Pending)
+    {
+        return TaskGroup::Parked;
+    }
+    match derived {
+        DerivedStatus::Blocked => TaskGroup::Blocked,
+        DerivedStatus::Ready => TaskGroup::Ready,
+        DerivedStatus::Done | DerivedStatus::Cancelled => TaskGroup::Done,
+    }
+}
+
+/// `task_key -> session indices` for the CURRENT repository only (0063's own
+/// risk: with `v` ALL-repos scope on, a sibling repository's session can
+/// carry the same task key for a different board — a row is joined only when
+/// its own `repo_path` is `None` (the default, current-repository-only scope)
+/// or matches the current repository root exactly).
+fn task_session_join(state: &State) -> std::collections::HashMap<String, Vec<usize>> {
+    let repo_root = super::command_handlers::resolve_repo_root(None)
+        .ok()
+        .map(|path| path.to_string());
+    let mut map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (idx, row) in state.sessions.iter().enumerate() {
+        let Some(key) = &row.task_key else { continue };
+        let same_repo = row.repo_path.is_none() || row.repo_path == repo_root;
+        if !same_repo {
+            continue;
+        }
+        map.entry(key.clone()).or_default().push(idx);
+    }
+    map
+}
+
+/// Rebuilds [`State::tasks_visible`] from `state.tasks_board` and
+/// `state.sessions` — called after every sync, every reload (the join
+/// overlay refreshes on the existing 2s session-poll cadence against a fixed
+/// board snapshot), and every collapse toggle, never in the draw path. A
+/// `None` board cache clears the visible list rather than showing anything —
+/// the screen is empty until the first `s`.
+fn rebuild_visible_tasks(state: &mut State) {
+    let Some(summaries) = state
+        .tasks_board
+        .as_ref()
+        .map(|board| board.summaries.clone())
+    else {
+        state.tasks_visible = Vec::new();
+        state.list_tasks.set_len(0);
+        return;
+    };
+    let join = task_session_join(state);
+    let mut buckets: Vec<(TaskGroup, Vec<String>)> = TaskGroup::order()
+        .into_iter()
+        .map(|group| (group, Vec::new()))
+        .collect();
+    for summary in &summaries {
+        let joined_rows: Vec<&SessionRow> = join
+            .get(&summary.key)
+            .into_iter()
+            .flatten()
+            .filter_map(|idx| state.sessions.get(*idx))
+            .collect();
+        let group = task_group(summary.derived_status, &joined_rows);
+        if let Some((_, keys)) = buckets.iter_mut().find(|(g, _)| *g == group) {
+            keys.push(summary.key.clone());
+        }
+    }
+    let mut visible = Vec::new();
+    for (group, keys) in buckets {
+        let collapsed = state.collapsed_task_groups.contains(&group);
+        visible.push(TaskVisibleRow::GroupHeader {
+            group,
+            count: keys.len(),
+            collapsed,
+        });
+        if !collapsed {
+            visible.extend(keys.into_iter().map(TaskVisibleRow::Task));
+        }
+    }
+    state.tasks_visible = visible;
+    state.list_tasks.set_len(state.tasks_visible.len());
+}
+
+/// The ONLY accessor TASKS' action keys route through, mirroring
+/// [`selected_session`]: `None` when the cursor sits on a group header (no
+/// verb of its own) or the board cache is empty.
+fn selected_task(state: &State) -> Option<&TaskSummary> {
+    let board = state.tasks_board.as_ref()?;
+    match state.tasks_visible.get(state.list_tasks.selected())? {
+        TaskVisibleRow::Task(key) => board.summaries.iter().find(|s| &s.key == key),
+        TaskVisibleRow::GroupHeader { .. } => None,
+    }
+}
+
+/// Enter/space on a TASKS group header: flips its collapsed state and
+/// rebuilds the visible-row list, mirroring [`toggle_selected_group`].
+fn toggle_selected_task_group(state: &mut State) {
+    let Some(TaskVisibleRow::GroupHeader { group, .. }) =
+        state.tasks_visible.get(state.list_tasks.selected())
+    else {
+        return;
+    };
+    let group = *group;
+    if !state.collapsed_task_groups.remove(&group) {
+        state.collapsed_task_groups.insert(group);
+    }
+    rebuild_visible_tasks(state);
+}
+
+/// `s`: the board's ONLY read path (0063's owner call — never automatic on
+/// opening the screen). Synchronous — the board is a handful of small TOML
+/// files, well under a tick — and re-stamps `synced_at` even when the read
+/// found issues, so "last synced" always reflects the most recent attempt.
+fn sync_tasks_board(state: &mut State) {
+    let dir = match super::tasks::board_dir(None) {
+        Ok(dir) => dir,
+        Err(error) => {
+            state.message = Some(format!("sync failed: {error}"));
+            return;
+        }
+    };
+    let provider = FilesTaskBoard::open_read(dir);
+    let summaries = match provider.list(false) {
+        Ok(summaries) => summaries,
+        Err(error) => {
+            state.message = Some(format!("sync failed: {error}"));
+            return;
+        }
+    };
+    let mut resolved = BTreeMap::new();
+    for summary in &summaries {
+        if let Ok(Some(task)) = provider.get(&summary.key) {
+            resolved.insert(summary.key.clone(), task);
+        }
+    }
+    let sync_report = provider.sync().unwrap_or_default();
+    let clean = sync_report.dangling_edges.is_empty()
+        && sync_report.parse_failures.is_empty()
+        && sync_report.duplicate_keys.is_empty();
+    state.tasks_board = Some(TasksBoardSnapshot {
+        summaries,
+        resolved,
+        sync_report,
+        synced_at: std::time::Instant::now(),
+    });
+    rebuild_visible_tasks(state);
+    refresh_task_preview_for_selection(state);
+    state.message = Some(if clean {
+        "synced".to_string()
+    } else {
+        "synced — sync issues found, see task detail".to_string()
+    });
+}
+
+/// Rebuilds (or clears) [`State::task_preview`] for the currently selected
+/// TASKS row — called on selection change and after every sync, never in the
+/// draw path.
+fn refresh_task_preview_for_selection(state: &mut State) {
+    let Some(summary) = selected_task(state).cloned() else {
+        state.task_preview = None;
+        return;
+    };
+    let Some(board) = &state.tasks_board else {
+        state.task_preview = None;
+        return;
+    };
+    let join = task_session_join(state);
+    let joined_rows: Vec<&SessionRow> = join
+        .get(&summary.key)
+        .into_iter()
+        .flatten()
+        .filter_map(|idx| state.sessions.get(*idx))
+        .collect();
+    state.task_preview = Some(build_task_preview(&summary, board, &joined_rows));
+}
+
+/// The TASKS detail pane (0063): status, relations resolved with the other
+/// side's live status (both directions), open steps, then joined runs — a
+/// parked run reachable from its task row. Pure over already-in-hand facts;
+/// no IO here (the board read happened at `sync` time).
+fn build_task_preview(
+    summary: &TaskSummary,
+    board: &TasksBoardSnapshot,
+    joined: &[&SessionRow],
+) -> TaskPreview {
+    let mut lines = Vec::new();
+    let mut header = tui::Line::blank();
+    header.push(format!("{} ", summary.key), tui::Tone::Bold);
+    header.push(summary.title.clone(), tui::Tone::Default);
+    lines.push(header);
+
+    let mut status_line = tui::Line::blank();
+    status_line.push("status: ", tui::Tone::Muted);
+    status_line.push(
+        super::tasks::status_text(summary.derived_status),
+        tui::Tone::Default,
+    );
+    lines.push(status_line);
+    for edge in &board.sync_report.dangling_edges {
+        if edge.from == summary.key {
+            let mut line = tui::Line::blank();
+            line.push(
+                format!("(dangling {}: {})", edge.field, edge.to),
+                tui::Tone::Fail,
+            );
+            lines.push(line);
+        }
+    }
+    lines.push(tui::Line::blank());
+
+    let Some(resolved) = board.resolved.get(&summary.key) else {
+        let mut line = tui::Line::blank();
+        line.push(
+            "(relations unavailable — resolve failed at the last sync)",
+            tui::Tone::Fail,
+        );
+        lines.push(line);
+        return TaskPreview {
+            key: summary.key.clone(),
+            lines: lines.iter().map(tui_ratatui::render_line).collect(),
+        };
+    };
+
+    push_task_relation_lines(&mut lines, "blocked by", &resolved.relations.depends_on);
+    push_task_relation_lines(&mut lines, "blocks", &resolved.relations.blocks);
+    if let Some(parent) = &resolved.relations.parent {
+        push_task_relation_lines(&mut lines, "parent", std::slice::from_ref(parent));
+    }
+    push_task_relation_lines(&mut lines, "children", &resolved.relations.children);
+
+    lines.push(tui::Line::blank());
+    let mut steps_header = tui::Line::blank();
+    steps_header.push("open steps:", tui::Tone::Muted);
+    lines.push(steps_header);
+    if resolved.open_steps.is_empty() {
+        let mut line = tui::Line::blank();
+        line.push("  (none)", tui::Tone::Muted);
+        lines.push(line);
+    } else {
+        for step in &resolved.open_steps {
+            let mut line = tui::Line::blank();
+            line.push(format!("  {} ", step.id), tui::Tone::Default);
+            line.push(step.title.clone(), tui::Tone::Muted);
+            lines.push(line);
+        }
+    }
+
+    lines.push(tui::Line::blank());
+    let mut runs_header = tui::Line::blank();
+    runs_header.push("joined runs:", tui::Tone::Muted);
+    lines.push(runs_header);
+    if joined.is_empty() {
+        let mut line = tui::Line::blank();
+        line.push("  (none)", tui::Tone::Muted);
+        lines.push(line);
+    } else {
+        for row in joined {
+            let mut line = tui::Line::blank();
+            let label = row.title.as_deref().unwrap_or(&row.session_id);
+            line.push(format!("  {label} "), tui::Tone::Default);
+            line.push(format!("({})", row.state_text), tui::Tone::Muted);
+            lines.push(line);
+        }
+    }
+
+    TaskPreview {
+        key: summary.key.clone(),
+        lines: lines.iter().map(tui_ratatui::render_line).collect(),
+    }
+}
+
+/// One relation direction's lines, `label edge.key (edge.title) [status] glyph`
+/// per edge — a bare list of ids is useless; the status is the point (0063).
+fn push_task_relation_lines(
+    lines: &mut Vec<tui::Line>,
+    label: &str,
+    edges: &[ctx_traits_core::task::graph::ResolvedEdge],
+) {
+    if edges.is_empty() {
+        return;
+    }
+    for edge in edges {
+        let mut line = tui::Line::blank();
+        let glyph = if edge.status.is_closed() {
+            "\u{2713}"
+        } else {
+            "\u{2717}"
+        };
+        line.push(format!("{label}: "), tui::Tone::Muted);
+        line.push(
+            format!(
+                "{} ({}) [{}] {glyph}",
+                edge.key,
+                edge.title,
+                super::tasks::status_text(edge.status)
+            ),
+            tui::Tone::Default,
+        );
+        lines.push(line);
+    }
+}
+
+/// `S`: split — a text-input modal for the child's title.
+fn open_task_split_modal(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let parent = summary.key.clone();
+    state.modal_host.open(
+        Action::Task(TaskAction::Split {
+            parent: parent.clone(),
+        }),
+        Modal::text_input(format!("split {parent} — child title"), "", false),
+    );
+}
+
+/// `a`: archive — a text-input modal for the closing status (`done` or
+/// `cancelled`), defaulting to `done`.
+fn open_task_archive_modal(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let key = summary.key.clone();
+    state.modal_host.open(
+        Action::Task(TaskAction::Archive { key: key.clone() }),
+        Modal::text_input(format!("archive {key} — done/cancelled"), "done", false),
+    );
+}
+
+fn apply_task_action(
+    state: &mut State,
+    action: TaskAction,
+    outcome: ModalOutcome,
+) -> crate::Result<()> {
+    let ModalOutcome::Submitted(text) = outcome else {
+        return Ok(());
+    };
+    match action {
+        TaskAction::Split { parent } => {
+            let title = text.trim();
+            if title.is_empty() {
+                state.message = Some("split refused: a title is required".to_string());
+                return Ok(());
+            }
+            let dir = super::tasks::board_dir(None)?;
+            let provider = FilesTaskBoard::open_read_write(dir);
+            match provider.create(NewTask {
+                title: title.to_string(),
+                parent: Some(parent.clone()),
+                ..Default::default()
+            }) {
+                Ok(created) => {
+                    state.message = Some(format!("created {} under {parent}", created.key));
+                    sync_tasks_board(state);
+                }
+                Err(error) => {
+                    state.message = Some(format!("split refused: {error}"));
+                }
+            }
+            Ok(())
+        }
+        TaskAction::Archive { key } => {
+            let status = match text.trim().to_ascii_lowercase().as_str() {
+                "done" => TaskDocStatus::Done,
+                "cancelled" | "canceled" => TaskDocStatus::Cancelled,
+                _ => {
+                    state.message = Some("archive refused: type done or cancelled".to_string());
+                    return Ok(());
+                }
+            };
+            let dir = super::tasks::board_dir(None)?;
+            let provider = FilesTaskBoard::open_read_write(dir);
+            match provider.update(
+                &key,
+                TaskUpdate {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            ) {
+                Ok(_) => {
+                    state.message = Some(format!("archived {key}"));
+                    sync_tasks_board(state);
+                }
+                Err(error) => {
+                    state.message = Some(format!("archive refused: {error}"));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// `d`: dispatch. A blocked task refuses inline, with its reason in the
+/// footer message, never a silently disabled key (0063's own Done-when
+/// clause) — the same [`ctx_traits_io::dispatch_preflight::unmet_dependencies`]
+/// filter and [`ctx_traits_io::dispatch_preflight::dependency_refusal_message`]
+/// dispatch itself uses. A task the board has not resolved (never synced, or
+/// the per-key `get` failed at the last sync) refuses the same way, naming
+/// the reason, rather than silently opening the spawn modal against unknown
+/// dependencies.
+fn dispatch_selected_task(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let key = summary.key.clone();
+    let Some(board) = &state.tasks_board else {
+        state.message = Some("not synced — press s before dispatching".to_string());
+        return;
+    };
+    let Some(resolved) = board.resolved.get(&key) else {
+        state.message = Some(format!(
+            "{key} could not be resolved at the last sync — press s to retry"
+        ));
+        return;
+    };
+    if let Some(unmet) = ctx_traits_io::dispatch_preflight::unmet_dependencies(resolved) {
+        state.message =
+            Some(ctx_traits_io::dispatch_preflight::dependency_refusal_message(&key, &unmet));
+        return;
+    }
+    open_spawn_modal_for_task(state, &key);
+}
+
+/// The existing spawn modal (§5050), seeded with `--set`/`task=<key>` lines
+/// so submission flows through [`apply_spawn_request`]'s existing clap
+/// validation and detached spawn unchanged — the run's own dispatch preflight
+/// remains the real gate; this screen's check above is UX only, and
+/// `--override-dependencies` stays reachable by editing the modal text. The
+/// seed's first line is left blank for the trait id, which the spawn modal's
+/// own contract requires as the first non-comment line.
+fn open_spawn_modal_for_task(state: &mut State, key: &str) {
+    let seed = format!("\n--set\ntask={key}\n");
+    state.modal_host.open(
+        Action::Session(SessionAction::Spawn),
+        Modal::text_input("spawn run", seed, true),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -5266,7 +5880,37 @@ fn build_tree_for_screen(state: &State, width: u16) -> PaneTree {
             TRUST_RIGHT_MIN,
             width,
         ),
+        Screen::Tasks => build_two_pane_tree(
+            PANE_TASKS_LIST,
+            &tasks_list_title(state),
+            PANE_TASKS_PREVIEW,
+            tasks_preview_title(state),
+            TASKS_LEFT_MIN,
+            TASKS_RIGHT_MIN,
+            width,
+        ),
     }
+}
+
+/// TASKS' list pane title (0063): the sync freshness the "Done when" clause
+/// asks for — "shows when it last ran" — read here rather than duplicated at
+/// every call site.
+fn tasks_list_title(state: &State) -> String {
+    match &state.tasks_board {
+        Some(board) => format!(
+            "tasks (synced {} ago)",
+            format_elapsed_ago(board.synced_at.elapsed())
+        ),
+        None => "tasks (never synced — press s)".to_string(),
+    }
+}
+
+fn tasks_preview_title(state: &State) -> String {
+    state
+        .task_preview
+        .as_ref()
+        .map(|preview| format!("preview: {}", preview.key))
+        .unwrap_or_else(|| "preview".to_string())
 }
 
 /// P552 review `live-run-pane-contract-absent`: the ordinary (list-visible)
@@ -5500,6 +6144,17 @@ fn render_pane_content(frame: &mut ratatui::Frame<'_>, id: PaneId, inner: Rect, 
             state.trust_preview.as_ref().map(|p| p.lines.as_slice()),
             "(no trait selected)",
             PANE_TRUST_PREVIEW,
+            state,
+        );
+    } else if id == PANE_TASKS_LIST {
+        render_tasks_list_pane(frame, inner, state);
+    } else if id == PANE_TASKS_PREVIEW {
+        render_lines_preview_pane(
+            frame,
+            inner,
+            state.task_preview.as_ref().map(|p| p.lines.as_slice()),
+            "(no task selected)",
+            PANE_TASKS_PREVIEW,
             state,
         );
     }
@@ -5818,6 +6473,54 @@ fn trust_row_label(row: &TrustRow) -> String {
     label
 }
 
+fn render_tasks_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &State) {
+    let summaries: &[TaskSummary] = state
+        .tasks_board
+        .as_ref()
+        .map(|board| board.summaries.as_slice())
+        .unwrap_or_default();
+    tui_panes::render_list_pane(
+        frame,
+        inner,
+        &state.tasks_visible,
+        &state.list_tasks,
+        |row| task_visible_row_label(row, summaries),
+        |_| false,
+    );
+}
+
+fn task_visible_row_label(row: &TaskVisibleRow, summaries: &[TaskSummary]) -> String {
+    match row {
+        TaskVisibleRow::GroupHeader {
+            group,
+            count,
+            collapsed,
+        } => {
+            let marker = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
+            format!("{marker} {} ({count})", group.label())
+        }
+        TaskVisibleRow::Task(key) => {
+            let Some(summary) = summaries.iter().find(|s| &s.key == key) else {
+                return String::new();
+            };
+            task_row_label(summary)
+        }
+    }
+}
+
+/// The TASKS list row: `key · derived status · title`, padded to
+/// [`LIST_LABEL_WIDTH`] like every other list in this dashboard.
+fn task_row_label(summary: &TaskSummary) -> String {
+    let label = format!(
+        "{} {} {}",
+        list_field(&summary.key, 8),
+        list_field(super::tasks::status_text(summary.derived_status), 10),
+        list_field(&summary.title, 56),
+    );
+    debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+    label
+}
+
 fn footer_line(state: &State) -> Paragraph<'static> {
     if state.story_view.is_some() {
         return tui_kit::keymap_footer(
@@ -5830,7 +6533,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
     let hint = match state.screen {
         Screen::Sessions => {
             format!(
-                "{navigation}  Enter attach/expand  space expand  a answer  s resume  S story  x stop  d delete  n spawn  v {}  r reload  Tab/1-4 screens  q quit{scope_suffix}",
+                "{navigation}  Enter attach/expand  space expand  a answer  s resume  S story  x stop  d delete  n spawn  v {}  r reload  Tab/1-5 screens  q quit{scope_suffix}",
                 if state.all_repos {
                     "this repo only"
                 } else {
@@ -5840,11 +6543,11 @@ fn footer_line(state: &State) -> Paragraph<'static> {
         }
         Screen::Traits => {
             format!(
-                "{navigation}  a approve  b block  e edit source  x explain  r reload  Tab/1-4 screens  q quit"
+                "{navigation}  a approve  b block  e edit source  x explain  r reload  Tab/1-5 screens  q quit"
             )
         }
         Screen::Merges => format!(
-            "{navigation}  m merge  d deep-merge  p print path  x drop  v {}  r reload  Tab/1-4 screens  q quit{scope_suffix}",
+            "{navigation}  m merge  d deep-merge  p print path  x drop  v {}  r reload  Tab/1-5 screens  q quit{scope_suffix}",
             if state.all_repos {
                 "this repo only"
             } else {
@@ -5852,7 +6555,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
             }
         ),
         Screen::Trust => format!(
-            "{navigation}  a approve  b block  space mark  A approve family/marked  o {} {} orphaned  r reload  Tab/1-4 screens  q quit  [{} marked]",
+            "{navigation}  a approve  b block  space mark  A approve family/marked  o {} {} orphaned  r reload  Tab/1-5 screens  q quit  [{} marked]",
             if state.show_trust_orphans {
                 "hide"
             } else {
@@ -5864,6 +6567,9 @@ fn footer_line(state: &State) -> Paragraph<'static> {
                 .filter(|row| row.class == trust_story::TrustClass::Orphaned)
                 .count(),
             state.trust_marks.len(),
+        ),
+        Screen::Tasks => format!(
+            "{navigation}  space expand  s sync  S split  a archive  d dispatch  r reload  Tab/1-5 screens  q quit"
         ),
     };
     let hint = format!("{hint}  [{}]", state.current_list().position_text());
@@ -5931,6 +6637,7 @@ mod tests {
             status,
             outcome: None,
             title: None,
+            task_key: None,
         }
     }
 
@@ -8708,6 +9415,196 @@ mod tests {
             updated_at: None,
             reason: None,
         }
+    }
+
+    // -----------------------------------------------------------------
+    // TASKS (0063)
+    // -----------------------------------------------------------------
+
+    fn task_summary(key: &str, derived: DerivedStatus) -> TaskSummary {
+        TaskSummary {
+            key: key.to_string(),
+            title: format!("title {key}"),
+            stored_status: None,
+            derived_status: derived,
+            archived: false,
+        }
+    }
+
+    fn resolved_task(key: &str, derived: DerivedStatus) -> ResolvedTask {
+        ResolvedTask {
+            document: ctx_traits_core::task::TaskDocument {
+                schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+                key: key.to_string(),
+                title: format!("title {key}"),
+                status: None,
+                raised: None,
+                content: String::new(),
+                relations: ctx_traits_core::task::Relations::default(),
+                steps: Vec::new(),
+            },
+            derived_status: derived,
+            relations: ctx_traits_core::task::graph::ResolvedRelations::default(),
+            archived: false,
+            open_steps: Vec::new(),
+        }
+    }
+
+    fn board_with(
+        summaries: Vec<TaskSummary>,
+        resolved: BTreeMap<String, ResolvedTask>,
+    ) -> TasksBoardSnapshot {
+        TasksBoardSnapshot {
+            summaries,
+            resolved,
+            sync_report: ctx_traits_core::task::provider::SyncReport::default(),
+            synced_at: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn task_group_live_run_beats_a_blocked_derived_status() {
+        let live = row_with_id("s1", SessionClass::Live);
+        assert_eq!(
+            task_group(DerivedStatus::Blocked, &[&live]),
+            TaskGroup::InFlight
+        );
+    }
+
+    #[test]
+    fn task_group_parked_run_beats_a_ready_derived_status() {
+        use ctx_traits_core::procedure::session::Status;
+        let mut pending = row_with_id("s1", SessionClass::Resumable);
+        pending.status = Some(Status::AwaitingInput);
+        assert_eq!(
+            task_group(DerivedStatus::Ready, &[&pending]),
+            TaskGroup::Parked
+        );
+    }
+
+    #[test]
+    fn task_group_done_with_a_live_joined_run_is_still_in_flight() {
+        let live = row_with_id("s1", SessionClass::Live);
+        assert_eq!(
+            task_group(DerivedStatus::Done, &[&live]),
+            TaskGroup::InFlight
+        );
+    }
+
+    #[test]
+    fn task_group_falls_back_to_derived_status_with_no_joined_runs() {
+        assert_eq!(task_group(DerivedStatus::Blocked, &[]), TaskGroup::Blocked);
+        assert_eq!(task_group(DerivedStatus::Ready, &[]), TaskGroup::Ready);
+        assert_eq!(task_group(DerivedStatus::Done, &[]), TaskGroup::Done);
+        assert_eq!(task_group(DerivedStatus::Cancelled, &[]), TaskGroup::Done);
+    }
+
+    #[test]
+    fn task_session_join_is_many_to_many_and_a_parent_keyed_run_leaves_the_child_idle() {
+        let mut state = State::new_without_worker();
+        let mut run_a = row_with_id("run-a", SessionClass::Live);
+        run_a.task_key = Some("0010".to_string());
+        let mut run_b = row_with_id("run-b", SessionClass::Live);
+        run_b.task_key = Some("0010".to_string());
+        let mut run_c = row_with_id("run-c", SessionClass::Live);
+        // Keyed to the parent while doing the child's work (0062 permits
+        // this) — the child must have no joined runs of its own.
+        run_c.task_key = Some("0010".to_string());
+        state.sessions = vec![run_a, run_b, run_c];
+        let join = task_session_join(&state);
+        assert_eq!(join.get("0010").map(Vec::len), Some(3));
+        assert!(!join.contains_key("0010.1"));
+    }
+
+    #[test]
+    fn rebuild_visible_tasks_emits_five_headers_and_collapse_toggles_persist_across_a_resync() {
+        let mut state = State::new_without_worker();
+        state.tasks_board = Some(board_with(
+            vec![
+                task_summary("0001", DerivedStatus::Ready),
+                task_summary("0002", DerivedStatus::Blocked),
+            ],
+            BTreeMap::new(),
+        ));
+        rebuild_visible_tasks(&mut state);
+        // Five groups always render a header, including empty ones; nothing
+        // starts collapsed.
+        assert_eq!(state.tasks_visible.len(), 5 + 2);
+        for group in TaskGroup::order() {
+            let index = state
+                .tasks_visible
+                .iter()
+                .position(
+                    |row| matches!(row, TaskVisibleRow::GroupHeader { group: candidate, .. } if *candidate == group),
+                )
+                .expect("group header");
+            state.list_tasks.set_selected(index);
+            toggle_selected_task_group(&mut state);
+        }
+        assert_eq!(state.collapsed_task_groups.len(), 5);
+        assert_eq!(state.tasks_visible.len(), 5);
+
+        // A resync (new summaries, same collapse set) keeps every group
+        // collapsed rather than resetting it.
+        state.tasks_board = Some(board_with(
+            vec![
+                task_summary("0001", DerivedStatus::Ready),
+                task_summary("0002", DerivedStatus::Blocked),
+                task_summary("0003", DerivedStatus::Done),
+            ],
+            BTreeMap::new(),
+        ));
+        rebuild_visible_tasks(&mut state);
+        assert_eq!(state.tasks_visible.len(), 5);
+        assert!(state.tasks_visible.iter().all(|row| matches!(
+            row,
+            TaskVisibleRow::GroupHeader {
+                collapsed: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn dispatch_selected_task_refusal_names_the_reason_and_never_opens_the_spawn_modal() {
+        let mut state = State::new_without_worker();
+        let mut dependent = resolved_task("0002", DerivedStatus::Blocked);
+        dependent.relations.depends_on = vec![ctx_traits_core::task::graph::ResolvedEdge {
+            key: "0001".to_string(),
+            title: "title 0001".to_string(),
+            status: DerivedStatus::Ready,
+        }];
+        let mut resolved = BTreeMap::new();
+        resolved.insert("0002".to_string(), dependent);
+        state.tasks_board = Some(board_with(
+            vec![task_summary("0002", DerivedStatus::Blocked)],
+            resolved,
+        ));
+        rebuild_visible_tasks(&mut state);
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0002"))
+            .expect("task row");
+        state.list_tasks.set_selected(index);
+
+        dispatch_selected_task(&mut state);
+
+        assert!(!state.modal_host.is_open());
+        let message = state.message.expect("refusal message set");
+        assert!(message.contains("0002 depends on 0001 (ready)"));
+        assert!(message.contains("--override-dependencies"));
+    }
+
+    #[test]
+    fn dispatch_selected_task_refuses_before_any_sync_has_run() {
+        let mut state = State::new_without_worker();
+        state.tasks_board = None;
+        // With no board cache there is no row to select; simulate the
+        // "cursor sits on nothing yet" state directly.
+        dispatch_selected_task(&mut state);
+        assert!(!state.modal_host.is_open());
+        assert_eq!(state.message.as_deref(), Some("no task selected"));
     }
 }
 #[test]

@@ -15,14 +15,14 @@ use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone
 
 const DEFAULT_BOARD_DIR: &str = ".internal/tasks";
 
-fn board_dir(board: Option<&str>) -> crate::Result<Utf8PathBuf> {
+pub(crate) fn board_dir(board: Option<&str>) -> crate::Result<Utf8PathBuf> {
     match board {
         Some(path) => Ok(Utf8PathBuf::from(path)),
         None => Ok(resolve_repo_root(None)?.join(DEFAULT_BOARD_DIR)),
     }
 }
 
-fn status_text(derived: DerivedStatus) -> &'static str {
+pub(crate) fn status_text(derived: DerivedStatus) -> &'static str {
     match derived {
         DerivedStatus::Ready => "ready",
         DerivedStatus::Blocked => "blocked",

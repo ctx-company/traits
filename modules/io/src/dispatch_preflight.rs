@@ -208,14 +208,15 @@ pub fn status_word(status: DerivedStatus) -> &'static str {
     }
 }
 
-/// Every unmet `depends-on` edge on `task`'s resolved document, or `None`
-/// when every declared dependency is closed (or none are declared). A
-/// dangling `depends-on` edge (the dependency key resolves to nothing) is
-/// reported by `sync`, not here — it has no status to name, so it is never
-/// counted as unmet.
-pub fn dependency_marker(task: &DispatchTask) -> Option<Vec<UnmetDependency>> {
-    let unmet: Vec<UnmetDependency> = task
-        .resolved
+/// Every unmet `depends-on` edge on `resolved`'s relations, or `None` when
+/// every declared dependency is closed (or none are declared). A dangling
+/// `depends-on` edge (the dependency key resolves to nothing) is reported by
+/// `sync`, not here — it has no status to name, so it is never counted as
+/// unmet. Shared by dispatch preflight ([`dependency_marker`]) and the
+/// dashboard's TASKS screen refusal (0063), so both name the same edges the
+/// same way.
+pub fn unmet_dependencies(resolved: &ResolvedTask) -> Option<Vec<UnmetDependency>> {
+    let unmet: Vec<UnmetDependency> = resolved
         .relations
         .depends_on
         .iter()
@@ -227,6 +228,12 @@ pub fn dependency_marker(task: &DispatchTask) -> Option<Vec<UnmetDependency>> {
         })
         .collect();
     if unmet.is_empty() { None } else { Some(unmet) }
+}
+
+/// Every unmet `depends-on` edge on `task`'s resolved document — see
+/// [`unmet_dependencies`], which does the actual filtering.
+pub fn dependency_marker(task: &DispatchTask) -> Option<Vec<UnmetDependency>> {
+    unmet_dependencies(&task.resolved)
 }
 
 /// Re-read `task`'s document from its board directory's CURRENT bytes —
@@ -702,6 +709,29 @@ mod tests {
         let message = dependency_refusal_message(&task.resolved.document.key, &unmet);
         assert!(message.contains("0002 depends on 0001 (ready)"));
         assert!(message.contains("--override-dependencies"));
+    }
+
+    #[test]
+    fn unmet_dependencies_matches_dependency_marker_on_the_same_fixture() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0001-dep.toml",
+            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-dependent.toml",
+            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
+            .unwrap()
+            .expect("resolves");
+        assert_eq!(unmet_dependencies(&task.resolved), dependency_marker(&task));
     }
 
     #[test]
