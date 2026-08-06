@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0082"
 title = "The journey pane follows the current step, showing as much of its ladder as fits"
 status = "ready"
@@ -10,6 +10,8 @@ When a run moves from one step to the next, the step it moved to should be
 visible without scrolling. Today it can sit below the fold, and the pane keeps
 showing where the run used to be.
 
+"""
+scope = """
 ## Decisions
 
 - **The target is the deepest pending step, not its container.** Inside a
@@ -42,6 +44,8 @@ existing `Tail` and `ActiveRow` alignments; the position-path walk that finds
 the deepest pending step and its enclosing containers; the journey arm of the
 follow wiring.
 
+"""
+validation = """
 ## Watch
 
 - The ladder is a property of the POSITION PATH, not of the rendered text.

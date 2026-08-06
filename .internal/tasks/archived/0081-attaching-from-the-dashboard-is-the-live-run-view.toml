@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0081"
 title = "Attaching from the dashboard gives you the live run view, not a preview of it"
 status = "done"
@@ -23,6 +23,8 @@ The reverse handoff already exists and is the shape to mirror: `d` in the live
 run view hands presentation to the dashboard through `DashboardHandoff`
 (`run_view.rs`). Enter is the same journey in the other direction.
 
+"""
+scope = """
 ## Decisions
 
 - **Attach hands over to `RunPanel`.** Not a preview that approximates it, and
@@ -45,6 +47,8 @@ renders the attached preview; `RunPanel` construction from an
 already-running session the attaching process does not drive; the return path
 to the dashboard.
 
+"""
+validation = """
 ## Watch
 
 - **This is the hard part: the attaching process is an OBSERVER.** In a

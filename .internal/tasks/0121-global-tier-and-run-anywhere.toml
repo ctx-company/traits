@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0121"
 title = "Trait distribution: global tier + run-anywhere"
 status = "ready"
@@ -23,6 +23,8 @@ refuse outside a git repo with a clear error. Package-granular trust:
 `trust approve <package>` reviews once and approves ALL current variant digests of
 that package (per-digest records underneath, all revert on change).
 
+"""
+validation = """
 ## Done when
 
 `cd /tmp && ctx traits run <installed-global-trait>` works end to end on a machine

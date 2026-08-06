@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0037"
 title = "`config.toml` (committed, shared) and `runtime.toml` (local, mine)"
 status = "done"
@@ -65,6 +65,8 @@ replaces, an omitted field inherits, `field = ""` explicitly unsets. A local
 `runtime.toml` itself is never scaffolded; it is copied from the example by
 whoever needs it, and is gitignored.
 
+"""
+validation = """
 ## Watch
 
 - **Merge once, at resolution** (0035). Five layers is more chances to get this

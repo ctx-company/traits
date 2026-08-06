@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0137"
 title = "Finished-step summaries in the narration sidebar"
 status = "done"
@@ -22,6 +22,8 @@ distinct entry kind — step summaries render with the step label emphasized (Bo
 still two-tone) as chapter marks between thinking ticks. An absent/disabled
 narrator produces no summary entry, no fallback text.
 
+"""
+validation = """
 ## Watch
 
 - COST is the design constraint: exactly one extra narrator call per finished

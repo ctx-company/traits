@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0125"
 title = "Conditional system v2: presence-aware guards, designed properly"
 status = "ready"
@@ -28,6 +28,8 @@ check-polymorphism P458 gave branch `check:` — a `sequence.check` gate step
 directly as the loop guard, killing the boolean-slot + `condition.equals` two-step;
 same desugaring, no extra schema surface.
 
+"""
+validation = """
 ## Done when
 
 The design doc enumerates the vocabulary with absent/present truth semantics for

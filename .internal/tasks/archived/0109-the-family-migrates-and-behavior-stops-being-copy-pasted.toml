@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0109"
 title = "the family migrates, and behavior stops being copy-pasted"
 status = "done"
@@ -11,6 +11,8 @@ Every implement variant moves to the functional layer, and the hand-copied `beha
 fragments. This is where the composition half of 0102 meets its first real consumer — the same
 role 0108 plays for the procedure half.
 
+"""
+scope = """
 ## Decisions
 
 - **Behavior-preserving or it is not done.** Same steps, same gates, same verdicts; every
@@ -30,6 +32,8 @@ role 0108 plays for the procedure half.
 All variant sources and family.ts; the fragments module; the relock; a written comparison of
 before/after authoring surface (line counts and what each variant now states versus inherits).
 
+"""
+validation = """
 ## Watch
 
 - Expressiveness gaps recorded against 0102, exactly as in 0108 — the family is bigger than

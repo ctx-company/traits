@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0039"
 title = "The landing must be visible: compact the journey once it is done"
 status = "done"
@@ -50,6 +50,8 @@ plain noun in the house style. `merge` is the honest literal alternative and is
 better if the metaphor is not worth keeping. Owner's call; the string appears at
 `run_view.rs:1512` and in the P549 tests around `"merge:landing"` (`:3069`).
 
+"""
+validation = """
 ## Watch
 
 - **Do not compact into a summary that hides a failure.** A step that failed, was

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0012"
 title = "Per-trait port defaults in config, so a path stops being hard-coded in trait source"
 status = "done"
@@ -43,6 +43,8 @@ The sidecar already exists and needs no new file: `.ctx/traits/<trait>/config.to
 
 Note for `tasks/0010`: a port default is unambiguously a DEFAULT in that task's classification — a nearer layer replaces it freely, and nothing here is a requirement a consumer must not weaken. It is the clean worked example for that side of the split.
 
+"""
+validation = """
 ## Watch
 
 - **A defaulted port is still evidence.** Whatever value is used must land in the ledger as the port's accepted value with its source (default / config / `--set`), or a run's receipt stops explaining what it actually read. This is the difference between a default and a hidden assumption.

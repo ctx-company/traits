@@ -1,10 +1,12 @@
-//! Task document schema v0.1: the canonical TOML shape for board tasks.
+//! Task document schema v0.2: the canonical TOML shape for board tasks.
 //!
-//! Per `.internal/tasks/0059-canonical-toml-task-format.md`: identity,
-//! status, and relations are typed fields; `content` and each step's
-//! `content` are opaque prose that nothing in this module parses. Steps are
-//! nested inside their owning document; a subtask is a separate document
-//! linked by `relations.parent`.
+//! Per `.internal/tasks/0059-canonical-toml-task-format.md` and
+//! `0063.1-typed-task-fields-content-scope-validation.toml`: identity,
+//! status, and relations are typed fields; `content`, `scope`,
+//! `validation`, and each step's `content` are opaque prose that nothing in
+//! this module parses beyond splitting it at import/migration time. Steps
+//! are nested inside their owning document; a subtask is a separate
+//! document linked by `relations.parent`.
 
 pub mod graph;
 pub mod markdown;
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// Schema version this module reads and writes. Bumped only when the shape
 /// changes; a document declaring any other value is rejected rather than
 /// guessed at.
-pub const SCHEMA_VERSION: &str = "0.1";
+pub const SCHEMA_VERSION: &str = "0.2";
 
 /// The closed set of stored statuses. Everything else (`blocked`,
 /// `in-flight`, a parent's status derived from its children) is derived,
@@ -58,10 +60,10 @@ impl Relations {
     }
 }
 
-/// A canonical task document: the typed envelope plus opaque `content`.
-///
-/// `status` is `Option` because the two split-index parents (0010, 0051)
-/// store none — their status is derived from children in 0060.
+/// A canonical task document: the typed envelope plus three opaque prose
+/// fields (0063.1). `status` is `Option` because the two split-index
+/// parents (0010, 0051) store none — their status is derived from children
+/// in 0060.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TaskDocument {
@@ -73,8 +75,24 @@ pub struct TaskDocument {
     pub status: Option<TaskStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raised: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The narrative: what this task is and why it exists.
     #[serde(default)]
     pub content: String,
+    /// Absorbs the house convention's `## Decisions` and `## Scope`
+    /// sections: the rulings, what is in and out.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
+    /// Absorbs the house convention's `## Watch` and `## Done when`
+    /// sections: what to watch while doing the work and how to know it is
+    /// done.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub validation: String,
     #[serde(default, skip_serializing_if = "Relations::is_empty")]
     pub relations: Relations,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -88,6 +106,17 @@ impl TaskDocument {
     /// agree on what "open" means.
     pub fn open_steps(&self) -> Vec<&Step> {
         self.steps.iter().filter(|step| !step.done).collect()
+    }
+
+    /// The three prose fields, labeled, in the one canonical rendering
+    /// order (0063.1) — the single place this order is defined, shared by
+    /// `ctx tasks show` and (0063.2) the dashboard's detail pane.
+    pub fn prose_sections(&self) -> [(&'static str, &str); 3] {
+        [
+            ("content", &self.content),
+            ("scope", &self.scope),
+            ("validation", &self.validation),
+        ]
     }
 }
 
@@ -141,7 +170,12 @@ mod tests {
             title: "Root-cause the park-report ledger-contract failure".to_string(),
             status: Some(TaskStatus::Ready),
             raised: Some("2026-08-01".to_string()),
+            closed: None,
+            wall: None,
+            origin: None,
             content: "The contract prose — everything a run reads verbatim today.\n".to_string(),
+            scope: String::new(),
+            validation: String::new(),
             relations: Relations {
                 depends_on: vec!["0049".to_string()],
                 parent: Some("0010".to_string()),
@@ -170,6 +204,61 @@ mod tests {
         let text = serialize(&document).expect("serialise");
         let parsed = parse(&text).expect("parse");
         assert_eq!(parsed.content, document.content);
+    }
+
+    #[test]
+    fn round_trips_wall_origin_closed_scope_and_validation() {
+        let mut document = sample();
+        document.wall = Some("wall-42".to_string());
+        document.origin = Some("run-abc".to_string());
+        document.closed = Some("2026-08-06".to_string());
+        document.scope = "## Decisions\n\n- a ruling\n".to_string();
+        document.validation = "## Done when\n\nit is done\n".to_string();
+        let text = serialize(&document).expect("serialise");
+        let parsed = parse(&text).expect("parse");
+        assert_eq!(parsed, document);
+    }
+
+    #[test]
+    fn optional_new_fields_round_trip_as_absent() {
+        let document = sample();
+        let text = serialize(&document).expect("serialise");
+        assert!(!text.contains("wall"));
+        assert!(!text.contains("origin"));
+        assert!(!text.contains("closed"));
+        assert!(!text.contains("scope"));
+        assert!(!text.contains("validation"));
+        let parsed = parse(&text).expect("parse");
+        assert_eq!(parsed.wall, None);
+        assert_eq!(parsed.origin, None);
+        assert_eq!(parsed.closed, None);
+        assert_eq!(parsed.scope, "");
+        assert_eq!(parsed.validation, "");
+    }
+
+    #[test]
+    fn rejects_schema_0_1_naming_both_versions() {
+        let text = "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"t\"\n";
+        let error = parse(text).expect_err("0.1 documents are rejected under schema 0.2");
+        let message = error.to_string();
+        assert!(message.contains("0.1"), "message was {message:?}");
+        assert!(message.contains("0.2"), "message was {message:?}");
+    }
+
+    #[test]
+    fn prose_sections_are_labeled_in_canonical_order() {
+        let mut document = sample();
+        document.scope = "the scope".to_string();
+        document.validation = "the validation".to_string();
+        let sections = document.prose_sections();
+        assert_eq!(
+            sections,
+            [
+                ("content", document.content.as_str()),
+                ("scope", "the scope"),
+                ("validation", "the validation"),
+            ]
+        );
     }
 
     #[test]

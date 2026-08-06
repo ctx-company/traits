@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0112"
 title = "Fuzz the audit detectors and the canonical parser"
 status = "ready"
@@ -21,6 +21,8 @@ Property targets: detectors never panic and are total over arbitrary UTF-8/bytes
 `decode_trait` never panics on arbitrary TOML; `decode → canonical_json → decode`
 round-trips stably; every seeded injection class is still caught.
 
+"""
+validation = """
 ## Watch
 
 - Detectors/decode are pure, so fuzzing needs no IO; keep targets deterministic and

@@ -544,13 +544,13 @@ fn setup_fixture(
         "/.ctx/runs/*.json\n/.ctx/traits/worktrees/\n/.ctx/debug/\n",
     );
     for (task, wall) in phases {
-        let mut content = "Why: fixture.\nApproach: fixture.\n".to_string();
-        if let Some(wall) = wall {
-            content.push_str(&format!("\n**Wall:** {wall}\n"));
-        }
-        content.push_str("\n## Done when\n\nFixture gates pass.\n");
+        let content = "Why: fixture.\nApproach: fixture.\n".to_string();
+        let validation = "## Done when\n\nFixture gates pass.\n".to_string();
+        let wall_line = wall
+            .map(|wall| format!("wall = \"{wall}\"\n"))
+            .unwrap_or_default();
         let body = format!(
-            "schema-version = \"0.1\"\nkey = \"{task}\"\ntitle = \"Park-honesty fixture task\"\nstatus = \"ready\"\n\ncontent = \"\"\"\n{content}\"\"\"\n"
+            "schema-version = \"0.2\"\nkey = \"{task}\"\ntitle = \"Park-honesty fixture task\"\nstatus = \"ready\"\n{wall_line}\ncontent = \"\"\"\n{content}\"\"\"\nvalidation = \"\"\"\n{validation}\"\"\"\n"
         );
         write_file(&repo.join(format!(".internal/tasks/{task}.toml")), &body);
     }

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0042"
 title = "Release readiness: what a clean repo must be able to do"
 status = "done"
@@ -131,6 +131,8 @@ Seven built-ins ship inside the binary (`critique-trait`, `explain-trait`,
   only reports). Machine-local and empty in a clean repo, so the walkthrough
   never sees it; a `trust prune` verb is post-v1 work.
 
+"""
+validation = """
 ## Watch
 
 - **A and B are the only true blockers.** C and D are decisions that must be

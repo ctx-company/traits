@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0044"
 title = "Live view pane polish: identify the run, name the pane for what it holds, kill the double label"
 status = "done"
@@ -46,6 +46,8 @@ name now. Check the same function for a sibling "landing"/"arrival" muted
 label with the same duplication (the P549 merge rows lived in the same flat
 list).
 
+"""
+validation = """
 ## Watch
 
 - The narrow-terminal fallback and the dashboard preview render from the same

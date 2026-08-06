@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0106"
 title = "functional procedures inside object shells"
 status = "done"
@@ -11,6 +11,8 @@ today's `variant({ procedure: … })` shells before full-file traits exist (0107
 genuinely novel machinery in the overhaul — everything after it is derivation and migration —
 so it gets its own task and its own proof.
 
+"""
+scope = """
 ## Decisions
 
 - **Build context.** A synchronous stack: a registrar called outside a build throws; an async
@@ -34,6 +36,8 @@ The functional entry module; a `procedure`-from-function adapter so existing obj
 variant shells can host a functional body; error messages that name the offending title and
 rule; docs with the settled snippets from 0102.
 
+"""
+validation = """
 ## Watch
 
 - The functional layer may not reach around the object layer — every emission goes through

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0108"
 title = "pilot: implement:quick compiles byte-identical"
 status = "done"
@@ -10,6 +10,8 @@ The honest test, by 0097's rule: an interface with no consumer is a guess. Port 
 to the functional layer using carried-over features only — no output templates, no optional
 outputs, nothing 0105 added — and prove the sugar is sugar.
 
+"""
+scope = """
 ## Decisions
 
 - **Byte-identical or it is not done.** The ported variant's generated canonical must equal the
@@ -25,6 +27,8 @@ outputs, nothing 0105 added — and prove the sugar is sugar.
 The ported source, committed alongside (not replacing) the object-layer original; the diff of
 the two canonicals; findings, if any, amended into 0102.
 
+"""
+validation = """
 ## Watch
 
 - No half-migrated states on main: the object-layer quick stays authoritative until 0109

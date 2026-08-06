@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0083"
 title = "The run changes shape when its journey ends"
 status = "done"
@@ -23,6 +23,8 @@ rather than accumulate one long scroll, and that reads better across the
 different harnesses than the continuous journey does. P549's choice is not
 wrong so much as superseded — do not treat it as a constraint to preserve.
 
+"""
+scope = """
 ## Decisions
 
 - **`End` scrolls to the true end, landing rows included.** Page keys are
@@ -78,6 +80,8 @@ wrong so much as superseded — do not treat it as a constraint to preserve.
 arm; the page-key end/start resolution; and the `landing` wording in
 `run_view` and `merge_story`.
 
+"""
+validation = """
 ## Watch
 
 - **The empty-pane case is answered by the trigger, not by a placeholder.**

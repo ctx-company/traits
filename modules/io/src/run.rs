@@ -2342,12 +2342,12 @@ mod startup_observer_tests {
         let (trait_path, _process_wide) = dispatch_task_fixture(&root, |tasks| {
             std::fs::write(
                 tasks.join("0001-dep.toml"),
-                "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+                "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
             )
             .unwrap();
             std::fs::write(
                 tasks.join("0002-dependent.toml"),
-                "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+                "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
             )
             .unwrap();
         });
@@ -2444,7 +2444,7 @@ mod startup_observer_tests {
         let (trait_path, _process_wide) = dispatch_task_fixture(&root, |tasks| {
             std::fs::write(
                 tasks.join("0050-example.toml"),
-                "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n",
+                "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n",
             )
             .unwrap();
         });
@@ -2482,7 +2482,12 @@ mod startup_observer_tests {
             title: "Example".to_string(),
             status: Some(ctx_traits_core::task::TaskStatus::Ready),
             raised: None,
+            closed: None,
+            wall: None,
+            origin: None,
             content: String::new(),
+            scope: String::new(),
+            validation: String::new(),
             relations: ctx_traits_core::task::Relations::default(),
             steps: Vec::new(),
         };
@@ -2501,7 +2506,7 @@ mod startup_observer_tests {
         let (trait_path, _process_wide) = dispatch_task_fixture(&root, |board| {
             std::fs::write(
                 board.join("0050-example.toml"),
-                "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Committed\"\nstatus = \"ready\"\n",
+                "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Committed\"\nstatus = \"ready\"\n",
             )
             .unwrap();
         });
@@ -2515,7 +2520,12 @@ mod startup_observer_tests {
             title: "Edited, not yet committed".to_string(),
             status: Some(ctx_traits_core::task::TaskStatus::Ready),
             raised: None,
+            closed: None,
+            wall: None,
+            origin: None,
             content: String::new(),
+            scope: String::new(),
+            validation: String::new(),
             relations: ctx_traits_core::task::Relations::default(),
             steps: Vec::new(),
         };

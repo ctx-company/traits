@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0111"
 title = "Comparison arm + secondary benchmarks: the gap is the result"
 status = "ready"
@@ -21,6 +21,8 @@ native==wasm numbers pre-empt the "is it fast / is the wasm real" follow-ups.
 - WASM bundle size + native-vs-wasm digest parity via `modules/wasm-core/src/abi.rs`
   (`audit_json`, `normalize_json`).
 
+"""
+validation = """
 ## Watch
 
 - Keep perf "cheap" (throughput, not a micro-benchmark harness).

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0004"
 title = "Sessions grouped by state, with labels that stop repeating themselves"
 status = "done"
@@ -29,6 +29,8 @@ completed
 
 **Label rule:** print the state; append `· <detail>` only when the detail differs from the state. Never `in-progress in-progress`. The separator is the bullet the house style already uses.
 
+"""
+validation = """
 ## Watch
 
 - The four names are the display vocabulary, not new state. Map from the existing `SessionClass`/status rather than inventing a parallel taxonomy — a session that is `awaiting-agent-output` is live, `blocked`/`rejected`/`harness-failed` are failed, and so on. Write that mapping down in one place; two places will drift.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0063.4"
 title = "Dispatch from the board starts a bound run, end to end"
 status = "ready"
@@ -26,6 +26,8 @@ From there:
 Diagnose first: reproduce one live board dispatch before fixing, in case a third seam
 (the two-line `--set` form, the join keying) is also broken in practice.
 
+"""
+scope = """
 ## Decisions
 
 - **The modal opens runnable.** Dispatch derives the trait id instead of demanding it from
@@ -42,6 +44,8 @@ Diagnose first: reproduce one live board dispatch before fixing, in case a third
 - **The observable definition of "works"**: after `d` + submit, the run appears under the
   task's in-flight group on the next join tick, and the run's ledger carries the task key.
 
+"""
+validation = """
 ## Watch
 
 - The dependency-refusal path and its tests must survive untouched — this task adds the

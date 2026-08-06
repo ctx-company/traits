@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0029"
 title = "Gate our own releases on a migration existing for the new version"
 status = "done"
@@ -27,6 +27,8 @@ release note. It is a strong showcase — we ship a tool that says behavior shou
 be provable and reproducible, and our own version bumps are gated on exactly
 that.
 
+"""
+validation = """
 ## Watch
 
 - The gate must key on the SCHEMA version, not the crate version. They move

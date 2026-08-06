@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0063.3"
 title = "Lists scroll only at the edge, and the shared kit enforces it"
 status = "ready"
@@ -27,6 +27,8 @@ After the offset is zeroed, the draw pass's `visible_range(rows)` re-clamps and 
 selection on the LAST visible row whenever `selected >= rows` — the cursor is glued to the
 bottom edge, so every up/down (and on TASKS, every 2s tick) shifts the window.
 
+"""
+scope = """
 ## Decisions
 
 - **The invariant, stated once in the kit**: a selection move scrolls the viewport only when
@@ -42,6 +44,8 @@ bottom edge, so every up/down (and on TASKS, every 2s tick) shifts the window.
   unchanged or shorter length keeps the window; the draw-time re-clamp is idempotent when
   the selection is already visible.
 
+"""
+validation = """
 ## Watch
 
 - The draw-time re-clamp against the real rect height is load-bearing (resize, and

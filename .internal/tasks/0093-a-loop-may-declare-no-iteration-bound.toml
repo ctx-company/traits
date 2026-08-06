@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0093"
 title = "A loop may declare no iteration bound"
 status = "ready"
@@ -14,6 +14,8 @@ owner both approve ends when the work is right, not on the sixth try — and a b
 approximate "never" is a lie in the source that a reader has to decode. Today the only way to say
 "no bound" is a large number.
 
+"""
+scope = """
 ## Decisions
 
 - **Fix it where it is enforced, not by adding a concept.** Static validation already permits
@@ -43,6 +45,8 @@ erroring and encodes "no bound"; the loop-advance path treats that encoding as "
 validation gains the two refusals above. The generated schema already carries `max-iterations` as
 optional, so no trait that declares one moves its digest — this is additive.
 
+"""
+validation = """
 ## Watch
 
 - **`frame.max_iterations: None` currently means "not a loop"** (`control_flow.rs:769` sets it for

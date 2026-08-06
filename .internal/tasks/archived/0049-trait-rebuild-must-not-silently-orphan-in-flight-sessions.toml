@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0049"
 title = "A trait rebuild must not silently orphan in-flight sessions"
 status = "done"
@@ -112,6 +112,8 @@ Two independent defects:
   drift report is what makes per-repo/per-version coexistence FEEL unsupported when it is not.
   Report per-digest state, so an approved older digest reads as approved.
 
+"""
+validation = """
 ## Watch
 
 - The contract check itself is correct and must not be relaxed — this task changes WHEN and HOW

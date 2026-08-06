@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0119"
 title = "`@ctx-traits/rust`: the compiler is the reviewer"
 status = "ready"
@@ -36,6 +36,8 @@ batched fix frame → re-run both → exit when the reduced list is empty`, boun
 factory the toolkit (0118) can compose: the factory takes the cargo invocation and
 round budget; the trait is the thin package wiring it to a worker seat.
 
+"""
+validation = """
 ## Watch
 
 - The diagnostic SHAPE is not fully stable across toolchains — pin what is read

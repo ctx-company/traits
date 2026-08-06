@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0027"
 title = "~10s of blank screen before a run shows anything"
 status = "done"
@@ -55,6 +55,8 @@ second:
    so the seam exists), many small ones just fill in behind the panel that is
    now already on screen.
 
+"""
+validation = """
 ## Watch
 
 - Do not fix this by deferring real work. Painting the panel earlier is not the

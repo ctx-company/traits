@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010.1"
 title = "Requirement resolution must be leaf-wise, driven by classified metadata"
 status = "done"
@@ -26,6 +26,8 @@ the winning document — proven by a test with conflicting legacy and current re
 - Tests for explicit default-valued repository requirements, partial nested requirement tables,
   ordered-list requirements, every requirement family, and unchanged fallback behaviour.
 
+"""
+validation = """
 ## Done when
 
 `cargo test -p ctx-traits-io harness_config` and `cargo test -p ctx-traits-cli --test proof_config`

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0084"
 title = "A command step declares its own silence budget"
 status = "done"
@@ -17,6 +17,8 @@ ten minutes of someone thinking, mid-review, and the failure looks like the tool
 There is no way to say so. `run.rs:2889` reads `idle_timeout_ms` from config only, with no trait
 fallback, so a repo-wide gate setting silently governs a step that has nothing to do with gates.
 
+"""
+scope = """
 ## Decisions
 
 - **`idle-timeout-ms` becomes authorable on a command step, and the step wins over config.** A step
@@ -45,6 +47,8 @@ fallback, so a repo-wide gate setting silently governs a step that has nothing t
 builder carrying it; `run.rs`'s resolution flipped to step-over-config for both bounds; `doctor`
 surfacing the effective values.
 
+"""
+validation = """
 ## Watch
 
 - **Flipping `timeout_ms` precedence is a behaviour change for existing traits, not an addition.**

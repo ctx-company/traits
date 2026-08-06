@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0017"
 title = "History keeps up to half the height and scrolls; activity never pushes it out"
 status = "done"
@@ -38,6 +38,8 @@ The scroll machinery already exists — `PaneScrolls`, per-pane offsets, and (fr
 
 A short history should still yield its unused rows to activity: reserving half when there are three lines of history would waste the column. Reserve **what it needs, capped at half** — the cap is what activity may not take, not a fixed allocation.
 
+"""
+validation = """
 ## Watch
 
 - Both panes need a floor, or a tall history starves activity on a short terminal. Today only activity has one (`CURRENT_MIN_OUTER_ROWS = 8`); history needs an equivalent, and the sum of the two floors must fit the smallest supported height — an inline viewport is already one row short of the terminal, and P552's header and fourth pane take more.

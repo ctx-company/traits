@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0006"
 title = "Scrolling tracks the key, not the frame: no batching, no overshoot"
 status = "done"
@@ -26,6 +26,8 @@ Two properties to preserve:
 - `Home`/`End`/`PageUp`/`PageDown` keep their existing single-shot semantics; only the repeating arrow/`j`/`k` case is folded.
 - Follow-mode derivation stays as P470 left it: derived from the RESULTING position, never the key's direction.
 
+"""
+validation = """
 ## Watch
 
 - Do not fix this by throttling the pump. The pump reading promptly is what keeps ctrl-c responsive; the problem is downstream of it.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0107"
 title = "defineTrait, use*, and the derived manifest"
 status = "done"
@@ -9,6 +9,8 @@ content = """
 Full-file functional traits: `export default function (ctx)` with `defineTrait` inside — one
 shape for behavioral and procedural traits alike, the object-layer shell no longer required.
 
+"""
+scope = """
 ## Decisions
 
 - **`defineTrait(slug, {…})`.** Exactly once per trait function, plain literal data only —
@@ -32,6 +34,8 @@ and its build errors; `ctx.input.*` resolution against declared input ports (unk
 the return-statement-to-output-port mapping; lock pipeline recording the package-level
 dependency edges.
 
+"""
+validation = """
 ## Watch
 
 - A behavioral trait — a function registering no steps — must produce a valid, lockable

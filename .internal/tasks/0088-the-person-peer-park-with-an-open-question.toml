@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0088"
 title = "The person peer: a run parks with an open question and resumes on the answer"
 status = "ready"
@@ -10,6 +10,8 @@ Second slice of the peer arc, and the one with the most value per line of code. 
 call-for-help path 0062 promised — *"a call-for-help path may soften this later, once there is an
 elegant interface for it"* — and it turns out to be park plus a typed hole.
 
+"""
+scope = """
 ## Decisions
 
 - **A person peer is `wait-ms = 0`, `deferred = true`.** It parks immediately rather than holding a
@@ -50,6 +52,8 @@ brief rendering the question, its evidence and its choices; `ctx traits answer <
 with schema validation and a clear refusal on mismatch; the dashboard answer surface over the same
 call; resume wiring the accepted value into the parked execution and advancing.
 
+"""
+validation = """
 ## Watch
 
 - **Resume must land in the same execution**, not re-enter the step. This is the first thing to test,

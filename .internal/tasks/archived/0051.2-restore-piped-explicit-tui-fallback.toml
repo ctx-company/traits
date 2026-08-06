@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0051.2"
 title = "Restore the piped explicit `--progress tui` fallback path"
 status = "done"
@@ -27,6 +27,8 @@ requirement 0051 was written under.
   diagnostic, not merely that initialization happened — the weak assertion is why the
   regression slipped through.
 
+"""
+validation = """
 ## Done when
 
 `ctx traits run --progress tui` with piped stdout/stderr emits byte-identical stderr to the

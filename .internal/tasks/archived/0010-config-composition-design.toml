@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010"
 title = "Config composition: decide what OVERRIDES and what DEFAULTS"
 content = """
@@ -45,6 +45,8 @@ And a third the current model cannot express at all: **a person's per-repo overr
 
 **4. How a person SEES the result.** `doctor --config` already prints each resolved value with its winning layer — that provenance must survive whatever this becomes, and should also say WHY a layer won ("repo requirement", "your override") rather than only which file it came from.
 
+"""
+validation = """
 ## Watch
 
 - Do not start by writing merge code. The classification is the decision; the code is mechanical after it and unfixable before it.

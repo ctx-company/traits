@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0103"
 title = "the great rename: abort-if and friends"
 status = "done"
@@ -10,6 +10,8 @@ Breaking renames are sanctioned now — before the functional layer exists — s
 born with the final vocabulary and never learns the old one. Behavior-preserving end to end:
 nothing about what runs changes, only what it is called.
 
+"""
+scope = """
 ## Decisions
 
 - **The renames.** Canonical `stop-if` → `abort-if`, `on-stop` → `on-abort`, step `emits` →
@@ -30,6 +32,8 @@ CDK field names, types, and constants; the canonical schema; runtime parse and l
 regeneration of all trait canonicals; the relock; docs and any doctrine resources that name the
 old fields.
 
+"""
+validation = """
 ## Watch
 
 - The whole-repo relock lands when no run is live (never rebuild a trait under a live run) and

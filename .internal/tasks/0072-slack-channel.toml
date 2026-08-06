@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0072"
 title = "The `slack` channel: one card per run, edited in place"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 Fifth slice of the handoff arc. The first channel with a secret and the first with a hard budget, so
 it is the one that proves capability-driven rendering actually works.
 
+"""
+scope = """
 ## Decisions
 
 - **One card per run, updated — not a stream, by default.** Keyed `(session, channel)` with the
@@ -49,6 +51,8 @@ The `slack` channel with stored `ts` + `chat.update`; its published `mode` optio
 `resolve()` covering token and channel existence; bounded retry with recorded failure;
 `--dry-run` printing the rendered blocks and destination.
 
+"""
+validation = """
 ## Watch
 
 - **Rate limits are the real constraint**, and 0070's debounce is what respects them. Coalesce a

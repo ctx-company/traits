@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010.5"
 title = "Prove additive-map conflicts behave, in the resolver and on the public path"
 status = "done"
@@ -22,6 +22,8 @@ repository-owned additive-map key.
   is lost) and same-key repository conflicts from BOTH personal sources (`~/.config` and
   `$CTX_CONFIG`).
 
+"""
+validation = """
 ## Done when
 
 `cargo test -p ctx-traits-io harness_config` and `cargo test -p ctx-traits-cli --test proof_config`

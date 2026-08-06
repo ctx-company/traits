@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0123"
 title = "Linux spawn sandbox: landlock via `pre_exec`, bubblewrap fallback"
 status = "ready"
@@ -21,6 +21,8 @@ the feature): downgrade to a bubblewrap (`bwrap`) argv-prefix fallback mirroring
 `sandbox-exec`'s delivery, or to the named capability report if neither is
 available — never silent.
 
+"""
+validation = """
 ## Watch
 
 - `pre_exec` runs in the forked child between `fork` and `exec` —

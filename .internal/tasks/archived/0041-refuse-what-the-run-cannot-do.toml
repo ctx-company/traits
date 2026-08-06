@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0041"
 title = "Refuse what the run cannot do, instead of blaming the worker for it"
 status = "done"
@@ -174,6 +174,8 @@ six secrets by name after sourcing it, including the Slack bot token and the
 ngrok authtoken; handing those to an agent breaks the same rule as "credentials
 must never reach argv" (0003).
 
+"""
+validation = """
 ## Watch
 
 - **A preflight that refuses too eagerly is worse than none.** It would block

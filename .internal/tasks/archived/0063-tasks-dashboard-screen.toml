@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0063"
 title = "A TASKS screen in the dashboard"
 status = "done"
@@ -8,6 +8,8 @@ content = """
 
 Fifth slice of the task-interface arc. The board becomes operable without an editor.
 
+"""
+scope = """
 ## Decisions
 
 - **A fifth screen** beside SESSIONS, TRAITS, MERGES and TRUST.
@@ -22,6 +24,8 @@ Fifth slice of the task-interface arc. The board becomes operable without an edi
 - **Dispatch from the board starts a run.** A blocked task refuses *with its reason shown*, rather
   than being invisibly disabled — the owner should always learn why.
 
+"""
+validation = """
 ## Watch
 
 - The join is many-runs-to-many-tasks, not one-to-one: a run may be keyed to a parent while doing

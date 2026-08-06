@@ -1,9 +1,9 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0097"
 title = "plannotator becomes a peer, and 0086 loses its hand-wiring"
 status = "ready"
 raised = "2026-08-04"
-content = '''
+content = """
 
 
 0086 puts the owner inside the loop by wiring one third-party binary into a trait by hand. 0087–0088
@@ -14,6 +14,8 @@ whether the abstraction is right: an interface with no second consumer is a gues
 0083/0084/0085 which are ready now, and it is a demo artifact with a recording attached. Ship it
 hand-wired, then move it — the pragmatic artifact and the rigorous version, in that order.
 
+"""
+scope = """
 ## Decisions
 
 - **plannotator is a peer, and the trait stops naming it.** `plan-owner-review` and
@@ -43,6 +45,8 @@ A `[[peer]]` binding for plannotator over the command peer; `plan-owner-review` 
 and stdin invocation shapes moved into peer config; 0086's package updated, relocked and re-approved;
 a written comparison of the two versions.
 
+"""
+validation = '''
 ## Watch
 
 - **Two invocation shapes, one binary.** 0086 uses plan mode over stdin *and* `annotate <file>

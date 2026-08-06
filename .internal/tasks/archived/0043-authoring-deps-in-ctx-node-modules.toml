@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0043"
 title = "Authoring deps must install into `.ctx/`, not the user's repo root"
 status = "done"
@@ -87,6 +87,8 @@ Version pinning is not optional: the CLI and the CDK agree on a schema version
 installs `latest` will eventually scaffold a package the installed binary
 cannot read.
 
+"""
+validation = """
 ## Watch
 
 - **Running an installed trait must never require Node.** A generated

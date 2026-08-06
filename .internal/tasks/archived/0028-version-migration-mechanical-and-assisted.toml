@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0028"
 title = "Version-to-version migration: mechanical, then assisted"
 status = "done"
@@ -32,6 +32,8 @@ Options, to be decided:
 Option 2 is likely right: it keeps the model's input authored-by-a-human rather
 than authored-by-a-previous-model, which is the actual failure mode.
 
+"""
+validation = """
 ## Watch
 
 - A migration must be refusable. "I cannot migrate this safely" is a valid

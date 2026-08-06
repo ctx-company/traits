@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0034"
 title = "`[trait.<id>]` seat overrides: one shape, three scopes"
 status = "done"
@@ -69,6 +69,23 @@ own machine-local runtime config, never one a dependency gets over its consumer.
 - When both `[repo.X]` and `[trait.Y]` apply, **trait wins**: it is the more
   specific qualifier.
 
+## Qualifier grammar
+
+Qualifier tables are named by their KIND — `trait.<id>`, `variant.<vid>`,
+`repo.<key>` — never by a bare name. A bare `[quick]` table would collide with
+any future top-level key of that name, and reads as a section rather than a
+scope.
+
+The same grammar carries budgets (0037), so `trait.<id>` and `variant.<vid>`
+mean the same thing wherever they appear:
+
+```toml
+[trait.implement.budget]                  frame-seconds = 3600
+[trait.implement.variant.quick.budget]    frame-seconds = 900
+[trait.implement.agent.role.worker]       harness = "opencode"
+```
+"""
+validation = """
 ## Watch
 
 - Resolution order must be one function, not a rule re-implemented per consumer.
@@ -90,19 +107,4 @@ trait; trait beats repo scope; `doctor --config` names the winning scope;
 package sidecars still cannot bind seats; the Justfile's `--assign` workarounds
 are gone.
 
-## Qualifier grammar
-
-Qualifier tables are named by their KIND — `trait.<id>`, `variant.<vid>`,
-`repo.<key>` — never by a bare name. A bare `[quick]` table would collide with
-any future top-level key of that name, and reads as a section rather than a
-scope.
-
-The same grammar carries budgets (0037), so `trait.<id>` and `variant.<vid>`
-mean the same thing wherever they appear:
-
-```toml
-[trait.implement.budget]                  frame-seconds = 3600
-[trait.implement.variant.quick.budget]    frame-seconds = 900
-[trait.implement.agent.role.worker]       harness = "opencode"
-```
 """

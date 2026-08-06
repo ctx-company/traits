@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0051"
 title = "Run startup progress belongs in the live pane layout, not in inline text lines"
 content = """
@@ -58,6 +58,8 @@ gate) is a row in that surface with its own state — pending, running, done, fa
 than a line appended once and never updated. A failing stage stays visible with its reason
 instead of scrolling past.
 
+"""
+validation = """
 ## Watch
 
 - Non-TTY paths must keep working exactly as they do now: `--progress stream|status|none`,

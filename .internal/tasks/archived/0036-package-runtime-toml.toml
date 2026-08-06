@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0036"
 title = "Package budgets move to `runtime.toml`, one file with variant tables"
 status = "done"
@@ -83,6 +83,8 @@ in both repos is invalidated.
 That is also why this pairs with 0026: both edit the same manifest table, and
 doing them separately means rewriting every package manifest twice.
 
+"""
+validation = """
 ## Watch
 
 - The manifest key is persisted. Needs a compatibility read of the old

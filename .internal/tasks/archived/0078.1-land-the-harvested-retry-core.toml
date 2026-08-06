@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0078.1"
 title = "Land the harvested retry core"
 status = "done"
@@ -35,6 +35,19 @@ deletions, exported verbatim from the run's worktree (`wt-18ef5c297dd4`, diff ag
   suite as the run left it (20 passing);
 - regenerated `packages/config` SDK output.
 
+## Decisions (inherited from 0078, binding)
+
+- Races retry, verdicts park. Retryable: `MAIN_ADVANCED_INFIX`, `FAST_FORWARD_FAILED`,
+  `MAIN_NOT_CLEAN_INFIX`, `CHECKOUT_BRANCH_PROBE_FAILED`, `CHECKOUT_CLEANLINESS_PROBE_FAILED`, and
+  classified transient git lock/control failures. Never retried: `GATE_FAILED_PREFIX`,
+  `GATE_LEFT_DIRTY`, `GATE_DISK_FLOOR_PREFIX`, `HARVEST_*`, `DEEP_REFUSE_REGRESSION_PREFIX`,
+  `BRANCH_MISMATCH_PREFIX`, and anything unrecognized.
+- A retry always re-runs the gate; nothing carries a green forward across a base change.
+- Never retry into model spend: every retry is mechanical-only; needing the merger again is a park.
+- `--no-wait` still means one attempt.
+
+"""
+scope = """
 ## Scope
 
 Apply the patch as one commit whose subject credits run-414acdf0's work, reconcile, gate, land
@@ -48,17 +61,8 @@ not let a reviewer pull them in:
 The three affected tests pass as written today; their known weaknesses are contract-recorded in the
 sibling task files, so a reviewer flagging them here is naming scoped-out work, not a blocker.
 
-## Decisions (inherited from 0078, binding)
-
-- Races retry, verdicts park. Retryable: `MAIN_ADVANCED_INFIX`, `FAST_FORWARD_FAILED`,
-  `MAIN_NOT_CLEAN_INFIX`, `CHECKOUT_BRANCH_PROBE_FAILED`, `CHECKOUT_CLEANLINESS_PROBE_FAILED`, and
-  classified transient git lock/control failures. Never retried: `GATE_FAILED_PREFIX`,
-  `GATE_LEFT_DIRTY`, `GATE_DISK_FLOOR_PREFIX`, `HARVEST_*`, `DEEP_REFUSE_REGRESSION_PREFIX`,
-  `BRANCH_MISMATCH_PREFIX`, and anything unrecognized.
-- A retry always re-runs the gate; nothing carries a green forward across a base change.
-- Never retry into model spend: every retry is mechanical-only; needing the merger again is a park.
-- `--no-wait` still means one attempt.
-
+"""
+validation = """
 ## Watch
 
 - **The run's final red gate was environmental, not a defect.** The per-round gate's sdk-check ran

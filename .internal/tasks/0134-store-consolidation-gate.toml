@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0134"
 title = "Store consolidation gate: rebuild, relock, re-approve, and gate `.ctx/traits/*` drift"
 status = "ready"
@@ -23,6 +23,8 @@ human step — digests are the trust boundary); extend the drift gate to repo tr
 so a source edit without a rebuild fails, handling the legitimately-source-less
 package rather than failing it.
 
+"""
+validation = """
 ## Watch
 
 - Trust re-approval is deliberately human.

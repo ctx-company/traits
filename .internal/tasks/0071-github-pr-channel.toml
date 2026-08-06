@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0071"
 title = "The `github-pr` channel: the brief becomes the pull request body"
 status = "ready"
@@ -10,6 +10,8 @@ Fourth slice of the handoff arc, and the first channel that touches the outside 
 of Slack deliberately: it needs no secrets of our own, it lands where reviewers already look, and
 `story --markdown` was written for exactly this.
 
+"""
+scope = """
 ## Decisions
 
 - **It always updates in place**, keyed on the branch — that is simply what a PR body is, and it is
@@ -36,6 +38,8 @@ The `github-pr` channel with update-in-place + branch key + adoption; `Document`
 with no budget; the fenced body block with preserve-around semantics; `resolve()` covering `gh`
 presence, auth and remote; draft-open behaviour; `--dry-run` printing the exact body and target.
 
+"""
+validation = """
 ## Watch
 
 - The branch is the key, so a run whose branch was renamed or deleted must fail cleanly and say so,

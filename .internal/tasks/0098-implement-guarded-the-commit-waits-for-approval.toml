@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0098"
 title = "`implement:guarded` — the commit waits for the owner's approval"
 status = "ready"
@@ -11,6 +11,8 @@ own, it waits for the owner to approve. `ctx-gate run -- <command>` runs a comma
 configured policy allows — otherwise it waits, polling until someone approves or refuses. From the
 run's side it is just a command that takes a while and then exits 0 or not.
 
+"""
+scope = """
 ## Decisions
 
 - **The gate is the command, not a new concept.** The commit step's command changes from
@@ -53,6 +55,8 @@ runbook note (a ctx-gate policy example plus the preflight below). Base the vari
 variant the demo dispatches (default or quick) — one line either way, since the option lives in the
 shared procedure.
 
+"""
+validation = """
 ## Watch
 
 - **The commit message is what the approver reads.** The scribe's message sits inside the command

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0050"
 title = "Root-cause the park-report ledger-contract failure, then restore the output port"
 status = "done"
@@ -146,6 +146,8 @@ both fact maps on mismatch and run one real dispatch.
 4. Check the sibling variants (default/smart/strict/phase) — they declare park-report ports too and
    were never exercised as hard as quick; whatever fix lands must cover them.
 
+"""
+validation = """
 ## Watch
 
 - Do not restore the port before the regression proof exists — this failure cost a full day of

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0080"
 title = "Panes earn their space: drop an empty history, drop startup's detail column, give command rows a verdict"
 status = "done"
@@ -8,6 +8,8 @@ content = """
 
 Three small ones. Each is screen space spent on something that says nothing.
 
+"""
+scope = """
 ## Decisions
 
 - **An empty history pane is not rendered.** `pane_tree`
@@ -61,6 +63,8 @@ from the step's accepted output value. The panel already holds the trait, the
 plan and the session, so both are reachable — neither may be guessed from the
 label text.
 
+"""
+validation = """
 ## Watch
 
 - The combinations multiply: `pane_tree` already has a `(has_progress,

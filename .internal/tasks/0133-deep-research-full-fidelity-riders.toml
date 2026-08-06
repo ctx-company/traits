@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0133"
 title = "deep-research full-fidelity riders"
 status = "ready"
@@ -19,6 +19,8 @@ the live validation (0132) harvests real gaps:
 - Plus: run `ctx traits import` on the original source AGENTS.md and record the
   scaffold diff as case-study material for the adoption funnel.
 
+"""
+validation = """
 ## Done when
 
 Each rider is either implemented against a gap the 0132 validation actually

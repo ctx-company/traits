@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0095"
 title = "One space around the bullet in history and current activity"
 status = "ready"
@@ -10,6 +10,8 @@ The event rows put two spaces on each side of their separator; every other
 bullet in the UI uses one. It reads as a gap rather than a separator, and it
 is inconsistent with the rows immediately around it.
 
+"""
+scope = """
 ## Decisions
 
 - **One space each side**, matching every other separator in the renderer.
@@ -25,6 +27,8 @@ is inconsistent with the rows immediately around it.
 `EVENT_PREFIX_SEP` and any snapshot or width assertion that encodes the old
 prefix width.
 
+"""
+validation = """
 ## Watch
 
 - The prefix is deliberately never truncated (P552: a terminal narrower than

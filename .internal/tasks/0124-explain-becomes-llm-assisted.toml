@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0124"
 title = "`explain` becomes LLM-assisted like refine; deterministic stays default"
 status = "ready"
@@ -31,6 +31,8 @@ Three pieces, mirroring the import treatment:
    through the explain gate (`evaluate_supplied_explain_scaffold` +
    `attach_check_report`).
 
+"""
+validation = """
 ## Watch
 
 - explain uses its OWN gate, not import's `evaluate_supplied_candidate` — keep the

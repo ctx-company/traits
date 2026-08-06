@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0116"
 title = "Auto-research writeup + story integration: the pre-registered experiment case study"
 status = "ready"
@@ -16,6 +16,8 @@ as the case study: the protocol artifact (pre-registered — reviewable before a
 single GPU-hour is spent), per-experiment story view, kept-chain digests (every kept
 mutation a digested diff, the whole optimization a byte-stable ledger).
 
+"""
+validation = """
 ## Watch
 
 - Claim-gate everything.

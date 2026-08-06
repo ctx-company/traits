@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0140"
 title = "Truly blocked is an ERROR: no commit, non-zero exit, halted batch, refused siblings"
 status = "done"
@@ -23,6 +23,8 @@ batch recipes halt the chain on that code, and the park records a **wall id** so
 dispatching a SIBLING task citing the same standing wall refuses at preflight
 ("wall <id> standing since run <x>") — the ×5 cascade becomes ×1.
 
+"""
+validation = """
 ## Watch
 
 - Never conflate with approved-with-leftovers (that ships).

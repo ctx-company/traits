@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0022"
 title = "Re-assert the output contract per turn in persistent sessions"
 status = "done"
@@ -30,6 +30,8 @@ a flag fixed at spawn cannot carry a per-frame schema).
 
 This task becomes live the moment a seat goes back to `persistent`.
 
+"""
+validation = """
 ## Watch
 
 - Re-asserting the contract does not restore `--json-schema`. The exclusivity is

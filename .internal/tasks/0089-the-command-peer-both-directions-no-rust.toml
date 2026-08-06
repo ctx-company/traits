@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0089"
 title = "The `command` peer: anyone's backend, in either direction, with no Rust"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 Third slice of the peer arc. 0073 makes a subprocess a handoff backend; this makes the same
 subprocess a correspondent a run can talk to and hear from.
 
+"""
+scope = """
 ## Decisions
 
 - **One executor, two payloads.** The command *channel* (0073) and the command *peer* are the same
@@ -37,6 +39,8 @@ The `command` peer variant reusing 0073's executor and versioned envelope/receip
 checking the program exists and is executable; bounds via 0084; `--dry-run` printing argv,
 environment keys and the stdin payload while executing nothing.
 
+"""
+validation = """
 ## Watch
 
 - **Reply validation is not the script's job.** Whatever it prints is checked against the trait's

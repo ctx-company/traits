@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0014"
 title = "Scrolling the journey to the bottom must not jump back to the top"
 status = "done"
@@ -39,6 +39,8 @@ Reaching the bottom of the journey should mean "I am looking at the end", not "r
 
 Whatever is chosen, the two follow kinds should stop diverging silently: one aligns to a row, the other to the tail, and only one of them can surprise the user.
 
+"""
+validation = """
 ## Watch
 
 - Do not fix this by disabling follow on the journey. Following the active step is the behaviour that makes a long run watchable without touching the keyboard; the bug is the re-engagement rule, not the following.

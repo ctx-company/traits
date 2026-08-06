@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0079"
 title = "A native provider transport: one HTTP call instead of a whole harness"
 status = "done"
@@ -17,6 +17,8 @@ title hitting its 20s bound in **44 of 58 traced runs** on this machine — the
 typical outcome was the timeout, not an answer. That is the harness, not the
 model.
 
+"""
+scope = """
 ## Decisions
 
 - **This is a TRANSPORT, not a harness and not a new seat concept.**
@@ -59,6 +61,8 @@ model.
 the resolved endpoint and key status; and rewiring the narrator and
 session-title seats onto it as the first consumers.
 
+"""
+validation = """
 ## Watch
 
 - **The threat model changes.** A harness spawn runs under `sandbox-exec` with

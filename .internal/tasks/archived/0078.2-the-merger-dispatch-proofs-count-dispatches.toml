@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0078.2"
 title = "The merger-dispatch proofs actually count dispatches"
 status = "done"
@@ -22,6 +22,8 @@ false positive and a hole:
   checkout-branch probe race on the first attempt, arrange the retry to meet a divergent base that
   would need reconciliation, and prove the retry parks with the merger harness never invoked.
 
+"""
+scope = """
 ## Scope
 
 Test-only, in `modules/cli/tests/proof_merge_on_completion.rs`:
@@ -35,6 +37,8 @@ Test-only, in `modules/cli/tests/proof_merge_on_completion.rs`:
 No production code changes; if a proof can only pass by changing `merge.rs`, stop and say so — that
 is a finding about the implementation, not a reason to widen this task.
 
+"""
+validation = """
 ## Done when
 
 The counting-merger fixture distinguishes one dispatch from many;

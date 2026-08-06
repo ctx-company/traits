@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0129"
 title = "Run handles: background sessions, steering, cancellation"
 status = "ready"
@@ -19,6 +19,8 @@ free-form scripting: the SDK's verbs are exactly the lifecycle
 programmatic orchestration inherits provenance by construction; loosening comes
 later, if ever. Design lives with this task.
 
+"""
+validation = """
 ## Watch
 
 - Steering is a LEDGER EVENT, not a side channel — every steer is provenance.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0032"
 title = "Move what remains of `.plans/` into `.internal/tasks/`"
 status = "done"
@@ -28,6 +28,8 @@ content = """
 Work is tracked as tasks now. Fold the remaining `.plans/` content into
 `.internal/tasks/` and retire the directory.
 
+"""
+validation = """
 ## Watch
 
 - **`.plans/EXECUTION_PLAN.md` is referenced by the `implement` trait** as a

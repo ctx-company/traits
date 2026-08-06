@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0005"
 title = "Leave the live view for the dashboard, and make the dashboard preview actually live"
 status = "done"
@@ -20,6 +20,8 @@ Selecting a session shows a reconstruction of its ledger. `refresh_attached_view
 
 Make the preview refresh on the reload tick for the selected row, not only for the attached one, and keep the digest short-circuit (it is the thing that makes this cheap — a rebuild is a trait+plan reconstruction, not a file read).
 
+"""
+validation = """
 ## Watch
 
 - **Do not put a rebuild on the 250 ms draw loop.** `refresh_attached_view`'s own doc says the reload tick is the correct cadence and the draw loop is not; a per-draw reconstruction would reintroduce the P522 reload storm on a bigger surface.

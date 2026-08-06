@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0099"
 title = "Test roots are resolved at runtime, never baked at compile time"
 status = "done"
@@ -55,6 +55,8 @@ The house already knows the rule: `ctx_bin()` in `modules/cli/tests/support/src/
 `CARGO_BIN_EXE_ctx` **at runtime** and its comment explains precisely why (P477). `repo_root()`,
 directly below it, violates the same rule with `env!`.
 
+"""
+scope = """
 ## Decisions
 
 - **Runtime derivation only.** Every path a test resolves must come from the running process's own
@@ -76,6 +78,8 @@ directly below it, violates the same rule with `env!`.
   `modules/**` outside an explicit, justified allowlist — so the class stays dead instead of
   regrowing one helper at a time.
 
+"""
+validation = """
 ## Watch
 
 - The proof guarding the invariant must itself resolve its root at runtime, or it re-imports the

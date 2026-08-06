@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0076"
 title = "The session title must not block the first frame, and must not cost 20 seconds to fail"
 status = "done"
@@ -47,6 +47,8 @@ drive → maybe_dispatch_session_title → dispatch_narration
   → ctx_traits_io::harness::run → thread::sleep     (1645/1657 samples)
 ```
 
+"""
+scope = """
 ## Decisions
 
 - **The title never blocks the first frame.** It is a cosmetic label. Nothing
@@ -80,6 +82,8 @@ performs is serialized against frame writes by ordering rather than by
 blocking; the title seat gets its own short bound, independent of
 `frame-seconds`; and the warm/cold fallback is skipped for this one call.
 
+"""
+validation = """
 ## Watch
 
 - **Confirm which bound actually applies before tuning anything.** `runtime.toml`

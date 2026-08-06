@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0009"
 title = "An ask pane: talk to the run while it runs"
 status = "done"
@@ -35,6 +35,8 @@ Its context is the run's own evidence: the ledger's accepted slot values, the st
 - **Screen space.** The 2x2 grid already loses rows to P552's header and borders on an inline viewport one row short of the terminal. The input pane should be one or two rows collapsed, expanding only while in use — not a permanent third of the screen.
 - No guide seat configured means the pane is absent, not broken.
 
+"""
+validation = """
 ## Done when
 
 A key opens an input under the live view; a question is answered from the run's own evidence by the `guide` seat; the answer never touches the ledger; the run is unaffected; token use appears in the run's accounting; and with no guide configured the pane simply is not there.

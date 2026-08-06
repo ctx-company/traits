@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0139"
 title = "Deep-merge charter v2 remainder: harvest adjudication, rebuild-don't-reconcile"
 status = "done"
@@ -27,6 +27,8 @@ sources) is NEVER sent to the model; the merger reconciles the sources, the
 machinery re-runs the generating commands, and the regenerated artifacts land.
 Declaration-driven, never filename patterns or toolchain knowledge.
 
+"""
+validation = """
 ## Watch
 
 - Fail-closed posture unchanged everywhere (invalid receipt ⇒ park; refusal ⇒

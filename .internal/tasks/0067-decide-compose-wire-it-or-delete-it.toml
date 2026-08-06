@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0067"
 title = "Decide `compose`: give it a meta-trait, or delete the command"
 status = "ready"
@@ -44,6 +44,8 @@ doctrine is now single-trait — fold standards and knowledge into the consuming
 resources and split only when a second consumer exists — and `dependency` plus resources is how
 traits share material. "Merge two traits into a third" is the pre-dependency answer.
 
+"""
+validation = """
 ## Watch
 
 - **Whichever way it goes, the help text is a bug today.** A command documenting a contract it

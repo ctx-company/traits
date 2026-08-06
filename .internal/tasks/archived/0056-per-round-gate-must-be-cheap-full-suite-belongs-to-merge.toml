@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0056"
 title = "The per-round gate must be cheap; the full suite belongs to the merge gate"
 status = "done"
@@ -40,6 +40,8 @@ Two gates with different jobs:
   commands the merge machinery runs before touching main — that is the natural home, and it means
   nothing lands unproven even though rounds stop paying for the whole suite.
 
+"""
+validation = """
 ## Watch
 
 - **The argv is the contract.** P565's rule stands: whatever the check step declares is what the

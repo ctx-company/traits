@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0026"
 title = "One word: `variant`. Retire `family`/`leaf`."
 status = "done"
@@ -11,6 +11,8 @@ but the manifest calls them `[family.leaf.<selector>]`, and code says `family`,
 `leaf`, `selector`, and `variant` interchangeably. Pick `variant` and use it
 everywhere.
 
+"""
+scope = """
 ## Scope
 
 - Manifest: `[family.leaf.<selector>]` → a variant table.
@@ -20,6 +22,8 @@ everywhere.
   "variants" to the user (`family: implement / variants: default, quick, …`) —
   the internals should match what is already the user-facing word.
 
+"""
+validation = """
 ## Watch
 
 - The manifest key is PERSISTED. A rename needs a compatibility read of the old

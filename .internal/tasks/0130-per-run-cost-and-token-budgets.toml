@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0130"
 title = "Cost/token budgets per run: per-model split + subscription-aware estimation"
 status = "ready"
@@ -19,6 +19,8 @@ tokens; the report shows both views (tokens by model, estimated $ by billing
 mode), so a "cheap" run through a subscription and a cheap run through API credits
 are distinguishable truths.
 
+"""
+validation = """
 ## Watch
 
 - Enforce at frame dispatch only (never mid-frame — same boundary rule as 0117).

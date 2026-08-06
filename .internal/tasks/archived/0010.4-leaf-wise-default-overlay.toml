@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010.4"
 title = "Defaults overlay leaf-by-leaf, so partial declarations stop erasing siblings"
 status = "done"
@@ -30,6 +30,8 @@ Config-layer assignment `extra-args` replaces the earlier ordered list rather th
 - Resolver and public-path tests where each tier supplies different harness and assignment leaves
   and every undeclared sibling survives with the correct winner.
 
+"""
+validation = """
 ## Done when
 
 `cargo test -p ctx-traits-io harness_config` and `cargo test -p ctx-traits-cli --test proof_config`

@@ -136,6 +136,19 @@ pub fn epoch_month_and_timestamp() -> (String, String) {
     )
 }
 
+/// Today's UTC date as `YYYY-MM-DD`, from the host clock — shared by any
+/// caller that needs to stamp a bare calendar date without pulling in a
+/// full date/time dependency (e.g. the task board's `closed` field,
+/// 0063.1).
+pub(crate) fn today_date_utc() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (year, month, day) = civil_from_days((secs / 86_400) as i64);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
 /// Howard Hinnant's `civil_from_days`: days-since-epoch to a proleptic
 /// Gregorian (year, month, day), used to avoid pulling in a full date/time
 /// dependency for a monthly journal file name.

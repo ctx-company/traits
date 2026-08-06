@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0101"
 title = "a large merger prompt still dispatches"
 status = "done"
@@ -46,6 +46,8 @@ Two defects, one dispatch:
   argv count, and prompt byte size — never the prompt content. The full prompt already lives in
   the debug trace under `config/ctx/debug/<repo>/<run-id>/`; the error should point there.
 
+"""
+validation = """
 ## Done when
 
 - A `--deep` merge whose slot payloads exceed ARG_MAX dispatches successfully (stdin delivery) or

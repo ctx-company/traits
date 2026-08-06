@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0122"
 title = "`publish`: preflight, dual-use pack, digests claim"
 status = "ready"
@@ -21,6 +21,8 @@ file list + digests; then shell to `npm publish` under the caller's npm auth
 (families ride along as variants; aggregation stays in `[dependencies]`). Rider:
 pass through npm provenance attestation (`--provenance`) when publishing from CI.
 
+"""
+validation = """
 ## Done when
 
 A draft package refuses with the reason; `--dry-run` output matches what lands on

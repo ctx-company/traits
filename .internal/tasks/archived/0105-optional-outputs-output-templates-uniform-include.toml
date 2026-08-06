@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0105"
 title = "optional outputs, output templates, uniform include"
 status = "done"
@@ -11,6 +11,8 @@ additions: optional outputs). P447 already gave inputs the `{ slot, optional: tr
 and command/check steps an `include:` field; this completes the symmetry on the output side and
 makes `include:` uniform across step kinds.
 
+"""
+scope = """
 ## Decisions
 
 - **Optional outputs.** `${slot.optional()}` in an output position lowers to
@@ -34,6 +36,8 @@ Output-side lowering for the optional marker and templates; `include:` on prompt
 exactly as the landed command-step semantics; runtime distinction between an optional output
 left unfilled and a required output missing; docs.
 
+"""
+validation = """
 ## Watch
 
 - Output slots with declared authorship are the authorship-check testbed — verify against

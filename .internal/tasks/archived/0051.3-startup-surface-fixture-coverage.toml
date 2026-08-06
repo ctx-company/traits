@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0051.3"
 title = "Fixture-backed coverage for the startup surface"
 status = "done"
@@ -20,6 +20,8 @@ production behaviour landed, its proofs did not) and the open step of
   now emits `warming <entry>` only when a validated directory is about to be cloned — that
   narrowing is the thing the fixture must hold.
 
+"""
+validation = """
 ## Watch
 
 - These are behaviour-freezing tests over a surface that just changed and is about to change

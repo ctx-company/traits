@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0104"
 title = "normalized emission: moving code is not drift"
 status = "done"
@@ -10,6 +10,8 @@ The law (0102): only the relative position of steps and `flow.*` statements is s
 task makes the emitter honor it, so reformatting, renaming a variable, reordering declarations,
 or moving a configuration call never reads as drift and never torches trust in the gate.
 
+"""
+scope = """
 ## Decisions
 
 - **Stable emission order.** Canonical keys and derived structures emit in a fixed, documented
@@ -25,6 +27,8 @@ or moving a configuration call never reads as drift and never torches trust in t
 Emitter ordering; title→id derivation and duplicate-title validation; regenerate and relock all
 packages; the normalization rules documented next to the emitter.
 
+"""
+validation = """
 ## Watch
 
 - Per the standing validation ruling (2026-07-24), the normalization property test (two sources

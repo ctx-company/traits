@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0128"
 title = "Trait-invokes-trait: typed sub-procedure composition"
 status = "ready"
@@ -17,6 +17,8 @@ inlined frames); ledger (child run-id reference + digest); CDK
 (`sequence.call(traitRef, {inputs, outputs})`). Implementation phases follow the
 design review.
 
+"""
+validation = """
 ## Watch
 
 - Composition must not launder trust — a local trait calling a restricted trait

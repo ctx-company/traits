@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0063.2"
 title = "The TASKS detail pane shows the task's prose"
 status = "ready"
@@ -11,6 +11,8 @@ it: `build_task_preview` renders key, title, status, dangling edges, relations, 
 and joined runs — and never `resolved.document.content`, even though `board.resolved` holds
 the full document from the last sync. You cannot decide to dispatch a task you cannot read.
 
+"""
+scope = """
 ## Decisions
 
 - **The prose renders between the status line and the relations block** — it is the
@@ -23,6 +25,8 @@ the full document from the last sync. You cannot decide to dispatch a task you c
   fields land, this pane renders them as the canonical labeled sections (content, scope,
   validation) — that follow-up belongs to whichever task lands second.
 
+"""
+validation = """
 ## Watch
 
 - The preview rebuild runs on selection change, sync, and the 2s join tick — never in the

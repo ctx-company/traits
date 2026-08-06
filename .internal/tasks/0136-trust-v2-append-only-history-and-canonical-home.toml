@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0136"
 title = "Trust v2: append-only approval history, start-time pinning, one canonical home for shared traits"
 status = "done"
@@ -39,6 +39,8 @@ natural fit), never `cp`. Propagation stays explicit (no-silent-propagation law)
 a rebuild here reaches a sibling only via its own `update`. Sequencing: verify the
 fold state (0134) first, then share.
 
+"""
+validation = """
 ## Watch
 
 - Store schema evolution must migrate existing records cleanly.

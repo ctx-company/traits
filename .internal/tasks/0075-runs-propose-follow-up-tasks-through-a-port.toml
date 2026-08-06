@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0075"
 title = "Runs propose follow-up tasks through a typed port"
 status = "ready"
@@ -10,6 +10,8 @@ The last piece of the handoff picture. A run discovers work it is not doing — 
 around, a cleanup its change implies, an assumption worth checking. Today that goes into a commit
 message or is lost.
 
+"""
+scope = """
 ## Decisions
 
 - **A typed output port, not a new mechanic.** The run emits task-shaped proposals through a
@@ -35,6 +37,8 @@ message or is lost.
   half a handoff, and the proposals are most likely to be acted on at the moment someone reads the
   card.
 
+"""
+validation = """
 ## Watch
 
 - The failure mode is volume, not accuracy. A run that proposes eight follow-ups per dispatch trains

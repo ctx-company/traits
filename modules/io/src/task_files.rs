@@ -257,7 +257,12 @@ impl Board {
             title: new_task.title,
             status: new_task.status,
             raised: None,
+            closed: None,
+            wall: None,
+            origin: None,
             content: new_task.content,
+            scope: String::new(),
+            validation: String::new(),
             relations: Relations {
                 depends_on: new_task.depends_on,
                 parent: new_task.parent,
@@ -323,6 +328,9 @@ impl Board {
         if let Some(status) = update.status {
             document.status = Some(status);
             archive_target = matches!(status, TaskStatus::Done | TaskStatus::Cancelled);
+            if archive_target && !was_archived {
+                document.closed = Some(crate::audit_journal::today_date_utc());
+            }
         }
 
         let file_name = current_path
@@ -497,7 +505,7 @@ mod tests {
     }
 
     const TASK_0001: &str =
-        "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"First\"\nstatus = \"ready\"\n";
+        "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"First\"\nstatus = \"ready\"\n";
 
     #[test]
     fn list_hides_archived_by_default_and_get_still_resolves_it() {
@@ -507,7 +515,7 @@ mod tests {
         write_task(
             &board_dir.join(ARCHIVED_DIR),
             "0002-second.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Second\"\nstatus = \"done\"\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Second\"\nstatus = \"done\"\n",
         );
 
         let read = FilesTaskBoard::open_read(board_dir.clone());
@@ -578,7 +586,7 @@ mod tests {
         write_task(
             &board_dir,
             "0005-existing.toml",
-            "schema-version = \"0.1\"\nkey = \"0005\"\ntitle = \"Existing\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0005\"\ntitle = \"Existing\"\nstatus = \"ready\"\n",
         );
 
         let write = FilesTaskBoard::open_read_write(board_dir.clone());
@@ -624,7 +632,7 @@ mod tests {
         write_task(
             &board_dir.join(ARCHIVED_DIR),
             "0010.1-leaf.toml",
-            "schema-version = \"0.1\"\nkey = \"0010.1\"\ntitle = \"Leaf\"\nstatus = \"done\"\n",
+            "schema-version = \"0.2\"\nkey = \"0010.1\"\ntitle = \"Leaf\"\nstatus = \"done\"\n",
         );
 
         let read = FilesTaskBoard::open_read(board_dir);
@@ -637,12 +645,12 @@ mod tests {
         write_task(
             &board_dir,
             "0110-a.toml",
-            "schema-version = \"0.1\"\nkey = \"0110\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0110\"\ntitle = \"A\"\nstatus = \"ready\"\n",
         );
         write_task(
             &board_dir,
             "0110-b.toml",
-            "schema-version = \"0.1\"\nkey = \"0110\"\ntitle = \"B\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0110\"\ntitle = \"B\"\nstatus = \"ready\"\n",
         );
 
         let write = FilesTaskBoard::open_read_write(board_dir);
@@ -669,12 +677,12 @@ mod tests {
         write_task(
             &board_dir,
             "0001-a.toml",
-            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
         );
         write_task(
             &board_dir,
             "0002-b.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
         );
 
         let write = FilesTaskBoard::open_read_write(board_dir);

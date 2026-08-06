@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0038"
 title = "A failing gate must say WHY, and its argv must have an owner"
 status = "done"
@@ -132,6 +132,13 @@ with a stated rule for choosing. Do not ship both without the rule; two ways to
 default the same kind of value is the ambiguity 0037 avoided by refusing to
 partition keys by kind.
 
+## Interim
+
+ctx-gate got a `test` recipe on 2026-07-29 (`cargo fmt --check`, `cargo check`,
+`git diff --check` — phase-independent, no test targets, since the DEMO-CRITICAL
+phases forbid them). That unblocks the loop; it does not remove the coupling.
+"""
+validation = """
 ## Watch
 
 - **Pinning stays the default; `config()` is the only opt-out** (owner ruling
@@ -170,9 +177,4 @@ machine-local tier cannot weaken it; every value NOT declared through `config()`
 stays digest-pinned exactly as today; and the effective value appears in the
 ledger with the layer that supplied it.
 
-## Interim
-
-ctx-gate got a `test` recipe on 2026-07-29 (`cargo fmt --check`, `cargo check`,
-`git diff --check` — phase-independent, no test targets, since the DEMO-CRITICAL
-phases forbid them). That unblocks the loop; it does not remove the coupling.
 """

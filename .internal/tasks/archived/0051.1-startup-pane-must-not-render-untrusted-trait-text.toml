@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0051.1"
 title = "The startup pane must not render trait-authored text before trust succeeds"
 status = "done"
@@ -28,6 +28,8 @@ sees; a startup pane that paints an unapproved trait's own strings breaks that.
 - Route interactive query selection through the startup-aware authorization path so candidate
   summaries and detailed selection errors are not printed while the pane is active.
 
+"""
+validation = """
 ## Done when
 
 A trait document carrying a sentinel in its id, summary and decode warnings is dispatched and

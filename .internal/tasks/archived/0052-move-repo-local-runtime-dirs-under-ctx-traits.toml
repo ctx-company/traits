@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0052"
 title = "Repo-local runtime directories move under `.ctx/traits/`"
 status = "done"
@@ -69,6 +69,8 @@ Managed gitignore (`modules/io/src/gitignore.rs`) must move with them: it curren
 belong under `.ctx/traits/`, and the OLD entries must keep being ignored so a checkout that
 still has the old directories does not suddenly show them as untracked.
 
+"""
+validation = """
 ## Watch
 
 - **Never move a directory out from under a live run.** A run's worktree path is recorded in

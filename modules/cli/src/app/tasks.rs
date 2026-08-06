@@ -259,6 +259,11 @@ pub(crate) fn handle_tasks_show(
                     status_tone(edge.status),
                 ));
             }
+            for (label, text) in resolved.document.prose_sections() {
+                if !text.is_empty() {
+                    panel = panel.row(PanelRow::toned(label, text, RowTone::Default));
+                }
+            }
             emit_human(false, &panel, mode, || Ok(()))?;
         }
     }

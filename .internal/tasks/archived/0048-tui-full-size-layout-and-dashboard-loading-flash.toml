@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0048"
 title = 'TUIs fill the terminal, and the dashboard stops flashing "Loading…"'
 status = "done"
@@ -36,6 +36,8 @@ unobtrusive staleness marker, never a placeholder that erases the screen's conte
 Where: the dashboard's tick/refresh path (`dashboard.rs`, its `InventoryCache` consumers) —
 find where the placeholder branch renders and make it first-paint-only.
 
+"""
+validation = """
 ## Done when
 
 Every TUI surface spans the full terminal at normal and narrow sizes, including after a

@@ -1,9 +1,9 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0046"
 title = "Big cleanup across all trait sources: one vocabulary, one style, inferred contracts"
 status = "done"
 raised = "2026-07-31"
-content = '''
+content = """
 
 
 One sweep over every package in `.ctx/traits/packages/` (implement, plan,
@@ -104,6 +104,8 @@ source/
 Every package converges on this shape. implement's `variants/quick/*`
 sub-package and plan's `data.ts`/`agent.ts` factories both dissolve into it.
 
+"""
+validation = '''
 ## Watch
 
 - **Sequencing against 0045** (`input.text`/`output.text` grammar): both

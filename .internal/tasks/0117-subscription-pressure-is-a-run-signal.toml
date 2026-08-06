@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0117"
 title = "Subscription pressure is a run signal, not a surprise"
 status = "ready"
@@ -25,6 +25,8 @@ default would have paused runs that then completed fine). Extend
 `CreditsExhaustedEvidence` (or a sibling) so subscription exhaustion carries
 `resets-at` rather than a top-up URL.
 
+"""
+validation = """
 ## Watch
 
 - Never pause MID-frame — a frame is an atomic harness subprocess; the check belongs

@@ -342,7 +342,12 @@ mod tests {
             title: format!("title {key}"),
             status,
             raised: None,
+            closed: None,
+            wall: None,
+            origin: None,
             content: String::new(),
+            scope: String::new(),
+            validation: String::new(),
             relations: Relations::default(),
             steps: Vec::<Step>::new(),
         }

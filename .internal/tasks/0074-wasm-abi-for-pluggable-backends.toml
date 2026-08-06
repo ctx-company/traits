@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0074"
 title = "A WASM ABI for pluggable backends: task providers and handoff channels"
 status = "ready"
@@ -19,6 +19,8 @@ backend plugin is the inward direction: the binary hosts a wasm runtime and call
 module it did not write. Different dependency, different threat model, essentially none of the
 existing code reusable beyond the JSON-string calling convention.
 
+"""
+scope = """
 ## Decisions
 
 - **This is not scheduled until `command` (0073) proves insufficient**, and "insufficient" means one
@@ -46,6 +48,8 @@ existing code reusable beyond the JSON-string calling convention.
   backend error with the module's digest in the message — never a host panic, and for a channel,
   never a failed run.
 
+"""
+validation = """
 ## Watch
 
 - Hosting a wasm runtime is a real dependency with a real binary-size and build-time cost, on a

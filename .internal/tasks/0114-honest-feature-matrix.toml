@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0114"
 title = "Public, honest feature matrix + per-competitor rebuttals"
 status = "ready"
@@ -23,6 +23,8 @@ for ctx (NOT ✓ — they are not shipped), and every remaining ✓ survives a h
 reviewer clicking straight through to a real command or doc; each rebuttal attacks
 the gap, not the project.
 
+"""
+validation = """
 ## Watch
 
 - Every cell must pass the claim gate (no cell may assert what it can't back).

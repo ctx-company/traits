@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0021"
 title = "`<response>` must point at `<schema>`, not `<format>`"
 status = "done"
@@ -38,6 +38,8 @@ its place as a shape-at-a-glance summary — and if kept, make it valid JSON wit
 type placeholders rather than bare tokens, so it cannot be read as an example
 that conflicts with the schema.
 
+"""
+validation = """
 ## Watch
 
 - Do not simply delete `<format>`: a one-line shape is genuinely useful for a

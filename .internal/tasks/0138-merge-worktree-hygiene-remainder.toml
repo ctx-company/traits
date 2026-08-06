@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0138"
 title = "Merge/worktree hygiene remainder: park prunes declared caches, doctor debris sweep"
 status = "done"
@@ -31,6 +31,8 @@ corpses an interrupted cleanup leaves); stale landing-gate temp binaries
 (delete). Doctor NEVER touches unmerged branches, present worktrees, or anything
 outside those three classes.
 
+"""
+validation = """
 ## Watch
 
 - Park semantics otherwise unchanged (parking preserves everything triage needs).

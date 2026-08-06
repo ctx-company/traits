@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0024"
 title = "Killing a live run leaves the terminal dirty"
 status = "done"
@@ -16,6 +16,8 @@ Teardown must run on every exit path, not just the clean one — normal
 completion, `q`/detach, SIGINT, and a panic. A restore that only happens at the
 bottom of the happy path is skipped by exactly the case that matters.
 
+"""
+validation = """
 ## Watch
 
 - Restoring twice must be harmless; several paths may race to it.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0115"
 title = "Adherence evals: prove a trait changes behavior, per directive"
 status = "ready"
@@ -20,6 +20,8 @@ directive id with the model-view digest, model id, and date. Deterministic check
 where possible, rubric-judge where not. Composes with the landed eval/scenario
 fields and the auto-research loop pattern.
 
+"""
+validation = """
 ## Watch
 
 - This is a PRODUCT capability and launch evidence, **never a gate on our own

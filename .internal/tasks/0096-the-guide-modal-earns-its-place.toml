@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0096"
 title = "The guide modal earns its place: bigger, dimmed behind, and actually informed"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 Five changes to the guide. Four are presentation. The fifth is the one that
 matters: **the guide does not know what the run is about.**
 
+"""
+scope = """
 ## Decisions
 
 ### It knows the run (the important one)
@@ -101,6 +103,8 @@ matters: **the guide does not know what the run is about.**
 helper in `tui_kit` with the existing dim sites moved onto it; a clear action
 and its hint; the guide's hint line.
 
+"""
+validation = """
 ## Watch
 
 - **The guide seat is one-shot and bounded.** More context means more tokens

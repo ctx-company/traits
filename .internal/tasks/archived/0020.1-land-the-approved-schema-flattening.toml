@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0020.1"
 title = "Land the approved schema-flattening diff"
 status = "done"
@@ -36,6 +36,8 @@ Both consumers (`<schema>` block and `--json-schema` payload) provably read the 
 Value from `requested_output_schema` (verified by the reviewer at `frame_prompt.rs:1244-1298`), so
 one flattening path serves both — the parent task's core contract.
 
+"""
+scope = """
 ## Scope
 
 Apply the patch as one commit whose subject credits run-7b9d29ff's work, gate, land. Reviewer-carried
@@ -43,6 +45,8 @@ minor notes that are explicitly NOT in scope (recorded so nobody relitigates the
 union-arm bracket-stripping in `referenced_local_ids` stays manual until union emit lands, and a
 dedicated union-cycle unit test rides with that same future work.
 
+"""
+validation = """
 ## Watch
 
 - **Do not run the gate against a stale leased slot.** The run's twelve gate attempts all failed on

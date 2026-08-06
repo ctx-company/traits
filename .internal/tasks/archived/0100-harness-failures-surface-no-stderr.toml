@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0100"
 title = "A failed harness spawn shows its exit code but never its stderr"
 status = "done"

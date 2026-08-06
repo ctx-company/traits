@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0054"
 title = "`?` opens a modal chat with the guide, not a one-shot strip"
 status = "done"
@@ -39,6 +39,8 @@ There is no history, no scrollback, and the conversation competes with the panes
 - Dispatch is unchanged: the existing `guide_dispatch` / `ask_results` channel and generation
   counter carry each question; only the presentation and the retention change.
 
+"""
+validation = """
 ## Watch
 
 - **Keys while the modal is open belong to the modal.** `q` closes it rather than opening the

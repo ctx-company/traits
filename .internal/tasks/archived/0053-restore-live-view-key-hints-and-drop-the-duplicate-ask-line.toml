@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0053"
 title = "Live view: restore the scroll key hints, and drop the duplicated ask line"
 status = "done"
@@ -46,6 +46,8 @@ still expands normally on `?` for editing, waiting and the answer.
 Tests pin the old text — `run_view.rs:6009` and `:6038` assert
 `ask_lines(&ask) == ["[?] Ask the guide"]` — and must move with the change.
 
+"""
+validation = """
 ## Watch
 
 - Both edits are in the shared renderer, so verify all three surfaces (live, dashboard preview,

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0015"
 title = "The journey line: bullets not gutters, and drop the in/out rows"
 status = "done"
@@ -42,6 +42,8 @@ Width is scarce — the journey shares a 2x2 grid (P552) inside an inline viewpo
 
 **The mark, the step label and the state survive to the narrowest width.** They are what the pane is for; the agent and variant are context.
 
+"""
+validation = """
 ## Watch
 
 - Truncate on DISPLAY width, not byte length — `·` is multi-byte and the step labels are authored text.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0047"
 title = "Run honesty: refuse non-starters, ask on stalls, hand off the unsatisfiable"
 status = "done"
@@ -72,6 +72,8 @@ timed-out as its own outcome — park immediately with reason "gate exceeds its 
 ceiling" (or route into mechanism 2's ask), never as another fix round; the reviewer
 doctrine stops asking workers to repair it.
 
+"""
+validation = """
 ## Watch
 
 - Mechanism 1's agent check and its deterministic preflight are complementary, not

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0003"
 title = "TeamClaude: multi-account Claude routing under ctx runs"
 status = "done"
@@ -211,10 +211,6 @@ That is precisely **P557** ("One harness, several accounts: per-seat credential 
 4. Decide whether MITM mode is needed (only if something in the path hardcodes `api.anthropic.com`).
 5. Record the outcome on **P557** — specifically whether env-per-seat is the right shape for that phase, which this research says it is.
 
-## Done when
-
-Three accounts serve one ctx run through the proxy; a quota rotation happens mid-run with no failed frame; and P557's design records env-per-seat with `TC_ACCT` pinning as its claude-code reference path.
-
 ## Explicitly not in scope
 
 Implementing P557; bundling, vendoring or defaulting to TeamClaude in the product; automatic account rotation logic inside ctx (the proxy owns that, and duplicating it would be worse).
@@ -242,4 +238,10 @@ Two durable lessons:
   (KeepAlive + RunAtLoad, `--activity-log` wired) is staged for the owner to
   install; until it is, `teamclaude status` before dispatching is the manual
   pre-flight.
+"""
+validation = """
+## Done when
+
+Three accounts serve one ctx run through the proxy; a quota rotation happens mid-run with no failed frame; and P557's design records env-per-seat with `TC_ACCT` pinning as its claude-code reference path.
+
 """

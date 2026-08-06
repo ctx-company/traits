@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0087"
 title = "The peer interface: a run tells and asks, and the host performs the effect"
 status = "ready"
@@ -33,6 +33,8 @@ An `ask` exists for the four cases an ambient tool cannot serve:
 
 Short version: an `ask` is the mechanism for answers that must be **structural**.
 
+"""
+scope = """
 ## Decisions
 
 - **Two verbs, one interface: `tell` and `ask`.** Direction is a declared property of a peer, not a
@@ -103,6 +105,8 @@ in the drive loop; `wait-ms` and `deferred` per peer; per-peer options schemas v
 delivery log widened to `(session, peer, site)` and handing back a prior reference; the `local` peer;
 `--dry-run` covering both verbs.
 
+"""
+validation = """
 ## Watch
 
 - **The perform-and-write-back path runs while a frame is open.** It is the first thing in the drive

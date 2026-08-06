@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0127"
 title = "Mode B host plugins: the agent operator's manual + packaging"
 status = "ready"
@@ -23,6 +23,8 @@ skill export. RIDER: the claude-code pack also emits
 `.claude-plugin/marketplace.json` so exported traits are one-click installable
 through the marketplace UI.
 
+"""
+validation = """
 ## Done when
 
 A cold agent completes a trait run driven only by the manual; all three host packs

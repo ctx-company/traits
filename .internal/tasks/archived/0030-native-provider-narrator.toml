@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0030"
 title = "Narrate through the provider API directly, not a harness"
 status = "done"
@@ -21,6 +21,8 @@ Call OpenAI/Anthropic directly for the narrator seat instead.
 - **Tokens.** Even the tuned `--pure` narrator carries a harness system prompt
   the task does not need. Direct calls send only what the status line requires.
 
+"""
+validation = """
 ## Watch
 
 - This adds a credential path ctx does not have today. Narration must DEGRADE

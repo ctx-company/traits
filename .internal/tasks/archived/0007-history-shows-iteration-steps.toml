@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0007"
 title = "History reads as a step log, with the iteration on the line"
 status = "done"
@@ -28,6 +28,8 @@ Exact ornamentation is open: `(2)`, `#2`, or `round 2` all read fine. Pick one a
 
 `position-path` on each sequence status already carries `{kind: "loop", id, index, iteration}` — the iteration is recorded per step, per round, and is what the ledger uses for its own bookkeeping. Nothing new needs capturing; the renderer is dropping it.
 
+"""
+validation = """
 ## Watch
 
 - Take the iteration from `position-path`, never from a counter the renderer keeps. A view-local counter drifts the moment a run resumes, and a resumed run is exactly when a reader most needs the history to be right.

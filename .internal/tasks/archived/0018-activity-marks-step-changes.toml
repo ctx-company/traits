@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0018"
 title = "Current activity marks each step change, and the timestamp goes back to HH:MM:SS"
 status = "done"
@@ -28,6 +28,8 @@ The prefix returns to the plain clock — `00:20:10`, not `00h 20m 10s`. `elapse
 
 This reverses part of an earlier ask (task 0007 / P552 discussed `00h 19m 13s`). The clock form is the decision: fixed width, sorts, and reads as a timestamp rather than a duration sentence. **Apply it everywhere the elapsed prefix appears — activity, history, journey — so the three panes agree.**
 
+"""
+validation = """
 ## Watch
 
 - Derive the step-change row from the ledger's own step transition, not from a narration string containing a step name. The panel already receives accepted-frame refreshes (`push_step_summary`, `refresh`); use that seam, or a run whose narrator is off gets no markers.

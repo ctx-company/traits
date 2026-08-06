@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0132"
 title = "deep-research: configure the seats, approve trust, run the live validation"
 status = "ready"
@@ -20,6 +20,8 @@ deep-research`; stub-fixture drive end-to-end; then one REAL topic run,
 owner-audited against the source repo's own quality rubric; every fidelity gap
 becomes a typed note routed to 0133 or a new task — never silently absorbed.
 
+"""
+validation = """
 ## Done when
 
 The real-topic run produces the research output structure the source AGENTS.md

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0110"
 title = "the session-title sink: the trait feeds the title"
 status = "ready"
@@ -13,6 +13,8 @@ session gets a title that says what the run is actually doing. It is the first *
 the first-party miniature of 0087's "a run tells": the run produces a value, the host performs
 the effect. Sinks are a closed, typed set; each one is added deliberately, like condition sugar.
 
+"""
+scope = """
 ## Decisions
 
 - **The spelling is `effect.session.title(X)`.** The `session` segment names the affected
@@ -62,6 +64,8 @@ generate-with-context for material; the narrator prompt context swap in
 registrar added to 0106's surface when that task lands (or as a follow-up commit on this one if
 0106 is already done).
 
+"""
+validation = """
 ## Watch
 
 - **Seat resolution is reused, not re-resolved.** The generated mode goes through the same

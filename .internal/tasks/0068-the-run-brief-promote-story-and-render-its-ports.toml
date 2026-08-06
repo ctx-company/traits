@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0068"
 title = "The run brief: promote `story`, and make it render the ports"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 First slice of the handoff arc. The brief already exists, it is hidden, and it does not render the
 content that makes it a brief.
 
+"""
+scope = """
 ## Decisions
 
 - **`story` IS the brief — do not build a second renderer.** `ctx traits story`
@@ -46,6 +48,8 @@ function with the three fidelities and the existing wire formats; port bodies in
 escalation flag promoted; the command unhidden with its help text rewritten for a first-class
 surface.
 
+"""
+validation = """
 ## Watch
 
 - **The park report is not currently a port.** 0050 removed `port:park-report` from quick as

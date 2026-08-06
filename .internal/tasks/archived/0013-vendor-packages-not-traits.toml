@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0013"
 title = "Vendor materializes PACKAGES, not traits"
 status = "done"
@@ -139,6 +139,8 @@ Make the authoring root discovered rather than assumed: a repo with `traits.toml
 
 **Watch:** the vendor DESTINATION differs too. A consumer vendors into `.ctx/traits/vendor/`; a package vendoring its own dependencies needs its own location, and whether that is `vendor/` at the package root or something excluded from the published tarball is a real decision — a package that ships its dependencies' copies inside itself would double-vendor on install. Decide it here rather than discovering it after the first publish.
 
+"""
+validation = """
 ## Watch
 
 - **The vendor tree is DERIVED — deleting it is a no-op.** Verified 2026-07-28: removing both vendored packages blocked four traits (`guarded-change`, `refactor-{quick,smart,strict}`), and a single `ctx traits vendor` regenerated both from their sibling path dependencies and restored every check to green. So there is nothing to migrate and no compatibility shim to write: land the new materialization and the next `vendor` produces it. Do NOT write a reader for the old layout — that is the flatten-when-one branch under another name.

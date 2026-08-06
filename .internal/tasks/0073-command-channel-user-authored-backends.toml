@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0073"
 title = "The `command` channel: how anyone authors their own handoff backend"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 Sixth slice of the handoff arc. First-party channels cover the cases we chose; this covers everyone
 else's, without us shipping a plugin runtime to do it.
 
+"""
+scope = """
 ## Decisions
 
 - **A subprocess is the extension point.** Envelope JSON on stdin, receipt JSON on stdout, non-zero
@@ -44,6 +46,8 @@ config-declared capabilities with required fields for this variant; `resolve()` 
 exists and is executable; timeout and output-size bounds; `--dry-run` printing the argv, the
 environment keys and the stdin payload without executing.
 
+"""
+validation = """
 ## Watch
 
 - **Bound it like a command step.** An extension script that hangs must not hang the host. Reuse

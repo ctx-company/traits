@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0062"
 title = "Task becomes a CDK type: uniform content nodes, deterministic extraction, iterable steps"
 status = "ready"
@@ -8,6 +8,8 @@ content = """
 
 Fourth slice of the task-interface arc, and the largest. Dispatch nothing else alongside it.
 
+"""
+scope = """
 ## Decisions
 
 - **A task is a uniform node.** `task.content`, `task.subtasks.*.content`, `task.steps.*.content`
@@ -39,6 +41,8 @@ Field proxies extend P398's typed field refs so `over: task.openSteps` typecheck
 `step.content` interpolates. The implement family is rewritten onto it, retiring
 `taskExtractionStep` and the text `slot:task-brief`.
 
+"""
+validation = """
 ## Watch
 
 - **This touches every trait in the fleet.** Digests move, everything relocks and re-approves, and

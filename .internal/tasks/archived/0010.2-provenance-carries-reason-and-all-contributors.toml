@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010.2"
 title = "Provenance carries the semantic reason and every additive contributor"
 status = "done"
@@ -25,6 +25,8 @@ authored exclusions augment the product defaults instead of replacing them.
   requirements, personal overrides, `$CTX_CONFIG`, duplicate additive entries, and same-key map
   conflicts.
 
+"""
+validation = """
 ## Done when
 
 `cargo test -p ctx-traits-cli --test proof_config` passes with exact text and JSON assertions

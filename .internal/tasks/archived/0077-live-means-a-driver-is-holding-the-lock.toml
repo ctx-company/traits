@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0077"
 title = '"Live" must mean a driver is holding the lock, not a status left behind'
 status = "done"
@@ -40,6 +40,8 @@ uses a real `flock`, so a dead holder's lock file reads as `Unheld`, and the
 `ProbeBudget` fallback for unprobed rows is `Unheld` too. Both are correct.
 The grouping simply ignores the answer.
 
+"""
+scope = """
 ## Decisions
 
 - **Live is a probe result, never a status.** One definition: a driver holds
@@ -68,6 +70,8 @@ section headers that render it. No change to `run_control::probe`,
 `ProbeBudget`, `classify_session`, or `SessionState::derive` — all four are
 already correct.
 
+"""
+validation = """
 ## Watch
 
 - **This is newly landed code**, from `5e97161a` (2026-08-03, "Group session

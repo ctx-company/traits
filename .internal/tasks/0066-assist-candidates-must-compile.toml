@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0066"
 title = "An assist candidate must compile: produce → build → check, in a bounded loop"
 status = "ready"
@@ -12,6 +12,8 @@ compile comes back `blocked` and the operator re-runs the whole command by hand.
 shape the product argues against — the guarded produce/review loop is our own primitive, and our
 own authoring commands do not use it.
 
+"""
+scope = """
 ## Decisions
 
 - **A failed build is a ROUND, not a verdict.** `generate`, `import --llm-assisted` and
@@ -46,6 +48,8 @@ per-round progress the way a run does rather than blocking silently on a multi-m
 assist `Candidate` envelope grows round evidence: rounds spent, which rung failed each round, and
 the diagnostics that drove the next attempt.
 
+"""
+validation = """
 ## Watch
 
 - **Each round costs a model call plus a node build.** Bound the rounds, declare the bound, and

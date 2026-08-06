@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0011"
 title = "Dim the inactive panes further, and dim everything when the terminal loses focus"
 status = "done"
@@ -18,6 +18,8 @@ The ask: in tmux (or any multiplexer / unfocused window), a ctx pane that is not
 
 This needs terminal focus reporting — `crossterm`'s `EnableFocusChange` and the `Event::FocusGained`/`FocusLost` events. **`rg 'FocusGained|EnableFocusChange' tui_ratatui.rs` returns nothing**: ctx does not enable or handle them today. So half 2 is: enable focus reporting on pane construction, handle the two events in the input pump, and hold a `terminal_focused` flag that styling reads.
 
+"""
+validation = """
 ## Watch
 
 - **Focus reporting is not universal.** It is a DEC private mode (`?1004`); tmux passes it through only when its own `focus-events` option is on, and some terminals ignore it entirely. Treat "never received a focus event" as focused — a view that renders permanently dim because a terminal is silent is worse than one that never dims. Probe/degrade, do not assume.

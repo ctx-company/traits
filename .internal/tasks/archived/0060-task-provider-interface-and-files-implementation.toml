@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0060"
 title = "The task provider interface, with the files backend as its first implementation"
 status = "ready"
@@ -9,6 +9,8 @@ content = """
 Second slice of the task-interface arc. The point of this task is that `.internal/tasks/` stops
 being *the* board and becomes *one implementation* of it.
 
+"""
+scope = """
 ## Decisions
 
 - **Verb set:** `resolve · get · list · create · update · sync`. Small on purpose.
@@ -32,6 +34,8 @@ being *the* board and becomes *one implementation* of it.
 - **`ctx tasks sync | list | show` ships with this slice** (owner call). Sync is manual only —
   never automatic on opening a surface.
 
+"""
+validation = """
 ## Watch
 
 - `sync` re-reads the backend: it reports what the backend says, not whether the backend is right.

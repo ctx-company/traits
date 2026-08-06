@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0057"
 title = "Worktree runs pay a full cold Rust build; they need a warm cache that survives"
 status = "done"
@@ -101,6 +101,8 @@ What share of a cold build is the ~460 dependency units versus our ~50 local uni
 binaries? If dependencies dominate, option 2 alone may be enough and the pool never needs building.
 Take this measurement before committing to a design.
 
+"""
+validation = """
 ## Watch
 
 - Whatever lands must keep concurrent runs genuinely independent — the reason per-worktree targets

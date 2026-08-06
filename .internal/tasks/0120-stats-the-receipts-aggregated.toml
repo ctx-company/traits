@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0120"
 title = "`ctx traits stats`: the receipts, aggregated"
 status = "ready"
@@ -16,6 +16,8 @@ refinement rounds to approval. Repo-scope now; machine-wide automatically once t
 global-tier resolution (0121) is in play. Strictly read-only — no new telemetry is
 written.
 
+"""
+validation = """
 ## Done when
 
 Stats over an existing day's ledgers reproduces hand-counted numbers; `--json` is

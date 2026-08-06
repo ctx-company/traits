@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0135"
 title = "Dynamic-synthesis remainder: skeleton-constrained synthesis + `distill <run-id>`"
 status = "ready"
@@ -30,6 +30,8 @@ frames → command steps with argv), synthesize prompts from resolved prompt tex
 Multi-ledger input generalizes (shared shape wins, divergences become
 parameters). Output `status = draft`, never auto-trusted.
 
+"""
+validation = """
 ## Watch
 
 - Distillation must never fabricate what the ledger doesn't evidence — steps

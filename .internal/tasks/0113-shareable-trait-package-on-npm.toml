@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0113"
 title = "Shareable trait package on npm, end to end: the reuse demo"
 status = "ready"
@@ -25,6 +25,8 @@ sweep. In a fresh repo, demo BOTH reuse modes authenticated as the scope owner:
 installs, vendors, locks, `check` green with dependency digests. Capture as the
 launch demo + blog snippet.
 
+"""
+validation = """
 ## Watch
 
 - The vendored subset (canonical doc + resources/) must be exactly what ships in the

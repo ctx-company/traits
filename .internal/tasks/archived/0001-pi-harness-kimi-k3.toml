@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0001"
 title = "Run Pi as a ctx harness, driving kimi-k3 (opencode-go / OpenRouter)"
 status = "done"
@@ -46,11 +46,13 @@ So the first question is not "which flag" but: **can `pi` reach kimi-k3 at all, 
 4. Add a seat: `[agent.role.<name>] harness = "pi"`, `model = <resolved id>`, `reasoning-effort` — note this becomes `--thinking`, so the valid values are Pi's, not `low|high|max`. `session-mode = "per-frame"` for the reason in risk 1.
 5. Run one small phase end to end. Watch the debug trace at `~/.config/ctx/debug/<repo>/<run-id>/` for `stdout-truncated`, and check the frame actually produced typed slot output rather than prose.
 
+## Explicitly not in scope
+
+Making `pi` the default worker; write confinement for `pi` (that is P480); fixing the schema-on-resume gap (that is P540).
+"""
+validation = """
 ## Done when
 
 `pi` spawns from a ctx seat against a reachable kimi-k3, completes one real frame with valid typed output, and the three risks above are each either resolved or recorded with a stated decision. The registry table in `harness_config.rs` matches Pi's actual `--help`.
 
-## Explicitly not in scope
-
-Making `pi` the default worker; write confinement for `pi` (that is P480); fixing the schema-on-resume gap (that is P540).
 """

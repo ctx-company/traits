@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0035"
 title = "Three config-resolution invariants, enforced rather than remembered"
 status = "done"
@@ -102,6 +102,8 @@ cannot drift from what it aliases.
 
 ---
 
+"""
+validation = """
 ## Watch
 
 - These are not style rules. Each names a specific failure that reached a run:

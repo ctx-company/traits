@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0090"
 title = "The `mcp` peer: server, toolset, binding — with the tool's schema checked at `doctor`"
 status = "ready"
@@ -18,6 +18,8 @@ depends on. 0087's four cases, applied to a machine that answers instead of a pe
 Ranked last because 0088 is the slice with no substitute, while this one's use cases are a narrow
 subset of what 0092 covers less rigorously but far more usefully.
 
+"""
+scope = """
 ## Decisions
 
 - **Three levels, declared separately: server, toolset, binding.**
@@ -51,6 +53,8 @@ stdio and HTTP transports as the server config allows; tool discovery and both-d
 matching in `resolve()`; the `args` rename map; host-owned server lifecycle with bounds from 0084;
 `--dry-run` printing the resolved server, tool and arguments without calling.
 
+"""
+validation = """
 ## Watch
 
 - **Tool output is untrusted input** and is validated against the declared reply schema before it

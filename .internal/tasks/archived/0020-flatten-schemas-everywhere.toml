@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0020"
 title = "Flatten schemas at emit: compose in authoring, never in the payload"
 status = "cancelled"
@@ -33,6 +33,8 @@ code paths, two sets of bugs, and a standing invitation for someone to
 "fix" the divergence. One flattened path is simpler and is at least as good in
 both places.
 
+"""
+validation = """
 ## Watch
 
 - Flattening a recursive or self-referential schema does not terminate. Reject

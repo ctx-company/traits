@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0040"
 title = "`publish` refuses every folded family package"
 status = "done"
@@ -69,6 +69,8 @@ is stale would ship exactly the drift the locked check exists to prevent. **Chec
 every leaf and refuse on the first failure**, reporting which leaf failed —
 publishing is a one-way act and the whole package moves together.
 
+"""
+validation = """
 ## Watch
 
 - **Do not add a `--variant` flag to make one leaf publishable.** The npm package

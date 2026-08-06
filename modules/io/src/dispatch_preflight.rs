@@ -2,16 +2,15 @@
 //! (P414), closed-status tasks, and unmet dependencies (0061).
 //!
 //! Before a session, worktree, or first frame exists, refuse to dispatch a
-//! task whose own task file carries an explicit `**Wall:** <id>` label when
-//! a repository-scoped ledger already records a BLOCKED `implement-*` run
+//! task whose own task file carries a typed `wall` id (0063.1) when a
+//! repository-scoped ledger already records a BLOCKED `implement-*` run
 //! whose typed park report cites that exact wall id — and no later run of
 //! that wall's ORIGINATING task has since completed. The task value resolves
 //! through the [`ctx_traits_core::task::provider::TaskProvider`] interface
 //! (0060/0061) against the trait's declared `task-board` directory — never a
 //! private filename/stem/prefix chain of this module's own — and the whole
 //! resolved document is that task's evidence. An id is never inferred from
-//! prose similarity — only an explicit, identical `**Wall:**` label id
-//! (found by scanning the document's opaque `content`) ever blocks a
+//! prose similarity — only an explicit, identical `wall` id ever blocks a
 //! sibling. [`resolve_dispatch_task`] is the single read every preflight
 //! (wall, closed-status, dependency) and dispatch materialisation shares.
 
@@ -24,7 +23,6 @@ use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{ResolvedTask, TaskProvider};
 
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
-const WALL_LABEL: &str = "**Wall:**";
 const IMPLEMENT_FAMILY_ID: &str = "implement";
 const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
 const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
@@ -140,11 +138,10 @@ pub fn resolve_dispatch_task(
     }))
 }
 
-/// The explicit `**Wall:** <id>` label, if any, out of the opaque `content`
-/// of `task`'s resolved document. A document carrying no such label yields
-/// `None` — never a refusal.
+/// The typed `wall` id (0063.1), if any, on `task`'s resolved document. A
+/// document carrying no such field yields `None` — never a refusal.
 pub fn explicit_wall_id(task: &DispatchTask) -> Option<String> {
-    task.resolved.document.content.lines().find_map(wall_label)
+    task.resolved.document.wall.clone()
 }
 
 /// A task document carrying a closed (`done` or `cancelled`) stored
@@ -270,20 +267,6 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
     format!(
         "task {task_key} depends on {deps} — dispatch refuses tasks with unmet dependencies; pass --override-dependencies to record an override and dispatch anyway"
     )
-}
-
-/// The id following a `**Wall:**` label on `line`, if present — the first
-/// whitespace-delimited token after the label.
-fn wall_label(line: &str) -> Option<String> {
-    let pos = line.find(WALL_LABEL)?;
-    let body = line[pos + WALL_LABEL.len()..].trim();
-    let id = body.split_whitespace().next()?;
-    let id = id.trim_end_matches(['.', ',']);
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_string())
-    }
 }
 
 /// The typed park-report entry a blocked session's final review round
@@ -586,7 +569,7 @@ mod tests {
     }
 
     const TASK_0050: &str =
-        "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n";
+        "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n";
 
     #[test]
     fn resolve_dispatch_task_matches_toml_not_markdown() {
@@ -626,7 +609,7 @@ mod tests {
         write_task(
             &board_dir.join("archived"),
             "0050-example.toml",
-            "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"done\"\n",
+            "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"done\"\n",
         );
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();
@@ -639,12 +622,39 @@ mod tests {
     }
 
     #[test]
-    fn wall_label_extracts_the_first_whitespace_delimited_token() {
-        assert_eq!(
-            wall_label("**Wall:** wall-42 extra text"),
-            Some("wall-42".to_string())
+    fn explicit_wall_id_reads_the_typed_field() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0050-example.toml",
+            "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\nwall = \"wall-42\"\n",
         );
-        assert_eq!(wall_label("no wall label here"), None);
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
+            .unwrap()
+            .expect("task resolves");
+        assert_eq!(explicit_wall_id(&task), Some("wall-42".to_string()));
+    }
+
+    #[test]
+    fn explicit_wall_id_is_none_without_the_typed_field() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0050-example.toml",
+            "schema-version = \"0.2\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
+            .unwrap()
+            .expect("task resolves");
+        assert_eq!(explicit_wall_id(&task), None);
     }
 
     #[test]
@@ -666,12 +676,12 @@ mod tests {
         write_task(
             &board_dir,
             "0001-dep.toml",
-            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"done\"\n",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"done\"\n",
         );
         write_task(
             &board_dir,
             "0002-dependent.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
         );
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();
@@ -689,12 +699,12 @@ mod tests {
         write_task(
             &board_dir,
             "0001-dep.toml",
-            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
         );
         write_task(
             &board_dir,
             "0002-dependent.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
         );
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();
@@ -719,12 +729,12 @@ mod tests {
         write_task(
             &board_dir,
             "0001-dep.toml",
-            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
         );
         write_task(
             &board_dir,
             "0002-dependent.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
         );
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();
@@ -742,7 +752,7 @@ mod tests {
         write_task(
             &board_dir,
             "0002-dependent.toml",
-            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"9999\"]\n",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"9999\"]\n",
         );
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();

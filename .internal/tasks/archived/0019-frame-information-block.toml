@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0019"
 title = "Render the frame's declared context: `<information>` with intent and behavior"
 status = "done"
@@ -95,24 +95,6 @@ declarations render, that sentence is a second source for one fact — the drift
 Sweep the other prompts for the same: anything an existing intent or behavior id
 already says belongs in the vocabulary, not in authored prose.
 
-## Watch
-
-- **Dilution is the real risk.** The authored prompt is extremely specific
-  ("re-run its argv verbatim — that exact command is what decides done-ness").
-  The directives are general dispositions. Specific and general instructions
-  coexisting can AVERAGE rather than add, blunting the tuned guidance. This is
-  the main reason the duplicate deletion above is not optional.
-- **Placement versus effect.** `<behavior>` governs the response but sits ~14 KB
-  before the output contract, with the whole draft between them. If behavior
-  demonstrably fails to land, moving `<behavior>` into `<output>` beside
-  `<budget>` is the first thing to try — a one-line change, not a redesign.
-  Treat placement as tunable, not settled.
-- **The budget figure must derive from the enforced constant.** A hand-copied
-  number drifts silently the day the limit changes, and the symptom is a
-  truncated frame — exactly what this prevents.
-- **`<information>` is context; `<data>` is operands.** Do not let slot values
-  leak upward, or the two stop meaning anything distinct.
-
 ## Measure it, and do not overclaim
 
 Cost is ~325 tokens (~7.5% of a measured 4,350-token produce frame): 7 intent
@@ -153,6 +135,26 @@ scratch worktree, same trait, same step, no session so all data ports render pen
 This confirms the frame carries the declared guidance and the duplicate prose
 is gone, on a real frame, not an estimate. Behavioral benefit remains
 unmeasured per the note above; P503 is still the instrument for that.
+
+"""
+validation = """
+## Watch
+
+- **Dilution is the real risk.** The authored prompt is extremely specific
+  ("re-run its argv verbatim — that exact command is what decides done-ness").
+  The directives are general dispositions. Specific and general instructions
+  coexisting can AVERAGE rather than add, blunting the tuned guidance. This is
+  the main reason the duplicate deletion above is not optional.
+- **Placement versus effect.** `<behavior>` governs the response but sits ~14 KB
+  before the output contract, with the whole draft between them. If behavior
+  demonstrably fails to land, moving `<behavior>` into `<output>` beside
+  `<budget>` is the first thing to try — a one-line change, not a redesign.
+  Treat placement as tunable, not settled.
+- **The budget figure must derive from the enforced constant.** A hand-copied
+  number drifts silently the day the limit changes, and the symptom is a
+  truncated frame — exactly what this prevents.
+- **`<information>` is context; `<data>` is operands.** Do not let slot values
+  leak upward, or the two stop meaning anything distinct.
 
 ## Done when
 

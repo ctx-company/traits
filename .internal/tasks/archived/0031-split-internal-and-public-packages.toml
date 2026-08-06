@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0031"
 title = "Split internal from public packages; ship only what is needed"
 status = "done"
@@ -40,6 +40,8 @@ distinction is implicit and generated output is emitted broadly.
 - A gate, so the split does not rot: publishing an internal package, or a
   public one importing an internal one, fails.
 
+"""
+validation = """
 ## Watch
 
 - `packages/config/src/generated.ts` is generated FROM the Rust schema and

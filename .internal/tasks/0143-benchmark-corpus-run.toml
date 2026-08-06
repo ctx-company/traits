@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0143"
 title = "Benchmark corpus run: audit ≥1,000 real marketplace skills, commit the manifest and numbers"
 status = "ready"
@@ -21,6 +21,8 @@ Driver: `scripts/audit_marketplace.py` (`discover_skills`, `audit_one` runs
 `just audit-marketplace <corpus>`. Detectors under audit:
 `modules/core/src/audit.rs` (`scan_hidden_content`) + `model_view/sanitize.rs`.
 
+"""
+validation = """
 ## Watch
 
 - Import runs dry (no repo writes) and stdout stays valid JSON even when the audit

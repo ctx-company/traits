@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0092"
 title = "Ambient tools for agent roles, and why they are not peers"
 status = "ready"
@@ -20,6 +20,17 @@ than a step in a procedure.
 
 Same underlying servers. Completely different contract with the ledger.
 
+## The open question that blocks it
+
+**What does replay mean for a turn with tool calls in it?** A recorded run replays recorded values;
+a turn that made four tool calls has four results that are part of how the response came to be but are
+not accepted slot values. Either they become ledger-visible — which is a lot of machinery and makes
+every turn a subgraph — or a replayed turn replays its transcript, tool results included, which means
+the transcript becomes evidence rather than a record. Both are defensible. Neither is decided, and
+shipping without deciding produces a run that cannot honestly claim to be reproducible.
+
+"""
+scope = """
 ## Decisions
 
 - **It is harness configuration, not procedure structure.** Grants live with the seat —
@@ -40,15 +51,8 @@ Same underlying servers. Completely different contract with the ledger.
   reason: a procedure whose claim is that every write is typed and attributed cannot have an unlogged
   writer inside a model turn. Read-shaped tools first; a writing grant needs its own argument.
 
-## The open question that blocks it
-
-**What does replay mean for a turn with tool calls in it?** A recorded run replays recorded values;
-a turn that made four tool calls has four results that are part of how the response came to be but are
-not accepted slot values. Either they become ledger-visible — which is a lot of machinery and makes
-every turn a subgraph — or a replayed turn replays its transcript, tool results included, which means
-the transcript becomes evidence rather than a record. Both are defensible. Neither is decided, and
-shipping without deciding produces a run that cannot honestly claim to be reproducible.
-
+"""
+validation = """
 ## Watch
 
 - **Cost.** A seat with tools uses them, repeatedly, and the calls are invisible until the bill.

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0023"
 title = "Mouse selection copies to clipboard on mouseup, then deselects"
 status = "done"
@@ -9,6 +9,8 @@ content = """
 Select text with the mouse in the live view; on mouseup the selection goes to
 the system clipboard and the selection clears. No modifier, no menu.
 
+"""
+validation = """
 ## Watch
 
 - The TUI takes over the alternate screen, so the terminal's own

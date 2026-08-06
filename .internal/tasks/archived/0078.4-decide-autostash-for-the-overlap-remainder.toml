@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0078.4"
 title = "Decide autostash for the dirty-overlap remainder"
 status = "done"

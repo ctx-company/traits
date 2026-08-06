@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0059"
 title = "Tasks become canonical TOML documents"
 status = "ready"
@@ -17,24 +17,6 @@ different ways ("ready to implement", "ready to investigate", "SPLIT 2026-08-03 
 "(depends on 0028)". Anything that wants to list, filter, enforce or transition tasks has to
 parse English. This product's whole thesis is deterministic typed artifacts with digests; the
 board should be one too.
-
-## Decisions
-
-- **TOML is the canonical storage format.** Markdown is an IMPORT path for adoption, never
-  storage — the same relationship the CDK already has between TS authoring and TOML canonicals.
-- **`schema-version` is required** on every task document, so the format can evolve the way
-  trait canonicals do.
-- **Structure the envelope, never the contract.** Identity, status and relations are typed
-  fields; `content` is opaque prose that nothing parses. In particular `## Done when` stays
-  prose — it is read by agents, not by code.
-- **Steps are nested in the document; subtasks are separate tasks.** A subtask is a task in its
-  own right (own key, own file, own dispatchability) linked by `relations.parent`. A step is an
-  ordered work item inside one task with no independent existence.
-- **Stored status is `ready | done | cancelled`.** Everything else is derived and belongs to
-  0060: `blocked` (unmet `depends-on`), `in-flight`/`parked` (joined from the session store),
-  and a parent's status (from its children — all children done ⇒ parent done).
-- **No priority, estimate or assignee.** This is a dispatch queue for a loop that runs one unit
-  at a time. The moment it grows a planning model it stops being an interface.
 
 ## Shape
 
@@ -65,11 +47,33 @@ Refresh `output_ports` after any projection that writes a port-backed slot …
 Archival is NOT a field — it is a provider mechanic (0060). The document must not encode where
 it lives.
 
+'''
+scope = """
+## Decisions
+
+- **TOML is the canonical storage format.** Markdown is an IMPORT path for adoption, never
+  storage — the same relationship the CDK already has between TS authoring and TOML canonicals.
+- **`schema-version` is required** on every task document, so the format can evolve the way
+  trait canonicals do.
+- **Structure the envelope, never the contract.** Identity, status and relations are typed
+  fields; `content` is opaque prose that nothing parses. In particular `## Done when` stays
+  prose — it is read by agents, not by code.
+- **Steps are nested in the document; subtasks are separate tasks.** A subtask is a task in its
+  own right (own key, own file, own dispatchability) linked by `relations.parent`. A step is an
+  ordered work item inside one task with no independent existence.
+- **Stored status is `ready | done | cancelled`.** Everything else is derived and belongs to
+  0060: `blocked` (unmet `depends-on`), `in-flight`/`parked` (joined from the session store),
+  and a parent's status (from its children — all children done ⇒ parent done).
+- **No priority, estimate or assignee.** This is a dispatch queue for a loop that runs one unit
+  at a time. The moment it grows a planning model it stops being an interface.
+
 ## Scope
 
 The schema and its version, a parser/serialiser, a markdown importer (H1 → title, body →
 content, checkbox lists → steps), and migration of the existing board.
 
+"""
+validation = """
 ## Watch
 
 - **The migration needs judgment, not a script.** Prose statuses and prose dependencies have to
@@ -88,4 +92,4 @@ Every task on the board — live and archived — is a TOML document carrying `s
 statuses come from the closed set; prose dependencies exist as `depends-on` edges; a markdown
 file can be imported into a task document; and nothing in the repo reads the board by parsing
 prose.
-'''
+"""

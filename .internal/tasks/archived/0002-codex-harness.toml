@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0002"
 title = "Add Codex as a real ctx harness, at parity with claude-code/opencode"
 status = "done"
@@ -60,11 +60,13 @@ The ask is "openai subscription (CLI)". Codex authenticates through its own logi
 5. Then a `--worktree` run, and check the sandbox payload actually applied — write outside the worktree should be **refused by the OS**, not merely undeclared. Confirm cargo gates still pass with the external build-cache dir.
 6. Promote to a built-in `HarnessDefinition` and wire `render_codex_payload` to it (route A).
 
+## Explicitly not in scope
+
+Per-account routing (see `tasks/0003`); making codex any seat's default; the P501 hook, which is a different mechanism that already landed.
+"""
+validation = """
 ## Done when
 
 A codex seat runs a real frame with typed output; subagent spawning is prevented or explicitly reported unsupported; an out-of-worktree write is refused by the sandbox while the declared carve-outs still work; and the registry entry reflects the binary's actual flags.
 
-## Explicitly not in scope
-
-Per-account routing (see `tasks/0003`); making codex any seat's default; the P501 hook, which is a different mechanism that already landed.
 """

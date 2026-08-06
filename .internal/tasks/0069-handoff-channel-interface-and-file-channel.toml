@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0069"
 title = "The handoff channel interface, with the file channel as its first implementation"
 status = "ready"
@@ -11,6 +11,8 @@ Second slice of the handoff arc, and the whole design. Everything after it is an
 A run currently ends and nothing leaves the machine. This gives a finished run *effects* — a file, a
 PR body, a Slack card — through one interface, without any of them being special-cased.
 
+"""
+scope = """
 ## Decisions
 
 - **Emission is not state, and the two interfaces stay apart.** The task provider (0060) reads a
@@ -66,6 +68,8 @@ the append-only delivery log in the run store; the `[handoff.channel]` and `[han
 tables with `doctor --config` provenance and `resolve()` validation; the `file` channel;
 `ctx traits handoff <session> [--channel …] [--dry-run]` running the same code path the host runs.
 
+"""
+validation = """
 ## Watch
 
 - **Updating in place requires the channel to read its own destination** (does a PR already exist for

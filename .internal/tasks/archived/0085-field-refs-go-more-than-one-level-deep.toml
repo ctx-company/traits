@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0085"
 title = "Field refs go more than one level deep"
 status = "done"
@@ -19,6 +19,8 @@ Any external tool whose output nests is therefore unreachable. plannotator's pla
 chain of `project` steps through throwaway slots, which is a workaround written into trait source
 where a later reader cannot tell it from intent.
 
+"""
+scope = """
 ## Decisions
 
 - **A path, not a new accessor kind.** `slot.a.b.c` lowers to exactly the guard the one-level form
@@ -48,6 +50,8 @@ provenance; one shared path resolver in core; guards, control flow, `project` an
 contract validator all routed through it; the `field` string in the generated schema carrying a
 dotted path.
 
+"""
+validation = """
 ## Watch
 
 - **Decide the path encoding once and prove it round-trips**, because it lands in recorded guard

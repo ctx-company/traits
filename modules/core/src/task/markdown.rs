@@ -1,19 +1,26 @@
 //! Markdown → [`TaskDocument`] import.
 //!
-//! Extracts exactly two things out of a board markdown file into the typed
-//! envelope: the H1 line (`key`, `title`) and the `**Status:**` header line
-//! (`status`, `relations.depends-on`, `raised`). Everything else — every
-//! other line of the file — becomes `content`, byte-identical to the
-//! source. Checkbox lists convert to `[[steps]]` only under an explicit
+//! Extracts the H1 line (`key`, `title`), the `**Status:**` header line
+//! (`status`, `relations.depends-on`, `raised`), and an optional
+//! `**Wall:**` label (`wall`, 0063.1) out of a board markdown file into the
+//! typed envelope. Everything else — every other line of the file — is
+//! opaque prose, split by [`split_sections`] into `content`/`scope`/
+//! `validation` (0063.1): sections headed `## Decisions`/`## Scope` move to
+//! `scope`, `## Watch`/`## Done when` move to `validation`, the remainder
+//! (including the H1/status/wall lines' surrounding text) stays in
+//! `content`. Checkbox lists convert to `[[steps]]` only under an explicit
 //! `## Steps` heading; every other list (numbered steps, prose bullets) is
-//! left untouched inside `content`.
+//! left untouched inside its prose field.
 
 use super::{Relations, Step, TaskDocument, TaskStatus};
 
 const STATUS_LABEL: &str = "**Status:**";
 const DEPENDS_ON_LABEL: &str = "**Depends on:**";
 const RAISED_LABEL: &str = "**Raised:**";
+const WALL_LABEL: &str = "**Wall:**";
 const STEPS_HEADING: &str = "## Steps";
+const SCOPE_HEADINGS: [&str; 2] = ["Decisions", "Scope"];
+const VALIDATION_HEADINGS: [&str; 2] = ["Watch", "Done when"];
 
 /// Markdown-import specific failures.
 #[derive(Debug, thiserror::Error)]
@@ -45,22 +52,33 @@ pub fn import(text: &str) -> Result<TaskDocument, Error> {
     let status_line = text.lines().nth(status_index).expect("index in bounds");
     let (status, depends_on, raised) = parse_status_line(status_line);
 
-    // Everything else, in original order, is opaque content — the H1 and
-    // status lines are the only two lines ever removed.
-    let content = text
+    let wall_index = text
+        .lines()
+        .position(|line| line.trim_start().starts_with(WALL_LABEL));
+    let wall = wall_index.and_then(|i| wall_label(text.lines().nth(i).expect("index in bounds")));
+    // A wall line is only removed from prose when it actually declared a
+    // wall id — a bare or unparseable label line stays in content.
+    let removed_wall_index = wall.is_some().then_some(wall_index).flatten();
+
+    // Everything else, in original order, is opaque prose — the H1,
+    // status, and (if present) wall lines are the only ones ever removed.
+    let raw_content = text
         .lines()
         .enumerate()
-        .filter(|(i, _)| *i != heading_index && *i != status_index)
+        .filter(|(i, _)| {
+            *i != heading_index && *i != status_index && Some(*i) != removed_wall_index
+        })
         .map(|(_, line)| line)
         .collect::<Vec<_>>()
         .join("\n");
     // Preserve the trailing newline convention of the source file.
-    let content = if text.ends_with('\n') && !content.is_empty() {
-        format!("{content}\n")
+    let raw_content = if text.ends_with('\n') && !raw_content.is_empty() {
+        format!("{raw_content}\n")
     } else {
-        content
+        raw_content
     };
-    let steps = extract_steps(&content);
+    let steps = extract_steps(&raw_content);
+    let (content, scope, validation) = split_sections(&raw_content);
 
     Ok(TaskDocument {
         schema_version: super::SCHEMA_VERSION.to_string(),
@@ -68,13 +86,76 @@ pub fn import(text: &str) -> Result<TaskDocument, Error> {
         title,
         status,
         raised,
+        closed: None,
+        wall,
+        origin: None,
         content,
+        scope,
+        validation,
         relations: Relations {
             depends_on,
             parent: None,
         },
         steps,
     })
+}
+
+/// Split opaque header-convention prose into the three typed prose fields
+/// per 0063.1: every line lands in exactly one of `content`/`scope`/
+/// `validation` — a top-level (`## `) heading line whose trimmed text is
+/// `## Decisions`/`## Scope` switches the running section to `scope`,
+/// `## Watch`/`## Done when` switches it to `validation`, any other
+/// heading switches back to `content`. The heading line itself stays
+/// inside the section it opens, so the field boundary is exact and the
+/// three outputs' line multiset always equals `content`'s — the same
+/// algorithm the 0.1 -> 0.2 board migration uses, so importer and migrator
+/// can never diverge.
+pub fn split_sections(content: &str) -> (String, String, String) {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Section {
+        Content,
+        Scope,
+        Validation,
+    }
+
+    let mut buckets: (Vec<&str>, Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new(), Vec::new());
+    let mut current = Section::Content;
+    for line in content.lines() {
+        if let Some(heading) = top_level_heading(line) {
+            current = if SCOPE_HEADINGS.contains(&heading) {
+                Section::Scope
+            } else if VALIDATION_HEADINGS.contains(&heading) {
+                Section::Validation
+            } else {
+                Section::Content
+            };
+        }
+        match current {
+            Section::Content => buckets.0.push(line),
+            Section::Scope => buckets.1.push(line),
+            Section::Validation => buckets.2.push(line),
+        }
+    }
+
+    let join = |lines: &[&str]| -> String {
+        if lines.is_empty() {
+            return String::new();
+        }
+        let mut joined = lines.join("\n");
+        if content.ends_with('\n') {
+            joined.push('\n');
+        }
+        joined
+    };
+    (join(&buckets.0), join(&buckets.1), join(&buckets.2))
+}
+
+/// The trimmed text of `line` if it is a top-level (`## `, not `### `)
+/// markdown heading, e.g. `"Decisions"` for `"## Decisions"` or
+/// `"## Watch "` (trailing whitespace tolerated).
+fn top_level_heading(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    trimmed.strip_prefix("## ").map(str::trim)
 }
 
 /// Parse `# NNNN — Title` (also tolerating a plain hyphen or colon
@@ -201,6 +282,21 @@ fn extract_task_numbers(text: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// The id following a `**Wall:**` label declared at the start of `line`
+/// (after trimming leading whitespace), if present — the first
+/// whitespace-delimited token after the label. A mid-sentence mention of
+/// the label is not a declaration and yields `None`.
+fn wall_label(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix(WALL_LABEL)?;
+    let id = rest.split_whitespace().next()?;
+    let id = id.trim_end_matches(['.', ',']);
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
 }
 
 /// The first `YYYY-MM-DD` token in `text`, if any.
@@ -365,7 +461,8 @@ mod tests {
         assert!(document.steps[0].done);
         assert_eq!(document.steps[0].content, "continuation line");
         assert!(!document.steps[1].done);
-        assert!(document.content.contains("## Done when"));
+        assert!(document.content.contains("## Steps"));
+        assert!(document.validation.contains("## Done when"));
     }
 
     #[test]
@@ -374,6 +471,66 @@ mod tests {
         let document = import(text).expect("import");
         assert!(document.steps.is_empty());
         assert!(document.content.contains("- [x] not a step"));
+    }
+
+    #[test]
+    fn imports_wall_label_into_typed_field_and_removes_it_from_content() {
+        let text = "# 0001 — Title\n\n**Status:** ready\n\n**Wall:** wall-42\n\nbody\n";
+        let document = import(text).expect("import");
+        assert_eq!(document.wall.as_deref(), Some("wall-42"));
+        assert!(!document.content.contains("**Wall:**"));
+    }
+
+    #[test]
+    fn prose_mention_of_wall_label_is_not_a_declaration() {
+        let text = "# 0001 — Title\n\n**Status:** ready\n\nscrapes the `**Wall:** <id>` label out of the prose\n";
+        let document = import(text).expect("import");
+        assert_eq!(document.wall, None);
+        assert!(
+            document
+                .content
+                .contains("scrapes the `**Wall:** <id>` label out of the prose")
+        );
+    }
+
+    #[test]
+    fn imports_headers_split_into_scope_and_validation() {
+        let text = "# 0001 — Title\n\n**Status:** ready\n\nintro\n\n## Decisions\n\n- a ruling\n\n## Scope\n\nwhat's in\n\n## Watch\n\nwatch this\n\n## Done when\n\nit's done\n\n## Approach\n\nhow\n";
+        let document = import(text).expect("import");
+        assert!(document.content.contains("intro"));
+        assert!(document.content.contains("## Approach"));
+        assert!(!document.content.contains("## Decisions"));
+        assert!(!document.content.contains("## Watch"));
+        assert!(document.scope.contains("## Decisions"));
+        assert!(document.scope.contains("- a ruling"));
+        assert!(document.scope.contains("## Scope"));
+        assert!(document.scope.contains("what's in"));
+        assert!(document.validation.contains("## Watch"));
+        assert!(document.validation.contains("watch this"));
+        assert!(document.validation.contains("## Done when"));
+        assert!(document.validation.contains("it's done"));
+    }
+
+    #[test]
+    fn split_sections_partitions_every_line_exactly_once() {
+        let content = "pre\n## Decisions\nd1\n## Watch\nw1\n## Other\no1\n";
+        let (content_out, scope_out, validation_out) = split_sections(content);
+        let mut recombined: Vec<&str> = content_out
+            .lines()
+            .chain(scope_out.lines())
+            .chain(validation_out.lines())
+            .collect();
+        let mut original: Vec<&str> = content.lines().collect();
+        recombined.sort_unstable();
+        original.sort_unstable();
+        assert_eq!(recombined, original);
+        assert!(scope_out.contains("## Decisions"));
+        assert!(scope_out.contains("d1"));
+        assert!(validation_out.contains("## Watch"));
+        assert!(validation_out.contains("w1"));
+        assert!(content_out.contains("pre"));
+        assert!(content_out.contains("## Other"));
+        assert!(content_out.contains("o1"));
     }
 
     #[test]

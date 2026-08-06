@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0064"
 title = "Reconcile the board against reality, and split an oversized task from its park report"
 status = "ready"
@@ -10,6 +10,8 @@ Last slice of the task-interface arc. Everything before it makes the board *read
 this one makes it *true*. Two mechanics that share one rule: they gather evidence and propose, and
 the owner decides.
 
+"""
+scope = """
 ## Decisions
 
 - **Reconcile is not sync.** Sync re-reads the backend and is mechanical: whatever the backend says
@@ -46,6 +48,8 @@ and park reports. A split path that turns one park report into proposed child ta
 surface for reviewing, accepting and rejecting proposals individually. `ctx tasks reconcile` for
 the same pass without a TUI.
 
+"""
+validation = """
 ## Watch
 
 - **Reconcile's failure mode is confidence, not coverage.** Missing a stale row costs a manual

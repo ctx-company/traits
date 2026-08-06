@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0078.3"
 title = "Convergence is proven under real lock contention"
 status = "done"
@@ -37,6 +37,8 @@ threads and asserts both finish. Nothing establishes that either process ever wa
 merge-lock hold, so the test passes even when the landings never contend — it proves scheduling
 luck, not convergence.
 
+"""
+scope = """
 ## Scope
 
 Test-only, in `modules/cli/tests/proof_merge_on_completion.rs`: make the contention deterministic.
@@ -45,6 +47,8 @@ hold BEFORE the first releases — the lock-holder / lock-wait evidence the merg
 record is the observable — then release and assert every run lands, with the loser's frames
 recording the wait.
 
+"""
+validation = """
 ## Watch
 
 - Determinism must come from coordination (hold the lock, observe the queued waiter, release), not

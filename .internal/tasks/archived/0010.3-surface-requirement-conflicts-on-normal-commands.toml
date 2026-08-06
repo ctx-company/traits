@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0010.3"
 title = "Requirement conflicts must be visible on ordinary commands"
 status = "done"
@@ -25,6 +25,8 @@ section forbids.
 - Public-path text and JSON tests proving a conflicting `$CTX_CONFIG` requirement warns on a normal
   command while the repository value remains effective.
 
+"""
+validation = """
 ## Done when
 
 `cargo test -p ctx-traits-cli --test proof_config` passes with public command assertions showing one

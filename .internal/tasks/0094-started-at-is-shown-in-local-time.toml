@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0094"
 title = """"Started at" is shown in the reader's local time"""
 status = "ready"
@@ -10,6 +10,8 @@ The title row's `Started at HH:MM:SS` is UTC. Nobody reading their own terminal
 is in UTC by preference, so the one timestamp a person compares against their
 own clock is the one that does not match it.
 
+"""
+scope = """
 ## Decisions
 
 - **Local time, and it is the only display that changes.** Elapsed durations
@@ -30,6 +32,8 @@ own clock is the one that does not match it.
 `epoch_clock_utc` and its callers — `title_row_line`, `title_pending_line`, and
 anything else rendering a wall-clock stamp from an epoch.
 
+"""
+validation = """
 ## Watch
 
 - The function name encodes the old behaviour; rename it with the change or

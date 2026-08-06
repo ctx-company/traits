@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0091"
 title = "Answers arrive on their own, and a watcher resumes the run"
 status = "ready"
@@ -14,6 +14,8 @@ Filed early and deliberately unscheduled, because the useful fact is that **it r
 0087 or 0088**. Park-with-an-open-question is already the resumable state and the answer path is
 already one function; the watcher is a caller of it. That is what makes deferring safe.
 
+"""
+scope = """
 ## Decisions
 
 - **Ingress is the hard half, not the watcher.** A loop that notices an answer and resumes is small.
@@ -40,6 +42,8 @@ An ingress surface accepting an answer from outside the machine with an identity
 resuming sessions parked on an answered question through 0088's path; idempotent handling of a
 repeated or late answer; visibility of both in the dashboard.
 
+"""
+validation = """
 ## Watch
 
 - **A long-lived process is a new operational surface** — start, stop, crash, restart, and a story for

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0016"
 title = "`story` reads like a story, not a ledger dump"
 status = "done"
@@ -64,6 +64,8 @@ The groupings are the point: **journey**, **what the agent actually ran**, **wha
 
 **Assisted level** keeps the same sections and replaces the per-step lines with narrated prose — same skeleton, richer text, so the two levels are recognisably the same document.
 
+"""
+validation = """
 ## Watch
 
 - **Round grouping comes from `position-path`'s `iteration`, never a counter** — the same rule as task 0007's history lines, and for the same reason: a resumed run breaks a view-local counter. Nested loops need a stated rule (outermost, innermost, or both).

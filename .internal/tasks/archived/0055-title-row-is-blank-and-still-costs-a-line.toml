@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0055"
 title = "The title row shows a pending state, and a failed first attempt stops being terminal"
 status = "done"
@@ -76,6 +76,8 @@ narrator seat, the row keeps the facts it has — `Implement (Quick) · Started 
 title segment and no filler like "untitled". The row stays because trait and time are real; only
 the title is absent.
 
+"""
+validation = """
 ## Watch
 
 - The dashboard reads the same persisted title (`dashboard.rs:1738`, `:2699`, `:2757`,

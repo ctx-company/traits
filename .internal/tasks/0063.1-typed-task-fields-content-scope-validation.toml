@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0063.1"
 title = "Typed task fields: content, scope and validation replace the header convention"
 status = "ready"
@@ -8,6 +8,8 @@ content = """
 
 First child of 0063. The document schema stops hiding its structure in markdown headers.
 
+"""
+scope = """
 ## Decisions
 
 - **Schema bump 0.1 -> 0.2.** The opaque `content` blob's house convention (`## Decisions`,
@@ -39,6 +41,32 @@ First child of 0063. The document schema stops hiding its structure in markdown 
   (`tasks show`, run materialisation when 0061 lands, the detail pane after 0063.2),
   sections render as content, scope, validation — labeled, in that order.
 
+## Ruling (landed 2026-08-06)
+
+No owner annotation was attached to the plan (plannotator verdict `allow`, plan unchanged),
+so the draft's own recommendations stand as the ruling:
+
+- `wall` (Option<String>): **accepted.** `dispatch_preflight::explicit_wall_id` now reads
+  `document.wall` directly; the `**Wall:**` prose scrape (`wall_label`/`WALL_LABEL` and their
+  test) is deleted from `modules/io/src/dispatch_preflight.rs`. The markdown importer scrapes
+  a genuine `**Wall:** <id>` label LINE into the typed field at import time and removes that
+  line from `content`, mirroring how the H1/`**Status:**` lines are already removed. The board
+  migration used a stricter "line trimmed starts-with the label" match (not a substring
+  search anywhere in the line) so it does not mistake the two prose MENTIONS of `**Wall:**`
+  (this file's own `## Decisions` above, and `archived/0041`) for real label declarations —
+  neither carries a genuine wall id, so the migrated board carries zero typed `wall` values.
+- `origin` (Option<String>): **accepted as a dormant field.** Added to the schema; no writer
+  populates it yet (0064/0075 will).
+- `closed` (Option<String>, bare `YYYY-MM-DD`): **accepted.** `FilesTaskBoard::update` now
+  stamps `closed` with the host clock's UTC date (`audit_journal::today_date_utc`, the
+  existing Howard-Hinnant civil-date helper, reused rather than pulling in a date crate) the
+  moment a live task's status transitions to `done`/`cancelled` — not on `create`, and not
+  re-stamped on a later edit of an already-archived task.
+- `content` -> `description` rename: **not taken.** `content` remains the incumbent field
+  name, as the draft's out-of-scope note allowed.
+
+"""
+validation = """
 ## Watch
 
 - Zero prose loss is the migration gate: for every document, the whitespace-normalized

@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0070"
 title = "A handoff surface updates in place as the run progresses"
 status = "ready"
@@ -11,6 +11,8 @@ Third slice of the handoff arc. One message per run, kept current — not a stre
 Progress notification is normally a noise problem. It stops being one when the surface is edited
 rather than re-posted, which is why this is in the arc at all and why "progress pings" are not.
 
+"""
+scope = """
 ## Decisions
 
 - **Update is not a new mechanism.** It is the same pipeline fired again: snapshot `RunState` →
@@ -43,6 +45,8 @@ rather than re-posted, which is why this is in the arc at all and why "progress 
 sequence numbers on delivery-log rows with an out-of-order refusal; the stored reference handed back
 on every repeat delivery; the file channel re-rendering on milestones as the offline proof of the loop.
 
+"""
+validation = """
 ## Watch
 
 - **Two caches, two cadences** — the dashboard's session-inventory poll and this milestone hook are

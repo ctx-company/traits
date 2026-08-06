@@ -1,4 +1,4 @@
-schema-version = "0.1"
+schema-version = "0.2"
 key = "0131"
 title = "Exhaustion escalation, re-authored against the current substrate"
 status = "ready"
@@ -25,6 +25,8 @@ with routed leftovers), it must be authored against: v0.15 exhaustion semantics,
 the leftovers contract, task 0093 (unbounded loops exist now), and 0141's
 blocked-is-error classification.
 
+"""
+validation = """
 ## Done when
 
 An owner design session either (a) ratifies "exhaustion blocks and commits
