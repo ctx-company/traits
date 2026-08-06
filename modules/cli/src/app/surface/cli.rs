@@ -82,6 +82,13 @@ struct Cli {
 
 /// Top-level commands.
 #[derive(Subcommand, Debug)]
+// `Traits`'s subcommand tree carries clap's full ~40-command `TraitsCommand`
+// enum inline (272 bytes) against `Tasks`'s three-command one (56 bytes).
+// Boxing `Traits`'s field to close the gap would touch every match site
+// across `command_handlers.rs`, `dashboard.rs`, and the construction call in
+// tests, for a one-time top-level `Command::parse` allocation that is not
+// hot — not worth the churn for this lint.
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Agent traits management.
     ///
@@ -97,6 +104,58 @@ pub enum Command {
 
         #[command(subcommand)]
         subcommand: Option<TraitsCommand>,
+    },
+
+    /// Task board document commands (sync, list, show) — the files-backed
+    /// `TaskProvider` (0060), a top-level command since a task board is
+    /// project-scoped, not trait-scoped. `ctx traits task import` (a
+    /// one-shot markdown-to-TOML conversion) stays under `traits`.
+    Tasks {
+        #[command(subcommand)]
+        subcommand: Option<TasksCommand>,
+    },
+}
+
+/// Nested `ctx tasks ...` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum TasksCommand {
+    /// Re-read the board directory and report dangling edges, unparseable
+    /// documents, and duplicate keys. Manual only — never runs implicitly.
+    Sync {
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List tasks on the board.
+    List {
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// Include archived (done/cancelled) tasks.
+        #[arg(long)]
+        archived: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one task, fully resolved (relations included).
+    Show {
+        /// The task's key, filename, or filename stem.
+        task: String,
+
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -6,7 +6,9 @@
 //! nested inside their owning document; a subtask is a separate document
 //! linked by `relations.parent`.
 
+pub mod graph;
 pub mod markdown;
+pub mod provider;
 
 use serde::{Deserialize, Serialize};
 

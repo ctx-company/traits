@@ -1603,6 +1603,21 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             }
             Some(cli::TraitsCommand::Help { json }) => crate::app::help_surface::handle_help(json),
         },
+        cli::Command::Tasks { subcommand } => match subcommand {
+            None => {
+                println!("ctx tasks — use --help to list task board commands");
+                Ok(CommandOutput::new(()))
+            }
+            Some(cli::TasksCommand::Sync { board, json }) => {
+                crate::app::tasks::handle_tasks_sync(board.as_deref(), json)
+            }
+            Some(cli::TasksCommand::List { board, archived, json }) => {
+                crate::app::tasks::handle_tasks_list(board.as_deref(), archived, json)
+            }
+            Some(cli::TasksCommand::Show { task, board, json }) => {
+                crate::app::tasks::handle_tasks_show(&task, board.as_deref(), json)
+            }
+        },
     }
 }
 

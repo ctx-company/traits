@@ -175,26 +175,16 @@ pub fn closed_status_marker(
 }
 
 /// Resolve `task_value` to a file name among the board directory's direct
-/// children — the exact filename, the exact stem, or (for a bare all-digit
-/// task number) the `NNNN-` prefix — mirroring how the implement family's
-/// own extraction step names a task. Subdirectories (`archived/` among
-/// them) never match: an archived task is not a live task. Candidates are
-/// sorted so a prefix match is deterministic even if numbers ever collide.
+/// children — the exact filename, the exact stem, or (for a bare
+/// `NNNN[.M...]`-shaped task key) the `NNNN-` prefix — mirroring how the
+/// implement family's own extraction step names a task. Subdirectories
+/// (`archived/` among them) never match: an archived task is not a live
+/// task. Delegates to [`crate::task_files::task_file_name_in_dir`] (0060),
+/// which this preflight's own resolution chain originated — the extraction
+/// keeps this behavior-preserving rather than a second implementation that
+/// could drift from it.
 fn task_file_name_in_board(board: &Utf8Path, task_value: &str) -> Option<String> {
-    let entries = std::fs::read_dir(board.as_std_path()).ok()?;
-    let numeric = !task_value.is_empty() && task_value.chars().all(|c| c.is_ascii_digit());
-    let prefix = format!("{task_value}-");
-    let mut names: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_file())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .filter(|name| name.ends_with(".toml"))
-        .collect();
-    names.sort();
-    names.into_iter().find(|name| {
-        let stem = &name[..name.len() - 5];
-        name == task_value || stem == task_value || (numeric && stem.starts_with(&prefix))
-    })
+    crate::task_files::task_file_name_in_dir(board, task_value)
 }
 
 /// The id following a `**Wall:**` label on `line`, if present — the first
