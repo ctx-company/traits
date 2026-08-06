@@ -201,18 +201,18 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 717,
-    "end": 717
+    "start": 727,
+    "end": 727
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 711,
-    "end": 711
+    "start": 717,
+    "end": 717
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 712,
-    "end": 712
+    "start": 718,
+    "end": 718
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -246,13 +246,13 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 710,
-    "end": 710
+    "start": 716,
+    "end": 716
   },
   "sequence:procedure/shipping-status": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 708,
-    "end": 708
+    "start": 714,
+    "end": 714
   },
   "sequence:procedure/task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -316,18 +316,18 @@
   },
   "slot:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 705,
-    "end": 705
+    "start": 711,
+    "end": 711
   },
   "slot:shipping-stage-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 706,
-    "end": 706
+    "start": 712,
+    "end": 712
   },
   "slot:shipping-status": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 698,
-    "end": 698
+    "start": 704,
+    "end": 704
   },
   "slot:task-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",

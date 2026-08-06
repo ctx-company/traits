@@ -54,7 +54,9 @@ const quickScribeText = input.prompt`The review has ended approved and the work 
     Write a concise commit message from the draft ${slot.draft} and the verdict ${slot.verdict}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
     Return exactly that message. Do not run git commands and do not write files.`;
 
-const procedureBody = procedure.from(
+/** 0098: the loop body, parameterized by an optional commit gate — extracted so `guarded` reuses it instead of copying the loop. */
+export function quickProcedure(gate?: { prefix: string; title?: string; timeoutMs?: number }) {
+    return procedure.from(
     {
         description:
             "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
@@ -111,9 +113,11 @@ const procedureBody = procedure.from(
             id: "shipping",
             scribe: { agent: agent.scribe, text: quickScribeText },
             receipt: slot.commitOutput,
+            gate,
         });
     },
-);
+    );
+}
 
 export default variant({
     name: "Implement (Quick)",
@@ -125,5 +129,5 @@ export default variant({
     resource: [resource.taskBoard],
     signal: [gateTimedOut],
     port: [port.commitReport, port.parkReportPort],
-    procedure: procedureBody,
+    procedure: quickProcedure(),
 });

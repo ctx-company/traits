@@ -693,8 +693,14 @@ export function functionalGuardedProduction(options: {
  * kit's own default-scribe-prose fallback has no consumer in this family and
  * is not reproduced (leanness).
  */
-export function familyCommitTail(opts: { id: string; scribe: GuardedProductionRole; receipt: SlotHandle; }): void {
-    const { id, scribe, receipt } = opts;
+export function familyCommitTail(opts: {
+    id: string;
+    scribe: GuardedProductionRole;
+    receipt: SlotHandle;
+    /** 0098: routes the commit through an external approval gate — e.g. `ctx-gate run --`. Absent, the commit command is untouched. */
+    gate?: { prefix: string; title?: string; timeoutMs?: number };
+}): void {
+    const { id, scribe, receipt, gate } = opts;
     const status = slot.text({
         id: `${id}-status`,
         description:
@@ -714,7 +720,16 @@ export function familyCommitTail(opts: { id: string; scribe: GuardedProductionRo
             input: input.command`git add -A -- :!.agents/runs`,
             output: stageOutput,
         });
-        step.command("Commit the work", { id: `${id}-commit`, input: input.command`git commit -m ${message}`, output: receipt });
+        const commitInput = gate === undefined ? input.command`git commit -m ${message}` : (() => {
+            const strings = [`${gate.prefix} git commit -m `, ``];
+            return input.command(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, message);
+        })();
+        step.command(gate?.title ?? "Commit the work", {
+            id: `${id}-commit`,
+            input: commitInput,
+            output: receipt,
+            ...(gate?.timeoutMs === undefined ? {} : { timeoutMs: gate.timeoutMs }),
+        });
     });
 }
 
@@ -742,9 +757,24 @@ export function familyProcedure(opts: {
     reviewRubric?: ResourceHandle;
     parkReportOutput?: SlotHandle;
     reviewExtraInstruction?: string;
+    /** 0098: forwarded to `familyCommitTail` — reaches the option from a default-based family, not just quick-based ones. */
+    commitGate?: { prefix: string; title?: string; timeoutMs?: number };
 }): void {
-    const { clerk, smart1, smart2, worker, scribe, taskBoard, variantDoctrine, verdict1, verdict2, reviewRubric, parkReportOutput, reviewExtraInstruction } =
-        opts;
+    const {
+        clerk,
+        smart1,
+        smart2,
+        worker,
+        scribe,
+        taskBoard,
+        variantDoctrine,
+        verdict1,
+        verdict2,
+        reviewRubric,
+        parkReportOutput,
+        reviewExtraInstruction,
+        commitGate,
+    } = opts;
     const parkReportSlot = parkReportOutput ?? parkReport;
 
     taskExtractionStep(clerk, taskBoard);
@@ -785,6 +815,7 @@ export function familyProcedure(opts: {
         id: "shipping",
         scribe: { agent: scribe, text: buildScribeText(verdict1, verdict2) },
         receipt: commitOutput,
+        gate: commitGate,
     });
 }
 
