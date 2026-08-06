@@ -624,6 +624,10 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 check,
                 json,
             }),
+            Some(cli::TraitsCommand::GenerateRound {
+                trait_id,
+                candidate,
+            }) => crate::app::generate::handle_generate_round(&trait_id, &candidate),
             Some(cli::TraitsCommand::Refine {
                 id_or_path,
                 change_request,

@@ -9,15 +9,44 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:35140588eb404c0b621b62c3b3308e7b403486bcfa4afbdd8e92f3c723527739"
-canonical = "sha256:7f6018acc4e79fc0a752fb1ece5eec1cb8f738ccf064012f5184cfc219b34def"
-model-visible = "sha256:a50ea154044ed6a848a20cae46bb9d8ffc71b032c1cdb5a92a5f7cb2c15eb319"
+source = "sha256:67be1385c9bd0ff167da18363bac3b6e9427f4fc575cb211ef3e7afdc3ff6938"
+canonical = "sha256:a98e1558be15a22e0bf033701253498d3c538e1fb3c654a3d3524fc63c75f9b6"
+model-visible = "sha256:499b5e4c6b66f18ec0badab48849e1b18f8e21adb86475a3095c535c8329b39b"
 resource-manifest = "sha256:de671b72dc4289a72b370132d9e1f5c2ab377ffaef0cfe67506222f1d6417898"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/generate-trait/SKILL.md"
-digest = "sha256:d1c8cfb08a14b9cb081e91730d08be6e31a9574b73bcbeace69cb5d7ce7bffed"
+digest = "sha256:e250a15b69b1a0bb48fa8c05b27f12a2878b2916bfda9e8bafca81f74c42cd0c"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:67be1385c9bd0ff167da18363bac3b6e9427f4fc575cb211ef3e7afdc3ff6938"
+canonical = "sha256:a98e1558be15a22e0bf033701253498d3c538e1fb3c654a3d3524fc63c75f9b6"
+model-visible = "sha256:e363b20dc506769ed1b86948ab06c09ddacf28755499161aea9243b27bc92f95"
+render = "sha256:3a322eb93390f84f8b978ff4df9258da12a32b8bb7ce2201938ac3d6ffaf96b8"
+generated-markdown = "sha256:e250a15b69b1a0bb48fa8c05b27f12a2878b2916bfda9e8bafca81f74c42cd0c"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.result output contract has no title",
+    "port.result output contract has no format guidance",
+    "port.trait-id.description: replaced shell-substitution markers in model-visible text (2)",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/generate-trait/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
 
 [[dependency]]
 alias = "trait-spec"
@@ -32,5 +61,5 @@ path = "../trait-spec"
 [dependency.digests]
 source = "sha256:2e679fed106ad0d7ba791d5a88b74a03d48c1cf84fe0d8786fbc971689db7f59"
 canonical = "sha256:6b6dabf47b2ff4f583405fca4e6a4cf87fea7aa8efa6b7298e28a15e126b3ff7"
-model-visible = "sha256:16efa105137138e4466db43f274ea2509cbe208008d1b370df730d83459bd30d"
-resource-manifest = "sha256:0df7adcc175a94c51c60e501d1fbde585ae1e70507f1753631eb97dcc37bfa0e"
+model-visible = "sha256:1737c78e8849cda8d8c71fb6ada2c9c3f8e1ec136bc8929bb883a6895eb6975f"
+resource-manifest = "sha256:34f8dde496301953f0ccb24af4b471284d8c78c063f58fdaad990cbc23b866f4"

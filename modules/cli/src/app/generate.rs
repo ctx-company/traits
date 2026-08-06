@@ -1,18 +1,23 @@
 //! Generate, critique, and evaluation-generation command handlers.
 
-use crate::app::entry::{build_file_evidence_from_io, to_json_value};
+use crate::app::entry::build_file_evidence_from_io;
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
 use crate::app::surface::cli;
 use ctx_traits_core::response::CommandOutput;
 
-#[derive(serde::Serialize)]
+/// The `generate-trait` meta-trait's terminal output: the round-evidence
+/// envelope its `derive-envelope` step assembles (task 0066.1). Deserializes
+/// `run_builtin_trait`'s single JSON output string.
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-struct GenerateAssistContext<'a> {
-    name: &'a str,
-    brief: &'a str,
-    slugified_trait_id: String,
-    model: &'a str,
-    target_schema: &'static str,
+pub(crate) struct GenerateEnvelope {
+    pub(crate) converged: bool,
+    pub(crate) rounds_spent: u32,
+    #[serde(default)]
+    pub(crate) failing_rung: Option<String>,
+    #[serde(default)]
+    pub(crate) diagnostics: Vec<ctx_traits_core::assist::Diagnostic>,
+    pub(crate) candidate_source: String,
 }
 
 #[derive(serde::Serialize)]
@@ -60,148 +65,75 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
         json,
     } = input;
     let trait_id = ctx_traits_core::synth::slugify_trait_id(name)?;
-    let (_package_path, output_path) = trait_package_output_paths(&trait_id, out);
 
-    let candidate =
-        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
-            operation: ctx_traits_core::assist::Operation::Generate,
-            source_trait_ids: vec![trait_id.clone()],
-            source_paths: Vec::new(),
-            source_digests: Vec::new(),
-            user_request: format!("{name}: {brief}"),
-            model: model.map(str::to_string),
-            target_path: output_path.clone(),
-            provider_available: candidate_path.is_none(),
-            context: to_json_value(
-                &GenerateAssistContext {
-                    name,
-                    brief,
-                    slugified_trait_id: trait_id.clone(),
-                    model: model.unwrap_or("provider-default"),
-                    target_schema: "agent-traits/canonical-trait",
-                },
-                "serialize generate assist context",
-            )?,
-        })?;
-
-    let (raw, encoding) = match candidate_path {
-        Some(cand_path) => {
-            let cand_utf8 = camino::Utf8Path::new(cand_path);
-            (
-                ctx_traits_io::read::read_text(cand_utf8)?,
-                ctx_traits_core::encoding::Encoding::from_path(cand_utf8)?,
-            )
+    // `--candidate` evaluates the supplied authoring source through exactly
+    // one round of the rung ladder: no meta-trait run, no provider call, by
+    // construction (this branch never reaches `run_builtin_trait`). This is
+    // the path gate tests exercise (task 0066.1).
+    if let Some(cand_path) = candidate_path {
+        let candidate_source = ctx_traits_io::read::read_text(camino::Utf8Path::new(cand_path))?;
+        let package_root = crate::app::assist_round::scratch_package_root(&trait_id);
+        let report =
+            crate::app::assist_round::evaluate_round(&candidate_source, &package_root, &trait_id)?;
+        print_round_report(&report, &package_root, json)?;
+        if !report.converged {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "generate --candidate failed at rung {}: candidate not written; scratch preserved at {package_root}",
+                    report.rung
+                ),
+            });
         }
-        None => (
-            match run_builtin_trait(
-                "generate-trait",
-                vec![runtime_input("name", name), runtime_input("brief", brief)],
-                assignments,
-                model,
-                None,
-            ) {
-                Ok(raw) => raw,
-                Err(error) => return blocked_assist_candidate(candidate, json, error.to_string()),
-            },
-            ctx_traits_core::encoding::Encoding::Json,
-        ),
-    };
-    let (candidate_text, wrapped_draft) = match decode_generate_candidate(&raw) {
-        Ok(decoded) => decoded,
-        Err(error) => return blocked_assist_candidate(candidate, json, error.to_string()),
-    };
-    let candidate_encoding = if wrapped_draft.is_some() {
-        ctx_traits_core::encoding::Encoding::Json
-    } else {
-        encoding
-    };
-    let mut evaluation = ctx_traits_core::assist::evaluate_supplied_candidate(
-        candidate,
-        &candidate_text,
-        candidate_encoding,
-    );
-    if wrapped_draft.is_some() {
-        // The runtime emits a typed wrapper, but the candidate gate remains the
-        // single trait validation path. Its audit identity must name the full
-        // model output rather than the extracted trait alone.
-        evaluation.candidate.raw_output_digest =
-            Some(ctx_traits_core::digest::Digest::source(&raw));
-        evaluation.candidate.parsed_candidate_digest = Some(
-            ctx_traits_core::digest::Digest::canonical(&canonical_json_value(&raw)?),
-        );
-        evaluation.candidate =
-            ctx_traits_core::assist::audit_wrapper_output(evaluation.candidate, &raw, &trait_id);
+        return Ok(CommandOutput::new(()));
     }
 
-    let actual_trait_id = evaluation
-        .candidate
-        .candidate_trait_id
-        .clone()
-        .unwrap_or_else(|| trait_id.clone());
-    let (package, target) = trait_package_output_paths(&actual_trait_id, out);
-    let trait_root = camino::Utf8Path::new(&package);
-    let mut candidate = attach_assist_check_report(
-        evaluation.candidate,
-        evaluation.normalized_trait.as_ref(),
-        evaluation.normalized_output_text.as_deref(),
-        trait_root,
+    // The default path (and `--check`) drive the declared bounded loop in
+    // `generate-trait`: the meta-trait iterates on its own typed rung
+    // diagnostics, and this handler writes only a converged result. No
+    // retry logic lives here — that is the meta-trait's job (task 0066.1).
+    let scratch_root = crate::app::assist_round::scratch_package_root(&trait_id);
+    let raw = run_builtin_trait(
+        "generate-trait",
+        vec![
+            runtime_input("name", name),
+            runtime_input("brief", brief),
+            runtime_input("trait-id", trait_id.clone()),
+        ],
+        assignments,
+        model,
+        None,
     )?;
-    if actual_trait_id != trait_id {
-        candidate.warnings.push(
-            "candidate-id-overrode-default: output target recomputed from candidate trait ID"
-                .to_string(),
-        );
-    }
-    if check {
-        candidate = apply_assist_check_drift(
-            candidate,
-            &target,
-            evaluation.normalized_output_text.as_deref(),
-        );
-    }
+    let envelope: GenerateEnvelope = serde_json::from_str(&raw)
+        .map_err(|error| crate::Error::json("decode generate loop envelope", error))?;
 
-    let final_candidate = if candidate.gate_summary.all_passed()
-        && candidate.status != ctx_traits_core::assist::CandidateStatus::Blocked
-        && !check
-    {
-        match evaluation.normalized_output_text.as_deref() {
-            Some(text) => {
-                match ctx_traits_io::write::write_candidate(
-                    ctx_traits_io::write::CandidateWriteRequest {
-                        target_path: camino::Utf8Path::new(&target),
-                        trait_id: &actual_trait_id,
-                        content: text,
-                        mode: ctx_traits_io::write::CandidateWriteMode::NewCandidate,
-                    },
-                ) {
-                    Ok(result) => ctx_traits_core::assist::mark_written(candidate, &result.path),
-                    Err(_) => {
-                        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
-                        candidate.warnings.push(
-                            "write gate failed: safe writer rejected target path".to_string(),
-                        );
-                        candidate
-                    }
-                }
-            }
-            None => candidate,
-        }
-    } else {
-        candidate
-    };
+    print_generate_envelope(&envelope, &scratch_root, json)?;
 
-    print_assist_candidate(&final_candidate, json)?;
-
-    if final_candidate.status == ctx_traits_core::assist::CandidateStatus::Blocked {
+    if !envelope.converged {
         return Err(crate::Error::Command {
-            message: if check {
-                "generate --check failed: candidate was blocked by validation gates".to_string()
-            } else {
-                "generate failed: candidate was blocked by validation gates; no file was written"
-                    .to_string()
-            },
+            message: format!(
+                "generate failed at rung {}: no package written; scratch preserved at {scratch_root}; {} round(s) spent",
+                envelope.failing_rung.as_deref().unwrap_or("unknown"),
+                envelope.rounds_spent
+            ),
         });
     }
+
+    if check {
+        return Ok(CommandOutput::new(()));
+    }
+
+    let (package_root, _output_path) = trait_package_output_paths(&trait_id, out);
+    let source_target =
+        ctx_traits_io::layout::package_source_write_path(camino::Utf8Path::new(&package_root));
+    ctx_traits_io::write::write_candidate(ctx_traits_io::write::CandidateWriteRequest {
+        target_path: &source_target,
+        trait_id: &trait_id,
+        content: &envelope.candidate_source,
+        mode: ctx_traits_io::write::CandidateWriteMode::NewCandidateSource,
+    })?;
+    // Only `build` writes `generated/` + `trait.lock` (the 0065 invariant);
+    // the loop's own evaluate rung never mutates the real package.
+    crate::app::schema_synth_build::handle_build(source_target.as_str(), "toml", None, false)?;
 
     Ok(CommandOutput::new(()))
 }
@@ -442,6 +374,21 @@ pub(crate) fn handle_generate_evals(
             message: "generate-evals failed: candidate was blocked by validation gates".to_string(),
         });
     }
+    Ok(CommandOutput::new(()))
+}
+
+/// The in-loop evaluate rung `generate-trait`'s meta-trait invokes for one
+/// round: exactly one call into `evaluate_round`, no provider, no looping.
+/// Always exits 0 and prints the round report as JSON whether or not it
+/// converged — the meta-trait's own `sequence.loop` decides continuation
+/// from the report's `converged` field, not from this process's exit code.
+pub(crate) fn handle_generate_round(
+    trait_id: &str,
+    candidate: &str,
+) -> crate::Result<CommandOutput<()>> {
+    let package_root = crate::app::assist_round::scratch_package_root(trait_id);
+    let report = crate::app::assist_round::evaluate_round(candidate, &package_root, trait_id)?;
+    print_round_report(&report, &package_root, true)?;
     Ok(CommandOutput::new(()))
 }
 
@@ -746,6 +693,124 @@ pub(crate) fn print_assist_candidate(
         }
     }
     Ok(())
+}
+
+pub(crate) fn print_round_report(
+    report: &ctx_traits_core::assist::RoundReport,
+    scratch_path: &camino::Utf8Path,
+    json: bool,
+) -> crate::Result<()> {
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            let text = serde_json::to_string_pretty(report).unwrap_or_else(|e| {
+                format!("{{\"error\": \"failed to serialize round report: {e}\"}}")
+            });
+            println!("{text}");
+        }
+        OutputMode::Human(mode) => {
+            let panel = round_report_panel(report, scratch_path);
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(())
+}
+
+fn round_report_panel(
+    report: &ctx_traits_core::assist::RoundReport,
+    scratch_path: &camino::Utf8Path,
+) -> Panel {
+    let status = if report.converged {
+        PanelStatus::Passed("converged".to_string())
+    } else {
+        PanelStatus::Blocked("blocked".to_string())
+    };
+    let mut panel = Panel::new("ctx", "generate-round", status)
+        .row(PanelRow::toned(
+            "rung",
+            report.rung.to_string(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "converged",
+            report.converged.to_string(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "scratch-path",
+            scratch_path.to_string(),
+            RowTone::Default,
+        ));
+    for diagnostic in &report.diagnostics {
+        panel = panel.row(PanelRow::toned(
+            "diagnostic",
+            format!(
+                "[{}/{}] {}",
+                diagnostic.gate, diagnostic.code, diagnostic.message
+            ),
+            RowTone::Warn,
+        ));
+    }
+    panel
+}
+
+pub(crate) fn print_generate_envelope(
+    envelope: &GenerateEnvelope,
+    scratch_path: &camino::Utf8Path,
+    json: bool,
+) -> crate::Result<()> {
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            let text = serde_json::to_string_pretty(envelope).unwrap_or_else(|e| {
+                format!("{{\"error\": \"failed to serialize generate envelope: {e}\"}}")
+            });
+            println!("{text}");
+        }
+        OutputMode::Human(mode) => {
+            let panel = generate_envelope_panel(envelope, scratch_path);
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+    Ok(())
+}
+
+fn generate_envelope_panel(envelope: &GenerateEnvelope, scratch_path: &camino::Utf8Path) -> Panel {
+    let status = if envelope.converged {
+        PanelStatus::Passed("converged".to_string())
+    } else {
+        PanelStatus::Blocked("blocked".to_string())
+    };
+    let mut panel = Panel::new("ctx", "generate", status)
+        .row(PanelRow::toned(
+            "converged",
+            envelope.converged.to_string(),
+            RowTone::Default,
+        ))
+        .row(PanelRow::toned(
+            "rounds-spent",
+            envelope.rounds_spent.to_string(),
+            RowTone::Default,
+        ));
+    if let Some(ref rung) = envelope.failing_rung {
+        panel = panel.row(PanelRow::toned("failing-rung", rung, RowTone::Default));
+    }
+    if !envelope.converged {
+        panel = panel.row(PanelRow::toned(
+            "scratch-path",
+            scratch_path.to_string(),
+            RowTone::Default,
+        ));
+    }
+    for diagnostic in &envelope.diagnostics {
+        panel = panel.row(PanelRow::toned(
+            "diagnostic",
+            format!(
+                "[{}/{}] {}",
+                diagnostic.gate, diagnostic.code, diagnostic.message
+            ),
+            RowTone::Warn,
+        ));
+    }
+    panel
 }
 
 fn assist_candidate_panel(candidate: &ctx_traits_core::assist::Candidate) -> Panel {

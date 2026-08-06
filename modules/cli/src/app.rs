@@ -5,6 +5,7 @@
 //! Product semantics live in `ctx-traits-core` and `ctx-traits-io`, not here.
 
 mod agent_dispatch;
+mod assist_round;
 mod cdk_build;
 mod command_handlers;
 mod compose;

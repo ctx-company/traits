@@ -384,91 +384,88 @@ fn validate_candidate_path(
     Ok(())
 }
 
-fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
+/// Collects a path's normal (non-root, non-parent) components, rejecting
+/// any root/parent-traversal component outright. Shared by both canonical
+/// package-id matchers below.
+fn normal_components(path: &Utf8Path) -> Option<Vec<&str>> {
     if path
         .components()
         .any(|component| !matches!(component, Utf8Component::RootDir | Utf8Component::Normal(_)))
     {
         return None;
     }
+    Some(
+        path.components()
+            .filter_map(|component| match component {
+                Utf8Component::Normal(value) => Some(value),
+                _ => None,
+            })
+            .collect(),
+    )
+}
 
-    let normals: Vec<&str> = path
-        .components()
-        .filter_map(|component| match component {
-            Utf8Component::Normal(value) => Some(value),
-            _ => None,
-        })
-        .collect();
-    if !path.is_absolute() {
-        return match normals.as_slice() {
-            [
-                ".ctx",
-                "traits",
-                id,
-                "generated",
-                "package.toml" | "trait.toml" | "index.toml",
-            ] if !id.is_empty() => Some(*id),
-            _ => None,
-        };
-    }
-
-    let ctx_positions: Vec<usize> = normals
-        .iter()
-        .enumerate()
-        .filter_map(|(index, component)| (*component == ".ctx").then_some(index))
-        .collect();
-    if ctx_positions.len() != 1 || ctx_positions[0] + 5 != normals.len() {
+/// Extracts the trait ID from a package-relative tail (e.g. `["generated",
+/// "index.toml"]`) under either the current `.ctx/traits/packages/<id>/...`
+/// root or the pre-P569 flat `.ctx/traits/<id>/...` root — the same two
+/// shapes [`crate::layout::is_canonical_package_root`] accepts for reads, so
+/// the safe writer accepts whichever shape a checkout's packages actually
+/// live under instead of only the shape that predates the P569 move.
+fn trait_id_for_tail<'a>(normals: &[&'a str], tail: &[&str]) -> Option<&'a str> {
+    let tail_len = tail.len();
+    if normals.len() < tail_len + 1 || &normals[normals.len() - tail_len..] != tail {
         return None;
     }
-    match normals.get(ctx_positions[0]..) {
-        Some(
-            [
-                ".ctx",
-                "traits",
-                id,
-                "generated",
-                "package.toml" | "trait.toml" | "index.toml",
-            ],
-        ) if !id.is_empty() => Some(*id),
+    let head = &normals[..normals.len() - tail_len];
+    match head {
+        [".ctx", "traits", id] if !id.is_empty() => Some(*id),
+        [".ctx", "traits", "packages", id] if !id.is_empty() => Some(*id),
         _ => None,
     }
+}
+
+/// Extracts the trait ID from an absolute path by locating a `.ctx`
+/// component and matching the remainder against [`trait_id_for_tail`]. Tries
+/// every `.ctx` occurrence from rightmost (closest to the target file) to
+/// leftmost — an absolute checkout path can itself sit under an ancestor
+/// `.ctx` directory (e.g. a worktree managed inside another `.ctx`-rooted
+/// tree), and the innermost one is always the target's own protocol root.
+fn trait_id_for_tail_absolute<'a>(normals: &[&'a str], tail: &[&str]) -> Option<&'a str> {
+    normals
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(index, component)| (*component == ".ctx").then_some(index))
+        .find_map(|ctx_position| trait_id_for_tail(&normals[ctx_position..], tail))
+}
+
+fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
+    let normals = normal_components(path)?;
+    const TAIL: [&str; 1] = ["generated"];
+    // `generated/<manifest>` accepts any of the three manifest filenames, so
+    // the tail match happens per-candidate rather than as one fixed slice.
+    for manifest in ["package.toml", "trait.toml", "index.toml"] {
+        let tail = [TAIL[0], manifest];
+        let found = if path.is_absolute() {
+            trait_id_for_tail_absolute(&normals, &tail)
+        } else {
+            trait_id_for_tail(&normals, &tail)
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
 }
 
 /// Mirror of [`canonical_generated_package_id`] for the authoring-source
 /// shape `<package>/source/index.ts` (task 0065).
 fn canonical_source_package_id(path: &Utf8Path) -> Option<&str> {
-    if path
-        .components()
-        .any(|component| !matches!(component, Utf8Component::RootDir | Utf8Component::Normal(_)))
-    {
-        return None;
-    }
-
-    let normals: Vec<&str> = path
-        .components()
-        .filter_map(|component| match component {
-            Utf8Component::Normal(value) => Some(value),
-            _ => None,
-        })
-        .collect();
-    if !path.is_absolute() {
-        return match normals.as_slice() {
-            [".ctx", "traits", id, "source", "index.ts"] if !id.is_empty() => Some(*id),
-            _ => None,
-        };
-    }
-
-    let ctx_positions: Vec<usize> = normals
-        .iter()
-        .enumerate()
-        .filter_map(|(index, component)| (*component == ".ctx").then_some(index))
-        .collect();
-    if ctx_positions.len() != 1 || ctx_positions[0] + 5 != normals.len() {
-        return None;
-    }
-    match normals.get(ctx_positions[0]..) {
-        Some([".ctx", "traits", id, "source", "index.ts"]) if !id.is_empty() => Some(*id),
-        _ => None,
+    let normals = normal_components(path)?;
+    const TAIL: [&str; 2] = ["source", "index.ts"];
+    if path.is_absolute() {
+        trait_id_for_tail_absolute(&normals, &TAIL)
+    } else {
+        trait_id_for_tail(&normals, &TAIL)
     }
 }
 

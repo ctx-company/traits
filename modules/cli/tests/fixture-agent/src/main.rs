@@ -32,6 +32,7 @@ fn main() -> ExitCode {
             Some("worker") => role_worker(),
             Some("reviewer") => role_reviewer(args.next(), args.next()),
             Some("scribe") => role_scribe(),
+            Some("generator") => role_generator(),
             other => {
                 eprintln!("ctx-fixture-agent: unknown --role {other:?}");
                 ExitCode::FAILURE
@@ -118,5 +119,19 @@ fn requested_output_field(prompt: &str) -> Option<String> {
 
 fn role_scribe() -> ExitCode {
     println!("{{\"commit-message\":\"P461 park-honesty proof fixture commit.\"}}");
+    ExitCode::SUCCESS
+}
+
+/// `generate-trait`'s produce/revise steps (task 0066.1's guarded loop):
+/// always returns the same authoring source, deliberately invalid
+/// TypeScript, so every round fails at the ladder's `build` rung and the
+/// loop's declared bound genuinely exhausts — proving the non-convergence
+/// path (no package write, failing rung named, scratch preserved) rather
+/// than a fixture escalation branch. Hand-escaped JSON string, not a
+/// dependency: this binary is deliberately std-only.
+fn role_generator() -> ExitCode {
+    let source = "this is not valid TypeScript {{{";
+    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+    println!("{{\"candidate-source\":\"{escaped}\"}}");
     ExitCode::SUCCESS
 }

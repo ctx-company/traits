@@ -925,6 +925,21 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Evaluate one authoring-source candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `generate-trait`'s in-loop
+    /// evaluate step (task 0066.1). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    #[command(hide = true)]
+    GenerateRound {
+        /// Trait ID the candidate must declare; also keys the scratch package.
+        trait_id: String,
+
+        /// Candidate authoring source (TypeScript) text.
+        candidate: String,
+    },
     /// LLM-assisted refinement of an existing canonical trait.
     ///
     /// `refine` loads existing canonical source and produces a candidate patch

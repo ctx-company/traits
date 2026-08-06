@@ -123,6 +123,7 @@ pub enum WriteStatus {
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum Gate {
+    Build,
     Parse,
     Normalize,
     Audit,
@@ -137,6 +138,8 @@ pub enum Gate {
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum DiagnosticCode {
+    CdkBuildFailed,
+    DegenerateCandidate,
     ParsedCandidateDigestUnavailable,
     ParseInvalidManifest,
     ParseShapeMismatch,
@@ -340,6 +343,38 @@ pub struct CandidateEvaluation {
     pub candidate: Candidate,
     pub normalized_trait: Option<Trait>,
     pub normalized_output_text: Option<String>,
+}
+
+/// The rung ladder a single generate round climbs, in evaluation order. A
+/// round stops at the first rung it fails; `converged` is true only once a
+/// round clears `Audit`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display, strum::IntoStaticStr,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum Rung {
+    Build,
+    SynthNormalize,
+    NonDegenerate,
+    Check,
+    Audit,
+}
+
+/// Outcome of evaluating one candidate through the rung ladder
+/// (`assist_round::evaluate_round`). Reused by both the loop's in-round
+/// command rung and the `--candidate` single-round path — the round-evidence
+/// envelope proper (0066.2) extends this; this stays the minimal shape the
+/// loop needs to guard on `converged`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RoundReport {
+    /// The last rung evaluated: the failing rung when `converged` is false,
+    /// or `Audit` (the ladder's final rung) when `converged` is true.
+    pub rung: Rung,
+    pub converged: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Result of evaluating an advisory review scaffold through the candidate gate.
