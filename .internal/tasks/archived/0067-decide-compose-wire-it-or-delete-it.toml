@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0067"
 title = "Decide `compose`: give it a meta-trait, or delete the command"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = """
 
