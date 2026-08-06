@@ -2820,6 +2820,8 @@ fn pane_content_len(state: &State, pane_id: PaneId) -> usize {
         state.merge_preview.as_ref().map_or(0, |p| p.lines.len())
     } else if pane_id == PANE_TRUST_PREVIEW {
         state.trust_preview.as_ref().map_or(0, |p| p.lines.len())
+    } else if pane_id == PANE_TASKS_PREVIEW {
+        state.task_preview.as_ref().map_or(0, |p| p.lines.len())
     } else {
         0
     }
@@ -5500,7 +5502,16 @@ fn refresh_task_preview_for_selection(state: &mut State) {
         .flatten()
         .filter_map(|idx| state.sessions.get(*idx))
         .collect();
-    state.task_preview = Some(build_task_preview(&summary, board, &joined_rows));
+    let wrap_width = state
+        .last_pane_layout
+        .rect(PANE_TASKS_PREVIEW)
+        .map_or(80, |rect| rect.width.saturating_sub(2));
+    state.task_preview = Some(build_task_preview(
+        &summary,
+        board,
+        &joined_rows,
+        wrap_width,
+    ));
 }
 
 /// The TASKS detail pane (0063): status, relations resolved with the other
@@ -5511,6 +5522,7 @@ fn build_task_preview(
     summary: &TaskSummary,
     board: &TasksBoardSnapshot,
     joined: &[&SessionRow],
+    wrap_width: u16,
 ) -> TaskPreview {
     let mut lines = Vec::new();
     let mut header = tui::Line::blank();
@@ -5544,11 +5556,45 @@ fn build_task_preview(
             tui::Tone::Fail,
         );
         lines.push(line);
+        let rlines: Vec<RLine<'static>> = lines.iter().map(tui_ratatui::render_line).collect();
         return TaskPreview {
             key: summary.key.clone(),
-            lines: lines.iter().map(tui_ratatui::render_line).collect(),
+            lines: tui_panes::wrapped_lines(&rlines, wrap_width),
         };
     };
+
+    for (label, text) in [
+        ("content", &resolved.document.content),
+        ("scope", &resolved.document.scope),
+        ("validation", &resolved.document.validation),
+    ] {
+        if text.trim().is_empty() {
+            continue;
+        }
+        lines.push(tui::Line::blank());
+        let mut label_line = tui::Line::blank();
+        label_line.push(format!("{label}:"), tui::Tone::Muted);
+        lines.push(label_line);
+        let raw: Vec<&str> = text.split('\n').collect();
+        let start = raw
+            .iter()
+            .position(|l| !l.trim().is_empty())
+            .unwrap_or(raw.len());
+        let end = raw
+            .iter()
+            .rposition(|l| !l.trim().is_empty())
+            .map_or(start, |i| i + 1);
+        for raw_line in &raw[start..end] {
+            let tone = if raw_line.trim_start().starts_with('#') {
+                tui::Tone::Muted
+            } else {
+                tui::Tone::Default
+            };
+            let mut line = tui::Line::blank();
+            line.push((*raw_line).to_string(), tone);
+            lines.push(line);
+        }
+    }
 
     push_task_relation_lines(&mut lines, "blocked by", &resolved.relations.depends_on);
     push_task_relation_lines(&mut lines, "blocks", &resolved.relations.blocks);
@@ -5592,9 +5638,10 @@ fn build_task_preview(
         }
     }
 
+    let rlines: Vec<RLine<'static>> = lines.iter().map(tui_ratatui::render_line).collect();
     TaskPreview {
         key: summary.key.clone(),
-        lines: lines.iter().map(tui_ratatui::render_line).collect(),
+        lines: tui_panes::wrapped_lines(&rlines, wrap_width),
     }
 }
 
@@ -9650,6 +9697,115 @@ mod tests {
         dispatch_selected_task(&mut state);
         assert!(!state.modal_host.is_open());
         assert_eq!(state.message.as_deref(), Some("no task selected"));
+    }
+
+    fn rline_text(line: &RLine<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn build_task_preview_renders_prose_between_status_and_relations_wrapped_to_width() {
+        let mut resolved = resolved_task("0001", DerivedStatus::Ready);
+        resolved.document.content = "\n\nfirst content line\nsecond content line\n\n".to_string();
+        resolved.document.scope = "in scope".to_string();
+        resolved.document.validation = "done when green".to_string();
+        resolved.relations.depends_on = vec![ctx_traits_core::task::graph::ResolvedEdge {
+            key: "0000".to_string(),
+            title: "blocker".to_string(),
+            status: DerivedStatus::Ready,
+        }];
+        let mut board_resolved = BTreeMap::new();
+        board_resolved.insert("0001".to_string(), resolved);
+        let board = board_with(
+            vec![task_summary("0001", DerivedStatus::Ready)],
+            board_resolved,
+        );
+
+        let preview =
+            build_task_preview(&task_summary("0001", DerivedStatus::Ready), &board, &[], 40);
+        let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
+
+        let status_index = texts
+            .iter()
+            .position(|t| t.contains("status:"))
+            .expect("status line");
+        let content_index = texts
+            .iter()
+            .position(|t| t.contains("first content line"))
+            .expect("content line");
+        let scope_index = texts
+            .iter()
+            .position(|t| t.contains("in scope"))
+            .expect("scope line");
+        let validation_index = texts
+            .iter()
+            .position(|t| t.contains("done when green"))
+            .expect("validation line");
+        let relation_index = texts
+            .iter()
+            .position(|t| t.contains("blocked by"))
+            .expect("relation line");
+
+        assert!(status_index < content_index);
+        assert!(content_index < scope_index);
+        assert!(scope_index < validation_index);
+        assert!(validation_index < relation_index);
+        for line in &preview.lines {
+            assert!(line.width() <= 40, "line exceeded wrap width: {line:?}");
+        }
+    }
+
+    #[test]
+    fn build_task_preview_with_empty_prose_matches_the_pre_prose_shape() {
+        let resolved = resolved_task("0001", DerivedStatus::Ready);
+        let mut board_resolved = BTreeMap::new();
+        board_resolved.insert("0001".to_string(), resolved);
+        let board = board_with(
+            vec![task_summary("0001", DerivedStatus::Ready)],
+            board_resolved,
+        );
+
+        let preview = build_task_preview(
+            &task_summary("0001", DerivedStatus::Ready),
+            &board,
+            &[],
+            200,
+        );
+        let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
+        assert!(!texts.iter().any(|t| t.contains("content:")));
+        assert!(!texts.iter().any(|t| t.contains("scope:")));
+        assert!(!texts.iter().any(|t| t.contains("validation:")));
+        let status_index = texts
+            .iter()
+            .position(|t| t.contains("status:"))
+            .expect("status line");
+        let steps_index = texts
+            .iter()
+            .position(|t| t.contains("open steps:"))
+            .expect("open steps header");
+        // No blank slab inserted between the (empty) status block and the
+        // (also empty) relations/open-steps block: exactly the two blank
+        // separators that existed before prose sections did (one before the
+        // resolve guard, one before "open steps:").
+        assert_eq!(steps_index - status_index, 3);
+    }
+
+    #[test]
+    fn apply_pane_scroll_clamps_to_task_preview_content_len() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Tasks;
+        state.last_pane_layout =
+            build_tree_for_screen(&state, 100).resolve(Rect::new(0, 0, 100, 3));
+        state.task_preview = Some(TaskPreview {
+            key: "0001".to_string(),
+            lines: vec![RLine::from("a"), RLine::from("b"), RLine::from("c")],
+        });
+        apply_pane_scroll(&mut state, PANE_TASKS_PREVIEW, ScrollDelta::Down(100));
+        let scroll = state.pane_scrolls.get(PANE_TASKS_PREVIEW);
+        assert_eq!(scroll.window(1), 2..3);
     }
 }
 #[test]
