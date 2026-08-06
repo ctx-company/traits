@@ -235,6 +235,12 @@ pub enum TasksCommand {
         #[arg(long = "step-open")]
         step_open: Vec<String>,
 
+        /// Release every task that directly depends on this one (removes
+        /// the edge). Only valid alongside `--status done` or
+        /// `--status cancelled` — the dependents sweep (0063.6).
+        #[arg(long = "release-dependents")]
+        release_dependents: bool,
+
         /// Emit structured JSON.
         #[arg(long)]
         json: bool,

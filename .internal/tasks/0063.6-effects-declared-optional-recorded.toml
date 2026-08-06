@@ -53,5 +53,5 @@ triggers nothing further; effect declarations are validated when the board confi
 """
 
 [relations]
-parent = "0063"
 depends-on = ["0063.5"]
+parent = "0063"

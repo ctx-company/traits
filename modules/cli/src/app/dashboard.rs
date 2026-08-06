@@ -54,7 +54,8 @@ use super::tui_ratatui::{self, RatatuiPane, render_line};
 use ctx_traits_core::task::TaskStatus as TaskDocStatus;
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{
-    NewTask, ResolvedTask, TaskProvider, TaskProviderMut, TaskSummary, TaskUpdate,
+    EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask, TaskProvider, TaskProviderMut,
+    TaskSummary, TaskUpdate,
 };
 use ctx_traits_io::task_files::FilesTaskBoard;
 
@@ -712,6 +713,21 @@ enum TaskAction {
         key: String,
         digest: String,
     },
+}
+
+/// `a`'s modal grammar: `done` or `cancelled` (`canceled` too), optionally
+/// followed by `release` to opt into the dependents sweep (0063.6) —
+/// `"done release"`, `"cancelled release"`. Case-insensitive.
+fn parse_task_archive_input(text: &str) -> Result<(TaskDocStatus, bool), String> {
+    let mut words = text.split_whitespace();
+    let status = match words.next().map(str::to_ascii_lowercase).as_deref() {
+        Some("done") => TaskDocStatus::Done,
+        Some("cancelled") | Some("canceled") => TaskDocStatus::Cancelled,
+        _ => return Err("type done or cancelled".to_string()),
+    };
+    let release_dependents =
+        words.next().map(str::to_ascii_lowercase).as_deref() == Some("release");
+    Ok((status, release_dependents))
 }
 
 /// The three forms `e`'s modal grammar accepts, parsed by
@@ -5769,8 +5785,11 @@ fn open_task_split_modal(state: &mut State) {
 }
 
 /// `a`: archive — a text-input modal for the closing status (`done` or
-/// `cancelled`), defaulting to `done`. Reads the task fresh to capture the
-/// digest the eventual write is validated against.
+/// `cancelled`), optionally followed by `release` to run the dependents
+/// sweep (0063.6), defaulting to `done`. Reads the task fresh to capture
+/// the digest the eventual write is validated against. When the task has
+/// dependents in the last-synced board, the prompt names how many and
+/// hints at the `release` token.
 fn open_task_archive_modal(state: &mut State) {
     let Some(summary) = selected_task(state) else {
         state.message = Some("no task selected".to_string());
@@ -5784,12 +5803,26 @@ fn open_task_archive_modal(state: &mut State) {
             return;
         }
     };
+    let dependents = state
+        .tasks_board
+        .as_ref()
+        .and_then(|board| board.resolved.get(&key))
+        .map(|resolved| resolved.relations.blocks.len())
+        .unwrap_or(0);
+    let prompt = if dependents > 0 {
+        format!(
+            "archive {key} — done/cancelled ({dependents} task(s) depend on this — \
+             add 'release' to release them)"
+        )
+    } else {
+        format!("archive {key} — done/cancelled")
+    };
     state.modal_host.open(
         Action::Task(TaskAction::Archive {
             key: key.clone(),
             digest,
         }),
-        Modal::text_input(format!("archive {key} — done/cancelled"), "done", false),
+        Modal::text_input(prompt, "done", false),
     );
 }
 
@@ -5872,11 +5905,10 @@ fn apply_task_action(
             Ok(())
         }
         TaskAction::Archive { key, digest } => {
-            let status = match text.trim().to_ascii_lowercase().as_str() {
-                "done" => TaskDocStatus::Done,
-                "cancelled" | "canceled" => TaskDocStatus::Cancelled,
-                _ => {
-                    state.message = Some("archive refused: type done or cancelled".to_string());
+            let (status, release_dependents) = match parse_task_archive_input(text.trim()) {
+                Ok(parsed) => parsed,
+                Err(reason) => {
+                    state.message = Some(format!("archive refused: {reason}"));
                     return Ok(());
                 }
             };
@@ -5887,11 +5919,15 @@ fn apply_task_action(
                 TaskUpdate {
                     status: Some(status),
                     expected_digest: Some(digest),
+                    release_dependents,
                     ..Default::default()
                 },
             ) {
-                Ok(_) => {
-                    state.message = Some(format!("archived {key}"));
+                Ok(outcome) => {
+                    state.message = Some(format!(
+                        "archived {key}{}",
+                        effects_summary(&outcome.effects)
+                    ));
                     sync_tasks_board(state);
                 }
                 Err(error) => {
@@ -5912,8 +5948,9 @@ fn apply_task_action(
             let dir = super::tasks::board_dir(None)?;
             let provider = FilesTaskBoard::open_read_write(dir);
             match provider.update(&key, update) {
-                Ok(_) => {
-                    state.message = Some(format!("edited {key}"));
+                Ok(outcome) => {
+                    state.message =
+                        Some(format!("edited {key}{}", effects_summary(&outcome.effects)));
                     sync_tasks_board(state);
                 }
                 Err(error) => {
@@ -5922,6 +5959,35 @@ fn apply_task_action(
             }
             Ok(())
         }
+    }
+}
+
+/// Fold recorded effects (0063.6) into the trailing clause of a dashboard
+/// status message — "" when nothing beyond the field write happened, else
+/// "; moved to archived/; released 0071, 0072; 0074 failed: <reason>".
+fn effects_summary(effects: &[EffectRecord]) -> String {
+    let mut clauses = Vec::new();
+    for effect in effects {
+        let joined = effect.documents.join(", ");
+        match (&effect.effect, &effect.outcome) {
+            (EffectKind::ArchivePlacement, EffectOutcome::Applied) => {
+                clauses.push(format!("moved to {joined}"));
+            }
+            (EffectKind::ArchivePlacement, EffectOutcome::Failed { reason }) => {
+                clauses.push(format!("archive placement failed: {reason}"));
+            }
+            (EffectKind::ReleaseDependents, EffectOutcome::Applied) => {
+                clauses.push(format!("released {joined}"));
+            }
+            (EffectKind::ReleaseDependents, EffectOutcome::Failed { reason }) => {
+                clauses.push(format!("{joined} {reason}"));
+            }
+        }
+    }
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" — {}", clauses.join("; "))
     }
 }
 
@@ -10080,6 +10146,33 @@ mod tests {
         assert_eq!(update.remove_depends_on, vec!["0010".to_string()]);
         assert_eq!(update.add_depends_on, vec!["0011".to_string()]);
         assert!(parse_task_edit_input("dep 0010").is_err());
+    }
+
+    #[test]
+    fn parse_task_archive_input_recognizes_the_release_token() {
+        let (status, release) = parse_task_archive_input("done").unwrap();
+        assert_eq!(status, TaskDocStatus::Done);
+        assert!(!release);
+
+        let (status, release) = parse_task_archive_input("done release").unwrap();
+        assert_eq!(status, TaskDocStatus::Done);
+        assert!(release);
+
+        let (status, release) = parse_task_archive_input("cancelled release").unwrap();
+        assert_eq!(status, TaskDocStatus::Cancelled);
+        assert!(release);
+
+        let (status, release) = parse_task_archive_input("canceled").unwrap();
+        assert_eq!(status, TaskDocStatus::Cancelled);
+        assert!(!release);
+
+        // Anything after `release` (or a typo instead of it) is ignored —
+        // only its presence as the second token opts in.
+        let (_, release) = parse_task_archive_input("done nope").unwrap();
+        assert!(!release);
+
+        assert!(parse_task_archive_input("bogus").is_err());
+        assert!(parse_task_archive_input("").is_err());
     }
 
     #[test]

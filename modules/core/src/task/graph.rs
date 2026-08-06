@@ -99,8 +99,10 @@ fn children_of<'a>(
 }
 
 /// Direct inbound `depends-on` edges onto `key` — the tasks `blocks`
-/// resolves to. Computed, not stored.
-fn blockers_of<'a>(
+/// resolves to. Computed, not stored. Public so a backend's dependents
+/// sweep (0063.6) can reuse the same edge-finding as `resolved_relations`
+/// rather than re-walking `documents` itself.
+pub fn blockers_of<'a>(
     documents: &'a BTreeMap<String, TaskDocument>,
     key: &str,
 ) -> Vec<&'a TaskDocument> {

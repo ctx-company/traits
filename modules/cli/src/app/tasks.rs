@@ -8,7 +8,9 @@ use camino::Utf8PathBuf;
 use ctx_traits_core::response::{CommandOutput, Envelope};
 use ctx_traits_core::task::TaskStatus as TaskDocStatus;
 use ctx_traits_core::task::graph::DerivedStatus;
-use ctx_traits_core::task::provider::{TaskProvider, TaskProviderMut, TaskUpdate};
+use ctx_traits_core::task::provider::{
+    EffectKind, EffectOutcome, TaskProvider, TaskProviderMut, TaskUpdate,
+};
 use ctx_traits_io::task_files::FilesTaskBoard;
 
 use crate::app::command_handlers::{print_json_report, resolve_repo_root};
@@ -187,6 +189,7 @@ pub(crate) fn handle_tasks_update(
     remove_depends_on: Vec<String>,
     step_done: Vec<String>,
     step_open: Vec<String>,
+    release_dependents: bool,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
     let dir = board_dir(board)?;
@@ -241,9 +244,10 @@ pub(crate) fn handle_tasks_update(
         },
         set_steps_done,
         expected_digest: Some(resolved.digest),
+        release_dependents,
     };
 
-    let summary = provider
+    let outcome = provider
         .update(&key, update)
         .map_err(|e| crate::Error::Command {
             message: e.to_string(),
@@ -251,10 +255,11 @@ pub(crate) fn handle_tasks_update(
 
     match OutputMode::select(json, false) {
         OutputMode::Json => {
-            print_json_report(&Envelope::ok(&summary), "tasks update report")?;
+            print_json_report(&Envelope::ok(&outcome), "tasks update report")?;
         }
         OutputMode::Human(mode) => {
-            let panel = Panel::new(
+            let summary = &outcome.summary;
+            let mut panel = Panel::new(
                 "ctx",
                 format!("tasks update — {}", summary.key),
                 PanelStatus::Passed(status_text(summary.derived_status).to_string()),
@@ -265,11 +270,31 @@ pub(crate) fn handle_tasks_update(
                 status_text(summary.derived_status),
                 status_tone(summary.derived_status),
             ));
+            for effect in &outcome.effects {
+                let (tone, outcome_text) = match &effect.outcome {
+                    EffectOutcome::Applied => (RowTone::Default, "applied".to_string()),
+                    EffectOutcome::Failed { reason } => {
+                        (RowTone::Fail, format!("failed: {reason}"))
+                    }
+                };
+                panel = panel.row(PanelRow::toned(
+                    effect_label(effect.effect),
+                    format!("{outcome_text} — {}", effect.documents.join(", ")),
+                    tone,
+                ));
+            }
             emit_human(false, &panel, mode, || Ok(()))?;
         }
     }
 
     Ok(CommandOutput::new(()))
+}
+
+fn effect_label(kind: EffectKind) -> &'static str {
+    match kind {
+        EffectKind::ArchivePlacement => "archive placement",
+        EffectKind::ReleaseDependents => "released dependents",
+    }
 }
 
 pub(crate) fn handle_tasks_show(
@@ -379,4 +404,70 @@ pub(crate) fn handle_tasks_show(
     }
 
     Ok(CommandOutput::new(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tempdir() -> Utf8PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "cli-tasks-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Utf8PathBuf::from_path_buf(dir).unwrap()
+    }
+
+    fn write_task(dir: &Utf8PathBuf, file_name: &str, toml: &str) {
+        std::fs::write(dir.join(file_name), toml).unwrap();
+    }
+
+    /// `tasks update --status done --release-dependents --json` (0063.6):
+    /// the sweep runs from the CLI's own flag threading (not just the io
+    /// layer directly) and its dependent is actually released.
+    #[test]
+    fn tasks_update_with_release_dependents_reports_the_sweep_effect() {
+        let board = tempdir();
+        write_task(
+            &board,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+
+        handle_tasks_update(
+            "0001",
+            Some(board.as_str()),
+            None,
+            Some(TaskUpdateStatus::Done),
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            true,
+            true,
+        )
+        .unwrap();
+
+        let provider = FilesTaskBoard::open_read(board);
+        let dependent = provider.get("0002").unwrap().unwrap();
+        assert!(dependent.document.relations.depends_on.is_empty());
+    }
 }

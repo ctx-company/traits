@@ -13,12 +13,58 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ctx_traits_core::digest::Digest;
 use ctx_traits_core::task::graph::{self, EdgeKind};
 use ctx_traits_core::task::provider::{
-    self, DuplicateKey, NewTask, ParseFailure, ProviderError, ResolvedTask, SyncReport,
-    TaskProvider, TaskProviderMut, TaskSummary, TaskUpdate, WriteError,
+    self, DuplicateKey, EffectKind, EffectOutcome, EffectRecord, NewTask, ParseFailure,
+    ProviderError, ResolvedTask, SyncReport, TaskProvider, TaskProviderMut, TaskSummary,
+    TaskUpdate, UpdateOutcome, WriteError,
 };
 use ctx_traits_core::task::{Relations, TaskDocument, TaskStatus};
 
 const ARCHIVED_DIR: &str = "archived";
+
+/// The board-config file name, reserved among a board directory's direct
+/// children: never parsed as a task document, never resolvable as one
+/// (0063.6).
+const BOARD_CONFIG_FILE: &str = "board.toml";
+
+/// Per-board effect declarations (0063.6), loaded from an optional
+/// `board.toml` in the board directory. `deny_unknown_fields` on both
+/// levels makes an undeclared effect name a load error rather than a
+/// silently ignored key — the closed set of two named effects is the whole
+/// surface, not an extension point for scripted ones.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct BoardConfig {
+    effects: EffectsConfig,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct EffectsConfig {
+    #[serde(rename = "archive-on-close")]
+    archive_on_close: bool,
+}
+
+impl Default for EffectsConfig {
+    fn default() -> Self {
+        Self {
+            archive_on_close: true,
+        }
+    }
+}
+
+/// Load `board_dir`'s `board.toml`, or the all-defaults config when the
+/// file is absent. A present-but-unparseable or unknown-key file is a
+/// `ProviderError` — validated when the config loads, not deferred to the
+/// first effect that would have used it.
+fn load_board_config(board_dir: &Utf8Path) -> Result<BoardConfig, ProviderError> {
+    let path = board_dir.join(BOARD_CONFIG_FILE);
+    match std::fs::read_to_string(path.as_std_path()) {
+        Ok(text) => toml::from_str(&text)
+            .map_err(|e| ProviderError(format!("{path}: invalid board config: {e}"))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BoardConfig::default()),
+        Err(e) => Err(provider_error(&path, e)),
+    }
+}
 
 /// Resolve `task_value` to a file name among `dir`'s direct children — the
 /// exact filename, the exact stem, or (for a bare `NNNN[.M...]`-shaped key)
@@ -35,7 +81,7 @@ pub(crate) fn task_file_name_in_dir(dir: &Utf8Path, task_value: &str) -> Option<
         .flatten()
         .filter(|entry| entry.path().is_file())
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .filter(|name| name.ends_with(".toml"))
+        .filter(|name| name.ends_with(".toml") && name != BOARD_CONFIG_FILE)
         .collect();
     names.sort();
     names.into_iter().find(|name| {
@@ -110,6 +156,7 @@ impl Board {
                 .filter(|entry| entry.path().is_file())
                 .filter_map(|entry| Utf8PathBuf::from_path_buf(entry.path()).ok())
                 .filter(|path| path.extension() == Some("toml"))
+                .filter(|path| archived || path.file_name() != Some(BOARD_CONFIG_FILE))
                 .collect();
             paths.sort();
             for path in paths {
@@ -291,7 +338,7 @@ impl Board {
         Ok(provider::summarize(&reloaded.documents, &key, archived))
     }
 
-    fn update(&self, key: &str, update: TaskUpdate) -> Result<TaskSummary, WriteError> {
+    fn update(&self, key: &str, update: TaskUpdate) -> Result<UpdateOutcome, WriteError> {
         let loaded = self.load()?;
         let current_path = Self::single_location(&loaded, key)?.clone();
         let mut document = loaded
@@ -300,6 +347,10 @@ impl Board {
             .cloned()
             .ok_or_else(|| WriteError::NotFound(key.to_string()))?;
         let was_archived = loaded.archived_keys.contains(key);
+        let closing = matches!(
+            update.status,
+            Some(TaskStatus::Done) | Some(TaskStatus::Cancelled)
+        );
 
         if let Some(expected) = &update.expected_digest
             && loaded.digests.get(key) != Some(expected)
@@ -315,6 +366,15 @@ impl Board {
             return Err(WriteError::InvalidField {
                 field: "title",
                 reason: "title must not be empty or whitespace-only".to_string(),
+            });
+        }
+
+        if update.release_dependents && !closing {
+            return Err(WriteError::InvalidField {
+                field: "release_dependents",
+                reason: "releasing dependents requires this update to set a closing status \
+                         (done or cancelled)"
+                    .to_string(),
             });
         }
 
@@ -391,14 +451,17 @@ impl Board {
                 step.done = *done;
             }
         }
+        let effects_config = load_board_config(&self.board_dir)?.effects;
         let mut archive_target = was_archived;
         if let Some(status) = update.status {
             document.status = Some(status);
-            archive_target = matches!(status, TaskStatus::Done | TaskStatus::Cancelled);
-            if archive_target && !was_archived {
+            if closing && !was_archived {
                 document.closed = Some(crate::audit_journal::today_date_utc());
-            } else if !archive_target && was_archived {
+            } else if !closing && was_archived {
                 document.closed = None;
+            }
+            if effects_config.archive_on_close {
+                archive_target = closing;
             }
         }
 
@@ -420,12 +483,95 @@ impl Board {
                 .map_err(|e| provider_error(&current_path, e))?;
         }
 
+        let mut effects = Vec::new();
+        if archive_target != was_archived {
+            effects.push(EffectRecord {
+                effect: EffectKind::ArchivePlacement,
+                outcome: EffectOutcome::Applied,
+                documents: vec![target_path.to_string()],
+            });
+        }
+
+        if update.release_dependents {
+            effects.extend(self.sweep_dependents(&loaded, key));
+        }
+
         let reloaded = self.load()?;
-        Ok(provider::summarize(
-            &reloaded.documents,
-            key,
-            archive_target,
-        ))
+        Ok(UpdateOutcome {
+            summary: provider::summarize(&reloaded.documents, key, archive_target),
+            effects,
+        })
+    }
+
+    /// The dependents sweep (0063.6): every task that directly
+    /// `depends-on` `key`, per the pre-write snapshot `loaded`, has that
+    /// edge removed by a direct document write — never a recursive
+    /// `self.update()`, so the sweep is structurally one hop and triggers
+    /// no further effects. Each dependent is re-read and its digest
+    /// compared against `loaded.digests` before it is touched (0063.5's
+    /// per-document stale refusal); a stale or otherwise failed dependent
+    /// is recorded and skipped, never a reason to fail the whole sweep or
+    /// roll back the primary write already applied by the caller.
+    fn sweep_dependents(&self, loaded: &LoadedBoard, key: &str) -> Vec<EffectRecord> {
+        let dependents = graph::blockers_of(&loaded.documents, key);
+        let mut applied = Vec::new();
+        let mut failed: Vec<(String, String)> = Vec::new();
+        for dependent in dependents {
+            let dep_key = dependent.key.clone();
+            match self.release_one_dependent(loaded, &dep_key, key) {
+                Ok(()) => applied.push(dep_key),
+                Err(e) => failed.push((dep_key, e.to_string())),
+            }
+        }
+        let mut records = Vec::new();
+        if !applied.is_empty() {
+            records.push(EffectRecord {
+                effect: EffectKind::ReleaseDependents,
+                outcome: EffectOutcome::Applied,
+                documents: applied,
+            });
+        }
+        for (dep_key, reason) in failed {
+            records.push(EffectRecord {
+                effect: EffectKind::ReleaseDependents,
+                outcome: EffectOutcome::Failed { reason },
+                documents: vec![dep_key],
+            });
+        }
+        records
+    }
+
+    /// Remove the `depends_on` edge naming `released` from `dep_key`'s
+    /// document, refusing (without touching disk) if `dep_key` changed
+    /// since `loaded` was taken.
+    fn release_one_dependent(
+        &self,
+        loaded: &LoadedBoard,
+        dep_key: &str,
+        released: &str,
+    ) -> Result<(), WriteError> {
+        let path = Self::single_location(loaded, dep_key)?.clone();
+        let text =
+            std::fs::read_to_string(path.as_std_path()).map_err(|e| provider_error(&path, e))?;
+        let current_digest = Digest::source(&text).as_str().to_string();
+        if loaded.digests.get(dep_key) != Some(&current_digest) {
+            return Err(WriteError::StaleWrite {
+                key: dep_key.to_string(),
+            });
+        }
+        let mut document = ctx_traits_core::task::parse(&text)
+            .map_err(|e| WriteError::from(ProviderError(e.to_string())))?;
+        document.relations.depends_on.retain(|dep| dep != released);
+
+        let dir = path
+            .parent()
+            .map(Utf8PathBuf::from)
+            .ok_or_else(|| WriteError::from(ProviderError(format!("{path}: no parent dir"))))?;
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| WriteError::from(ProviderError(format!("{path}: no file name"))))?
+            .to_string();
+        self.write_document(&dir, &file_name, &document)
     }
 }
 
@@ -530,7 +676,7 @@ impl TaskProviderMut for ReadWriteBoard {
         self.0.create(new_task)
     }
 
-    fn update(&self, key: &str, update: TaskUpdate) -> Result<TaskSummary, WriteError> {
+    fn update(&self, key: &str, update: TaskUpdate) -> Result<UpdateOutcome, WriteError> {
         self.0.update(key, update)
     }
 }
@@ -606,7 +752,7 @@ mod tests {
         write_task(&board_dir, "0001-first.toml", TASK_0001);
 
         let write = FilesTaskBoard::open_read_write(board_dir.clone());
-        let summary = write
+        let outcome = write
             .update(
                 "0001",
                 TaskUpdate {
@@ -615,7 +761,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(summary.archived);
+        assert!(outcome.summary.archived);
         assert!(!board_dir.join("0001-first.toml").exists());
         assert!(
             board_dir
@@ -623,14 +769,26 @@ mod tests {
                 .join("0001-first.toml")
                 .exists()
         );
+        assert_eq!(outcome.effects.len(), 1);
+        assert_eq!(outcome.effects[0].effect, EffectKind::ArchivePlacement);
+        assert_eq!(outcome.effects[0].outcome, EffectOutcome::Applied);
+        assert_eq!(
+            outcome.effects[0].documents,
+            vec![
+                board_dir
+                    .join(ARCHIVED_DIR)
+                    .join("0001-first.toml")
+                    .to_string()
+            ]
+        );
 
         let list = write.list(false).unwrap();
         assert!(list.is_empty());
         let fetched = write.get("0001").unwrap().expect("still resolves archived");
         assert!(fetched.archived);
 
-        // Reopening moves it back.
-        let summary = write
+        // Reopening moves it back and records the move too.
+        let outcome = write
             .update(
                 "0001",
                 TaskUpdate {
@@ -639,7 +797,9 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(!summary.archived);
+        assert!(!outcome.summary.archived);
+        assert_eq!(outcome.effects.len(), 1);
+        assert_eq!(outcome.effects[0].effect, EffectKind::ArchivePlacement);
         assert!(board_dir.join("0001-first.toml").exists());
         assert!(
             !board_dir
@@ -1087,5 +1247,229 @@ mod tests {
         let dependent_after =
             std::fs::read_to_string(board_dir.join("0002-b.toml").as_std_path()).unwrap();
         assert_eq!(dependent_before, dependent_after);
+    }
+
+    #[test]
+    fn archive_on_close_false_skips_the_move_and_records_no_effect() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+        write_task(
+            &board_dir,
+            BOARD_CONFIG_FILE,
+            "[effects]\narchive-on-close = false\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let outcome = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(!outcome.summary.archived);
+        assert!(outcome.effects.is_empty());
+        assert!(board_dir.join("0001-a.toml").exists());
+        assert!(!board_dir.join(ARCHIVED_DIR).join("0001-a.toml").exists());
+    }
+
+    #[test]
+    fn unknown_effects_key_is_a_load_error() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+        write_task(
+            &board_dir,
+            BOARD_CONFIG_FILE,
+            "[effects]\narchive-on-scripting = true\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, WriteError::Backend(_)));
+    }
+
+    #[test]
+    fn board_toml_never_surfaces_as_a_task_or_a_parse_failure() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+        write_task(
+            &board_dir,
+            BOARD_CONFIG_FILE,
+            "[effects]\narchive-on-close = true\n",
+        );
+
+        let read = FilesTaskBoard::open_read(board_dir.clone());
+        let list = read.list(true).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].key, "0001");
+
+        let report = read.sync().unwrap();
+        assert!(report.parse_failures.is_empty());
+
+        assert_eq!(read.resolve("board").unwrap(), None);
+    }
+
+    #[test]
+    fn release_dependents_removes_both_edges_lists_both_documents_and_stale_one_fails() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        write_task(
+            &board_dir,
+            "0003-c.toml",
+            "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"C\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let outcome = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    release_dependents: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let sweep = outcome
+            .effects
+            .iter()
+            .find(|e| e.effect == EffectKind::ReleaseDependents)
+            .expect("release-dependents effect recorded");
+        assert_eq!(sweep.outcome, EffectOutcome::Applied);
+        let mut documents = sweep.documents.clone();
+        documents.sort();
+        assert_eq!(documents, vec!["0002".to_string(), "0003".to_string()]);
+
+        assert!(
+            write
+                .get("0002")
+                .unwrap()
+                .unwrap()
+                .document
+                .relations
+                .depends_on
+                .is_empty()
+        );
+        assert!(
+            write
+                .get("0003")
+                .unwrap()
+                .unwrap()
+                .document
+                .relations
+                .depends_on
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn release_dependents_without_a_closing_status_is_refused() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    release_dependents: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            WriteError::InvalidField {
+                field: "release_dependents",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_dependent_that_changed_since_the_snapshot_fails_its_own_entry_and_keeps_its_file() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        write_task(
+            &board_dir,
+            "0003-c.toml",
+            "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"C\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let loaded = write.0.load().unwrap();
+
+        // 0002 changes on disk after the snapshot `sweep_dependents` below
+        // is handed — the exact race 0063.5's per-document refusal guards.
+        let rewritten_0002 = "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B renamed\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n";
+        write_task(&board_dir, "0002-b.toml", rewritten_0002);
+
+        let records = write.0.sweep_dependents(&loaded, "0001");
+        let applied: Vec<_> = records
+            .iter()
+            .filter(|r| r.outcome == EffectOutcome::Applied)
+            .flat_map(|r| r.documents.clone())
+            .collect();
+        let failed: Vec<_> = records
+            .iter()
+            .filter(|r| matches!(r.outcome, EffectOutcome::Failed { .. }))
+            .flat_map(|r| r.documents.clone())
+            .collect();
+        assert_eq!(applied, vec!["0003".to_string()]);
+        assert_eq!(failed, vec!["0002".to_string()]);
+
+        // The stale dependent's file is untouched...
+        let actual_0002 =
+            std::fs::read_to_string(board_dir.join("0002-b.toml").as_std_path()).unwrap();
+        assert_eq!(actual_0002, rewritten_0002);
+        // ...while the fresh one had its edge removed.
+        assert!(
+            write
+                .get("0003")
+                .unwrap()
+                .unwrap()
+                .document
+                .relations
+                .depends_on
+                .is_empty()
+        );
     }
 }

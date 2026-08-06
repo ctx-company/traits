@@ -1638,6 +1638,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 remove_depends_on,
                 step_done,
                 step_open,
+                release_dependents,
                 json,
             }) => crate::app::tasks::handle_tasks_update(
                 &task,
@@ -1657,6 +1658,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 remove_depends_on,
                 step_done,
                 step_open,
+                release_dependents,
                 json,
             ),
         },

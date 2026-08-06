@@ -116,6 +116,62 @@ pub struct TaskUpdate {
     /// it matches the stored document's current [`ResolvedTask::digest`].
     /// `None` bypasses the check.
     pub expected_digest: Option<String>,
+    /// The explicit ask (0063.6) for the dependents-sweep effect: when
+    /// `true` and this update sets a closing status, every task that
+    /// directly `depends-on` this one has that edge removed in the same
+    /// write. Refused with [`WriteError::InvalidField`] when set without a
+    /// closing status — there is nothing to release a dependent from
+    /// otherwise. Default `false`: the sweep never runs silently.
+    pub release_dependents: bool,
+}
+
+/// The closed set of follow-ups an `update` can declare (0063.6). Adding a
+/// new kind is a deliberate, reviewed change — this is not an extension
+/// point for backend-specific or scripted effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EffectKind {
+    /// The files backend's close/reopen archive move (default-on, declared
+    /// per board in `board.toml`'s `[effects]` table).
+    ArchivePlacement,
+    /// The dependents sweep: every direct `depends-on` edge onto the
+    /// updated task is removed, one hop, only when
+    /// [`TaskUpdate::release_dependents`] asked for it.
+    ReleaseDependents,
+}
+
+/// What happened when a declared effect ran. `Failed` never rolls back the
+/// primary field write — an effect is best-effort by ruling, not a
+/// condition on the update succeeding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "outcome")]
+pub enum EffectOutcome {
+    Applied,
+    Failed { reason: String },
+}
+
+/// One declared effect's execution, named so nothing an `update` did beyond
+/// the field write happens silently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct EffectRecord {
+    pub effect: EffectKind,
+    #[serde(flatten)]
+    pub outcome: EffectOutcome,
+    /// The document(s) the effect touched or attempted to touch, by key —
+    /// for `ArchivePlacement` the updated task itself (named by the target
+    /// path in `reason` on failure); for `ReleaseDependents` every
+    /// dependent the sweep visited, applied or failed alike.
+    pub documents: Vec<String>,
+}
+
+/// `update`'s result: the same [`TaskSummary`] plus every declared effect
+/// that ran, in the order it ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct UpdateOutcome {
+    pub summary: TaskSummary,
+    pub effects: Vec<EffectRecord>,
 }
 
 /// A backend-level failure common to both reads and writes (an unreadable
@@ -196,8 +252,11 @@ pub trait TaskProviderMut: TaskProvider {
     /// that would create a cycle is refused (naming both paths) before
     /// anything is written. A status write that closes the task
     /// (`done`/`cancelled`) archives it; a status write that reopens an
-    /// archived task un-archives it.
-    fn update(&self, key: &str, update: TaskUpdate) -> Result<TaskSummary, WriteError>;
+    /// archived task un-archives it. Declared effects (0063.6) run after
+    /// the field write and are recorded in the returned
+    /// [`UpdateOutcome::effects`] — an effect failing never rolls back the
+    /// field write itself.
+    fn update(&self, key: &str, update: TaskUpdate) -> Result<UpdateOutcome, WriteError>;
 }
 
 /// Build a [`TaskSummary`] for `key` from a snapshot, given whether it is
