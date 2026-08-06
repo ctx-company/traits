@@ -13,7 +13,7 @@ export const reviewVerdict = schema.object(
         }),
         blockers: schema.field(schema.list(blockerSchema), {
             description:
-                "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), un-abstracted duplication, OR an owner annotation from a denied round briefing that the work does not yet visibly address. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
+                "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), un-abstracted duplication, OR owner feedback from an annotated round briefing that the work does not yet visibly address. Draft-fidelity is judged solely under the quick authority rule — a left-undone step is forgivable there with a recorded reason and is never listed here as a categorical blocker on its own. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure.",
         }),
         advisory: schema.field(schema.text(), {
             required: false,
@@ -68,7 +68,7 @@ export const ownerDecision = schema.object(
     {
         decision: schema.field(schema.text(), {
             description:
-                '"approved", "denied", or "dismissed" — plannotator\'s gate verdict on the round briefing. Only "approved" advances the build loop; denied and dismissed both leave it unsatisfied and the loop continues.',
+                '"approved" or "annotated" — plannotator\'s gate verdict on the round briefing. Only "approved" advances the build loop; "annotated" (the owner submitted feedback without approving) leaves it unsatisfied and the loop continues. A "dismissed" verdict (the owner closed the briefing via Exit without deciding) never reaches this slot: the summon step turns it into a failing exit and the run halts.',
         }),
     },
     { description: "plannotator's `annotate --gate --json` verdict on one round's briefing." },

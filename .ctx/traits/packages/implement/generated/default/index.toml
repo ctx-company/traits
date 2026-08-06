@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.21.0"
+version = "0.22.0"
 name = "Implement (Default)"
 summary = "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
 variant = "default"

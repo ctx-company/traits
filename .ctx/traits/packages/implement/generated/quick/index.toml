@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.21.0"
+version = "0.22.0"
 name = "Implement (Quick)"
 summary = "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit."
 variant = "quick"

@@ -1,28 +1,28 @@
 {
   "agent:clerk": {
     "file": "packages/agents/src/index.ts",
-    "start": 63,
-    "end": 63
+    "start": 65,
+    "end": 65
   },
   "agent:scribe": {
     "file": "packages/agents/src/index.ts",
-    "start": 39,
-    "end": 39
+    "start": 41,
+    "end": 41
   },
   "agent:smart-1": {
     "file": "packages/agents/src/index.ts",
-    "start": 53,
-    "end": 53
+    "start": 55,
+    "end": 55
   },
   "agent:smart-2": {
     "file": "packages/agents/src/index.ts",
-    "start": 53,
-    "end": 53
+    "start": 55,
+    "end": 55
   },
   "agent:worker": {
     "file": "packages/agents/src/index.ts",
-    "start": 29,
-    "end": 29
+    "start": 31,
+    "end": 31
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -91,13 +91,13 @@
   },
   "schema:blocker": {
     "file": "packages/agents/src/index.ts",
-    "start": 225,
-    "end": 225
+    "start": 227,
+    "end": 227
   },
   "schema:blocker-step": {
     "file": "packages/agents/src/index.ts",
-    "start": 205,
-    "end": 205
+    "start": 207,
+    "end": 207
   },
   "schema:correctness-findings": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -116,13 +116,13 @@
   },
   "schema:leftover": {
     "file": "packages/agents/src/index.ts",
-    "start": 385,
-    "end": 385
+    "start": 387,
+    "end": 387
   },
   "schema:owner-item": {
     "file": "packages/agents/src/index.ts",
-    "start": 338,
-    "end": 338
+    "start": 340,
+    "end": 340
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
