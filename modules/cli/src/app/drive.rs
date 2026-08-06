@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1081,7 +1081,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // writing frames — so a detached narrator thread never races a frame's
     // whole-ledger write, and a resumed drive never dispatches a second call.
     let pending_title = PendingSessionTitle::default();
-    maybe_dispatch_session_title(
+    let title_worker_dispatched = maybe_dispatch_session_title(
         &input,
         run_panel.0.as_ref(),
         &session_for_lock,
@@ -1115,6 +1115,15 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // permanent, not merely delayed (0143 investigation).
     let title_claim_owner = driver_lock.title_claim_owner().to_string();
     let mut report = flush_after_drive_loop(drive_result, || {
+        // Grace before the close-out: a drive ending inside its first frame
+        // reaches here before the narrator answered, and closing immediately
+        // throws away a title that is often milliseconds from arriving. The
+        // wait is skipped entirely when the worker already answered (the
+        // ordinary case — any frame boundary is far longer than a narrator
+        // call), and bounded when it has not.
+        if title_worker_dispatched {
+            pending_title.await_answer_briefly(Duration::from_millis(1500));
+        }
         pending_title.flush(&ledger_path, None);
         close_out_unanswered_session_title(&ledger_path, &title_claim_owner);
     })?;
@@ -3903,7 +3912,14 @@ fn create_run_panel(
 /// is just a mutex and has no such ordering constraint: the title appears the
 /// moment it exists, and is written down at the next safe point.
 #[derive(Clone, Default)]
-pub(crate) struct PendingSessionTitle(Arc<Mutex<Option<SessionTitleOutcome>>>);
+pub(crate) struct PendingSessionTitle {
+    slot: Arc<Mutex<Option<SessionTitleOutcome>>>,
+    /// Set the moment the worker delivers ANY outcome — including one a
+    /// frame-boundary flush has since consumed — so the drive-exit grace wait
+    /// returns immediately instead of polling for an answer that already
+    /// arrived.
+    answered: Arc<AtomicBool>,
+}
 
 enum SessionTitleOutcome {
     Success {
@@ -3922,15 +3938,36 @@ enum SessionTitleOutcome {
 
 impl PendingSessionTitle {
     fn put(&self, outcome: SessionTitleOutcome) {
-        if let Ok(mut slot) = self.0.lock() {
+        if let Ok(mut slot) = self.slot.lock() {
             *slot = Some(outcome);
         }
+        self.answered.store(true, Ordering::Release);
     }
 
     /// Take the pending title, if one has arrived. Called from the drive
     /// thread only.
     fn take(&self) -> Option<SessionTitleOutcome> {
-        self.0.lock().ok().and_then(|mut slot| slot.take())
+        self.slot.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Bounded drive-exit grace for a dispatched worker that has not answered
+    /// yet: a drive that ends inside its first frame (a command-permission
+    /// block, a fast failure) reaches the exit close-out before the
+    /// narrator's answer exists, so the claim settles retryable and the real
+    /// title — often milliseconds away — is thrown out. Waiting briefly lets
+    /// the flush below record the actual title instead; the close-out still
+    /// runs after, as the no-op its owner check makes it. Returns whether an
+    /// answer arrived; the wait only ever bites on those fast exits, since
+    /// any run that reached a frame boundary has long had its answer.
+    fn await_answer_briefly(&self, deadline: Duration) -> bool {
+        let start = Instant::now();
+        while !self.answered.load(Ordering::Acquire) {
+            if start.elapsed() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        true
     }
 
     /// Persist a title that has arrived, from the drive thread, at a point
@@ -4000,6 +4037,10 @@ fn close_out_unanswered_session_title(ledger_path: &camino::Utf8Path, claim_owne
     }
 }
 
+/// Returns whether a title worker was actually spawned — i.e. an `in-flight`
+/// claim now stands in the ledger whose answer is worth a bounded drive-exit
+/// grace before `close_out_unanswered_session_title` settles it. Every
+/// no-dispatch path (unclaimable, no narrator, load failure) returns `false`.
 #[allow(clippy::too_many_arguments)]
 fn maybe_dispatch_session_title(
     input: &DriveInputs<'_>,
@@ -4010,10 +4051,10 @@ fn maybe_dispatch_session_title(
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
     pending: &PendingSessionTitle,
     claim_owner: &str,
-) {
+) -> bool {
     let Ok(loaded) = ctx_traits_io::run::load_trait_for_session(input.file, None, session, "drive")
     else {
-        return;
+        return false;
     };
     let (trait_name, input_text) =
         run_view::title_prompt_context_for(loaded.trait_ref.name.as_str(), session);
@@ -4027,7 +4068,7 @@ fn maybe_dispatch_session_title(
     let Ok((worktree_env, confinement_payloads)) =
         resolve_effective_worktree_env(input.execution_dir, profile)
     else {
-        return;
+        return false;
     };
     let attempts =
         match ctx_traits_io::run_session::claim_session_title_attempt(ledger_path, claim_owner) {
@@ -4041,7 +4082,7 @@ fn maybe_dispatch_session_title(
             }
         };
     let Some(attempts) = attempts else {
-        return;
+        return false;
     };
     let prompt = harness_stream::session_title_prompt(&trait_name, &input_text);
     // 0079: `cold_narrator_config_for_session_title` applies the single
@@ -4072,7 +4113,7 @@ fn maybe_dispatch_session_title(
                 },
             ));
         }
-        return;
+        return false;
     };
     if let Some(panel) = run_panel {
         panel.set_title_state(Some(
@@ -4116,6 +4157,21 @@ fn maybe_dispatch_session_title(
                 // presentation-only; the ledger stays the authority.
                 ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&sidecar_ledger_path)
                     .append_session_title(title.clone());
+                // Paint the live panel from here too, for the same reason: a
+                // panel write is just a mutex with no ledger-ordering
+                // constraint, and without it the live view keeps showing
+                // "(Generating session title…)" until the first frame
+                // completes — minutes after the title existed. The
+                // frame-boundary flush re-paints the same resolved state
+                // from the ledger, harmlessly.
+                if let Some(panel) = panel.as_ref() {
+                    panel.set_title_state(Some(
+                        ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+                            attempts,
+                            title: title.clone(),
+                        },
+                    ));
+                }
                 SessionTitleOutcome::Success { owner, title }
             }
             Err(error) => SessionTitleOutcome::Failure {
@@ -4129,6 +4185,7 @@ fn maybe_dispatch_session_title(
             panel.tick();
         }
     });
+    true
 }
 
 fn refresh_existing_run_panel(
@@ -9180,6 +9237,28 @@ mod session_title_flush_tests {
         let _ = std::fs::remove_dir_all(directory.as_std_path());
         std::fs::create_dir_all(directory.as_std_path()).expect("create scratch directory");
         directory.join("ledger.json")
+    }
+
+    #[test]
+    fn await_answer_returns_immediately_once_the_worker_has_answered() {
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::Success {
+            owner: "owner".to_string(),
+            title: "answered".to_string(),
+        });
+        let start = std::time::Instant::now();
+        assert!(pending.await_answer_briefly(std::time::Duration::from_secs(5)));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        // The answered flag survives the flush consuming the outcome, so a
+        // drive exit after a mid-run flush never re-waits.
+        let _ = pending.take();
+        assert!(pending.await_answer_briefly(std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn await_answer_times_out_when_no_worker_ever_answers() {
+        let pending = PendingSessionTitle::default();
+        assert!(!pending.await_answer_briefly(std::time::Duration::from_millis(120)));
     }
 
     #[test]
