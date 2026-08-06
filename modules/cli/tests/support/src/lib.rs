@@ -333,38 +333,6 @@ pub fn git_init(dir: &Path) {
     git_init_on_branch(dir, "main");
 }
 
-/// Same as [`git_init`], but on `branch` instead of the fixed `"main"` — used
-/// by P488 default-branch-discovery proofs that need a fixture repo whose
-/// default branch is something other than `main` (e.g. `trunk`).
-/// Recursively collect every `.rs` file under `dir`. Shared by the
-/// repo-wide source-scan proofs (`proof_branch_literals`,
-/// `proof_identity_scrub`, `proof_compile_time_paths`) so the walk is
-/// written once (P490). `target/` directories are skipped: they hold build
-/// artifacts and crate-local scratch output (task 0099's
-/// `non_tmp_scratch_root`), never source, and walking a shared
-/// `CARGO_TARGET_DIR`'s contents would be both slow and liable to surface
-/// generated `.rs` files that are not this repository's own source.
-pub fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries {
-        let entry = entry.unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()));
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .unwrap_or_else(|error| panic!("cannot stat {}: {error}", path.display()));
-        if file_type.is_dir() {
-            if path.file_name().is_some_and(|name| name == "target") {
-                continue;
-            }
-            collect_rs_files(&path, out);
-        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
-}
-
 /// Write a fixture trait's canonical file and generated manifest, keyed on
 /// one activation keyword. Shared by the P499/P501 hook proof suites
 /// (`proof_claude_code_hook`, `proof_codex_hook`) — the harnesses' proofs
