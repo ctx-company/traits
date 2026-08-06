@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0064"
 title = "Reconcile the board against reality, and split an oversized task from its park report"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = """
 
