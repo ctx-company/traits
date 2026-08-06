@@ -5545,7 +5545,14 @@ fn merge_project_config(
         let target = base.registry.get_or_insert_with(RegistryTable::default);
         if registry.base.is_some() {
             target.base = registry.base;
-            record_winner(winners, "registry.base", layer, source);
+            record_winner(winners, "registry.base", layer, source.clone());
+        }
+    }
+    if let Some(tasks) = next.tasks {
+        let target = base.tasks.get_or_insert_with(TasksTable::default);
+        if tasks.dispatch_trait.is_some() {
+            target.dispatch_trait = tasks.dispatch_trait;
+            record_winner(winners, "tasks.dispatch-trait", layer, source);
         }
     }
 }
@@ -8182,6 +8189,43 @@ mod config_tests {
         assert_eq!(
             winners["worktree.retention.cheap"].source.as_deref(),
             Some("repo")
+        );
+    }
+
+    /// 0063.4 regression: `[tasks] dispatch-trait` parsed from a repo config
+    /// file must survive the project merge — it was only applied on the
+    /// `CTX_CONFIG` environment path, so a configured board dispatch still
+    /// opened the modal as unconfigured.
+    #[test]
+    fn tasks_dispatch_trait_survives_the_project_merge_from_a_repo_layer() {
+        let configured: RuntimeConfig =
+            toml::from_str("[tasks]\ndispatch-trait = \"implement:quick\"\n").unwrap();
+        let mut effective = RuntimeConfig::default();
+        let mut winners = BTreeMap::new();
+        merge_project_config(
+            &mut effective,
+            configured,
+            ConfigLayer::Repo,
+            Some("repo".to_string()),
+            &mut winners,
+        );
+        assert_eq!(
+            effective.effective_dispatch_trait().as_deref(),
+            Some("implement:quick")
+        );
+        assert_eq!(winners["tasks.dispatch-trait"].source.as_deref(), Some("repo"));
+
+        // A later layer without a `[tasks]` table must not clear it.
+        merge_project_config(
+            &mut effective,
+            RuntimeConfig::default(),
+            ConfigLayer::UserGlobal,
+            Some("global".to_string()),
+            &mut winners,
+        );
+        assert_eq!(
+            effective.effective_dispatch_trait().as_deref(),
+            Some("implement:quick")
         );
     }
 
