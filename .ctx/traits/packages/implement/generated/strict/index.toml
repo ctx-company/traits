@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.20.0"
+version = "0.21.0"
 name = "Implement (Strict)"
 summary = "Verbatim dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement the draft exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
 variant = "strict"

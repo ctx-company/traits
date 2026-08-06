@@ -28,6 +28,12 @@ export const QUICK_INTENT: Intent = {
     ],
 };
 
+/** gated's intent: quick's lean set plus role-attributed output for the owner-in-the-loop surfaces (variants/gated.ts). */
+export const GATED_INTENT: Intent = {
+    require: [...QUICK_INTENT.require!, intent.require.RoleAttributedOutput],
+    avoid: [...QUICK_INTENT.avoid!],
+};
+
 /** default/smart/phase's superset intent (variants/default.ts). */
 export const FAMILY_INTENT: Intent = {
     require: [

@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.20.0"
+version = "0.21.0"
 name = "Implement Phase"
 summary = "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
 variant = "phase"

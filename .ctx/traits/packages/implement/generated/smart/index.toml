@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.20.0"
+version = "0.21.0"
 name = "Implement (Smart)"
 summary = "Research-informed dogfood implementation procedure: research prior art, extract the task contract from the task board, draft the approach, implement it, refine against two independent reviewers who may amend the draft, and commit."
 variant = "smart"

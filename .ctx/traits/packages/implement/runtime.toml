@@ -8,3 +8,12 @@ idle-seconds = 1200
 frame-seconds = 1800
 total-seconds = 21600
 idle-seconds = 600
+
+# gated waits on a human at up to eleven points (plan annotation, one gated
+# briefing per approved round, the final brief display) — each plannotator
+# step carries its own 4h idle ceiling, and the run's total budget must
+# survive the owner being away, so it gets a day.
+[variant.gated]
+frame-seconds = 1800
+total-seconds = 86400
+idle-seconds = 600

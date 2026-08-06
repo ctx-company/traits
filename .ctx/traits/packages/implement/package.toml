@@ -1,6 +1,6 @@
 [package]
 id = "implement"
-version = "0.20.0"
+version = "0.21.0"
 name = "Implement"
 status = "ready"
 
@@ -28,6 +28,10 @@ aliases = ["implement-strict"]
 [family.variant.phase]
 path = "generated/phase/index.toml"
 aliases = ["implement-phase"]
+
+[family.variant.gated]
+path = "generated/gated/index.toml"
+aliases = ["implement-gated"]
 
 [publish]
 name = "@ctx-traits/implement"
