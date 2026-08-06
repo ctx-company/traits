@@ -697,8 +697,84 @@ enum Action {
 /// reuses `SessionAction::Spawn` unchanged.
 #[derive(Clone)]
 enum TaskAction {
-    Split { parent: String },
-    Archive { key: String },
+    Split {
+        parent: String,
+    },
+    Archive {
+        key: String,
+        digest: String,
+    },
+    /// `e`: status + relations, the only surface the task authorizes
+    /// beyond archive (prose editing stays CLI-only). `digest` is
+    /// captured at modal-open — the snapshot the write is validated
+    /// against.
+    Edit {
+        key: String,
+        digest: String,
+    },
+}
+
+/// The three forms `e`'s modal grammar accepts, parsed by
+/// [`parse_task_edit_input`]: `status <ready|done|cancelled>`,
+/// `dep +<key>` / `dep -<key>`, and `dep <old> <new>` (re-point, one
+/// `TaskUpdate` call per the recorded ruling). Anything else is a parse
+/// error reported verbatim in `state.message`.
+fn parse_task_edit_input(text: &str) -> Result<TaskUpdate, String> {
+    let mut parts = text.split_whitespace();
+    let verb = parts
+        .next()
+        .ok_or_else(|| "empty — try `status ready` or `dep +<key>`".to_string())?;
+    match verb {
+        "status" => {
+            let value = parts
+                .next()
+                .ok_or_else(|| "status needs a value: ready, done, or cancelled".to_string())?;
+            let status = match value.to_ascii_lowercase().as_str() {
+                "ready" => TaskDocStatus::Ready,
+                "done" => TaskDocStatus::Done,
+                "cancelled" | "canceled" => TaskDocStatus::Cancelled,
+                other => return Err(format!("unknown status {other:?}")),
+            };
+            Ok(TaskUpdate {
+                status: Some(status),
+                ..Default::default()
+            })
+        }
+        "dep" => {
+            let first = parts
+                .next()
+                .ok_or_else(|| "dep needs +<key>, -<key>, or <old> <new>".to_string())?;
+            if let Some(key) = first.strip_prefix('+') {
+                if key.is_empty() {
+                    return Err("dep +<key> needs a key".to_string());
+                }
+                Ok(TaskUpdate {
+                    add_depends_on: vec![key.to_string()],
+                    ..Default::default()
+                })
+            } else if let Some(key) = first.strip_prefix('-') {
+                if key.is_empty() {
+                    return Err("dep -<key> needs a key".to_string());
+                }
+                Ok(TaskUpdate {
+                    remove_depends_on: vec![key.to_string()],
+                    ..Default::default()
+                })
+            } else {
+                let new = parts
+                    .next()
+                    .ok_or_else(|| format!("dep {first} needs a second key to re-point to"))?;
+                Ok(TaskUpdate {
+                    remove_depends_on: vec![first.to_string()],
+                    add_depends_on: vec![new.to_string()],
+                    ..Default::default()
+                })
+            }
+        }
+        other => Err(format!(
+            "unknown form {other:?} — try `status ready`, `dep +<key>`, `dep -<key>`, or `dep <old> <new>`"
+        )),
+    }
 }
 
 #[derive(Clone)]
@@ -2612,6 +2688,7 @@ fn handle_key(
         KeyCode::Char('s') if state.screen == Screen::Tasks => sync_tasks_board(state),
         KeyCode::Char('S') if state.screen == Screen::Tasks => open_task_split_modal(state),
         KeyCode::Char('a') if state.screen == Screen::Tasks => open_task_archive_modal(state),
+        KeyCode::Char('e') if state.screen == Screen::Tasks => open_task_edit_modal(state),
         KeyCode::Char('d') if state.screen == Screen::Tasks => dispatch_selected_task(state),
         _ => {}
     }
@@ -5692,17 +5769,74 @@ fn open_task_split_modal(state: &mut State) {
 }
 
 /// `a`: archive — a text-input modal for the closing status (`done` or
-/// `cancelled`), defaulting to `done`.
+/// `cancelled`), defaulting to `done`. Reads the task fresh to capture the
+/// digest the eventual write is validated against.
 fn open_task_archive_modal(state: &mut State) {
     let Some(summary) = selected_task(state) else {
         state.message = Some("no task selected".to_string());
         return;
     };
     let key = summary.key.clone();
+    let digest = match fetch_task_digest(&key) {
+        Ok(digest) => digest,
+        Err(error) => {
+            state.message = Some(format!("archive refused: {error}"));
+            return;
+        }
+    };
     state.modal_host.open(
-        Action::Task(TaskAction::Archive { key: key.clone() }),
+        Action::Task(TaskAction::Archive {
+            key: key.clone(),
+            digest,
+        }),
         Modal::text_input(format!("archive {key} — done/cancelled"), "done", false),
     );
+}
+
+/// `e`: edit — a text-input modal for the mini-grammar
+/// [`parse_task_edit_input`] accepts. Reads the task fresh to capture the
+/// digest the eventual write is validated against.
+fn open_task_edit_modal(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let key = summary.key.clone();
+    let digest = match fetch_task_digest(&key) {
+        Ok(digest) => digest,
+        Err(error) => {
+            state.message = Some(format!("edit refused: {error}"));
+            return;
+        }
+    };
+    state.modal_host.open(
+        Action::Task(TaskAction::Edit {
+            key: key.clone(),
+            digest,
+        }),
+        Modal::text_input(
+            format!("edit {key} — status <s> | dep +<k> | dep -<k> | dep <old> <new>"),
+            "",
+            false,
+        ),
+    );
+}
+
+/// The snapshot digest a modal-open captures for a task, by a fresh read —
+/// not the (possibly stale) board cache — so the write it eventually backs
+/// is validated against what is on disk right now.
+fn fetch_task_digest(key: &str) -> crate::Result<String> {
+    let dir = super::tasks::board_dir(None)?;
+    let provider = FilesTaskBoard::open_read(dir);
+    let resolved = provider
+        .get(key)
+        .map_err(|e| crate::Error::Command {
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| crate::Error::Command {
+            message: format!("task {key} not found"),
+        })?;
+    Ok(resolved.digest)
 }
 
 fn apply_task_action(
@@ -5737,7 +5871,7 @@ fn apply_task_action(
             }
             Ok(())
         }
-        TaskAction::Archive { key } => {
+        TaskAction::Archive { key, digest } => {
             let status = match text.trim().to_ascii_lowercase().as_str() {
                 "done" => TaskDocStatus::Done,
                 "cancelled" | "canceled" => TaskDocStatus::Cancelled,
@@ -5752,6 +5886,7 @@ fn apply_task_action(
                 &key,
                 TaskUpdate {
                     status: Some(status),
+                    expected_digest: Some(digest),
                     ..Default::default()
                 },
             ) {
@@ -5761,6 +5896,28 @@ fn apply_task_action(
                 }
                 Err(error) => {
                     state.message = Some(format!("archive refused: {error}"));
+                }
+            }
+            Ok(())
+        }
+        TaskAction::Edit { key, digest } => {
+            let mut update = match parse_task_edit_input(text.trim()) {
+                Ok(update) => update,
+                Err(reason) => {
+                    state.message = Some(format!("edit refused: {reason}"));
+                    return Ok(());
+                }
+            };
+            update.expected_digest = Some(digest);
+            let dir = super::tasks::board_dir(None)?;
+            let provider = FilesTaskBoard::open_read_write(dir);
+            match provider.update(&key, update) {
+                Ok(_) => {
+                    state.message = Some(format!("edited {key}"));
+                    sync_tasks_board(state);
+                }
+                Err(error) => {
+                    state.message = Some(format!("edit refused: {error}"));
                 }
             }
             Ok(())
@@ -6658,7 +6815,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
             state.trust_marks.len(),
         ),
         Screen::Tasks => format!(
-            "{navigation}  space expand  s sync  S split  a archive  d dispatch  r reload  Tab/1-5 screens  q quit"
+            "{navigation}  space expand  s sync  S split  a archive  e edit  d dispatch  r reload  Tab/1-5 screens  q quit"
         ),
     };
     let hint = format!("{hint}  [{}]", state.current_list().position_text());
@@ -9542,6 +9699,7 @@ mod tests {
 
     fn resolved_task(key: &str, derived: DerivedStatus) -> ResolvedTask {
         ResolvedTask {
+            digest: format!("sha256:{key}"),
             document: ctx_traits_core::task::TaskDocument {
                 schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
                 key: key.to_string(),
@@ -9888,6 +10046,46 @@ mod tests {
         apply_pane_scroll(&mut state, PANE_TASKS_PREVIEW, ScrollDelta::Down(100));
         let scroll = state.pane_scrolls.get(PANE_TASKS_PREVIEW);
         assert_eq!(scroll.window(1), 2..3);
+    }
+
+    #[test]
+    fn parse_task_edit_input_status_form() {
+        let update = parse_task_edit_input("status ready").unwrap();
+        assert_eq!(update.status, Some(TaskDocStatus::Ready));
+        let update = parse_task_edit_input("status done").unwrap();
+        assert_eq!(update.status, Some(TaskDocStatus::Done));
+        let update = parse_task_edit_input("status cancelled").unwrap();
+        assert_eq!(update.status, Some(TaskDocStatus::Cancelled));
+        assert!(parse_task_edit_input("status bogus").is_err());
+        assert!(parse_task_edit_input("status").is_err());
+    }
+
+    #[test]
+    fn parse_task_edit_input_dep_add_and_remove_forms() {
+        let update = parse_task_edit_input("dep +0010").unwrap();
+        assert_eq!(update.add_depends_on, vec!["0010".to_string()]);
+        assert!(update.remove_depends_on.is_empty());
+
+        let update = parse_task_edit_input("dep -0010").unwrap();
+        assert_eq!(update.remove_depends_on, vec!["0010".to_string()]);
+        assert!(update.add_depends_on.is_empty());
+
+        assert!(parse_task_edit_input("dep +").is_err());
+        assert!(parse_task_edit_input("dep -").is_err());
+    }
+
+    #[test]
+    fn parse_task_edit_input_dep_repoint_form_is_one_remove_plus_one_add() {
+        let update = parse_task_edit_input("dep 0010 0011").unwrap();
+        assert_eq!(update.remove_depends_on, vec!["0010".to_string()]);
+        assert_eq!(update.add_depends_on, vec!["0011".to_string()]);
+        assert!(parse_task_edit_input("dep 0010").is_err());
+    }
+
+    #[test]
+    fn parse_task_edit_input_rejects_unknown_forms_and_empty_input() {
+        assert!(parse_task_edit_input("").is_err());
+        assert!(parse_task_edit_input("bogus").is_err());
     }
 }
 #[test]

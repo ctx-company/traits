@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
+use ctx_traits_core::digest::Digest;
 use ctx_traits_core::task::graph::{self, EdgeKind};
 use ctx_traits_core::task::provider::{
     self, DuplicateKey, NewTask, ParseFailure, ProviderError, ResolvedTask, SyncReport,
@@ -66,6 +67,10 @@ struct LoadedBoard {
     locations: BTreeMap<String, Vec<Utf8PathBuf>>,
     archived_keys: BTreeSet<String>,
     parse_failures: Vec<ParseFailure>,
+    /// `sha256:<hex>` of the first-wins document's exact stored source text,
+    /// per key (0063.5) — what a caller's `expected_digest` is checked
+    /// against.
+    digests: BTreeMap<String, String>,
 }
 
 /// The private filesystem shell shared by both the read-only and
@@ -94,6 +99,7 @@ impl Board {
         let mut locations: BTreeMap<String, Vec<Utf8PathBuf>> = BTreeMap::new();
         let mut archived_keys = BTreeSet::new();
         let mut parse_failures = Vec::new();
+        let mut digests: BTreeMap<String, String> = BTreeMap::new();
 
         for (dir, archived) in [(self.board_dir.clone(), false), (self.archived_dir(), true)] {
             let Ok(entries) = std::fs::read_dir(dir.as_std_path()) else {
@@ -124,6 +130,7 @@ impl Board {
                         if let std::collections::btree_map::Entry::Vacant(slot) =
                             documents.entry(key.clone())
                         {
+                            digests.insert(key.clone(), Digest::source(&text).as_str().to_string());
                             slot.insert(document);
                             if archived {
                                 archived_keys.insert(key);
@@ -145,6 +152,7 @@ impl Board {
             locations,
             archived_keys,
             parse_failures,
+            digests,
         })
     }
 
@@ -170,10 +178,12 @@ impl Board {
             return Ok(None);
         }
         let archived = loaded.archived_keys.contains(key);
+        let digest = loaded.digests.get(key).cloned().unwrap_or_default();
         Ok(Some(provider::resolve_task(
             &loaded.documents,
             key,
             archived,
+            digest,
         )))
     }
 
@@ -291,24 +301,64 @@ impl Board {
             .ok_or_else(|| WriteError::NotFound(key.to_string()))?;
         let was_archived = loaded.archived_keys.contains(key);
 
-        // Cycle checks run against `loaded.documents`, which does not yet
-        // carry any of this write's new edges — exactly what
-        // `would_create_cycle` needs to answer "would the edge close a
-        // loop", and this refuses before anything is written.
+        if let Some(expected) = &update.expected_digest
+            && loaded.digests.get(key) != Some(expected)
+        {
+            return Err(WriteError::StaleWrite {
+                key: key.to_string(),
+            });
+        }
+
+        if let Some(title) = &update.title
+            && title.trim().is_empty()
+        {
+            return Err(WriteError::InvalidField {
+                field: "title",
+                reason: "title must not be empty or whitespace-only".to_string(),
+            });
+        }
+
+        for (step_id, _) in &update.set_steps_done {
+            if !document.steps.iter().any(|step| &step.id == step_id) {
+                return Err(WriteError::UnknownStep {
+                    key: key.to_string(),
+                    step_id: step_id.clone(),
+                });
+            }
+        }
+
+        // Cycle checks run against a clone of `loaded.documents` with this
+        // write's own removals already applied — a re-point (remove+add in
+        // one call) must not see the edge it is deleting as still closing a
+        // loop, so removals apply to the clone before the added edges are
+        // checked against it.
+        let mut post_removal = loaded.documents.clone();
+        if let Some(clone_doc) = post_removal.get_mut(key) {
+            clone_doc
+                .relations
+                .depends_on
+                .retain(|dep| !update.remove_depends_on.contains(dep));
+            if let Some(new_parent) = &update.set_parent {
+                clone_doc.relations.parent = new_parent.clone();
+            }
+        }
         for dep in &update.add_depends_on {
             if let Some(cycle) =
-                graph::would_create_cycle(&loaded.documents, EdgeKind::DependsOn, key, dep)
+                graph::would_create_cycle(&post_removal, EdgeKind::DependsOn, key, dep)
             {
                 return Err(cycle.into());
             }
         }
         if let Some(Some(new_parent)) = &update.set_parent
             && let Some(cycle) =
-                graph::would_create_cycle(&loaded.documents, EdgeKind::Parent, key, new_parent)
+                graph::would_create_cycle(&post_removal, EdgeKind::Parent, key, new_parent)
         {
             return Err(cycle.into());
         }
 
+        if let Some(title) = update.title {
+            document.title = title;
+        }
         for dep in &update.add_depends_on {
             if !document.relations.depends_on.contains(dep) {
                 document.relations.depends_on.push(dep.clone());
@@ -324,12 +374,31 @@ impl Board {
         if let Some(content) = update.content {
             document.content = content;
         }
+        if let Some(scope) = update.scope {
+            document.scope = scope;
+        }
+        if let Some(validation) = update.validation {
+            document.validation = validation;
+        }
+        if let Some(wall) = update.set_wall {
+            document.wall = wall;
+        }
+        if let Some(origin) = update.set_origin {
+            document.origin = origin;
+        }
+        for (step_id, done) in &update.set_steps_done {
+            if let Some(step) = document.steps.iter_mut().find(|step| &step.id == step_id) {
+                step.done = *done;
+            }
+        }
         let mut archive_target = was_archived;
         if let Some(status) = update.status {
             document.status = Some(status);
             archive_target = matches!(status, TaskStatus::Done | TaskStatus::Cancelled);
             if archive_target && !was_archived {
                 document.closed = Some(crate::audit_journal::today_date_utc());
+            } else if !archive_target && was_archived {
+                document.closed = None;
             }
         }
 
@@ -664,6 +733,8 @@ mod tests {
                 "0110",
                 TaskUpdate {
                     status: Some(TaskStatus::Done),
+                    title: Some("Retitled".to_string()),
+                    scope: Some("new scope".to_string()),
                     ..Default::default()
                 },
             )
@@ -696,5 +767,325 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, WriteError::CycleRefused { .. }));
+    }
+
+    #[test]
+    fn update_names_every_new_field_and_get_reflects_them() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n\n[[steps]]\nid = \"s1\"\ntitle = \"first\"\ndone = false\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    title: Some("Retitled A".to_string()),
+                    scope: Some("the scope".to_string()),
+                    validation: Some("the validation".to_string()),
+                    set_wall: Some(Some("wall-1".to_string())),
+                    set_origin: Some(Some("run-1".to_string())),
+                    set_steps_done: vec![("s1".to_string(), true)],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let fetched = write.get("0001").unwrap().unwrap();
+        assert_eq!(fetched.document.title, "Retitled A");
+        assert_eq!(fetched.document.scope, "the scope");
+        assert_eq!(fetched.document.validation, "the validation");
+        assert_eq!(fetched.document.wall, Some("wall-1".to_string()));
+        assert_eq!(fetched.document.origin, Some("run-1".to_string()));
+        assert!(fetched.document.steps[0].done);
+        assert!(fetched.open_steps.is_empty());
+    }
+
+    #[test]
+    fn untouched_fields_survive_a_content_only_update_byte_stable() {
+        let board_dir = tempdir();
+        let document = TaskDocument {
+            schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+            key: "0001".to_string(),
+            title: "A".to_string(),
+            status: Some(TaskStatus::Ready),
+            raised: None,
+            closed: None,
+            wall: Some("wall-1".to_string()),
+            origin: Some("run-1".to_string()),
+            content: "old content".to_string(),
+            scope: "the scope".to_string(),
+            validation: "the validation".to_string(),
+            relations: Relations::default(),
+            steps: Vec::new(),
+        };
+        let canonical = ctx_traits_core::task::serialize(&document).unwrap();
+        write_task(&board_dir, "0001-a.toml", &canonical);
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    content: Some("new content".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let mut expected = document;
+        expected.content = "new content".to_string();
+        let expected_text = ctx_traits_core::task::serialize(&expected).unwrap();
+        let actual_text =
+            std::fs::read_to_string(board_dir.join("0001-a.toml").as_std_path()).unwrap();
+        assert_eq!(actual_text, expected_text);
+    }
+
+    #[test]
+    fn stale_write_refuses_naming_staleness_fresh_digest_succeeds_none_bypasses() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        let fetched = write.get("0001").unwrap().unwrap();
+        let stale_digest = fetched.digest.clone();
+
+        // The document changes on disk after the caller's snapshot.
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"Changed\"\nstatus = \"ready\"\n",
+        );
+
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    expected_digest: Some(stale_digest),
+                    content: Some("attempted".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, WriteError::StaleWrite { key } if key == "0001"));
+
+        let fresh_digest = write.get("0001").unwrap().unwrap().digest;
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    expected_digest: Some(fresh_digest),
+                    content: Some("landed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            write.get("0001").unwrap().unwrap().document.content,
+            "landed"
+        );
+
+        // `expected_digest: None` bypasses the staleness check entirely.
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    content: Some("bypassed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            write.get("0001").unwrap().unwrap().document.content,
+            "bypassed"
+        );
+    }
+
+    #[test]
+    fn repoint_in_one_call_is_cycle_checked_against_the_post_removal_graph() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        write_task(
+            &board_dir,
+            "0003-c.toml",
+            "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"C\"\nstatus = \"ready\"\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+
+        // 0001 depends on 0003 today. Re-pointing it in one call — remove
+        // the 0003 edge, add a 0002 edge — still names a real cycle (0002
+        // already depends on 0001), and must refuse even though the add is
+        // paired with a remove in the same `TaskUpdate`.
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    add_depends_on: vec!["0003".to_string()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    remove_depends_on: vec!["0003".to_string()],
+                    add_depends_on: vec!["0002".to_string()],
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, WriteError::CycleRefused { .. }));
+    }
+
+    #[test]
+    fn step_flip_mutates_in_place_and_unknown_step_id_refuses() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n\n[[steps]]\nid = \"s1\"\ntitle = \"first\"\ndone = false\n\n[[steps]]\nid = \"s2\"\ntitle = \"second\"\ndone = false\n",
+        );
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    set_steps_done: vec![("s1".to_string(), true)],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let fetched = write.get("0001").unwrap().unwrap();
+        assert_eq!(fetched.document.steps.len(), 2);
+        assert!(fetched.document.steps[0].done);
+        assert!(!fetched.document.steps[1].done);
+
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    set_steps_done: vec![("no-such-step".to_string(), true)],
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, WriteError::UnknownStep { key, step_id } if key == "0001" && step_id == "no-such-step")
+        );
+    }
+
+    #[test]
+    fn empty_title_refused() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        let err = write
+            .update(
+                "0001",
+                TaskUpdate {
+                    title: Some("   ".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            WriteError::InvalidField { field: "title", .. }
+        ));
+    }
+
+    #[test]
+    fn closed_is_cleared_on_reopen() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-a.toml", TASK_0001);
+
+        let write = FilesTaskBoard::open_read_write(board_dir);
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            write
+                .get("0001")
+                .unwrap()
+                .unwrap()
+                .document
+                .closed
+                .is_some()
+        );
+
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Ready),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(write.get("0001").unwrap().unwrap().document.closed, None);
+    }
+
+    #[test]
+    fn closing_a_dependency_unblocks_the_dependent_with_no_write_to_its_file() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-b.toml",
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"B\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        let dependent_before =
+            std::fs::read_to_string(board_dir.join("0002-b.toml").as_std_path()).unwrap();
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        assert_eq!(
+            write.get("0002").unwrap().unwrap().derived_status,
+            DerivedStatus::Blocked
+        );
+
+        write
+            .update(
+                "0001",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            write.get("0002").unwrap().unwrap().derived_status,
+            DerivedStatus::Ready
+        );
+        let dependent_after =
+            std::fs::read_to_string(board_dir.join("0002-b.toml").as_std_path()).unwrap();
+        assert_eq!(dependent_before, dependent_after);
     }
 }

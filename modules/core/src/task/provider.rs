@@ -49,6 +49,11 @@ pub struct ResolvedTask {
     /// in document order. Not stored — recomputed on every resolve so it
     /// never drifts from the document it was derived from.
     pub open_steps: Vec<Step>,
+    /// `sha256:<hex>` of the stored document's exact source text (0063.5).
+    /// A caller that later writes a `TaskUpdate` passes this back as
+    /// `expected_digest` to refuse a write against a document that changed
+    /// since it was read.
+    pub digest: String,
 }
 
 /// What `sync` reports: what the backend's own re-read says, never a
@@ -93,11 +98,24 @@ pub struct NewTask {
 /// parent" (`Some(None)`) from "set the parent" (`Some(Some(key))`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskUpdate {
+    pub title: Option<String>,
     pub status: Option<TaskStatus>,
     pub content: Option<String>,
+    pub scope: Option<String>,
+    pub validation: Option<String>,
     pub add_depends_on: Vec<String>,
     pub remove_depends_on: Vec<String>,
     pub set_parent: Option<Option<String>>,
+    pub set_wall: Option<Option<String>>,
+    pub set_origin: Option<Option<String>>,
+    /// `(step id, new done value)` pairs, applied in order. The step stays
+    /// inside its owning document — this never adds, removes, or reorders
+    /// steps (0059's line: standalone work is a child task).
+    pub set_steps_done: Vec<(String, bool)>,
+    /// When `Some`, the write refuses with [`WriteError::StaleWrite`] unless
+    /// it matches the stored document's current [`ResolvedTask::digest`].
+    /// `None` bypasses the check.
+    pub expected_digest: Option<String>,
 }
 
 /// A backend-level failure common to both reads and writes (an unreadable
@@ -123,6 +141,12 @@ pub enum WriteError {
         "key {0:?} is ambiguous — more than one document declares it; resolve the duplicate before writing"
     )]
     AmbiguousKey(String),
+    #[error("invalid {field}: {reason}")]
+    InvalidField { field: &'static str, reason: String },
+    #[error("task {key:?} has no step {step_id:?}")]
+    UnknownStep { key: String, step_id: String },
+    #[error("{key:?} changed since you looked — sync and retry")]
+    StaleWrite { key: String },
     #[error(transparent)]
     Backend(#[from] ProviderError),
 }
@@ -198,11 +222,13 @@ pub fn summarize(
 }
 
 /// Build a [`ResolvedTask`] for `key` from a snapshot, given whether it is
-/// archived. Same invariant as [`summarize`]: `key` must be present.
+/// archived and the digest of its stored source text. Same invariant as
+/// [`summarize`]: `key` must be present.
 pub fn resolve_task(
     documents: &BTreeMap<String, TaskDocument>,
     key: &str,
     archived: bool,
+    digest: String,
 ) -> ResolvedTask {
     let doc = documents
         .get(key)
@@ -214,6 +240,7 @@ pub fn resolve_task(
         open_steps: doc.open_steps().into_iter().cloned().collect(),
         document: doc,
         archived,
+        digest,
     }
 }
 

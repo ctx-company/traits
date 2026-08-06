@@ -117,7 +117,13 @@ pub enum Command {
 }
 
 /// Nested `ctx tasks ...` subcommands.
+///
+/// `Update` carries one flag per editable field (0063.5) against `Sync`'s
+/// two — the same large-enum-variant tradeoff `Command` above already
+/// accepts rather than boxing fields for a one-time `Command::parse`
+/// allocation that is not hot.
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum TasksCommand {
     /// Re-read the board directory and report dangling edges, unparseable
     /// documents, and duplicate keys. Manual only — never runs implicitly.
@@ -157,6 +163,92 @@ pub enum TasksCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Apply a partial update to one task: only the fields named change
+    /// (0063.5). Reads the task first to capture its digest, then refuses
+    /// the write if the document changed since — the read-modify-write
+    /// window this command itself opens.
+    Update {
+        /// The task's key, filename, or filename stem.
+        task: String,
+
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// New title. Refused if empty or whitespace-only.
+        #[arg(long)]
+        title: Option<String>,
+
+        /// New stored status.
+        #[arg(long)]
+        status: Option<TaskUpdateStatus>,
+
+        /// Replace the narrative content.
+        #[arg(long)]
+        content: Option<String>,
+
+        /// Replace the scope prose. Pass an empty string to clear.
+        #[arg(long)]
+        scope: Option<String>,
+
+        /// Replace the validation prose. Pass an empty string to clear.
+        #[arg(long)]
+        validation: Option<String>,
+
+        /// Set the wall-clock deadline.
+        #[arg(long, conflicts_with = "clear_wall")]
+        wall: Option<String>,
+
+        /// Clear the wall-clock deadline.
+        #[arg(long)]
+        clear_wall: bool,
+
+        /// Set the origin.
+        #[arg(long, conflicts_with = "clear_origin")]
+        origin: Option<String>,
+
+        /// Clear the origin.
+        #[arg(long)]
+        clear_origin: bool,
+
+        /// Set the parent (makes this task a child).
+        #[arg(long, conflicts_with = "clear_parent")]
+        parent: Option<String>,
+
+        /// Clear the parent.
+        #[arg(long)]
+        clear_parent: bool,
+
+        /// Add a `depends-on` edge. Repeatable.
+        #[arg(long = "add-depends-on")]
+        add_depends_on: Vec<String>,
+
+        /// Remove a `depends-on` edge. Repeatable.
+        #[arg(long = "remove-depends-on")]
+        remove_depends_on: Vec<String>,
+
+        /// Mark a step done by id. Repeatable.
+        #[arg(long = "step-done")]
+        step_done: Vec<String>,
+
+        /// Mark a step not-done by id. Repeatable.
+        #[arg(long = "step-open")]
+        step_open: Vec<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `--status` values for `ctx tasks update` — the closed set of stored
+/// statuses, spelled the same as the schema's own `TaskStatus`.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum TaskUpdateStatus {
+    Ready,
+    Done,
+    Cancelled,
 }
 
 /// Nested `ctx traits ...` subcommands.

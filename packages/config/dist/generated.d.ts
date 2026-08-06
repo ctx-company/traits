@@ -9,6 +9,7 @@ export interface CtxConfig {
     repo?: Record<string, RepoOverride>;
     run?: RunTable;
     schemaVersion?: string;
+    tasks?: TasksTable;
     trait?: Record<string, TraitDefaults>;
     worktree?: WorktreeConfig;
 }
@@ -174,6 +175,9 @@ export interface RunTable {
 }
 export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
+export interface TasksTable {
+    dispatchTrait?: string;
+}
 export interface TraitDefaults {
     agent?: AgentDefaults;
     defaults?: PortDefaults;
