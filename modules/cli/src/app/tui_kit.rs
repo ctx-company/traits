@@ -144,10 +144,10 @@ impl ScrollList {
         }
         self.selected = self.selected.min(self.len - 1);
         self.offset = self.offset.min(self.selected);
-        if rows == 0 {
+        if rows == 0 || rows == usize::MAX {
             return;
         }
-        if rows != usize::MAX && self.selected >= self.offset + rows {
+        if self.selected >= self.offset + rows {
             self.offset = self.selected + 1 - rows;
         }
         let max_offset = self.len.saturating_sub(rows.min(self.len));
@@ -1158,6 +1158,65 @@ mod tests {
         assert_eq!(list.selected(), PAGE_STEP);
         list.page(false, 10);
         assert_eq!(list.selected(), 0);
+    }
+
+    #[test]
+    fn scroll_list_mid_window_move_leaves_offset_untouched() {
+        // Exercises clamp(usize::MAX) directly (the fixed path): pre-fix,
+        // this zeroed offset and the final visible_range would be 0..10
+        // instead of 5..15.
+        let mut list = ScrollList::new();
+        list.set_len(50);
+        list.move_by(14, 10); // selected 14, pushes offset to 5: view 5..15
+        assert_eq!(list.visible_range(10), 5..15);
+        list.move_by(-6, usize::MAX); // selected 8, strictly inside [5, 15)
+        assert_eq!(list.selected(), 8);
+        assert_eq!(list.visible_range(10), 5..15);
+    }
+
+    #[test]
+    fn scroll_list_bottom_edge_move_from_nonzero_offset_advances_by_overflow() {
+        let mut list = ScrollList::new();
+        list.set_len(50);
+        list.move_by(10, 10); // selected 10, view 1..11
+        assert_eq!(list.visible_range(10), 1..11);
+        list.move_by(1, 10); // selected 11, at the edge of [1, 11)
+        assert_eq!(list.selected(), 11);
+        assert_eq!(list.visible_range(10), 2..12);
+    }
+
+    #[test]
+    fn scroll_list_set_len_preserves_window_and_clamps_on_shrink() {
+        // set_len routes through clamp(usize::MAX) (the fixed path), so the
+        // selection is placed strictly inside the window before each
+        // set_len call: pre-fix, that clamp zeroed offset and the window
+        // would jump to 0..10 instead of staying at 5..15.
+        let mut list = ScrollList::new();
+        list.set_len(50);
+        list.move_by(14, 10); // selected 14, pushes offset to 5: view 5..15
+        assert_eq!(list.visible_range(10), 5..15);
+        list.move_by(-6, usize::MAX); // selected 8, strictly inside [5, 15)
+        assert_eq!(list.selected(), 8);
+
+        list.set_len(50); // unchanged length: window stays put
+        assert_eq!(list.visible_range(10), 5..15);
+
+        list.set_len(20); // shorter but still covers the window
+        assert_eq!(list.visible_range(10), 5..15);
+
+        list.set_len(5); // shrinks below offset + rows: clamps to last full window
+        assert_eq!(list.selected(), 4);
+        assert_eq!(list.visible_range(10), 0..5);
+    }
+
+    #[test]
+    fn scroll_list_visible_range_is_idempotent() {
+        let mut list = ScrollList::new();
+        list.set_len(50);
+        list.move_by(10, 10);
+        let first = list.visible_range(10);
+        let second = list.visible_range(10);
+        assert_eq!(first, second);
     }
 
     #[test]
