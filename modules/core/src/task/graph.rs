@@ -9,13 +9,13 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{TaskDocument, TaskStatus};
 
 /// A status after derivation: the closed stored set plus `Blocked`, which
 /// has no stored representation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DerivedStatus {
     Ready,
@@ -35,7 +35,7 @@ impl DerivedStatus {
 /// One resolved edge: the other task's key, title, and current derived
 /// status — enough for a consumer to render "blocked by 0049 (ready)"
 /// without a second lookup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ResolvedEdge {
     pub key: String,
@@ -45,7 +45,7 @@ pub struct ResolvedEdge {
 
 /// A document's relations, fully resolved: stored edges (`depends_on`,
 /// `parent`) alongside their computed inverses (`blocks`, `children`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ResolvedRelations {
     pub depends_on: Vec<ResolvedEdge>,
@@ -55,13 +55,13 @@ pub struct ResolvedRelations {
 }
 
 /// A key referenced by a relation that does not exist in the snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct DanglingEdge {
     /// The task carrying the dangling reference.
     pub from: String,
     /// The relation field naming the missing key (`depends-on` or `parent`).
-    pub field: &'static str,
+    pub field: String,
     /// The missing key.
     pub to: String,
 }
@@ -223,7 +223,7 @@ pub fn dangling_edges(documents: &BTreeMap<String, TaskDocument>) -> Vec<Danglin
             if !documents.contains_key(dep) {
                 found.push(DanglingEdge {
                     from: doc.key.clone(),
-                    field: "depends-on",
+                    field: "depends-on".to_string(),
                     to: dep.clone(),
                 });
             }
@@ -233,7 +233,7 @@ pub fn dangling_edges(documents: &BTreeMap<String, TaskDocument>) -> Vec<Danglin
         {
             found.push(DanglingEdge {
                 from: doc.key.clone(),
-                field: "parent",
+                field: "parent".to_string(),
                 to: parent.clone(),
             });
         }

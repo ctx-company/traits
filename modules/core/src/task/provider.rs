@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::graph::{CyclePaths, DerivedStatus, ResolvedRelations};
 use super::{Step, TaskDocument, TaskStatus};
@@ -25,7 +25,7 @@ use super::{Step, TaskDocument, TaskStatus};
 /// A task reduced to what a list view needs: identity, title, and both the
 /// stored and derived status (they can differ — a `Ready`-stored task with
 /// an unmet dependency derives to `Blocked`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TaskSummary {
     pub key: String,
@@ -38,7 +38,7 @@ pub struct TaskSummary {
 /// A single task fully resolved: its document plus every relation edge
 /// resolved to the other side's key, title and current status — a consumer
 /// never needs a second lookup to render an edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ResolvedTask {
     pub document: TaskDocument,
@@ -58,7 +58,7 @@ pub struct ResolvedTask {
 
 /// What `sync` reports: what the backend's own re-read says, never a
 /// verification of the repository beyond the board itself.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SyncReport {
     pub dangling_edges: Vec<super::graph::DanglingEdge>,
@@ -67,7 +67,7 @@ pub struct SyncReport {
 }
 
 /// A file the backend could not parse into a [`TaskDocument`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ParseFailure {
     pub location: String,
@@ -75,7 +75,7 @@ pub struct ParseFailure {
 }
 
 /// More than one file in the board declares the same `key`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct DuplicateKey {
     pub key: String,

@@ -3,8 +3,10 @@
 //!
 //! A board directory holds `.toml` task documents as direct children (the
 //! live set) plus an `archived/` subdirectory (documents closed via
-//! `done`/`cancelled`). Every call re-reads the directory — no cache, no
-//! watcher — since `sync` is manual only and boards are small.
+//! `done`/`cancelled`). Every call re-reads the directory. The backend
+//! itself carries no cache and no watcher; a persisted-cache freshness
+//! layer above it (0063.7, `ctx-traits-io::task_board_cache`) decides when
+//! a consumer needs to call in here again via [`board_fingerprint`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -117,6 +119,51 @@ struct LoadedBoard {
     /// per key (0063.5) — what a caller's `expected_digest` is checked
     /// against.
     digests: BTreeMap<String, String>,
+}
+
+/// One board directory's stat-sweep signature (0063.7): every direct
+/// `*.toml` child of `board_dir` (including `board.toml`) and of
+/// `board_dir/archived`, as (archived, name, mtime-seconds, len), sorted. No
+/// parsing — cheap enough to run on every dashboard tick. A file appearing,
+/// disappearing, or moving between the two directories changes the
+/// fingerprint because names participate in it, not just mtimes. A missing
+/// `archived/` fingerprints as empty, not an error.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BoardFingerprint(Vec<(bool, String, i64, u64)>);
+
+/// Sweep `board_dir` for [`BoardFingerprint`] without reading any file's
+/// contents.
+pub fn board_fingerprint(board_dir: &Utf8Path) -> Result<BoardFingerprint, ProviderError> {
+    let mut entries = Vec::new();
+    for (dir, archived) in [
+        (board_dir.to_path_buf(), false),
+        (board_dir.join(ARCHIVED_DIR), true),
+    ] {
+        let read_dir = match std::fs::read_dir(dir.as_std_path()) {
+            Ok(read_dir) => read_dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(provider_error(&dir, e)),
+        };
+        for entry in read_dir {
+            let entry = entry.map_err(|e| provider_error(&dir, e))?;
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let metadata = entry.metadata().map_err(|e| provider_error(&dir, e))?;
+            let modified = metadata.modified().map_err(|e| provider_error(&dir, e))?;
+            let secs = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            entries.push((archived, name.to_string(), secs, metadata.len()));
+        }
+    }
+    entries.sort();
+    Ok(BoardFingerprint(entries))
 }
 
 /// The private filesystem shell shared by both the read-only and
@@ -1471,5 +1518,80 @@ mod tests {
                 .depends_on
                 .is_empty()
         );
+    }
+
+    fn set_mtime(path: &Utf8Path, secs_from_epoch: u64) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path.as_std_path())
+            .unwrap();
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs_from_epoch))
+            .unwrap();
+    }
+
+    #[test]
+    fn fingerprint_is_stable_over_an_unchanged_directory() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+
+        let a = board_fingerprint(&board_dir).unwrap();
+        let b = board_fingerprint(&board_dir).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn fingerprint_changes_on_added_removed_and_moved_files() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+        let baseline = board_fingerprint(&board_dir).unwrap();
+
+        write_task(&board_dir, "0002-second.toml", TASK_0001);
+        let added = board_fingerprint(&board_dir).unwrap();
+        assert_ne!(baseline, added);
+
+        std::fs::remove_file(board_dir.join("0002-second.toml").as_std_path()).unwrap();
+        let removed = board_fingerprint(&board_dir).unwrap();
+        assert_eq!(removed, baseline);
+
+        std::fs::create_dir_all(board_dir.join(ARCHIVED_DIR).as_std_path()).unwrap();
+        std::fs::rename(
+            board_dir.join("0001-first.toml").as_std_path(),
+            board_dir
+                .join(ARCHIVED_DIR)
+                .join("0001-first.toml")
+                .as_std_path(),
+        )
+        .unwrap();
+        let moved = board_fingerprint(&board_dir).unwrap();
+        assert_ne!(moved, baseline);
+    }
+
+    #[test]
+    fn fingerprint_tolerates_missing_archived_dir() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+        assert!(!board_dir.join(ARCHIVED_DIR).as_std_path().exists());
+        board_fingerprint(&board_dir).unwrap();
+    }
+
+    #[test]
+    fn fingerprint_changes_on_mtime_or_length_bump_with_same_name() {
+        let board_dir = tempdir();
+        write_task(&board_dir, "0001-first.toml", TASK_0001);
+        set_mtime(&board_dir.join("0001-first.toml"), 1_000_000);
+        let baseline = board_fingerprint(&board_dir).unwrap();
+
+        set_mtime(&board_dir.join("0001-first.toml"), 1_000_100);
+        let mtime_bumped = board_fingerprint(&board_dir).unwrap();
+        assert_ne!(baseline, mtime_bumped);
+
+        write_task(
+            &board_dir,
+            "0001-first.toml",
+            &format!("{TASK_0001}extra = 1\n"),
+        );
+        set_mtime(&board_dir.join("0001-first.toml"), 1_000_000);
+        let length_bumped = board_fingerprint(&board_dir).unwrap();
+        assert_ne!(baseline, length_bumped);
     }
 }

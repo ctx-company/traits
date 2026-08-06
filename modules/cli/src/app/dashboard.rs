@@ -54,10 +54,11 @@ use super::tui_ratatui::{self, RatatuiPane, render_line};
 use ctx_traits_core::task::TaskStatus as TaskDocStatus;
 use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{
-    EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask, TaskProvider, TaskProviderMut,
-    TaskSummary, TaskUpdate,
+    EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask, SyncReport, TaskProvider,
+    TaskProviderMut, TaskSummary, TaskUpdate,
 };
-use ctx_traits_io::task_files::FilesTaskBoard;
+use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
+use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
 
 mod worker;
 
@@ -519,16 +520,25 @@ struct TrustPreviewFacts {
     family_members: Vec<(String, trust_story::TrustClass)>,
 }
 
-/// TASKS' board cache (0063): the provider's own `list`/`get` results plus
-/// its `sync` report, captured once per `s` keypress. `resolved` is keyed by
-/// task key and only ever holds keys `summaries` also names — a `get` that
-/// races a concurrent edit and returns `None`/an error simply leaves that key
-/// absent, which the detail pane renders as "relations unavailable".
+/// TASKS' board cache (0063, freshness automated by 0063.7): the provider's
+/// own `list`/`get` results plus its `sync` report, captured on every `s`
+/// keypress, tick-detected board change, or provider write through the
+/// dashboard. `resolved` is keyed by task key and only ever holds keys
+/// `summaries` also names — a `get` that races a concurrent edit and returns
+/// `None`/an error simply leaves that key absent, which the detail pane
+/// renders as "relations unavailable".
+#[derive(Clone)]
 struct TasksBoardSnapshot {
     summaries: Vec<TaskSummary>,
     resolved: BTreeMap<String, ResolvedTask>,
-    sync_report: ctx_traits_core::task::provider::SyncReport,
-    synced_at: std::time::Instant,
+    sync_report: SyncReport,
+    /// Unix epoch seconds this read completed — wall-clock, not
+    /// [`std::time::Instant`], so the "as of" age survives a dashboard
+    /// restart via the persisted cache (0063.7).
+    captured_at: u64,
+    /// The board directory's stat-sweep signature at read time — what the
+    /// 2s tick compares against to decide whether to re-read.
+    fingerprint: BoardFingerprint,
 }
 
 /// The five fixed TASKS groups (0063's own "Done when": "blocked, ready,
@@ -919,13 +929,25 @@ struct State {
     list_merges: ScrollList,
     list_trust: ScrollList,
     list_tasks: ScrollList,
-    /// TASKS' board cache (0063): keypress-driven and renderer-owned, never
-    /// part of [`DashboardSnapshot`]/the worker — the polled session
-    /// inventory and the task board are two caches with two cadences, and
-    /// keeping them structurally separate is what makes "last synced" mean
-    /// only the board. `None` until the first `s` keypress on TASKS — the
-    /// screen never reads the board automatically on open.
+    /// TASKS' board cache (0063; freshness automated by 0063.7):
+    /// renderer-owned, never part of [`DashboardSnapshot`]/the worker — the
+    /// polled session inventory and the task board are two caches with two
+    /// cadences, and keeping them structurally separate is what makes "as
+    /// of" mean only the board. Populated at startup from the persisted
+    /// snapshot cache (or one synchronous live read if the cache misses),
+    /// kept fresh by a stat-sweep on the existing 2s tick, and still
+    /// forceable with `s`. `None` only when startup's own read also failed —
+    /// see `tasks_refresh_error` for why.
     tasks_board: Option<TasksBoardSnapshot>,
+    /// Set whenever a board re-read (tick-triggered or `s`) fails; cleared
+    /// on the next successful read. The cached board (if any) stays
+    /// rendered regardless — this only adds the failure note to the title.
+    tasks_refresh_error: Option<String>,
+    /// Override for the persisted snapshot's cache root (0063.7). `None` in
+    /// production, resolving to the real per-repository cache root; tests
+    /// set this to a scratch directory so `cargo test` never touches
+    /// `~/.config/ctx/cache`.
+    tasks_cache_root: Option<camino::Utf8PathBuf>,
     /// TASKS' visible list projection (group headers + task rows), mirroring
     /// [`State::sessions_visible`]/[`rebuild_visible_sessions`] — rebuilt on
     /// every sync and every collapse toggle, never in the draw path.
@@ -1073,6 +1095,7 @@ impl State {
     fn new() -> Self {
         let mut state = Self::new_without_worker_for_session(None);
         state.worker = Some(worker::Handle::new());
+        load_tasks_board_at_startup(&mut state);
         state
     }
 
@@ -1083,6 +1106,7 @@ impl State {
         let mut state =
             Self::new_without_worker_for_session_with_guide(Some(session_id), guide_chat);
         state.worker = Some(worker::Handle::new());
+        load_tasks_board_at_startup(&mut state);
         state
     }
 
@@ -1127,6 +1151,8 @@ impl State {
             list_trust: ScrollList::new(),
             list_tasks: ScrollList::new(),
             tasks_board: None,
+            tasks_refresh_error: None,
+            tasks_cache_root: None,
             tasks_visible: Vec::new(),
             collapsed_task_groups: HashSet::new(),
             task_preview: None,
@@ -1348,9 +1374,10 @@ impl State {
             }
         }
         // The session-inventory overlay (in-flight/parked) refreshes on this
-        // same 2s cadence against whatever board snapshot `sync_tasks_board`
-        // last captured — a `None` cache (never synced) rebuilds to nothing,
-        // same as `rebuild_visible_tasks` does on its own.
+        // same 2s cadence against whatever board snapshot is currently
+        // captured — automated by 0063.7's own tick sweep, not this one — a
+        // `None` cache (startup read also failed) rebuilds to nothing, same
+        // as `rebuild_visible_tasks` does on its own.
         if self.tasks_board.is_some() {
             rebuild_visible_tasks(self);
             if self.screen == Screen::Tasks {
@@ -2489,9 +2516,15 @@ fn run_with_initial_session(
             // (or one spawned by `n`, or a run that finished while listed)
             // appears without the user having to press `r`. `State::reload`
             // also refreshes the SESSIONS preview/attach pane at this same
-            // cadence — never per-draw.
+            // cadence — never per-draw. The TASKS board's own stat-sweep
+            // (0063.7) rides the same cadence, regardless of which screen is
+            // active — a continuous run of keypresses resets `last_reload`
+            // and delays both alike, same as the pre-existing session poll;
+            // read-your-writes (every provider write re-syncs immediately)
+            // covers the interactive case.
             if last_reload.elapsed() >= RELOAD_INTERVAL {
                 state.reload();
+                refresh_tasks_board_if_stale(&mut state);
                 last_reload = std::time::Instant::now();
             }
             continue;
@@ -5463,6 +5496,14 @@ fn task_session_join(state: &State) -> std::collections::HashMap<String, Vec<usi
 /// `None` board cache clears the visible list rather than showing anything —
 /// the screen is empty until the first `s`.
 fn rebuild_visible_tasks(state: &mut State) {
+    // 0063.7: auto-refresh reshuffles groups on any tick, not just on a
+    // keypress — preserve the selected task's identity across the rebuild
+    // rather than letting the cursor jump to whatever row now sits at the
+    // old numeric index.
+    let selected_key = match state.tasks_visible.get(state.list_tasks.selected()) {
+        Some(TaskVisibleRow::Task(key)) => Some(key.clone()),
+        _ => None,
+    };
     let Some(summaries) = state
         .tasks_board
         .as_ref()
@@ -5503,6 +5544,14 @@ fn rebuild_visible_tasks(state: &mut State) {
     }
     state.tasks_visible = visible;
     state.list_tasks.set_len(state.tasks_visible.len());
+    if let Some(key) = selected_key
+        && let Some(index) = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(candidate) if candidate == &key))
+    {
+        state.list_tasks.set_selected(index);
+    }
 }
 
 /// The ONLY accessor TASKS' action keys route through, mirroring
@@ -5531,10 +5580,71 @@ fn toggle_selected_task_group(state: &mut State) {
     rebuild_visible_tasks(state);
 }
 
-/// `s`: the board's ONLY read path (0063's owner call — never automatic on
-/// opening the screen). Synchronous — the board is a handful of small TOML
-/// files, well under a tick — and re-stamps `synced_at` even when the read
-/// found issues, so "last synced" always reflects the most recent attempt.
+fn wall_clock_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+/// One board read: `list` + `get` per key + `sync`, plus the fingerprint
+/// sweep a later tick compares against. The one place a live board read
+/// happens — shared by startup, the `s` keypress, and the 2s tick sweep.
+fn read_board_snapshot(dir: &camino::Utf8Path) -> Result<TasksBoardSnapshot, String> {
+    let provider = FilesTaskBoard::open_read(dir.to_owned());
+    let summaries = provider.list(false).map_err(|error| error.to_string())?;
+    let mut resolved = BTreeMap::new();
+    for summary in &summaries {
+        if let Ok(Some(task)) = provider.get(&summary.key) {
+            resolved.insert(summary.key.clone(), task);
+        }
+    }
+    let sync_report = provider.sync().unwrap_or_default();
+    let fingerprint = task_files::board_fingerprint(dir).map_err(|error| error.to_string())?;
+    Ok(TasksBoardSnapshot {
+        summaries,
+        resolved,
+        sync_report,
+        captured_at: wall_clock_now_secs(),
+        fingerprint,
+    })
+}
+
+/// The persisted snapshot's cache root: `state.tasks_cache_root` if a test
+/// has overridden it, else the real per-repository cache root. Kept as a
+/// seam so no test writes through `current_repo_key()` into the user's real
+/// `~/.config/ctx/cache`.
+fn tasks_cache_root(state: &State) -> Option<camino::Utf8PathBuf> {
+    if let Some(root) = &state.tasks_cache_root {
+        return Some(root.clone());
+    }
+    ctx_traits_io::state::current_global_cache_root().ok()
+}
+
+/// Persist `board` to `cache_root` (0063.7). Best-effort: a write failure
+/// never surfaces to the user — the cache is derived evidence, not
+/// authority, and the in-memory board just read is what the screen renders
+/// regardless of whether the write lands.
+fn persist_board_snapshot(
+    cache_root: &camino::Utf8Path,
+    dir: &camino::Utf8Path,
+    board: &TasksBoardSnapshot,
+) {
+    let record = BoardSnapshotRecord::new(
+        dir,
+        board.captured_at,
+        board.summaries.clone(),
+        board.resolved.clone(),
+        board.sync_report.clone(),
+        board.fingerprint.clone(),
+    );
+    let _ = task_board_cache::write_snapshot(cache_root, &record);
+}
+
+/// `s`: forces a re-read regardless of the tick's own fingerprint check —
+/// useful against impatience or (once a remote backend exists) a slow
+/// upstream. Synchronous — the board is a handful of small TOML files, well
+/// under a tick.
 fn sync_tasks_board(state: &mut State) {
     let dir = match super::tasks::board_dir(None) {
         Ok(dir) => dir,
@@ -5543,37 +5653,120 @@ fn sync_tasks_board(state: &mut State) {
             return;
         }
     };
-    let provider = FilesTaskBoard::open_read(dir);
-    let summaries = match provider.list(false) {
-        Ok(summaries) => summaries,
+    sync_tasks_board_in(state, &dir);
+}
+
+fn sync_tasks_board_in(state: &mut State, dir: &camino::Utf8Path) {
+    match read_board_snapshot(dir) {
+        Ok(board) => {
+            let clean = board.sync_report.dangling_edges.is_empty()
+                && board.sync_report.parse_failures.is_empty()
+                && board.sync_report.duplicate_keys.is_empty();
+            if let Some(cache_root) = tasks_cache_root(state) {
+                persist_board_snapshot(&cache_root, dir, &board);
+            }
+            state.tasks_board = Some(board);
+            state.tasks_refresh_error = None;
+            rebuild_visible_tasks(state);
+            refresh_task_preview_for_selection(state);
+            state.message = Some(if clean {
+                "synced".to_string()
+            } else {
+                "synced — sync issues found, see task detail".to_string()
+            });
+        }
         Err(error) => {
+            state.tasks_refresh_error = Some(error.clone());
             state.message = Some(format!("sync failed: {error}"));
+        }
+    }
+}
+
+/// The 2s tick's board freshness check (0063.7): a stat sweep, then a
+/// re-read only when the sweep disagrees with the last-captured fingerprint
+/// (or there is no board yet). No parsing happens when nothing changed —
+/// the sweep is the whole per-tick cost. A failed re-read never blanks the
+/// screen: the previous `tasks_board` (if any) stays exactly as it was, with
+/// `tasks_refresh_error` set so the title can note the failure.
+fn refresh_tasks_board_if_stale(state: &mut State) {
+    let dir = match super::tasks::board_dir(None) {
+        Ok(dir) => dir,
+        Err(error) => {
+            state.tasks_refresh_error = Some(error.to_string());
             return;
         }
     };
-    let mut resolved = BTreeMap::new();
-    for summary in &summaries {
-        if let Ok(Some(task)) = provider.get(&summary.key) {
-            resolved.insert(summary.key.clone(), task);
+    refresh_tasks_board_if_stale_in(state, &dir);
+}
+
+fn refresh_tasks_board_if_stale_in(state: &mut State, dir: &camino::Utf8Path) {
+    let current_fingerprint = task_files::board_fingerprint(dir);
+    let stale = match (&state.tasks_board, &current_fingerprint) {
+        (Some(board), Ok(fingerprint)) => &board.fingerprint != fingerprint,
+        _ => true,
+    };
+    if !stale {
+        return;
+    }
+    match read_board_snapshot(dir) {
+        Ok(board) => {
+            if let Some(cache_root) = tasks_cache_root(state) {
+                persist_board_snapshot(&cache_root, dir, &board);
+            }
+            state.tasks_board = Some(board);
+            state.tasks_refresh_error = None;
+            rebuild_visible_tasks(state);
+            if state.screen == Screen::Tasks {
+                refresh_task_preview_for_selection(state);
+            }
+        }
+        Err(error) => {
+            state.tasks_refresh_error = Some(error);
         }
     }
-    let sync_report = provider.sync().unwrap_or_default();
-    let clean = sync_report.dangling_edges.is_empty()
-        && sync_report.parse_failures.is_empty()
-        && sync_report.duplicate_keys.is_empty();
-    state.tasks_board = Some(TasksBoardSnapshot {
-        summaries,
-        resolved,
-        sync_report,
-        synced_at: std::time::Instant::now(),
-    });
-    rebuild_visible_tasks(state);
-    refresh_task_preview_for_selection(state);
-    state.message = Some(if clean {
-        "synced".to_string()
-    } else {
-        "synced — sync issues found, see task detail".to_string()
-    });
+}
+
+/// Startup population (0063.7): the persisted snapshot cache if it hits and
+/// still names this exact `board_dir`, else one synchronous live read — the
+/// screen opens populated either way, or with a visible failure rather than
+/// silently empty.
+fn load_tasks_board_at_startup(state: &mut State) {
+    let dir = match super::tasks::board_dir(None) {
+        Ok(dir) => dir,
+        Err(error) => {
+            state.tasks_refresh_error = Some(error.to_string());
+            return;
+        }
+    };
+    let cache_root = tasks_cache_root(state);
+    if let Some(cache_root) = &cache_root
+        && let Some(record) = task_board_cache::read_snapshot(cache_root, &dir)
+    {
+        state.tasks_board = Some(TasksBoardSnapshot {
+            summaries: record.summaries,
+            resolved: record.resolved,
+            sync_report: record.sync_report,
+            captured_at: record.captured_at,
+            fingerprint: record.fingerprint,
+        });
+        state.tasks_refresh_error = None;
+        rebuild_visible_tasks(state);
+        return;
+    }
+    match read_board_snapshot(&dir) {
+        Ok(board) => {
+            if let Some(cache_root) = &cache_root {
+                persist_board_snapshot(cache_root, &dir, &board);
+            }
+            state.tasks_board = Some(board);
+            state.tasks_refresh_error = None;
+            rebuild_visible_tasks(state);
+        }
+        Err(error) => {
+            state.tasks_board = None;
+            state.tasks_refresh_error = Some(error);
+        }
+    }
 }
 
 /// Rebuilds (or clears) [`State::task_preview`] for the currently selected
@@ -6204,16 +6397,18 @@ fn build_tree_for_screen(state: &State, width: u16) -> PaneTree {
     }
 }
 
-/// TASKS' list pane title (0063): the sync freshness the "Done when" clause
-/// asks for — "shows when it last ran" — read here rather than duplicated at
-/// every call site.
+/// TASKS' list pane title (0063; freshness automated by 0063.7): the age of
+/// the currently-rendered snapshot, honest about staleness rather than
+/// implying a live view — with a failure suffix when the most recent
+/// refresh attempt (tick or `s`) did not land.
 fn tasks_list_title(state: &State) -> String {
-    match &state.tasks_board {
-        Some(board) => format!(
-            "tasks (synced {} ago)",
-            format_elapsed_ago(board.synced_at.elapsed())
-        ),
-        None => "tasks (never synced — press s)".to_string(),
+    let base = match &state.tasks_board {
+        Some(board) => format!("tasks (as of {} ago)", format_epoch_ago(board.captured_at)),
+        None => "tasks (no board read yet)".to_string(),
+    };
+    match &state.tasks_refresh_error {
+        Some(_) => format!("{base} — refresh failed"),
+        None => base,
     }
 }
 
@@ -9795,8 +9990,9 @@ mod tests {
         TasksBoardSnapshot {
             summaries,
             resolved,
-            sync_report: ctx_traits_core::task::provider::SyncReport::default(),
-            synced_at: std::time::Instant::now(),
+            sync_report: SyncReport::default(),
+            captured_at: wall_clock_now_secs(),
+            fingerprint: BoardFingerprint::default(),
         }
     }
 
@@ -10179,6 +10375,154 @@ mod tests {
     fn parse_task_edit_input_rejects_unknown_forms_and_empty_input() {
         assert!(parse_task_edit_input("").is_err());
         assert!(parse_task_edit_input("bogus").is_err());
+    }
+
+    // -----------------------------------------------------------------
+    // TASKS board freshness (0063.7)
+    // -----------------------------------------------------------------
+
+    fn tasks_board_tempdir() -> camino::Utf8PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "dashboard-tasks-board-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        camino::Utf8PathBuf::from_path_buf(dir).unwrap()
+    }
+
+    /// A `State` with [`State::tasks_cache_root`] pointed at a scratch temp
+    /// directory, so persistence in these tests never touches the real
+    /// `~/.config/ctx/cache`.
+    fn state_with_scratch_cache() -> State {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "dashboard-tasks-cache-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State::new_without_worker();
+        state.tasks_cache_root = Some(camino::Utf8PathBuf::from_path_buf(dir).unwrap());
+        state
+    }
+
+    fn write_task_toml(dir: &camino::Utf8Path, file_name: &str, key: &str) {
+        std::fs::write(
+            dir.join(file_name).as_std_path(),
+            format!(
+                "schema-version = \"0.2\"\nkey = \"{key}\"\ntitle = \"title {key}\"\nstatus = \"ready\"\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn tick_refresh_applies_a_changed_board() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
+
+        write_task_toml(&dir, "0002-second.toml", "0002");
+        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 2);
+        assert!(state.tasks_refresh_error.is_none());
+    }
+
+    #[test]
+    fn tick_refresh_is_a_no_op_when_the_fingerprint_is_unchanged() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        let captured_at = state.tasks_board.as_ref().unwrap().captured_at;
+
+        // A second sweep with nothing changed on disk must not disturb the
+        // already-captured snapshot (same fingerprint => no re-read).
+        refresh_tasks_board_if_stale_in(&mut state, &dir);
+        assert_eq!(state.tasks_board.as_ref().unwrap().captured_at, captured_at);
+    }
+
+    #[test]
+    fn failed_re_read_keeps_the_prior_snapshot_and_sets_the_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
+
+        let archived = dir.join("archived");
+        std::fs::create_dir_all(archived.as_std_path()).unwrap();
+        std::fs::set_permissions(
+            archived.as_std_path(),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+
+        refresh_tasks_board_if_stale_in(&mut state, &dir);
+
+        // Restore permissions before any assertion can panic and leak an
+        // unreadable directory into the temp root's cleanup.
+        std::fs::set_permissions(
+            archived.as_std_path(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+
+        assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
+        assert!(state.tasks_refresh_error.is_some());
+    }
+
+    #[test]
+    fn title_renders_age_from_captured_at_and_notes_a_refresh_failure() {
+        let mut state = State::new_without_worker();
+        assert_eq!(tasks_list_title(&state), "tasks (no board read yet)");
+
+        state.tasks_board = Some(board_with(
+            vec![task_summary("0001", DerivedStatus::Ready)],
+            BTreeMap::new(),
+        ));
+        assert!(tasks_list_title(&state).starts_with("tasks (as of "));
+        assert!(!tasks_list_title(&state).contains("refresh failed"));
+
+        state.tasks_refresh_error = Some("boom".to_string());
+        assert!(tasks_list_title(&state).ends_with("— refresh failed"));
+    }
+
+    #[test]
+    fn selected_task_key_survives_a_re_read_that_reshuffles_groups() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        write_task_toml(&dir, "0002-second.toml", "0002");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0002"))
+            .expect("0002 row present");
+        state.list_tasks.set_selected(index);
+
+        // Close 0001 so it moves to the Done group ahead of 0002 in the
+        // fixed group order, reshuffling row indices.
+        let doc_0001 =
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title 0001\"\nstatus = \"done\"\n";
+        std::fs::write(dir.join("0001-first.toml").as_std_path(), doc_0001).unwrap();
+        refresh_tasks_board_if_stale_in(&mut state, &dir);
+
+        match state.tasks_visible.get(state.list_tasks.selected()) {
+            Some(TaskVisibleRow::Task(key)) => assert_eq!(key, "0002"),
+            Some(TaskVisibleRow::GroupHeader { .. }) => panic!("selection landed on a header"),
+            None => panic!("selection landed out of bounds"),
+        }
     }
 }
 #[test]

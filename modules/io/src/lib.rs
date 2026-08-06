@@ -75,6 +75,7 @@ pub mod run_session;
 pub mod run_summary;
 pub mod state;
 pub mod target_slot;
+pub mod task_board_cache;
 pub mod task_files;
 pub mod tripwire;
 pub mod trust;
