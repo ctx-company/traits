@@ -387,6 +387,19 @@ pub(crate) fn emit_lines(lines: &[Line]) -> crate::Result<()> {
     Ok(())
 }
 
+/// Named-ANSI two-tone a plain stderr progress line (never a `Panel`), gated
+/// by the same terminal/`NO_COLOR`/`CI`/`TERM=dumb` capability check the
+/// styled panel path uses — a caller writing raw stderr lines (e.g.
+/// `handle_generate`'s per-round observer) stays in the palette doctrine
+/// without duplicating the gate.
+pub(crate) fn stderr_line(text: &str, tone: Tone) -> String {
+    if stderr_supports_live(false) {
+        paint(tone, text)
+    } else {
+        text.to_string()
+    }
+}
+
 fn paint(tone: Tone, text: &str) -> String {
     if text.is_empty() {
         return String::new();

@@ -98,7 +98,7 @@ pub(crate) fn handle_refine(input: RefineInputs<'_>) -> crate::Result<CommandOut
                 model,
                 None,
             ) {
-                Ok(raw) => raw,
+                Ok(outcome) => outcome.output,
                 Err(error) => return blocked_assist_candidate(candidate, json, error.to_string()),
             },
             ctx_traits_core::encoding::Encoding::Json,

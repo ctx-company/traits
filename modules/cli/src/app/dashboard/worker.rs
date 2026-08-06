@@ -199,7 +199,8 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
                     None,
                     None,
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| error.to_string())?
+                .output;
                 let narration = ctx_traits_core::assist::validate_trait_narration(
                     &raw,
                     &request.trait_id,

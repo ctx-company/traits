@@ -97,11 +97,13 @@ const reviseIfNotConverged = sequence.branch("revise-if-not-converged", {
     success: [reviseStep],
 });
 
+const ROUND_BOUND = 3;
+
 const guardedLoop = sequence.loop("guarded-loop", {
     title: "Guarded generate loop",
     sequence: sequence.linear("round", [evaluateStep, countRound, reviseIfNotConverged]),
     until: condition.fieldEquals(roundReport, "converged", true),
-    iterations: 3,
+    iterations: ROUND_BOUND,
     onExhausted: "continue",
 });
 
@@ -113,6 +115,7 @@ const envelopeSchema = schema.object(
     {
         converged: schema.field(schema.boolean(), { description: "Whether the loop exited because a candidate converged." }),
         "rounds-spent": schema.field(schema.integer(), { description: "Rounds evaluated, including the first draft's evaluation." }),
+        "rounds-bound": schema.field(schema.integer(), { description: "The declared round bound the loop is guarded against." }),
         "failing-rung": schema.field(schema.text(), { required: false, description: "The rung the last round failed at; absent when converged." }),
         diagnostics: schema.field(schema.any(), { required: false, description: "The last round's diagnostics; empty when converged." }),
         "candidate-source": schema.field(schema.text(), { description: "The last candidate produced." }),
@@ -126,11 +129,12 @@ const envelope = slot({
 });
 
 const deriveEnvelopeScript = `
-const [roundReportText, candidateSourceText, roundsSpentText] = process.argv.slice(1);
+const [roundReportText, candidateSourceText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
 const report = JSON.parse(roundReportText);
 process.stdout.write(JSON.stringify({
     converged: report.converged,
     "rounds-spent": Number(roundsSpentText),
+    "rounds-bound": Number(roundsBoundText),
     "failing-rung": report.converged ? undefined : report.rung,
     diagnostics: report.diagnostics ?? [],
     "candidate-source": candidateSourceText,
@@ -139,7 +143,16 @@ process.stdout.write(JSON.stringify({
 
 const deriveEnvelopeStep = sequence.command("derive-envelope", {
     title: "Assemble the terminal round-evidence envelope",
-    argv: ["node", "--input-type=module", "--eval", deriveEnvelopeScript, roundReport, candidateSource, roundsSpent],
+    argv: [
+        "node",
+        "--input-type=module",
+        "--eval",
+        deriveEnvelopeScript,
+        roundReport,
+        candidateSource,
+        roundsSpent,
+        String(ROUND_BOUND),
+    ],
     output: envelope,
 });
 

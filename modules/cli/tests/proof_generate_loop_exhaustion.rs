@@ -138,6 +138,40 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
         "the report must name the failing rung (build)\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
 
+    // Task 0066.2: the `--json` envelope is the same `RoundEvidence` struct
+    // human mode renders — round-by-round evidence, not just the terminal
+    // verdict.
+    let evidence: serde_json::Value =
+        serde_json::from_str(&stdout).expect("--json output must be one RoundEvidence document");
+    assert_eq!(evidence["converged"], serde_json::json!(false));
+    assert_eq!(evidence["rounds-spent"], serde_json::json!(3));
+    assert_eq!(evidence["rounds-bound"], serde_json::json!(3));
+    assert_eq!(evidence["failing-rung"], serde_json::json!("build"));
+    let rounds = evidence["rounds"]
+        .as_array()
+        .expect("evidence must carry a rounds array");
+    assert_eq!(
+        rounds.len(),
+        3,
+        "rounds.len() must equal rounds-spent and rounds-bound: {evidence}"
+    );
+    for (index, round) in rounds.iter().enumerate() {
+        assert_eq!(round["round"], serde_json::json!(index + 1));
+        assert_eq!(round["rung"], serde_json::json!("build"));
+        assert_eq!(round["converged"], serde_json::json!(false));
+        assert!(
+            round["diagnostics"]
+                .as_array()
+                .is_some_and(|diagnostics| !diagnostics.is_empty()),
+            "every round must carry at least one diagnostic: {round}"
+        );
+    }
+    assert_eq!(
+        evidence["failing-rung"],
+        rounds.last().expect("at least one round")["rung"],
+        "failing-rung must match the last round's rung"
+    );
+
     let target_package = proj.join(format!(".ctx/traits/packages/{trait_id}"));
     assert!(
         !target_package.exists(),

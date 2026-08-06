@@ -1166,6 +1166,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     clear_merge_intent: no_merge,
                     panel_handoff: Some(panel_handoff.clone()),
                     startup: None,
+                    frame_observer: None,
                 })?;
                 let session_path = ctx_traits_io::run_session::resolve_session_path(
                     &session,

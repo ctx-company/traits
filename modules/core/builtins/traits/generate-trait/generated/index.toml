@@ -86,6 +86,11 @@ description = "The last round's diagnostics; empty when converged."
 schema = "schema:text"
 description = "The rung the last round failed at; absent when converged."
 
+[schema.fields.rounds-bound]
+schema = "schema:integer"
+required = true
+description = "The declared round bound the loop is guarded against."
+
 [schema.fields.rounds-spent]
 schema = "schema:integer"
 required = true
@@ -264,11 +269,12 @@ argv = [
     "--input-type=module",
     "--eval",
     """
-const [roundReportText, candidateSourceText, roundsSpentText] = process.argv.slice(1);
+const [roundReportText, candidateSourceText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
 const report = JSON.parse(roundReportText);
 process.stdout.write(JSON.stringify({
     converged: report.converged,
     "rounds-spent": Number(roundsSpentText),
+    "rounds-bound": Number(roundsBoundText),
     "failing-rung": report.converged ? undefined : report.rung,
     diagnostics: report.diagnostics ?? [],
     "candidate-source": candidateSourceText,
@@ -276,4 +282,5 @@ process.stdout.write(JSON.stringify({
     "{slot:round-report}",
     "{slot:candidate-source}",
     "{slot:rounds-spent}",
+    "3",
 ]

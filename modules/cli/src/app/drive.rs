@@ -111,6 +111,30 @@ type WaveOutcomes = BTreeMap<usize, crate::Result<ctx_traits_io::harness::Harnes
 /// `parallel_wave_activation_key`).
 type PendingWaveCache = BTreeMap<String, WaveOutcomes>;
 
+/// A frame about to be dispatched to a harness (agent step): identity only,
+/// no accepted value yet exists.
+pub struct FrameDispatchEvent<'a> {
+    pub item_id: Option<&'a str>,
+}
+
+/// One slot revision a frame's acceptance just persisted.
+pub struct FrameAcceptedEvent<'a> {
+    pub slot_ref: &'a str,
+    pub value: &'a serde_json::Value,
+}
+
+pub enum FrameObserverEvent<'a> {
+    Dispatched(FrameDispatchEvent<'a>),
+    Accepted(FrameAcceptedEvent<'a>),
+}
+
+/// Live per-frame progress hook (task 0066.2): invoked at frame dispatch and
+/// once per accepted slot revision. Additive to the existing `progress`
+/// status lines — installed only by callers that want typed, step-scoped
+/// commentary (`handle_generate`'s round observer); every other caller
+/// passes `None` and drive's behavior and output are unchanged.
+pub type FrameObserver<'a> = &'a dyn Fn(FrameObserverEvent<'_>);
+
 pub struct DriveInputs<'a> {
     pub file: Option<&'a str>,
     pub session: &'a str,
@@ -171,6 +195,9 @@ pub struct DriveInputs<'a> {
     /// A startup pane created before session initialization. It is consumed by
     /// the first live frame rather than allocating a second terminal owner.
     pub startup: Option<crate::app::run_startup_view::StartupView>,
+    /// Live per-frame progress hook (task 0066.2). `None` for every caller
+    /// that hasn't opted in — byte-identical to today's progress output.
+    pub frame_observer: Option<FrameObserver<'a>>,
 }
 
 /// Cheap, cloneable one-shot slot a completed drive's live pane is handed
@@ -1904,6 +1931,7 @@ fn drive_loop(
             // frame for a long time and the panel must not look frozen.
             refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
             command_started_event(&outcome.session, run_panel.0.is_some());
+            let revisions_before = outcome.session.slot_revisions.len();
             outcome =
                 ctx_traits_io::run::advance_commands(ctx_traits_io::run::AdvanceCommandsRequest {
                     trait_file: input.file,
@@ -1915,6 +1943,16 @@ fn drive_loop(
                     elapsed_seconds: current_elapsed_seconds(),
                     tick_observer: run_panel.0.as_ref().map(run_view::RunPanel::tick_observer),
                 })?;
+            if let Some(observer) = input.frame_observer.as_ref() {
+                for revision in outcome.session.slot_revisions.iter().skip(revisions_before) {
+                    if let Some(payload) = revision.submitted_payload.as_ref() {
+                        observer(FrameObserverEvent::Accepted(FrameAcceptedEvent {
+                            slot_ref: revision.slot_ref.as_str(),
+                            value: &payload.value,
+                        }));
+                    }
+                }
+            }
             if let Some(failure) = outcome.command_failure.as_ref() {
                 report.final_session_status = Some(outcome.session.status.clone());
                 refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
@@ -2023,6 +2061,11 @@ fn drive_loop(
             |agent| agent.role.clone(),
         );
         let role = role.as_str();
+        if let Some(observer) = input.frame_observer.as_ref() {
+            observer(FrameObserverEvent::Dispatched(FrameDispatchEvent {
+                item_id: frame.item_id.as_deref(),
+            }));
+        }
         let structural_seat = frame
             .assigned_agent
             .as_ref()

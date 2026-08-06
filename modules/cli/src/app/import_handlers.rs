@@ -746,7 +746,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                         model,
                         run_profile_document.as_ref(),
                     ) {
-                        Ok(raw) => raw,
+                        Ok(outcome) => outcome.output,
                         Err(error) => {
                             return blocked_assist_candidate(candidate, json, error.to_string());
                         }

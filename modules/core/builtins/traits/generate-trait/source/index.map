@@ -16,8 +16,8 @@
   },
   "port:result": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 146,
-    "end": 146
+    "start": 159,
+    "end": 159
   },
   "port:trait-id": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -36,8 +36,8 @@
   },
   "schema:generate-envelope": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 111,
-    "end": 111
+    "start": 113,
+    "end": 113
   },
   "schema:round-report": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -46,8 +46,8 @@
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 153,
-    "end": 153
+    "start": 166,
+    "end": 166
   },
   "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -56,13 +56,13 @@
   },
   "sequence:procedure/derive-envelope": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 140,
-    "end": 140
+    "start": 144,
+    "end": 144
   },
   "sequence:procedure/guarded-loop": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 100,
-    "end": 100
+    "start": 102,
+    "end": 102
   },
   "sequence:procedure/init-rounds-spent": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -76,8 +76,8 @@
   },
   "sequence:round": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 102,
-    "end": 102
+    "start": 104,
+    "end": 104
   },
   "sequence:round/count-round": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -101,8 +101,8 @@
   },
   "slot:envelope": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 122,
-    "end": 122
+    "start": 125,
+    "end": 125
   },
   "slot:round-report": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
@@ -116,7 +116,7 @@
   },
   "trait:generate-trait": {
     "file": "modules/core/builtins/traits/generate-trait/source/index.ts",
-    "start": 153,
-    "end": 153
+    "start": 166,
+    "end": 166
   }
 }

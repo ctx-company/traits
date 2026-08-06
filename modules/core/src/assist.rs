@@ -377,6 +377,35 @@ pub struct RoundReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// One round's rung-ladder evaluation, positioned in acceptance order within
+/// a `RoundEvidence` history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RoundRecord {
+    /// 1-based round number, in the order the loop accepted it.
+    pub round: u32,
+    pub rung: Rung,
+    pub converged: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Round-by-round evidence for a generate run: rounds spent against the
+/// declared bound, the rung each round failed at, and the diagnostics that
+/// drove the next attempt. Uniform across the guarded loop and the
+/// single-round `--candidate` path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RoundEvidence {
+    pub converged: bool,
+    pub rounds_spent: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rounds_bound: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_rung: Option<Rung>,
+    pub rounds: Vec<RoundRecord>,
+}
+
 /// Result of evaluating an advisory review scaffold through the candidate gate.
 #[derive(Debug)]
 pub struct ScaffoldEvaluation<T> {

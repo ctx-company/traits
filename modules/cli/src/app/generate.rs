@@ -6,13 +6,18 @@ use crate::app::surface::cli;
 use ctx_traits_core::response::CommandOutput;
 
 /// The `generate-trait` meta-trait's terminal output: the round-evidence
-/// envelope its `derive-envelope` step assembles (task 0066.1). Deserializes
-/// `run_builtin_trait`'s single JSON output string.
+/// envelope its `derive-envelope` step assembles (task 0066.1/0066.2).
+/// Deserializes `run_builtin_trait`'s single JSON output string.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct GenerateEnvelope {
     pub(crate) converged: bool,
     pub(crate) rounds_spent: u32,
+    /// Absent only when a stale repo-local shadow package (built before
+    /// 0066.2) supplied this envelope — degrades gracefully rather than
+    /// failing decode.
+    #[serde(default)]
+    pub(crate) rounds_bound: Option<u32>,
     #[serde(default)]
     pub(crate) failing_rung: Option<String>,
     #[serde(default)]
@@ -53,6 +58,99 @@ pub(crate) struct GenerateInputs<'a> {
     pub(crate) json: bool,
 }
 
+/// Live per-round progress for `handle_generate`'s guarded-loop drive (task
+/// 0066.2): plain, minimal stderr lines in both human and `--json` modes —
+/// stderr never corrupts the stdout JSON envelope. Tracks its own round
+/// count from `evaluate-round` acceptances rather than trusting the
+/// meta-trait's `rounds-spent` counter slot, which this observer never
+/// reads.
+struct RoundProgressObserver {
+    round: std::cell::Cell<u32>,
+}
+
+impl RoundProgressObserver {
+    fn new() -> Self {
+        Self {
+            round: std::cell::Cell::new(0),
+        }
+    }
+
+    fn observe(&self, event: crate::app::drive::FrameObserverEvent<'_>) {
+        match event {
+            crate::app::drive::FrameObserverEvent::Dispatched(dispatch) => {
+                self.observe_dispatch(dispatch);
+            }
+            crate::app::drive::FrameObserverEvent::Accepted(accepted) => {
+                self.observe_accepted(accepted);
+            }
+        }
+    }
+
+    fn observe_dispatch(&self, dispatch: crate::app::drive::FrameDispatchEvent<'_>) {
+        match dispatch.item_id {
+            Some("produce-first") => {
+                eprintln!(
+                    "{}",
+                    crate::app::tui::stderr_line(
+                        "round 1 · drafting candidate",
+                        crate::app::tui::Tone::Default
+                    )
+                );
+            }
+            Some("revise") => {
+                let next_round = self.round.get() + 1;
+                eprintln!(
+                    "{}",
+                    crate::app::tui::stderr_line(
+                        &format!("round {next_round} · revising candidate"),
+                        crate::app::tui::Tone::Default,
+                    )
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn observe_accepted(&self, accepted: crate::app::drive::FrameAcceptedEvent<'_>) {
+        if accepted.slot_ref != ROUND_REPORT_SLOT_REF {
+            return;
+        }
+        let Ok(report) =
+            serde_json::from_value::<ctx_traits_core::assist::RoundReport>(accepted.value.clone())
+        else {
+            return;
+        };
+        let round = self.round.get() + 1;
+        self.round.set(round);
+        if report.converged {
+            eprintln!(
+                "{}",
+                crate::app::tui::stderr_line(
+                    &format!("round {round} · converged"),
+                    crate::app::tui::Tone::Pass,
+                )
+            );
+            return;
+        }
+        let top_diagnostic = report
+            .diagnostics
+            .first()
+            .map_or("no diagnostic recorded", |diagnostic| {
+                diagnostic.message.as_str()
+            });
+        eprintln!(
+            "{}",
+            crate::app::tui::stderr_line(
+                &format!(
+                    "round {round} · failed at {} — {top_diagnostic}",
+                    report.rung
+                ),
+                crate::app::tui::Tone::Fail,
+            )
+        );
+    }
+}
+
 pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<CommandOutput<()>> {
     let GenerateInputs {
         name,
@@ -69,13 +167,26 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     // `--candidate` evaluates the supplied authoring source through exactly
     // one round of the rung ladder: no meta-trait run, no provider call, by
     // construction (this branch never reaches `run_builtin_trait`). This is
-    // the path gate tests exercise (task 0066.1).
+    // the path gate tests exercise (task 0066.1). The evidence surface is
+    // uniform whether the loop ran once or to its bound (task 0066.2).
     if let Some(cand_path) = candidate_path {
         let candidate_source = ctx_traits_io::read::read_text(camino::Utf8Path::new(cand_path))?;
         let package_root = crate::app::assist_round::scratch_package_root(&trait_id);
         let report =
             crate::app::assist_round::evaluate_round(&candidate_source, &package_root, &trait_id)?;
-        print_round_report(&report, &package_root, json)?;
+        let evidence = ctx_traits_core::assist::RoundEvidence {
+            converged: report.converged,
+            rounds_spent: 1,
+            rounds_bound: None,
+            failing_rung: (!report.converged).then_some(report.rung),
+            rounds: vec![ctx_traits_core::assist::RoundRecord {
+                round: 1,
+                rung: report.rung,
+                converged: report.converged,
+                diagnostics: report.diagnostics.clone(),
+            }],
+        };
+        print_round_evidence(&evidence, &package_root, json)?;
         if !report.converged {
             return Err(crate::Error::Command {
                 message: format!(
@@ -91,8 +202,13 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     // `generate-trait`: the meta-trait iterates on its own typed rung
     // diagnostics, and this handler writes only a converged result. No
     // retry logic lives here — that is the meta-trait's job (task 0066.1).
+    // A live observer reports each round as it happens instead of blocking
+    // silently until the verdict (task 0066.2); it takes over drive's own
+    // Status progress lines for this call (see `run_builtin_trait_observed`).
     let scratch_root = crate::app::assist_round::scratch_package_root(&trait_id);
-    let raw = run_builtin_trait(
+    let round_progress = RoundProgressObserver::new();
+    let observer: crate::app::drive::FrameObserver<'_> = &|event| round_progress.observe(event);
+    let outcome = run_builtin_trait_observed(
         "generate-trait",
         vec![
             runtime_input("name", name),
@@ -102,11 +218,13 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
         assignments,
         model,
         None,
+        Some(observer),
     )?;
-    let envelope: GenerateEnvelope = serde_json::from_str(&raw)
+    let envelope: GenerateEnvelope = serde_json::from_str(&outcome.output)
         .map_err(|error| crate::Error::json("decode generate loop envelope", error))?;
 
-    print_generate_envelope(&envelope, &scratch_root, json)?;
+    let evidence = round_evidence_from_envelope(&envelope, outcome.round_records);
+    print_round_evidence(&evidence, &scratch_root, json)?;
 
     if !envelope.converged {
         return Err(crate::Error::Command {
@@ -201,7 +319,7 @@ pub(crate) fn handle_critique(input: CritiqueInputs<'_>) -> crate::Result<Comman
             input.model,
             None,
         ) {
-            Ok(raw) => raw,
+            Ok(outcome) => outcome.output,
             Err(error) => {
                 return blocked_assist_candidate(candidate, input.json, error.to_string());
             }
@@ -313,7 +431,7 @@ pub(crate) fn handle_generate_evals(
             input.model,
             None,
         ) {
-            Ok(raw) => raw,
+            Ok(outcome) => outcome.output,
             Err(error) => {
                 return blocked_assist_candidate(candidate, input.json, error.to_string());
             }
@@ -407,13 +525,70 @@ pub(crate) fn runtime_input(
     }
 }
 
+/// [`run_builtin_trait`]'s result: the trait's single JSON output string,
+/// plus (additive, ignored by every caller but `handle_generate`) the
+/// session's `slot:round-report` acceptance history decoded in round order —
+/// empty for every built-in trait that never writes that slot.
+pub(crate) struct BuiltinTraitOutcome {
+    pub(crate) output: String,
+    pub(crate) round_records: Vec<ctx_traits_core::assist::RoundRecord>,
+}
+
+const ROUND_REPORT_SLOT_REF: &str = "slot:round-report";
+
+/// Decode the session's accepted `slot:round-report` revisions, in
+/// acceptance order, into 1-based `RoundRecord`s. The revision payload's
+/// shape is exactly `RoundReport` (task 0066.1's meta-trait schema mirrors
+/// it field-for-field), so no re-parsing beyond a direct deserialize.
+fn round_records_from_session(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> crate::Result<Vec<ctx_traits_core::assist::RoundRecord>> {
+    let mut records = Vec::new();
+    for revision in &session.slot_revisions {
+        if revision.slot_ref.as_str() != ROUND_REPORT_SLOT_REF {
+            continue;
+        }
+        let Some(payload) = revision.submitted_payload.as_ref() else {
+            continue;
+        };
+        let report: ctx_traits_core::assist::RoundReport =
+            serde_json::from_value(payload.value.clone())
+                .map_err(|error| crate::Error::json("decode round-report revision", error))?;
+        records.push(ctx_traits_core::assist::RoundRecord {
+            round: u32::try_from(records.len() + 1).unwrap_or(u32::MAX),
+            rung: report.rung,
+            converged: report.converged,
+            diagnostics: report.diagnostics,
+        });
+    }
+    Ok(records)
+}
+
 pub(crate) fn run_builtin_trait(
     trait_id: &str,
     input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
     assignments: &[String],
     model: Option<&str>,
     run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
-) -> crate::Result<String> {
+) -> crate::Result<BuiltinTraitOutcome> {
+    run_builtin_trait_observed(
+        trait_id,
+        input_values,
+        assignments,
+        model,
+        run_profile,
+        None,
+    )
+}
+
+fn run_builtin_trait_observed(
+    trait_id: &str,
+    input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
+    assignments: &[String],
+    model: Option<&str>,
+    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
+    frame_observer: Option<crate::app::drive::FrameObserver<'_>>,
+) -> crate::Result<BuiltinTraitOutcome> {
     let agent_role = match trait_id {
         "generate-trait" => "generator",
         "refine-trait" => "refiner",
@@ -501,12 +676,20 @@ pub(crate) fn run_builtin_trait(
         // never contend with a concurrent conductor for this ephemeral
         // session.
         wait: false,
-        progress: cli::DriveProgress::Status,
+        // An installed observer owns the whole progress surface for this
+        // call — drive's own Status lines would otherwise double-print
+        // every accepted frame alongside the round-scoped commentary.
+        progress: if frame_observer.is_some() {
+            cli::DriveProgress::None
+        } else {
+            cli::DriveProgress::Status
+        },
         worktree: None,
         execution_dir: None,
         clear_merge_intent: false,
         panel_handoff: None,
         startup: None,
+        frame_observer,
     })?;
     if report.status != "completed" {
         return Err(crate::Error::Command {
@@ -521,6 +704,7 @@ pub(crate) fn run_builtin_trait(
         elapsed_seconds: None,
     })?
     .session;
+    let round_records = round_records_from_session(&session)?;
     let outputs = session
         .completion
         .as_ref()
@@ -536,11 +720,15 @@ pub(crate) fn run_builtin_trait(
             ),
         });
     };
-    match &output.value {
-        serde_json::Value::String(value) => Ok(value.clone()),
+    let output = match &output.value {
+        serde_json::Value::String(value) => value.clone(),
         value => serde_json::to_string(value)
-            .map_err(|e| crate::Error::json("serialize built-in trait output", e)),
-    }
+            .map_err(|e| crate::Error::json("serialize built-in trait output", e))?,
+    };
+    Ok(BuiltinTraitOutcome {
+        output,
+        round_records,
+    })
 }
 
 fn builtin_assignments(
@@ -753,28 +941,62 @@ fn round_report_panel(
     panel
 }
 
-pub(crate) fn print_generate_envelope(
+/// Decode a `GenerateEnvelope`'s `failing-rung` string into the typed
+/// [`Rung`] the uniform [`ctx_traits_core::assist::RoundEvidence`] carries.
+fn parse_failing_rung(rung: &str) -> Option<ctx_traits_core::assist::Rung> {
+    serde_json::from_value(serde_json::Value::String(rung.to_string())).ok()
+}
+
+/// Assemble the loop's uniform round-evidence envelope from the terminal
+/// `GenerateEnvelope` and the session's own accepted `round-report` history
+/// (task 0066.2). `rounds.len() == rounds_spent` is verified downstream by
+/// the panel/JSON printer, not silently trusted here.
+pub(crate) fn round_evidence_from_envelope(
     envelope: &GenerateEnvelope,
+    rounds: Vec<ctx_traits_core::assist::RoundRecord>,
+) -> ctx_traits_core::assist::RoundEvidence {
+    ctx_traits_core::assist::RoundEvidence {
+        converged: envelope.converged,
+        rounds_spent: envelope.rounds_spent,
+        rounds_bound: envelope.rounds_bound,
+        failing_rung: envelope
+            .failing_rung
+            .as_deref()
+            .and_then(parse_failing_rung),
+        rounds,
+    }
+}
+
+/// Print a [`ctx_traits_core::assist::RoundEvidence`]: JSON mode serializes
+/// the struct verbatim, human mode renders it as a panel — the same struct
+/// backs both, so the two surfaces agree on every fact by construction (task
+/// 0066.2). Shared by the guarded-loop path and `--candidate`'s single-round
+/// wrapper.
+pub(crate) fn print_round_evidence(
+    evidence: &ctx_traits_core::assist::RoundEvidence,
     scratch_path: &camino::Utf8Path,
     json: bool,
 ) -> crate::Result<()> {
     match OutputMode::select(json, false) {
         OutputMode::Json => {
-            let text = serde_json::to_string_pretty(envelope).unwrap_or_else(|e| {
-                format!("{{\"error\": \"failed to serialize generate envelope: {e}\"}}")
+            let text = serde_json::to_string_pretty(evidence).unwrap_or_else(|e| {
+                format!("{{\"error\": \"failed to serialize round evidence: {e}\"}}")
             });
             println!("{text}");
         }
         OutputMode::Human(mode) => {
-            let panel = generate_envelope_panel(envelope, scratch_path);
+            let panel = round_evidence_panel(evidence, scratch_path);
             emit_human(false, &panel, mode, || Ok(()))?;
         }
     }
     Ok(())
 }
 
-fn generate_envelope_panel(envelope: &GenerateEnvelope, scratch_path: &camino::Utf8Path) -> Panel {
-    let status = if envelope.converged {
+fn round_evidence_panel(
+    evidence: &ctx_traits_core::assist::RoundEvidence,
+    scratch_path: &camino::Utf8Path,
+) -> Panel {
+    let status = if evidence.converged {
         PanelStatus::Passed("converged".to_string())
     } else {
         PanelStatus::Blocked("blocked".to_string())
@@ -782,32 +1004,72 @@ fn generate_envelope_panel(envelope: &GenerateEnvelope, scratch_path: &camino::U
     let mut panel = Panel::new("ctx", "generate", status)
         .row(PanelRow::toned(
             "converged",
-            envelope.converged.to_string(),
+            evidence.converged.to_string(),
             RowTone::Default,
         ))
         .row(PanelRow::toned(
             "rounds-spent",
-            envelope.rounds_spent.to_string(),
+            evidence.rounds_spent.to_string(),
             RowTone::Default,
         ));
-    if let Some(ref rung) = envelope.failing_rung {
-        panel = panel.row(PanelRow::toned("failing-rung", rung, RowTone::Default));
+    if let Some(bound) = evidence.rounds_bound {
+        panel = panel.row(PanelRow::toned(
+            "rounds-bound",
+            bound.to_string(),
+            RowTone::Default,
+        ));
     }
-    if !envelope.converged {
+    if let Some(rung) = evidence.failing_rung {
+        panel = panel.row(PanelRow::toned(
+            "failing-rung",
+            rung.to_string(),
+            RowTone::Default,
+        ));
+    }
+    // A missing fact is a 0066.1 gap to surface, not to patch around — a
+    // mismatch prints a warning row instead of silently trusting either
+    // count.
+    if evidence.rounds.len() as u32 != evidence.rounds_spent {
+        panel = panel.row(PanelRow::toned(
+            "warning",
+            format!(
+                "round history has {} entries but rounds-spent reports {}",
+                evidence.rounds.len(),
+                evidence.rounds_spent
+            ),
+            RowTone::Warn,
+        ));
+    }
+    if !evidence.converged {
         panel = panel.row(PanelRow::toned(
             "scratch-path",
             scratch_path.to_string(),
             RowTone::Default,
         ));
     }
-    for diagnostic in &envelope.diagnostics {
+    for record in &evidence.rounds {
+        let bound_suffix = evidence
+            .rounds_bound
+            .map(|bound| format!("/{bound}"))
+            .unwrap_or_default();
+        if record.converged {
+            panel = panel.row(PanelRow::toned(
+                format!("round {}{bound_suffix}", record.round),
+                "converged",
+                RowTone::Pass,
+            ));
+            continue;
+        }
+        let top_diagnostic = record
+            .diagnostics
+            .first()
+            .map_or("no diagnostic recorded", |diagnostic| {
+                diagnostic.message.as_str()
+            });
         panel = panel.row(PanelRow::toned(
-            "diagnostic",
-            format!(
-                "[{}/{}] {}",
-                diagnostic.gate, diagnostic.code, diagnostic.message
-            ),
-            RowTone::Warn,
+            format!("round {}{bound_suffix}", record.round),
+            format!("failed at {} — {top_diagnostic}", record.rung),
+            RowTone::Fail,
         ));
     }
     panel

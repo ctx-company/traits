@@ -44,5 +44,5 @@ human surfaces agree on every fact.
 """
 
 [relations]
-parent = "0066"
 depends-on = ["0066.1"]
+parent = "0066"

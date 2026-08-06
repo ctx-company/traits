@@ -428,6 +428,7 @@ pub(crate) fn handle_session_start(
         clear_merge_intent: false,
         panel_handoff: Some(panel_handoff.clone()),
         startup,
+        frame_observer: None,
     })?;
 
     // outcome.session is the pre-drive snapshot; re-inspect for the completed
