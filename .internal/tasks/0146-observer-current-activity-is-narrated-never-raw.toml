@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0146"
+title = "The attached view's current activity is narrated text, never raw stream JSON"
+status = "ready"
+raised = "2026-08-07"
+content = """
+
+
+Owner report 2026-08-07: attaching to a session from the dashboard shows "current
+activity" in the raw, non-narrated format — harness-stream JSON — where the live view
+would show a narrated line.
+
+Why: the driving panel's narration is produced in-process by the drive loop's narrator
+worker and pushed into the panel; the dashboard's attach observer instead re-derives its
+whole presentation from persisted truth (`refresh_from_ledger` → ledger + activity
+sidecar) on every poll. Narration lines are not part of that persisted truth, so the
+observer's current-activity row falls back to the rawest thing it has — the stream tail.
+
+The house ruling for the no-narrator live view already applies here in spirit: when no
+narration exists, show the model's own text quoted — never raw JSON.
+
+"""
+scope = """
+## Decisions
+
+- **Same pane, same session, same words**: what the attach observer shows for current
+  activity should match what the live panel would show, to the extent persisted evidence
+  allows.
+- **Preferred shape: narrations become part of the persisted evidence** the observer
+  already reads — the activity sidecar is the natural home (append-only, tolerant reads,
+  derived-evidence-never-authority; the session-title record set the precedent). The
+  driving panel parks each narration line as it is produced; the observer reads it back.
+- **The fallback obeys the existing ruling**: with no parked narration (older sessions,
+  narrator disabled), the observer quotes the agent's own message text — the raw-JSON
+  rendering is a bug in every mode, not a fallback.
+- **The observer never runs its own narrator.** It is a reader; paying for model calls
+  from a read-only attach is out (a keypress must not spend tokens — the story view's
+  own rule).
+
+"""
+validation = """
+## Watch
+
+- Sidecar writes ride the existing writer discipline (append at the moment the narration
+  resolves, same as `append_session_title`); nothing touches the ledger write path or its
+  frame-boundary race constraint.
+- Parked narrations are presentation evidence; the story/report pipeline should keep
+  ignoring them unless a task says otherwise (story reads its own sources).
+- Volume: narrations arrive every ~15s per frame; the sidecar stays an append-only log —
+  verify tolerant readers stay fast on long runs before shipping.
+
+## Done when
+
+Attaching to a narrated live session shows the same current-activity line the live panel
+shows; attaching to a session with no narrations shows quoted agent text, never raw
+stream JSON; a completed session's attach view renders its last narrated state; the
+observer makes zero provider calls.
+"""

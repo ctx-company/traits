@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0148"
+title = "One keymap: every dashboard command, hint and modal audited for consistency"
+status = "ready"
+raised = "2026-08-07"
+content = """
+
+
+Owner report 2026-08-07: the same kind of action is bound differently in different
+places — e.g. confirming a task dispatch is `ctrl-d` (the multi-line modal's submit,
+because Enter inserts a newline there) while other confirms are Enter. The ask: go
+through ALL dashboard commands, including footer hints and modal footers, and make the
+whole surface consistent.
+
+This is an audit-first task: the deliverable starts with a complete inventory, then the
+renames/rebindings fall out of it.
+
+"""
+scope = """
+## Decisions
+
+- **Inventory first, one table**: every screen (SESSIONS, TRAITS, MERGES, TRUST, TASKS),
+  every key, its action, where it is hinted (footer, modal footer, guide modal), and
+  every modal with its submit/cancel keys. The audit lands in the task's own evidence
+  before any rebinding happens.
+- **Then one convention, applied everywhere.** At minimum:
+  - One confirm shape: Enter submits everywhere it can; the multi-line-input exception
+    (`ctrl-d`) either becomes uniform across every multi-line modal AND is always hinted,
+    or multi-line submit gets a binding that does not collide with "end of input"
+    muscle-memory elsewhere. Decide once, in the kit (`tui_kit` owns modal semantics).
+  - Same verb, same key on every screen: sync, archive, dispatch, split, reload, quit,
+    story — a verb present on two screens must not have two spellings.
+  - Case discipline decided once (lowercase = row verb, uppercase = screen/bulk verb, or
+    whatever rule wins — but one rule).
+- **Every binding is hinted where it applies**; nothing reachable only by source-reading.
+  The footer and the guide modal (0096) are regenerated from the audited map, not
+  hand-maintained in parallel.
+- **Breaking changes are fine** (owner muscle-memory over legacy), but each rebinding is
+  listed in the landing's evidence.
+
+"""
+validation = """
+## Watch
+
+- The keymap sprawls across `handle_key`, screen-specific arms, `tui_kit` modal
+  handlers, and `run_view`'s attached/live path — the audit must cover the attached view
+  and modals too, or the inconsistency just moves there.
+- 0147 (input coalescing) and 0145 (attach key ownership) touch the same dispatch path;
+  coordinate landings to avoid conflict churn.
+- Watch for collisions with terminal conventions (ctrl-c, ctrl-d as EOF, ctrl-z) — a
+  submit binding that doubles as a shell signal in some terminal is a trap.
+
+## Done when
+
+A complete key inventory exists in the landing evidence; every action follows the chosen
+convention on every screen and modal; every binding is hinted at its point of use;
+footers and the guide modal derive from the same map; the ctrl-d-vs-enter confirm
+inconsistency is resolved one way everywhere; each changed binding is listed.
+"""

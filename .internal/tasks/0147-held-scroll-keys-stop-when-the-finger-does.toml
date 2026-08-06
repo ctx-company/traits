@@ -1,0 +1,57 @@
+schema-version = "0.2"
+key = "0147"
+title = "Held scroll keys stop when the finger does: coalesce input on TASKS and MERGES"
+status = "ready"
+raised = "2026-08-07"
+content = """
+
+
+Owner report 2026-08-07: holding j/k on the TASKS and MERGES screens keeps scrolling
+after the key is released — the queued autorepeat drains for seconds. SESSIONS does not
+misbehave noticeably.
+
+Why: the dashboard's main loop is one key per iteration — `pane.poll_key(TICK)`, handle,
+then a full draw. Key autorepeat generates events faster than a draw cycle completes, so
+events pile up in the terminal buffer and keep being consumed one-draw-at-a-time after
+release. Screens whose draw (or per-selection rebuild) is more expensive fall further
+behind — TASKS re-derives proposals and rebuilds the task preview on selection change;
+MERGES similarly — which is why they lag visibly where SESSIONS keeps up. This is the
+same disease archived 0006 fixed for the live view ("scroll tracks the key, not the
+frame"), now in the dashboard loop.
+
+"""
+scope = """
+## Decisions
+
+- **Coalesce in the shared loop, not per screen**: after the blocking poll returns a
+  key, drain every immediately-available buffered event before drawing; consecutive
+  same-direction scroll/navigation keys merge into one aggregate delta, a
+  different-kind key ends the batch (order preserved). One draw per batch.
+- **This lands in the dashboard's main loop / shared key path**, so every screen —
+  SESSIONS, TRAITS, MERGES, TRUST, TASKS — gets identical feel; no screen-local
+  workarounds (0063.3's rule: scroll semantics live in the kit, enforced by review).
+- **Cheapen the follow-up work too**: selection-change side effects (task preview
+  rebuild, proposal derivation) run once per BATCH, not once per event — the coalesced
+  delta makes that natural.
+- **Bound the batch** (e.g. a generous max events per drain) so a pathological event
+  flood still draws periodically instead of freezing.
+
+"""
+validation = """
+## Watch
+
+- Single discrete presses must not be swallowed or reordered — coalescing merges only
+  adjacent same-kind scroll keys; Enter/verb keys after a scroll burst still apply after
+  the movement, as typed.
+- The attached view and modals have their own input paths (`pending_keys`, modal
+  handlers); keep the batch drain in the dashboard list loop only, or verify it composes.
+- Measure, don't assume: confirm on TASKS that post-release drift is gone with a held
+  key, and that SESSIONS feel is unchanged.
+
+## Done when
+
+Holding j/k on TASKS or MERGES scrolls smoothly and stops the moment the key is
+released, on every screen; a burst of held scrolling triggers selection side effects once
+per drawn frame rather than once per buffered event; discrete keypresses behave exactly
+as before.
+"""

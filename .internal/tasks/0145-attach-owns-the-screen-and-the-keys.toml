@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0145"
+title = "Attaching from the dashboard owns the screen and the keys, every time"
+status = "ready"
+raised = "2026-08-07"
+content = """
+
+
+Owner report 2026-08-07: entering a session from the dashboard often leaves the view
+mis-rendered — journey/information panes overlap — and j/k/Tab then act on the DASHBOARD
+(list moves, screen switches) and drop straight back out of the session.
+
+The two symptoms are one story: the attach handoff did not fully transfer terminal and
+input ownership. The handoff (`run_with_initial_session`'s attach loop) quits the
+dashboard's alt-screen pane, then `run_attached_observer` opens an INLINE pane at the
+restored cursor position; if that observer exits early or draws over restored scrollback,
+the user sees overlapped panes while their keys are already being read by the resumed
+dashboard loop — which is exactly "j/k does dashboard things and I am back on the list".
+
+Diagnose before fixing: reproduce with a live session and establish WHICH of the seams
+fails — the inline pane drawing over stale restored content, the observer terminating
+early (error swallowed into `state.message`), or input events buffered across the
+teardown/rebuild boundary being replayed into the wrong loop.
+
+"""
+scope = """
+## Decisions
+
+- **Attach either owns the terminal completely or reports why not.** An observer that
+  cannot set up its pane must surface its error prominently, not silently return to the
+  dashboard under a half-drawn screen — today the outcome collapses into the footer
+  message while the screen still shows the wreckage.
+- **The attached view starts from a clean surface**: whatever the fix is (clearing from
+  the cursor, entering the inline region explicitly), the first observer draw must not
+  interleave with restored dashboard scrollback.
+- **Keys buffered across the handoff belong to the view being entered**, not the one
+  being left; drain or discard pending input at the boundary in both directions (attach
+  and detach) so a held key during the transition cannot act on the wrong loop.
+- **Same contract on the way back**: detach rebuilds the dashboard pane from a clean
+  state, with the same input-drain rule.
+
+"""
+validation = """
+## Watch
+
+- P081's ordering is deliberate (the dashboard pane must be gone before the observer's
+  pane exists — and mirrored on the d-handoff); fix rendering and input WITHIN that
+  ordering, do not reorder the teardown.
+- The live view (`d`-handoff from a run) shares the renderer and the inline-pane setup —
+  verify the fix does not regress the live pane's own entry, at both width breakpoints
+  (P552 one-renderer contract).
+- This is timing-sensitive; a reproduced failure beats a reasoned one. Capture what the
+  early-exit actually was before changing behavior.
+
+## Done when
+
+Attaching from the SESSIONS list renders the attached view cleanly every time (no
+overlapped panes over dashboard remnants); j/k/Tab inside the attached view act on the
+attached view only; a failed attach says so visibly instead of silently landing back on
+the list under a corrupted screen; detach restores a correctly drawn dashboard; keys held
+during either transition never operate the other surface.
+"""
