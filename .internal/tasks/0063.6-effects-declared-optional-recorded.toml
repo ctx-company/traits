@@ -1,0 +1,57 @@
+schema-version = "0.2"
+key = "0063.6"
+title = "Update effects: declared, optional, recorded — never silent, never cascading"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Sixth child of 0063. One effect already exists, hardcoded and unreported: the files
+backend's `update` moves a task closing to done/cancelled into `archived/` and stamps
+`closed` — and the caller's result says nothing about the file move. This task turns
+"things that happen because of an update" into a first-class, declared, visible layer.
+
+"""
+scope = """
+## Decisions
+
+- **An effect is a declared follow-up to a field transition**, configured per board:
+  files — "on close, move into `archived/`" (today's behavior, now declared and default-on);
+  a remote backend — "status maps to this column/state". The update names fields; the
+  board's config says what those changes additionally mean on that backend.
+- **Effects are optional and best-effort** (owner ruling 2026-08-06): the field write is
+  the contract and succeeds on its own; an effect that cannot run is reported in the
+  result, never a reason to refuse or roll back the update.
+- **Every effect is recorded in the update's result** — "moved to archived/",
+  "removed edge from 0072" — so nothing changes silently. The result type grows an
+  effects list; the CLI and dashboard print it.
+- **Effects never cascade.** One hop: an effect's own edits trigger no further effects.
+  A cancellation must not ripple the board.
+- **The dependents sweep is the first prompted effect**: removing every edge pointing AT a
+  task edits other documents, so it runs only when explicitly asked ("3 tasks depend on
+  this — release them?"), one hop, each touched document listed in the result.
+- **Unmapped is an error, not a guess**: a remote board whose config does not map one of
+  our stored statuses fails at sync/config-check time, not mid-update.
+
+"""
+validation = """
+## Watch
+
+- Do not let effect declarations become a scripting language. A closed set of named
+  effects with small configs is the whole surface; anything richer is a different product.
+- The archive-move must stay atomic with the field write on the files backend (write to
+  target, then remove source — the existing order); declaring it must not un-harden it.
+- The sweep edits documents the caller did not name — it must respect the same stale-write
+  refusal per touched document (0063.5) and report partial completion honestly.
+
+## Done when
+
+The files board's archive-move is a declared default whose execution appears in the update
+result; an update whose effect fails still applies its fields and reports the failure; the
+dependents sweep exists, runs only when asked, lists every document it touched, and
+triggers nothing further; effect declarations are validated when the board config loads.
+"""
+
+[relations]
+parent = "0063"
+depends-on = ["0063.5"]

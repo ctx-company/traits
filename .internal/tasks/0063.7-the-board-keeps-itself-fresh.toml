@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0063.7"
+title = "The board keeps itself fresh: background sync over a persisted cache"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Seventh child of 0063. Today the TASKS screen is empty until `s` is pressed, and every
+change of derived state (blocked, in-flight) waits for the next manual sync. This
+DELIBERATELY REVERSES 0063's recorded ruling that sync is manual-only and never automatic
+— owner call, 2026-08-06: freshness should be automatic; what stays visible is the age.
+
+"""
+scope = """
+## Decisions
+
+- **The screen always opens populated, from a persisted cache** of the last board snapshot,
+  with a dim "as of <age>" stamp. The stamp is the honesty marker: you are looking at a
+  snapshot, and you can see how old it is.
+- **Files: watch, don't re-read.** On the dashboard's existing 2s tick, fingerprint the
+  board directory (names + mtimes — a stat sweep, no parsing) and re-read only when the
+  fingerprint changes. Derived state recomputes with every re-read.
+- **Remote backends: refresh on a cadence from board config**, serving the cache between
+  fetches. A slow or failed fetch never blanks the screen — the cached board renders with
+  its age and the failure noted.
+- **`s` survives as "refresh now"** — useful against a remote board and for impatience; no
+  longer load-bearing.
+- **Read-your-writes**: any write through the provider (update, create, an accepted
+  proposal) refreshes the snapshot before the next draw, which also hands 0063.5's
+  stale-write refusal a fresh baseline.
+- **Reconcile stays manual.** This task automates re-reading what the backend says. Whether
+  what the backend says is still true of the repository (0064) is a different, expensive
+  question whose output is proposals, not screen state.
+
+"""
+validation = """
+## Watch
+
+- 0063's original Watch still bites: the session inventory and the board snapshot are two
+  caches with two cadences. Keep them distinct; the age stamp means "board read", nothing
+  else.
+- The fingerprint must catch a file appearing, disappearing, and moving to `archived/`
+  (the 0063.6 effect) — names are part of the fingerprint, not just mtimes.
+- No parsing on the tick path when nothing changed: the stat sweep is the whole cost.
+- The persisted cache is derived evidence, never authority — a corrupt or stale cache file
+  is discarded and rebuilt from the backend, not trusted.
+
+## Done when
+
+Opening the dashboard shows the last-known board immediately with its age; editing a task
+file on disk is reflected within a tick or two without any keypress; a remote-style
+backend outage leaves the cached board on screen with the failure and age visible; `s`
+still forces a refresh; a provider write is visible on the very next draw.
+"""
+
+[relations]
+parent = "0063"

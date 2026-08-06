@@ -1,0 +1,58 @@
+schema-version = "0.2"
+key = "0063.8"
+title = "A merged run proposes closing its task; one key accepts with the evidence"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Eighth child of 0063, the closing slice of the queue arc. A run finishing never closes its
+task — finishing is not proof the work is in. The moment that IS evidence is the merge of
+the run's branch. This task puts the proposal there, so closing a task honestly costs one
+keypress instead of a reconcile session.
+
+"""
+scope = """
+## Decisions
+
+- **The trigger is the merge, not run completion.** When a branch whose run is bound to a
+  task (the ledger's task key, 0061) reaches the default branch, the board surfaces a
+  proposal: "run <id> for <task> merged as <sha> — mark done?".
+- **Propose, never apply** — 0064's rule holds unchanged. Accepting calls the provider's
+  `update` with status done; the declared close effects (0063.6) then archive it; the
+  evidence (run id, merged sha) lands in the task's `origin`-adjacent trail and the update
+  result. Rejecting records nothing and the proposal disappears until re-derived.
+- **Proposals are derived, never stored** (0064's own Watch): recomputed from the ledger
+  and merge state on each look, discarded on exit. No third place task state lives.
+- **Surfaced where you already look**: a pending chip on the affected TASKS row and a
+  one-key confirm; `ctx tasks` gains the same list non-interactively. Dependents unblock
+  by derivation the moment the accept lands — no further writes.
+- **Deferred, explicitly**: fully automatic close for tasks whose typed `validation`
+  carries machine-checkable clauses (possible now that 0063.1's schema is live) — only
+  those could ever close unconfirmed, and that is its own future ruling. Queue mode
+  ("dispatch the next ready task") is also not this task; the ready group already is the
+  queue, and walking it deserves its own contract.
+
+"""
+validation = """
+## Watch
+
+- The binding is many-runs-to-many-tasks (a run keyed to a parent doing a child's work,
+  0062). A merge proposes for the task the ledger names — never inferred from branch
+  names or commit messages.
+- A merged branch is necessary evidence, not sufficient truth: the proposal shows the
+  task's own Done-when beside the accept so the owner judges against the contract, not
+  the commit's existence.
+- Confidence is the failure mode (0064's Watch): when the ledger's task key is missing or
+  ambiguous, propose nothing — a silent wrong "done" corrupts every dependency downstream.
+
+## Done when
+
+Merging a task-bound run's branch produces a visible proposal citing run id and sha;
+accepting closes the task through the provider (effects reported), and its dependents read
+ready on the next look; rejecting leaves the board untouched; an unbound or ambiguous
+merge proposes nothing; nothing about proposals persists anywhere between looks.
+"""
+
+[relations]
+parent = "0063"

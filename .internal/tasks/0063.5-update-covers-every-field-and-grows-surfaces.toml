@@ -1,0 +1,59 @@
+schema-version = "0.2"
+key = "0063.5"
+title = "Update covers every editable field, from the CLI and the dashboard"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Fifth child of 0063, first slice of the queue arc (brainstormed 2026-08-06). The write half
+of the provider exists — `TaskUpdate { status, content, add/remove_depends_on, set_parent }`
+with cycle refusal, called today only by the dashboard's split and archive verbs. This task
+finishes it: every editable field, and surfaces a human can actually reach.
+
+"""
+scope = """
+## Decisions
+
+- **`TaskUpdate` grows the missing fields**: `title`, `scope`, `validation`, `wall`,
+  `origin`, and per-step done flags. `closed` stays backend-stamped on close, never
+  caller-set. Same partial-update semantics as today: only what you name changes.
+- **`ctx tasks update <key>` lands as the CLI surface** — flag per field, `--json` result.
+- **The dashboard gets an edit verb** beyond archive: at minimum status and relations
+  (add/remove/re-point a dependency) from the task row; prose editing may stay CLI-only.
+- **A stale write refuses.** The caller acted on a snapshot; if the document changed since
+  (compare its digest), refuse with "changed since you looked — sync and retry" rather than
+  overwriting. The files backend rarely hits this; a remote backend will.
+- **Runs stay read-only.** The `open_read`/`open_read_write` split already enforces it;
+  this task must not hand the write capability to anything inside a run.
+- **Relations rulings, recorded here after the 2026-08-06 brainstorm**:
+  - Unblocking needs no writes — blocked is derived from current statuses at read time, so
+    closing a task frees its dependents by itself.
+  - Edges stay in place after both sides close: they record why the order existed.
+  - `cancelled` satisfies dependents, same as `done` — a dependent shows "cancelled ✓",
+    which says more than a vanished edge.
+  - Re-pointing a dependency (the 0064-blocked-by-0063's-children case) is a plain
+    `remove` + `add` on the depender, no machinery.
+  - Sweeping edges OFF other documents ("remove everything depending on X") is an effect,
+    not a field write — it belongs to 0063.6.
+
+"""
+validation = """
+## Watch
+
+- `deny_unknown_fields` plus partial updates means serialization must not drop fields it
+  did not touch — round-trip the untouched remainder byte-stable.
+- The cycle refusal must cover re-pointing (remove+add in one call) the same as add alone.
+- Step flags flip inside the owning document; do not let this grow into steps becoming
+  standalone documents (0059's line: a standalone unit of work is a child task).
+
+## Done when
+
+Every field above is updatable through one `ctx tasks update` call and reflected by `get`;
+the dashboard edits status and relations from a task row; a write against a changed
+document refuses naming the staleness; a run cannot reach the write capability; the cycle
+and ambiguous-key refusals still hold with the new fields in play.
+"""
+
+[relations]
+parent = "0063"
