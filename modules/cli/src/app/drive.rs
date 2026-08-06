@@ -4056,6 +4056,7 @@ fn maybe_dispatch_session_title(
     let tokens = narrator_tokens.clone();
     let pending = pending.clone();
     let owner = claim_owner.to_string();
+    let sidecar_ledger_path = ledger_path.to_path_buf();
     // 0079: the api client owns its own bounded transient retry; re-driving
     // an api failure through the outer 3-attempt claim ladder would multiply
     // the two retry layers (worst case 3 claims × client retries × read
@@ -4075,7 +4076,18 @@ fn maybe_dispatch_session_title(
             panel.add_narrator_tokens(call_total);
         }
         pending.put(match result {
-            Ok(title) => SessionTitleOutcome::Success { owner, title },
+            Ok(title) => {
+                // Park the title in the activity sidecar NOW: the ledger
+                // write below waits for a frame boundary — which the drive
+                // thread only reaches after the whole first step — so a
+                // ledger-observing surface (the dashboard) would otherwise
+                // show no title until the first step completes, no matter
+                // how fast the narrator answered. Append-only, best-effort,
+                // presentation-only; the ledger stays the authority.
+                ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&sidecar_ledger_path)
+                    .append_session_title(title.clone());
+                SessionTitleOutcome::Success { owner, title }
+            }
             Err(error) => SessionTitleOutcome::Failure {
                 owner,
                 reason: error.to_string(),

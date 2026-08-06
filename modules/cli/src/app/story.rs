@@ -219,6 +219,9 @@ pub(crate) fn load_activity(
                     text,
                 });
             }
+            // The parked session title is a dashboard presentation record;
+            // the story reads titles from the ledger's own provenance.
+            ctx_traits_io::activity_sidecar::ActivityRecord::SessionTitle { .. } => {}
         }
     }
     Some(ctx_traits_core::procedure::story::ActivityInput {

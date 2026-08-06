@@ -34,6 +34,14 @@ pub enum ActivityRecord {
         role: String,
         text: String,
     },
+    /// P552 follow-up: the resolved session title, parked here by the title
+    /// worker the moment it exists. The ledger's `SessionTitleState` stays
+    /// the authority and is written only at a frame boundary (the drive
+    /// thread owns whole-ledger writes); this record exists so a
+    /// ledger-observing surface (the dashboard) can show the title without
+    /// waiting out the first frame. Same doctrine as every sidecar record:
+    /// derived evidence, never authority.
+    SessionTitle { at_epoch_ms: u64, title: String },
 }
 
 impl ActivityRecord {
@@ -41,6 +49,7 @@ impl ActivityRecord {
         match self {
             ActivityRecord::Activity { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::StepSummary { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::SessionTitle { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
 }
@@ -110,6 +119,17 @@ impl ActivitySidecarWriter {
             text,
         });
     }
+
+    /// Append the resolved session title. Safe alongside the drive thread's
+    /// own writer: both hold `O_APPEND` handles and every record is one
+    /// whole-line write, so concurrent appends interleave by line, never
+    /// mid-record.
+    pub fn append_session_title(&mut self, title: String) {
+        self.append_line(&ActivityRecord::SessionTitle {
+            at_epoch_ms: current_epoch_ms(),
+            title,
+        });
+    }
 }
 
 /// Tolerant read of a sidecar: parses one JSON value per line, skipping and
@@ -139,6 +159,19 @@ pub fn read_activity(ledger_path: &Utf8Path) -> (Vec<ActivityRecord>, usize) {
 /// used to decide `detailed`/`assisted` degradation without a full read.
 pub fn activity_exists(ledger_path: &Utf8Path) -> bool {
     activity_path(ledger_path).as_std_path().is_file()
+}
+
+/// The last session title parked in the sidecar, if any — the presentation
+/// fallback a ledger-observing surface uses while the ledger's own
+/// `SessionTitleState` has not resolved yet (it resolves only at a frame
+/// boundary). Tolerant like every sidecar read; callers should prefer the
+/// ledger title whenever it exists.
+pub fn read_session_title(ledger_path: &Utf8Path) -> Option<String> {
+    let (records, _) = read_activity(ledger_path);
+    records.into_iter().rev().find_map(|record| match record {
+        ActivityRecord::SessionTitle { title, .. } => Some(title),
+        _ => None,
+    })
 }
 
 /// Best-effort removal of a ledger's activity sidecar, sibling to
@@ -214,6 +247,26 @@ mod tests {
         let (records, skipped) = read_activity(&ledger_path);
         assert_eq!(records.len(), 2);
         assert_eq!(skipped, 1);
+    }
+
+    /// The title fallback returns the LAST parked title, reads `None` when
+    /// no title record exists, and coexists with other record kinds.
+    #[test]
+    fn session_title_reads_back_last_parked_title() {
+        let dir = scratch_dir("session-title");
+        let ledger_path = dir.join("session-fixture.json");
+        assert_eq!(read_session_title(&ledger_path), None);
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        writer.append_activity(fixture_event(1));
+        writer.append_session_title("First title".to_string());
+        writer.append_session_title("Refined title".to_string());
+        assert_eq!(
+            read_session_title(&ledger_path),
+            Some("Refined title".to_string())
+        );
+        let (records, skipped) = read_activity(&ledger_path);
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 3);
     }
 
     #[test]
