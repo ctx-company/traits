@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0066.3"
 title = "refine --apply and import --llm-assisted join the same loop"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

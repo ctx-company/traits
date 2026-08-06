@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0098"
 title = "`implement:guarded` — the commit waits for the owner's approval"
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-06"
+origin = "run run-9b28f35a253beccac2c9a0c0d1a9216356543d60c37ccb782a8ef8e17c3d48f4 merged as b0a0be7daeecaf6b292c7c5e313b19cd9ac2a23c"
 content = """
 
 

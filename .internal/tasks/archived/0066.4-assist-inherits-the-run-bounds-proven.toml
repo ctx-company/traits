@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0066.4"
 title = "Assist inherits the run bounds, proven: a hung round dies with its bound named"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

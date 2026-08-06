@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0066.2"
 title = "Round evidence in the candidate envelope; per-round progress in the CLI"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
+closed = "2026-08-06"
+origin = "run run-5788937de88b853d344290f451d7193abaa572347cfab74fbe9d7044308ec68b merged as 790a7d3088ab557fe097a8abadea9c48ae860713"
 content = """
 
 
