@@ -18,6 +18,8 @@ export type {
   GuardedProductionRole,
   ReviewerVerdictValue,
 } from "./process.ts";
+export { declareTaskSlot, stepSchema, subtaskNodeSchema, taskSchema } from "./task.ts";
+export type { StepValue, SubtaskNodeValue, TaskValue } from "./task.ts";
 
 /**
  * Declares the shared worker role: implements a draft/design and applies reviewer fixes.

@@ -81,6 +81,16 @@ pub struct TaskDocument {
     pub steps: Vec<Step>,
 }
 
+impl TaskDocument {
+    /// Steps not yet marked `done`, in document order — the derived
+    /// collection a step-iterating trait runs over (0062). Single-sourced
+    /// here so the CLI/provider surface and any future runtime accessor
+    /// agree on what "open" means.
+    pub fn open_steps(&self) -> Vec<&Step> {
+        self.steps.iter().filter(|step| !step.done).collect()
+    }
+}
+
 /// Parse a task document from TOML text, rejecting unknown fields and any
 /// `schema-version` other than [`SCHEMA_VERSION`].
 pub fn parse(text: &str) -> crate::Result<TaskDocument> {
@@ -199,5 +209,50 @@ mod tests {
             "schema-version = \"{SCHEMA_VERSION}\"\nkey = \"0001\"\ntitle = \"t\"\nstatus = \"blocked\"\n"
         );
         assert!(parse(&text).is_err());
+    }
+
+    #[test]
+    fn open_steps_excludes_done_and_preserves_order() {
+        let mut document = sample();
+        document.steps = vec![
+            Step {
+                id: "s1".to_string(),
+                title: "first".to_string(),
+                done: true,
+                content: String::new(),
+            },
+            Step {
+                id: "s2".to_string(),
+                title: "second".to_string(),
+                done: false,
+                content: String::new(),
+            },
+            Step {
+                id: "s3".to_string(),
+                title: "third".to_string(),
+                done: false,
+                content: String::new(),
+            },
+        ];
+        let open: Vec<&str> = document
+            .open_steps()
+            .into_iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(open, vec!["s2", "s3"]);
+    }
+
+    #[test]
+    fn open_steps_empty_when_all_done_or_stepless() {
+        let mut document = sample();
+        document.steps = Vec::new();
+        assert!(document.open_steps().is_empty());
+        document.steps = vec![Step {
+            id: "s1".to_string(),
+            title: "first".to_string(),
+            done: true,
+            content: String::new(),
+        }];
+        assert!(document.open_steps().is_empty());
     }
 }

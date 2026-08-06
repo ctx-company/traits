@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::graph::{CyclePaths, DerivedStatus, ResolvedRelations};
-use super::{TaskDocument, TaskStatus};
+use super::{Step, TaskDocument, TaskStatus};
 
 /// A task reduced to what a list view needs: identity, title, and both the
 /// stored and derived status (they can differ — a `Ready`-stored task with
@@ -45,6 +45,10 @@ pub struct ResolvedTask {
     pub derived_status: DerivedStatus,
     pub relations: ResolvedRelations,
     pub archived: bool,
+    /// Derived from `document.steps` (0062): steps not yet marked `done`,
+    /// in document order. Not stored — recomputed on every resolve so it
+    /// never drifts from the document it was derived from.
+    pub open_steps: Vec<Step>,
 }
 
 /// What `sync` reports: what the backend's own re-read says, never a
@@ -207,6 +211,7 @@ pub fn resolve_task(
     ResolvedTask {
         derived_status: super::graph::derived_status(documents, key),
         relations: super::graph::resolved_relations(documents, key),
+        open_steps: doc.open_steps().into_iter().cloned().collect(),
         document: doc,
         archived,
     }
