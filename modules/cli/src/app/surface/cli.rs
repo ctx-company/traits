@@ -136,6 +136,19 @@ pub enum TasksCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List merge-time done-proposals (0063.8): tasks a merged bound run
+    /// proposes closing, non-interactively — the same derivation the
+    /// dashboard TASKS screen surfaces, recomputed on each look, listed
+    /// only (accepting stays `tasks update <task> --status done`).
+    Proposals {
+        /// Board directory. Defaults to `.internal/tasks`.
+        #[arg(long)]
+        board: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// List tasks on the board.
     List {
         /// Board directory. Defaults to `.internal/tasks`.

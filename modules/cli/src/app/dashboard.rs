@@ -26,7 +26,7 @@
 //! `Session(..)` / `Trait(..)`) so both screens share one `ModalHost`.
 //! MERGES is untouched by this phase.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -261,6 +261,12 @@ struct SessionRow {
     /// run never keyed to a task — the TASKS screen's only join key onto
     /// `state.sessions`.
     task_key: Option<String>,
+    /// 0063.8: this run's last terminal merge frame's landed sha, when that
+    /// frame is `Merged` — [`task_proposals::merged_landed_sha`]'s own
+    /// result, carried onto the row so `rebuild_visible_tasks` never
+    /// re-parses the ledger to derive a proposal. `None` for an unreadable
+    /// ledger or a run that has not landed.
+    merged_landed: Option<String>,
 }
 
 #[derive(Clone)]
@@ -723,6 +729,16 @@ enum TaskAction {
         key: String,
         digest: String,
     },
+    /// `y`: accept a merge-time done-proposal (0063.8). `digest` is captured
+    /// at modal-open, same stale-write discipline as `Archive`/`Edit`;
+    /// `evidence` is every merged bound run the proposal cited, carried
+    /// through so the accept can fold it into `origin` and the reported
+    /// result.
+    MarkDone {
+        key: String,
+        digest: String,
+        evidence: Vec<super::task_proposals::MergedRunEvidence>,
+    },
 }
 
 /// `a`'s modal grammar: `done` or `cancelled` (`canceled` too), optionally
@@ -957,6 +973,11 @@ struct State {
     /// way.
     collapsed_task_groups: HashSet<TaskGroup>,
     task_preview: Option<TaskPreview>,
+    /// 0063.8: derived done-proposals, keyed by task key — rebuilt inside
+    /// `rebuild_visible_tasks` from `task_session_join` + `tasks_board`, same
+    /// as `tasks_visible`. Never in the draw path, discarded with `State` on
+    /// exit; nothing about a proposal persists between looks.
+    task_proposals: HashMap<String, super::task_proposals::DoneProposal>,
     message: Option<String>,
     quit: bool,
     /// SESSIONS scope (P439): current repository/ad-hoc invocation only
@@ -1156,6 +1177,7 @@ impl State {
             tasks_visible: Vec::new(),
             collapsed_task_groups: HashSet::new(),
             task_preview: None,
+            task_proposals: HashMap::new(),
             message: None,
             quit: false,
             all_repos: false,
@@ -2024,6 +2046,7 @@ fn sessions_from_inventory_tagged(
             outcome,
             title,
             task_key,
+            merged_landed,
         ) = match &row.status {
             ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
                 let outcome = session
@@ -2064,6 +2087,7 @@ fn sessions_from_inventory_tagged(
                     outcome,
                     persisted_session_title(session, &row.ledger_path),
                     session.provenance.task_key.clone(),
+                    super::task_proposals::merged_landed_sha(session),
                 )
             }
             ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
@@ -2073,6 +2097,7 @@ fn sessions_from_inventory_tagged(
                 "-".to_string(),
                 String::new(),
                 SessionClass::Unreadable,
+                None,
                 None,
                 None,
                 None,
@@ -2094,6 +2119,7 @@ fn sessions_from_inventory_tagged(
             outcome,
             title,
             task_key,
+            merged_landed,
         });
     }
     rows.sort_by_key(|row| {
@@ -2738,6 +2764,7 @@ fn handle_key(
         KeyCode::Char('S') if state.screen == Screen::Tasks => open_task_split_modal(state),
         KeyCode::Char('a') if state.screen == Screen::Tasks => open_task_archive_modal(state),
         KeyCode::Char('e') if state.screen == Screen::Tasks => open_task_edit_modal(state),
+        KeyCode::Char('y') if state.screen == Screen::Tasks => open_task_mark_done_modal(state),
         KeyCode::Char('d') if state.screen == Screen::Tasks => dispatch_selected_task(state),
         _ => {}
     }
@@ -5514,6 +5541,29 @@ fn rebuild_visible_tasks(state: &mut State) {
         return;
     };
     let join = task_session_join(state);
+    let duplicate_keys = state
+        .tasks_board
+        .as_ref()
+        .map(|board| board.sync_report.duplicate_keys.clone())
+        .unwrap_or_default();
+    let mut runs: Vec<(Option<&str>, &str, Option<&str>)> = Vec::new();
+    for (key, indices) in &join {
+        for idx in indices {
+            let Some(row) = state.sessions.get(*idx) else {
+                continue;
+            };
+            runs.push((
+                Some(key.as_str()),
+                row.run_id.as_str(),
+                row.merged_landed.as_deref(),
+            ));
+        }
+    }
+    let proposals = super::task_proposals::derive_proposals(&runs, &summaries, &duplicate_keys);
+    state.task_proposals = proposals
+        .into_iter()
+        .map(|proposal| (proposal.task_key.clone(), proposal))
+        .collect();
     let mut buckets: Vec<(TaskGroup, Vec<String>)> = TaskGroup::order()
         .into_iter()
         .map(|group| (group, Vec::new()))
@@ -5792,22 +5842,27 @@ fn refresh_task_preview_for_selection(state: &mut State) {
         .last_pane_layout
         .rect(PANE_TASKS_PREVIEW)
         .map_or(80, |rect| rect.width.saturating_sub(2));
+    let proposal = state.task_proposals.get(&summary.key);
     state.task_preview = Some(build_task_preview(
         &summary,
         board,
         &joined_rows,
+        proposal,
         wrap_width,
     ));
 }
 
 /// The TASKS detail pane (0063): status, relations resolved with the other
 /// side's live status (both directions), open steps, then joined runs — a
-/// parked run reachable from its task row. Pure over already-in-hand facts;
-/// no IO here (the board read happened at `sync` time).
+/// parked run reachable from its task row — then, when 0063.8 derived a
+/// pending merge-time done-proposal for this task, one line naming it next
+/// to the joined-runs section. Pure over already-in-hand facts; no IO here
+/// (the board read happened at `sync` time).
 fn build_task_preview(
     summary: &TaskSummary,
     board: &TasksBoardSnapshot,
     joined: &[&SessionRow],
+    proposal: Option<&super::task_proposals::DoneProposal>,
     wrap_width: u16,
 ) -> TaskPreview {
     let mut lines = Vec::new();
@@ -5922,6 +5977,21 @@ fn build_task_preview(
             line.push(format!("({})", row.state_text), tui::Tone::Muted);
             lines.push(line);
         }
+    }
+    if let Some(proposal) = proposal {
+        let mut line = tui::Line::blank();
+        let citations = proposal
+            .evidence
+            .iter()
+            .map(|evidence| format!("run {} merged as {}", evidence.run_id, evidence.sha))
+            .collect::<Vec<_>>()
+            .join("; ");
+        line.push("  pending: ", tui::Tone::Muted);
+        line.push(
+            format!("{citations} — press y to mark done"),
+            tui::Tone::Default,
+        );
+        lines.push(line);
     }
 
     let rlines: Vec<RLine<'static>> = lines.iter().map(tui_ratatui::render_line).collect();
@@ -6048,6 +6118,59 @@ fn open_task_edit_modal(state: &mut State) {
     );
 }
 
+/// `y`: accept a merge-time done-proposal (0063.8). Refuses inline (no
+/// modal) when the selected task has no derived proposal or the board's
+/// last-synced resolve has nothing for its key; otherwise reads the task
+/// fresh (the digest the eventual write is validated against) and opens a
+/// confirm showing the run id, merged sha per cited run, and the task's own
+/// `validation` prose — the owner judges against the contract, not the
+/// commit's existence.
+fn open_task_mark_done_modal(state: &mut State) {
+    let Some(summary) = selected_task(state) else {
+        state.message = Some("no task selected".to_string());
+        return;
+    };
+    let key = summary.key.clone();
+    let Some(proposal) = state.task_proposals.get(&key).cloned() else {
+        state.message = Some(format!("{key}: no merge-time done-proposal"));
+        return;
+    };
+    let Some(resolved) = state
+        .tasks_board
+        .as_ref()
+        .and_then(|board| board.resolved.get(&key))
+    else {
+        state.message = Some(format!("{key}: not resolvable at the last sync"));
+        return;
+    };
+    let digest = match fetch_task_digest(&key) {
+        Ok(digest) => digest,
+        Err(error) => {
+            state.message = Some(format!("mark done refused: {error}"));
+            return;
+        }
+    };
+    let mut body = String::new();
+    for evidence in &proposal.evidence {
+        body.push_str(&format!(
+            "run {} for {key} merged as {} — mark done?\n",
+            evidence.run_id, evidence.sha
+        ));
+    }
+    if !resolved.document.validation.trim().is_empty() {
+        body.push_str("\ndone-when:\n");
+        body.push_str(resolved.document.validation.trim());
+    }
+    state.modal_host.open(
+        Action::Task(TaskAction::MarkDone {
+            key: key.clone(),
+            digest,
+            evidence: proposal.evidence.clone(),
+        }),
+        Modal::confirm(format!("mark {key} done"), body),
+    );
+}
+
 /// The snapshot digest a modal-open captures for a task, by a fresh read —
 /// not the (possibly stale) board cache — so the write it eventually backs
 /// is validated against what is on disk right now.
@@ -6070,10 +6193,26 @@ fn apply_task_action(
     action: TaskAction,
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
+    // `MarkDone` is a `Confirm` modal (`Confirmed`/`Cancelled`, `Cancelled`
+    // already filtered by `apply_action`), unlike every other `TaskAction`,
+    // which is a `TextInput` modal reading `Submitted(text)` — mirrors
+    // `apply_session_action`'s own `Spawn` special-case split.
+    if let TaskAction::MarkDone {
+        key,
+        digest,
+        evidence,
+    } = action
+    {
+        if outcome != ModalOutcome::Confirmed {
+            return Ok(());
+        }
+        return apply_task_mark_done(state, key, digest, evidence);
+    }
     let ModalOutcome::Submitted(text) = outcome else {
         return Ok(());
     };
     match action {
+        TaskAction::MarkDone { .. } => unreachable!("handled above"),
         TaskAction::Split { parent } => {
             let title = text.trim();
             if title.is_empty() {
@@ -6153,6 +6292,64 @@ fn apply_task_action(
             Ok(())
         }
     }
+}
+
+/// `y`'s `Confirmed` write: `status: done` with the digest captured at
+/// modal-open, folding the newest cited evidence into `origin` when the
+/// document has none yet (0063.8's own ruling — `origin` today means "which
+/// run raised this task"; silently overwriting an existing one would
+/// destroy provenance to record provenance, so an already-set origin is
+/// left untouched, and the evidence still lands in the message below
+/// either way). Declared close effects (0063.6) run as usual, reported the
+/// same way `Archive`/`Edit` already report them.
+fn apply_task_mark_done(
+    state: &mut State,
+    key: String,
+    digest: String,
+    evidence: Vec<super::task_proposals::MergedRunEvidence>,
+) -> crate::Result<()> {
+    let Some(latest) = evidence.last() else {
+        state.message = Some(format!("mark done refused: {key} has no evidence"));
+        return Ok(());
+    };
+    let dir = super::tasks::board_dir(None)?;
+    let provider = FilesTaskBoard::open_read_write(dir);
+    let has_origin = provider
+        .get(&key)
+        .ok()
+        .flatten()
+        .is_some_and(|resolved| resolved.document.origin.is_some());
+    let set_origin = if has_origin {
+        None
+    } else {
+        Some(Some(format!(
+            "run {} merged as {}",
+            latest.run_id, latest.sha
+        )))
+    };
+    match provider.update(
+        &key,
+        TaskUpdate {
+            status: Some(TaskDocStatus::Done),
+            expected_digest: Some(digest),
+            set_origin,
+            ..Default::default()
+        },
+    ) {
+        Ok(outcome) => {
+            state.message = Some(format!(
+                "{key} marked done — run {} merged as {}{}",
+                latest.run_id,
+                latest.sha,
+                effects_summary(&outcome.effects)
+            ));
+            sync_tasks_board(state);
+        }
+        Err(error) => {
+            state.message = Some(format!("mark done refused: {error}"));
+        }
+    }
+    Ok(())
 }
 
 /// Fold recorded effects (0063.6) into the trailing clause of a dashboard
@@ -6991,12 +7188,16 @@ fn render_tasks_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &S
         inner,
         &state.tasks_visible,
         &state.list_tasks,
-        |row| task_visible_row_label(row, summaries),
+        |row| task_visible_row_label(row, summaries, &state.task_proposals),
         |_| false,
     );
 }
 
-fn task_visible_row_label(row: &TaskVisibleRow, summaries: &[TaskSummary]) -> String {
+fn task_visible_row_label(
+    row: &TaskVisibleRow,
+    summaries: &[TaskSummary],
+    proposals: &HashMap<String, super::task_proposals::DoneProposal>,
+) -> String {
     match row {
         TaskVisibleRow::GroupHeader {
             group,
@@ -7010,19 +7211,22 @@ fn task_visible_row_label(row: &TaskVisibleRow, summaries: &[TaskSummary]) -> St
             let Some(summary) = summaries.iter().find(|s| &s.key == key) else {
                 return String::new();
             };
-            task_row_label(summary)
+            task_row_label(summary, proposals.contains_key(key))
         }
     }
 }
 
-/// The TASKS list row: `key · derived status · title`, padded to
-/// [`LIST_LABEL_WIDTH`] like every other list in this dashboard.
-fn task_row_label(summary: &TaskSummary) -> String {
+/// The TASKS list row: `key · derived status · pending-proposal marker ·
+/// title`, padded to [`LIST_LABEL_WIDTH`] like every other list in this
+/// dashboard (0063.8: the marker column is fixed-width, so the title field
+/// is trimmed to compensate rather than growing the row).
+fn task_row_label(summary: &TaskSummary, has_proposal: bool) -> String {
     let label = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         list_field(&summary.key, 8),
         list_field(super::tasks::status_text(summary.derived_status), 10),
-        list_field(&summary.title, 56),
+        list_field(if has_proposal { "!" } else { "" }, 1),
+        list_field(&summary.title, 54),
     );
     debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
     label
@@ -7076,7 +7280,7 @@ fn footer_line(state: &State) -> Paragraph<'static> {
             state.trust_marks.len(),
         ),
         Screen::Tasks => format!(
-            "{navigation}  space expand  s sync  S split  a archive  e edit  d dispatch  r reload  Tab/1-5 screens  q quit"
+            "{navigation}  space expand  s sync  S split  a archive  e edit  y mark done  d dispatch  r reload  Tab/1-5 screens  q quit"
         ),
     };
     let hint = format!("{hint}  [{}]", state.current_list().position_text());
@@ -7165,6 +7369,7 @@ mod tests {
             outcome: None,
             title: None,
             task_key: None,
+            merged_landed: None,
         }
     }
 
@@ -10099,6 +10304,57 @@ mod tests {
         )));
     }
 
+    /// 0063.8: a task-bound run whose last terminal merge frame landed
+    /// derives a proposal on the exact same rebuild that produces
+    /// `tasks_visible` — never a second pass, never persisted.
+    #[test]
+    fn rebuild_visible_tasks_derives_a_proposal_for_a_merged_bound_run() {
+        let mut state = State::new_without_worker();
+        let mut run = row_with_id("run-a", SessionClass::Terminal);
+        run.task_key = Some("0100".to_string());
+        run.merged_landed = Some("abc123".to_string());
+        state.sessions = vec![run];
+        state.tasks_board = Some(board_with(
+            vec![task_summary("0100", DerivedStatus::Ready)],
+            BTreeMap::new(),
+        ));
+        rebuild_visible_tasks(&mut state);
+        let proposal = state
+            .task_proposals
+            .get("0100")
+            .expect("proposal derived for the merged bound run");
+        assert_eq!(proposal.evidence.len(), 1);
+        assert_eq!(proposal.evidence[0].run_id, "r-run-a");
+        assert_eq!(proposal.evidence[0].sha, "abc123");
+    }
+
+    /// A run that has not landed (`merged_landed: None`) never derives a
+    /// proposal — the safe-absence direction 0064's Watch requires.
+    #[test]
+    fn rebuild_visible_tasks_derives_nothing_for_an_unmerged_bound_run() {
+        let mut state = State::new_without_worker();
+        let mut run = row_with_id("run-a", SessionClass::Live);
+        run.task_key = Some("0100".to_string());
+        state.sessions = vec![run];
+        state.tasks_board = Some(board_with(
+            vec![task_summary("0100", DerivedStatus::Ready)],
+            BTreeMap::new(),
+        ));
+        rebuild_visible_tasks(&mut state);
+        assert!(state.task_proposals.is_empty());
+    }
+
+    #[test]
+    fn task_row_label_reserves_a_fixed_width_marker_for_a_pending_proposal() {
+        let summary = task_summary("0100", DerivedStatus::Ready);
+        let without = task_row_label(&summary, false);
+        let with = task_row_label(&summary, true);
+        assert_eq!(tui::display_width(&without), LIST_LABEL_WIDTH);
+        assert_eq!(tui::display_width(&with), LIST_LABEL_WIDTH);
+        assert_ne!(without, with);
+        assert!(with.contains('!'));
+    }
+
     #[test]
     fn dispatch_selected_task_refusal_names_the_reason_and_never_opens_the_spawn_modal() {
         let mut state = State::new_without_worker();
@@ -10226,8 +10482,13 @@ mod tests {
             board_resolved,
         );
 
-        let preview =
-            build_task_preview(&task_summary("0001", DerivedStatus::Ready), &board, &[], 40);
+        let preview = build_task_preview(
+            &task_summary("0001", DerivedStatus::Ready),
+            &board,
+            &[],
+            None,
+            40,
+        );
         let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
 
         let status_index = texts
@@ -10274,6 +10535,7 @@ mod tests {
             &task_summary("0001", DerivedStatus::Ready),
             &board,
             &[],
+            None,
             200,
         );
         let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();

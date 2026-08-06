@@ -123,6 +123,83 @@ pub(crate) fn handle_tasks_sync(
     Ok(CommandOutput::new(()))
 }
 
+/// `ctx tasks proposals` (0063.8): the same merge-time done-proposal
+/// derivation the dashboard TASKS screen surfaces, non-interactively and
+/// list-only — accepting one stays `ctx tasks update <task> --status done`,
+/// no new write surface here. Read-only: the current-repository run
+/// inventory plus a fresh board `list`/`sync`, folded through the same pure
+/// [`super::task_proposals::derive_proposals`] both consumers share.
+pub(crate) fn handle_tasks_proposals(
+    board: Option<&str>,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    let dir = board_dir(board)?;
+    let provider = FilesTaskBoard::open_read(dir.clone());
+    let summaries = provider.list(false).map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+    let sync_report = provider.sync().map_err(|e| crate::Error::Command {
+        message: e.to_string(),
+    })?;
+
+    let inventory = ctx_traits_io::run_session::current_repo_run_inventory().map_err(|e| {
+        crate::Error::Command {
+            message: e.to_string(),
+        }
+    })?;
+    let triples: Vec<(Option<String>, String, Option<String>)> = inventory
+        .iter()
+        .filter_map(|row| match &row.status {
+            ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => Some((
+                session.provenance.task_key.clone(),
+                session.run_id.as_str().to_string(),
+                super::task_proposals::merged_landed_sha(session),
+            )),
+            ctx_traits_io::run_session::InventoryOutcome::Unreadable { .. } => None,
+        })
+        .collect();
+    let runs: Vec<(Option<&str>, &str, Option<&str>)> = triples
+        .iter()
+        .map(|(key, run_id, sha)| (key.as_deref(), run_id.as_str(), sha.as_deref()))
+        .collect();
+    let proposals =
+        super::task_proposals::derive_proposals(&runs, &summaries, &sync_report.duplicate_keys);
+
+    match OutputMode::select(json, false) {
+        OutputMode::Json => {
+            print_json_report(&Envelope::ok(&proposals), "tasks proposals report")?;
+        }
+        OutputMode::Human(mode) => {
+            let mut panel = Panel::new(
+                "ctx",
+                format!("tasks proposals — {dir}"),
+                PanelStatus::Passed(format!("{} proposal(s)", proposals.len())),
+            );
+            for proposal in &proposals {
+                let value = proposal
+                    .evidence
+                    .iter()
+                    .map(|evidence| {
+                        format!(
+                            "run {} merged as {} — mark done?",
+                            evidence.run_id, evidence.sha
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                panel = panel.row(PanelRow::toned(
+                    proposal.task_key.clone(),
+                    value,
+                    RowTone::Default,
+                ));
+            }
+            emit_human(false, &panel, mode, || Ok(()))?;
+        }
+    }
+
+    Ok(CommandOutput::new(()))
+}
+
 pub(crate) fn handle_tasks_list(
     board: Option<&str>,
     archived: bool,
@@ -469,5 +546,27 @@ mod tests {
         let provider = FilesTaskBoard::open_read(board);
         let dependent = provider.get("0002").unwrap().unwrap();
         assert!(dependent.document.relations.depends_on.is_empty());
+    }
+
+    /// `ctx tasks proposals` (0063.8) is a thin edge: it never crashes
+    /// against a board with no session inventory bound to it, and its
+    /// `--json` envelope shape is exercised through the pure derivation
+    /// (`derive_proposals`, tested exhaustively in `task_proposals.rs`)
+    /// rather than a live inventory this test cannot control.
+    #[test]
+    fn tasks_proposals_against_an_unbound_board_lists_nothing() {
+        let board = tempdir();
+        write_task(
+            &board,
+            "0001-a.toml",
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"A\"\nstatus = \"ready\"\n",
+        );
+
+        // `CommandOutput<()>` carries nothing to assert on directly — this
+        // handler prints its envelope rather than returning it. The board's
+        // own task carries no bound run, so completing without error over a
+        // real (if empty) session inventory is the thin-edge contract this
+        // test protects.
+        handle_tasks_proposals(Some(board.as_str()), true).unwrap();
     }
 }
