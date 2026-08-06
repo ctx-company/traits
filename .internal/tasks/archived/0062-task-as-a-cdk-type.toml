@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0062"
 title = "Task becomes a CDK type: uniform content nodes, deterministic extraction, iterable steps"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = """
 

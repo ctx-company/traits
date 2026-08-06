@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0061"
 title = "Dispatch resolves, materialises and digests the task; unmet dependencies refuse"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = """
 

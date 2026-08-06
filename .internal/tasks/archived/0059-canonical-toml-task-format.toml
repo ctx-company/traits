@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0059"
 title = "Tasks become canonical TOML documents"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = '''
 

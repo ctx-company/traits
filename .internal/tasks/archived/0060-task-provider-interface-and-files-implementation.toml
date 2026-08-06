@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0060"
 title = "The task provider interface, with the files backend as its first implementation"
-status = "ready"
+status = "done"
 raised = "2026-08-03"
 content = """
 
