@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.5"
 title = "Update covers every editable field, from the CLI and the dashboard"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.4"
 title = "Dispatch from the board starts a bound run, end to end"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

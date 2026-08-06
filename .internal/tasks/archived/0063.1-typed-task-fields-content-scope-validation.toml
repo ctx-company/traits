@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.1"
 title = "Typed task fields: content, scope and validation replace the header convention"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

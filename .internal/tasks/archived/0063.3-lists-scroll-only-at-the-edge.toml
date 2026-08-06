@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.3"
 title = "Lists scroll only at the edge, and the shared kit enforces it"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

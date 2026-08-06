@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.2"
 title = "The TASKS detail pane shows the task's prose"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 
