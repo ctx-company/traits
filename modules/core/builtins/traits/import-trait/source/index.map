@@ -4,10 +4,10 @@
     "start": 3,
     "end": 3
   },
-  "port:candidate": {
+  "port:result": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 144,
+    "end": 144
   },
   "port:scaffold": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
@@ -34,24 +34,99 @@
     "start": 11,
     "end": 11
   },
-  "prompt:import": {
+  "prompt:produce-first": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 45,
+    "end": 45
+  },
+  "prompt:revise": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 75,
+    "end": 75
+  },
+  "schema:import-envelope": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 98,
+    "end": 98
+  },
+  "schema:round-report": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
     "start": 23,
     "end": 23
   },
-  "schema:trait-draft": {
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 20,
-    "end": 20
+    "start": 151,
+    "end": 151
   },
-  "sequence:procedure/import": {
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
-    "start": 23,
-    "end": 23
+    "start": 72,
+    "end": 72
   },
-  "trait:import-trait": {
+  "sequence:procedure/derive-envelope": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 129,
+    "end": 129
+  },
+  "sequence:procedure/guarded-loop": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 90,
+    "end": 90
+  },
+  "sequence:procedure/init-rounds-spent": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 51,
+    "end": 51
+  },
+  "sequence:procedure/produce-first": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 42,
+    "end": 42
+  },
+  "sequence:round": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 92,
+    "end": 92
+  },
+  "sequence:round/count-round": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 67,
+    "end": 67
+  },
+  "sequence:round/evaluate-round": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 60,
+    "end": 60
+  },
+  "sequence:round/revise-if-not-converged": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 83,
+    "end": 83
+  },
+  "slot:candidate": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "slot:envelope": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 110,
+    "end": 110
+  },
+  "slot:round-report": {
     "file": "modules/core/builtins/traits/import-trait/source/index.ts",
     "start": 32,
     "end": 32
+  },
+  "slot:rounds-spent": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 37,
+    "end": 37
+  },
+  "trait:import-trait": {
+    "file": "modules/core/builtins/traits/import-trait/source/index.ts",
+    "start": 151,
+    "end": 151
   }
 }

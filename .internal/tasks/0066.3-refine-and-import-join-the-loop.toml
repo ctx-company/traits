@@ -44,5 +44,5 @@ path; the non-assisted forms of both commands are byte-identical in behavior to 
 """
 
 [relations]
-parent = "0066"
 depends-on = ["0066.1"]
+parent = "0066"

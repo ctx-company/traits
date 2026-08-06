@@ -9,10 +9,15 @@
     "start": 11,
     "end": 11
   },
-  "port:refinement": {
+  "port:result": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 31,
-    "end": 31
+    "start": 168,
+    "end": 168
+  },
+  "port:single-shot": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 18,
+    "end": 18
   },
   "port:source": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
@@ -29,34 +34,109 @@
     "start": 10,
     "end": 10
   },
-  "prompt:refine": {
+  "prompt:produce-first": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 60,
+    "end": 60
   },
-  "schema:refine-patch": {
+  "prompt:revise": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 13,
-    "end": 13
+    "start": 99,
+    "end": 99
   },
-  "schema:refine-scaffold": {
+  "schema:refine-envelope": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 21,
-    "end": 21
+    "start": 122,
+    "end": 122
   },
-  "schema:source-anchor": {
+  "schema:round-report": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 12,
-    "end": 12
+    "start": 32,
+    "end": 32
   },
-  "sequence:procedure/refine": {
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 175,
+    "end": 175
+  },
+  "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then/revise": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 96,
+    "end": 96
+  },
+  "sequence:procedure/capture-single-shot": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 71,
+    "end": 71
+  },
+  "sequence:procedure/derive-envelope": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 153,
+    "end": 153
+  },
+  "sequence:procedure/guarded-loop": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 114,
+    "end": 114
+  },
+  "sequence:procedure/init-rounds-spent": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 66,
+    "end": 66
+  },
+  "sequence:procedure/produce-first": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 57,
+    "end": 57
+  },
+  "sequence:round": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 116,
+    "end": 116
+  },
+  "sequence:round/count-round": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 87,
+    "end": 87
+  },
+  "sequence:round/evaluate-round": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 80,
+    "end": 80
+  },
+  "sequence:round/revise-if-not-converged": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 107,
+    "end": 107
+  },
+  "slot:candidate": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 27,
+    "end": 27
+  },
+  "slot:envelope": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 134,
+    "end": 134
+  },
+  "slot:round-report": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 41,
+    "end": 41
+  },
+  "slot:rounds-spent": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 46,
+    "end": 46
+  },
+  "slot:single-shot-flag": {
+    "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
+    "start": 52,
+    "end": 52
   },
   "trait:refine-trait": {
     "file": "modules/core/builtins/traits/refine-trait/source/index.ts",
-    "start": 33,
-    "end": 33
+    "start": 175,
+    "end": 175
   }
 }

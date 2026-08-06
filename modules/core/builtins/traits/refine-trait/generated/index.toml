@@ -2,7 +2,7 @@ id = "refine-trait"
 schema-version = "0.2"
 version = "0.1.0"
 name = "Refine Trait"
-summary = "Produces a validated source-anchored trait refinement scaffold."
+summary = "Drives a bounded produce/evaluate loop that refines a trait candidate against the deterministic rung ladder (with an identity rung refinement must never cross), revising on its own typed diagnostics."
 
 [[dependency]]
 alias = "trait-spec"
@@ -20,6 +20,25 @@ tag = [
 ]
 
 [[port]]
+id = "change-request"
+direction = "input"
+schema = "schema:text"
+description = "Requested refinement."
+
+[[port]]
+id = "result"
+direction = "output"
+schema = "schema:refine-envelope"
+description = "Terminal round-evidence envelope: convergence, rounds spent, failing rung, diagnostics, and the last candidate scaffold."
+value = "slot:envelope"
+
+[[port]]
+id = "single-shot"
+direction = "input"
+schema = "schema:boolean"
+description = "Stop after exactly one produce/evaluate round regardless of convergence."
+
+[[port]]
 id = "source"
 direction = "input"
 schema = "schema:text"
@@ -35,86 +54,93 @@ description = "sha256 digest of the source trait."
 id = "source-path"
 direction = "input"
 schema = "schema:text"
-description = "Filesystem path whose lines anchors must reference."
-
-[[port]]
-id = "change-request"
-direction = "input"
-schema = "schema:text"
-description = "Requested refinement."
-
-[[port]]
-id = "refinement"
-direction = "output"
-schema = "schema:refine-scaffold"
-description = "Refinement scaffold."
-value = "slot:refine"
+description = "Filesystem path whose lines anchors must reference; also the round evaluator's re-read source."
 
 [[slot]]
-id = "refine"
-schema = "schema:refine-scaffold"
-description = "Runtime slot refine."
+id = "candidate"
+schema = "schema:text"
+description = "Current-round refine scaffold JSON text: {source-trait-id, source-digest, proposed-trait, patches}."
+
+[[slot]]
+id = "envelope"
+schema = "schema:refine-envelope"
+description = "Terminal round-evidence envelope."
+
+[[slot]]
+id = "round-report"
+schema = "schema:round-report"
+description = "Latest round's rung-ladder evaluation."
+
+[[slot]]
+id = "rounds-spent"
+schema = "schema:number"
+description = "Rounds evaluated so far, including the pre-loop first draft's evaluation."
+
+[[slot]]
+id = "single-shot-flag"
+schema = "schema:boolean"
+description = "Local copy of the single-shot input port for the loop guard."
 
 [[schema]]
-id = "source-anchor"
-description = "A one-based inclusive source location."
+id = "refine-envelope"
+description = "Terminal report the CLI handler drives its write-once/non-convergence decision from."
 
-[schema.fields.end]
-schema = "schema:number"
-required = true
-
-[schema.fields.file]
+[schema.fields.candidate]
 schema = "schema:text"
 required = true
+description = "The last candidate scaffold JSON text produced."
 
-[schema.fields.start]
-schema = "schema:number"
+[schema.fields.converged]
+schema = "schema:boolean"
 required = true
+description = "Whether the loop exited because a candidate converged."
 
-[[schema]]
-id = "refine-patch"
-description = "One requested source-anchored refinement."
-
-[schema.fields.anchor]
-schema = "schema:source-anchor"
-required = true
-
-[schema.fields.change]
-schema = "schema:text"
-required = true
-
-[[schema]]
-id = "refine-scaffold"
-description = "A source-anchored refinement proposal."
-
-[schema.fields.patches]
-schema = "[schema:refine-patch]"
-required = true
-
-[schema.fields.proposed-trait]
+[schema.fields.diagnostics]
 schema = "schema:any"
-required = true
+description = "The last round's diagnostics; empty when converged."
 
-[schema.fields.source-digest]
+[schema.fields.failing-rung]
+schema = "schema:text"
+description = "The rung the last round failed at; absent when converged."
+
+[schema.fields.rounds-bound]
+schema = "schema:integer"
+required = true
+description = "The declared round bound the loop is guarded against."
+
+[schema.fields.rounds-spent]
+schema = "schema:integer"
+required = true
+description = "Rounds evaluated, including the first draft's evaluation."
+
+[[schema]]
+id = "round-report"
+description = "One round's rung-ladder evaluation, emitted by `ctx traits refine-round`."
+
+[schema.fields.converged]
+schema = "schema:boolean"
+required = true
+description = "Whether the candidate cleared every rung."
+
+[schema.fields.diagnostics]
+schema = "schema:any"
+description = "Typed diagnostics from the failing rung; empty once converged."
+
+[schema.fields.rung]
 schema = "schema:text"
 required = true
-
-[schema.fields.source-trait-id]
-schema = "schema:text"
-required = true
+description = "The last rung evaluated: the failing rung, or the ladder's final rung once converged."
 
 [[agent]]
 id = "refiner"
-description = "Produces source-anchored trait refinement scaffolds."
+description = "Produces source-anchored trait refinement scaffolds, then revises them against typed round diagnostics."
 summary = "Trait refinement agent."
 
-[prompt.refine]
+[prompt.produce-first]
 text = """
-Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
 
-Ground the result in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one structured refine scaffold with anchored patches.
-
-Return JSON matching schema:refine-scaffold, with no surrounding commentary."""
+        Refine {port:source} at {port:source-path} for {port:change-request}. Preserve source identity, use {port:source-digest} as source evidence, and anchor every patch to real one-based inclusive lines in {port:source-path}.
+        Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return exactly one complete refine scaffold JSON text with fields source-trait-id, source-digest, proposed-trait, and patches — nothing else."""
 input = [
     "port:source",
     "port:source-path",
@@ -123,23 +149,98 @@ input = [
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:refine"]
+output = ["slot:candidate"]
+
+[prompt.revise]
+text = """
+
+        Round evaluation of the refinement for {port:change-request} failed at rung {slot:round-report}. Current candidate scaffold: {slot:candidate}.
+        Fix exactly what the diagnostics in {slot:round-report} name; never change the trait's identity or drop its procedure — refinement edits a trait, it does not swap or gut it. Keep everything else. Return the complete corrected refine scaffold JSON text only, nothing else."""
+input = [
+    "port:change-request",
+    "slot:round-report",
+    "slot:candidate",
+]
+output = ["slot:candidate"]
+
+[[sequence.ctx-branch-arm-s-5-round-23-revise-if-not-converged-then.sequence]]
+id = "revise"
+title = "Revise the candidate against its round diagnostics (refiner)"
+agent = "agent:refiner"
+prompt = "prompt:revise"
+input = [
+    "port:change-request",
+    "slot:round-report",
+    "slot:candidate",
+]
+output = ["slot:candidate"]
+
+[[sequence.round.sequence]]
+id = "evaluate-round"
+title = "Evaluate the candidate through the rung ladder"
+input = [
+    "port:source-path",
+    "slot:candidate",
+]
+output = ["slot:round-report"]
+
+[sequence.round.sequence.command]
+argv = [
+    "ctx",
+    "traits",
+    "refine-round",
+    "{port:source-path}",
+    "{slot:candidate}",
+]
+timeout-ms = 180000
+
+[[sequence.round.sequence]]
+id = "count-round"
+title = "Advance the rounds-spent counter"
+kind = "project"
+
+[[sequence.round.sequence.projection]]
+destination = "slot:rounds-spent"
+operation = "increment"
+
+[sequence.round.sequence.projection.source]
+literal = 1
+
+[[sequence.round.sequence.output]]
+slot = "slot:rounds-spent"
+operation = "increment"
+
+[[sequence.round.sequence]]
+id = "revise-if-not-converged"
+title = "Revise If Not Converged"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-5-round-23-revise-if-not-converged-then"
+
+[[sequence.round.sequence.when.not.any]]
+slot = "slot:round-report"
+field = "converged"
+equals = true
+
+[[sequence.round.sequence.when.not.any]]
+slot = "slot:single-shot-flag"
+equals = true
 
 [procedure]
-description = "Propose one refinement scaffold whose trait identity remains equal to the source identity."
+description = "Produce a refinement scaffold, evaluate it through the deterministic rung ladder, and revise within a declared round bound; the handler writes only a converged result. `single-shot` stops after exactly one round for the non-`--apply` preview path."
 input = [
+    "port:change-request",
+    "port:single-shot",
     "port:source",
     "port:source-digest",
     "port:source-path",
-    "port:change-request",
 ]
-output = ["port:refinement"]
+output = ["port:result"]
 
 [[procedure.sequence]]
-id = "refine"
-title = "Refine trait"
+id = "produce-first"
+title = "Draft the refinement scaffold (refiner)"
 agent = "agent:refiner"
-prompt = "prompt:refine"
+prompt = "prompt:produce-first"
 input = [
     "port:source",
     "port:source-path",
@@ -148,4 +249,79 @@ input = [
     "resource:trait-spec/agent-traits-schema",
     "resource:trait-spec/design-rubric",
 ]
-output = ["slot:refine"]
+output = ["slot:candidate"]
+
+[[procedure.sequence]]
+id = "init-rounds-spent"
+title = "Seed the rounds-spent counter"
+kind = "project"
+output = ["slot:rounds-spent"]
+
+[[procedure.sequence.projection]]
+destination = "slot:rounds-spent"
+
+[procedure.sequence.projection.source]
+literal = 0
+
+[[procedure.sequence]]
+id = "capture-single-shot"
+title = "Capture the single-shot flag into a local slot"
+input = ["port:single-shot"]
+output = ["slot:single-shot-flag"]
+
+[procedure.sequence.command]
+argv = [
+    "node",
+    "--eval",
+    "process.stdout.write(String(process.argv[1]))",
+    "{port:single-shot}",
+]
+
+[[procedure.sequence]]
+id = "guarded-loop"
+title = "Guarded refine loop"
+kind = "loop"
+sequence = "sequence:round"
+max-iterations = 3
+on-exhausted = "continue"
+
+[[procedure.sequence.until.any]]
+slot = "slot:round-report"
+field = "converged"
+equals = true
+
+[[procedure.sequence.until.any]]
+slot = "slot:single-shot-flag"
+equals = true
+
+[[procedure.sequence]]
+id = "derive-envelope"
+title = "Assemble the terminal round-evidence envelope"
+input = [
+    "slot:round-report",
+    "slot:candidate",
+    "slot:rounds-spent",
+]
+output = ["slot:envelope"]
+
+[procedure.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [roundReportText, candidateText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
+const report = JSON.parse(roundReportText);
+process.stdout.write(JSON.stringify({
+    converged: report.converged,
+    "rounds-spent": Number(roundsSpentText),
+    "rounds-bound": Number(roundsBoundText),
+    "failing-rung": report.converged ? undefined : report.rung,
+    diagnostics: report.diagnostics ?? [],
+    candidate: candidateText,
+}));""",
+    "{slot:round-report}",
+    "{slot:candidate}",
+    "{slot:rounds-spent}",
+    "3",
+]

@@ -32,7 +32,8 @@ fn main() -> ExitCode {
             Some("worker") => role_worker(),
             Some("reviewer") => role_reviewer(args.next(), args.next()),
             Some("scribe") => role_scribe(),
-            Some("generator") => role_generator(),
+            Some("generator") => role_generator(args.next()),
+            Some("refiner") => role_refiner(args.next()),
             other => {
                 eprintln!("ctx-fixture-agent: unknown --role {other:?}");
                 ExitCode::FAILURE
@@ -122,16 +123,43 @@ fn role_scribe() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `generate-trait`'s produce/revise steps (task 0066.1's guarded loop):
-/// always returns the same authoring source, deliberately invalid
-/// TypeScript, so every round fails at the ladder's `build` rung and the
-/// loop's declared bound genuinely exhausts — proving the non-convergence
-/// path (no package write, failing rung named, scratch preserved) rather
-/// than a fixture escalation branch. Hand-escaped JSON string, not a
-/// dependency: this binary is deliberately std-only.
-fn role_generator() -> ExitCode {
-    let source = "this is not valid TypeScript {{{";
-    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
-    println!("{{\"candidate-source\":\"{escaped}\"}}");
+/// `generate-trait`'s and `import-trait`'s produce/revise steps (both
+/// declare an agent literally named `generator`; task 0066.1/0066.3's
+/// guarded loops): always returns the same deliberately invalid text, so
+/// every round fails at the ladder's earliest rung (`build` for generate's
+/// TypeScript candidate, `synth-normalize` for import's JSON candidate) and
+/// the loop's declared bound genuinely exhausts — proving the
+/// non-convergence path (no package write, failing rung named, scratch
+/// preserved) rather than a fixture escalation branch. The output field is
+/// read off the compiled prompt's own return-format skeleton (see
+/// `requested_output_field`) rather than hard-coded, since generate's
+/// candidate lands in slot `candidate-source` and import's in slot
+/// `candidate`.
+fn role_generator(prompt: Option<String>) -> ExitCode {
+    let field = requested_output_field(&prompt.unwrap_or_default())
+        .unwrap_or_else(|| "candidate-source".to_string());
+    println!("{{\"{field}\":{}}}", invalid_candidate_json());
     ExitCode::SUCCESS
+}
+
+/// `refine-trait`'s produce/revise steps (task 0066.3's guarded loop):
+/// always returns the same deliberately invalid text in slot `candidate`, so
+/// every round fails at the ladder's `synth-normalize` rung and the loop's
+/// declared bound genuinely exhausts.
+fn role_refiner(prompt: Option<String>) -> ExitCode {
+    let field = requested_output_field(&prompt.unwrap_or_default())
+        .unwrap_or_else(|| "candidate".to_string());
+    println!("{{\"{field}\":{}}}", invalid_candidate_json());
+    ExitCode::SUCCESS
+}
+
+/// Deliberately invalid candidate text, JSON-string-encoded: fails to parse
+/// as either TypeScript (generate's build rung) or JSON (refine/import's
+/// synth-normalize rung), so it never converges regardless of which loop
+/// evaluates it. Hand-escaped, not a dependency: this binary is deliberately
+/// std-only.
+fn invalid_candidate_json() -> String {
+    let source = "this is not valid TypeScript or JSON {{{";
+    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }

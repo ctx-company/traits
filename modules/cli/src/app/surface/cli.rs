@@ -967,6 +967,38 @@ pub enum TraitsCommand {
         /// Candidate authoring source (TypeScript) text.
         candidate: String,
     },
+    /// Evaluate one refine scaffold candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `refine-trait`'s in-loop
+    /// evaluate step (task 0066.3). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    #[command(hide = true)]
+    RefineRound {
+        /// Filesystem path whose lines patch anchors must reference; also
+        /// re-read for the source trait identity and digest.
+        source_path: String,
+
+        /// Candidate refine scaffold (JSON) text.
+        candidate: String,
+    },
+    /// Evaluate one import trait-draft candidate through the rung ladder.
+    ///
+    /// Internal: the only intended caller is `import-trait`'s in-loop
+    /// evaluate step (task 0066.3). Never calls a provider, never loops —
+    /// exactly one round, always exits 0 and prints the round report as
+    /// JSON regardless of convergence; the meta-trait's own loop primitive
+    /// decides whether to continue.
+    #[command(hide = true)]
+    ImportRound {
+        /// Trait ID the candidate must declare; also keys the scratch
+        /// package and the persisted scaffold baseline.
+        trait_id: String,
+
+        /// Candidate trait draft (JSON) text.
+        candidate: String,
+    },
     /// LLM-assisted refinement of an existing canonical trait.
     ///
     /// `refine` loads existing canonical source and produces a candidate patch

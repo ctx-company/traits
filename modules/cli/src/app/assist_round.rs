@@ -172,6 +172,257 @@ pub(crate) fn evaluate_round(
     })
 }
 
+/// Path within `trait_id`'s scratch package where every refine/import round
+/// persists the raw candidate text before it can fail any rung — the file a
+/// non-convergence error names as the preserved candidate (task 0066.3
+/// "Done when": a non-converging run "preserves its last candidate at a
+/// stated path"). Overwritten every round, so it always holds the most
+/// recent candidate regardless of which rung it fails.
+pub(crate) fn candidate_path(trait_id: &str) -> Utf8PathBuf {
+    scratch_package_root(trait_id).join("candidate.json")
+}
+
+/// Persist `candidate_text` to [`candidate_path`] for `trait_id`, so the
+/// scratch file backing a non-convergence error's stated path is written
+/// before evaluation can fail — restoring parity with generate's
+/// preserve-on-failure contract for candidates that never reach a build
+/// rung (refine/import candidates are already canonical JSON).
+fn persist_candidate(trait_id: &str, candidate_text: &str) -> crate::Result<()> {
+    ctx_traits_io::write::write_build_output(&candidate_path(trait_id), candidate_text)?;
+    Ok(())
+}
+
+/// Shared ladder core for `refine-round`/`import-round`: the candidate is
+/// already canonical JSON (refine's `proposed-trait`, import's decoded trait
+/// draft), so unlike [`evaluate_round`] there is no build rung — the ladder
+/// starts at synth/normalize. `identity_extra` runs only once the plain
+/// trait-id check passes, so a command-specific identity/baseline predicate
+/// (import's scaffold-retention check) can add a further `Identity`-rung
+/// failure without duplicating the id comparison.
+fn evaluate_canonical_ladder(
+    candidate_json: &str,
+    expected_trait_id: &str,
+    package_root: &Utf8Path,
+    identity_extra: impl FnOnce(&ctx_traits_core::Trait) -> Option<Diagnostic>,
+) -> crate::Result<RoundReport> {
+    persist_candidate(expected_trait_id, candidate_json)?;
+    let boundary = plan_deterministic_boundary(ctx_traits_core::assist::BoundaryRequest {
+        operation: ctx_traits_core::assist::Operation::Generate,
+        source_trait_ids: vec![expected_trait_id.to_string()],
+        source_paths: Vec::new(),
+        source_digests: Vec::new(),
+        user_request: format!("round evaluation of {expected_trait_id}"),
+        model: None,
+        target_path: package_root.to_string(),
+        provider_available: false,
+        context: serde_json::Value::Null,
+    })?;
+    let evaluation = evaluate_supplied_candidate(
+        boundary,
+        candidate_json,
+        ctx_traits_core::encoding::Encoding::Json,
+    );
+    if !evaluation.candidate.gate_summary.parse.ok
+        || !evaluation.candidate.gate_summary.normalize.ok
+    {
+        return Ok(failed(
+            Rung::SynthNormalize,
+            evaluation.candidate.diagnostics,
+        ));
+    }
+    let Some(normalized_trait) = evaluation.normalized_trait.as_ref() else {
+        return Ok(failed(
+            Rung::SynthNormalize,
+            evaluation.candidate.diagnostics,
+        ));
+    };
+    let Some(normalized_text) = evaluation.normalized_output_text.as_deref() else {
+        return Ok(failed(
+            Rung::SynthNormalize,
+            evaluation.candidate.diagnostics,
+        ));
+    };
+
+    if normalized_trait.id.as_str() != expected_trait_id {
+        return Ok(failed(
+            Rung::Identity,
+            vec![Diagnostic {
+                gate: Gate::Normalize,
+                code: DiagnosticCode::IdentityChanged,
+                field: Some("id".to_string()),
+                message: format!(
+                    "candidate trait id {:?} does not match expected id {expected_trait_id:?}",
+                    normalized_trait.id.as_str()
+                ),
+            }],
+        ));
+    }
+    if let Some(diagnostic) = identity_extra(normalized_trait) {
+        return Ok(failed(Rung::Identity, vec![diagnostic]));
+    }
+
+    let has_sequence = normalized_trait
+        .procedure
+        .as_ref()
+        .is_some_and(|procedure| !procedure.sequence.is_empty());
+    if !has_sequence {
+        return Ok(failed(
+            Rung::NonDegenerate,
+            vec![Diagnostic {
+                gate: Gate::Build,
+                code: DiagnosticCode::DegenerateCandidate,
+                field: Some("procedure.sequence".to_string()),
+                message: "candidate declares no procedure sequence".to_string(),
+            }],
+        ));
+    }
+
+    let candidate = crate::app::generate::attach_assist_check_report(
+        evaluation.candidate,
+        Some(normalized_trait),
+        Some(normalized_text),
+        package_root,
+    )?;
+    if !candidate.gate_summary.check.ok {
+        return Ok(failed(Rung::Check, candidate.diagnostics));
+    }
+    if !candidate.gate_summary.audit.ok {
+        return Ok(failed(Rung::Audit, candidate.diagnostics));
+    }
+
+    Ok(RoundReport {
+        rung: Rung::Audit,
+        converged: true,
+        diagnostics: Vec::new(),
+    })
+}
+
+/// Evaluate one `refine --apply` round: `candidate` is the refine scaffold
+/// JSON text (`{"source-trait-id", "source-digest", "proposed-trait",
+/// "patches"}`). Re-reads `source_path` for the digest/line-count scaffold
+/// anchors are validated against, so a scaffold whose patches drifted from
+/// the live source fails here, at `SynthNormalize`, as a typed diagnostic —
+/// never a hard error the loop cannot recover from.
+pub(crate) fn evaluate_refine_round(
+    source_path: &str,
+    candidate_scaffold: &str,
+) -> crate::Result<(RoundReport, String)> {
+    let source_text = ctx_traits_io::read::read_text(Utf8Path::new(source_path))?;
+    let source_digest = ctx_traits_core::digest::Digest::source(&source_text);
+    let (existing_trait, _) = ctx_traits_core::encoding::decode_trait_with_warnings(
+        ctx_traits_core::encoding::Encoding::from_path(Utf8Path::new(source_path))?,
+        &source_text,
+    )?;
+    let trait_id = existing_trait.id.as_str().to_string();
+    persist_candidate(&trait_id, candidate_scaffold)?;
+    let (candidate_text, _scaffold) = match crate::app::refine::decode_refine_candidate(
+        candidate_scaffold,
+        source_digest.as_str(),
+        source_path,
+        source_text.lines().count(),
+    ) {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            return Ok((
+                failed(
+                    Rung::SynthNormalize,
+                    vec![Diagnostic {
+                        gate: Gate::Parse,
+                        code: DiagnosticCode::ParseFailed,
+                        field: None,
+                        message: error.to_string(),
+                    }],
+                ),
+                trait_id,
+            ));
+        }
+    };
+    let package_root = scratch_package_root(&trait_id);
+    let report = evaluate_canonical_ladder(&candidate_text, &trait_id, &package_root, |_| None)?;
+    Ok((report, trait_id))
+}
+
+/// Path within `trait_id`'s scratch package where `handle_import` persists
+/// the deterministic scaffold baseline text before driving the guarded
+/// import loop, and `import-round` reads it back to check baseline
+/// retention (task 0066.3 §3).
+pub(crate) fn baseline_path(trait_id: &str) -> Utf8PathBuf {
+    scratch_package_root(trait_id).join("baseline.toml")
+}
+
+/// Persist the deterministic scaffold baseline `handle_import` computed for
+/// `trait_id` before driving the guarded import loop, so `import-round`
+/// (which never sees the CLI's in-memory analysis) has the same baseline to
+/// converge against for every round of the same run.
+pub(crate) fn persist_baseline(trait_id: &str, baseline_text: &str) -> crate::Result<Utf8PathBuf> {
+    let path = baseline_path(trait_id);
+    ctx_traits_io::write::write_build_output(&path, baseline_text)?;
+    Ok(path)
+}
+
+/// Evaluate one `import --llm-assisted` round: `candidate` is the raw model
+/// output (either a `{"trait": ...}` wrapper or a bare canonical draft).
+/// Re-reads the deterministic scaffold baseline text `handle_import`
+/// persisted to `baseline_path(trait_id)` before driving the loop — the
+/// convergence target the candidate must remain recognizable against
+/// (declaration set retained; enrichment adds, never deletes).
+pub(crate) fn evaluate_import_round(trait_id: &str, candidate: &str) -> crate::Result<RoundReport> {
+    persist_candidate(trait_id, candidate)?;
+    let (candidate_text, _wrapped) = crate::app::generate::decode_generate_candidate(candidate)?;
+    let package_root = scratch_package_root(trait_id);
+    let baseline_text = ctx_traits_io::read::read_text(&baseline_path(trait_id))?;
+    let (baseline_trait, _) = ctx_traits_core::encoding::decode_trait_with_warnings(
+        ctx_traits_core::encoding::Encoding::Toml,
+        &baseline_text,
+    )?;
+    evaluate_canonical_ladder(
+        &candidate_text,
+        trait_id,
+        &package_root,
+        |candidate_trait| {
+            let missing: Vec<String> = declaration_ids(&baseline_trait)
+                .difference(&declaration_ids(candidate_trait))
+                .cloned()
+                .collect();
+            if missing.is_empty() {
+                return None;
+            }
+            Some(Diagnostic {
+                gate: Gate::Normalize,
+                code: DiagnosticCode::BaselineDiscarded,
+                field: None,
+                message: format!(
+                    "candidate drops declaration(s) present in the imported scaffold baseline: {}",
+                    missing.join(", ")
+                ),
+            })
+        },
+    )
+}
+
+/// A trait's declaration set as a deterministic proxy for "recognizably the
+/// source": dependency aliases, resource/schema ids, and metadata tags.
+/// Import's baseline rung checks this set is retained (a subset relation),
+/// not equal — enrichment is expected to add declarations, never drop them.
+fn declaration_ids(trait_ref: &ctx_traits_core::Trait) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for dependency in &trait_ref.dependencies {
+        ids.insert(format!("dependency:{}", dependency.alias));
+    }
+    for resource in &trait_ref.resources {
+        ids.insert(format!("resource:{}", resource.id));
+    }
+    for schema in &trait_ref.schemas {
+        ids.insert(format!("schema:{}", schema.id));
+    }
+    if let Some(metadata) = trait_ref.metadata.as_ref() {
+        for tag in metadata.tag.iter() {
+            ids.insert(format!("tag:{}", tag.as_str()));
+        }
+    }
+    ids
+}
+
 fn failed(rung: Rung, diagnostics: Vec<Diagnostic>) -> RoundReport {
     RoundReport {
         rung,

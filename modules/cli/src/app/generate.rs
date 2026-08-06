@@ -64,18 +64,18 @@ pub(crate) struct GenerateInputs<'a> {
 /// count from `evaluate-round` acceptances rather than trusting the
 /// meta-trait's `rounds-spent` counter slot, which this observer never
 /// reads.
-struct RoundProgressObserver {
+pub(crate) struct RoundProgressObserver {
     round: std::cell::Cell<u32>,
 }
 
 impl RoundProgressObserver {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             round: std::cell::Cell::new(0),
         }
     }
 
-    fn observe(&self, event: crate::app::drive::FrameObserverEvent<'_>) {
+    pub(crate) fn observe(&self, event: crate::app::drive::FrameObserverEvent<'_>) {
         match event {
             crate::app::drive::FrameObserverEvent::Dispatched(dispatch) => {
                 self.observe_dispatch(dispatch);
@@ -581,7 +581,7 @@ pub(crate) fn run_builtin_trait(
     )
 }
 
-fn run_builtin_trait_observed(
+pub(crate) fn run_builtin_trait_observed(
     trait_id: &str,
     input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
     assignments: &[String],
@@ -941,28 +941,52 @@ fn round_report_panel(
     panel
 }
 
-/// Decode a `GenerateEnvelope`'s `failing-rung` string into the typed
-/// [`Rung`] the uniform [`ctx_traits_core::assist::RoundEvidence`] carries.
+/// Decode an envelope's `failing-rung` string into the typed [`Rung`] the
+/// uniform [`ctx_traits_core::assist::RoundEvidence`] carries.
 fn parse_failing_rung(rung: &str) -> Option<ctx_traits_core::assist::Rung> {
     serde_json::from_value(serde_json::Value::String(rung.to_string())).ok()
 }
 
+/// The terminal shape every guarded-loop meta-trait's `derive-envelope` step
+/// emits (task 0066.1/0066.2/0066.3): convergence, rounds spent against the
+/// declared bound, and the failing rung — shared by `generate-trait`,
+/// `refine-trait`, and `import-trait`'s otherwise command-specific envelope
+/// structs so `round_evidence_from_envelope` has exactly one implementation.
+pub(crate) trait LoopEnvelope {
+    fn converged(&self) -> bool;
+    fn rounds_spent(&self) -> u32;
+    fn rounds_bound(&self) -> Option<u32>;
+    fn failing_rung(&self) -> Option<&str>;
+}
+
+impl LoopEnvelope for GenerateEnvelope {
+    fn converged(&self) -> bool {
+        self.converged
+    }
+    fn rounds_spent(&self) -> u32 {
+        self.rounds_spent
+    }
+    fn rounds_bound(&self) -> Option<u32> {
+        self.rounds_bound
+    }
+    fn failing_rung(&self) -> Option<&str> {
+        self.failing_rung.as_deref()
+    }
+}
+
 /// Assemble the loop's uniform round-evidence envelope from the terminal
-/// `GenerateEnvelope` and the session's own accepted `round-report` history
-/// (task 0066.2). `rounds.len() == rounds_spent` is verified downstream by
-/// the panel/JSON printer, not silently trusted here.
-pub(crate) fn round_evidence_from_envelope(
-    envelope: &GenerateEnvelope,
+/// envelope and the session's own accepted `round-report` history (task
+/// 0066.2). `rounds.len() == rounds_spent` is verified downstream by the
+/// panel/JSON printer, not silently trusted here.
+pub(crate) fn round_evidence_from_envelope<E: LoopEnvelope>(
+    envelope: &E,
     rounds: Vec<ctx_traits_core::assist::RoundRecord>,
 ) -> ctx_traits_core::assist::RoundEvidence {
     ctx_traits_core::assist::RoundEvidence {
-        converged: envelope.converged,
-        rounds_spent: envelope.rounds_spent,
-        rounds_bound: envelope.rounds_bound,
-        failing_rung: envelope
-            .failing_rung
-            .as_deref()
-            .and_then(parse_failing_rung),
+        converged: envelope.converged(),
+        rounds_spent: envelope.rounds_spent(),
+        rounds_bound: envelope.rounds_bound(),
+        failing_rung: envelope.failing_rung().and_then(parse_failing_rung),
         rounds,
     }
 }

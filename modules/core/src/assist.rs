@@ -152,6 +152,8 @@ pub enum DiagnosticCode {
     ImportTraitDrift,
     ImportReportMissing,
     ImportReportDrift,
+    IdentityChanged,
+    BaselineDiscarded,
 }
 
 impl DiagnosticCode {
@@ -356,6 +358,12 @@ pub struct CandidateEvaluation {
 pub enum Rung {
     Build,
     SynthNormalize,
+    /// Refine/import-only rung: the candidate's trait identity must equal
+    /// the source's (refine) or the requested (import) trait id, and — for
+    /// import — the deterministic scaffold baseline's declarations must
+    /// still be present (enrichment adds, never deletes). Generate has no
+    /// identity constraint to police, so its ladder never reaches this rung.
+    Identity,
     NonDegenerate,
     Check,
     Audit,

@@ -7,14 +7,49 @@ use crate::app::entry::{
     trait_package_output_paths,
 };
 use crate::app::generate::{
-    blocked_assist_candidate, canonical_json_value, decode_generate_candidate, run_builtin_trait,
-    runtime_input,
+    LoopEnvelope, blocked_assist_candidate, canonical_json_value, decode_generate_candidate,
+    print_round_evidence, print_round_report, round_evidence_from_envelope,
+    run_builtin_trait_observed, runtime_input,
 };
 use crate::app::import_analysis::{
     ImportSourceAnalysis, analyze_import_source, augment_draft_with_multi_file_resources,
     multi_file_evidence, multi_file_resource_mappings,
 };
 use crate::app::presentation::{OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human};
+
+/// `import-trait`'s terminal output: the round-evidence envelope its
+/// `derive-envelope` step assembles (task 0066.3, mirroring 0066.1/0066.2's
+/// `GenerateEnvelope`). `candidate` is the last trait draft JSON text
+/// produced — decoded downstream by the existing `decode_generate_candidate`
+/// pipeline exactly as a provider's raw output was before this task.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct ImportLoopEnvelope {
+    converged: bool,
+    rounds_spent: u32,
+    #[serde(default)]
+    rounds_bound: Option<u32>,
+    #[serde(default)]
+    failing_rung: Option<String>,
+    #[serde(default)]
+    diagnostics: Vec<ctx_traits_core::assist::Diagnostic>,
+    candidate: String,
+}
+
+impl LoopEnvelope for ImportLoopEnvelope {
+    fn converged(&self) -> bool {
+        self.converged
+    }
+    fn rounds_spent(&self) -> u32 {
+        self.rounds_spent
+    }
+    fn rounds_bound(&self) -> Option<u32> {
+        self.rounds_bound
+    }
+    fn failing_rung(&self) -> Option<&str> {
+        self.failing_rung.as_deref()
+    }
+}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -733,7 +768,21 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                         .map(camino::Utf8Path::new)
                         .map(ctx_traits_io::harness_config::load_run_profile_document)
                         .transpose()?;
-                    match run_builtin_trait(
+                    // The loop's `import-round` rung converges toward the
+                    // deterministic scaffold baseline, not the CLI's
+                    // in-memory analysis — persist it once, before driving,
+                    // so every round of this run reads the same baseline
+                    // (task 0066.3 §3).
+                    let candidate_path = crate::app::assist_round::candidate_path(&trait_id);
+                    if let Err(error) =
+                        crate::app::assist_round::persist_baseline(&trait_id, &synth_output_text)
+                    {
+                        return blocked_assist_candidate(candidate, json, error.to_string());
+                    }
+                    let round_progress = crate::app::generate::RoundProgressObserver::new();
+                    let observer: crate::app::drive::FrameObserver<'_> =
+                        &|event| round_progress.observe(event);
+                    let outcome = match run_builtin_trait_observed(
                         "import-trait",
                         vec![
                             runtime_input("scaffold", synth_output_text.as_str()),
@@ -745,12 +794,29 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                         assignments,
                         model,
                         run_profile_document.as_ref(),
+                        Some(observer),
                     ) {
-                        Ok(outcome) => outcome.output,
+                        Ok(outcome) => outcome,
                         Err(error) => {
                             return blocked_assist_candidate(candidate, json, error.to_string());
                         }
+                    };
+                    let envelope: ImportLoopEnvelope = serde_json::from_str(&outcome.output)
+                        .map_err(|error| {
+                            crate::Error::json("decode import loop envelope", error)
+                        })?;
+                    let evidence = round_evidence_from_envelope(&envelope, outcome.round_records);
+                    print_round_evidence(&evidence, &candidate_path, json)?;
+                    if !envelope.converged {
+                        return Err(crate::Error::Command {
+                            message: format!(
+                                "import --llm-assisted failed at rung {}: no package written; last candidate preserved at {candidate_path}; {} round(s) spent",
+                                envelope.failing_rung.as_deref().unwrap_or("unknown"),
+                                envelope.rounds_spent
+                            ),
+                        });
                     }
+                    envelope.candidate
                 },
                 ctx_traits_core::encoding::Encoding::Json,
             ),
@@ -1108,6 +1174,21 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
             })?;
         }
     }
+    Ok(CommandOutput::new(()))
+}
+
+/// The in-loop evaluate rung `import-trait`'s meta-trait invokes for one
+/// round: exactly one call into `assist_round::evaluate_import_round`, no
+/// provider, no looping. Always exits 0 and prints the round report as JSON
+/// whether or not it converged — the meta-trait's own `sequence.loop`
+/// decides continuation from the report's `converged` field.
+pub(crate) fn handle_import_round(
+    trait_id: &str,
+    candidate: &str,
+) -> crate::Result<CommandOutput<()>> {
+    let report = crate::app::assist_round::evaluate_import_round(trait_id, candidate)?;
+    let package_root = crate::app::assist_round::scratch_package_root(trait_id);
+    print_round_report(&report, &package_root, true)?;
     Ok(CommandOutput::new(()))
 }
 

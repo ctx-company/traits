@@ -628,6 +628,14 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 trait_id,
                 candidate,
             }) => crate::app::generate::handle_generate_round(&trait_id, &candidate),
+            Some(cli::TraitsCommand::RefineRound {
+                source_path,
+                candidate,
+            }) => crate::app::refine::handle_refine_round(&source_path, &candidate),
+            Some(cli::TraitsCommand::ImportRound {
+                trait_id,
+                candidate,
+            }) => crate::app::import_handlers::handle_import_round(&trait_id, &candidate),
             Some(cli::TraitsCommand::Refine {
                 id_or_path,
                 change_request,
