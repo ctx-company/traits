@@ -708,7 +708,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     // below, plus this run's later worktree materialisation, all read the
     // SAME document, so an edit landing mid-dispatch can never split "what
     // was checked" from "what was run".
-    let dispatch_task = crate::dispatch_preflight::resolve_dispatch_task(
+    let dispatch_resolution = crate::dispatch_preflight::resolve_dispatch_task(
         &loaded.trait_ref,
         &loaded.trait_root,
         task_value,
@@ -720,6 +720,25 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             error.to_string(),
         );
     })?;
+    // 0063.4: an explicit `task=` that cannot bind through the trait's
+    // `task-board` resource refuses at dispatch — the same rule the
+    // dashboard's TASKS screen enforces (0061), enforced here too since a
+    // check that only lives in the UI is bypassed by the bare CLI. No
+    // `task=` given, or a non-`implement-*` trait, is never refused.
+    let dispatch_task = match dispatch_resolution {
+        crate::dispatch_preflight::DispatchTaskResolution::NotRequested => None,
+        crate::dispatch_preflight::DispatchTaskResolution::Bound(task) => Some(*task),
+        crate::dispatch_preflight::DispatchTaskResolution::CannotBind { trait_id, reason } => {
+            let message =
+                crate::dispatch_preflight::cannot_bind_refusal_message(&trait_id, &reason);
+            update(
+                StartupStage::Harness,
+                StartupStageState::Failed,
+                message.clone(),
+            );
+            return invalid_request("run.task", message);
+        }
+    };
 
     if let Some(task) = dispatch_task.as_ref()
         && let Some(wall_id) = crate::dispatch_preflight::explicit_wall_id(task)
@@ -2433,6 +2452,94 @@ mod startup_observer_tests {
         );
         assert_eq!(provenance.task_key.as_deref(), Some("0002"));
         assert!(provenance.task_digest.is_some());
+    }
+
+    /// 0063.4: an `implement-*` trait declaring no `task-board` resource at
+    /// all, exercised without a `task=` value (starts) and with one
+    /// (refuses naming the trait and the missing resource) — the explicit
+    /// value cannot silently drop.
+    fn boardless_implement_fixture(root: &std::path::Path) -> String {
+        let trait_root = root.join(".ctx/traits/implement-boardless-fixture");
+        let generated = trait_root.join("generated");
+        std::fs::create_dir_all(&generated).unwrap();
+        let trait_path = generated.join("index.toml");
+        std::fs::write(
+            &trait_path,
+            "id = \"implement-boardless-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement boardless fixture\"\nsummary = \"0063.4 boardless dispatch fixture\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            trait_root.join("trait.toml"),
+            "[package]\nid = \"implement-boardless-fixture\"\nversion = \"0.1.0\"\nname = \"Implement boardless fixture\"\nstatus = \"ready\"\n",
+        )
+        .unwrap();
+        let trait_path = trait_path.to_string_lossy().into_owned();
+        let loaded = load_trait_source(Some(&trait_path), None, "test").unwrap();
+        crate::trust::update_named_digest(
+            "implement-boardless-fixture",
+            &loaded.canonical_digest,
+            crate::trust::TrustState::Verified,
+            Some("0063.4 boardless dispatch fixture".to_string()),
+        )
+        .unwrap();
+        trait_path
+    }
+
+    fn boardless_start_request<'a>(
+        trait_path: &'a str,
+        input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
+    ) -> StartRequest<'a> {
+        StartRequest {
+            trait_file: Some(trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values,
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: false,
+            merge_rung: None,
+        }
+    }
+
+    #[test]
+    fn explicit_task_against_a_boardless_implement_trait_refuses_naming_trait_and_resource() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let trait_path = boardless_implement_fixture(&root);
+        let input_values = parse_initial_sets(&["task=0002".to_string()]).unwrap();
+        let refused = start(boardless_start_request(&trait_path, input_values)).unwrap_err();
+        let message = refused.to_string();
+        assert!(message.contains("implement-boardless-fixture"), "{message}");
+        assert!(message.contains("task-board"), "{message}");
+    }
+
+    #[test]
+    fn no_task_value_starts_a_boardless_implement_trait_without_refusal() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let trait_path = boardless_implement_fixture(&root);
+        start(boardless_start_request(&trait_path, Vec::new()))
+            .expect("no task= given is never refused");
     }
 
     #[test]

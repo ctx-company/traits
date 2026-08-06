@@ -893,6 +893,10 @@ pub struct RuntimeConfig {
     /// Project-fact landing policy.
     #[serde(default)]
     pub merge: Option<MergeTable>,
+    /// 0063.4 board-dispatch policy: the trait id the board's `d` dispatch
+    /// seeds into the spawn modal by default.
+    #[serde(default)]
+    pub tasks: Option<TasksTable>,
     /// P489 git process timeout policy.
     #[serde(default)]
     pub git: Option<GitTable>,
@@ -1000,6 +1004,7 @@ enum ConfigLeaf {
     GitLongSeconds,
     PublishExclude,
     RegistryBase,
+    TasksDispatchTrait,
     HarnessDynamic,
     AgentDynamic,
     HostDynamic,
@@ -1053,6 +1058,7 @@ impl ConfigLeaf {
         Self::GitLongSeconds,
         Self::PublishExclude,
         Self::RegistryBase,
+        Self::TasksDispatchTrait,
         Self::HarnessDynamic,
         Self::AgentDynamic,
         Self::HostDynamic,
@@ -1106,6 +1112,7 @@ impl ConfigLeaf {
             Self::GitLongSeconds => "git.long-seconds",
             Self::PublishExclude => "publish.exclude",
             Self::RegistryBase => "registry.base",
+            Self::TasksDispatchTrait => "tasks.dispatch-trait",
             Self::HarnessDynamic => "harness.*",
             Self::AgentDynamic => "agent.*",
             Self::HostDynamic => "host.*",
@@ -1128,6 +1135,7 @@ impl ConfigLeaf {
             | Self::MergeDeep
             | Self::GitLongSeconds
             | Self::RegistryBase
+            | Self::TasksDispatchTrait
             // These maps are resolved by machine-scoped qualifier handling,
             // not by repository requirement precedence.
             | Self::HarnessDynamic
@@ -1210,6 +1218,18 @@ pub struct PublishTable {
 pub struct RegistryTable {
     #[serde(default)]
     pub base: Option<String>,
+}
+
+/// `[tasks] dispatch-trait` (0063.4): the trait id the TASKS board's `d`
+/// dispatch seeds into the spawn modal's first line by default, so
+/// dispatching a task never requires the owner to recall a trait id from
+/// memory. `None` when unconfigured — the modal opens as today, its leading
+/// comment naming this key as the missing setting.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TasksTable {
+    #[serde(default)]
+    pub dispatch_trait: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -1553,6 +1573,15 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|git| git.long_seconds)
             .map(|seconds| seconds * 1000)
+    }
+
+    /// 0063.4 `[tasks] dispatch-trait`: the trait id the board's `d`
+    /// dispatch seeds into the spawn modal by default. `None` when
+    /// unconfigured.
+    pub fn effective_dispatch_trait(&self) -> Option<String> {
+        self.tasks
+            .as_ref()
+            .and_then(|tasks| tasks.dispatch_trait.clone())
     }
 }
 
@@ -4098,6 +4127,7 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::GitLongSeconds
         | ConfigLeaf::PublishExclude
         | ConfigLeaf::RegistryBase
+        | ConfigLeaf::TasksDispatchTrait
         | ConfigLeaf::HarnessDynamic
         | ConfigLeaf::AgentDynamic
         | ConfigLeaf::HostDynamic
@@ -4348,7 +4378,16 @@ fn apply_environment_defaults(
             .registry
             .get_or_insert_with(RegistryTable::default)
             .base = next.base.clone();
-        record_winner(winners, "registry.base", layer, source);
+        record_winner(winners, "registry.base", layer, source.clone());
+    }
+    if let Some(next) = &document.tasks
+        && next.dispatch_trait.is_some()
+    {
+        runtime
+            .tasks
+            .get_or_insert_with(TasksTable::default)
+            .dispatch_trait = next.dispatch_trait.clone();
+        record_winner(winners, "tasks.dispatch-trait", layer, source);
     }
 }
 

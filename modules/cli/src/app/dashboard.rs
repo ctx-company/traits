@@ -5804,15 +5804,37 @@ fn dispatch_selected_task(state: &mut State) {
 /// so submission flows through [`apply_spawn_request`]'s existing clap
 /// validation and detached spawn unchanged — the run's own dispatch preflight
 /// remains the real gate; this screen's check above is UX only, and
-/// `--override-dependencies` stays reachable by editing the modal text. The
-/// seed's first line is left blank for the trait id, which the spawn modal's
-/// own contract requires as the first non-comment line.
+/// `--override-dependencies` stays reachable by editing the modal text.
+/// 0063.4: the seed's first line is the `[tasks] dispatch-trait` config
+/// default, editable before submit — resolved synchronously at keypress
+/// (the same `resolve_runtime_config` entry point `run` itself uses), never
+/// cached on `State`, so a config edit takes effect on the next dispatch.
+/// Absent config, the modal opens as before (blank first line) but its
+/// leading comment names exactly the missing key.
 fn open_spawn_modal_for_task(state: &mut State, key: &str) {
-    let seed = format!("\n--set\ntask={key}\n");
+    let dispatch_trait =
+        ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
+            .ok()
+            .and_then(|config| config.effective_dispatch_trait());
+    let seed = spawn_modal_seed(dispatch_trait.as_deref(), key);
     state.modal_host.open(
         Action::Session(SessionAction::Spawn),
         Modal::text_input("spawn run", seed, true),
     );
+}
+
+/// The spawn modal's seed text for a board dispatch: `dispatch_trait`
+/// (`[tasks] dispatch-trait`, 0063.4) as the modal's first line when
+/// configured — the spawn modal's own contract requires a trait id as the
+/// first non-comment line — or, absent config, a leading comment naming
+/// exactly the missing key so the owner is never left guessing.
+fn spawn_modal_seed(dispatch_trait: Option<&str>, key: &str) -> String {
+    match dispatch_trait {
+        Some(trait_id) => format!("{trait_id}\n--set\ntask={key}\n"),
+        None => format!(
+            "# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--set\ntask={key}\n"
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -9697,6 +9719,66 @@ mod tests {
         dispatch_selected_task(&mut state);
         assert!(!state.modal_host.is_open());
         assert_eq!(state.message.as_deref(), Some("no task selected"));
+    }
+
+    #[test]
+    fn spawn_modal_seed_leads_with_the_configured_dispatch_trait() {
+        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+        let mut lines = seed.lines();
+        assert_eq!(lines.next(), Some("implement-quick"));
+        assert_eq!(lines.next(), Some("--set"));
+        assert_eq!(lines.next(), Some("task=0063"));
+    }
+
+    /// 0063.4's diagnose-first mandate: the seed's two-line `--set` /
+    /// `task=<key>` form is three separate argv tokens once
+    /// [`apply_spawn_request`]'s `.lines()` split runs — clap parses that
+    /// identically to a single space-separated invocation, so the two-line
+    /// form is not a distinct seam.
+    #[test]
+    fn spawn_modal_seed_two_line_set_form_parses_as_traits_run() {
+        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+        let user_args: Vec<String> = seed
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(user_args, vec!["implement-quick", "--set", "task=0063"]);
+        // See `every_visible_traits_command_has_a_registry_entry`
+        // (presentation.rs): building the derived Clap tree overflows
+        // `cargo test`'s default per-test thread stack in a debug build.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                let mut full_argv: Vec<std::ffi::OsString> =
+                    vec!["ctx".into(), "traits".into(), "run".into()];
+                full_argv.extend(user_args.iter().map(std::ffi::OsString::from));
+                match super::super::surface::cli::parse(full_argv) {
+                    Ok(Some(super::super::surface::cli::Command::Traits {
+                        subcommand: Some(super::super::surface::cli::TraitsCommand::Run { .. }),
+                        ..
+                    })) => {}
+                    other => panic!(
+                        "expected `ctx traits run implement-quick --set task=0063` to parse, got {other:?}"
+                    ),
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn spawn_modal_seed_names_the_missing_config_key_absent_a_default() {
+        let seed = spawn_modal_seed(None, "0063");
+        let mut lines = seed.lines();
+        let comment = lines.next().expect("comment line");
+        assert!(comment.starts_with('#'));
+        assert!(comment.contains("dispatch-trait"));
+        assert_eq!(lines.next(), Some(""));
+        assert_eq!(lines.next(), Some("--set"));
+        assert_eq!(lines.next(), Some("task=0063"));
     }
 
     fn rline_text(line: &RLine<'static>) -> String {

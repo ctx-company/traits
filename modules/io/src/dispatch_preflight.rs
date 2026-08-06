@@ -81,61 +81,114 @@ pub struct DispatchTask {
 /// Resolve `task_value` through the trait's declared `task-board` resource
 /// via the [`TaskProvider`] interface: trait is `implement-*` → `task-board`
 /// resource → board directory → `FilesTaskBoard::resolve`/`get`. A trait
-/// without a declared `task-board` resource, a missing task value, an
-/// unreadable board, a task value matching no live task, or a task value
-/// resolving only to an archived document (never surfaced to dispatch
-/// preflight — an archived task is not a live task) yields `None` — never a
-/// refusal. This is the single read every preflight (wall, closed-status,
-/// dependency) and dispatch materialisation shares.
+/// outside the `implement-*` family, or a dispatch carrying no task value at
+/// all, yields [`DispatchTaskResolution::NotRequested`] — never a refusal,
+/// since a plain `task` input port may carry unrelated semantics on any
+/// other trait (0063.4). An `implement-*` trait dispatched WITH an explicit
+/// task value that cannot bind — no declared `task-board` resource, an
+/// unreadable/absent board, a task value matching no live task, or a value
+/// resolving only to an archived document — yields
+/// [`DispatchTaskResolution::CannotBind`]: a silently unbound run is exactly
+/// the dishonesty this product exists to remove. This is the single read
+/// every preflight (wall, closed-status, dependency) and dispatch
+/// materialisation shares.
 pub fn resolve_dispatch_task(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
     task_value: Option<&str>,
-) -> crate::Result<Option<DispatchTask>> {
+) -> crate::Result<DispatchTaskResolution> {
     if !is_implement_family(trait_ref.id.as_str()) {
-        return Ok(None);
+        return Ok(DispatchTaskResolution::NotRequested);
     }
     let Some(task_value) = task_value else {
-        return Ok(None);
+        return Ok(DispatchTaskResolution::NotRequested);
+    };
+    let cannot_bind = |reason: String| DispatchTaskResolution::CannotBind {
+        trait_id: trait_ref.id.as_str().to_string(),
+        reason,
     };
     let Some(resource) = trait_ref
         .resources
         .iter()
         .find(|resource| resource.id == TASK_BOARD_RESOURCE_ID)
     else {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "declares no {TASK_BOARD_RESOURCE_ID} resource"
+        )));
     };
     let Some(relative_path) = resource.path.as_deref() else {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "its {TASK_BOARD_RESOURCE_ID} resource declares no path"
+        )));
     };
     let roots = crate::resource::resolve_resource_roots(trait_root, &trait_ref.resources)?;
     // The board must be a DIRECTORY — its presented path is the validated,
     // root-contained location the files backend opens.
     let presented_board = crate::resource::presentation_path(&roots, resource, relative_path)?;
     if presented_board.status != crate::resource::PresentationStatus::Directory {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "{TASK_BOARD_RESOURCE_ID} directory {} is not present",
+            presented_board.path
+        )));
     }
     let board = crate::task_files::FilesTaskBoard::open_read(presented_board.path.clone());
     let Some(key) = board.resolve(task_value).map_err(provider_error)? else {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "task {task_value} does not resolve on the {TASK_BOARD_RESOURCE_ID}"
+        )));
     };
     let Some(resolved) = board.get(&key).map_err(provider_error)? else {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "task {key} does not resolve on the {TASK_BOARD_RESOURCE_ID}"
+        )));
     };
     if resolved.archived {
-        return Ok(None);
+        return Ok(cannot_bind(format!("task {key} is archived")));
     }
     let Some(file_name) =
         crate::task_files::task_file_name_in_dir(&presented_board.path, &resolved.document.key)
     else {
-        return Ok(None);
+        return Ok(cannot_bind(format!(
+            "task {key} has no file on the {TASK_BOARD_RESOURCE_ID}"
+        )));
     };
-    Ok(Some(DispatchTask {
+    Ok(DispatchTaskResolution::Bound(Box::new(DispatchTask {
         resolved,
         file_name,
         board_dir: presented_board.path,
         invocation_repo_root: roots.invocation_repo_root,
-    }))
+    })))
+}
+
+/// The three-state outcome of [`resolve_dispatch_task`]: a dispatch never
+/// requested task binding at all, a dispatch that bound successfully, or an
+/// `implement-*` dispatch that named a task value it could not bind — the
+/// state that must become a hard refusal at the call site rather than a
+/// silent, unbound start (0063.4).
+#[derive(Debug, Clone)]
+pub enum DispatchTaskResolution {
+    NotRequested,
+    Bound(Box<DispatchTask>),
+    CannotBind { trait_id: String, reason: String },
+}
+
+impl DispatchTaskResolution {
+    /// The bound task, if this resolution reached one — `None` for both
+    /// `NotRequested` and `CannotBind`. Convenience for callers (and tests)
+    /// that only care whether a task ended up bound.
+    pub fn bound(self) -> Option<DispatchTask> {
+        match self {
+            Self::Bound(task) => Some(*task),
+            Self::NotRequested | Self::CannotBind { .. } => None,
+        }
+    }
+}
+
+/// The deterministic dispatch refusal message for an unbindable explicit
+/// `task=` value: names the trait and the reason it cannot carry the task,
+/// so the fix is legible without reading source.
+pub fn cannot_bind_refusal_message(trait_id: &str, reason: &str) -> String {
+    format!("trait {trait_id} cannot bind task — {reason}; dispatch refuses to start unbound")
 }
 
 /// The typed `wall` id (0063.1), if any, on `task`'s resolved document. A
@@ -582,6 +635,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
             .unwrap()
+            .bound()
             .expect("resolves the toml document, ignoring the markdown sibling");
         assert_eq!(task.file_name, "0050-example.toml");
         assert_eq!(task.resolved.document.key, "0050");
@@ -597,6 +651,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050-example"))
             .unwrap()
+            .bound()
             .expect("resolves by exact stem");
         assert_eq!(task.file_name, "0050-example.toml");
     }
@@ -614,11 +669,77 @@ mod tests {
         let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
         let trait_ref = implement_trait_with_board();
         assert!(
-            resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
-                .unwrap()
-                .is_none(),
-            "an archived-only task is not a live task; preflight must fail open"
+            matches!(
+                resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap(),
+                DispatchTaskResolution::CannotBind { .. }
+            ),
+            "an archived-only task named explicitly cannot bind — dispatch must refuse, not fail open"
         );
+    }
+
+    #[test]
+    fn resolve_dispatch_task_not_requested_without_a_task_value() {
+        let dir = tempfile_dir();
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        assert!(matches!(
+            resolve_dispatch_task(&trait_ref, trait_root, None).unwrap(),
+            DispatchTaskResolution::NotRequested
+        ));
+    }
+
+    #[test]
+    fn resolve_dispatch_task_not_requested_on_a_non_implement_trait_even_with_a_task_value() {
+        let dir = tempfile_dir();
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let text = "id = \"other\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n";
+        let trait_ref = ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            text,
+        )
+        .expect("fixture trait decodes");
+        assert!(matches!(
+            resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap(),
+            DispatchTaskResolution::NotRequested
+        ));
+    }
+
+    #[test]
+    fn resolve_dispatch_task_cannot_bind_when_the_trait_declares_no_task_board() {
+        let dir = tempfile_dir();
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let text = "id = \"implement-quick\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n";
+        let trait_ref = ctx_traits_core::encoding::decode_trait(
+            ctx_traits_core::encoding::Encoding::Toml,
+            text,
+        )
+        .expect("fixture trait decodes");
+        match resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap() {
+            DispatchTaskResolution::CannotBind { trait_id, reason } => {
+                assert_eq!(trait_id, "implement-quick");
+                assert!(reason.contains("task-board"));
+                let message = cannot_bind_refusal_message(&trait_id, &reason);
+                assert!(message.contains("implement-quick"));
+                assert!(message.contains("task-board"));
+            }
+            other => panic!("expected CannotBind, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_dispatch_task_cannot_bind_when_the_task_value_does_not_resolve() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        match resolve_dispatch_task(&trait_ref, trait_root, Some("9999")).unwrap() {
+            DispatchTaskResolution::CannotBind { trait_id, reason } => {
+                assert_eq!(trait_id, "implement-quick");
+                assert!(reason.contains("9999"));
+            }
+            other => panic!("expected CannotBind, got {other:?}"),
+        }
     }
 
     #[test]
@@ -635,6 +756,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
             .unwrap()
+            .bound()
             .expect("task resolves");
         assert_eq!(explicit_wall_id(&task), Some("wall-42".to_string()));
     }
@@ -653,6 +775,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
             .unwrap()
+            .bound()
             .expect("task resolves");
         assert_eq!(explicit_wall_id(&task), None);
     }
@@ -687,6 +810,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
             .unwrap()
+            .bound()
             .expect("resolves");
         assert!(dependency_marker(&task).is_none());
     }
@@ -710,6 +834,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
             .unwrap()
+            .bound()
             .expect("resolves");
         let unmet = dependency_marker(&task).expect("0001 is ready, not closed");
         assert_eq!(unmet.len(), 1);
@@ -740,6 +865,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
             .unwrap()
+            .bound()
             .expect("resolves");
         assert_eq!(unmet_dependencies(&task.resolved), dependency_marker(&task));
     }
@@ -758,6 +884,7 @@ mod tests {
         let trait_ref = implement_trait_with_board();
         let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
             .unwrap()
+            .bound()
             .expect("resolves");
         assert!(
             dependency_marker(&task).is_none(),
