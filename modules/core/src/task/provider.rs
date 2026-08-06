@@ -138,7 +138,7 @@ pub trait TaskProvider {
     /// Resolve `task_value` (a bare key, a dotted child key, a filename, or
     /// a stem) to the canonical key of the task it names, or `None` if
     /// nothing matches. Resolution rules are the backend's own — the files
-    /// backend follows `task_file_name_in_board`'s chain.
+    /// backend follows `task_file_name_in_dir`'s chain.
     fn resolve(&self, task_value: &str) -> Result<Option<String>, ProviderError>;
 
     /// The task named by `key`, fully resolved, or `None` if no task has

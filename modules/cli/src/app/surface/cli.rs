@@ -2232,6 +2232,12 @@ pub struct SessionStartArgs {
     #[arg(long = "no-strict-loops", conflicts_with = "strict_loops")]
     pub no_strict_loops: bool,
 
+    /// Dispatch a task whose `depends-on` is unmet anyway. Recorded in the
+    /// run's provenance (typed evidence plus a human-readable warning), not
+    /// left silent.
+    #[arg(long = "override-dependencies")]
+    pub override_dependencies: bool,
+
     /// Open a scrollable run-story pane at termination, after the merge
     /// report when one runs. Bare `--story` renders the free `default`
     /// level; `--story=assisted` spends narrator model calls — the only

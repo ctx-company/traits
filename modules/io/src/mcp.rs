@@ -206,6 +206,7 @@ fn ctx_traits_run_start_inner(
     initial_values.sort_by(|a, b| a.ref_text.cmp(&b.ref_text));
     let outcome = crate::run::start(crate::run::StartRequest {
         strict_loops: false,
+        override_dependencies: false,
         defer_commands: false,
         trait_file: request.trait_file.as_deref(),
         trait_id,

@@ -498,6 +498,7 @@ pub(crate) fn run_builtin_trait(
     let outcome = ctx_traits_io::run::start(ctx_traits_io::run::StartRequest {
         // Internal driving traits keep the declared loop policy.
         strict_loops: false,
+        override_dependencies: false,
         defer_commands: false,
         trait_file: Some(trait_file.as_str()),
         trait_id: None,

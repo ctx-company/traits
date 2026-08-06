@@ -220,6 +220,10 @@ pub struct StartRequest<'a> {
     /// `on-exhausted` policy or signals — a continuing loop's declared
     /// signals are not emitted either, since the loop did not continue.
     pub strict_loops: bool,
+    /// `--override-dependencies`: dispatch a task with an unmet `depends-on`
+    /// anyway. Recorded in provenance rather than left silent — see
+    /// [`ctx_traits_core::procedure::session::DependencyOverrideProvenance`].
+    pub override_dependencies: bool,
     /// P460 resolved automatic-landing intent, already validated by the
     /// caller against an effective worktree. Written straight into this
     /// session's initial persisted `Provenance` (never a post-start ledger
@@ -699,7 +703,12 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             .map(|value| (value.ref_text.as_str(), &value.value)),
     );
     let task_value = owned_task_value.as_deref();
-    if let Some(wall_id) = crate::dispatch_preflight::explicit_wall_id(
+    // 0061: resolve the dispatched task through the `TaskProvider` interface
+    // exactly once — the wall, closed-status, and dependency preflights
+    // below, plus this run's later worktree materialisation, all read the
+    // SAME document, so an edit landing mid-dispatch can never split "what
+    // was checked" from "what was run".
+    let dispatch_task = crate::dispatch_preflight::resolve_dispatch_task(
         &loaded.trait_ref,
         &loaded.trait_root,
         task_value,
@@ -710,15 +719,19 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             StartupStageState::Failed,
             error.to_string(),
         );
-    })? && let Some(standing) =
-        crate::dispatch_preflight::find_standing_wall(&wall_id, task_value.unwrap_or_default())
-            .inspect_err(|error| {
-                update(
-                    StartupStage::Harness,
-                    StartupStageState::Failed,
-                    error.to_string(),
-                );
-            })?
+    })?;
+
+    if let Some(task) = dispatch_task.as_ref()
+        && let Some(wall_id) = crate::dispatch_preflight::explicit_wall_id(task)
+        && let Some(standing) =
+            crate::dispatch_preflight::find_standing_wall(&wall_id, task_value.unwrap_or_default())
+                .inspect_err(|error| {
+                    update(
+                        StartupStage::Harness,
+                        StartupStageState::Failed,
+                        error.to_string(),
+                    );
+                })?
     {
         let message = crate::dispatch_preflight::refusal_message(&standing);
         update(
@@ -733,21 +746,12 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     // onto the typed task document by 0059): refuse to dispatch an
     // `implement-*` task whose own task document's stored `status` field is
     // `done` or `cancelled` — a direct typed-field read, never a
-    // derivation. Unmet-dependency (`blocked`) refusal has no stored
-    // representation under 0059's schema and moves to 0060's derived
-    // status. Fails open like the wall preflight above.
-    if let Some(marker) = crate::dispatch_preflight::closed_status_marker(
-        &loaded.trait_ref,
-        &loaded.trait_root,
-        task_value,
-    )
-    .inspect_err(|error| {
-        update(
-            StartupStage::Harness,
-            StartupStageState::Failed,
-            error.to_string(),
-        );
-    })? {
+    // derivation. Unmet-dependency (`blocked`) refusal is the dependency
+    // preflight below. Fails open like the wall preflight above.
+    if let Some(marker) = dispatch_task
+        .as_ref()
+        .and_then(crate::dispatch_preflight::closed_status_marker)
+    {
         let message = crate::dispatch_preflight::closed_status_refusal_message(&marker);
         update(
             StartupStage::Harness,
@@ -755,6 +759,50 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             message.clone(),
         );
         return invalid_request("run.task", message);
+    }
+
+    // Dependency pre-flight (0061): refuse to dispatch a task whose own
+    // `depends-on` is unmet, in the same preflight family as the wall and
+    // closed-status checks above — enforcement lives at dispatch, not in
+    // the dashboard, since a check that only exists in the UI is bypassed
+    // by the CLI. `--override-dependencies` dispatches anyway and leaves a
+    // typed trace in provenance plus a human-readable warning.
+    let mut preflight_warnings: Vec<String> = Vec::new();
+    let mut dependency_override: Option<
+        ctx_traits_core::procedure::session::DependencyOverrideProvenance,
+    > = None;
+    if let Some(task) = dispatch_task.as_ref()
+        && let Some(unmet) = crate::dispatch_preflight::dependency_marker(task)
+    {
+        let message = crate::dispatch_preflight::dependency_refusal_message(
+            &task.resolved.document.key,
+            &unmet,
+        );
+        if request.override_dependencies {
+            preflight_warnings.push(format!("dependency override recorded: {message}"));
+            dependency_override = Some(
+                ctx_traits_core::procedure::session::DependencyOverrideProvenance {
+                    task_key: task.resolved.document.key.clone(),
+                    unmet: unmet
+                        .iter()
+                        .map(
+                            |dep| ctx_traits_core::procedure::session::UnmetDependencyEvidence {
+                                key: dep.key.clone(),
+                                status: crate::dispatch_preflight::status_word(dep.status)
+                                    .to_string(),
+                            },
+                        )
+                        .collect(),
+                },
+            );
+        } else {
+            update(
+                StartupStage::Harness,
+                StartupStageState::Failed,
+                message.clone(),
+            );
+            return invalid_request("run.task", message);
+        }
     }
 
     // Unrunnable-command pre-flight: a command step's argv lives in the trait,
@@ -1115,6 +1163,56 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         }
     };
 
+    // 0061: materialise the dispatched task's CURRENT invocation-repository
+    // working-tree bytes into the run's worktree (never HEAD — a task
+    // amended but not yet committed must still be what the run executes)
+    // and digest what was written, so "what was this run told to do" is
+    // answerable from evidence alone. Only meaningful for `--worktree`
+    // runs: a host-side run already executes against the working tree it
+    // was just read from.
+    let mut task_evidence: Option<(ctx_traits_core::digest::Digest, String)> = None;
+    if let Some(task) = dispatch_task.as_ref()
+        && let Some(current) = crate::dispatch_preflight::reread_current_document(task)
+            .inspect_err(|error| {
+                update(
+                    StartupStage::Initialization,
+                    StartupStageState::Failed,
+                    error.to_string(),
+                );
+            })?
+    {
+        let text = ctx_traits_core::task::serialize(&current.document)?;
+        let digest = ctx_traits_core::digest::Digest::source(&text);
+        if let Some(execution_dir) = execution_dir.as_deref() {
+            match task
+                .invocation_repo_root
+                .as_deref()
+                .and_then(|repo_root| task.board_dir.strip_prefix(repo_root).ok())
+            {
+                Some(relative_board_dir) => {
+                    let target_dir = execution_dir.join(relative_board_dir);
+                    if let Err(error) =
+                        std::fs::create_dir_all(target_dir.as_std_path()).and_then(|()| {
+                            std::fs::write(target_dir.join(&task.file_name).as_std_path(), &text)
+                        })
+                    {
+                        preflight_warnings.push(format!(
+                            "could not materialise task {} into the worktree: {error}",
+                            current.document.key
+                        ));
+                    }
+                }
+                None => {
+                    preflight_warnings.push(format!(
+                        "task-board resource for task {} does not resolve under the invocation repository root; dispatch digested it but could not materialise it into the worktree",
+                        current.document.key
+                    ));
+                }
+            }
+        }
+        task_evidence = Some((digest, current.document.key));
+    }
+
     provider_capability_reports.extend(
         apply_default_inputs(
             &loaded.trait_ref,
@@ -1326,7 +1424,11 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 state_source: request.state_source.to_string(),
                 agent_assignments: None,
                 harness_probes: Vec::new(),
-                warnings: worktree_retry_warnings,
+                warnings: {
+                    let mut warnings = preflight_warnings;
+                    warnings.extend(worktree_retry_warnings);
+                    warnings
+                },
                 trait_source: Some(ctx_traits_core::procedure::session::TraitSource {
                     kind: loaded.source_kind,
                     path: persisted_source_path.to_string(),
@@ -1341,6 +1443,9 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                 started_at_epoch: Some(crate::run_liveness::epoch_secs()),
                 trust_approval,
                 session_title: None,
+                task_digest: task_evidence.as_ref().map(|(digest, _)| digest.clone()),
+                task_key: task_evidence.map(|(_, key)| key),
+                dependency_override,
             },
         },
     )
@@ -1598,6 +1703,7 @@ mod startup_observer_tests {
                     observed.lock().unwrap().push(update)
                 })),
                 strict_loops: false,
+                override_dependencies: false,
                 merge_rung: None,
             });
             if expect_success {
@@ -1635,6 +1741,7 @@ mod startup_observer_tests {
                 narrate_progress: false,
                 startup_observer: None,
                 strict_loops: false,
+                override_dependencies: false,
                 merge_rung: None,
             })
             .expect("startup fixture starts")
@@ -1713,6 +1820,7 @@ mod startup_observer_tests {
                 observed.lock().unwrap().push(update)
             })),
             strict_loops: false,
+            override_dependencies: false,
             merge_rung: None,
         })
         .unwrap_err();
@@ -2090,6 +2198,7 @@ mod startup_observer_tests {
             narrate_progress: false,
             startup_observer: None,
             strict_loops: false,
+            override_dependencies: false,
             merge_rung: None,
         })
         .expect("awaiting fixture starts");
@@ -2149,6 +2258,318 @@ mod startup_observer_tests {
                 "{port} evidence"
             );
         }
+    }
+
+    /// A minimal `implement-*` trait fixture declaring `task-board` at
+    /// `.internal/tasks` (`root = "repo"`, matching every real
+    /// `implement-*` package) and an input `task` port, for exercising the
+    /// 0061 dependency preflight/materialisation through `start()` end to
+    /// end. `board` is a closure so callers can write task files under the
+    /// fixture repository root's `.internal/tasks` before `start` is
+    /// called. `root` is initialised as a Git repository and everything
+    /// written (trait files and board) is committed, since the fixture's
+    /// `root = "repo"` resource requires a discoverable repository —
+    /// callers that need an uncommitted edit make it AFTER this returns.
+    /// Returns the trait path plus the held process-wide test lock (see
+    /// `startup_observer_orders_configured_worktree_substages_without_reopening_them`):
+    /// the caller must keep the guard alive for every git spawn its own
+    /// test body makes afterward (resource resolution, worktree creation),
+    /// not just the ones this function makes.
+    fn dispatch_task_fixture(
+        root: &std::path::Path,
+        board: impl FnOnce(&std::path::Path),
+    ) -> (String, std::sync::MutexGuard<'static, ()>) {
+        let trait_root = root.join(".ctx/traits/implement-fixture");
+        let generated = trait_root.join("generated");
+        std::fs::create_dir_all(&generated).unwrap();
+        let board_dir = root.join(".internal/tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        board(&board_dir);
+        let trait_path = generated.join("index.toml");
+        std::fs::write(
+            &trait_path,
+            "id = \"implement-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement fixture\"\nsummary = \"0061 dispatch fixture\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            trait_root.join("trait.toml"),
+            "[package]\nid = \"implement-fixture\"\nversion = \"0.1.0\"\nname = \"Implement fixture\"\nstatus = \"ready\"\n",
+        )
+        .unwrap();
+
+        // Serialised against tests that restrict the whole process: see
+        // `startup_observer_orders_configured_worktree_substages_without_reopening_them`.
+        let _process_wide = crate::lock_process_wide_test();
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "dispatch-task@example.invalid"],
+            vec!["config", "user.name", "Dispatch task fixture"],
+            vec!["-c", "core.excludesFile=", "add", "-A"],
+            vec!["commit", "-qm", "dispatch task fixture"],
+        ] {
+            let output = Command::new("git")
+                .args(&args)
+                .current_dir(root)
+                .output()
+                .unwrap_or_else(|err| panic!("could not spawn `git {}`: {err}", args.join(" ")));
+            assert!(
+                output.status.success(),
+                "fixture `git {}` failed: {}\n{}",
+                args.join(" "),
+                output.status,
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+
+        let trait_path = trait_path.to_string_lossy().into_owned();
+        let loaded = load_trait_source(Some(&trait_path), None, "test").unwrap();
+        crate::trust::update_named_digest(
+            "implement-fixture",
+            &loaded.canonical_digest,
+            crate::trust::TrustState::Verified,
+            Some("0061 dispatch fixture".to_string()),
+        )
+        .unwrap();
+        (trait_path, _process_wide)
+    }
+
+    #[test]
+    fn dependency_preflight_refuses_then_override_dispatches_with_recorded_provenance() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let (trait_path, _process_wide) = dispatch_task_fixture(&root, |tasks| {
+            std::fs::write(
+                tasks.join("0001-dep.toml"),
+                "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+            )
+            .unwrap();
+            std::fs::write(
+                tasks.join("0002-dependent.toml"),
+                "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+            )
+            .unwrap();
+        });
+        let input_values = parse_initial_sets(&["task=0002".to_string()]).unwrap();
+
+        let refused = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: input_values.clone(),
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: false,
+            merge_rung: None,
+        })
+        .unwrap_err();
+        let message = refused.to_string();
+        assert!(
+            message.contains("0002 depends on 0001 (ready)"),
+            "{message}"
+        );
+        assert!(message.contains("--override-dependencies"), "{message}");
+
+        let overridden = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values,
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: true,
+            merge_rung: None,
+        })
+        .expect("override dispatches despite the unmet dependency");
+        let provenance = &overridden.session.provenance;
+        let dependency_override = provenance
+            .dependency_override
+            .as_ref()
+            .expect("override is recorded in provenance");
+        assert_eq!(dependency_override.task_key, "0002");
+        assert_eq!(dependency_override.unmet.len(), 1);
+        assert_eq!(dependency_override.unmet[0].key, "0001");
+        assert_eq!(dependency_override.unmet[0].status, "ready");
+        assert!(
+            provenance
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("dependency override recorded")),
+            "{:?}",
+            provenance.warnings
+        );
+        assert_eq!(provenance.task_key.as_deref(), Some("0002"));
+        assert!(provenance.task_digest.is_some());
+    }
+
+    #[test]
+    fn task_digest_and_key_record_the_currently_resolved_document() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let (trait_path, _process_wide) = dispatch_task_fixture(&root, |tasks| {
+            std::fs::write(
+                tasks.join("0050-example.toml"),
+                "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n",
+            )
+            .unwrap();
+        });
+        let start = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: parse_initial_sets(&["task=0050".to_string()]).unwrap(),
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: false,
+            merge_rung: None,
+        })
+        .expect("resolvable task dispatches");
+        assert_eq!(start.session.provenance.task_key.as_deref(), Some("0050"));
+        let expected_document = ctx_traits_core::task::TaskDocument {
+            schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+            key: "0050".to_string(),
+            title: "Example".to_string(),
+            status: Some(ctx_traits_core::task::TaskStatus::Ready),
+            raised: None,
+            content: String::new(),
+            relations: ctx_traits_core::task::Relations::default(),
+            steps: Vec::new(),
+        };
+        let expected_digest = ctx_traits_core::digest::Digest::source(
+            &ctx_traits_core::task::serialize(&expected_document).unwrap(),
+        );
+        assert_eq!(start.session.provenance.task_digest, Some(expected_digest));
+    }
+
+    #[test]
+    fn worktree_materialisation_carries_an_uncommitted_task_edit() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let (trait_path, _process_wide) = dispatch_task_fixture(&root, |board| {
+            std::fs::write(
+                board.join("0050-example.toml"),
+                "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Committed\"\nstatus = \"ready\"\n",
+            )
+            .unwrap();
+        });
+
+        // Edit the task WITHOUT committing — the amended-but-uncommitted
+        // trap task 0050 (this suite's own name is a coincidence) hit for
+        // real on 2026-08-03 (see the task's own "Why materialise" note).
+        let edited_document = ctx_traits_core::task::TaskDocument {
+            schema_version: ctx_traits_core::task::SCHEMA_VERSION.to_string(),
+            key: "0050".to_string(),
+            title: "Edited, not yet committed".to_string(),
+            status: Some(ctx_traits_core::task::TaskStatus::Ready),
+            raised: None,
+            content: String::new(),
+            relations: ctx_traits_core::task::Relations::default(),
+            steps: Vec::new(),
+        };
+        let edited_text = ctx_traits_core::task::serialize(&edited_document).unwrap();
+        std::fs::write(root.join(".internal/tasks/0050-example.toml"), &edited_text).unwrap();
+        let expected_digest = ctx_traits_core::digest::Digest::source(&edited_text);
+
+        let outcome = start(StartRequest {
+            trait_file: Some(&trait_path),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: parse_initial_sets(&["task=0050".to_string()]).unwrap(),
+            out: None,
+            session_store: None,
+            ephemeral: true,
+            resource_evidence: ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: Some(Some("materialize-test")),
+            defer_commands: false,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: false,
+            merge_rung: None,
+        })
+        .expect("worktree dispatch of a resolvable task succeeds");
+
+        let execution_dir = outcome
+            .execution_dir
+            .expect("--worktree request prepares an execution directory");
+        let materialized = std::fs::read_to_string(
+            execution_dir
+                .join(".internal/tasks/0050-example.toml")
+                .as_std_path(),
+        )
+        .expect("the worktree carries the task's materialised copy");
+        assert_eq!(
+            materialized, edited_text,
+            "the worktree's task file must carry the edited, uncommitted text, not the committed one"
+        );
+        assert_eq!(
+            outcome.session.provenance.task_digest,
+            Some(expected_digest),
+            "the ledger's task digest must equal the digest of the materialised bytes"
+        );
+        assert_eq!(outcome.session.provenance.task_key.as_deref(), Some("0050"));
     }
 
     fn assert_terminal_states_are_monotonic(updates: &[StartupUpdate]) {

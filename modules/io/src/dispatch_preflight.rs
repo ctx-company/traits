@@ -1,28 +1,39 @@
-//! Dispatch-time standing-wall pre-flight for the `implement-*` family (P414).
+//! Dispatch-time pre-flight for the `implement-*` family: standing walls
+//! (P414), closed-status tasks, and unmet dependencies (0061).
 //!
 //! Before a session, worktree, or first frame exists, refuse to dispatch a
 //! task whose own task file carries an explicit `**Wall:** <id>` label when
 //! a repository-scoped ledger already records a BLOCKED `implement-*` run
 //! whose typed park report cites that exact wall id — and no later run of
 //! that wall's ORIGINATING task has since completed. The task value resolves
-//! to one file among the trait's declared `task-board` directory's direct
-//! children (0059 canonical-TOML migration: board files are `.toml`
-//! [`ctx_traits_core::task::TaskDocument`]s, not markdown), and the whole
-//! file is that task's document. An id is never inferred from prose
-//! similarity — only an explicit, identical `**Wall:**` label id (found by
-//! scanning the document's opaque `content`) ever blocks a sibling.
+//! through the [`ctx_traits_core::task::provider::TaskProvider`] interface
+//! (0060/0061) against the trait's declared `task-board` directory — never a
+//! private filename/stem/prefix chain of this module's own — and the whole
+//! resolved document is that task's evidence. An id is never inferred from
+//! prose similarity — only an explicit, identical `**Wall:**` label id
+//! (found by scanning the document's opaque `content`) ever blocks a
+//! sibling. [`resolve_dispatch_task`] is the single read every preflight
+//! (wall, closed-status, dependency) and dispatch materialisation shares.
 
 use std::collections::BTreeMap;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use ctx_traits_core::procedure::session::{Session, Status};
+use ctx_traits_core::task::graph::DerivedStatus;
+use ctx_traits_core::task::provider::{ResolvedTask, TaskProvider};
 
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
 const WALL_LABEL: &str = "**Wall:**";
 const IMPLEMENT_FAMILY_ID: &str = "implement";
 const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
 const PARK_REPORT_SLOT_REF: &str = "slot:park-report";
+
+fn provider_error(error: ctx_traits_core::task::provider::ProviderError) -> crate::Error {
+    crate::Error::Usage {
+        message: error.to_string(),
+    }
+}
 
 /// A standing wall found among this repository's ledgers: the wall id, the
 /// task that originally recorded it, and the run that blocked on it.
@@ -47,20 +58,42 @@ pub fn is_implement_family(trait_id: &str) -> bool {
     trait_id == IMPLEMENT_FAMILY_ID || trait_id.starts_with(IMPLEMENT_FAMILY_PREFIX)
 }
 
-/// Resolve `task_value` to the text of its task file among the trait's
-/// declared `task-board` directory's direct children, following the same
-/// resolution chain [`explicit_wall_id`] and `blocked_status_marker` both
-/// need: trait is `implement-*` → `task-board` resource → board directory
-/// → `task_file_name_in_board` → validated `presentation_path` read. A
-/// trait without a declared `task-board` resource, a missing task value,
-/// an unreadable board, or a task value matching no file yields `None` —
-/// never a refusal. Returns the file's text alongside its resolved file
-/// name, since callers building refusal messages need the name too.
-fn read_task_board_file(
+/// A task resolved through the `TaskProvider` interface for dispatch-time
+/// preflight, plus the presentation evidence the preflights and
+/// materialisation both need beyond what [`ResolvedTask`] itself carries:
+/// the file name (for the closed-status refusal's clearing instruction) and
+/// the board directory's validated presentation path (for materialising
+/// the same document into a run's worktree). Resolved exactly once per
+/// dispatch and threaded through every preflight plus materialisation, so
+/// an edit landing between checks can never split "what was checked" from
+/// "what was run".
+#[derive(Debug, Clone)]
+pub struct DispatchTask {
+    pub resolved: ResolvedTask,
+    pub file_name: String,
+    pub board_dir: Utf8PathBuf,
+    /// The invocation repository root the board directory resolved under,
+    /// when the `task-board` resource declares `root = "repo"` and a Git
+    /// repository was discovered. `None` for a package-rooted board (no
+    /// worktree image exists to materialise into) or when no invocation
+    /// repository was found — materialisation fails open in both cases.
+    pub invocation_repo_root: Option<Utf8PathBuf>,
+}
+
+/// Resolve `task_value` through the trait's declared `task-board` resource
+/// via the [`TaskProvider`] interface: trait is `implement-*` → `task-board`
+/// resource → board directory → `FilesTaskBoard::resolve`/`get`. A trait
+/// without a declared `task-board` resource, a missing task value, an
+/// unreadable board, a task value matching no live task, or a task value
+/// resolving only to an archived document (never surfaced to dispatch
+/// preflight — an archived task is not a live task) yields `None` — never a
+/// refusal. This is the single read every preflight (wall, closed-status,
+/// dependency) and dispatch materialisation shares.
+pub fn resolve_dispatch_task(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
     task_value: Option<&str>,
-) -> crate::Result<Option<(String, String)>> {
+) -> crate::Result<Option<DispatchTask>> {
     if !is_implement_family(trait_ref.id.as_str()) {
         return Ok(None);
     }
@@ -79,49 +112,39 @@ fn read_task_board_file(
     };
     let roots = crate::resource::resolve_resource_roots(trait_root, &trait_ref.resources)?;
     // The board must be a DIRECTORY — its presented path is the validated,
-    // root-contained location to list. The chosen task FILE then goes
-    // through `presentation_path` itself, so the actual read gets the full
-    // containment/symlink/regular-file validation chain.
+    // root-contained location the files backend opens.
     let presented_board = crate::resource::presentation_path(&roots, resource, relative_path)?;
     if presented_board.status != crate::resource::PresentationStatus::Directory {
         return Ok(None);
     }
-    let Some(file_name) = task_file_name_in_board(&presented_board.path, task_value) else {
+    let board = crate::task_files::FilesTaskBoard::open_read(presented_board.path.clone());
+    let Some(key) = board.resolve(task_value).map_err(provider_error)? else {
         return Ok(None);
     };
-    let presented = crate::resource::presentation_path(
-        &roots,
-        resource,
-        &format!("{relative_path}/{file_name}"),
-    )?;
-    if !matches!(
-        presented.status,
-        crate::resource::PresentationStatus::Available
-    ) {
+    let Some(resolved) = board.get(&key).map_err(provider_error)? else {
+        return Ok(None);
+    };
+    if resolved.archived {
         return Ok(None);
     }
-    let text = crate::read::read_text(&presented.path)?;
-    Ok(Some((text, file_name)))
+    let Some(file_name) =
+        crate::task_files::task_file_name_in_dir(&presented_board.path, &resolved.document.key)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(DispatchTask {
+        resolved,
+        file_name,
+        board_dir: presented_board.path,
+        invocation_repo_root: roots.invocation_repo_root,
+    }))
 }
 
-/// Parse the explicit `**Wall:** <id>` label, if any, out of the opaque
-/// `content` of the task document that `task_value` names among the
-/// trait's declared `task-board` directory's direct children. A trait
-/// without a declared `task-board` resource, a missing task value, an
-/// unreadable board, a task value matching no file, or a document that
-/// fails to parse yields `None` — never a refusal.
-pub fn explicit_wall_id(
-    trait_ref: &ctx_traits_core::Trait,
-    trait_root: &Utf8Path,
-    task_value: Option<&str>,
-) -> crate::Result<Option<String>> {
-    let Some((text, _file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
-        return Ok(None);
-    };
-    let Ok(document) = ctx_traits_core::task::parse(&text) else {
-        return Ok(None);
-    };
-    Ok(document.content.lines().find_map(wall_label))
+/// The explicit `**Wall:** <id>` label, if any, out of the opaque `content`
+/// of `task`'s resolved document. A document carrying no such label yields
+/// `None` — never a refusal.
+pub fn explicit_wall_id(task: &DispatchTask) -> Option<String> {
+    task.resolved.document.content.lines().find_map(wall_label)
 }
 
 /// A task document carrying a closed (`done` or `cancelled`) stored
@@ -149,42 +172,97 @@ pub fn closed_status_refusal_message(marker: &ClosedStatusMarker) -> String {
 /// Refuse to dispatch a task document whose stored `status` field is
 /// `done` or `cancelled` — a direct typed-field read, never a derivation.
 /// Unmet-dependency (`blocked`) refusal has no stored representation under
-/// 0059's schema and moves to 0060's derived status. A trait without a
-/// declared `task-board` resource, a missing task value, an unreadable
-/// board, a task value matching no file, a document that fails to parse,
-/// or a document with `status = "ready"`/absent yields `None` — never a
-/// refusal.
-pub fn closed_status_marker(
-    trait_ref: &ctx_traits_core::Trait,
-    trait_root: &Utf8Path,
-    task_value: Option<&str>,
-) -> crate::Result<Option<ClosedStatusMarker>> {
-    let Some((text, file_name)) = read_task_board_file(trait_ref, trait_root, task_value)? else {
-        return Ok(None);
-    };
-    let Ok(document) = ctx_traits_core::task::parse(&text) else {
-        return Ok(None);
-    };
-    match document.status {
+/// 0059's schema and moves to 0060's derived status, handled by
+/// [`dependency_marker`] instead. `task`'s document with `status =
+/// "ready"`/absent yields `None` — never a refusal.
+pub fn closed_status_marker(task: &DispatchTask) -> Option<ClosedStatusMarker> {
+    match task.resolved.document.status {
         Some(
             status @ (ctx_traits_core::task::TaskStatus::Done
             | ctx_traits_core::task::TaskStatus::Cancelled),
-        ) => Ok(Some(ClosedStatusMarker { file_name, status })),
-        _ => Ok(None),
+        ) => Some(ClosedStatusMarker {
+            file_name: task.file_name.clone(),
+            status,
+        }),
+        _ => None,
     }
 }
 
-/// Resolve `task_value` to a file name among the board directory's direct
-/// children — the exact filename, the exact stem, or (for a bare
-/// `NNNN[.M...]`-shaped task key) the `NNNN-` prefix — mirroring how the
-/// implement family's own extraction step names a task. Subdirectories
-/// (`archived/` among them) never match: an archived task is not a live
-/// task. Delegates to [`crate::task_files::task_file_name_in_dir`] (0060),
-/// which this preflight's own resolution chain originated — the extraction
-/// keeps this behavior-preserving rather than a second implementation that
-/// could drift from it.
-fn task_file_name_in_board(board: &Utf8Path, task_value: &str) -> Option<String> {
-    crate::task_files::task_file_name_in_dir(board, task_value)
+/// One `depends-on` edge on `task`'s resolved document that has not
+/// resolved `Done`/`Cancelled` — met is the edge's derived status
+/// `is_closed()` (0060), not the dependency's stored field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmetDependency {
+    pub key: String,
+    pub title: String,
+    pub status: DerivedStatus,
+}
+
+/// The word a refusal/override message names an edge's derived status by.
+pub fn status_word(status: DerivedStatus) -> &'static str {
+    match status {
+        DerivedStatus::Ready => "ready",
+        DerivedStatus::Blocked => "blocked",
+        DerivedStatus::Done => "done",
+        DerivedStatus::Cancelled => "cancelled",
+    }
+}
+
+/// Every unmet `depends-on` edge on `task`'s resolved document, or `None`
+/// when every declared dependency is closed (or none are declared). A
+/// dangling `depends-on` edge (the dependency key resolves to nothing) is
+/// reported by `sync`, not here — it has no status to name, so it is never
+/// counted as unmet.
+pub fn dependency_marker(task: &DispatchTask) -> Option<Vec<UnmetDependency>> {
+    let unmet: Vec<UnmetDependency> = task
+        .resolved
+        .relations
+        .depends_on
+        .iter()
+        .filter(|edge| !edge.status.is_closed())
+        .map(|edge| UnmetDependency {
+            key: edge.key.clone(),
+            title: edge.title.clone(),
+            status: edge.status,
+        })
+        .collect();
+    if unmet.is_empty() { None } else { Some(unmet) }
+}
+
+/// Re-read `task`'s document from its board directory's CURRENT bytes —
+/// never the snapshot [`resolve_dispatch_task`] captured — so dispatch
+/// materialisation can never prefer a stale read over an edit that landed
+/// between preflight and worktree preparation (the whole point of 0061:
+/// read from the invocation repository's working tree, write into the
+/// worktree). `None` only if the task vanished from the board or turned
+/// archived in that window; a genuine backend failure is a real error, not
+/// fail-open, since [`resolve_dispatch_task`] already proved the board was
+/// readable moments earlier in the same dispatch.
+pub fn reread_current_document(task: &DispatchTask) -> crate::Result<Option<ResolvedTask>> {
+    let board = crate::task_files::FilesTaskBoard::open_read(task.board_dir.clone());
+    let Some(resolved) = board
+        .get(&task.resolved.document.key)
+        .map_err(provider_error)?
+    else {
+        return Ok(None);
+    };
+    if resolved.archived {
+        return Ok(None);
+    }
+    Ok(Some(resolved))
+}
+
+/// The deterministic dispatch refusal message for an unmet dependency,
+/// naming the dependency and its current status in one sentence.
+pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> String {
+    let deps = unmet
+        .iter()
+        .map(|dep| format!("{} ({})", dep.key, status_word(dep.status)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "task {task_key} depends on {deps} — dispatch refuses tasks with unmet dependencies; pass --override-dependencies to record an override and dispatch anyway"
+    )
 }
 
 /// The id following a `**Wall:**` label on `line`, if present — the first
@@ -487,36 +565,70 @@ fn just_recipe_exists(repo_root: &Utf8Path, recipe: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A minimal `implement-quick` trait declaring `task-board` at
+    /// `tasks` (package-rooted), for exercising [`resolve_dispatch_task`]
+    /// end to end without a Git repository.
+    fn implement_trait_with_board() -> ctx_traits_core::Trait {
+        let text = "id = \"implement-quick\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n\n[[resource]]\nid = \"task-board\"\npath = \"tasks\"\n";
+        ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, text)
+            .expect("fixture trait decodes")
+    }
+
+    fn write_task(dir: &std::path::Path, file_name: &str, toml: &str) {
+        std::fs::write(dir.join(file_name), toml).unwrap();
+    }
+
+    const TASK_0050: &str =
+        "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"ready\"\n";
+
     #[test]
-    fn task_file_name_in_board_matches_toml_not_markdown() {
+    fn resolve_dispatch_task_matches_toml_not_markdown() {
         let dir = tempfile_dir();
-        std::fs::write(dir.join("0050-example.toml"), "").unwrap();
-        std::fs::write(dir.join("0050-example.md"), "").unwrap();
-        let board = Utf8Path::from_path(dir.as_path()).unwrap();
-        assert_eq!(
-            task_file_name_in_board(board, "0050"),
-            Some("0050-example.toml".to_string())
-        );
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(&board_dir, "0050-example.toml", TASK_0050);
+        std::fs::write(board_dir.join("0050-example.md"), "").unwrap();
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
+            .unwrap()
+            .expect("resolves the toml document, ignoring the markdown sibling");
+        assert_eq!(task.file_name, "0050-example.toml");
+        assert_eq!(task.resolved.document.key, "0050");
     }
 
     #[test]
-    fn task_file_name_in_board_matches_exact_stem() {
+    fn resolve_dispatch_task_matches_exact_stem() {
         let dir = tempfile_dir();
-        std::fs::write(dir.join("0050-example.toml"), "").unwrap();
-        let board = Utf8Path::from_path(dir.as_path()).unwrap();
-        assert_eq!(
-            task_file_name_in_board(board, "0050-example"),
-            Some("0050-example.toml".to_string())
-        );
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(&board_dir, "0050-example.toml", TASK_0050);
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0050-example"))
+            .unwrap()
+            .expect("resolves by exact stem");
+        assert_eq!(task.file_name, "0050-example.toml");
     }
 
     #[test]
-    fn task_file_name_in_board_ignores_subdirectories() {
+    fn resolve_dispatch_task_never_surfaces_an_archived_task() {
         let dir = tempfile_dir();
-        std::fs::create_dir(dir.join("archived")).unwrap();
-        std::fs::write(dir.join("archived").join("0050-example.toml"), "").unwrap();
-        let board = Utf8Path::from_path(dir.as_path()).unwrap();
-        assert_eq!(task_file_name_in_board(board, "0050"), None);
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(board_dir.join("archived")).unwrap();
+        write_task(
+            &board_dir.join("archived"),
+            "0050-example.toml",
+            "schema-version = \"0.1\"\nkey = \"0050\"\ntitle = \"Example\"\nstatus = \"done\"\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        assert!(
+            resolve_dispatch_task(&trait_ref, trait_root, Some("0050"))
+                .unwrap()
+                .is_none(),
+            "an archived-only task is not a live task; preflight must fail open"
+        );
     }
 
     #[test]
@@ -537,6 +649,80 @@ mod tests {
         let message = closed_status_refusal_message(&marker);
         assert!(message.contains("done"));
         assert!(message.contains("0050-example.toml"));
+    }
+
+    #[test]
+    fn dependency_marker_none_when_every_dependency_is_closed() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0001-dep.toml",
+            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"done\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-dependent.toml",
+            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
+            .unwrap()
+            .expect("resolves");
+        assert!(dependency_marker(&task).is_none());
+    }
+
+    #[test]
+    fn dependency_marker_names_every_unmet_edge() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0001-dep.toml",
+            "schema-version = \"0.1\"\nkey = \"0001\"\ntitle = \"Dep\"\nstatus = \"ready\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0002-dependent.toml",
+            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"0001\"]\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
+            .unwrap()
+            .expect("resolves");
+        let unmet = dependency_marker(&task).expect("0001 is ready, not closed");
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].key, "0001");
+        assert_eq!(unmet[0].status, DerivedStatus::Ready);
+
+        let message = dependency_refusal_message(&task.resolved.document.key, &unmet);
+        assert!(message.contains("0002 depends on 0001 (ready)"));
+        assert!(message.contains("--override-dependencies"));
+    }
+
+    #[test]
+    fn dependency_marker_ignores_a_dangling_edge() {
+        let dir = tempfile_dir();
+        let board_dir = dir.join("tasks");
+        std::fs::create_dir_all(&board_dir).unwrap();
+        write_task(
+            &board_dir,
+            "0002-dependent.toml",
+            "schema-version = \"0.1\"\nkey = \"0002\"\ntitle = \"Dependent\"\nstatus = \"ready\"\nrelations.depends-on = [\"9999\"]\n",
+        );
+        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+        let trait_ref = implement_trait_with_board();
+        let task = resolve_dispatch_task(&trait_ref, trait_root, Some("0002"))
+            .unwrap()
+            .expect("resolves");
+        assert!(
+            dependency_marker(&task).is_none(),
+            "a dangling edge has no status to name and is `sync`'s job, not dispatch's"
+        );
     }
 
     fn tempfile_dir() -> std::path::PathBuf {

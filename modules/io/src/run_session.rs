@@ -955,6 +955,9 @@ mod session_title_tests {
                 started_at_epoch: None,
                 trust_approval: None,
                 session_title: None,
+                task_digest: None,
+                task_key: None,
+                dependency_override: None,
             },
             ledger: ctx_traits_core::procedure::runtime::State {
                 run_id: ctx_traits_core::procedure::run::Id::new(run_id.to_string())

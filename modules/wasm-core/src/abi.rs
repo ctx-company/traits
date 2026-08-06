@@ -600,6 +600,9 @@ pub fn run_start_json(input: &str) -> String {
                     started_at_epoch: None,
                     trust_approval: request.trust_approval,
                     session_title: None,
+                    task_digest: None,
+                    task_key: None,
+                    dependency_override: None,
                 },
             },
         )?;

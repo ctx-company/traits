@@ -299,6 +299,47 @@ pub struct Provenance {
     /// whether `title` itself resolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_title: Option<SessionTitleState>,
+    /// 0061: the byte digest of the task document materialised into this
+    /// run's worktree at dispatch, alongside the resolved task key —
+    /// "what was this run told to do" answerable from evidence alone
+    /// without re-resolving the board. `None` for a run dispatched without
+    /// a resolvable task (including every legacy ledger, and every run of
+    /// a trait outside the `implement-*` family).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_digest: Option<Digest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_key: Option<String>,
+    /// 0061: recorded when `--override-dependencies` dispatched this run
+    /// despite an unmet `depends-on`. `None` for every run that dispatched
+    /// with no unmet dependency, or that never resolved a task at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_override: Option<DependencyOverrideProvenance>,
+}
+
+/// One `depends-on` edge that was unmet at dispatch time, as recorded by a
+/// `--override-dependencies` dispatch — the edge's key and derived status
+/// AT THAT MOMENT, not a live re-derivation (the dependency may since have
+/// closed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct UnmetDependencyEvidence {
+    pub key: String,
+    pub status: String,
+}
+
+/// A recorded dependency-preflight override (0061): the task that was
+/// dispatched and every `depends-on` edge that was unmet at that moment.
+/// An override that left no trace would be exactly the silent dishonesty
+/// this product exists to remove, so this is typed provenance, not a
+/// free-text warning alone (a human-readable line is additionally pushed
+/// onto [`Provenance::warnings`] so every existing run view surfaces it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct DependencyOverrideProvenance {
+    pub task_key: String,
+    pub unmet: Vec<UnmetDependencyEvidence>,
 }
 
 /// Persisted lifecycle of the optional narrator title. `None` on
@@ -3950,6 +3991,9 @@ output = ["slot:final"]
                 started_at_epoch: None,
                 trust_approval: None,
                 session_title: None,
+                task_digest: None,
+                task_key: None,
+                dependency_override: None,
             },
         };
         start_run_session(
@@ -4484,6 +4528,9 @@ equals = "revise"
                 attempts: 2,
                 title: "Refactor the merge story".to_string(),
             }),
+            task_digest: None,
+            task_key: None,
+            dependency_override: None,
         };
         let text = serde_json::to_string(&provenance).expect("serialize");
         let round_tripped: Provenance = serde_json::from_str(&text).expect("deserialize");
@@ -4659,6 +4706,9 @@ equals = "approve"
                 started_at_epoch: None,
                 trust_approval: None,
                 session_title: None,
+                task_digest: None,
+                task_key: None,
+                dependency_override: None,
             },
         };
         start_run_session(
