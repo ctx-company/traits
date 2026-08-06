@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.6"
 title = "Update effects: declared, optional, recorded — never silent, never cascading"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

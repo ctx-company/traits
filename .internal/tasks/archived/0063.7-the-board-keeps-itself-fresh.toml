@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.7"
 title = "The board keeps itself fresh: background sync over a persisted cache"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0066.1"
 title = "The guarded loop lands in generate: rounds, rungs, scratch, write-once"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 
