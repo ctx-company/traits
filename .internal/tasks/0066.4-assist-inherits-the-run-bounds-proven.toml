@@ -1,0 +1,51 @@
+schema-version = "0.2"
+key = "0066.4"
+title = "Assist inherits the run bounds, proven: a hung round dies with its bound named"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Fourth slice of 0066. Assist commands execute through `run_builtin_trait` → ephemeral
+session → `drive`, which means `[run] frame-seconds` and the 0058 command bounds
+(`command-idle-seconds`, `command-seconds`) apply to authoring for the first time once the
+loop lands. Inheriting bounds is not the work — proving they fire honestly is.
+
+"""
+scope = """
+## Decisions
+
+- **A hung round is killed by the command bound with the bound NAMED** in the report — "the
+  build exceeded command-seconds (120s)" — never surfaced as a masked timeout or a generic
+  failure.
+- **The frame bound and the round bound compose visibly**: when the frame ceiling cuts a
+  loop short before the round bound is spent, the report says which limit ended the run.
+  Two bounds that can each end the loop must never be reported as each other.
+- **A killed round is a failed round**, entering the same evidence path (0066.2): rung
+  reached, bound that fired, candidate preserved. The loop may continue into the next round
+  if its own bound allows.
+- **Proof by fixture, not by reading**: a gate test with a deliberately hanging build step
+  demonstrates the kill, the naming, and the preserved candidate.
+
+"""
+validation = """
+## Watch
+
+- Do not tune the bounds here; 0056 owns where gate/step ceilings live. This slice only
+  proves the existing bounds reach the assist path and speak their own names.
+- The hang fixture must not depend on wall-clock generosity — use a bound low enough for
+  the suite while proving the mechanism (behavioral fixture, per house test doctrine).
+- Ephemeral sessions must stay ephemeral: the bound firing must not strand scratch
+  candidates as phantom sessions in the store.
+
+## Done when
+
+A fixture with a hanging build inside the loop is killed by the command bound and the
+report names that bound and its value; a frame-ceiling cut names the frame bound instead;
+the killed round appears in round evidence with its preserved candidate; no phantom
+session or scratch residue survives the kill.
+"""
+
+[relations]
+parent = "0066"
+depends-on = ["0066.1"]

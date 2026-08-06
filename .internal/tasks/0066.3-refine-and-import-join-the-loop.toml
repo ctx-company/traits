@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0066.3"
+title = "refine --apply and import --llm-assisted join the same loop"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Third slice of 0066. The loop exists for `generate` (0066.1); the other two LLM-assisted
+authoring commands are still single unguarded calls. Same primitive, same declaration
+style, two more meta-traits.
+
+"""
+scope = """
+## Decisions
+
+- **`refine --apply` and `import --llm-assisted` each declare the guarded loop in their
+  meta-trait**, reusing 0066.1's shape: rung ladder, typed-diagnostics feedback, scratch
+  candidate, write-once, preserve-on-failure, declared bound.
+- **Refine's identity rung**: on top of the non-degenerate rung, a refine round that
+  changes the trait's identity fails — refinement edits a trait, it does not swap it.
+- **Import's convergence target is the imported contract**: the loop retries toward a
+  candidate that builds and checks clean; what was imported must remain recognizably the
+  source material (no converge-by-discarding-the-input).
+- **Round evidence and progress (0066.2) apply as-is** — no command-specific evidence
+  shapes.
+
+"""
+validation = """
+## Watch
+
+- Resist copy-paste drift between the three meta-traits: if the loop declaration cannot be
+  shared cleanly, that is a finding about trait composition — write it down (0066's
+  dogfood rule).
+- `refine` without `--apply` and `import` without `--llm-assisted` stay exactly as they
+  are: no loop, no provider calls, no behavior change.
+
+## Done when
+
+Both commands retry on typed diagnostics within their declared bounds and report rounds
+spent; a refine round that drops the procedure or changes trait identity fails; a
+non-converging run of either writes nothing and preserves its last candidate at a stated
+path; the non-assisted forms of both commands are byte-identical in behavior to before.
+"""
+
+[relations]
+parent = "0066"
+depends-on = ["0066.1"]

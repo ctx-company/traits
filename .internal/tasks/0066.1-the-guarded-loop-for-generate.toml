@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0066.1"
+title = "The guarded loop lands in generate: rounds, rungs, scratch, write-once"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+The heart of 0066, scoped to `generate` alone. Today `handle_generate` is one model call:
+produce, evaluate, and any failure — decode, build, check — returns verdict `blocked`
+(`blocked_assist_candidate`), throwing the paid attempt away. This slice makes a failed
+build a round instead of a verdict, for one command, end to end.
+
+"""
+scope = """
+## Decisions (0066's shared contract applies; specific to this slice:)
+
+- **The loop is declared in the generate meta-trait** as a guarded produce/review loop —
+  no retry logic in `generate.rs`. If the loop primitive cannot express something this
+  needs, that finding is written down (0066's dogfood rule), not worked around in Rust.
+- **Round input is the typed diagnostics** from the failed rung (`cdk_build`'s
+  `severity`/`code`/`fieldPath`/`message`, synth and check diagnostics alike), fed to the
+  next produce round. The rung ladder and its order: build → synth/normalize → `check` →
+  audit.
+- **The non-degenerate rung ships here, not later**: the built trait must still declare a
+  procedure and a sequence, or the round FAILS — without this, the loop can converge by
+  deletion and this slice's own Done-when would bless it.
+- **Scratch candidate location for all rounds; write-once on convergence** through the safe
+  writer, lock and approve only then. Intermediate rounds never touch `trait.lock` or the
+  trust store.
+- **Non-convergence**: no package written, last failing rung named with its diagnostics,
+  last candidate source preserved at a stated path in the report.
+- **The bound is declared** (in the meta-trait), reported as rounds spent, and spending it
+  is the ONLY way the command reports failure.
+- **`--check` and `--candidate` semantics land with this slice**: `--check` = converge and
+  write nothing; `--candidate <file>` = exactly one round, zero provider calls.
+
+"""
+validation = """
+## Watch
+
+- Each round costs a model call plus a node build — the bound is not decoration. Declare
+  it, enforce it, report it.
+- `--candidate` is what the gate tests run; if this slice accidentally makes it loop or
+  call a provider, the test suite gets slow and paid. Keep it one round by construction.
+- The evidence envelope only needs enough here for the loop to function; the full
+  round-evidence surface is 0066.2 — do not gold-plate it in this slice.
+
+## Done when
+
+`ctx traits generate` returns a package that builds, normalizes and checks clean, having
+retried on its own typed diagnostics within a declared bound; a non-converging run writes
+no package, names the failing rung and preserves its last candidate source at the reported
+path; a candidate that compiles but declares no procedure fails a round; intermediate
+rounds leave `trait.lock` and the trust store untouched; `--check` converges without
+writing; `--candidate` evaluates exactly one round with no provider call.
+"""
+
+[relations]
+parent = "0066"

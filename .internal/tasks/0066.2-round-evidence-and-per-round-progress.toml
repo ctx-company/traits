@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0066.2"
+title = "Round evidence in the candidate envelope; per-round progress in the CLI"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Second slice of 0066. With the loop in place (0066.1), the command must stop being a
+multi-minute black box: today the CLI blocks silently until the verdict, and the candidate
+envelope says nothing about what the attempts cost or where they failed.
+
+"""
+scope = """
+## Decisions
+
+- **The assist `Candidate` envelope grows round evidence**: rounds spent vs the declared
+  bound, which rung failed each round, and the diagnostics that drove the next attempt.
+  Typed, in the envelope — not prose in a log.
+- **The CLI surfaces per-round progress the way a run does** — round started, rung reached,
+  rung failed with its top diagnostic — instead of blocking silently. Live and `--json`
+  both; the JSON envelope is the same evidence, not a second bookkeeping.
+- **`--candidate` reports one round in the same shape** — the evidence surface is uniform
+  whether the loop ran once or to its bound.
+
+"""
+validation = """
+## Watch
+
+- The two-tone CLI doctrine holds: progress lines are plain and minimal, no spinners or
+  truecolor.
+- Evidence is derived from what the loop already knows — this slice adds no new judgment,
+  only visibility. If a fact is not in the loop's hands, that is a 0066.1 gap, not a place
+  to re-parse output.
+- Do not leak provider prompts or raw model output into the envelope; diagnostics and rung
+  names only.
+
+## Done when
+
+A generate run's envelope shows rounds spent, per-round failing rung and the diagnostics
+that drove each next attempt; watching the command shows each round as it happens; a
+`--candidate` evaluation reports its single round in the identical shape; the JSON and
+human surfaces agree on every fact.
+"""
+
+[relations]
+parent = "0066"
+depends-on = ["0066.1"]
