@@ -1,8 +1,9 @@
 schema-version = "0.2"
 key = "0082"
 title = "The journey pane follows the current step, showing as much of its ladder as fits"
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-06"
 content = """
 
 
