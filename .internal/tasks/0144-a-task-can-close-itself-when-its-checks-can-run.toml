@@ -1,0 +1,68 @@
+schema-version = "0.2"
+key = "0144"
+title = "A task can close itself — but only when its done-conditions are checks a machine can run"
+status = "ready"
+raised = "2026-08-07"
+content = """
+
+
+The follow-up 0063.8 deliberately left open. Today, when a task's run merges, the board
+proposes "mark done?" and the owner presses one key. That key exists because merging proves
+the code landed — not that the task's done-conditions were met. A human has to judge that,
+because the conditions are written as prose.
+
+This task adds the honest exception: a task may declare its done-conditions as actual
+checks — commands that pass or fail. When every declared check passes against the merged
+result, there is nothing left for a human to judge, and the task may close itself with the
+proof attached. Tasks without checks keep the one-key confirm forever.
+
+"""
+scope = """
+## Decisions
+
+- **A task may declare checks.** Alongside the written `validation` text, a task can list
+  commands (e.g. a test filter, a build, a grep that must find something) that define
+  "done" mechanically. The prose stays — it explains; the checks decide.
+- **Closing itself requires ALL of**: the bound run's branch merged; every declared check
+  run against the repository AFTER that merge; every check passed. Anything less — one
+  check failing, checks that could not run, no checks declared — falls back to today's
+  proposal + one-key confirm, with the failure shown.
+- **The proof is recorded.** A self-closed task stores the same things a confirmed close
+  does (closed date, merged commit) plus each check it ran and its result. Looking at the
+  archived task answers "why did this close without me?" completely.
+- **Checks are declared in the task document, reviewed like content.** They are part of
+  the contract you write when filing the task — not something a run adds to its own task
+  later. A run must never be able to weaken or write the checks that would close its own
+  task.
+- **Auto-close is opt-in per board.** A config switch turns the behavior on; off, declared
+  checks still run but only upgrade the proposal ("all 3 checks passed — mark done?"),
+  which is also the natural first milestone to ship.
+- **Checks run where merges are observed** — the owner's machine, on the merged state, in
+  a clean checkout or worktree. Never inside the run that wants its task closed, and never
+  against the run's own branch.
+
+"""
+validation = """
+## Watch
+
+- The wrong failure here is a task closing on checks that pass for the wrong reason (an
+  empty test filter matching nothing, a grep that finds its own task file). Require checks
+  to be able to FAIL: a check that matched nothing or ran zero tests counts as failed, and
+  say so in the result.
+- Bound the checks (time and count) — a task must not be able to declare a check that
+  hangs the board.
+- Keep the existing flow untouched for every task without checks: same proposal, same one
+  key. This adds a lane; it does not move the road.
+- A check's command runs on the owner's machine — it inherits the same trust posture as
+  dispatching a trait, so surface the commands in the proposal before they ever run the
+  first time.
+
+## Done when
+
+A task with declared checks, whose run merges and whose checks all pass, closes with the
+check results and merged commit recorded on the archived document; one failing or
+un-runnable check downgrades to the ordinary proposal showing which check failed and why;
+a task without checks behaves exactly as today; the board switch defaults off and, when
+off, passing checks strengthen the proposal instead of closing; a run cannot edit its own
+task's checks.
+"""
