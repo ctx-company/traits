@@ -10,13 +10,13 @@
 
 set -uo pipefail
 
-trait_id="implement:gated"
+trait_id="implement:quick"
 
 usage() {
   cat <<'USAGE'
 usage: implement.sh [--trait <id>] "<task>[, <task>...]"
 
-    -t, --trait=ID   Trait or family:variant to run (default: implement:gated)
+    -t, --trait=ID   Trait or family:variant to run (default: implement:quick)
     -h, --help       Show this help
 USAGE
 }
