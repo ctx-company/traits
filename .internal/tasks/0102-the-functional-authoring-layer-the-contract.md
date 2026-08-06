@@ -217,6 +217,64 @@ export default function () {
 - Per the standing validation ruling (2026-07-24), no behavior-freezing tests while these
   surfaces churn: the gate stays drift/embed + builds + cargo test.
 
+## Amendments (0108 pilot findings)
+
+`implement:quick` ported functionally at
+`.ctx/traits/packages/implement/source/variants/quick-functional.ts` (0106 `variant({...})`
+shape, `procedure.from`). `diff generated/quick/index.toml <scratch>/quick/index.toml` is
+**not** empty; every surviving delta traces to one of the two gaps below — nothing else
+differs (loop bounds, `until`/`abort-if` guards, produce/review input ordering, the
+shipping-maybe-commit branch, and every prompt body all matched byte-for-byte). Neither gap
+was worked around; the port omits what it cannot express and cites this amendment.
+
+- **F2 — no explicit step-id override.** `step.command`/`step.check`/`agent.prompt` always mint
+  `id = mintId(title)` (`registrars.ts:107,118,133`; `agent.ts:80`); there is no `id:` field on
+  any registrar's options type. The baseline carries seven steps whose id was hand-chosen
+  distinct from `kebab(title)`: `draft-writing`/"Draft the work", `repo-gates`/"Run the
+  repository gate chain", `capture-diff`/"Capture the changed-file inventory",
+  `shipping-status`/"Check working tree status", `shipping-message`/"Write the commit message
+  (scribe)", `shipping-stage`/"Stage all changes except runtime state",
+  `shipping-commit`/"Commit the work" — all invented inline by `commitTail`/quick's own
+  `sequence.prompt`/`sequence.check`/`sequence.command` calls in
+  `packages/agents/src/process.ts` and `source/variants/quick.ts`. The pilot reproduces these
+  steps' content exactly (title, prompt/argv, inputs, outputs) but their ids differ
+  (`draft-the-work`, `run-the-repository-gate-chain`, `capture-the-changed-file-inventory`,
+  `check-working-tree-status`, `write-the-commit-message-scribe`,
+  `stage-all-changes-except-runtime-state`, `commit-the-work`), which also renames the
+  corresponding `[prompt.*]` tables. 0109 needs a resolution — either an authored `id:` escape
+  on the registrars, or a sanctioned baseline id-reset — before any variant with a hand-chosen
+  id can migrate.
+- **F3 — no `step.project` registrar.** `step` exposes only `command`/`check`
+  (`registrars.ts:104-124`); there is no functional way to author a `kind = "project"` step, and
+  no escape hatch exists to lift a pre-built object-layer `SequenceHandle` (e.g.
+  `deriveParkReportStep`'s output) into a `procedure.from` scope — `registerItem`/`currentScope`
+  are internal to `registrars.ts` and not exported from `@ctx-traits/cdk`. The baseline's
+  `park-report-clear` → `park-report-record` (branch) → `park-report-append` triad
+  (`family.ts:553-575`) is entirely unreachable functionally and is omitted from the pilot;
+  as a direct consequence `slot:park-report` is never written by the ported variant, so its
+  auto-inferred `procedure.output` also drops `port:park-report` (present in the baseline,
+  absent in the port). Any variant using `deriveParkReportStep`, or any composite that needs a
+  deterministic project step, cannot migrate until `step.project` (or an object-handle lift
+  escape) exists.
+- **F1 (confirmed, no diff impact)** — a full-file `defineTrait` entry still cannot carry family
+  identity (`DefineTraitFields` has no `variant`; `variant.import` rejects a function default
+  export), so 0108's port necessarily used the 0106 `variant({...})` shape, never a 0107
+  full-file trait function. 0109 needs an answer for this before any variant can migrate as a
+  whole file.
+- **F4 (confirmed clean)** — `combineAbortIfArms` with a single `flow.when(..., flow.Abort)` arm
+  emits the bare condition, matching the object layer's `abortIf:` byte-for-byte; no arm title
+  leaks into emission. No amendment needed.
+- **R3 tooling gap (process note, not a CDK gap)** — `ctx traits build`'s `--out` flag is
+  rejected for any native-family source ("`--out` is not supported for native trait family
+  sources"), and a family is recognized only at a package's own `source/index.ts` — an
+  arbitrary `.ts` path importing `variant.import(...)` is refused ("declares a native trait
+  family but is not under a recognized package's source/index.{ts,mjs} root"). There is
+  currently no supported way to build a single-variant family to a scratch location without
+  standing up a full scratch package (own `package.toml` + copied `source/` tree, `id` aligned
+  to the target family, built once, diffed, then deleted — never committed). This pilot's
+  scratch artifact was produced that way; no `functional-pilot/` shell file is checked in,
+  since none of the explored forms worked without it becoming, in effect, a second package.
+
 ## Done when
 
 0103–0109 cite this file instead of re-deciding; any expressiveness gap found downstream is
