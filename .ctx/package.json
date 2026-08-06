@@ -1,0 +1,9 @@
+{
+  "name": "ctx-traits-authoring",
+  "private": true,
+  "description": "Authoring-time dependencies for this project's ctx.traits packages. Created by `ctx traits init`; not published, and not needed to RUN a trait.",
+  "type": "module",
+  "dependencies": {
+    "@ctx-traits/cdk": "0.1.0-alpha.0"
+  }
+}

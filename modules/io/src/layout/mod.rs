@@ -636,6 +636,15 @@ pub fn package_manifest_write_path(package_root: &Utf8Path) -> Utf8PathBuf {
     }
 }
 
+/// Authoring-source write path for a canonical package: `<root>/source/index.ts`.
+///
+/// The assist-facing sibling of [`package_manifest_write_path`] — `generate`,
+/// `refine --apply` and `import --llm-assisted` write here so that `build`
+/// stays the only producer of `<root>/generated/index.toml` (task 0065).
+pub fn package_source_write_path(package_root: &Utf8Path) -> Utf8PathBuf {
+    package_root.join(SOURCE_DIR).join("index.ts")
+}
+
 /// Paths for one portable protocol package under a repository root.
 ///
 /// All paths are relative to the repo root and use `camino` UTF-8 paths.

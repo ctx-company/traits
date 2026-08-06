@@ -188,12 +188,45 @@ fn normalize_generated_relative_path(
 /// Write mode for assist candidate writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CandidateWriteMode {
-    /// New candidate package (generate, compose, refine --out).
+    /// New candidate package (compose, refine --out).
     NewCandidate,
     /// Overwrite existing canonical source (refine --apply).
     RefineApply,
     /// Managed import package (import --llm-assisted).
     ManagedImport,
+    /// New package's authoring source, `<root>/source/index.ts` (generate).
+    NewCandidateSource,
+    /// Overwrite an existing package's authoring source (refine --apply,
+    /// task 0065: `refine` edits `source/index.ts`, never `generated/`).
+    RefineApplySource,
+    /// Managed import package's authoring source (import --llm-assisted,
+    /// task 0065).
+    ManagedImportSource,
+}
+
+impl CandidateWriteMode {
+    /// Whether this mode targets `<package>/source/index.ts` instead of
+    /// `<package>/generated/index.toml` (task 0065: only `build` writes
+    /// canonical; assist writes authoring source).
+    fn targets_authoring_source(self) -> bool {
+        matches!(
+            self,
+            CandidateWriteMode::NewCandidateSource
+                | CandidateWriteMode::RefineApplySource
+                | CandidateWriteMode::ManagedImportSource
+        )
+    }
+
+    /// The legacy (pre-0065) canonical-targeting mode this source mode
+    /// mirrors for leaf-overwrite semantics (new-vs-refine-vs-import).
+    fn leaf_semantics(self) -> CandidateWriteMode {
+        match self {
+            CandidateWriteMode::NewCandidateSource => CandidateWriteMode::NewCandidate,
+            CandidateWriteMode::RefineApplySource => CandidateWriteMode::RefineApply,
+            CandidateWriteMode::ManagedImportSource => CandidateWriteMode::ManagedImport,
+            other => other,
+        }
+    }
 }
 
 /// Request for a safe assist candidate write.
@@ -205,6 +238,7 @@ pub struct CandidateWriteRequest<'a> {
 }
 
 /// Result of a safe assist candidate write.
+#[derive(Debug)]
 pub struct CandidateWriteResult {
     pub path: String,
     pub byte_size: u64,
@@ -309,21 +343,37 @@ fn validate_candidate_path(
         }
     }
 
-    let Some(package_id) = canonical_generated_package_id(path) else {
-        return Err(fs_err(
-            path,
-            format!(
-                "target must be a canonical {}/<package>/generated/index.toml path",
-                crate::layout::trait_protocol_root()
-            ),
-        ));
+    let package_id = if mode.targets_authoring_source() {
+        let Some(id) = canonical_source_package_id(path) else {
+            return Err(fs_err(
+                path,
+                format!(
+                    "target must be a canonical {}/<package>/source/index.ts path",
+                    crate::layout::trait_protocol_root()
+                ),
+            ));
+        };
+        id
+    } else {
+        let Some(id) = canonical_generated_package_id(path) else {
+            return Err(fs_err(
+                path,
+                format!(
+                    "target must be a canonical {}/<package>/generated/index.toml path",
+                    crate::layout::trait_protocol_root()
+                ),
+            ));
+        };
+        id
     };
 
     let package_matches_trait = package_id == trait_id;
-    let package_is_candidate = matches!(mode, CandidateWriteMode::NewCandidate)
-        && package_id
-            .strip_prefix(trait_id)
-            .is_some_and(|suffix| suffix.starts_with('-'));
+    let package_is_candidate = matches!(
+        mode,
+        CandidateWriteMode::NewCandidate | CandidateWriteMode::NewCandidateSource
+    ) && package_id
+        .strip_prefix(trait_id)
+        .is_some_and(|suffix| suffix.starts_with('-'));
     if !package_matches_trait && !package_is_candidate {
         return Err(fs_err(
             path,
@@ -380,6 +430,44 @@ fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
                 "package.toml" | "trait.toml" | "index.toml",
             ],
         ) if !id.is_empty() => Some(*id),
+        _ => None,
+    }
+}
+
+/// Mirror of [`canonical_generated_package_id`] for the authoring-source
+/// shape `<package>/source/index.ts` (task 0065).
+fn canonical_source_package_id(path: &Utf8Path) -> Option<&str> {
+    if path
+        .components()
+        .any(|component| !matches!(component, Utf8Component::RootDir | Utf8Component::Normal(_)))
+    {
+        return None;
+    }
+
+    let normals: Vec<&str> = path
+        .components()
+        .filter_map(|component| match component {
+            Utf8Component::Normal(value) => Some(value),
+            _ => None,
+        })
+        .collect();
+    if !path.is_absolute() {
+        return match normals.as_slice() {
+            [".ctx", "traits", id, "source", "index.ts"] if !id.is_empty() => Some(*id),
+            _ => None,
+        };
+    }
+
+    let ctx_positions: Vec<usize> = normals
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component)| (*component == ".ctx").then_some(index))
+        .collect();
+    if ctx_positions.len() != 1 || ctx_positions[0] + 5 != normals.len() {
+        return None;
+    }
+    match normals.get(ctx_positions[0]..) {
+        Some([".ctx", "traits", id, "source", "index.ts"]) if !id.is_empty() => Some(*id),
         _ => None,
     }
 }
@@ -459,11 +547,12 @@ fn inspect_leaf(path: &Utf8Path) -> crate::Result<LeafState> {
 
 fn validate_leaf_for_mode(path: &Utf8Path, mode: CandidateWriteMode) -> crate::Result<bool> {
     match inspect_leaf(path)? {
-        LeafState::Missing => match mode {
+        LeafState::Missing => match mode.leaf_semantics() {
             CandidateWriteMode::RefineApply => {
                 Err(fs_err(path, "refine apply target must already exist"))
             }
             CandidateWriteMode::NewCandidate | CandidateWriteMode::ManagedImport => Ok(false),
+            _ => unreachable!("leaf_semantics() only returns legacy modes"),
         },
         LeafState::Symlink => Err(fs_err(path, "target is a symlink")),
         LeafState::Special => Err(fs_err(path, "target is not a regular file")),
@@ -488,12 +577,13 @@ fn validate_regular_leaf_for_mode(
         ));
     }
 
-    match mode {
+    match mode.leaf_semantics() {
         CandidateWriteMode::NewCandidate | CandidateWriteMode::ManagedImport => Err(fs_err(
             path,
             "target already exists; use refine or choose a new --out package",
         )),
         CandidateWriteMode::RefineApply => Ok(true),
+        _ => unreachable!("leaf_semantics() only returns legacy modes"),
     }
 }
 
@@ -736,4 +826,75 @@ fn validate_package_manifest_shape(path: &Utf8Path) -> crate::Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod authoring_source_write_tests {
+    use super::*;
+
+    fn scratch_dir(label: &str) -> Utf8PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ctx-write-rs-test-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Utf8PathBuf::from_path_buf(dir).unwrap()
+    }
+
+    #[test]
+    fn new_candidate_source_writes_source_index_ts_under_traits_root() {
+        let root = scratch_dir("new-source");
+        let target = root.join(".ctx/traits/my-trait/source/index.ts");
+        let result = write_candidate(CandidateWriteRequest {
+            target_path: &target,
+            trait_id: "my-trait",
+            content: "export default trait(\"my-trait\", {});",
+            mode: CandidateWriteMode::NewCandidateSource,
+        })
+        .unwrap();
+        assert!(!result.overwritten);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "export default trait(\"my-trait\", {});"
+        );
+    }
+
+    #[test]
+    fn new_candidate_source_rejects_generated_shaped_target() {
+        let root = scratch_dir("reject-generated");
+        let target = root.join(".ctx/traits/my-trait/generated/index.toml");
+        let err = write_candidate(CandidateWriteRequest {
+            target_path: &target,
+            trait_id: "my-trait",
+            content: "id = \"my-trait\"",
+            mode: CandidateWriteMode::NewCandidateSource,
+        })
+        .unwrap_err();
+        assert!(format!("{err}").contains("source/index.ts"));
+    }
+
+    #[test]
+    fn refine_apply_source_requires_existing_file_and_overwrites_it() {
+        let root = scratch_dir("refine-apply-source");
+        let target = root.join(".ctx/traits/my-trait/source/index.ts");
+        let missing = write_candidate(CandidateWriteRequest {
+            target_path: &target,
+            trait_id: "my-trait",
+            content: "new",
+            mode: CandidateWriteMode::RefineApplySource,
+        })
+        .unwrap_err();
+        assert!(format!("{missing}").contains("must already exist"));
+
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "old").unwrap();
+        let result = write_candidate(CandidateWriteRequest {
+            target_path: &target,
+            trait_id: "my-trait",
+            content: "new",
+            mode: CandidateWriteMode::RefineApplySource,
+        })
+        .unwrap();
+        assert!(result.overwritten);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    }
 }
