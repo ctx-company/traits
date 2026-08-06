@@ -637,7 +637,7 @@ fn command_frame(
     plan: &CommandPlan,
     state: &State,
 ) -> crate::Result<CommandFrame> {
-    let (argv, resource_argv) = if let Some(argv_from) = plan.argv_from.as_deref() {
+    let (argv, substituted, resource_argv) = if let Some(argv_from) = plan.argv_from.as_deref() {
         let value = accepted_value(state, argv_from).ok_or_else(|| {
             crate::procedure::invalid_field(
                 "runtime.command.argv-from",
@@ -678,11 +678,19 @@ fn command_frame(
                 ),
             ));
         }
-        (argv, Vec::new())
+        (argv, Vec::new(), Vec::new())
     } else {
-        (resolve_command_argv(&plan.argv, state), collect_resource_argv(&plan.argv))
+        let (argv, substituted) = resolve_command_argv(&plan.argv, state);
+        (argv, substituted, collect_resource_argv(&plan.argv))
     };
-    crate::r#trait::procedure::validate_command_argv(&argv, "runtime.command.argv")?;
+    // Substituted items are runtime DATA (a draft, a briefing, a commit
+    // message) and may be multi-line or untrimmed; only the authored items
+    // keep the authored hygiene rules (2026-08-06, run-99dafe1d).
+    crate::r#trait::procedure::validate_resolved_command_argv(
+        &argv,
+        &substituted,
+        "runtime.command.argv",
+    )?;
     let executable_digest = plan
         .executable_digest_from
         .as_deref()
@@ -757,10 +765,22 @@ pub(crate) fn command_execution_succeeded(
 /// stays one literal argument. Tokens without an accepted value, and braces
 /// that are not `{slot:x}`/`{port:x}` refs, are copied through unchanged —
 /// token-free argv is returned byte-for-byte identical.
-fn resolve_command_argv(argv: &[String], state: &State) -> Vec<String> {
-    argv.iter()
-        .map(|arg| resolve_command_argv_item(arg, state))
-        .collect()
+///
+/// The second return lists the indices where at least one token actually
+/// substituted — those items are runtime data, and
+/// [`crate::r#trait::procedure::validate_resolved_command_argv`] exempts them
+/// from the authored-argv hygiene rules.
+fn resolve_command_argv(argv: &[String], state: &State) -> (Vec<String>, Vec<usize>) {
+    let mut resolved = Vec::with_capacity(argv.len());
+    let mut substituted = Vec::new();
+    for (index, arg) in argv.iter().enumerate() {
+        let (value, item_substituted) = resolve_command_argv_item(arg, state);
+        if item_substituted {
+            substituted.push(index);
+        }
+        resolved.push(value);
+    }
+    (resolved, substituted)
 }
 
 /// Extract authored `{resource:<id>}` argv positions from literal command
@@ -789,24 +809,28 @@ fn collect_resource_argv(argv: &[String]) -> Vec<ResourceArgvRef> {
 /// diagnostics-only (`${...}`, `` `...` ``, `{{...}}`) stay untouched at
 /// runtime too, instead of a divergent hand-rolled parser substituting text
 /// validation never required as input.
-fn resolve_command_argv_item(arg: &str, state: &State) -> String {
+fn resolve_command_argv_item(arg: &str, state: &State) -> (String, bool) {
     let (interpolations, _diagnostics) = scan_interpolations(arg);
     if interpolations.is_empty() {
-        return arg.to_string();
+        return (arg.to_string(), false);
     }
     let chars: Vec<char> = arg.chars().collect();
     let mut out = String::new();
     let mut cursor = 0;
+    let mut substituted = false;
     for interp in &interpolations {
         out.extend(chars[cursor..interp.start].iter());
         match resolve_argv_ref_value(&interp.ref_text, state) {
-            Some(value) => out.push_str(&value),
+            Some(value) => {
+                out.push_str(&value);
+                substituted = true;
+            }
             None => out.extend(chars[interp.start..interp.end].iter()),
         }
         cursor = interp.end;
     }
     out.extend(chars[cursor..].iter());
-    out
+    (out, substituted)
 }
 
 /// Render the accepted value for a local `slot:`/`port:` interpolation body,

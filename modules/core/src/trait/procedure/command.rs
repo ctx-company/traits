@@ -116,6 +116,25 @@ fn is_shell_metachar(ch: char) -> bool {
 }
 
 pub(crate) fn validate_command_argv(argv: &[String], field_path: &str) -> crate::Result<()> {
+    validate_resolved_command_argv(argv, &[], field_path)
+}
+
+/// Validate a command argv in which the items at `substituted` indices carry
+/// runtime-interpolated slot/port VALUES rather than authored text
+/// (2026-08-06, run-99dafe1d): a model-written document handed to a step as a
+/// positional argument is data, and data may legitimately be multi-line or
+/// end in a newline — applying the authored-argv hygiene rule
+/// (`trim() != arg`) to it killed the run the moment a draft ended with a
+/// newline. Authored items — and the program at argv[0], substituted or not —
+/// keep the full authored rules; a substituted non-program item is rejected
+/// only for what actually breaks execution or proves a misfire: resolving to
+/// an empty value, or carrying NUL. An empty `substituted` list makes this
+/// exactly the authored-argv validation.
+pub(crate) fn validate_resolved_command_argv(
+    argv: &[String],
+    substituted: &[usize],
+    field_path: &str,
+) -> crate::Result<()> {
     if argv.is_empty() {
         return Err(crate::manifest::Error::InvalidField {
             field_path: field_path.to_string(),
@@ -124,7 +143,16 @@ pub(crate) fn validate_command_argv(argv: &[String], field_path: &str) -> crate:
         .into());
     }
     for (i, arg) in argv.iter().enumerate() {
-        if arg.trim() != arg || arg.is_empty() {
+        let data_item = i != 0 && substituted.contains(&i);
+        if data_item {
+            if arg.is_empty() {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{field_path}[{i}]"),
+                    message: "argv item resolved from a slot/port must not be empty".to_string(),
+                }
+                .into());
+            }
+        } else if arg.trim() != arg || arg.is_empty() {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: format!("{field_path}[{i}]"),
                 message: "argv item must be non-empty and trimmed".to_string(),
@@ -188,5 +216,46 @@ fn success_exit_codes(values: &[i32]) -> Vec<i32> {
         values.sort_unstable();
         values.dedup();
         values
+    }
+}
+
+#[cfg(test)]
+mod validate_resolved_command_argv_tests {
+    use super::*;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn substituted_data_item_may_be_multi_line_and_untrimmed() {
+        let argv = argv(&["sh", "-c", r#"printf %s "$1""#, "sh", "# draft\n\nbody\n"]);
+        assert!(validate_resolved_command_argv(&argv, &[4], "runtime.command.argv").is_ok());
+    }
+
+    #[test]
+    fn substituted_data_item_must_not_be_empty() {
+        let argv = argv(&["sh", "-c", r#"printf %s "$1""#, "sh", ""]);
+        let error = validate_resolved_command_argv(&argv, &[4], "runtime.command.argv")
+            .expect_err("empty resolved value must be rejected");
+        assert!(error.to_string().contains("resolved from a slot/port"));
+    }
+
+    #[test]
+    fn substituted_data_item_must_not_contain_nul() {
+        let argv = argv(&["sh", "-c", "echo", "sh", "a\0b"]);
+        assert!(validate_resolved_command_argv(&argv, &[4], "runtime.command.argv").is_err());
+    }
+
+    #[test]
+    fn authored_items_keep_the_trimmed_rule() {
+        let argv = argv(&["sh", "-c", "echo", "sh", "tail \n"]);
+        assert!(validate_resolved_command_argv(&argv, &[], "runtime.command.argv").is_err());
+    }
+
+    #[test]
+    fn substituted_program_keeps_the_authored_rules() {
+        let argv = argv(&["plannotator\n", "annotate"]);
+        assert!(validate_resolved_command_argv(&argv, &[0], "runtime.command.argv").is_err());
     }
 }
