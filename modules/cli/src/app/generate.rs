@@ -1579,7 +1579,6 @@ pub(crate) fn trait_package_output_paths(trait_id: &str, out: Option<&str>) -> (
     }
 }
 
-
 pub(crate) fn attach_assist_check_report(
     candidate: ctx_traits_core::assist::Candidate,
     normalized_trait: Option<&ctx_traits_core::Trait>,
