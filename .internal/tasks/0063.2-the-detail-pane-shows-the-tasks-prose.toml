@@ -1,0 +1,43 @@
+schema-version = "0.1"
+key = "0063.2"
+title = "The TASKS detail pane shows the task's prose"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Second child of 0063. The board is operable from the dashboard, but not yet READABLE from
+it: `build_task_preview` renders key, title, status, dangling edges, relations, open steps
+and joined runs — and never `resolved.document.content`, even though `board.resolved` holds
+the full document from the last sync. You cannot decide to dispatch a task you cannot read.
+
+## Decisions
+
+- **The prose renders between the status line and the relations block** — it is the
+  substance; relations, steps and joined runs keep their current order below it.
+- **Plain lines, no markdown machinery**: wrapped to the pane width via the existing
+  wrapped-lines path, default tone, headers at most dimmed. The two-tone doctrine holds.
+- **The pane scrolls**: the preview pane's existing scroll state gets the real line count,
+  so a long task is readable end to end, not truncated at the fold.
+- **No dependency on 0063.1**: render today's single `content` field now; when the typed
+  fields land, this pane renders them as the canonical labeled sections (content, scope,
+  validation) — that follow-up belongs to whichever task lands second.
+
+## Watch
+
+- The preview rebuild runs on selection change, sync, and the 2s join tick — never in the
+  draw path (0063's own rule). Adding prose must not move rendering work into draw; wrap at
+  build time or at draw from pre-built lines, as the pane does today.
+- A task with empty prose must render exactly as the pane does now — no blank slab.
+- Line count grows by an order of magnitude; verify both width breakpoints of the one
+  renderer (P552) still hold.
+
+## Done when
+
+Selecting a task shows its prose in the detail pane, wrapped to the pane width and
+scrollable when longer than the pane; status, relations, open steps and joined runs still
+render around it; an empty-prose task renders as today.
+"""
+
+[relations]
+parent = "0063"

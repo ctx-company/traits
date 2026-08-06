@@ -1,0 +1,61 @@
+schema-version = "0.1"
+key = "0063.1"
+title = "Typed task fields: content, scope and validation replace the header convention"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+First child of 0063. The document schema stops hiding its structure in markdown headers.
+
+## Decisions
+
+- **Schema bump 0.1 -> 0.2.** The opaque `content` blob's house convention (`## Decisions`,
+  `## Watch`, `## Done when`, ad-hoc `## Scope`/`## Why`) becomes three typed prose fields,
+  each a multi-line TOML string, each still opaque prose inside:
+  - `content` — the narrative: what this is and why it exists. (Owner floated `description`
+    as an alternative name; `content` is retained here as the incumbent — flag at review if
+    the rename is wanted.)
+  - `scope` — absorbs today's `## Decisions` and `## Scope`: the rulings, what is in and out.
+  - `validation` — absorbs today's `## Watch` and `## Done when`: what to watch while doing
+    it and how you know it is done.
+- **Steps keep their single `content`** — a step is too small to carry three fields.
+- **Proposed additional fields, pending owner ruling** (raised per 0063.1's own brief):
+  - `wall` (optional string) — `dispatch_preflight::explicit_wall_id` today SCRAPES
+    `**Wall:** <id>` out of the prose; a typed field deletes a prose-parse from the dispatch
+    path. The strongest candidate: it is already load-bearing data pretending to be text.
+  - `origin` (optional string) — what raised the task: a run id, a park report, a human.
+    0064 (reconcile) and 0075 (task port) both write tasks; typed origin makes board
+    provenance queryable instead of archaeological.
+  - `closed` (optional date) — `raised` has no counterpart; status transitions currently
+    lose their date. Cheap now, feeds stats (0120) later.
+- **Migration is mechanical and total**: live board and `archived/` in one commit, headers
+  split into the three fields, remainder staying in `content`. The parser stays
+  single-version (rejects anything but the current `schema-version` — existing doctrine),
+  so no dual-read window: migrate and bump together.
+- **The markdown importer follows**: `task::markdown::import` maps the same headers to the
+  same fields.
+- **One concatenation order, defined once**: wherever the document is consumed as text
+  (`tasks show`, run materialisation when 0061 lands, the detail pane after 0063.2),
+  sections render as content, scope, validation — labeled, in that order.
+
+## Watch
+
+- Zero prose loss is the migration gate: for every document, the whitespace-normalized
+  concatenation of the three new fields must equal the old `content`. Script it; do not
+  eyeball 140 files.
+- `deny_unknown_fields` means every writer (split, archive, provider round-trip, the task
+  port) must move in the same change or start rejecting its own output.
+- 0063.2 renders whatever fields exist — coordinate, no hard dependency either direction.
+
+## Done when
+
+Schema 0.2 round-trips through serialize/parse; the whole board (live and archived) is
+migrated with the zero-loss check green; a 0.1 document is rejected naming both versions;
+`ctx tasks show` prints the three fields as labeled sections in the canonical order; the
+`**Wall:**` prose scrape is deleted if the `wall` field is accepted, and each proposed field
+has an explicit accept/reject recorded here.
+"""
+
+[relations]
+parent = "0063"

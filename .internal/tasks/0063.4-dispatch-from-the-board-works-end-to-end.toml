@@ -1,0 +1,64 @@
+schema-version = "0.1"
+key = "0063.4"
+title = "Dispatch from the board starts a bound run, end to end"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Fourth child of 0063. The `d` key's refusal half works and is tested (unsynced board,
+unresolved task, unmet dependencies — each refuses with its reason in the footer). The
+success half does not yet produce a running, task-bound run.
+
+## Where it stops today (verified in source, 2026-08-06)
+
+`dispatch_selected_task` -> `open_spawn_modal_for_task` seeds the spawn modal with a BLANK
+first line (the trait id the modal contract requires) plus `--set` / `task=<key>`.
+From there:
+
+- Submitting the seed unedited fails clap (missing trait positional) with only a footer
+  message — dispatch dead-ends unless the owner hand-types a trait id from memory.
+- Worse: `resolve_dispatch_task` yields `None` — never a hard error — when the chosen trait
+  declares no `task-board` resource. The run then STARTS, silently unbound: no ledger task
+  key, no digest, never joined, never in-flight on the board. A dispatch that silently
+  drops its task is exactly the dishonesty this product exists to remove.
+
+Diagnose first: reproduce one live board dispatch before fixing, in case a third seam
+(the two-line `--set` form, the join keying) is also broken in practice.
+
+## Decisions
+
+- **The modal opens runnable.** Dispatch derives the trait id instead of demanding it from
+  memory: a config default (e.g. a `dispatch-trait` key beside the board config), seeded
+  into the modal and editable before submit. Absent config, the modal opens as today but
+  its comment names exactly what is missing and where to set it. (Derivation source is an
+  owner call — config default is the proposal; a per-task declared trait is the richer
+  alternative if wanted.)
+- **An explicit `task=` that cannot bind refuses.** When a task value was passed and the
+  trait cannot carry it (no `task-board` resource, resolve failure), dispatch refuses with
+  a sentence naming the trait and the missing resource — at run dispatch, not only in the
+  dashboard (0061's rule: a UI-only check is bypassed by the CLI). No `task=` given stays
+  no error.
+- **The observable definition of "works"**: after `d` + submit, the run appears under the
+  task's in-flight group on the next join tick, and the run's ledger carries the task key.
+
+## Watch
+
+- The dependency-refusal path and its tests must survive untouched — this task adds the
+  success path, it does not relitigate the refusals.
+- The forbidden-flag filter and clap-validation contract of `apply_spawn_request` stay the
+  single gate; dispatch seeds arguments, it never grows a second spawn path.
+- 0061 (materialise + digest) is still open; do not smuggle its scope in here. Binding =
+  ledger task key + join; the digest lands with 0061.
+
+## Done when
+
+With the default trait configured, `d` on a ready task starts a run without editing the
+modal; the task shows in-flight within a tick and the ledger names the task key; an
+explicit `task=` against a trait that cannot bind it refuses, naming the trait and the
+missing resource, from both the dashboard and a bare `ctx traits run`; the existing
+refusal tests still pass.
+"""
+
+[relations]
+parent = "0063"

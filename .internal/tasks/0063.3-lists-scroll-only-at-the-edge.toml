@@ -1,0 +1,66 @@
+schema-version = "0.1"
+key = "0063.3"
+title = "Lists scroll only at the edge, and the shared kit enforces it"
+status = "ready"
+raised = "2026-08-06"
+content = """
+
+
+Third child of 0063, filed against every list screen, not just TASKS. Arrow keys currently
+move the whole viewport with the cursor instead of walking the cursor within a stable
+window until it reaches the edge.
+
+## Diagnosis (verified in source, 2026-08-06)
+
+The shared kit already exists — `tui_kit::ScrollList` / `tui_kit::ViewportScroll`, and every
+scrolling surface (dashboard's five screens, trait editor, run view, story view) already
+routes through it. The defect is INSIDE the kit: `ScrollList::clamp`'s `rows == usize::MAX`
+path computes `max_offset = len - rows.min(len)`, which is always 0, and zeroes the offset —
+directly contradicting its own doc comment ("only clamps selected/offset to the list
+length, deferring the visible window"). Two callers hit that path constantly:
+
+- `State::move_selection` -> `move_by(delta, usize::MAX)` — every arrow key;
+- `rebuild_visible_tasks` -> `set_len` — every 2s snapshot tick while the board is synced
+  (`apply_snapshots`), even with no key pressed.
+
+After the offset is zeroed, the draw pass's `visible_range(rows)` re-clamps and lands the
+selection on the LAST visible row whenever `selected >= rows` — the cursor is glued to the
+bottom edge, so every up/down (and on TASKS, every 2s tick) shifts the window.
+
+## Decisions
+
+- **The invariant, stated once in the kit**: a selection move scrolls the viewport only when
+  the selection would leave the visible window; otherwise the offset does not change.
+  `set_len` and reloads clamp to bounds but preserve the offset. The doc comment becomes
+  true rather than being rewritten to match the bug.
+- **Fix in `tui_kit`, not per screen** — one change repairs SESSIONS, TRAITS, MERGES, TRUST
+  and TASKS together. No screen grows private offset arithmetic; that is the "shared logic"
+  half of the ask, and it is enforced by review, with the kit tests as the single home for
+  scroll semantics.
+- **Kit-level tests encode the invariant**: mid-window move leaves the offset untouched;
+  a move at the bottom edge advances the offset by exactly the overflow; `set_len` with an
+  unchanged or shorter length keeps the window; the draw-time re-clamp is idempotent when
+  the selection is already visible.
+
+## Watch
+
+- The draw-time re-clamp against the real rect height is load-bearing (resize, and
+  key-handling never knows the pane height — `move_selection`'s own comment). Keep it;
+  make it stable, not gone.
+- `Home`/`End`/`PgUp`/`PgDn` and `position_text` semantics are unchanged.
+- `ViewportScroll::is_at_bottom` feeds follow mode (P470: derive from the RESULTING
+  position, never the key direction) — the offset-preservation change must not flip
+  follow-mode behavior on the sessions progress pane.
+- Archived 0006 ("scroll tracks the key, not the frame") and 0014 ("journey scroll does not
+  jump to top") are the same disease in older skins — check their fixtures still hold.
+
+## Done when
+
+On any list longer than its pane, arrows walk the cursor within a stable window and the
+view scrolls only at the edge; the TASKS screen's 2s tick no longer moves the window under
+a stationary cursor; the kit tests above are green; the `usize::MAX` contradiction between
+`clamp`'s code and doc comment is gone.
+"""
+
+[relations]
+parent = "0063"
