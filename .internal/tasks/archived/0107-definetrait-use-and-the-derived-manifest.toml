@@ -1,7 +1,7 @@
 schema-version = "0.1"
 key = "0107"
 title = "defineTrait, use*, and the derived manifest"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
 content = """
 

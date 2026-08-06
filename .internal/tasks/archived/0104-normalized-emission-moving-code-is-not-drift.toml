@@ -1,7 +1,7 @@
 schema-version = "0.1"
 key = "0104"
 title = "normalized emission: moving code is not drift"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
 content = """
 
