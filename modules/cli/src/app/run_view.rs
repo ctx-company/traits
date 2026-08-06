@@ -359,6 +359,27 @@ enum StreamRowKind {
     ModelText,
 }
 
+/// Merge an incoming (usually ledger-derived) title lifecycle into the
+/// panel's: a resolved title never regresses to a pending state. The title
+/// worker paints `Resolved` the moment the narrator answers, while the ledger
+/// stays `in-flight` until the next frame-boundary flush — the whole first
+/// frame — so a raw assignment on refresh clobbered the fresh title straight
+/// back to "(Generating session title…)". Keeping a resolved title is always
+/// faithful: the ledger lifecycle can move `in-flight` forward but never OUT
+/// of `Resolved`.
+fn merge_title_state(
+    current: &mut Option<ctx_traits_core::procedure::session::SessionTitleState>,
+    incoming: Option<ctx_traits_core::procedure::session::SessionTitleState>,
+) {
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let current_resolved = matches!(current, Some(SessionTitleState::Resolved { .. }));
+    let incoming_resolved = matches!(incoming, Some(SessionTitleState::Resolved { .. }));
+    if current_resolved && !incoming_resolved {
+        return;
+    }
+    *current = incoming;
+}
+
 impl RunPanel {
     pub(crate) fn new(
         trait_name: String,
@@ -549,7 +570,10 @@ impl RunPanel {
             return;
         };
         state.session = session.clone();
-        state.title_state = session.provenance.session_title.clone();
+        merge_title_state(
+            &mut state.title_state,
+            session.provenance.session_title.clone(),
+        );
         state.title_generation_live = generation_live;
         apply_ledger_seed(&mut state, ledger_path);
         if terminal && !state.observer_finished {
@@ -717,7 +741,15 @@ impl RunPanel {
         state.session = session.clone();
         // Frame refreshes read the authoritative ledger lifecycle. This also
         // replaces an abandoned final in-flight claim with its terminal state.
-        state.title_state = session.provenance.session_title.clone();
+        // Merged, not assigned: the title worker paints `Resolved` the moment
+        // the narrator answers, while the ledger stays `in-flight` until the
+        // next frame-boundary flush — for the whole first frame, so a raw
+        // assignment here clobbered the fresh title straight back to
+        // "(Generating session title…)".
+        merge_title_state(
+            &mut state.title_state,
+            session.provenance.session_title.clone(),
+        );
         let display = state.live.current_display();
         let mut narration = narration_for(&state.session, display.clone());
         if display.finished
@@ -976,7 +1008,7 @@ impl RunPanel {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        state.title_state = title_state;
+        merge_title_state(&mut state.title_state, title_state);
         render_locked(&mut state);
     }
 
@@ -1432,6 +1464,49 @@ fn entered_step_text(view: &RunView, phase: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_resolved_title_never_regresses_to_a_pending_ledger_state() {
+        use ctx_traits_core::procedure::session::SessionTitleState;
+        let mut current = Some(SessionTitleState::Resolved {
+            attempts: 1,
+            title: "answered".to_string(),
+        });
+        // A frame refresh mid-first-frame still reads `in-flight` from the
+        // ledger — it must not clobber the worker-painted title.
+        merge_title_state(
+            &mut current,
+            Some(SessionTitleState::InFlight {
+                owner: "owner".to_string(),
+                attempts: 1,
+            }),
+        );
+        assert!(matches!(
+            current,
+            Some(SessionTitleState::Resolved { ref title, .. }) if title == "answered"
+        ));
+        merge_title_state(&mut current, None);
+        assert!(matches!(current, Some(SessionTitleState::Resolved { .. })));
+        // Every forward move still lands: pending states advance freely, and
+        // a resolved value may be replaced by a newer resolved value.
+        let mut pending = Some(SessionTitleState::InFlight {
+            owner: "owner".to_string(),
+            attempts: 1,
+        });
+        merge_title_state(
+            &mut pending,
+            Some(SessionTitleState::Retryable { attempts: 1 }),
+        );
+        assert!(matches!(pending, Some(SessionTitleState::Retryable { .. })));
+        merge_title_state(
+            &mut pending,
+            Some(SessionTitleState::Resolved {
+                attempts: 2,
+                title: "late".to_string(),
+            }),
+        );
+        assert!(matches!(pending, Some(SessionTitleState::Resolved { .. })));
+    }
 
     fn step(key: &str, state: StepState, summary: Option<&str>) -> RunStep {
         RunStep {
