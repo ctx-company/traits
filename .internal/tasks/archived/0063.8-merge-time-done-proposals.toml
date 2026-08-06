@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0063.8"
 title = "A merged run proposes closing its task; one key accepts with the evidence"
-status = "ready"
+status = "done"
 raised = "2026-08-06"
 content = """
 
