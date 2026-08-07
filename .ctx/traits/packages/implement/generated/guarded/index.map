@@ -66,8 +66,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 157,
-    "end": 157
+    "start": 130,
+    "end": 130
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/schema.ts",
@@ -91,13 +91,13 @@
   },
   "sequence:building-body/park-report-clear": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 560,
-    "end": 560
+    "start": 317,
+    "end": 317
   },
   "sequence:building-body/park-report-record": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 565,
-    "end": 565
+    "start": 322,
+    "end": 322
   },
   "sequence:building-body/repo-gates": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
@@ -106,23 +106,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 727,
-    "end": 727
+    "start": 368,
+    "end": 368
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 717,
-    "end": 717
+    "start": 358,
+    "end": 358
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 718,
-    "end": 718
+    "start": 359,
+    "end": 359
   },
   "sequence:ctx-branch-arm-s-13-building-body-18-park-report-record-then/park-report-append": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 566,
-    "end": 566
+    "start": 323,
+    "end": 323
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
@@ -136,18 +136,18 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 716,
-    "end": 716
+    "start": 357,
+    "end": 357
   },
   "sequence:procedure/shipping-status": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 714,
-    "end": 714
+    "start": 355,
+    "end": 355
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 195,
-    "end": 195
+    "start": 168,
+    "end": 168
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
@@ -166,13 +166,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 153,
-    "end": 153
+    "start": 126,
+    "end": 126
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 141,
-    "end": 141
+    "start": 114,
+    "end": 114
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
@@ -181,18 +181,18 @@
   },
   "slot:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 711,
-    "end": 711
+    "start": 352,
+    "end": 352
   },
   "slot:shipping-stage-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 712,
-    "end": 712
+    "start": 353,
+    "end": 353
   },
   "slot:shipping-status": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 704,
-    "end": 704
+    "start": 345,
+    "end": 345
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/variants/quick/slot.ts",
