@@ -224,6 +224,14 @@ pub struct StartRequest<'a> {
     /// anyway. Recorded in provenance rather than left silent — see
     /// [`ctx_traits_core::procedure::session::DependencyOverrideProvenance`].
     pub override_dependencies: bool,
+    /// `--task-dispatch`: bind the `task` input through the trait's declared
+    /// `task-board` resource, with the wall/closed-status/dependency
+    /// preflights and worktree materialisation that binding carries. Set by
+    /// the `[tasks] dispatch-trait` flow (the dashboard TASKS screen's
+    /// dispatch seed); without it a `task` input is plain text like any
+    /// other port value — task binding is never inferred from a trait id or
+    /// port name.
+    pub task_dispatch: bool,
     /// P460 resolved automatic-landing intent, already validated by the
     /// caller against an effective worktree. Written straight into this
     /// session's initial persisted `Provenance` (never a post-start ledger
@@ -713,22 +721,39 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         }
     }
 
-    // Standing-wall pre-flight (P414): before any assignment, worktree, or
-    // session exists, refuse to dispatch an `implement-*` task whose own
-    // task file carries an explicit `**Wall:**` label matching a BLOCKED
-    // run's typed park report already standing in this repository's
-    // ledgers. Reads `port:task` from the values parsed above.
-    let owned_task_value = crate::run_session::task_value_from_pairs(
-        initial_values
-            .iter()
-            .map(|value| (value.ref_text.as_str(), &value.value)),
-    );
+    // Task binding is OPT-IN per dispatch (`--task-dispatch`, set by the
+    // `[tasks] dispatch-trait` flow): only then is the `task` input read as
+    // a task-board key and put through the wall/closed-status/dependency
+    // preflights and worktree materialisation below. On every other
+    // dispatch a `task` input is plain text with whatever semantics the
+    // trait gives it — binding is never inferred from a trait id or port
+    // name.
+    let owned_task_value = request
+        .task_dispatch
+        .then(|| {
+            crate::run_session::task_value_from_pairs(
+                initial_values
+                    .iter()
+                    .map(|value| (value.ref_text.as_str(), &value.value)),
+            )
+        })
+        .flatten();
+    if request.task_dispatch && owned_task_value.is_none() {
+        let message =
+            "--task-dispatch requires a task value (--set task=<key>) to bind".to_string();
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            message.clone(),
+        );
+        return invalid_request("run.task", message);
+    }
     let task_value = owned_task_value.as_deref();
     // 0061: resolve the dispatched task through the `TaskProvider` interface
-    // exactly once — the wall, closed-status, and dependency preflights
-    // below, plus this run's later worktree materialisation, all read the
-    // SAME document, so an edit landing mid-dispatch can never split "what
-    // was checked" from "what was run".
+    // exactly once — the wall (P414), closed-status, and dependency
+    // preflights below, plus this run's later worktree materialisation, all
+    // read the SAME document, so an edit landing mid-dispatch can never
+    // split "what was checked" from "what was run".
     let dispatch_resolution = crate::dispatch_preflight::resolve_dispatch_task(
         &loaded.trait_ref,
         &loaded.trait_root,
@@ -741,11 +766,10 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             error.to_string(),
         );
     })?;
-    // 0063.4: an explicit `task=` that cannot bind through the trait's
-    // `task-board` resource refuses at dispatch — the same rule the
+    // 0063.4: a requested task dispatch whose `task=` cannot bind through
+    // the trait's `task-board` resource refuses — the same rule the
     // dashboard's TASKS screen enforces (0061), enforced here too since a
-    // check that only lives in the UI is bypassed by the bare CLI. No
-    // `task=` given, or a non-`implement-*` trait, is never refused.
+    // check that only lives in the UI is bypassed by the bare CLI.
     let dispatch_task = match dispatch_resolution {
         crate::dispatch_preflight::DispatchTaskResolution::NotRequested => None,
         crate::dispatch_preflight::DispatchTaskResolution::Bound(task) => Some(*task),
@@ -1744,6 +1768,7 @@ mod startup_observer_tests {
                 })),
                 strict_loops: false,
                 override_dependencies: false,
+                task_dispatch: false,
                 merge_rung: None,
             });
             if expect_success {
@@ -1782,6 +1807,7 @@ mod startup_observer_tests {
                 startup_observer: None,
                 strict_loops: false,
                 override_dependencies: false,
+                task_dispatch: false,
                 merge_rung: None,
             })
             .expect("startup fixture starts")
@@ -1861,6 +1887,7 @@ mod startup_observer_tests {
             })),
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: false,
             merge_rung: None,
         })
         .unwrap_err();
@@ -2239,6 +2266,7 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: false,
             merge_rung: None,
         })
         .expect("awaiting fixture starts");
@@ -2417,6 +2445,7 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: true,
             merge_rung: None,
         })
         .unwrap_err();
@@ -2451,6 +2480,7 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: true,
+            task_dispatch: true,
             merge_rung: None,
         })
         .expect("override dispatches despite the unmet dependency");
@@ -2534,12 +2564,13 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: true,
             merge_rung: None,
         }
     }
 
     #[test]
-    fn explicit_task_against_a_boardless_implement_trait_refuses_naming_trait_and_resource() {
+    fn requested_task_dispatch_against_a_boardless_trait_refuses_naming_trait_and_resource() {
         if !run_in_isolated_child() {
             return;
         }
@@ -2553,14 +2584,38 @@ mod startup_observer_tests {
     }
 
     #[test]
-    fn no_task_value_starts_a_boardless_implement_trait_without_refusal() {
+    fn requested_task_dispatch_without_a_task_value_refuses() {
         if !run_in_isolated_child() {
             return;
         }
         let root = child_test_root();
         let trait_path = boardless_implement_fixture(&root);
-        start(boardless_start_request(&trait_path, Vec::new()))
-            .expect("no task= given is never refused");
+        let refused = start(boardless_start_request(&trait_path, Vec::new())).unwrap_err();
+        assert!(
+            refused.to_string().contains("--task-dispatch requires"),
+            "{refused}"
+        );
+    }
+
+    /// The inverse of the refusals above, and the whole point of making task
+    /// binding opt-in: WITHOUT `--task-dispatch`, a `task=` value is plain
+    /// port text — no board resolution, no refusal, regardless of trait id
+    /// or the value's shape.
+    #[test]
+    fn plain_dispatch_passes_a_prose_task_value_through_without_binding() {
+        if !run_in_isolated_child() {
+            return;
+        }
+        let root = child_test_root();
+        let trait_path = boardless_implement_fixture(&root);
+        let input_values =
+            parse_initial_sets(&["task=free-form prose, not a board key".to_string()]).unwrap();
+        let mut request = boardless_start_request(&trait_path, input_values);
+        request.task_dispatch = false;
+        let outcome = start(request).expect("an unrequested task binding never refuses");
+        let task = crate::run_session::session_task(&outcome.session)
+            .expect("the task port accepted the prose value");
+        assert_eq!(task, "free-form prose, not a board key");
     }
 
     #[test]
@@ -2600,6 +2655,7 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: true,
             merge_rung: None,
         })
         .expect("resolvable task dispatches");
@@ -2691,6 +2747,7 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
+            task_dispatch: true,
             merge_rung: None,
         })
         .expect("worktree dispatch of a resolvable task succeeds");

@@ -1,16 +1,25 @@
-//! Dispatch-time pre-flight for the `implement-*` family: standing walls
-//! (P414), closed-status tasks, and unmet dependencies (0061).
+//! Dispatch-time pre-flight for explicitly requested task dispatches:
+//! standing walls (P414), closed-status tasks, and unmet dependencies
+//! (0061).
 //!
-//! Before a session, worktree, or first frame exists, refuse to dispatch a
-//! task whose own task file carries a typed `wall` id (0063.1) when a
-//! repository-scoped ledger already records a BLOCKED `implement-*` run
-//! whose typed park report cites that exact wall id — and no later run of
-//! that wall's ORIGINATING task has since completed. The task value resolves
-//! through the [`ctx_traits_core::task::provider::TaskProvider`] interface
-//! (0060/0061) against the trait's declared `task-board` directory — never a
-//! private filename/stem/prefix chain of this module's own — and the whole
-//! resolved document is that task's evidence. An id is never inferred from
-//! prose similarity — only an explicit, identical `wall` id ever blocks a
+//! Task binding is OPT-IN per dispatch: it runs only when the caller
+//! explicitly requests it (`--task-dispatch`, which the `[tasks]
+//! dispatch-trait` flow supplies) — never inferred from a trait id, a port
+//! name, or any other naming convention. A dispatch that does not request
+//! it passes its `task` input through as plain text like any other port
+//! value.
+//!
+//! When requested: before a session, worktree, or first frame exists,
+//! refuse to dispatch a task whose own task file carries a typed `wall` id
+//! (0063.1) when a repository-scoped ledger already records a BLOCKED
+//! task-dispatched run whose typed park report cites that exact wall id —
+//! and no later run of that wall's ORIGINATING task has since completed.
+//! The task value resolves through the
+//! [`ctx_traits_core::task::provider::TaskProvider`] interface (0060/0061)
+//! against the trait's declared `task-board` directory — never a private
+//! filename/stem/prefix chain of this module's own — and the whole resolved
+//! document is that task's evidence. An id is never inferred from prose
+//! similarity — only an explicit, identical `wall` id ever blocks a
 //! sibling. [`resolve_dispatch_task`] is the single read every preflight
 //! (wall, closed-status, dependency) and dispatch materialisation shares.
 
@@ -23,8 +32,6 @@ use ctx_traits_core::task::graph::DerivedStatus;
 use ctx_traits_core::task::provider::{ResolvedTask, TaskProvider};
 
 const TASK_BOARD_RESOURCE_ID: &str = "task-board";
-const IMPLEMENT_FAMILY_ID: &str = "implement";
-const IMPLEMENT_FAMILY_PREFIX: &str = "implement-";
 
 fn provider_error(error: ctx_traits_core::task::provider::ProviderError) -> crate::Error {
     crate::Error::Usage {
@@ -47,12 +54,6 @@ pub fn refusal_message(standing: &StandingWall) -> String {
         "wall {} standing since run {} (task {})",
         standing.wall_id, standing.origin_run_id, standing.origin_task
     )
-}
-
-/// Only `implement-*` traits participate in wall preflight — every other
-/// trait dispatches unaffected.
-pub fn is_implement_family(trait_id: &str) -> bool {
-    trait_id == IMPLEMENT_FAMILY_ID || trait_id.starts_with(IMPLEMENT_FAMILY_PREFIX)
 }
 
 /// A task resolved through the `TaskProvider` interface for dispatch-time
@@ -78,27 +79,24 @@ pub struct DispatchTask {
 }
 
 /// Resolve `task_value` through the trait's declared `task-board` resource
-/// via the [`TaskProvider`] interface: trait is `implement-*` → `task-board`
-/// resource → board directory → `FilesTaskBoard::resolve`/`get`. A trait
-/// outside the `implement-*` family, or a dispatch carrying no task value at
-/// all, yields [`DispatchTaskResolution::NotRequested`] — never a refusal,
-/// since a plain `task` input port may carry unrelated semantics on any
-/// other trait (0063.4). An `implement-*` trait dispatched WITH an explicit
-/// task value that cannot bind — no declared `task-board` resource, an
-/// unreadable/absent board, a task value matching no live task, or a value
-/// resolving only to an archived document — yields
-/// [`DispatchTaskResolution::CannotBind`]: a silently unbound run is exactly
-/// the dishonesty this product exists to remove. This is the single read
-/// every preflight (wall, closed-status, dependency) and dispatch
-/// materialisation shares.
+/// via the [`TaskProvider`] interface: `task-board` resource → board
+/// directory → `FilesTaskBoard::resolve`/`get`. Call this ONLY for a
+/// dispatch that explicitly requested task binding (`--task-dispatch`) —
+/// never speculatively: on every other dispatch a `task` input port is
+/// plain text with whatever semantics the trait gives it (0063.4). A
+/// dispatch carrying no task value at all yields
+/// [`DispatchTaskResolution::NotRequested`]. An explicit task value that
+/// cannot bind — no declared `task-board` resource, an unreadable/absent
+/// board, a task value matching no live task, or a value resolving only to
+/// an archived document — yields [`DispatchTaskResolution::CannotBind`]: a
+/// silently unbound task dispatch is exactly the dishonesty this product
+/// exists to remove. This is the single read every preflight (wall,
+/// closed-status, dependency) and dispatch materialisation shares.
 pub fn resolve_dispatch_task(
     trait_ref: &ctx_traits_core::Trait,
     trait_root: &Utf8Path,
     task_value: Option<&str>,
 ) -> crate::Result<DispatchTaskResolution> {
-    if !is_implement_family(trait_ref.id.as_str()) {
-        return Ok(DispatchTaskResolution::NotRequested);
-    }
     let Some(task_value) = task_value else {
         return Ok(DispatchTaskResolution::NotRequested);
     };
@@ -160,10 +158,10 @@ pub fn resolve_dispatch_task(
 }
 
 /// The three-state outcome of [`resolve_dispatch_task`]: a dispatch never
-/// requested task binding at all, a dispatch that bound successfully, or an
-/// `implement-*` dispatch that named a task value it could not bind — the
-/// state that must become a hard refusal at the call site rather than a
-/// silent, unbound start (0063.4).
+/// requested task binding at all, a dispatch that bound successfully, or a
+/// requested task dispatch that named a value it could not bind — the state
+/// that must become a hard refusal at the call site rather than a silent,
+/// unbound start (0063.4).
 #[derive(Debug, Clone)]
 pub enum DispatchTaskResolution {
     NotRequested,
@@ -321,8 +319,8 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
     )
 }
 
-/// Scan this repository's session ledgers for a BLOCKED `implement-*` run
-/// whose park report cites `wall_id`, and that has not since been cleared by
+/// Scan this repository's session ledgers for a BLOCKED run whose park
+/// report cites `wall_id`, and that has not since been cleared by
 /// a later completed run of the same originating task. Ledgers with no
 /// typed park report (legacy blocked runs, or runs blocked for unrelated
 /// reasons) are ignored. `dispatched_task` is the task value about to be
@@ -337,12 +335,13 @@ pub fn dependency_refusal_message(task_key: &str, unmet: &[UnmetDependency]) -> 
 /// ledger is first resolved to a [`crate::run_summary::RunSummary`] (a fresh
 /// sidecar answers in two `stat`s plus a small JSON read; a missing or
 /// stale one falls back to a full parse, so behavior is identical whether
-/// or not a sidecar exists) and only rows whose summary is genuinely
-/// `implement-*` and Completed-or-Blocked — the only two states this
-/// preflight ever inspects — are deep-parsed a second time for the frame
-/// history (`session_task`, park report, terminal epoch) a summary cannot
-/// carry. Every other row (typically most of a diverse ledger store) is
-/// skipped without ever touching its frame history.
+/// or not a sidecar exists) and only rows whose summary is
+/// Completed-or-Blocked — the only two states this preflight ever inspects
+/// — are deep-parsed a second time for the frame history (`session_task`,
+/// park report, terminal epoch) a summary cannot carry. A summary carries
+/// no task evidence, so status is the only cheap filter; a deep-parsed
+/// session that never carried a `port:task` value simply matches no wall in
+/// [`standing_wall_in_sessions`].
 pub fn find_standing_wall(
     wall_id: &str,
     dispatched_task: &str,
@@ -352,9 +351,6 @@ pub fn find_standing_wall(
         let Ok(summary) = crate::run_summary::read_summary_or_ledger(&path) else {
             continue;
         };
-        if !is_implement_family(&summary.trait_id) {
-            continue;
-        }
         if !matches!(summary.status, Status::Completed | Status::Blocked) {
             continue;
         }
@@ -384,10 +380,10 @@ fn terminal_epoch(session: &Session) -> Option<u64> {
         .map(|outcome| outcome.recorded_at_epoch)
 }
 
-/// `sessions` is already filtered to `implement-*` + Completed-or-Blocked by
+/// `sessions` is already filtered to Completed-or-Blocked by
 /// [`find_standing_wall`]'s summary-first scan; this function does not
-/// re-check either condition, since every element it receives already
-/// satisfies both.
+/// re-check that condition, since every element it receives already
+/// satisfies it.
 fn standing_wall_in_sessions(
     sessions: &[Session],
     wall_id: &str,
@@ -396,9 +392,8 @@ fn standing_wall_in_sessions(
     // Latest completion epoch per task_value, used to decide whether a
     // blocked run's wall has since been cleared — keyed on task alone (not
     // `(trait_id, task_value)`): the wall marks a TASK as blocked, and an
-    // approved completion of that same task through any implement-family
-    // variant (quick, default, smart, strict, phase) clears it, since the
-    // task is not tied to which variant last ran it.
+    // approved completion of that same task through any trait clears it,
+    // since the task is not tied to which trait last ran it.
     let mut latest_completed: BTreeMap<String, u64> = BTreeMap::new();
     for session in sessions {
         if session.status != Status::Completed {
@@ -668,41 +663,32 @@ mod tests {
         ));
     }
 
+    /// Binding is caller-requested, never trait-id-inferred: the resolver
+    /// treats every trait identically, and a boardless trait named a task
+    /// value refuses regardless of what the trait is called.
     #[test]
-    fn resolve_dispatch_task_not_requested_on_a_non_implement_trait_even_with_a_task_value() {
-        let dir = tempfile_dir();
-        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
-        let text = "id = \"other\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n";
-        let trait_ref = ctx_traits_core::encoding::decode_trait(
-            ctx_traits_core::encoding::Encoding::Toml,
-            text,
-        )
-        .expect("fixture trait decodes");
-        assert!(matches!(
-            resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap(),
-            DispatchTaskResolution::NotRequested
-        ));
-    }
-
-    #[test]
-    fn resolve_dispatch_task_cannot_bind_when_the_trait_declares_no_task_board() {
-        let dir = tempfile_dir();
-        let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
-        let text = "id = \"implement-quick\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n";
-        let trait_ref = ctx_traits_core::encoding::decode_trait(
-            ctx_traits_core::encoding::Encoding::Toml,
-            text,
-        )
-        .expect("fixture trait decodes");
-        match resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap() {
-            DispatchTaskResolution::CannotBind { trait_id, reason } => {
-                assert_eq!(trait_id, "implement-quick");
-                assert!(reason.contains("task-board"));
-                let message = cannot_bind_refusal_message(&trait_id, &reason);
-                assert!(message.contains("implement-quick"));
-                assert!(message.contains("task-board"));
+    fn resolve_dispatch_task_cannot_bind_on_any_boardless_trait_regardless_of_id() {
+        for id in ["other", "implement-quick"] {
+            let dir = tempfile_dir();
+            let trait_root = Utf8Path::from_path(dir.as_path()).unwrap();
+            let text = format!(
+                "id = \"{id}\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n"
+            );
+            let trait_ref = ctx_traits_core::encoding::decode_trait(
+                ctx_traits_core::encoding::Encoding::Toml,
+                &text,
+            )
+            .expect("fixture trait decodes");
+            match resolve_dispatch_task(&trait_ref, trait_root, Some("0050")).unwrap() {
+                DispatchTaskResolution::CannotBind { trait_id, reason } => {
+                    assert_eq!(trait_id, id);
+                    assert!(reason.contains("task-board"));
+                    let message = cannot_bind_refusal_message(&trait_id, &reason);
+                    assert!(message.contains(id));
+                    assert!(message.contains("task-board"));
+                }
+                other => panic!("expected CannotBind for {id}, got {other:?}"),
             }
-            other => panic!("expected CannotBind, got {other:?}"),
         }
     }
 

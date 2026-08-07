@@ -6472,9 +6472,8 @@ fn latest_blocked_split_source(state: &State, task_key: &str) -> Option<SplitSou
         let Ok(session) = ctx_traits_io::run_session::read_run_session(&row.ledger_path) else {
             continue;
         };
-        if !ctx_traits_io::dispatch_preflight::is_implement_family(&session.trait_id) {
-            continue;
-        }
+        // No trait-id filter: the join above already scopes rows to sessions
+        // that carried THIS task key, and any trait can be task-dispatched.
         let epoch = session
             .last_drive_outcome
             .as_ref()
@@ -6964,10 +6963,14 @@ fn open_spawn_modal_for_task(state: &mut State, key: &str) {
 /// first non-comment line — or, absent config, a leading comment naming
 /// exactly the missing key so the owner is never left guessing.
 fn spawn_modal_seed(dispatch_trait: Option<&str>, key: &str) -> String {
+    // `--task-dispatch` is what makes this a BOARD dispatch: without it the
+    // run treats `task=<key>` as plain port text and never binds, preflights,
+    // or materialises the board document. This seed is the one place the
+    // flow supplies it automatically.
     match dispatch_trait {
-        Some(trait_id) => format!("{trait_id}\n--set\ntask={key}\n"),
+        Some(trait_id) => format!("{trait_id}\n--task-dispatch\n--set\ntask={key}\n"),
         None => format!(
-            "# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--set\ntask={key}\n"
+            "# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--task-dispatch\n--set\ntask={key}\n"
         ),
     }
 }
@@ -10927,6 +10930,7 @@ mod tests {
         let seed = spawn_modal_seed(Some("implement-quick"), "0063");
         let mut lines = seed.lines();
         assert_eq!(lines.next(), Some("implement-quick"));
+        assert_eq!(lines.next(), Some("--task-dispatch"));
         assert_eq!(lines.next(), Some("--set"));
         assert_eq!(lines.next(), Some("task=0063"));
     }
@@ -10945,7 +10949,10 @@ mod tests {
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(str::to_string)
             .collect();
-        assert_eq!(user_args, vec!["implement-quick", "--set", "task=0063"]);
+        assert_eq!(
+            user_args,
+            vec!["implement-quick", "--task-dispatch", "--set", "task=0063"]
+        );
         // See `every_visible_traits_command_has_a_registry_entry`
         // (presentation.rs): building the derived Clap tree overflows
         // `cargo test`'s default per-test thread stack in a debug build.
@@ -10961,7 +10968,7 @@ mod tests {
                         ..
                     })) => {}
                     other => panic!(
-                        "expected `ctx traits run implement-quick --set task=0063` to parse, got {other:?}"
+                        "expected `ctx traits run implement-quick --task-dispatch --set task=0063` to parse, got {other:?}"
                     ),
                 }
             })
@@ -10978,6 +10985,7 @@ mod tests {
         assert!(comment.starts_with('#'));
         assert!(comment.contains("dispatch-trait"));
         assert_eq!(lines.next(), Some(""));
+        assert_eq!(lines.next(), Some("--task-dispatch"));
         assert_eq!(lines.next(), Some("--set"));
         assert_eq!(lines.next(), Some("task=0063"));
     }

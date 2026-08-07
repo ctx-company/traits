@@ -313,9 +313,10 @@ argv = ["git", "commit", "--allow-empty", "-m", "{slot:commit-message}"]
 /// must control `on-exhausted` and the reviewer's schema directly rather
 /// than inheriting whatever the checked-in packages currently declare.
 ///
-/// The trait id must start with `implement-` — `is_implement_family`
-/// (`modules/io/src/dispatch_preflight.rs`) gates wall preflight
-/// participation on that literal prefix.
+/// Every dispatch in this suite passes `--task-dispatch` — wall preflight
+/// participation is explicitly requested per dispatch
+/// (`modules/io/src/dispatch_preflight.rs`), never inferred from the trait
+/// id.
 fn fixture_trait_toml(id: &str, max_iterations: u32, on_exhausted: &str) -> String {
     format!(
         r#"id = "{id}"
@@ -619,6 +620,7 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "traits",
             "run",
             "implement-fixture-park-blocked",
+            "--task-dispatch",
             "--set",
             "task=P900",
             "--out",
@@ -666,6 +668,7 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "traits",
             "run",
             "implement-fixture-park-blocked",
+            "--task-dispatch",
             "--set",
             "task=P901",
             "--no-drive",
@@ -712,6 +715,7 @@ fn continuing_exhaustion_lands_the_commit() {
             "traits",
             "run",
             "implement-fixture-park-continue",
+            "--task-dispatch",
             "--set",
             "task=P950",
             "--out",
@@ -1087,6 +1091,7 @@ fn drive_dual_review_phase(
             "traits",
             "run",
             trait_id,
+            "--task-dispatch",
             "--set",
             &format!("task={phase}"),
             "--out",
@@ -1264,6 +1269,7 @@ fn guarded_exhaustion_refreshes_project_written_park_report_output() {
             "traits",
             "run",
             id,
+            "--task-dispatch",
             "--set",
             "task=P980",
             "--no-drive",
@@ -1333,6 +1339,7 @@ fn guarded_timed_out_stop_refreshes_project_written_park_report_output() {
             "traits",
             "run",
             id,
+            "--task-dispatch",
             "--set",
             "task=P981",
             "--no-drive",
@@ -1492,6 +1499,7 @@ fn dual_review_call_boundary_refreshes_both_park_report_appends() {
             "traits",
             "run",
             id,
+            "--task-dispatch",
             "--set",
             "task=P972",
             "--no-drive",

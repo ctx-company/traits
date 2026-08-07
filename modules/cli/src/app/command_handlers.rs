@@ -893,6 +893,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             args.no_strict_loops,
                         ),
                         override_dependencies: args.override_dependencies,
+                        task_dispatch: args.task_dispatch,
                         json: args.json,
                         trait_args: &args.trait_args,
                         // `--merge`/`--no-merge` are already rejected above
@@ -950,6 +951,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             args.no_strict_loops,
                         ),
                         override_dependencies: args.override_dependencies,
+                        task_dispatch: args.task_dispatch,
                         json: args.json,
                         verbose: args.verbose,
                         trait_args: &args.trait_args,
@@ -1023,6 +1025,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             args.no_strict_loops,
                         ),
                         override_dependencies: args.override_dependencies,
+                        task_dispatch: args.task_dispatch,
                         json: args.json,
                         verbose: args.verbose,
                         trait_args: &args.trait_args,

@@ -2369,6 +2369,15 @@ pub struct SessionStartArgs {
     #[arg(long = "override-dependencies")]
     pub override_dependencies: bool,
 
+    /// Bind the `task` input through the trait's declared `task-board`
+    /// resource: the value must resolve to a live task on the board, the
+    /// wall/closed-status/dependency preflights run, and the task file is
+    /// materialised into the run's worktree. The `[tasks] dispatch-trait`
+    /// flow sets this automatically; without it a `task` input is plain
+    /// text like any other port value.
+    #[arg(long = "task-dispatch")]
+    pub task_dispatch: bool,
+
     /// Open a scrollable run-story pane at termination, after the merge
     /// report when one runs. Bare `--story` renders the free `default`
     /// level; `--story=assisted` spends narrator model calls — the only

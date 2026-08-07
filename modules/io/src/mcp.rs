@@ -207,6 +207,7 @@ fn ctx_traits_run_start_inner(
     let outcome = crate::run::start(crate::run::StartRequest {
         strict_loops: false,
         override_dependencies: false,
+        task_dispatch: false,
         defer_commands: false,
         trait_file: request.trait_file.as_deref(),
         trait_id,
