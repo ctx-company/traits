@@ -164,7 +164,12 @@ fn install_counting_merger(repo: &Path, marker: &Path) {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\nprintf 'call\\n' >> '{}'\nprintf '{{\\\"result\\\":\\\"proceed\\\"}}\\n'\n",
+            // `%s` with the JSON as an ARGUMENT, never as the printf format:
+            // ubuntu's /bin/sh is dash, whose printf leaves `\"` in a format
+            // string literal — the receipt came out as `{{\\\"result\\\"...`,
+            // invalid JSON, and every merger-dispatching proof parked red on
+            // Linux while Macs (bash printf eats `\"`) stayed green.
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\nprintf 'call\\n' >> '{}'\nprintf '%s\\n' '{{\"result\":\"proceed\"}}'\n",
             marker.display()
         ),
     )
