@@ -443,13 +443,25 @@ impl RatatuiPane {
                         return Err(err);
                     }
                 };
-                let terminal = match inline_terminal(rows) {
+                let mut terminal = match inline_terminal(rows) {
                     Ok(terminal) => terminal,
                     Err(err) => {
                         restore_terminal(PaneScreen::Inline);
                         return Err(err);
                     }
                 };
+                // A freshly built inline terminal has blank diff buffers, so
+                // ratatui never repaints cells the first frame leaves blank —
+                // whatever the caller's scrollback held at the cursor shows
+                // through underneath the new pane's content. `apply_resize`
+                // already clears a replacement terminal for the same reason
+                // (`:643`); construction needs the identical discipline so
+                // the attach/`d`-handoff/startup panes all start on a clean
+                // surface, not just a mid-run resize.
+                if let Err(err) = terminal.clear() {
+                    restore_terminal(PaneScreen::Inline);
+                    return Err(err);
+                }
                 inline_size = Some((columns, rows));
                 terminal
             }
@@ -465,6 +477,22 @@ impl RatatuiPane {
             // instead of letting a raw `eprintln!` scroll the real screen out
             // from under a viewport that has no way to notice it happened.
             ctx_traits_io::decode_diagnostics::begin_capture();
+        }
+        // Discard whatever crossterm already buffered for the reader before
+        // this pane's own pump thread starts draining it. A key struck
+        // during the teardown/rebuild boundary (the previous pane's `leave`
+        // stopped its pump, but nothing owned the tty until this thread
+        // spawns below) would otherwise be delivered to THIS pane on its
+        // very first poll — the pane being entered, not the one the key was
+        // meant for, but still the wrong recipient: it belongs to neither
+        // loop, and forwarding it is what turned a held key into "j/k does
+        // dashboard things and I am back on the list". Bounded to whatever
+        // is already queued (`Duration::ZERO`, never blocks) so genuine
+        // type-ahead struck after this point is unaffected.
+        while event::poll(Duration::ZERO).unwrap_or(false) {
+            if event::read().is_err() {
+                break;
+            }
         }
         let pump = Arc::new(PumpControl {
             stop: AtomicBool::new(false),

@@ -705,6 +705,11 @@ enum Action {
     Trait(TraitAction),
     Merge(MergeAction),
     Task(TaskAction),
+    /// Acknowledges a failed attach (P081/0145): the observer never took the
+    /// terminal, so there is nothing to confirm or roll back — dismissing
+    /// this modal is the only outcome, for either key the `Confirm` widget
+    /// accepts.
+    AttachFailed,
 }
 
 /// TASKS' `S`/`a` write tags (0063): the modal itself carries the typed text
@@ -2543,14 +2548,6 @@ fn run_with_initial_session(
                 state.guide_chat.as_ref(),
                 state.guide_chat_session_id.as_deref(),
             );
-            state.message = Some(match outcome {
-                Ok(Some(message)) => message,
-                Ok(None) => format!(
-                    "detached from {}",
-                    state_short_session(&state, &request.session_id)
-                ),
-                Err(error) => format!("attach failed: {error}"),
-            });
             pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
                 ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
                     path: "<tty>".to_string(),
@@ -2559,6 +2556,21 @@ fn run_with_initial_session(
             })?;
             state.reload();
             last_reload = std::time::Instant::now();
+            // A failed attach never took the terminal — it must not collapse
+            // into the footer message under whatever the screen looked like
+            // mid-teardown. Report it through a blocking modal instead, on
+            // the just-rebuilt (fully redrawn) dashboard pane; a successful
+            // attach or an ordinary detach still reports on the footer.
+            let short_session = state_short_session(&state, &request.session_id);
+            match describe_attach_outcome(&outcome, &short_session) {
+                Ok(footer) => state.message = Some(footer),
+                Err(modal_body) => {
+                    state.modal_host.open(
+                        Action::AttachFailed,
+                        Modal::confirm("attach failed", modal_body),
+                    );
+                }
+            }
             continue;
         }
         if let Some(guide_chat) = state.guide_chat.as_ref() {
@@ -2676,6 +2688,24 @@ fn run_attached_observer(
     let finished = observer.observer_finished();
     observer.close();
     Ok(finished.then(|| "the run finished while attached".to_string()))
+}
+
+/// P081/0145: pure mapping from [`run_attached_observer`]'s outcome to what
+/// the dashboard reports — extracted so it is directly testable without a
+/// `RatatuiPane`. `Ok` is footer text (a successful attach's finish message,
+/// or an ordinary detach note); `Err` is the body of the blocking modal a
+/// failed attach opens instead, since that outcome never took the terminal
+/// and must not collapse into the footer under whatever the screen looked
+/// like mid-teardown.
+fn describe_attach_outcome(
+    outcome: &crate::Result<Option<String>>,
+    short_session: &str,
+) -> Result<String, String> {
+    match outcome {
+        Ok(Some(message)) => Ok(message.clone()),
+        Ok(None) => Ok(format!("detached from {short_session}")),
+        Err(error) => Err(format!("attach failed: {error}")),
+    }
 }
 
 fn handle_key(
@@ -4706,6 +4736,7 @@ fn apply_action(
         Action::Trait(action) => apply_trait_action(state, action, outcome),
         Action::Merge(action) => apply_merge_action(state, action, outcome),
         Action::Task(action) => apply_task_action(state, action, outcome),
+        Action::AttachFailed => Ok(()),
     }
 }
 
@@ -8942,6 +8973,32 @@ mod tests {
 
         let request = state.attach_request.expect("attach request recorded");
         assert_eq!(request.session_id, "A");
+    }
+
+    #[test]
+    fn describe_attach_outcome_finished_and_detach_report_on_the_footer() {
+        assert_eq!(
+            describe_attach_outcome(
+                &Ok(Some("the run finished while attached".to_string())),
+                "A"
+            ),
+            Ok("the run finished while attached".to_string())
+        );
+        assert_eq!(
+            describe_attach_outcome(&Ok(None), "A"),
+            Ok("detached from A".to_string())
+        );
+    }
+
+    #[test]
+    fn describe_attach_outcome_error_reports_a_modal_body_not_a_footer_message() {
+        let outcome: crate::Result<Option<String>> = Err(crate::Error::Command {
+            message: "ledger unreadable".to_string(),
+        });
+        assert_eq!(
+            describe_attach_outcome(&outcome, "A"),
+            Err("attach failed: ledger unreadable".to_string())
+        );
     }
 
     // Classification table (draft test 1), now covering the real mapping
