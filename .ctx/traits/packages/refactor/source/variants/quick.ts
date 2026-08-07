@@ -1,7 +1,6 @@
 import { blockerSchema, INTEGRITY_DOCTRINE, reviewerRole, QUICK_VARIANT_DOCTRINE, scribeRole, workerRole } from "@ctx-traits/agents";
-import { input, intent, port, procedure, schema, sequence, slot, variant } from "@ctx-traits/cdk";
+import { condition, input, intent, port, procedure, schema, sequence, slot, variant } from "@ctx-traits/cdk";
 
-import { guardedCommitTail } from "../sequence/commit.ts";
 import { architectureDialect } from "../resource.ts";
 
 const smart1 = reviewerRole(
@@ -149,31 +148,35 @@ export default variant({
                     Then return the full updated work summary replacing ${workSummary}: what changed (files), how behavior was preserved, gate results, open concerns.`,
                 output: workSummary,
             }),
-            ...guardedCommitTail(gitStatus, [
-                sequence.prompt("summarization", {
-                    title: "Write the commit message (scribe)",
-                    agent: scribe,
-                    text: input.prompt`
+            sequence.command({ id: "check-git-status", title: "Check working tree status", argv: ["git", "status", "--porcelain"], output: gitStatus }),
+            sequence.when("maybe-commit", {
+                if: condition.not(condition.equals(gitStatus, "")),
+                then: [
+                    sequence.prompt("summarization", {
+                        title: "Write the commit message (scribe)",
+                        agent: scribe,
+                        text: input.prompt`
                         The single review pass for the refactor of ${target} has ended and the work is being committed. The reviewer verdict is ${verdict} — read its status field FIRST; a status still set to revise means the one round did not fully satisfy the reviewer: say so plainly.
                         Write the commit message from the checklist ${checklist} and that verdict: subject line "refactor(${target}): <boundary in a few words>", then one paragraph summarizing what changed and behavior preservation.
                         If the verdict carries a forgiveness-reason, add one line noting the forgiven plan-fidelity gap and its reason. If status is revise, end with an "Unresolved reviewer blockers:" section listing each open blocker in one line. Omit both sections when not applicable.
                         Return exactly that message as your output; the runtime injects it into the git commit step.
                         Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.`,
-                    output: commitMessage,
-                }),
-                sequence.command({
-                    id: "git-stage",
-                    title: "Stage all changes except runtime state",
-                    argv: ["git", "add", "-A", "--", ":(exclude).agents/runs"],
-                    output: stageOutput,
-                }),
-                sequence.command({
-                    id: "git-commit",
-                    title: "Commit the refactor",
-                    argv: ["git", "commit", "-m", commitMessage],
-                    output: commitOutput,
-                }),
-            ]),
+                        output: commitMessage,
+                    }),
+                    sequence.command({
+                        id: "git-stage",
+                        title: "Stage all changes except runtime state",
+                        argv: ["git", "add", "-A", "--", ":(exclude).agents/runs"],
+                        output: stageOutput,
+                    }),
+                    sequence.command({
+                        id: "git-commit",
+                        title: "Commit the refactor",
+                        argv: ["git", "commit", "-m", commitMessage],
+                        output: commitOutput,
+                    }),
+                ],
+            }),
         ],
     }),
 });

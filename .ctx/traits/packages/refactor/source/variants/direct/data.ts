@@ -1,5 +1,5 @@
 import { port, slot } from "@ctx-traits/cdk";
-import { directAnnotations } from "./direct-schema.ts";
+import { directAnnotations } from "./schema.ts";
 
 export const directAnnotationsSlot = slot({
     id: "annotations",

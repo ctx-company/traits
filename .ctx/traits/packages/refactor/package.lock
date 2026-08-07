@@ -18,7 +18,35 @@ resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c92
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/refactor-default/SKILL.md"
-digest = "sha256:ca5ba9d975d2fe51c54dd5d1eb9ee037c5750527dabd5801451f0371fde95551"
+digest = "sha256:cca58331c4a633a58e06254d478c92ee6d0767f99da3fe033a15792c86ecbc24"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:cb2a8727d6a3f1a9cd643a1f533742365f072833e1b992d08dc334f2aaddc9d6"
+canonical = "sha256:3f8b4b8085f03482a2f180eeade87ee2c7b048f2f5d0bad697d21d38e65147eb"
+model-visible = "sha256:8febe545f2e70df55f78f560169f0e2867ccfee8d64a4f2070ac38741231d384"
+render = "sha256:a16e35563a49e3bc5a0471de1c0d4c23ed18aaf24054775683e38b60105388a5"
+generated-markdown = "sha256:cca58331c4a633a58e06254d478c92ee6d0767f99da3fe033a15792c86ecbc24"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.commit-report output contract has no title",
+    "port.commit-report output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/refactor-default/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]
 
 [[trait]]
 id = "refactor"
