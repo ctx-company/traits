@@ -1,13 +1,13 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 7,
-    "end": 7
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 9,
+    "end": 9
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 3,
-    "end": 3
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 5,
+    "end": 5
   },
   "port:task": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
@@ -16,57 +16,57 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
+    "start": 13,
+    "end": 13
+  },
+  "prompt:refine-task": {
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
     "start": 23,
     "end": 23
   },
-  "prompt:refine-task": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 9,
-    "end": 9
-  },
   "prompt:split": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 32,
-    "end": 32
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 44,
+    "end": 44
   },
   "prompt:write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 7,
-    "end": 7
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 60,
+    "end": 60
   },
   "sequence:procedure/refine-task": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 6,
-    "end": 6
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 20,
+    "end": 20
   },
   "sequence:procedure/split": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 29,
-    "end": 29
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 41,
+    "end": 41
   },
   "sequence:procedure/write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 57,
+    "end": 57
   },
   "slot:grounding": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 7,
-    "end": 7
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 14,
+    "end": 14
   },
   "slot:result": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 17,
-    "end": 17
-  },
-  "slot:task-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 12,
     "end": 12
   },
-  "trait:plan": {
-    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+  "slot:task-files": {
+    "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 7,
     "end": 7
+  },
+  "trait:plan": {
+    "file": ".ctx/traits/packages/plan/source/variants/default.ts",
+    "start": 70,
+    "end": 70
   }
 }

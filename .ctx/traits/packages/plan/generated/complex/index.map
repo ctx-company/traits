@@ -1,13 +1,13 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 31,
-    "end": 31
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 9,
+    "end": 9
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 27,
-    "end": 27
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 5,
+    "end": 5
   },
   "port:task": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
@@ -16,82 +16,82 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 23,
-    "end": 23
+    "start": 13,
+    "end": 13
   },
   "prompt:critique": {
-    "file": ".ctx/traits/packages/plan/source/sequence/critique.ts",
-    "start": 8,
-    "end": 8
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 65,
+    "end": 65
   },
   "prompt:refine-task": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 9,
-    "end": 9
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 28,
+    "end": 28
   },
   "prompt:revise": {
-    "file": ".ctx/traits/packages/plan/source/sequence/critique.ts",
-    "start": 21,
-    "end": 21
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 76,
+    "end": 76
   },
   "prompt:split": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 32,
-    "end": 32
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 49,
+    "end": 49
   },
   "prompt:write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 7,
-    "end": 7
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 86,
+    "end": 86
   },
   "sequence:procedure/critique": {
-    "file": ".ctx/traits/packages/plan/source/sequence/critique.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 62,
+    "end": 62
   },
   "sequence:procedure/refine-task": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 6,
-    "end": 6
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 25,
+    "end": 25
   },
   "sequence:procedure/revise": {
-    "file": ".ctx/traits/packages/plan/source/sequence/critique.ts",
-    "start": 18,
-    "end": 18
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 73,
+    "end": 73
   },
   "sequence:procedure/split": {
-    "file": ".ctx/traits/packages/plan/source/sequence/planning.ts",
-    "start": 29,
-    "end": 29
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 46,
+    "end": 46
   },
   "sequence:procedure/write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 83,
+    "end": 83
   },
   "slot:critique": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 18,
-    "end": 18
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 19,
+    "end": 19
   },
   "slot:grounding": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 7,
-    "end": 7
+    "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
+    "start": 14,
+    "end": 14
   },
   "slot:result": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 17,
-    "end": 17
-  },
-  "slot:task-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 12,
     "end": 12
   },
+  "slot:task-files": {
+    "file": ".ctx/traits/packages/plan/source/data.ts",
+    "start": 7,
+    "end": 7
+  },
   "trait:plan": {
     "file": ".ctx/traits/packages/plan/source/variants/complex.ts",
-    "start": 8,
-    "end": 8
+    "start": 96,
+    "end": 96
   }
 }

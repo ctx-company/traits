@@ -1,13 +1,13 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 23,
-    "end": 23
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 9,
+    "end": 9
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/packages/plan/source/agent.ts",
-    "start": 19,
-    "end": 19
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 5,
+    "end": 5
   },
   "port:task": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
@@ -16,42 +16,42 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
-    "start": 23,
-    "end": 23
+    "start": 13,
+    "end": 13
   },
   "prompt:distill": {
-    "file": ".ctx/traits/packages/plan/source/sequence/formatting.ts",
-    "start": 26,
-    "end": 26
-  },
-  "prompt:write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 7,
-    "end": 7
-  },
-  "sequence:procedure/distill": {
-    "file": ".ctx/traits/packages/plan/source/sequence/formatting.ts",
-    "start": 23,
-    "end": 23
-  },
-  "sequence:procedure/write": {
-    "file": ".ctx/traits/packages/plan/source/sequence/writing.ts",
-    "start": 5,
-    "end": 5
-  },
-  "slot:result": {
-    "file": ".ctx/traits/packages/plan/source/data.ts",
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
     "start": 17,
     "end": 17
   },
-  "slot:task-files": {
+  "prompt:write": {
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 32,
+    "end": 32
+  },
+  "sequence:procedure/distill": {
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 14,
+    "end": 14
+  },
+  "sequence:procedure/write": {
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 29,
+    "end": 29
+  },
+  "slot:result": {
     "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 12,
     "end": 12
   },
-  "trait:plan": {
-    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+  "slot:task-files": {
+    "file": ".ctx/traits/packages/plan/source/data.ts",
     "start": 7,
     "end": 7
+  },
+  "trait:plan": {
+    "file": ".ctx/traits/packages/plan/source/variants/quick.ts",
+    "start": 42,
+    "end": 42
   }
 }
