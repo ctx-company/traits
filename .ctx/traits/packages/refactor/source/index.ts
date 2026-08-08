@@ -1,7 +1,7 @@
 import { trait, variant } from "@ctx-traits/cdk";
 
 export default trait("refactor", {
-    version: "0.8.0",
+    version: "0.9.0",
     variants: {
         direct: variant.import("./variants/direct/index.ts"),
         default: variant.import("./variants/default.ts").default(),

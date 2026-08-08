@@ -82,33 +82,33 @@ const implementStep = sequence.prompt("implement", {
 const review1 = sequence.prompt("review-1", {
     title: "Review refactor (smart-1)", agent: smart1,
     text: input.prompt(
-        `Review the refactored state of {target} against the agreed design {agreedDesign}. Current work summary: {workSummary}.
+        `Review the refactored state of {target} against the agreed design — the phase contract quoted in the doctrine below. The current work summary is attached as input.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
             ${SMART_VARIANT_DOCTRINE}
             ${CROSS_REVIEWER_CONFLICT_BLOCKER}
             Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
             ${INTEGRITY_DOCTRINE}`,
-        { target, agreedDesign, workSummary, phaseBrief: agreedDesign, productBrief: architectureDialect },
+        { target, phaseBrief: agreedDesign, productBrief: architectureDialect },
     ),
     output: verdict1,
-    input: [target, agreedDesign, workSummary],
+    input: [workSummary],
 });
 
 const review2 = sequence.prompt("review-2", {
     title: "Review refactor (smart-2)", agent: smart2,
     text: input.prompt(
-        `Independently review the refactored state of {target} against the agreed design {agreedDesign}. Current work summary: {workSummary}.
+        `Independently review the refactored state of {target} against the agreed design — the phase contract quoted in the doctrine below. The current work summary is attached as input.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
             ${SMART_VARIANT_DOCTRINE}
             ${CROSS_REVIEWER_CONFLICT_BLOCKER}
             Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
             ${INTEGRITY_DOCTRINE}`,
-        { target, agreedDesign, workSummary, phaseBrief: agreedDesign, productBrief: architectureDialect },
+        { target, phaseBrief: agreedDesign, productBrief: architectureDialect },
     ),
     output: verdict2,
-    input: [target, agreedDesign, workSummary],
+    input: [workSummary],
 });
 
 const applyFixesAndAmendments = sequence.prompt("apply-fixes", {

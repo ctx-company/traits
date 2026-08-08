@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.8.0"
+version = "0.9.0"
 name = "Refactor (Quick)"
 summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
 variant = "quick"
@@ -227,7 +227,7 @@ output = ["slot:work-summary"]
 
 [prompt.review]
 text = """
-Review the implemented state of {port:target} against the checklist {slot:checklist}. Current work summary: {slot:work-summary}.
+Review the implemented state of {port:target} against the checklist — the phase contract quoted in the doctrine below. The current work summary is attached as input.
                     A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. Checklist-item fidelity is judged SOLELY by the authority rule below — apply it directly, with no separate "undone step is always a blocker" rule layered on top. PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Quick authority: forgive a plan-fidelity gap ONLY when you record the reason it was reasonable to diverge; a genuine correctness defect is never forgivable regardless of reason, and remains a BLOCKER exactly as REVIEW_VERDICT_DOCTRINE requires. Forgiveness excuses missing or altered plan steps that changed nothing an observer could break; it never excuses a bug, a house-rule violation, or un-abstracted duplication.
                     This is the ONLY review pass — the worker applies your findings once and the run commits.
                     Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
@@ -240,8 +240,8 @@ Review the implemented state of {port:target} against the checklist {slot:checkl
 input = [
     "port:target",
     "slot:checklist",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict"]
 
@@ -332,8 +332,8 @@ prompt = "prompt:review"
 input = [
     "port:target",
     "slot:checklist",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict"]
 

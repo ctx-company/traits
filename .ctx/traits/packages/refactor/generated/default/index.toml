@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.8.0"
+version = "0.9.0"
 name = "Refactor (Default)"
 summary = "Surveyed refactoring procedure: survey the target against the house standards, frame the problem, design the boundary, implement it, refine against two independent reviewers, and commit."
 variant = "default"
@@ -281,7 +281,7 @@ output = ["slot:work-summary"]
 
 [prompt.review-1]
 text = """
-Review the refactored state of {port:target} against the agreed design {slot:agreed-design}. Current work summary: {slot:work-summary}.
+Review the refactored state of {port:target} against the agreed design — the phase contract quoted in the doctrine below. The current work summary is attached as input.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
@@ -295,14 +295,14 @@ Review the refactored state of {port:target} against the agreed design {slot:agr
 input = [
     "port:target",
     "slot:agreed-design",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict-1"]
 
 [prompt.review-2]
 text = """
-Independently review the refactored state of {port:target} against the agreed design {slot:agreed-design}. Current work summary: {slot:work-summary}.
+Independently review the refactored state of {port:target} against the agreed design — the phase contract quoted in the doctrine below. The current work summary is attached as input.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
             PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Default authority: enforce all and only the plan's declared MUST and MUST-NOT lists exactly as stated, with no forgiveness for divergence from any listed item and no invented plan requirement beyond those lists. Hold the plan to its own text, not to a stricter standard you infer — plan fidelity is judged solely by the explicit MUST/MUST-NOT lists, while any other plan content and every genuine correctness defect are judged independently under REVIEW_VERDICT_DOCTRINE regardless of what the lists do or do not declare.
@@ -316,8 +316,8 @@ Independently review the refactored state of {port:target} against the agreed de
 input = [
     "port:target",
     "slot:agreed-design",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict-2"]
 
@@ -403,8 +403,8 @@ prompt = "prompt:review-1"
 input = [
     "port:target",
     "slot:agreed-design",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict-1"]
 
@@ -416,8 +416,8 @@ prompt = "prompt:review-2"
 input = [
     "port:target",
     "slot:agreed-design",
-    "slot:work-summary",
     "resource:architecture-dialect",
+    "slot:work-summary",
 ]
 output = ["slot:review-verdict-2"]
 

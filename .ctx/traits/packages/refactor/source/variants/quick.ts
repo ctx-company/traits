@@ -129,15 +129,15 @@ export default variant({
                 title: "Review the implementation (smart-1)",
                 agent: smart1,
                 text: input.prompt(
-                    `Review the implemented state of {target} against the checklist {checklist}. Current work summary: {workSummary}.
+                    `Review the implemented state of {target} against the checklist — the phase contract quoted in the doctrine below. The current work summary is attached as input.
                     A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. Checklist-item fidelity is judged SOLELY by the authority rule below — apply it directly, with no separate "undone step is always a blocker" rule layered on top. ${QUICK_VARIANT_DOCTRINE}
                     This is the ONLY review pass — the worker applies your findings once and the run commits.
                     Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
                     ${INTEGRITY_DOCTRINE}`,
-                    { target, checklist, workSummary, phaseBrief: checklist, productBrief: architectureDialect },
+                    { target, phaseBrief: checklist, productBrief: architectureDialect },
                 ),
                 output: verdict,
-                input: [target, checklist, workSummary],
+                input: [workSummary],
             }),
             sequence.prompt("apply-fixes", {
                 title: "Apply the reviewer's pass (worker)",
