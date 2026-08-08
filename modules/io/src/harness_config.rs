@@ -7512,7 +7512,15 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     resume_flag: Some("--resume".to_string()),
                     session_flag: None,
                     dir_flag: None,
-                    prompt_via: Some("arg".to_string()),
+                    // `claude -p` reads the prompt from stdin when no
+                    // positional prompt is given, and stdin delivery bypasses
+                    // the 128KiB single-argv ceiling entirely (Linux caps one
+                    // argv string at exactly 131072 bytes) — a live review
+                    // frame at 143KB hit that wall through argv delivery
+                    // (2026-08-08). Argv buys nothing for a harness that
+                    // reads stdin; the other built-ins keep "arg" because
+                    // their stdin contracts are unverified.
+                    prompt_via: Some("stdin".to_string()),
                     stream: Some(true),
                     output: Some("claude-stream-json".to_string()),
                 }),
@@ -7903,6 +7911,19 @@ mod config_tests {
             ..HarnessRegistry::default()
         };
         validate_registry(&registry).expect("the Pi built-in convention is valid");
+    }
+
+    /// `claude -p` reads its prompt from stdin when no positional prompt is
+    /// given; stdin delivery bypasses the 128KiB single-argv ceiling, which
+    /// a live 143KB review frame hit through argv delivery (2026-08-08).
+    #[test]
+    fn claude_code_built_in_delivers_the_prompt_over_stdin() {
+        let definition = built_in_harness_definition("claude-code", &HarnessRegistry::default());
+        let cli = definition
+            .cli
+            .as_ref()
+            .expect("claude-code has a CLI convention");
+        assert_eq!(cli.prompt_via.as_deref(), Some("stdin"));
     }
 
     #[test]
