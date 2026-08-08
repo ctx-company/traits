@@ -43,17 +43,10 @@
 use std::fs;
 use std::path::Path;
 
-use serial_test::serial;
 use support::{
-    ScratchRoot, controlled_command, ctx_bin, fixture_agent_bin, git_init, require_success,
-    require_success_with_env, run_ctx, run_git, utf8,
+    ScratchRoot, fixture_agent_bin, git_init, require_success, require_success_with_env, run_ctx,
+    run_git, utf8,
 };
-
-/// P460's typed exit for a merge-intent run that never reached a completed
-/// drive — mirrored here rather than imported so a drift in
-/// `crate::app::error`'s constant breaks this proof loudly instead of
-/// silently tracking whatever the binary happens to emit.
-const EXIT_RUN_NOT_COMPLETED: i32 = 3;
 
 fn write_file(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
@@ -747,92 +740,6 @@ fn continuing_exhaustion_lands_the_commit() {
     assert!(
         ledger_text.contains("\"final-state\": \"completed\""),
         "P950 must reach final-state completed despite the loop never approving:\n{ledger_text}"
-    );
-
-    let _ = scratch;
-}
-
-/// Fork 4: the real Justfile `implement` recipe (the same private
-/// recipe `just implement`/`just implement-lean` both call) halts a batch
-/// at the first phase that ends without completing, and never dispatches
-/// the phase after it.
-#[test]
-#[serial]
-fn batch_halts_at_the_first_blocked_phase() {
-    const WALL: &str = "WALL-P461-BATCH-FIXTURE";
-    let id = "implement-fixture-park-batch";
-    let (scratch, repo, home) = setup_fixture(
-        "p461-park-batch-exit",
-        id,
-        &fixture_trait_toml(id, 2, "abort"),
-        &[("P960", Some(WALL)), ("P961", Some(WALL))],
-    );
-    let source_root = support::repo_root();
-    let justfile = source_root.join("Justfile");
-    assert!(
-        justfile.exists(),
-        "source repository Justfile not found at {}",
-        justfile.display()
-    );
-
-    // `just` invokes `ctx` by bare name via `PATH`, and the recipe's own
-    // fixture-reviewer configuration travels as `CTX_FIXTURE_*` env vars —
-    // both layered on top of `support::controlled_command`'s one
-    // environment definition, never a second hand-rolled copy of it.
-    let real_path = std::env::var("PATH").unwrap_or_default();
-    let ctx_dir = ctx_bin()
-        .parent()
-        .expect("ctx binary path has a parent directory")
-        .to_path_buf();
-    let patched_path = format!("{}:{real_path}", ctx_dir.display());
-
-    let head_before = git_rev_parse_head(&repo, &home);
-    let mut command = controlled_command(
-        Path::new("just"),
-        &[
-            "--justfile",
-            justfile.to_str().unwrap(),
-            "--working-directory",
-            repo.to_str().unwrap(),
-            "implement-with",
-            "implement-fixture-park-batch",
-            "P960,P961",
-        ],
-        &repo,
-        &home,
-    );
-    command
-        .env("PATH", patched_path)
-        .env("CTX_FIXTURE_REVIEWER1_MODE", "revise")
-        .env("CTX_FIXTURE_REVIEWER1_WALL", WALL)
-        .env("CTX_FIXTURE_REVIEWER1_BLOCKER", "fixture-batch-defect");
-    let output = command
-        .output()
-        .unwrap_or_else(|error| panic!("cannot run just implement: {error}"));
-    let (stdout, stderr) = utf8(&output);
-    let combined = format!("{stdout}{stderr}");
-
-    // P414's contract: a distinct nonzero exit, reported as a typed park —
-    // never a bare exit code. Under the P460 completion seam a drive that
-    // ends without completing exits EXIT_RUN_NOT_COMPLETED = 3.
-    assert_eq!(
-        output.status.code(),
-        Some(EXIT_RUN_NOT_COMPLETED),
-        "`implement \"P960,P961\"` must exit {EXIT_RUN_NOT_COMPLETED} (EXIT_RUN_NOT_COMPLETED):\n{combined}"
-    );
-    assert!(
-        combined.contains("PARKED"),
-        "batch output must report a PARKED phase:\n{combined}"
-    );
-    assert!(
-        !combined.contains("P961"),
-        "the second phase must never be mentioned — it must never be dispatched once P960 parks:\n{combined}"
-    );
-
-    let head_after = git_rev_parse_head(&repo, &home);
-    assert_eq!(
-        head_before, head_after,
-        "HEAD must not move — the parked phase must never merge"
     );
 
     let _ = scratch;

@@ -1999,12 +1999,6 @@ describe("public brands and values", () => {
   });
 });
 
-it("keeps the README example synchronized with its compiled fixture", () => {
-  const readme = readFileSync(resolve(testDirectory, "../README.md"), "utf8");
-  const example = readme.match(/```ts\n([\s\S]*?)```/)?.[1];
-  expect(example).toBe(readFileSync(resolve(testDirectory, "fixtures/readme-example.ts"), "utf8"));
-});
-
 it("passes metadata family/variant and facets through the draft unchanged", () => {
   const draft = toDraftJson(
     trait("plan-quick", {

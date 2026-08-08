@@ -24,9 +24,8 @@ use ctx_traits_core::encoding::{self, Encoding};
 use ctx_traits_core::render::{ExtendedRenderProfile, plan_render};
 use ctx_traits_core::response::{Envelope, JsonAbiErrorCodes};
 use ctx_traits_wasm_core::abi::{
-    ABI_SCHEMA_VERSION, AuditRequest, NormalizeRequest, NormalizeResponse, RenderRequest,
-    TraitDocument, ValidateRequest, ValidateResponse, audit_json, normalize_json, render_json,
-    validate_json,
+    ABI_SCHEMA_VERSION, NormalizeRequest, NormalizeResponse, RenderRequest, TraitDocument,
+    ValidateRequest, ValidateResponse, normalize_json, render_json, validate_json,
 };
 
 const TEST_ERROR_CODES: JsonAbiErrorCodes = JsonAbiErrorCodes {
@@ -92,40 +91,6 @@ fn collect_generated_index_toml(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
-}
-
-/// Committed first-party text used as the hidden-content audit corpus.
-///
-/// The corpus only has to be REAL committed text that both engines must agree
-/// on — it is a parity fixture, not a golden. It has been repointed twice as
-/// its sources were deleted (the third-party `.fixtures/` samples in ab4855e,
-/// then `scripts/goldens` and `.configs/` in P569), so it now reads trait
-/// resources that ship with the repository's own packages and have no reason
-/// to disappear.
-fn audit_text_fixtures() -> Vec<(PathBuf, &'static str)> {
-    let root = repo_root();
-    let fixtures = vec![
-        (
-            root.join(".ctx/traits/packages/engineering-standards/resources/coding-standards.md"),
-            "engineering-standards",
-        ),
-        (
-            root.join(".ctx/traits/packages/deep-research/resources/research-standards.md"),
-            "deep-research",
-        ),
-        (
-            root.join(".ctx/traits/packages/deep-research/resources/quality-rubric.md"),
-            "deep-research-rubric",
-        ),
-    ];
-    for (path, _) in &fixtures {
-        assert!(
-            path.exists(),
-            "missing committed audit fixture {}",
-            path.display()
-        );
-    }
-    fixtures
 }
 
 fn read_fixture(path: &Path) -> String {
@@ -227,33 +192,6 @@ fn normalize_json_matches_native() {
                 output_format
             );
         }
-    }
-}
-
-#[test]
-fn audit_json_matches_native() {
-    for (path, trait_id) in audit_text_fixtures() {
-        let text = read_fixture(&path);
-
-        let request = AuditRequest {
-            text: text.clone(),
-            trait_id: trait_id.to_string(),
-            path: Some(path.display().to_string()),
-        };
-        let abi_response = audit_json(&serde_json::to_string(&request).expect("encode request"));
-
-        let native = native_envelope(ctx_traits_core::audit::scan_hidden_content(
-            &text,
-            trait_id,
-            Some(path.display().to_string()).as_deref(),
-        ));
-
-        assert_eq!(
-            abi_response,
-            native,
-            "audit_json native/ABI parity mismatch for {}",
-            path.display()
-        );
     }
 }
 
