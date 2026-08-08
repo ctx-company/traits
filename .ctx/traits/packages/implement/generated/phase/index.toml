@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.23.0"
+version = "0.24.0"
 name = "Implement Phase"
 summary = "Dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
 variant = "phase"
@@ -107,7 +107,7 @@ value = "slot:park-report"
 [[port]]
 id = "task"
 direction = "input"
-schema = "schema:text"
+schema = "schema:task"
 description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
 
 [[slot]]
@@ -515,6 +515,11 @@ description = "The mandatory first scope finding."
 schema = "[schema:review-finding]"
 required = true
 description = "Any further scope findings beyond the mandatory first one."
+
+[[schema]]
+id = "task"
+schema = "schema:text"
+description = "A task reference: a task-board id (resolved and bound automatically when this trait is the configured [tasks] dispatch-trait), or a manual task description (a virtual task; not yet supported)."
 
 [[signal]]
 id = "gate-timed-out"

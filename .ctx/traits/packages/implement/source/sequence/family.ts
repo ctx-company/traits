@@ -41,8 +41,7 @@ export const clerk = clerkRole(
     "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board.",
 );
 
-export const task = port.input.text({
-    id: "task",
+export const task = port.input.task({
     description:
         'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
 });

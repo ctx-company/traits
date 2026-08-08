@@ -5,6 +5,7 @@ import type { CdkObject } from "./meta.js";
 import { metaOf, withDeclaration } from "./meta.js";
 import { collectMany, compact, mutableScalarArray, validateSlug } from "./normalize.js";
 import { refText } from "./ref.js";
+import { schema } from "./schema.js";
 import type { SchemaValue } from "./schema.js";
 
 export interface PortDefaultCommand {
@@ -85,6 +86,15 @@ export interface PortDirectionHelpers {
   /** Text-schema port in this fixed direction. @example `port.output.text({ id: "summary" })` */
   text(fields: Omit<PortFields, "direction" | "schema">): PortHandle<string>;
   /**
+   * Task-schema port in this fixed direction (`id` defaults to `"task"`),
+   * declaring the SDK task schema (`schema.task()`) alongside it. The trait
+   * configured as `[tasks] dispatch-trait` must declare its `task` input
+   * port through this type — dispatch validates the port and resolves
+   * task-board ids automatically.
+   * @example `port.input.task({ description: "Task to implement." })`
+   */
+  task(fields: Omit<PortFields, "direction" | "schema" | "id"> & { readonly id?: string; }): PortHandle<string>;
+  /**
    * Port with an explicit schema in this fixed direction.
    * @example `port.input.of({ id: "limit", schema: schema.number() })`
    */
@@ -141,6 +151,8 @@ function portDirectionHelpers(direction: "input" | "output"): PortDirectionHelpe
   return {
     text: (fields: Omit<PortFields, "direction" | "schema">): PortHandle<string> =>
       portOf<string>({ ...fields, direction, schema: "schema:text" }),
+    task: (fields: Omit<PortFields, "direction" | "schema" | "id"> & { readonly id?: string; }): PortHandle<string> =>
+      portOf<string>({ ...fields, id: fields.id ?? "task", direction, schema: schema.task() }),
     of,
   };
 }

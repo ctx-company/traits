@@ -6,13 +6,13 @@ generated-at = "not-recorded"
 [[trait]]
 id = "implement"
 variant = "default"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:00ffb439eefe46752f91c12788c0e73233139a564d985ea6e6fc6f9ae4e5029a"
-canonical = "sha256:1f842efd3c3d3bff6e37ff4745b86dd78e280ea83ecbbb16303f2a01f01863f4"
-model-visible = "sha256:0b7e5b0f6eb36123efa294914e0316bbb7640100f6360651372f29da724e14ae"
+source = "sha256:cbe235ee0a9dbc2060c4d1d49397ca41ef79ef5c7a2aba973bd927349a9fc5b2"
+canonical = "sha256:9684914052fedf83a8c721ab4ed4b9932a6f5c58ddf34dee07a98faa279bd0b0"
+model-visible = "sha256:5e6b7b17e87ac60ab50f147f78e03929c70fd47ff72dab4d5fac75d46a4a2ede"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
@@ -51,37 +51,37 @@ options = ["--profile=agent-skills"]
 [[trait]]
 id = "implement"
 variant = "gated"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:829dd149368619bafa67eb846a9aca2e740f67df203b799ae68e95b73a920e42"
-canonical = "sha256:43c1471047f51c4527ebeff1cbcd600dd87ff73c3a1bc511edf29827b4b2c254"
-model-visible = "sha256:869777a158e83e14c3fc7d73aa816608ef174b70c620a92b2c3e74a3abc1772f"
+source = "sha256:c51016b1571dacf819ce10f9bffc548586fed2f015e90d9eb33d8681ac54f3d1"
+canonical = "sha256:554512b87f95259d30f9a42978d2ac24f2b20ed78f40268f334f1094303230bb"
+model-visible = "sha256:d2aad076a3d1c80eefe82621e0d78353b2c1acf0b5e65d4e907835cc098cbaaf"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait]]
 id = "implement"
 variant = "guarded"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:ff86fb27d4357a0b7f8e11e0c5e022e9388c98f62ef29ab45ef74c625187e6b7"
-canonical = "sha256:d2efef0859d50686981ad6f2e764f7d53a9847c4a25e4a7ac21002a3e15f2af9"
-model-visible = "sha256:a0c1e456666e5077fb17feacb2fcdbfffe9bddfff56b1a398149ec8c98e77308"
+source = "sha256:b4051e6f4fbb9840ad41c651c3f795e681f0cc8bfa7e8bf1b0a9a99b599a347d"
+canonical = "sha256:3428de9dc12ab25e989ad8971f19653fdeaf78c7e14ad7f8dfb6d4dfb8a11247"
+model-visible = "sha256:b04f58e2f866b7ff9597ed38d4fb2fe1ba63845ac4a07ff96f6fe5f6b2d2c2d5"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait]]
 id = "implement"
 variant = "phase"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:6c05809306ce9d342a50b6be5e2621cb703f291bda423f3a72c898175fab2f82"
-canonical = "sha256:96995f536d53f4a687daa796fb6089617dac975ff6ca13b55bd2afaf23274a09"
-model-visible = "sha256:edbe704a485b0f9318874c68a40685f0ca61ec0cdff3f1645589e9665a702a5d"
+source = "sha256:2425cb25ee093b96331de01c924d097040e0ba5bc69837f208dc5e4d9f6a7ab3"
+canonical = "sha256:e07de7e989de950b7183fc94fad03dfc69b29901e0ce27612619dc28a3a3da38"
+model-visible = "sha256:363f625147e32d179bbc1ebd8d416fd738ec7d1fb934eed2ac438b5fdb2a6950"
 resource-manifest = "sha256:6dcb074372952eecf2c308a01aa9944a5b9b1e87eefd18423542401d8e0a3470"
 
 [[trait.export]]
@@ -92,13 +92,13 @@ digest = "sha256:40f5078b464b7cd67a2f2dbeaa11988268bcc8f33a0edd4b4c6ddf52a26d3b2
 [[trait]]
 id = "implement"
 variant = "quick"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:3b9fc4e82a61c2269d874f955a977f7200e1249dbceb6898a9519e863f0afbb7"
-canonical = "sha256:a2ff18aaf6fe33b9d7df058b3c35d501bd3c978b4a1c991790ce04246e0e8bcb"
-model-visible = "sha256:bce31391325dc83d996d3f604b3d34b72550b1011da53e9752aa338b3f766f6c"
+source = "sha256:30d63ff70f32a29f5491c9d58f1782932053aa1ca589c70f6f4948fce247082a"
+canonical = "sha256:3fc80e23a916bd02286a86012aaa39c9b6144f490a29c82237b0dc1959d491f5"
+model-visible = "sha256:b621872e3664467e89f86f8a170164bb9502bf2ad6196472fca71719fb4f76f2"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
@@ -109,13 +109,13 @@ digest = "sha256:855bf4f6320842339a89f85b00d858a770da79be2c201ca392e152c44d4a764
 [[trait]]
 id = "implement"
 variant = "smart"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:bdcf8cc28b498de844bec6f9060f51c825beaf5c95e8c68ede4dee78fa8d4992"
-canonical = "sha256:e945ab85ecb7637ea879b134b86c854ef81ec68a8b8cf51c9e94b78ca01a99b1"
-model-visible = "sha256:602261d59a00ce141fa96e076f345ee039225370540d89a1abe9236f52333cef"
+source = "sha256:a52e5d296a59d2cf053996676635a681e453e5e0943b55ba33462a01ff88832f"
+canonical = "sha256:6804d075b5f55b62a0eb4e47923fca9f3b04d8b3f48f31757a6797e44531211d"
+model-visible = "sha256:95aaf319f924789e3be4363fdb673651aa8d40da8bf6ab58742b3a88c4115574"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]
@@ -126,13 +126,13 @@ digest = "sha256:304170d8d6d27ac8af175bc15b04d01c79c086e0b904f4f29319aa2464d0111
 [[trait]]
 id = "implement"
 variant = "strict"
-requested-version = "0.23.0"
-resolved-version = "0.23.0"
+requested-version = "0.24.0"
+resolved-version = "0.24.0"
 
 [trait.digests]
-source = "sha256:68cd37b85379172eb2c0087343619b9d2bdea5a67b87ec0013f144ee735c49ee"
-canonical = "sha256:fa02a19e5ca9c64679e7e4b26f2771b65172d7664e86aa4052a5563fac9bb437"
-model-visible = "sha256:7191d23c7d0352bc2661db5c6e736d414d2f712755b9308ec1768330774e42e6"
+source = "sha256:f0e60e99de9d66ba7025143df0028200dbc7b98f9d97a7bc75837145f42c164d"
+canonical = "sha256:11145375256a944218a5bb2f080b862c0307e473c7de447794902e4e7b0b9bca"
+model-visible = "sha256:028071eea7ee73f91c6aa49aaccf5909e632d949c43600c5df9a83b4304619af"
 resource-manifest = "sha256:f95112d86fe2949c038a31c82594e2030fe90562bc2d6898f7e65c67d7efdef9"
 
 [[trait.export]]

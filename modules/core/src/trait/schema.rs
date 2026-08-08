@@ -201,14 +201,15 @@ pub fn validate_schemas_with_ids(
                     .into());
                 }
             }
-            let Some(allowed) = schema.allowed.as_ref() else {
-                return Err(crate::manifest::Error::InvalidField {
-                    field_path: format!("schema[{i}].allowed"),
-                    message: "scalar schema declarations must declare allowed values".to_string(),
-                }
-                .into());
-            };
-            validate_allowed_values(allowed, schema_ref, &format!("schema[{i}].allowed"))?;
+            // A scalar declaration with `allowed` is a closed-vocabulary
+            // enum; without it, an OPEN scalar alias — a semantically named
+            // schema over a builtin scalar (the SDK task type,
+            // `[[schema]] id = "task"` over `schema:text`, is the canonical
+            // case). Runtime validation checks the base scalar either way
+            // and the allowed set only when declared.
+            if let Some(allowed) = schema.allowed.as_ref() {
+                validate_allowed_values(allowed, schema_ref, &format!("schema[{i}].allowed"))?;
+            }
         }
     }
 

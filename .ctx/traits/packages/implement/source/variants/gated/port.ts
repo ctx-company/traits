@@ -2,8 +2,7 @@ import { port, schema } from "@ctx-traits/cdk";
 import { reviewVerdict } from "./schema.ts";
 import { briefMarkdown, commitOutput, parkReport } from "./slot.ts";
 
-export const task = port.input.text({
-    id: "task",
+export const task = port.input.task({
     description:
         'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
 });

@@ -213,6 +213,18 @@ export interface SchemaFunction {
   /** Inline schema ref that accepts any JSON value — the escape hatch for output shapes not worth declaring precisely. @example `port.output.of(schema.any(), { id: "raw" })` */
   any(): "schema:any" & SchemaRef<JsonValue>;
   /**
+   * The SDK task type: a declared scalar schema (`[[schema]] id = "task"`
+   * over text) whose value is a task reference — a task-board id, or a
+   * manual task description (a "virtual" task; not yet supported by the
+   * runtime). The trait configured as `[tasks] dispatch-trait` MUST type
+   * its `task` input port with this schema: dispatch validates the port and
+   * automatically resolves the value through the trait's `task-board`
+   * resource. `port.input.task(...)` declares the port and this schema in
+   * one call.
+   * @example `port.input.of(schema.task(), { id: "task", description: "Task to implement." })`
+   */
+  task(): SchemaHandle<string>;
+  /**
    * Wraps `inner` as a list/array schema ref, alias of `schema.array`.
    * @example `schema.list(schema.text())`
    */
@@ -436,6 +448,7 @@ export const schema: SchemaFunction = {
   number: () => schemaBuiltins.number,
   integer: () => schemaBuiltins.integer,
   any: () => schemaBuiltins.any,
+  task: schemaTaskDeclaration,
   list: schemaArray,
   array: schemaArray,
   union: schemaUnion,
@@ -505,6 +518,22 @@ function schemaEnumSpec<T extends readonly EnumLiteral[]>(values: T): SchemaEnum
   // documents that gap rather than a false claim of structural overlap.
   const allowed = Array.from(values) as unknown as T; // audited-unknown-cast: mutable array -> generic readonly T, see comment above
   return withMeta({ schema: schemaRef, allowed }, { kind: "schema-field" });
+}
+
+/**
+ * The SDK task schema declaration (see `SchemaFunction.task`): a stable,
+ * canonical `[[schema]] id = "task"` scalar-over-text declaration, so every
+ * dispatch trait carries the identical contract and the runtime can
+ * recognise the type by its ref (`schema:task`) alone.
+ */
+function schemaTaskDeclaration(): SchemaHandle<string> {
+  const declaration = compact({
+    id: "task",
+    schema: "schema:text",
+    description:
+      "A task reference: a task-board id (resolved and bound automatically when this trait is the configured [tasks] dispatch-trait), or a manual task description (a virtual task; not yet supported).",
+  });
+  return withDeclaration("schema", "schema:task", declaration, {});
 }
 
 function schemaEnumDeclaration<const T extends readonly EnumLiteral[]>(

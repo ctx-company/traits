@@ -1,15 +1,15 @@
-//! Dispatch-time pre-flight for explicitly requested task dispatches:
+//! Dispatch-time pre-flight for the configured `[tasks] dispatch-trait`:
 //! standing walls (P414), closed-status tasks, and unmet dependencies
 //! (0061).
 //!
-//! Task binding is OPT-IN per dispatch: it runs only when the caller
-//! explicitly requests it (`--task-dispatch`, which the `[tasks]
-//! dispatch-trait` flow supplies) — never inferred from a trait id, a port
-//! name, or any other naming convention. A dispatch that does not request
-//! it passes its `task` input through as plain text like any other port
-//! value.
+//! Task binding belongs to exactly one trait per repository: the one
+//! `[tasks] dispatch-trait` names. Running THAT trait reads its `task`
+//! input as a task reference (an SDK `schema:task`-typed port, validated at
+//! dispatch) and binds it through the board; every other trait's `task`
+//! input is plain text — binding is never inferred from a trait id, a port
+//! name, or any other naming convention.
 //!
-//! When requested: before a session, worktree, or first frame exists,
+//! When binding runs: before a session, worktree, or first frame exists,
 //! refuse to dispatch a task whose own task file carries a typed `wall` id
 //! (0063.1) when a repository-scoped ledger already records a BLOCKED
 //! task-dispatched run whose typed park report cites that exact wall id —
@@ -37,6 +37,18 @@ fn provider_error(error: ctx_traits_core::task::provider::ProviderError) -> crat
     crate::Error::Usage {
         message: error.to_string(),
     }
+}
+
+/// A task value fit for a refusal message: task ids are short, but a manual
+/// description can be paragraphs — truncate so the refusal stays legible
+/// instead of echoing the whole paragraph back mid-sentence.
+fn display_task_value(task_value: &str) -> String {
+    const MAX: usize = 60;
+    if task_value.chars().count() <= MAX {
+        return task_value.to_string();
+    }
+    let truncated: String = task_value.chars().take(MAX).collect();
+    format!("{truncated}…")
 }
 
 /// A standing wall found among this repository's ledgers: the wall id, the
@@ -81,7 +93,7 @@ pub struct DispatchTask {
 /// Resolve `task_value` through the trait's declared `task-board` resource
 /// via the [`TaskProvider`] interface: `task-board` resource → board
 /// directory → `FilesTaskBoard::resolve`/`get`. Call this ONLY for a
-/// dispatch that explicitly requested task binding (`--task-dispatch`) —
+/// dispatch of the configured `[tasks] dispatch-trait` —
 /// never speculatively: on every other dispatch a `task` input port is
 /// plain text with whatever semantics the trait gives it (0063.4). A
 /// dispatch carrying no task value at all yields
@@ -131,7 +143,8 @@ pub fn resolve_dispatch_task(
     let board = crate::task_files::FilesTaskBoard::open_read(presented_board.path.clone());
     let Some(key) = board.resolve(task_value).map_err(provider_error)? else {
         return Ok(cannot_bind(format!(
-            "task {task_value} does not resolve on the {TASK_BOARD_RESOURCE_ID}"
+            "task {:?} does not resolve on the {TASK_BOARD_RESOURCE_ID} (manual task descriptions — virtual tasks — are not supported yet; pass a task id)",
+            display_task_value(task_value)
         )));
     };
     let Some(resolved) = board.get(&key).map_err(provider_error)? else {

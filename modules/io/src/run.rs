@@ -224,14 +224,6 @@ pub struct StartRequest<'a> {
     /// anyway. Recorded in provenance rather than left silent — see
     /// [`ctx_traits_core::procedure::session::DependencyOverrideProvenance`].
     pub override_dependencies: bool,
-    /// `--task-dispatch`: bind the `task` input through the trait's declared
-    /// `task-board` resource, with the wall/closed-status/dependency
-    /// preflights and worktree materialisation that binding carries. Set by
-    /// the `[tasks] dispatch-trait` flow (the dashboard TASKS screen's
-    /// dispatch seed); without it a `task` input is plain text like any
-    /// other port value — task binding is never inferred from a trait id or
-    /// port name.
-    pub task_dispatch: bool,
     /// P460 resolved automatic-landing intent, already validated by the
     /// caller against an effective worktree. Written straight into this
     /// session's initial persisted `Provenance` (never a post-start ledger
@@ -408,6 +400,38 @@ pub struct RunInfoSelectionOutput {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/// The `[tasks] dispatch-trait` port contract: the configured dispatch trait
+/// must declare an input port `task` typed with the SDK task schema — a
+/// local `[[schema]] id = "task"` scalar over `schema:text` (what the CDK's
+/// `schema.task()`/`port.input.task` emit). Returns the specific problem to
+/// name in the refusal, or `None` when the contract holds. Enforced only
+/// for the configured dispatch trait: every other trait may shape a `task`
+/// port however it likes.
+fn dispatch_trait_port_problem(trait_ref: &ctx_traits_core::Trait) -> Option<String> {
+    let Some(port) = trait_ref.ports.iter().find(|port| {
+        port.id == "task" && port.direction == ctx_traits_core::r#trait::port::PortDirection::Input
+    }) else {
+        return Some("it declares no `task` input port".to_string());
+    };
+    if port.schema != "schema:task" {
+        return Some(format!(
+            "its `task` input port is typed {:?}, not the SDK task schema (\"schema:task\")",
+            port.schema
+        ));
+    }
+    let Some(decl) = trait_ref.schemas.iter().find(|schema| schema.id == "task") else {
+        // Unreachable after trait validation (a schema ref must resolve),
+        // kept as a real refusal rather than a panic.
+        return Some("it declares no `task` schema for the port to resolve".to_string());
+    };
+    if decl.schema.as_deref() != Some("schema:text") {
+        return Some(
+            "its `task` schema is not the SDK task type (a scalar over schema:text)".to_string(),
+        );
+    }
+    None
+}
 
 pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     const PRE_AUTHORIZATION_FAILURE: &str = "trait authorization was refused";
@@ -721,15 +745,39 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         }
     }
 
-    // Task binding is OPT-IN per dispatch (`--task-dispatch`, set by the
-    // `[tasks] dispatch-trait` flow): only then is the `task` input read as
-    // a task-board key and put through the wall/closed-status/dependency
-    // preflights and worktree materialisation below. On every other
-    // dispatch a `task` input is plain text with whatever semantics the
-    // trait gives it — binding is never inferred from a trait id or port
-    // name.
-    let owned_task_value = request
-        .task_dispatch
+    // Task binding belongs to the configured `[tasks] dispatch-trait` alone:
+    // when THIS trait is the one that config names, its `task` input is a
+    // task reference — validated below and put through the
+    // wall/closed-status/dependency preflights and worktree materialisation.
+    // On every other trait a `task` input is plain text with whatever
+    // semantics the trait gives it — binding is never inferred from a trait
+    // id, a port name, or a CLI flag. Config resolution failures fall
+    // through as "unconfigured": a genuinely broken config still fails
+    // loudly at assignment resolution below.
+    // The configured selector is `family` or `family:variant`; a family's
+    // variants all share the family's own trait id in their canonicals, so
+    // the family part is what identifies "the dispatch trait" — every
+    // variant of the configured family carries the same task-port contract.
+    let is_dispatch_trait = crate::harness_config::resolve_runtime_config(Utf8Path::new("."))
+        .ok()
+        .and_then(|config| config.effective_dispatch_trait())
+        .is_some_and(|selector| {
+            let family = selector.split(':').next().unwrap_or(selector.as_str());
+            family == loaded.trait_ref.id.as_str()
+        });
+    if is_dispatch_trait && let Some(problem) = dispatch_trait_port_problem(&loaded.trait_ref) {
+        let message = format!(
+            "trait {} is the configured [tasks] dispatch-trait, but {problem}; declare the port with the SDK task type (CDK: port.input.task)",
+            loaded.trait_ref.id.as_str()
+        );
+        update(
+            StartupStage::Harness,
+            StartupStageState::Failed,
+            message.clone(),
+        );
+        return invalid_request("run.task", message);
+    }
+    let owned_task_value = is_dispatch_trait
         .then(|| {
             crate::run_session::task_value_from_pairs(
                 initial_values
@@ -738,16 +786,6 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             )
         })
         .flatten();
-    if request.task_dispatch && owned_task_value.is_none() {
-        let message =
-            "--task-dispatch requires a task value (--set task=<key>) to bind".to_string();
-        update(
-            StartupStage::Harness,
-            StartupStageState::Failed,
-            message.clone(),
-        );
-        return invalid_request("run.task", message);
-    }
     let task_value = owned_task_value.as_deref();
     // 0061: resolve the dispatched task through the `TaskProvider` interface
     // exactly once — the wall (P414), closed-status, and dependency
@@ -1768,7 +1806,6 @@ mod startup_observer_tests {
                 })),
                 strict_loops: false,
                 override_dependencies: false,
-                task_dispatch: false,
                 merge_rung: None,
             });
             if expect_success {
@@ -1807,7 +1844,6 @@ mod startup_observer_tests {
                 startup_observer: None,
                 strict_loops: false,
                 override_dependencies: false,
-                task_dispatch: false,
                 merge_rung: None,
             })
             .expect("startup fixture starts")
@@ -1887,7 +1923,6 @@ mod startup_observer_tests {
             })),
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: false,
             merge_rung: None,
         })
         .unwrap_err();
@@ -2266,7 +2301,6 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: false,
             merge_rung: None,
         })
         .expect("awaiting fixture starts");
@@ -2356,7 +2390,7 @@ mod startup_observer_tests {
         let trait_path = generated.join("index.toml");
         std::fs::write(
             &trait_path,
-            "id = \"implement-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement fixture\"\nsummary = \"0061 dispatch fixture\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+            "id = \"implement-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement fixture\"\nsummary = \"0061 dispatch fixture\"\n\n[[resource]]\nid = \"task-board\"\npath = \".internal/tasks\"\nroot = \"repo\"\n\n[[schema]]\nid = \"task\"\nschema = \"schema:text\"\ndescription = \"SDK task type\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:task\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
         )
         .unwrap();
         std::fs::write(
@@ -2398,6 +2432,9 @@ mod startup_observer_tests {
             Some("0061 dispatch fixture".to_string()),
         )
         .unwrap();
+        // Every consumer of this fixture exercises board binding, which
+        // belongs to the configured dispatch trait alone.
+        configure_dispatch_trait("implement-fixture");
         (trait_path, _process_wide)
     }
 
@@ -2445,7 +2482,6 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: true,
             merge_rung: None,
         })
         .unwrap_err();
@@ -2480,7 +2516,6 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: true,
-            task_dispatch: true,
             merge_rung: None,
         })
         .expect("override dispatches despite the unmet dependency");
@@ -2509,14 +2544,21 @@ mod startup_observer_tests {
     /// all, exercised without a `task=` value (starts) and with one
     /// (refuses naming the trait and the missing resource) — the explicit
     /// value cannot silently drop.
-    fn boardless_implement_fixture(root: &std::path::Path) -> String {
+    fn boardless_implement_fixture(root: &std::path::Path, task_schema: &str) -> String {
         let trait_root = root.join(".ctx/traits/implement-boardless-fixture");
         let generated = trait_root.join("generated");
         std::fs::create_dir_all(&generated).unwrap();
         let trait_path = generated.join("index.toml");
+        let task_schema_decl = if task_schema == "schema:task" {
+            "[[schema]]\nid = \"task\"\nschema = \"schema:text\"\ndescription = \"SDK task type\"\n\n"
+        } else {
+            ""
+        };
         std::fs::write(
             &trait_path,
-            "id = \"implement-boardless-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement boardless fixture\"\nsummary = \"0063.4 boardless dispatch fixture\"\n\n[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"schema:text\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n",
+            format!(
+                "id = \"implement-boardless-fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Implement boardless fixture\"\nsummary = \"0063.4 boardless dispatch fixture\"\n\n{task_schema_decl}[[port]]\nid = \"task\"\ndirection = \"input\"\nschema = \"{task_schema}\"\ndescription = \"Task value\"\n\n[procedure]\ndescription = \"Run command\"\n\n[[slot]]\nid = \"notified\"\nschema = \"schema:text\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Run command\"\nkind = \"command\"\ncmd = \"true\"\noutput = [\"slot:notified\"]\n"
+            ),
         )
         .unwrap();
         std::fs::write(
@@ -2564,18 +2606,33 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: true,
             merge_rung: None,
         }
     }
 
+    /// Configure `[tasks] dispatch-trait` in the isolated child's GLOBAL
+    /// config layer (`$XDG_CONFIG_HOME/ctx/traits/runtime.toml`), which
+    /// `resolve_runtime_config` reads regardless of the child's cwd — the
+    /// same key a real repo sets in its own `.ctx/traits/` config.
+    fn configure_dispatch_trait(trait_id: &str) {
+        let config_dir = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap())
+            .join("ctx/traits");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("runtime.toml"),
+            format!("[tasks]\ndispatch-trait = \"{trait_id}\"\n"),
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn requested_task_dispatch_against_a_boardless_trait_refuses_naming_trait_and_resource() {
+    fn dispatch_trait_with_a_boardless_task_refuses_naming_trait_and_resource() {
         if !run_in_isolated_child() {
             return;
         }
         let root = child_test_root();
-        let trait_path = boardless_implement_fixture(&root);
+        let trait_path = boardless_implement_fixture(&root, "schema:task");
+        configure_dispatch_trait("implement-boardless-fixture");
         let input_values = parse_initial_sets(&["task=0002".to_string()]).unwrap();
         let refused = start(boardless_start_request(&trait_path, input_values)).unwrap_err();
         let message = refused.to_string();
@@ -2583,36 +2640,39 @@ mod startup_observer_tests {
         assert!(message.contains("task-board"), "{message}");
     }
 
+    /// The `[tasks] dispatch-trait` port contract: a configured dispatch
+    /// trait whose `task` port is not typed with the SDK task schema
+    /// refuses at dispatch, naming the actual schema and the fix.
     #[test]
-    fn requested_task_dispatch_without_a_task_value_refuses() {
+    fn dispatch_trait_without_the_sdk_task_schema_refuses() {
         if !run_in_isolated_child() {
             return;
         }
         let root = child_test_root();
-        let trait_path = boardless_implement_fixture(&root);
-        let refused = start(boardless_start_request(&trait_path, Vec::new())).unwrap_err();
-        assert!(
-            refused.to_string().contains("--task-dispatch requires"),
-            "{refused}"
-        );
+        let trait_path = boardless_implement_fixture(&root, "schema:text");
+        configure_dispatch_trait("implement-boardless-fixture");
+        let input_values = parse_initial_sets(&["task=0002".to_string()]).unwrap();
+        let refused = start(boardless_start_request(&trait_path, input_values)).unwrap_err();
+        let message = refused.to_string();
+        assert!(message.contains("[tasks] dispatch-trait"), "{message}");
+        assert!(message.contains("schema:task"), "{message}");
     }
 
-    /// The inverse of the refusals above, and the whole point of making task
-    /// binding opt-in: WITHOUT `--task-dispatch`, a `task=` value is plain
-    /// port text — no board resolution, no refusal, regardless of trait id
-    /// or the value's shape.
+    /// The inverse of the refusals above, and the point of tying binding to
+    /// `[tasks] dispatch-trait` alone: on any trait the config does NOT
+    /// name, a `task=` value is plain port text — no board resolution, no
+    /// refusal, regardless of trait id or the value's shape.
     #[test]
-    fn plain_dispatch_passes_a_prose_task_value_through_without_binding() {
+    fn undesignated_trait_passes_a_prose_task_value_through_without_binding() {
         if !run_in_isolated_child() {
             return;
         }
         let root = child_test_root();
-        let trait_path = boardless_implement_fixture(&root);
+        let trait_path = boardless_implement_fixture(&root, "schema:text");
         let input_values =
             parse_initial_sets(&["task=free-form prose, not a board key".to_string()]).unwrap();
-        let mut request = boardless_start_request(&trait_path, input_values);
-        request.task_dispatch = false;
-        let outcome = start(request).expect("an unrequested task binding never refuses");
+        let outcome = start(boardless_start_request(&trait_path, input_values))
+            .expect("a trait the config does not name never board-binds");
         let task = crate::run_session::session_task(&outcome.session)
             .expect("the task port accepted the prose value");
         assert_eq!(task, "free-form prose, not a board key");
@@ -2655,7 +2715,6 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: true,
             merge_rung: None,
         })
         .expect("resolvable task dispatches");
@@ -2747,7 +2806,6 @@ mod startup_observer_tests {
             startup_observer: None,
             strict_loops: false,
             override_dependencies: false,
-            task_dispatch: true,
             merge_rung: None,
         })
         .expect("worktree dispatch of a resolvable task succeeds");

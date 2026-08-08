@@ -653,7 +653,6 @@ pub(crate) fn run_builtin_trait_observed(
         // Internal driving traits keep the declared loop policy.
         strict_loops: false,
         override_dependencies: false,
-        task_dispatch: false,
         defer_commands: false,
         trait_file: Some(trait_file.as_str()),
         trait_id: None,

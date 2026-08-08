@@ -313,8 +313,8 @@ argv = ["git", "commit", "--allow-empty", "-m", "{slot:commit-message}"]
 /// must control `on-exhausted` and the reviewer's schema directly rather
 /// than inheriting whatever the checked-in packages currently declare.
 ///
-/// Every dispatch in this suite passes `--task-dispatch` — wall preflight
-/// participation is explicitly requested per dispatch
+/// Each fixture repo names its trait as `[tasks] dispatch-trait` — wall
+/// preflight participation belongs to the configured dispatch trait
 /// (`modules/io/src/dispatch_preflight.rs`), never inferred from the trait
 /// id.
 fn fixture_trait_toml(id: &str, max_iterations: u32, on_exhausted: &str) -> String {
@@ -331,10 +331,15 @@ path = ".internal/tasks"
 root = "repo"
 trigger = "on-demand"
 
+[[schema]]
+id = "task"
+schema = "schema:text"
+description = "SDK task type"
+
 [[port]]
 id = "task"
 direction = "input"
-schema = "schema:text"
+schema = "schema:task"
 description = "Task to implement, named by its file in .internal/tasks/."
 
 [[port]]
@@ -555,6 +560,13 @@ fn setup_fixture(
         );
         write_file(&repo.join(format!(".internal/tasks/{task}.toml")), &body);
     }
+    // Board binding belongs to the configured `[tasks] dispatch-trait`:
+    // name this fixture's trait so dispatching it binds `task=` through the
+    // board with the wall/closed-status/dependency preflights.
+    write_file(
+        &repo.join(".ctx/traits/config.toml"),
+        &format!("[tasks]\ndispatch-trait = \"{id}\"\n"),
+    );
     commit_all(&repo, &home, "initial commit");
 
     require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
@@ -620,7 +632,6 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "traits",
             "run",
             "implement-fixture-park-blocked",
-            "--task-dispatch",
             "--set",
             "task=P900",
             "--out",
@@ -668,7 +679,6 @@ fn blocked_exhaustion_parks_and_stands_as_a_wall() {
             "traits",
             "run",
             "implement-fixture-park-blocked",
-            "--task-dispatch",
             "--set",
             "task=P901",
             "--no-drive",
@@ -715,7 +725,6 @@ fn continuing_exhaustion_lands_the_commit() {
             "traits",
             "run",
             "implement-fixture-park-continue",
-            "--task-dispatch",
             "--set",
             "task=P950",
             "--out",
@@ -867,10 +876,15 @@ path = ".internal/tasks"
 root = "repo"
 trigger = "on-demand"
 
+[[schema]]
+id = "task"
+schema = "schema:text"
+description = "SDK task type"
+
 [[port]]
 id = "task"
 direction = "input"
-schema = "schema:text"
+schema = "schema:task"
 description = "Task to implement, named by its file in .internal/tasks/."
 
 [[port]]
@@ -1091,7 +1105,6 @@ fn drive_dual_review_phase(
             "traits",
             "run",
             trait_id,
-            "--task-dispatch",
             "--set",
             &format!("task={phase}"),
             "--out",
@@ -1269,7 +1282,6 @@ fn guarded_exhaustion_refreshes_project_written_park_report_output() {
             "traits",
             "run",
             id,
-            "--task-dispatch",
             "--set",
             "task=P980",
             "--no-drive",
@@ -1339,7 +1351,6 @@ fn guarded_timed_out_stop_refreshes_project_written_park_report_output() {
             "traits",
             "run",
             id,
-            "--task-dispatch",
             "--set",
             "task=P981",
             "--no-drive",
@@ -1499,7 +1510,6 @@ fn dual_review_call_boundary_refreshes_both_park_report_appends() {
             "traits",
             "run",
             id,
-            "--task-dispatch",
             "--set",
             "task=P972",
             "--no-drive",

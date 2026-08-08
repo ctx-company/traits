@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.23.0"
+version = "0.24.0"
 name = "Implement (Guarded)"
 summary = "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands."
 variant = "guarded"
@@ -71,7 +71,7 @@ value = "slot:park-report"
 [[port]]
 id = "task"
 direction = "input"
-schema = "schema:text"
+schema = "schema:task"
 description = 'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.'
 
 [[slot]]
@@ -273,6 +273,11 @@ allowed = [
 schema = "schema:text"
 required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
+
+[[schema]]
+id = "task"
+schema = "schema:text"
+description = "A task reference: a task-board id (resolved and bound automatically when this trait is the configured [tasks] dispatch-trait), or a manual task description (a virtual task; not yet supported)."
 
 [[signal]]
 id = "gate-timed-out"

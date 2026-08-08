@@ -81,7 +81,6 @@ while IFS= read -r task; do
   # stdio is inherited so `--progress tui` keeps the real terminal: capturing
   # it here to inspect output would blank the live view.
   ctx traits run "$trait_id" \
-    --task-dispatch \
     --set "task=$task" \
     --worktree \
     --merge \
