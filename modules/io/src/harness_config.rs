@@ -1004,7 +1004,6 @@ enum ConfigLeaf {
     GitLongSeconds,
     PublishExclude,
     RegistryBase,
-    TasksDispatchTrait,
     TasksAutoClose,
     HarnessDynamic,
     AgentDynamic,
@@ -1059,7 +1058,6 @@ impl ConfigLeaf {
         Self::GitLongSeconds,
         Self::PublishExclude,
         Self::RegistryBase,
-        Self::TasksDispatchTrait,
         Self::TasksAutoClose,
         Self::HarnessDynamic,
         Self::AgentDynamic,
@@ -1114,7 +1112,6 @@ impl ConfigLeaf {
             Self::GitLongSeconds => "git.long-seconds",
             Self::PublishExclude => "publish.exclude",
             Self::RegistryBase => "registry.base",
-            Self::TasksDispatchTrait => "tasks.dispatch-trait",
             Self::TasksAutoClose => "tasks.auto-close",
             Self::HarnessDynamic => "harness.*",
             Self::AgentDynamic => "agent.*",
@@ -1138,7 +1135,6 @@ impl ConfigLeaf {
             | Self::MergeDeep
             | Self::GitLongSeconds
             | Self::RegistryBase
-            | Self::TasksDispatchTrait
             | Self::TasksAutoClose
             // These maps are resolved by machine-scoped qualifier handling,
             // not by repository requirement precedence.
@@ -1224,16 +1220,14 @@ pub struct RegistryTable {
     pub base: Option<String>,
 }
 
-/// `[tasks] dispatch-trait` (0063.4): the trait id the TASKS board's `d`
-/// dispatch seeds into the spawn modal's first line by default, so
-/// dispatching a task never requires the owner to recall a trait id from
-/// memory. `None` when unconfigured — the modal opens as today, its leading
-/// comment naming this key as the missing setting.
+/// `[tasks]`: task-board behavior knobs. (`dispatch-trait` was removed —
+/// the TASKS board's `d` dispatch now offers a picker over every trait
+/// declaring the SDK task port (`schema:task`), so eligibility is a trait
+/// declaration, not configuration; remove any leftover `dispatch-trait`
+/// line, which now refuses decode.)
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TasksTable {
-    #[serde(default)]
-    pub dispatch_trait: Option<String>,
     /// `[tasks] auto-close` (0144): how a task's declared checks translate
     /// into a close action, beneath each document's own `auto_close`
     /// override. `None` when unconfigured.
@@ -1582,15 +1576,6 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|git| git.long_seconds)
             .map(|seconds| seconds * 1000)
-    }
-
-    /// 0063.4 `[tasks] dispatch-trait`: the trait id the board's `d`
-    /// dispatch seeds into the spawn modal by default. `None` when
-    /// unconfigured.
-    pub fn effective_dispatch_trait(&self) -> Option<String> {
-        self.tasks
-            .as_ref()
-            .and_then(|tasks| tasks.dispatch_trait.clone())
     }
 
     /// 0144 `[tasks] auto-close`: how a task's declared checks translate
@@ -4154,7 +4139,6 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::GitLongSeconds
         | ConfigLeaf::PublishExclude
         | ConfigLeaf::RegistryBase
-        | ConfigLeaf::TasksDispatchTrait
         | ConfigLeaf::TasksAutoClose
         | ConfigLeaf::HarnessDynamic
         | ConfigLeaf::AgentDynamic
@@ -4407,15 +4391,6 @@ fn apply_environment_defaults(
             .get_or_insert_with(RegistryTable::default)
             .base = next.base.clone();
         record_winner(winners, "registry.base", layer, source.clone());
-    }
-    if let Some(next) = &document.tasks
-        && next.dispatch_trait.is_some()
-    {
-        runtime
-            .tasks
-            .get_or_insert_with(TasksTable::default)
-            .dispatch_trait = next.dispatch_trait.clone();
-        record_winner(winners, "tasks.dispatch-trait", layer, source.clone());
     }
     if let Some(next) = &document.tasks
         && next.auto_close.is_some()
@@ -5576,10 +5551,6 @@ fn merge_project_config(
     }
     if let Some(tasks) = next.tasks {
         let target = base.tasks.get_or_insert_with(TasksTable::default);
-        if tasks.dispatch_trait.is_some() {
-            target.dispatch_trait = tasks.dispatch_trait;
-            record_winner(winners, "tasks.dispatch-trait", layer, source.clone());
-        }
         if tasks.auto_close.is_some() {
             target.auto_close = tasks.auto_close;
             record_winner(winners, "tasks.auto-close", layer, source);
@@ -8222,47 +8193,18 @@ mod config_tests {
         );
     }
 
-    /// 0063.4 regression: `[tasks] dispatch-trait` parsed from a repo config
-    /// file must survive the project merge — it was only applied on the
-    /// `CTX_CONFIG` environment path, so a configured board dispatch still
-    /// opened the modal as unconfigured.
+    /// The removed `[tasks] dispatch-trait` key refuses decode loudly (the
+    /// table is `deny_unknown_fields`) instead of being silently accepted
+    /// as dead config — dispatch eligibility is a trait declaration
+    /// (`schema:task` task port) now, never configuration.
     #[test]
-    fn tasks_dispatch_trait_survives_the_project_merge_from_a_repo_layer() {
-        let configured: RuntimeConfig =
-            toml::from_str("[tasks]\ndispatch-trait = \"implement:quick\"\n").unwrap();
-        let mut effective = RuntimeConfig::default();
-        let mut winners = BTreeMap::new();
-        merge_project_config(
-            &mut effective,
-            configured,
-            ConfigLayer::Repo,
-            Some("repo".to_string()),
-            &mut winners,
-        );
-        assert_eq!(
-            effective.effective_dispatch_trait().as_deref(),
-            Some("implement:quick")
-        );
-        assert_eq!(
-            winners["tasks.dispatch-trait"].source.as_deref(),
-            Some("repo")
-        );
-
-        // A later layer without a `[tasks]` table must not clear it.
-        merge_project_config(
-            &mut effective,
-            RuntimeConfig::default(),
-            ConfigLayer::UserGlobal,
-            Some("global".to_string()),
-            &mut winners,
-        );
-        assert_eq!(
-            effective.effective_dispatch_trait().as_deref(),
-            Some("implement:quick")
-        );
+    fn tasks_dispatch_trait_key_refuses_decode() {
+        let error = toml::from_str::<RuntimeConfig>("[tasks]\ndispatch-trait = \"implement\"\n")
+            .expect_err("removed key must not decode");
+        assert!(error.to_string().contains("dispatch-trait"), "{error}");
     }
 
-    /// 0144, following the `tasks.dispatch-trait` precedent above: `[tasks]
+    /// 0144: `[tasks]
     /// auto-close` parsed from a repo config file must survive the project
     /// merge from the repo layer.
     #[test]

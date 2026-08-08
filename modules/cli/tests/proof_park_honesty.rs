@@ -313,10 +313,10 @@ argv = ["git", "commit", "--allow-empty", "-m", "{slot:commit-message}"]
 /// must control `on-exhausted` and the reviewer's schema directly rather
 /// than inheriting whatever the checked-in packages currently declare.
 ///
-/// Each fixture repo names its trait as `[tasks] dispatch-trait` — wall
-/// preflight participation belongs to the configured dispatch trait
-/// (`modules/io/src/dispatch_preflight.rs`), never inferred from the trait
-/// id.
+/// Each fixture trait types its `task` port with the SDK task schema
+/// (`schema:task`) — the declaration that makes dispatch bind the task and
+/// run wall preflight (`modules/io/src/dispatch_preflight.rs`); never
+/// inferred from the trait id or configuration.
 fn fixture_trait_toml(id: &str, max_iterations: u32, on_exhausted: &str) -> String {
     format!(
         r#"id = "{id}"
@@ -560,13 +560,6 @@ fn setup_fixture(
         );
         write_file(&repo.join(format!(".internal/tasks/{task}.toml")), &body);
     }
-    // Board binding belongs to the configured `[tasks] dispatch-trait`:
-    // name this fixture's trait so dispatching it binds `task=` through the
-    // board with the wall/closed-status/dependency preflights.
-    write_file(
-        &repo.join(".ctx/traits/config.toml"),
-        &format!("[tasks]\ndispatch-trait = \"{id}\"\n"),
-    );
     commit_all(&repo, &home, "initial commit");
 
     require_success("`ctx traits init`", &["traits", "init"], &repo, &home);

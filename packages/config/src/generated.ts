@@ -214,7 +214,6 @@ export type StoryLevel = "default" | "detailed" | "assisted";
 
 export interface TasksTable {
   autoClose?: AutoClosePolicy;
-  dispatchTrait?: string;
 }
 
 export interface TraitDefaults {

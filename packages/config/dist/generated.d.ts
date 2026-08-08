@@ -178,7 +178,6 @@ export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 export interface TasksTable {
     autoClose?: AutoClosePolicy;
-    dispatchTrait?: string;
 }
 export interface TraitDefaults {
     agent?: AgentDefaults;

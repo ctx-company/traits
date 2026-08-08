@@ -709,11 +709,17 @@ enum Action {
 
 /// TASKS' `S`/`a` write tags (0063): the modal itself carries the typed text
 /// (a child title for split, `done`/`cancelled` for archive), resolved to
-/// `ModalOutcome::Submitted` on confirm. Dispatch (`d`) never opens a
-/// `Task` modal — a blocked task refuses inline, and a permitted dispatch
-/// reuses `SessionAction::Spawn` unchanged.
+/// `ModalOutcome::Submitted` on confirm. Dispatch (`d`) opens the
+/// trait picker first ([`PickDispatchTrait`](TaskAction::PickDispatchTrait));
+/// the picked trait then reuses `SessionAction::Spawn` unchanged.
 #[derive(Clone)]
 enum TaskAction {
+    /// `d`'s trait picker: a `Select` modal over every trait declaring the
+    /// SDK task port; `Submitted` carries the picked selector, which opens
+    /// the ordinary spawn modal seeded for `key`.
+    PickDispatchTrait {
+        key: String,
+    },
     Split {
         parent: String,
     },
@@ -6653,6 +6659,11 @@ fn apply_task_action(
         TaskAction::ReconcileStep { .. } | TaskAction::SplitStep { .. } => {
             unreachable!("apply_action routes reconcile/split queue steps before reaching here")
         }
+        TaskAction::PickDispatchTrait { key } => {
+            // `text` is the picked trait selector from the Select modal.
+            open_spawn_modal_for_task(state, &text, &key);
+            Ok(())
+        }
         TaskAction::Split { parent } => {
             let title = text.trim();
             if title.is_empty() {
@@ -6931,48 +6942,124 @@ fn dispatch_selected_task(state: &mut State) {
             Some(ctx_traits_io::dispatch_preflight::dependency_refusal_message(&key, &unmet));
         return;
     }
-    open_spawn_modal_for_task(state, &key);
+    open_dispatch_picker_for_task(state, &key);
 }
 
-/// The existing spawn modal (§5050), seeded with `--set`/`task=<key>` lines
-/// so submission flows through [`apply_spawn_request`]'s existing clap
-/// validation and detached spawn unchanged — the run's own dispatch preflight
-/// remains the real gate; this screen's check above is UX only, and
+/// Open the dispatch-trait picker for `key`: every trait (and family
+/// variant) whose canonical declares a `task` input port typed with the SDK
+/// task schema (`schema:task`) is offered; picking one opens the ordinary
+/// spawn modal seeded for that trait. The typed port is the sole
+/// eligibility marker — the same declaration the run itself binds on — so
+/// the picker can never offer a trait the runtime would treat as plain
+/// text. Enumerated fresh at keypress, never cached on `State`, so a
+/// package edit takes effect on the next dispatch.
+fn open_dispatch_picker_for_task(state: &mut State, key: &str) {
+    let selectors = task_dispatchable_selectors();
+    let options: Vec<(String, String)> = selectors
+        .into_iter()
+        .map(|selector| (selector.clone(), selector))
+        .collect();
+    let Some(modal) = Modal::select(format!("dispatch {key}"), options) else {
+        state.message = Some(
+            "no trait declares a task input port typed schema:task (CDK: port.input.task); nothing can dispatch this task"
+                .to_string(),
+        );
+        return;
+    };
+    state.modal_host.open(
+        Action::Task(TaskAction::PickDispatchTrait {
+            key: key.to_string(),
+        }),
+        modal,
+    );
+}
+
+/// Every selector whose canonical declares the SDK task port: plain trait
+/// ids as-is, family packages expanded to one `family:variant` per variant
+/// whose own canonical carries the marker. Read errors skip the candidate —
+/// this list is picker UX; the run's own port check is the enforcement.
+fn task_dispatchable_selectors() -> Vec<String> {
+    let Ok(context) = ctx_traits_io::inventory::InventoryContext::discover() else {
+        return Vec::new();
+    };
+    let Ok(ids) = context.candidate_ids() else {
+        return Vec::new();
+    };
+    let mut selectors = Vec::new();
+    for id in ids {
+        let Ok(Some(resolution)) = context.resolve_tiers(&id) else {
+            continue;
+        };
+        let winner = &resolution.winner.path;
+        // A family package lists each variant separately; its manifest
+        // lives at the package root somewhere above the winning canonical.
+        let family = winner.ancestors().skip(1).take(4).find_map(|ancestor| {
+            let manifest = ctx_traits_io::layout::package_manifest_path(ancestor);
+            ctx_traits_io::family_manifest::read_family_table(&manifest)
+                .ok()
+                .flatten()
+                .map(|table| (ancestor.to_path_buf(), table))
+        });
+        match family {
+            Some((package_root, table)) => {
+                for variant in table.variant_names() {
+                    let Some((_, resolved_variant)) = table.variant(&variant) else {
+                        continue;
+                    };
+                    let path = package_root.join(&resolved_variant.relative_path);
+                    if trait_file_declares_task_port(&path) {
+                        selectors.push(format!("{id}:{variant}"));
+                    }
+                }
+            }
+            None => {
+                if trait_file_declares_task_port(winner) {
+                    selectors.push(id);
+                }
+            }
+        }
+    }
+    selectors.sort();
+    selectors.dedup();
+    selectors
+}
+
+/// Whether the canonical at `path` declares an input port `task` typed
+/// `schema:task` — the same marker `run::start` binds on.
+fn trait_file_declares_task_port(path: &camino::Utf8Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path.as_std_path()) else {
+        return false;
+    };
+    let Ok(trait_ref) =
+        ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, &text)
+    else {
+        return false;
+    };
+    trait_ref.ports.iter().any(|port| {
+        port.id == "task"
+            && port.direction == ctx_traits_core::r#trait::port::PortDirection::Input
+            && port.schema == "schema:task"
+    })
+}
+
+/// The existing spawn modal (§5050), seeded with the picked trait plus
+/// `--set`/`task=<key>` lines so submission flows through
+/// [`apply_spawn_request`]'s existing clap validation and detached spawn
+/// unchanged — the run's own dispatch preflight remains the real gate, and
 /// `--override-dependencies` stays reachable by editing the modal text.
-/// 0063.4: the seed's first line is the `[tasks] dispatch-trait` config
-/// default, editable before submit — resolved synchronously at keypress
-/// (the same `resolve_runtime_config` entry point `run` itself uses), never
-/// cached on `State`, so a config edit takes effect on the next dispatch.
-/// Absent config, the modal opens as before (blank first line) but its
-/// leading comment names exactly the missing key.
-fn open_spawn_modal_for_task(state: &mut State, key: &str) {
-    let dispatch_trait =
-        ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
-            .ok()
-            .and_then(|config| config.effective_dispatch_trait());
-    let seed = spawn_modal_seed(dispatch_trait.as_deref(), key);
+fn open_spawn_modal_for_task(state: &mut State, trait_selector: &str, key: &str) {
+    let seed = spawn_modal_seed(trait_selector, key);
     state.modal_host.open(
         Action::Session(SessionAction::Spawn),
         Modal::text_input("spawn run", seed, true),
     );
 }
 
-/// The spawn modal's seed text for a board dispatch: `dispatch_trait`
-/// (`[tasks] dispatch-trait`, 0063.4) as the modal's first line when
-/// configured — the spawn modal's own contract requires a trait id as the
-/// first non-comment line — or, absent config, a leading comment naming
-/// exactly the missing key so the owner is never left guessing.
-fn spawn_modal_seed(dispatch_trait: Option<&str>, key: &str) -> String {
-    // No flag needed: dispatching the configured dispatch trait IS what
-    // makes this a board dispatch — the run recognises the trait from
-    // `[tasks] dispatch-trait` itself and binds, preflights, and
-    // materialises the board document automatically.
-    match dispatch_trait {
-        Some(trait_id) => format!("{trait_id}\n--set\ntask={key}\n"),
-        None => format!(
-            "# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--set\ntask={key}\n"
-        ),
-    }
+/// The spawn modal's seed text for a board dispatch: the picked trait
+/// selector as the first line (the spawn modal's own contract requires a
+/// trait id there), then the task binding.
+fn spawn_modal_seed(trait_selector: &str, key: &str) -> String {
+    format!("{trait_selector}\n--set\ntask={key}\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -10926,8 +11013,8 @@ mod tests {
     }
 
     #[test]
-    fn spawn_modal_seed_leads_with_the_configured_dispatch_trait() {
-        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+    fn spawn_modal_seed_leads_with_the_picked_dispatch_trait() {
+        let seed = spawn_modal_seed("implement-quick", "0063");
         let mut lines = seed.lines();
         assert_eq!(lines.next(), Some("implement-quick"));
         assert_eq!(lines.next(), Some("--set"));
@@ -10941,7 +11028,7 @@ mod tests {
     /// form is not a distinct seam.
     #[test]
     fn spawn_modal_seed_two_line_set_form_parses_as_traits_run() {
-        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+        let seed = spawn_modal_seed("implement-quick", "0063");
         let user_args: Vec<String> = seed
             .lines()
             .map(str::trim)
@@ -10971,18 +11058,6 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
-    }
-
-    #[test]
-    fn spawn_modal_seed_names_the_missing_config_key_absent_a_default() {
-        let seed = spawn_modal_seed(None, "0063");
-        let mut lines = seed.lines();
-        let comment = lines.next().expect("comment line");
-        assert!(comment.starts_with('#'));
-        assert!(comment.contains("dispatch-trait"));
-        assert_eq!(lines.next(), Some(""));
-        assert_eq!(lines.next(), Some("--set"));
-        assert_eq!(lines.next(), Some("task=0063"));
     }
 
     fn rline_text(line: &RLine<'static>) -> String {

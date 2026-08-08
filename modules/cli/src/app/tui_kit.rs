@@ -359,6 +359,15 @@ pub(crate) enum Modal {
         input: TextInput,
         multiline: bool,
     },
+    /// A closed pick list: up/down moves the highlight, enter submits the
+    /// highlighted option's value, esc cancels. Options are `(value,
+    /// label)` — the value is what `ModalOutcome::Submitted` carries, the
+    /// label is what renders.
+    Select {
+        title: String,
+        options: Vec<(String, String)>,
+        selected: usize,
+    },
 }
 
 /// Reusable single-line or multi-line Unicode editing state.  Both modal and
@@ -440,17 +449,34 @@ impl Modal {
         }
     }
 
+    /// A pick-list modal over `(value, label)` options; refuses to build
+    /// from an empty list (callers surface their own "nothing to pick"
+    /// message instead).
+    pub(crate) fn select(title: impl Into<String>, options: Vec<(String, String)>) -> Option<Self> {
+        if options.is_empty() {
+            return None;
+        }
+        Some(Modal::Select {
+            title: title.into(),
+            options,
+            selected: 0,
+        })
+    }
+
     pub(crate) fn title(&self) -> &str {
         match self {
             Modal::Confirm { title, .. } => title,
             Modal::TextInput { title, .. } => title,
+            Modal::Select { title, .. } => title,
         }
     }
 
     /// Routes one key. Esc always cancels; a confirm dialog accepts
     /// `y`/enter to confirm and `n`/esc to cancel; a single-line input
     /// submits on enter; a multi-line input inserts a newline on enter and
-    /// submits on `ctrl-d` (hinted in the modal's own footer row).
+    /// submits on `ctrl-d` (hinted in the modal's own footer row); a select
+    /// list moves on up/down (or `k`/`j`) and submits the highlighted value
+    /// on enter.
     pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ModalOutcome {
         match self {
             Modal::Confirm { .. } => match key.code {
@@ -461,6 +487,21 @@ impl Modal {
             Modal::TextInput {
                 input, multiline, ..
             } => input.handle_key(*multiline, key),
+            Modal::Select {
+                options, selected, ..
+            } => match key.code {
+                KeyCode::Esc => ModalOutcome::Cancelled,
+                KeyCode::Enter => ModalOutcome::Submitted(options[*selected].0.clone()),
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *selected = selected.saturating_sub(1);
+                    ModalOutcome::Pending
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *selected = (*selected + 1).min(options.len() - 1);
+                    ModalOutcome::Pending
+                }
+                _ => ModalOutcome::Pending,
+            },
         }
     }
 }
@@ -858,6 +899,12 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
             let base = if *multiline { 12 } else { 5 };
             (width, base + body_rows)
         }
+        Modal::Select { options, .. } => {
+            let width = 70u16.min(area.width.max(1));
+            // Options + blank + hint + borders, clamped to the frame.
+            let height = (options.len() as u16 + 4).min(area.height.max(5));
+            (width, height)
+        }
     };
     let rect = centered_rect(area, width, height);
     frame.render_widget(Clear, rect);
@@ -929,6 +976,31 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
             let cursor_y =
                 inner.y + (body_row_offset + row as u16).min(inner.height.saturating_sub(1));
             frame.set_cursor_position((cursor_x, cursor_y));
+        }
+        Modal::Select {
+            options, selected, ..
+        } => {
+            // Keep the highlight visible when the list outgrows the pane:
+            // scroll a window around `selected`, hint row always last.
+            let visible = inner.height.saturating_sub(2).max(1) as usize;
+            let first = selected
+                .saturating_sub(visible.saturating_sub(1))
+                .min(options.len().saturating_sub(visible));
+            let mut lines: Vec<RLine<'static>> = Vec::new();
+            for (index, (_, label)) in options.iter().enumerate().skip(first).take(visible) {
+                let style = if index == *selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                lines.push(RLine::from(Span::styled(label.clone(), style)));
+            }
+            lines.push(RLine::default());
+            lines.push(RLine::from(Span::styled(
+                "↑/↓ move  enter pick  esc cancel",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+            frame.render_widget(Paragraph::new(lines), inner);
         }
     }
 }
