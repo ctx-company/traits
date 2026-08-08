@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0145"
 title = "Attaching from the dashboard owns the screen and the keys, every time"
-status = "ready"
+status = "done"
 raised = "2026-08-07"
+closed = "2026-08-08"
+origin = "run run-c63b4f6653b42c6533e5e9adedca18e825b71b000fb028b4443a991aec3e83a0 merged as 448c96a9ca58ddb0e9ca8428f72d5b61a55b656d"
 content = """
 
 
