@@ -341,7 +341,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         defineTrait("behavior-overlap");
         useBehavior({ tone: tone.Direct });
-        useBehavior({ tone: tone.Blunt });
+        useBehavior({ tone: tone.Warm });
       })
     ).toThrow(/"tone" was already set/);
   });
