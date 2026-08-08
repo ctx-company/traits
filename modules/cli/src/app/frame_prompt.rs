@@ -5,7 +5,7 @@
 //! function here is a pure read of a `LoadedTrait` + `Session` +
 //! `SequenceFrame` triple — no harness dispatch, no session mutation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
@@ -296,7 +296,7 @@ pub(crate) fn resolved_human_question_body(
     match resolved_prompt_body(loaded, session, frame, evidence)? {
         Ok(text) => {
             let text = resolve_resource_tokens(loaded, session, frame, text, &[])?;
-            let text = resolve_input_value_tokens(session, frame, text);
+            let (text, _substituted) = resolve_input_value_tokens(session, frame, text);
             let max_inline_prompt_bytes = effective_max_inline_prompt_bytes();
             if text.len() > max_inline_prompt_bytes {
                 return Err(crate::Error::Command {
@@ -340,8 +340,10 @@ pub(crate) fn resolved_frame_prompt(
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
 ) -> crate::Result<ResolvedFramePrompt> {
-    let prompt_section = resolved_prompt_section(loaded, session, frame, pending_inputs)?;
-    let input_section = resolved_input_section(loaded, session, frame, pending_inputs)?;
+    let (prompt_section, substituted) =
+        resolved_prompt_section(loaded, session, frame, pending_inputs)?;
+    let input_section =
+        resolved_input_section(loaded, session, frame, pending_inputs, &substituted)?;
     let information_section = frame_information_section(loaded, frame, &prompt_section);
     Ok(ResolvedFramePrompt {
         prompt_section,
@@ -355,6 +357,7 @@ fn resolved_input_section(
     session: &ctx_traits_core::procedure::session::Session,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
+    substituted: &BTreeSet<String>,
 ) -> crate::Result<String> {
     if frame.available_inputs.is_empty()
         && frame.resource_evidence.is_empty()
@@ -365,6 +368,15 @@ fn resolved_input_section(
 
     let mut section = String::new();
     for input in &frame.available_inputs {
+        // A value the prompt body already carries verbatim (an interpolated
+        // `{slot:...}`/`{port:...}` token) is not attached a second time:
+        // the duplicate `<data>` element doubled frame bytes for zero
+        // information — a 39KB design document once appeared three times in
+        // one review frame, tripping the argv budget. Completing P019's
+        // "operands only" collapse: the substitution IS the operand.
+        if substituted.contains(&input.ref_text) {
+            continue;
+        }
         // One element per input, named for the ref's own id. No schema
         // attribute (P562's rule: input carries the value, only output
         // describes shapes) and no digest — provenance lives in the ledger.
@@ -888,11 +900,15 @@ fn resolve_resource_tokens(
 /// when the digest-carrying input record is too large to inline separately.
 /// Runs after prompt digest verification and after resource-token resolution,
 /// so a substituted value cannot inject tokens that would then re-resolve.
+/// Substitutes `{slot:...}`/`{port:...}` tokens with their accepted scalar
+/// values and reports WHICH refs were substituted, so the input section can
+/// skip re-attaching a value the prompt body already carries verbatim (see
+/// [`resolved_input_section`]).
 fn resolve_input_value_tokens(
     session: &ctx_traits_core::procedure::session::Session,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     text: String,
-) -> String {
+) -> (String, BTreeSet<String>) {
     let mut values = BTreeMap::new();
     for input in &frame.available_inputs {
         let Some(value) = accepted_input_value(session, input) else {
@@ -903,25 +919,28 @@ fn resolve_input_value_tokens(
         };
         values.insert(input.ref_text.as_str(), scalar);
     }
+    let mut substituted = BTreeSet::new();
     let mut resolved = String::with_capacity(text.len());
     let mut remaining = text.as_str();
     while let Some(start) = remaining.find('{') {
         let token_start = start + 1;
         let Some(end) = remaining[token_start..].find('}') else {
             resolved.push_str(remaining);
-            return resolved;
+            return (resolved, substituted);
         };
         let token_end = token_start + end;
         resolved.push_str(&remaining[..start]);
-        if let Some(value) = values.get(&remaining[token_start..token_end]) {
+        let token = &remaining[token_start..token_end];
+        if let Some(value) = values.get(token) {
             resolved.push_str(value);
+            substituted.insert(token.to_string());
         } else {
             resolved.push_str(&remaining[start..=token_end]);
         }
         remaining = &remaining[token_end + 1..];
     }
     resolved.push_str(remaining);
-    resolved
+    (resolved, substituted)
 }
 
 fn accepted_input_value<'a>(
@@ -993,20 +1012,22 @@ fn resolved_prompt_section(
     session: &ctx_traits_core::procedure::session::Session,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     pending_inputs: &[PendingInput],
-) -> crate::Result<String> {
+) -> crate::Result<(String, BTreeSet<String>)> {
     let Some(evidence) = frame.prompt.as_ref() else {
-        return Ok("none\n".to_string());
+        return Ok(("none\n".to_string(), BTreeSet::new()));
     };
 
     // P561: the prompt's source/ref/digest header is gone from the model's
     // view. It is provenance — the ledger records it, and the model can act on
     // none of it, so the section opens empty.
     let mut section = String::new();
+    let mut substituted = BTreeSet::new();
     let _ = &evidence.source;
     match resolved_prompt_body(loaded, session, frame, evidence)? {
         Ok(text) => {
             let text = resolve_resource_tokens(loaded, session, frame, text, pending_inputs)?;
-            let text = resolve_input_value_tokens(session, frame, text);
+            let (text, substituted_refs) = resolve_input_value_tokens(session, frame, text);
+            substituted = substituted_refs;
             let max_inline_prompt_bytes = effective_max_inline_prompt_bytes();
             if text.len() > max_inline_prompt_bytes {
                 return Err(crate::Error::Command {
@@ -1025,7 +1046,7 @@ fn resolved_prompt_section(
             section.push_str(&format!("(prompt body unavailable: {reason})\n"));
         }
     }
-    Ok(section)
+    Ok((section, substituted))
 }
 
 fn resolved_prompt_body(
