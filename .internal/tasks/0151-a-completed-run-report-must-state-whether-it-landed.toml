@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0151"
+title = "A completed run's report must state whether the work actually landed"
+status = "ready"
+raised = "2026-08-09"
+content = """
+
+
+Owner report 2026-08-09: after seeing a report with a commit and success, branch
+`ctx/run/wt-5df383a38cb8` had not merged into main — the owner had to merge it by
+hand.
+
+Ledger evidence (session-5df383a38cb8…): trait `refactor`, status `completed`,
+`slot:commit-output` = "[ctx/run/wt-5df383a38cb8 af129a63] refactor(cdk): replace
+~139 `unknown` sites…" — and provenance contains NO merge-frames at all. The merge
+did not fail; it was never requested. The Justfile recipe that dispatched it runs
+`ctx traits run refactor --worktree --progress tui` with no `--merge` (unlike
+`implement.sh`, which passes `--merge`), so the run ends with a commit sitting on a
+retained run branch, and the final panel shows commit + success with nothing saying
+"this is NOT on main".
+
+The report was truthful about what happened and silent about what didn't — for an
+owner, commit+success reads as landed. That silence is the defect.
+
+"""
+scope = """
+## Decisions
+
+- **The final report states landing state explicitly.** A worktree run that ends
+  with a commit and no merge frames renders a distinct line: committed on
+  `ctx/run/<id>` — NOT merged; next: `ctx traits merge <run-id>`. A merged run
+  renders the landed sha and target. A parked merge keeps its existing park
+  rendering. No completed-with-commit report may omit the landing state.
+- **Same honesty in the machine surfaces**: the run's summary JSON and the
+  dashboard row carry landed/not-merged/parked, so MERGES (or SESSIONS) can list
+  landable-but-unmerged completed runs instead of them vanishing as "completed".
+- **Recipe posture is decided, not accidental**: either add `--merge` to the
+  worktree recipes that today omit it (refactor, plan, deep-research, …) or keep
+  them merge-less deliberately — owner's call, recorded in the Justfile comment
+  either way. The report fix stands regardless.
+
+"""
+validation = """
+## Watch
+
+- Do NOT fix this by auto-merging: a run the owner dispatched without merge intent
+  must stay unmerged; only the reporting gets loud.
+- The clean-tree skip case (nothing to commit) must not print "not merged" noise —
+  the line renders only when a commit receipt exists.
+- Retained worktree/branch bookkeeping already exists; reuse the ledger's own
+  merge-frames/commit-output evidence, never a second derivation of "did it land".
+
+## Done when
+
+Running a worktree trait without merge intent ends with a report and summary that
+say, in one line, that the commit is on the run branch and not on main, plus the
+exact merge command; the dashboard lists such runs distinctly; every worktree
+recipe's merge posture is explicit in the Justfile; a scratch-fixture proof covers
+the completed-with-commit-no-merge report path.
+"""

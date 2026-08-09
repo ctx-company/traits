@@ -1,0 +1,67 @@
+schema-version = "0.2"
+key = "0150"
+title = "Trust must never report verified while the bytes someone can run are unreviewed"
+status = "ready"
+raised = "2026-08-09"
+content = """
+
+
+Owner report 2026-08-09: trust shows true while it is not.
+
+Reproduced 2026-08-08 on the refactor family. `ctx traits run refactor:smart`
+refused with "invalid manifest at run-session.lifecycle-trust: trait authorization
+was refused" — correct behavior, the smart variant's canonical digest
+(sha256:69ca138d…) was unreviewed after a rebuild. But every reporting surface said
+trust was fine:
+
+- `ctx traits trust refactor` printed `verdict: verified` — it answers for ONE
+  digest (the default variant's, sha256:3f8b4b80…) while the family ships five
+  variants, each with its own digest.
+- `ctx traits trust refactor:smart` echoes its header as `ctx traits trust
+  refactor` (the variant qualifier is accepted but visibly dropped), inviting the
+  owner to read the family-level verdict as covering the variant.
+- Package-level summaries (`ctx traits list`, the dashboard TRUST screen) collapse
+  to one trust verdict per package, so "verified" can stand while the variant the
+  owner actually runs refuses.
+
+Separate but same incident: the refusal message itself is wrong — "invalid manifest
+at run-session.lifecycle-trust" describes a manifest problem; the actual condition
+is an unreviewed-trust refusal with a one-command fix.
+
+"""
+scope = """
+## Decisions
+
+- **Per-digest truth on every surface.** `ctx traits trust <family>` reports every
+  variant's digest+verdict (a table, not one line); `trust <family:variant>` reports
+  that variant and echoes the variant in its header.
+- **Aggregates are conservative**: a package-level trust cell is "verified" only
+  when EVERY variant's current digest is verified; otherwise "partial (N/M)" or
+  "unreviewed" — never plain verified.
+- **The run refusal names the real condition**: unreviewed trust, the offending
+  variant+digest, and the exact `ctx traits trust approve <family:variant>` to
+  clear it — not "invalid manifest".
+- **Do not weaken the store**: digest-keyed per-variant trust is correct and stays;
+  this task is reporting honesty only. Family-wide approve-all is a separate owner
+  decision, out of scope here.
+
+"""
+validation = """
+## Watch
+
+- `trust approve <family>` currently approves which digest(s)? Pin the semantics
+  and make the report match them exactly — the display must never imply broader
+  coverage than the store records.
+- The dashboard TRUST screen and `list --verbose` derive from the same data; fix
+  the derivation once, not per screen.
+- Proofs: scratch-fixture family with two variants, approve one, assert the family
+  report/aggregate/refusal wording — never the committed packages (2026-08-08
+  ruling).
+
+## Done when
+
+No surface can print verified for a package while any of its variants' current
+digests is unreviewed; querying a variant echoes that variant; the run-time trust
+refusal names trust and the exact approve command; scratch-fixture proofs cover the
+family report, the aggregate, and the refusal text.
+"""

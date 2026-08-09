@@ -1,0 +1,62 @@
+schema-version = "0.2"
+key = "0149"
+title = "Marking a task done must work from every surface that offers it"
+status = "ready"
+raised = "2026-08-09"
+content = """
+
+
+Owner report 2026-08-09: marking a task done is not working.
+
+What is already ruled out (verified live the same day): the CLI path works end to
+end — `ctx tasks update 0146 --status done` set the status AND applied archive
+placement (moved the file under archived/), and `--status ready` restored both. So
+the break is in one of the other surfaces that offer "done":
+
+- the dashboard TASKS screen's verb (0063.x — sync/split/archive/dispatch keys, and
+  whatever accept/done affordance it surfaces for proposals);
+- the merge-time done-proposal flow (0063.8): `ctx tasks proposals` lists them, and
+  "accepting stays `tasks update <task> --status done`" — if the dashboard offers
+  accept but doesn't actually run that update (or swallows its refusal), done
+  silently no-ops;
+- the 0144 auto-close policy (`ctx task check` / a task closing itself when its
+  declared checks can run) never firing after a merged run.
+
+One likely silent-failure mechanism to check first: `tasks update` deliberately
+refuses the write when the document changed since its read (digest-guarded
+read-modify-write). A surface that calls it and discards stderr turns that refusal
+into "nothing happened".
+
+"""
+scope = """
+## Decisions
+
+- **First step is a pinned repro with the owner**: which surface, which task, what
+  was shown. Do not fix blind — the CLI verb provably works.
+- **Fix the failing surface's own path**, not by adding a second write mechanism:
+  every surface that marks done must route through the same `tasks update` (or
+  provider call) the CLI uses, so placement and digest-guard semantics stay single.
+- **No silent no-ops**: a refused or failed update must surface visibly on the
+  surface that triggered it (dashboard footer/modal, CLI stderr) — a swallowed
+  digest-conflict refusal is itself a bug to fix here.
+- Add a behavioral proof driving the same code path the broken surface uses
+  (scratch board fixture — never the committed board, per the 2026-08-08 ruling).
+
+"""
+validation = """
+## Watch
+
+- The board is the owner's status surface: runs never write it; only owner-invoked
+  surfaces (CLI, dashboard) may. Keep that invariant while fixing.
+- `tasks update`'s digest refusal is CORRECT behavior — the fix for a conflict is
+  re-read-and-retry or surface the error, never dropping the guard.
+- Archive placement is part of "done" — a fix that flips status but leaves the file
+  in the live directory is not done.
+
+## Done when
+
+Marking a task done from the reported surface works end to end (status flips,
+placement applied, visible confirmation); any refused update is shown to the owner
+with its reason, never swallowed; a scratch-fixture proof covers that surface's
+path.
+"""
