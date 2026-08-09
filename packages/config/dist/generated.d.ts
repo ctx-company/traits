@@ -19,6 +19,7 @@ export interface AgentDefaults {
     variant?: Record<string, VariantOverride>;
 }
 export type AgentModelTier = "top" | "fast";
+export type AutoClosePolicy = "confirm" | "checked" | "merge";
 export interface BuildCacheConfig {
     env: string;
 }
@@ -176,6 +177,7 @@ export interface RunTable {
 export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 export interface TasksTable {
+    autoClose?: AutoClosePolicy;
     dispatchTrait?: string;
 }
 export interface TraitDefaults {
