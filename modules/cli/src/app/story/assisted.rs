@@ -107,6 +107,7 @@ mod tests {
                 text: Some("did something".to_string()),
                 tool: Some("edit".to_string()),
                 tokens: None,
+                rate_limit: None,
             },
         }
     }

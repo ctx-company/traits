@@ -224,6 +224,15 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             None => "absent (off)".to_string(),
         },
     );
+    add(
+        &mut knobs,
+        &report.winners,
+        "run.usage-warning-threshold".into(),
+        match policy.usage_warning_threshold {
+            Some(threshold) => threshold.to_string(),
+            None => "absent (off)".to_string(),
+        },
+    );
     let merge = report.runtime.effective_merge_policy();
     add(
         &mut knobs,

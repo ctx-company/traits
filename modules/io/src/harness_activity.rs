@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
+use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind, RateLimitObservation};
 use serde_json::Value;
 
 const MAX_TEXT_CHARS: usize = 512;
@@ -149,6 +149,14 @@ impl HarnessActivityAdapter {
             Some("compaction") | Some("compact") => {
                 self.emit(events, ActivityKind::Compacting, None, None, None)
             }
+            Some("rate_limit_event") => {
+                if let Some(observation) = event
+                    .get("rate_limit_info")
+                    .and_then(RateLimitObservation::decode)
+                {
+                    self.emit_rate_limit(events, observation);
+                }
+            }
             _ => {}
         }
     }
@@ -240,6 +248,33 @@ impl HarnessActivityAdapter {
             text,
             tool,
             tokens,
+            rate_limit: None,
+        });
+    }
+
+    /// Emit a decoded `rate_limit_event` observation (P556/0117). The human
+    /// text names the absolute reset instant (an epoch, never a duration) so
+    /// live surfaces never render a stale "resets in Xh" that drifts as the
+    /// event ages.
+    fn emit_rate_limit(
+        &mut self,
+        events: &mut Vec<ActivityEvent>,
+        observation: RateLimitObservation,
+    ) {
+        self.sequence += 1;
+        let limit_type = observation.limit_type.as_deref().unwrap_or("unknown");
+        let text = format!(
+            "rate limit {} ({limit_type}) — resets at epoch {}",
+            observation.status, observation.resets_at_epoch
+        );
+        events.push(ActivityEvent {
+            sequence: self.sequence,
+            frame_id: self.frame_id.clone(),
+            kind: ActivityKind::RateLimited,
+            text: Some(text),
+            tool: None,
+            tokens: None,
+            rate_limit: Some(observation),
         });
     }
 }
@@ -344,5 +379,49 @@ mod tests {
                     .contains("retain")
             );
         }
+    }
+
+    #[test]
+    fn claude_decodes_a_rejected_rate_limit_event_split_across_chunks() {
+        let mut adapter =
+            HarnessActivityAdapter::new(HarnessActivityAdapterKind::ClaudeCode, "frame");
+        let first = br#"{"type":"rate_limit_event","rate_limit_info":{"status":"rej"#;
+        let second = br#"ected","resetsAt":1784836800,"rateLimitType":"five_hour"},"uuid":"u1","session_id":"s1"}
+"#;
+        assert!(adapter.push(first).is_empty());
+        let events = adapter.push(second);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, ActivityKind::RateLimited);
+        let observation = events[0].rate_limit.as_ref().expect("rate_limit set");
+        assert_eq!(observation.status, "rejected");
+        assert_eq!(observation.limit_type.as_deref(), Some("five_hour"));
+        assert_eq!(observation.resets_at_epoch, 1_784_836_800);
+        assert!(
+            events[0]
+                .text
+                .as_deref()
+                .unwrap_or_default()
+                .contains("1784836800")
+        );
+        assert!(
+            !events[0]
+                .text
+                .as_deref()
+                .unwrap_or_default()
+                .contains("in ")
+        );
+    }
+
+    #[test]
+    fn claude_tolerates_a_rate_limit_event_with_no_rate_limit_type() {
+        let mut adapter =
+            HarnessActivityAdapter::new(HarnessActivityAdapterKind::ClaudeCode, "frame");
+        let events = adapter.push(
+            br#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":100}}
+"#,
+        );
+        assert_eq!(events.len(), 1);
+        let observation = events[0].rate_limit.as_ref().expect("rate_limit set");
+        assert_eq!(observation.limit_type, None);
     }
 }

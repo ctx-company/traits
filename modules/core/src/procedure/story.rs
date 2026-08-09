@@ -1033,6 +1033,7 @@ mod activity_enrichment_tests {
                 text: text.map(str::to_string),
                 tool: tool.map(str::to_string),
                 tokens,
+                rate_limit: None,
             },
         }
     }

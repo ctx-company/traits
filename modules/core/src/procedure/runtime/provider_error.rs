@@ -16,6 +16,8 @@
 // shape. This module performs no parsing beyond string/JSON inspection and
 // no filesystem, process, or network access.
 
+use crate::procedure::activity::RateLimitObservation;
+
 /// Bounded, provider-attributable evidence that an account ran out of
 /// payment credits or usage quota.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,15 +27,28 @@ pub struct CreditsExhaustedEvidence {
     pub detail: String,
 }
 
+/// Bounded, provider-attributable evidence that a subscription harness
+/// rejected a turn on usage/rate-limit pressure (P556/0117) — distinct from
+/// [`CreditsExhaustedEvidence`], which carries a top-up URL for API-key
+/// billing. A subscription limit carries a reset instant instead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubscriptionLimitEvidence {
+    pub limit_type: Option<String>,
+    pub utilization: Option<f64>,
+    pub resets_at_epoch: u64,
+    pub detail: String,
+}
+
 /// Result of inspecting harness evidence for a provider-reported failure.
-/// `InvalidModel` and `CreditsExhausted` are the non-retryable cases: every
-/// retry would answer identically without ever spawning a real turn.
-/// `Generic` covers all other provider-flagged failures, which retain
-/// `harness-failed` handling.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `InvalidModel`, `CreditsExhausted`, and `RateLimited` are the
+/// non-retryable cases: every retry would answer identically without ever
+/// spawning a real turn. `Generic` covers all other provider-flagged
+/// failures, which retain `harness-failed` handling.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProviderErrorClassification {
     InvalidModel(String),
     CreditsExhausted(CreditsExhaustedEvidence),
+    RateLimited(SubscriptionLimitEvidence),
     Generic(String),
 }
 
@@ -138,12 +153,29 @@ pub fn classify_provider_error(
 /// result event is reached.
 fn classify_claude_stream_error(stream_events: &[JsonValue]) -> Option<ProviderErrorClassification> {
     let mut model_not_found_marker = false;
+    // Last rejected `rate_limit_info` observation, in stream order — a
+    // subscription harness can reject on more than one limit type across a
+    // stream; `rejected_last` tracks whichever rejection was observed most
+    // recently so the pause names the type that actually caused this lost
+    // turn (P556/0117). `latest_rate_limit_observations` below separately
+    // captures every observed limit type (any status) for ledger evidence.
+    let mut rejected_last: Option<RateLimitObservation> = None;
     for value in stream_events {
         if !model_not_found_marker {
             model_not_found_marker = value
                 .get("error")
                 .and_then(JsonValue::as_str)
                 .is_some_and(|error| error.eq_ignore_ascii_case("model_not_found"));
+        }
+        if value.get("type").and_then(JsonValue::as_str) == Some("rate_limit_event") {
+            if let Some(observation) = value
+                .get("rate_limit_info")
+                .and_then(RateLimitObservation::decode)
+                && observation.status == "rejected"
+            {
+                rejected_last = Some(observation);
+            }
+            continue;
         }
         if value.get("type").and_then(JsonValue::as_str) != Some("result") {
             continue;
@@ -177,7 +209,13 @@ fn classify_claude_stream_error(stream_events: &[JsonValue]) -> Option<ProviderE
                 .and_then(JsonValue::as_i64)
                 .is_none_or(|turns| turns <= 1);
         let billing = billing_text && (flagged || zero_work);
-        if !flagged && !billing {
+        // A rejected rate-limit event corroborated by this result losing the
+        // turn (error-flagged, or zero-work — the same guard `billing` uses
+        // above) is the AYCguytU-shaped check: an earlier transient
+        // `rate_limit_event` must never reclassify a result that went on to
+        // do real, successful work.
+        let rate_limited = rejected_last.is_some() && (flagged || zero_work);
+        if !flagged && !billing && !rate_limited {
             return None;
         }
         if model_not_found_marker || is_model_resolution_error(value, text) {
@@ -187,6 +225,24 @@ fn classify_claude_stream_error(stream_events: &[JsonValue]) -> Option<ProviderE
                 text.chars().take(200).collect()
             };
             return Some(ProviderErrorClassification::InvalidModel(detail));
+        }
+        if rate_limited && let Some(latest) = &rejected_last {
+            let detail = if text.is_empty() {
+                format!(
+                    "rate limit rejected ({})",
+                    latest.limit_type.as_deref().unwrap_or("unknown")
+                )
+            } else {
+                text.chars().take(200).collect()
+            };
+            return Some(ProviderErrorClassification::RateLimited(
+                SubscriptionLimitEvidence {
+                    limit_type: latest.limit_type.clone(),
+                    utilization: latest.utilization,
+                    resets_at_epoch: latest.resets_at_epoch,
+                    detail,
+                },
+            ));
         }
         if billing {
             let detail = if text.is_empty() {
@@ -213,6 +269,33 @@ fn classify_claude_stream_error(stream_events: &[JsonValue]) -> Option<ProviderE
         ));
     }
     None
+}
+
+/// Latest rate-limit observation per limit type, across every status
+/// (`allowed`, `allowed_warning`, `rejected`) — unlike
+/// [`classify_claude_stream_error`], which only acts on rejections that
+/// corroborate a lost turn. Lets a caller persist run pressure evidence into
+/// the ledger even when the drive never paused (P556/0117 done-when).
+pub fn latest_rate_limit_observations(
+    stream_events: &[JsonValue],
+) -> BTreeMap<String, RateLimitObservation> {
+    let mut latest: BTreeMap<String, RateLimitObservation> = BTreeMap::new();
+    for value in stream_events {
+        if value.get("type").and_then(JsonValue::as_str) != Some("rate_limit_event") {
+            continue;
+        }
+        if let Some(observation) = value
+            .get("rate_limit_info")
+            .and_then(RateLimitObservation::decode)
+        {
+            let key = observation
+                .limit_type
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            latest.insert(key, observation);
+        }
+    }
+    latest
 }
 
 /// Definitive structured evidence that claude could not resolve the
@@ -252,8 +335,20 @@ pub struct ProviderCreditsPause {
     /// absent, so two different unnamed frames never render the same label.
     #[serde(default)]
     pub frame_run_index: usize,
-    pub top_up_url: String,
+    /// Absent for a subscription rate-limit pause (there is no top-up URL to
+    /// offer); always present for an API-key credits pause. `default` +
+    /// `skip_serializing_if` so a ledger written before this field was
+    /// optional still deserializes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_up_url: Option<String>,
     pub detail: String,
+    /// The rejected limit's reset instant, epoch seconds (P556/0117). Never
+    /// convert to a duration — only `Some` for a subscription rate-limit
+    /// pause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_type: Option<String>,
 }
 
 #[cfg(test)]
@@ -435,4 +530,155 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rejected_rate_limit_with_lost_turn_classifies_as_rate_limited() {
+        // Verbatim shape from trace run-5a1316833f08.../004-implement-worker
+        // (0117): rejected `rate_limit_event`, synthetic assistant message,
+        // then a zero-cost, single-turn, error-flagged `result`.
+        let stdout = concat!(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1784836800,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false},"uuid":"u1","session_id":"s1"}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"model":"<synthetic>","content":[]}}"#,
+            "\n",
+            r#"{"type":"result","is_error":true,"total_cost_usd":0,"num_turns":1,"result":""}"#,
+        );
+        let events: Vec<JsonValue> = stdout
+            .lines()
+            .map(|line| serde_json::from_str::<JsonValue>(line).unwrap())
+            .collect();
+        match classify_provider_error(&evidence(
+            "claude-stream-json",
+            &events,
+            stdout,
+            "",
+            Some(1),
+        )) {
+            Some(ProviderErrorClassification::RateLimited(evidence)) => {
+                assert_eq!(evidence.resets_at_epoch, 1_784_836_800);
+                assert_eq!(evidence.limit_type.as_deref(), Some("five_hour"));
+            }
+            other => panic!("expected RateLimited classification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejected_rate_limit_before_a_successful_costly_result_is_not_reclassified() {
+        // AYCguytU-shaped guard (0117): a transient rejected rate-limit
+        // event earlier in the stream must never reclassify a result that
+        // went on to do real, successful, multi-turn work.
+        let stdout = concat!(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1784836800,"rateLimitType":"five_hour"},"uuid":"u1","session_id":"s1"}"#,
+            "\n",
+            r#"{"type":"result","is_error":false,"num_turns":12,"total_cost_usd":0.42,"result":"done"}"#,
+        );
+        let events: Vec<JsonValue> = stdout
+            .lines()
+            .map(|line| serde_json::from_str::<JsonValue>(line).unwrap())
+            .collect();
+        assert!(
+            classify_provider_error(&evidence(
+                "claude-stream-json",
+                &events,
+                stdout,
+                "",
+                Some(0)
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn rate_limited_names_the_latest_rejected_type_across_several() {
+        let stdout = concat!(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":100,"rateLimitType":"five_hour"},"uuid":"u1","session_id":"s1"}"#,
+            "\n",
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":200,"rateLimitType":"seven_day"},"uuid":"u2","session_id":"s1"}"#,
+            "\n",
+            r#"{"type":"result","is_error":true,"total_cost_usd":0,"num_turns":1,"result":""}"#,
+        );
+        let events: Vec<JsonValue> = stdout
+            .lines()
+            .map(|line| serde_json::from_str::<JsonValue>(line).unwrap())
+            .collect();
+        match classify_provider_error(&evidence(
+            "claude-stream-json",
+            &events,
+            stdout,
+            "",
+            Some(1),
+        )) {
+            Some(ProviderErrorClassification::RateLimited(evidence)) => {
+                assert_eq!(evidence.limit_type.as_deref(), Some("seven_day"));
+                assert_eq!(evidence.resets_at_epoch, 200);
+            }
+            other => panic!("expected RateLimited classification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn latest_rate_limit_observations_keeps_every_type_regardless_of_status() {
+        let stdout = concat!(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":100,"rateLimitType":"five_hour","utilization":0.9}}"#,
+            "\n",
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":200,"rateLimitType":"seven_day"}}"#,
+        );
+        let events: Vec<JsonValue> = stdout
+            .lines()
+            .map(|line| serde_json::from_str::<JsonValue>(line).unwrap())
+            .collect();
+        let observations = latest_rate_limit_observations(&events);
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations["five_hour"].utilization, Some(0.9));
+        assert_eq!(observations["seven_day"].resets_at_epoch, 200);
+    }
+
+    #[test]
+    fn pre_0117_pause_json_with_a_required_string_top_up_url_still_deserializes() {
+        // Every pre-0117 ledger wrote `top_up_url` as a plain required
+        // string; the relaxed `Option<String>` must still decode it.
+        let json = r#"{
+            "provider": "claude",
+            "role": "default",
+            "frame-title": "step",
+            "frame-run-index": 0,
+            "top-up-url": "https://console.anthropic.com/settings/billing",
+            "detail": "Credit balance is too low"
+        }"#;
+        let pause: ProviderCreditsPause = serde_json::from_str(json).expect("decodes");
+        assert_eq!(
+            pause.top_up_url.as_deref(),
+            Some("https://console.anthropic.com/settings/billing")
+        );
+        assert_eq!(pause.resets_at_epoch, None);
+        assert_eq!(pause.limit_type, None);
+    }
+
+    #[test]
+    fn subscription_pause_json_omits_top_up_url_and_carries_a_reset_epoch() {
+        let json = r#"{
+            "provider": "claude",
+            "role": "default",
+            "frame-title": "step",
+            "frame-run-index": 0,
+            "detail": "rate limit rejected (five_hour)",
+            "resets-at-epoch": 1784836800,
+            "limit-type": "five_hour"
+        }"#;
+        let pause: ProviderCreditsPause = serde_json::from_str(json).expect("decodes");
+        assert_eq!(pause.top_up_url, None);
+        assert_eq!(pause.resets_at_epoch, Some(1_784_836_800));
+        assert_eq!(pause.limit_type.as_deref(), Some("five_hour"));
+    }
+
+    #[test]
+    fn decode_tolerates_a_missing_utilization_and_rate_limit_type() {
+        // 8 events observed in this repo's own traces with no `rateLimitType`
+        // at all; `utilization` is likewise absent on many `allowed` events.
+        let value: JsonValue =
+            serde_json::from_str(r#"{"status":"allowed","resetsAt":1784836800}"#).unwrap();
+        let observation = RateLimitObservation::decode(&value).expect("decodes");
+        assert_eq!(observation.limit_type, None);
+        assert_eq!(observation.utilization, None);
+        assert_eq!(observation.resets_at_epoch, 1_784_836_800);
+    }
 }

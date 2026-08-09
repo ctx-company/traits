@@ -916,6 +916,15 @@ pub struct DriveOutcome {
     /// itself the crashed-vs-exited signal P512 builds on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u8>,
+    /// Latest observed subscription rate-limit pressure per limit type
+    /// (P556/0117), keyed by `RateLimitObservation::limit_type` (or
+    /// `"unknown"` for the wire's typeless events). Carries evidence even on
+    /// a drive that never paused — `None` when the dispatched harness emits
+    /// no usage telemetry or this is an older ledger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<
+        std::collections::BTreeMap<String, crate::procedure::activity::RateLimitObservation>,
+    >,
 }
 
 /// The effective drive budget recorded as evidence alongside a
@@ -977,12 +986,16 @@ pub struct TokenUsageEvidence {
 /// into a single argument for `record_drive_outcome` so a caller supplies
 /// exactly one evidence value rather than a growing list of independent
 /// optional parameters.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DriveTerminalEvidence {
     pub effective_budget: Option<DriveBudgetEvidence>,
     pub token_usage: Option<TokenUsageEvidence>,
     /// P510 liveness evidence, see [`DriveOutcome::exit_code`].
     pub exit_code: Option<u8>,
+    /// See [`DriveOutcome::rate_limit`] (P556/0117).
+    pub rate_limit: Option<
+        std::collections::BTreeMap<String, crate::procedure::activity::RateLimitObservation>,
+    >,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

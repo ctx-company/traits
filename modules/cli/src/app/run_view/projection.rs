@@ -951,13 +951,14 @@ fn activity_kind_label(kind: &ActivityKind) -> &'static str {
         ActivityKind::Stalled => "stalled",
         ActivityKind::Compacting => "compacting",
         ActivityKind::NoActivityReported => "no activity reported",
+        ActivityKind::RateLimited => "rate limited",
     }
 }
 
 fn activity_event_tone(kind: &ActivityKind) -> tui::Tone {
     match kind {
         ActivityKind::ValidatingOutput => tui::Tone::Pass,
-        ActivityKind::Stalled => tui::Tone::Fail,
+        ActivityKind::Stalled | ActivityKind::RateLimited => tui::Tone::Fail,
         _ => tui::Tone::Default,
     }
 }
@@ -1005,6 +1006,7 @@ mod tests {
             text: text.map(str::to_string),
             tool: None,
             tokens: None,
+            rate_limit: None,
         }
     }
 
@@ -2016,6 +2018,7 @@ summary = "A test trait."
                 guide_complete: None,
             }),
             exit_code: None,
+            rate_limit: None,
         });
         let ledger_path = camino::Utf8PathBuf::from(format!(
             "/tmp/ctx-traits-run-view-ledger-seed-{}.json",

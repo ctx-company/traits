@@ -207,6 +207,7 @@ mod tests {
             text: Some("edited file.rs".to_string()),
             tool: Some("edit".to_string()),
             tokens: None,
+            rate_limit: None,
         }
     }
 

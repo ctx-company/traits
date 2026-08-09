@@ -75,6 +75,7 @@ impl MergeLive {
             text: draft.text,
             tool: draft.tool,
             tokens: None,
+            rate_limit: None,
         });
     }
 

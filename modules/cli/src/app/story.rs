@@ -978,6 +978,7 @@ mod tests {
                 text: text.map(str::to_string),
                 tool: tool.map(str::to_string),
                 tokens: None,
+                rate_limit: None,
             },
         }
     }

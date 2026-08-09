@@ -862,7 +862,7 @@ impl RunProfileAssignment {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RuntimeConfig {
     #[serde(default)]
@@ -990,6 +990,7 @@ enum ConfigLeaf {
     RunBuildCache,
     RunInlinePromptBytes,
     RunStory,
+    RunUsageWarningThreshold,
     MergeWait,
     MergeOverlap,
     MergeAuto,
@@ -1045,6 +1046,7 @@ impl ConfigLeaf {
         Self::RunBuildCache,
         Self::RunInlinePromptBytes,
         Self::RunStory,
+        Self::RunUsageWarningThreshold,
         Self::MergeWait,
         Self::MergeOverlap,
         Self::MergeAuto,
@@ -1100,6 +1102,7 @@ impl ConfigLeaf {
             Self::RunBuildCache => "run.build-cache",
             Self::RunInlinePromptBytes => "run.inline-prompt-bytes",
             Self::RunStory => "run.story",
+            Self::RunUsageWarningThreshold => "run.usage-warning-threshold",
             Self::MergeWait => "merge.wait",
             Self::MergeOverlap => "merge.overlap",
             Self::MergeAuto => "merge.auto",
@@ -1133,6 +1136,7 @@ impl ConfigLeaf {
             | Self::PublishExclude => ConfigSemantic::Additive,
             Self::RunWait
             | Self::RunStory
+            | Self::RunUsageWarningThreshold
             | Self::MergeWait
             | Self::MergeAuto
             | Self::MergeDeep
@@ -1241,7 +1245,7 @@ pub struct TasksTable {
     pub auto_close: Option<ctx_traits_core::task::AutoClosePolicy>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RunTable {
     #[serde(default)]
@@ -1275,6 +1279,13 @@ pub struct RunTable {
     /// whenever this resolves to `assisted`.
     #[serde(default)]
     pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
+    /// `[run] usage-warning-threshold` (P556/0117): a utilization fraction
+    /// (e.g. `0.9`) at or above which a claude-code subscription limit's
+    /// latest observation is surfaced live as a warning — never a pause.
+    /// `None` (the default) turns the warning off entirely; a `rejected`
+    /// limit always pauses regardless of this setting.
+    #[serde(default)]
+    pub usage_warning_threshold: Option<f64>,
 }
 
 #[derive(
@@ -1441,7 +1452,7 @@ pub struct EffectiveConfig<T> {
     pub winner: ConfigWinner,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConfigReport {
     pub runtime: RuntimeConfig,
     pub winners: BTreeMap<String, ConfigWinner>,
@@ -1464,7 +1475,7 @@ pub struct ConfigRequirementConflict {
 /// Runtime defaults after all configuration layers have been classified.
 /// Keeping this projection here prevents doctor and command dispatch from
 /// inventing different defaults.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectiveRunPolicy {
     pub worktree: bool,
     pub max_frames: Option<u64>,
@@ -1488,6 +1499,9 @@ pub struct EffectiveRunPolicy {
     /// when the CLI supplies neither `--story` nor `--no-story`. `None`
     /// means the pane is off by default.
     pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
+    /// P556/0117 `[run] usage-warning-threshold`. `None` (off) unless a
+    /// config layer sets one.
+    pub usage_warning_threshold: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1539,6 +1553,7 @@ impl RuntimeConfig {
             strict_loops: run.and_then(|value| value.strict_loops).unwrap_or(false),
             inline_prompt_bytes: run.and_then(|value| value.inline_prompt_bytes),
             story: run.and_then(|value| value.story),
+            usage_warning_threshold: run.and_then(|value| value.usage_warning_threshold),
         }
     }
 
@@ -2191,7 +2206,7 @@ pub struct ConfiguredPortDefault {
     pub evidence: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedRuntimeAssignments {
     pub registry: HarnessRegistry,
     pub assignments: BTreeMap<String, ProfileAssignment>,
@@ -2208,6 +2223,10 @@ pub struct ResolvedRuntimeAssignments {
     pub qualifier_by_role: BTreeMap<String, String>,
     pub budget: RunProfileBudget,
     pub worktree: WorktreeConfig,
+    /// `[run] usage-warning-threshold` (P556/0117), resolved through the
+    /// same config-layer overlay as every other `[run]` knob. `None` (off)
+    /// unless a layer sets one.
+    pub usage_warning_threshold: Option<f64>,
     pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
     model_catalogs: BTreeMap<String, ModelCatalogState>,
     model_catalog_capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
@@ -2727,6 +2746,10 @@ fn resolve_runtime_assignments_impl(
         .as_ref()
         .map(|run| run.budget.clone())
         .unwrap_or_default();
+    let usage_warning_threshold = runtime_config
+        .run
+        .as_ref()
+        .and_then(|run| run.usage_warning_threshold);
     // `resolve_runtime_config` (via `resolve_config_report`) already folded
     // declared named build caches into `worktree.build_cache` (P428).
     let worktree = runtime_config.worktree;
@@ -2860,6 +2883,7 @@ fn resolve_runtime_assignments_impl(
         qualifier_by_role,
         budget,
         worktree,
+        usage_warning_threshold,
         port_defaults,
         model_catalogs: BTreeMap::new(),
         model_catalog_capability_reports: Vec::new(),
@@ -4148,6 +4172,7 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::RunWait
         | ConfigLeaf::RunBuildCache
         | ConfigLeaf::RunStory
+        | ConfigLeaf::RunUsageWarningThreshold
         | ConfigLeaf::MergeWait
         | ConfigLeaf::MergeAuto
         | ConfigLeaf::MergeDeep
@@ -5646,7 +5671,11 @@ fn overlay_run_table(
     }
     if next.story.is_some() {
         base.story = next.story;
-        record_winner(winners, "run.story", layer, source);
+        record_winner(winners, "run.story", layer, source.clone());
+    }
+    if next.usage_warning_threshold.is_some() {
+        base.usage_warning_threshold = next.usage_warning_threshold;
+        record_winner(winners, "run.usage-warning-threshold", layer, source);
     }
 }
 
@@ -10264,6 +10293,28 @@ mod config_tests {
     }
 
     #[test]
+    fn usage_warning_threshold_parses_and_is_off_by_default() {
+        let with_threshold: RuntimeConfig =
+            toml::from_str("[run]\nusage-warning-threshold = 0.9\n").expect("threshold decodes");
+        assert_eq!(
+            with_threshold
+                .run
+                .expect("run table")
+                .usage_warning_threshold,
+            Some(0.9)
+        );
+        assert_eq!(
+            RuntimeConfig::default()
+                .effective_run_policy()
+                .usage_warning_threshold,
+            None
+        );
+        let unset: RuntimeConfig = toml::from_str("[run]\nworktree = true\n")
+            .expect("run table without threshold decodes");
+        assert_eq!(unset.run.expect("run table").usage_warning_threshold, None);
+    }
+
+    #[test]
     fn trait_port_defaults_merge_leafwise_and_environment_wins_with_provenance() {
         let parse = |text: &str| toml::from_str::<RuntimeConfig>(text).expect("config decodes");
         let mut effective = RuntimeConfig::default();
@@ -10320,6 +10371,7 @@ mod config_tests {
             qualifier_by_role: BTreeMap::new(),
             budget: RunProfileBudget::default(),
             worktree: WorktreeConfig::default(),
+            usage_warning_threshold: None,
             port_defaults: BTreeMap::new(),
             model_catalogs: BTreeMap::new(),
             model_catalog_capability_reports: Vec::new(),

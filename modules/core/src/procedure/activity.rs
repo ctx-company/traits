@@ -66,11 +66,49 @@ pub enum ActivityKind {
     Stalled,
     Compacting,
     NoActivityReported,
+    RateLimited,
+}
+
+/// A decoded `rate_limit_event` observation from a subscription harness
+/// (P556/0117). `limit_type` and `utilization` are optional because the
+/// wire payload omits them on some observed events; `resets_at_epoch` is
+/// an epoch and must never be converted to a duration downstream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct RateLimitObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_type: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utilization: Option<f64>,
+    pub resets_at_epoch: u64,
+}
+
+impl RateLimitObservation {
+    /// Tolerant decode of a claude-code `rate_limit_info` payload
+    /// (P556/0117). Shared by the activity adapter (`ctx-traits-io`) and the
+    /// provider-error classifier (`ctx-traits-core`) so the wire shape is
+    /// decoded in exactly one place. `status` and `resetsAt` are the only
+    /// fields observed on every sampled event; everything else is optional.
+    pub fn decode(info: &serde_json::Value) -> Option<Self> {
+        let status = info.get("status").and_then(serde_json::Value::as_str)?;
+        let resets_at_epoch = info.get("resetsAt").and_then(serde_json::Value::as_u64)?;
+        Some(Self {
+            limit_type: info
+                .get("rateLimitType")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            status: status.to_string(),
+            utilization: info.get("utilization").and_then(serde_json::Value::as_f64),
+            resets_at_epoch,
+        })
+    }
 }
 
 /// One ordered activity observation. Text is deliberately bounded by adapters;
 /// tool results are not represented in this type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub struct ActivityEvent {
@@ -87,6 +125,11 @@ pub struct ActivityEvent {
     /// unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u64>,
+    /// Decoded `rate_limit_event` evidence (P556/0117). Additive and
+    /// `skip_serializing_if` so pre-existing ledgers/sidecars deserialize
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<RateLimitObservation>,
 }
 
 /// The latest event available for a frame, suitable for live surfaces.

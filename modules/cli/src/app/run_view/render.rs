@@ -1582,6 +1582,7 @@ mod tests {
             text: text.map(str::to_string),
             tool: None,
             tokens: None,
+            rate_limit: None,
         }
     }
 

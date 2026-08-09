@@ -576,6 +576,7 @@ pub fn record_drive_outcome(
         effective_budget: evidence.effective_budget,
         token_usage: evidence.token_usage,
         exit_code: evidence.exit_code,
+        rate_limit: evidence.rate_limit,
     });
     write_run_session(&path, &loaded)
 }
@@ -593,6 +594,7 @@ pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
         effective_budget: None,
         token_usage: None,
         exit_code: None,
+        rate_limit: None,
     });
     write_run_session(path, &loaded)
 }

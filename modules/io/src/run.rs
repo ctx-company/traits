@@ -4306,6 +4306,7 @@ mod resolve_command_bounds_tests {
             strict_loops: false,
             inline_prompt_bytes: None,
             story: None,
+            usage_warning_threshold: None,
         }
     }
 

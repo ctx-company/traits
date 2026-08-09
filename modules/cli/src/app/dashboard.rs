@@ -8734,6 +8734,7 @@ mod tests {
                 text: Some(text.to_string()),
                 tool: None,
                 tokens: None,
+                rate_limit: None,
             },
         );
     }

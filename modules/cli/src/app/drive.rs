@@ -305,6 +305,18 @@ pub struct DriveReport {
     /// write through, so the two can never be reported as each other.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bound_fired: Option<String>,
+    /// Latest observed subscription rate-limit pressure per limit type
+    /// across this drive's harness attempts (P556/0117), regardless of
+    /// whether any attempt paused — the ledger's pressure-evidence
+    /// done-when. `None` when the dispatched harness emits no usage
+    /// telemetry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<
+        std::collections::BTreeMap<
+            String,
+            ctx_traits_core::procedure::activity::RateLimitObservation,
+        >,
+    >,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -470,6 +482,7 @@ impl ActivityRecorder {
             text: None,
             tool: None,
             tokens: None,
+            rate_limit: None,
         });
     }
 
@@ -483,6 +496,7 @@ impl ActivityRecorder {
             text: Some(format!("attempt {attempt} of {max}: {reason}")),
             tool: None,
             tokens: None,
+            rate_limit: None,
         });
     }
 
@@ -611,6 +625,7 @@ fn flush_pending(state: &mut ActivityRecorderState) {
         text: (!text.is_empty()).then_some(text),
         tool: None,
         tokens: (pending.tokens_total > 0).then_some(pending.tokens_total),
+        rate_limit: None,
     });
 }
 
@@ -647,6 +662,7 @@ mod activity_recorder_tests {
                 text: Some(format!("chunk-{i}")),
                 tool: None,
                 tokens: Some(2),
+                rate_limit: None,
             });
         }
         recorder.finish_frame("frame-a");
@@ -1077,6 +1093,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             credits_pause: None,
             merge: None,
             bound_fired: None,
+            rate_limit: None,
         };
         push_capability(
             &mut report,
@@ -1233,6 +1250,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         effective_budget: Some(budget_evidence(&budget)),
         token_usage,
         exit_code: Some(drive_report_exit_code(&report.status)),
+        rate_limit: report.rate_limit.clone(),
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker
@@ -1417,6 +1435,7 @@ fn busy_report(input: &DriveInputs<'_>) -> DriveReport {
         credits_pause: None,
         merge: None,
         bound_fired: None,
+        rate_limit: None,
     }
 }
 
@@ -1770,6 +1789,7 @@ fn drive_loop(
         credits_pause: None,
         merge: None,
         bound_fired: None,
+        rate_limit: None,
     };
     report
         .capabilities
@@ -2313,6 +2333,7 @@ fn drive_loop(
                 &input,
                 &mut report,
                 budget,
+                profile.usage_warning_threshold,
                 &harness,
                 &plan,
                 LiveFramePresentation {
@@ -2809,6 +2830,36 @@ fn drive_loop(
                 duration_ms: Some(run.duration_ms),
             });
             let provider_error_stream_events = provider_error_stream_events(output_id, &run.stdout);
+            // P556/0117 done-when: persist rate-limit pressure evidence into
+            // the report regardless of whether this attempt ends up paused —
+            // later attempts' observations overwrite earlier ones per type.
+            let attempt_rate_limit =
+                ctx_traits_core::procedure::runtime::latest_rate_limit_observations(
+                    &provider_error_stream_events,
+                );
+            if output_id != "claude-stream-json" {
+                push_capability(
+                    &mut report,
+                    ctx_traits_core::response::CapabilityReport::unsupported(
+                        format!("runtime.usage-telemetry.{}", plan.harness_id),
+                        "harness emits no usage telemetry",
+                    ),
+                );
+            }
+            surface_usage_warnings(
+                &mut report,
+                &attempt_rate_limit,
+                profile.usage_warning_threshold,
+                role,
+                &plan.harness_id,
+                run.duration_ms,
+            );
+            if !attempt_rate_limit.is_empty() {
+                report
+                    .rate_limit
+                    .get_or_insert_with(std::collections::BTreeMap::new)
+                    .extend(attempt_rate_limit);
+            }
             let provider_error_classification = classify_provider_error(
                 output_id,
                 &run.stdout,
@@ -2862,7 +2913,27 @@ fn drive_loop(
                         harness_id: &plan.harness_id,
                         duration_ms: run.duration_ms,
                     },
-                    credits,
+                    PauseEvidence::Credits(credits),
+                );
+                return Ok(report);
+            }
+            if let Some(ProviderErrorClassification::RateLimited(rate_limit)) =
+                &provider_error_classification
+            {
+                // A rejected subscription rate limit answers every retry
+                // identically until the window resets — pause instead of
+                // burning the correction budget on a condition no retry
+                // clears (0117), and consume no retry doing so.
+                apply_credits_pause(
+                    &mut report,
+                    &frame,
+                    CreditsPauseEvent {
+                        event_name: "harness-rate-limited",
+                        role,
+                        harness_id: &plan.harness_id,
+                        duration_ms: run.duration_ms,
+                    },
+                    PauseEvidence::RateLimited(rate_limit),
                 );
                 return Ok(report);
             }
@@ -3704,10 +3775,16 @@ pub fn print_credits_pause(
     pause: &ctx_traits_core::procedure::runtime::ProviderCreditsPause,
     session: &str,
 ) -> crate::Result<()> {
-    let panel = Panel::new(
+    let is_rate_limited = pause.resets_at_epoch.is_some();
+    let panel_status = if is_rate_limited {
+        "paused (rate limited)"
+    } else {
+        "paused (credits)"
+    };
+    let mut panel = Panel::new(
         "ctx",
         "drive",
-        PanelStatus::Blocked("paused (credits)".to_string()),
+        PanelStatus::Blocked(panel_status.to_string()),
     )
     .row(PanelRow::toned(
         "provider",
@@ -3723,28 +3800,68 @@ pub fn print_credits_pause(
         "frame",
         pause_frame_label(pause),
         RowTone::Default,
-    ))
-    .row(PanelRow::toned(
-        "top-up",
-        pause.top_up_url.as_str(),
-        RowTone::Default,
-    ))
-    .row(PanelRow::toned(
-        "detail",
-        pause.detail.as_str(),
-        RowTone::Default,
-    ))
-    .next(PanelRow::toned(
-        "resume",
-        format!("ctx traits drive --session {session}"),
-        RowTone::Default,
     ));
+    panel = match (&pause.top_up_url, pause.resets_at_epoch) {
+        (Some(top_up_url), _) => panel.row(PanelRow::toned(
+            "top-up",
+            top_up_url.clone(),
+            RowTone::Default,
+        )),
+        (None, Some(resets_at_epoch)) => {
+            let mut label = format_epoch_utc(resets_at_epoch);
+            if let Some(limit_type) = &pause.limit_type {
+                label = format!("{label} ({limit_type})");
+            }
+            panel.row(PanelRow::toned("resets-at", label, RowTone::Default))
+        }
+        (None, None) => panel,
+    };
+    let panel = panel
+        .row(PanelRow::toned(
+            "detail",
+            pause.detail.as_str(),
+            RowTone::Default,
+        ))
+        .next(PanelRow::toned(
+            "resume",
+            format!("ctx traits drive --session {session}"),
+            RowTone::Default,
+        ));
     emit_human(
         false,
         &panel,
         crate::app::presentation::HumanOutputMode::Compact,
         || Ok(()),
     )
+}
+
+/// A `rate_limit_event`'s `resetsAt` (and every other epoch this pause
+/// touches) is an absolute instant, never a duration — this renders it as
+/// one rather than a decaying "in Xh" that goes stale the moment it's
+/// printed. Pure calendar arithmetic (Howard Hinnant's `civil_from_days`) so
+/// no date/time dependency is needed for one label.
+fn format_epoch_utc(epoch: u64) -> String {
+    let days = (epoch / 86_400) as i64;
+    let secs_of_day = epoch % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = if month <= 2 { y + 1 } else { y };
+    (year, month, day)
 }
 
 /// The paused frame's identifying label: its title when non-empty, else the
@@ -7470,6 +7587,7 @@ fn drive_mcp_frame(
     input: &DriveInputs<'_>,
     report: &mut DriveReport,
     budget: &Budget,
+    usage_warning_threshold: Option<f64>,
     harness: &ctx_traits_io::harness_config::HarnessDefinition,
     plan: &AssignmentPlan,
     presentation: LiveFramePresentation<'_>,
@@ -7643,14 +7761,40 @@ fn drive_mcp_frame(
         }
         let mcp_output_id = cli.and_then(|cli| cli.output.as_deref()).unwrap_or("");
         let mcp_stream_events = provider_error_stream_events(mcp_output_id, &run.stdout);
+        let mcp_attempt_rate_limit =
+            ctx_traits_core::procedure::runtime::latest_rate_limit_observations(&mcp_stream_events);
+        if mcp_output_id != "claude-stream-json" {
+            push_capability(
+                report,
+                ctx_traits_core::response::CapabilityReport::unsupported(
+                    format!("runtime.usage-telemetry.{}", plan.harness_id),
+                    "harness emits no usage telemetry",
+                ),
+            );
+        }
+        surface_usage_warnings(
+            report,
+            &mcp_attempt_rate_limit,
+            usage_warning_threshold,
+            current.role,
+            &plan.harness_id,
+            run.duration_ms,
+        );
+        if !mcp_attempt_rate_limit.is_empty() {
+            report
+                .rate_limit
+                .get_or_insert_with(std::collections::BTreeMap::new)
+                .extend(mcp_attempt_rate_limit);
+        }
+        let mcp_provider_error_classification = classify_provider_error(
+            mcp_output_id,
+            &run.stdout,
+            &run.stderr,
+            run.exit_code,
+            &mcp_stream_events,
+        );
         if let Some(ProviderErrorClassification::CreditsExhausted(credits)) =
-            classify_provider_error(
-                mcp_output_id,
-                &run.stdout,
-                &run.stderr,
-                run.exit_code,
-                &mcp_stream_events,
-            )
+            &mcp_provider_error_classification
         {
             // Classify before the retry counter below increments: every
             // retry answers identically and burns the dying balance doing
@@ -7665,7 +7809,23 @@ fn drive_mcp_frame(
                     harness_id: &plan.harness_id,
                     duration_ms: run.duration_ms,
                 },
-                &credits,
+                PauseEvidence::Credits(credits),
+            );
+            return Ok(false);
+        }
+        if let Some(ProviderErrorClassification::RateLimited(rate_limit)) =
+            &mcp_provider_error_classification
+        {
+            apply_credits_pause(
+                report,
+                current.frame,
+                CreditsPauseEvent {
+                    event_name: "mcp-harness-rate-limited",
+                    role: current.role,
+                    harness_id: &plan.harness_id,
+                    duration_ms: run.duration_ms,
+                },
+                PauseEvidence::RateLimited(rate_limit),
             );
             return Ok(false);
         }
@@ -7718,25 +7878,56 @@ struct CreditsPauseEvent<'a> {
     duration_ms: u128,
 }
 
+/// Either provider-error shape a pause can be built from: API-key credits
+/// exhaustion (carries a top-up URL) or subscription rate-limit rejection
+/// (carries a reset instant instead). One pause family, discriminated by
+/// which fields are populated, per the P556/0117 review call — leaner than a
+/// second `paused-rate-limited` status string threading through every
+/// ledger/report consumer.
+enum PauseEvidence<'a> {
+    Credits(&'a ctx_traits_core::procedure::runtime::CreditsExhaustedEvidence),
+    RateLimited(&'a ctx_traits_core::procedure::runtime::SubscriptionLimitEvidence),
+}
+
 /// Shared by the CLI harness loop and the MCP frame loop: build the typed
 /// `ProviderCreditsPause` from the paused `SequenceFrame`, record the pause
 /// event, and mark the report paused. One shared builder instead of two
-/// near-identical ~20-line blocks.
+/// near-identical ~20-line blocks, and generalized (P556/0117) to build from
+/// either evidence shape rather than adding a second sibling.
 fn apply_credits_pause(
     report: &mut DriveReport,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     event: CreditsPauseEvent<'_>,
-    credits: &ctx_traits_core::procedure::runtime::CreditsExhaustedEvidence,
+    evidence: PauseEvidence<'_>,
 ) {
     report.status = "paused-provider-credits".to_string();
-    let pause = ctx_traits_core::procedure::runtime::ProviderCreditsPause {
-        provider: credits.provider.clone(),
-        role: event.role.to_string(),
-        frame_title: frame.title.clone(),
-        frame_item_id: frame.item_id.clone(),
-        frame_run_index: frame.run_index.unwrap_or_default(),
-        top_up_url: credits.top_up_url.clone(),
-        detail: credits.detail.clone(),
+    let pause = match evidence {
+        PauseEvidence::Credits(credits) => {
+            ctx_traits_core::procedure::runtime::ProviderCreditsPause {
+                provider: credits.provider.clone(),
+                role: event.role.to_string(),
+                frame_title: frame.title.clone(),
+                frame_item_id: frame.item_id.clone(),
+                frame_run_index: frame.run_index.unwrap_or_default(),
+                top_up_url: Some(credits.top_up_url.clone()),
+                detail: credits.detail.clone(),
+                resets_at_epoch: None,
+                limit_type: None,
+            }
+        }
+        PauseEvidence::RateLimited(rate_limit) => {
+            ctx_traits_core::procedure::runtime::ProviderCreditsPause {
+                provider: "claude".to_string(),
+                role: event.role.to_string(),
+                frame_title: frame.title.clone(),
+                frame_item_id: frame.item_id.clone(),
+                frame_run_index: frame.run_index.unwrap_or_default(),
+                top_up_url: None,
+                detail: rate_limit.detail.clone(),
+                resets_at_epoch: Some(rate_limit.resets_at_epoch),
+                limit_type: rate_limit.limit_type.clone(),
+            }
+        }
     };
     report.events.push(DriveEvent {
         event: event.event_name.to_string(),
@@ -8530,6 +8721,51 @@ fn submit_harness_output(
         },
         out: None,
     })?)
+}
+
+/// `[run] usage-warning-threshold` surfacing (P556/0117): named the type,
+/// utilization, and absolute reset instant when any latest observation from
+/// this attempt is at or above the configured threshold. Surface only — a
+/// `rejected` observation is handled separately by the pause path above,
+/// which never consults this threshold. Off (`None` threshold) is the
+/// default and this is then a no-op.
+fn surface_usage_warnings(
+    report: &mut DriveReport,
+    observations: &std::collections::BTreeMap<
+        String,
+        ctx_traits_core::procedure::activity::RateLimitObservation,
+    >,
+    threshold: Option<f64>,
+    role: &str,
+    harness_id: &str,
+    duration_ms: u128,
+) {
+    let Some(threshold) = threshold else {
+        return;
+    };
+    for (limit_type, observation) in observations {
+        let Some(utilization) = observation.utilization else {
+            continue;
+        };
+        if utilization < threshold {
+            continue;
+        }
+        let detail = format!(
+            "{limit_type} at {:.0}% (reset {})",
+            utilization * 100.0,
+            format_epoch_utc(observation.resets_at_epoch)
+        );
+        report
+            .warnings
+            .push(format!("usage-warning {role}@{harness_id}: {detail}"));
+        report.events.push(DriveEvent {
+            event: "usage-warning".to_string(),
+            role: Some(role.to_string()),
+            harness: Some(harness_id.to_string()),
+            detail,
+            duration_ms: Some(duration_ms),
+        });
+    }
 }
 
 fn push_capability(
