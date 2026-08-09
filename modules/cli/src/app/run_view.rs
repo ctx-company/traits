@@ -2234,7 +2234,7 @@ summary = "A test trait."
             .expect("draw");
 
         let area = Rect::new(0, 0, 120, 11);
-        let title_line = title_row_line(None, true, "trait", None);
+        let title_line = title_row_line(None, true, "trait", None, None);
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),
