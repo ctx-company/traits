@@ -342,6 +342,39 @@ pub struct DependencyOverrideProvenance {
     pub unmet: Vec<UnmetDependencyEvidence>,
 }
 
+/// Where a resolved session title came from (task 0110): the same
+/// provenance philosophy as a loop recording its exit mechanism. Absent on
+/// every legacy ledger and every state P552's auto-title path still writes,
+/// which decodes to [`Self::NarratorDefault`].
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::Display,
+    strum::EnumString,
+)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum SessionTitleSource {
+    /// The pre-0110 auto-title path: narrator titles from trait name and
+    /// input text, or a legacy ledger with no recorded source.
+    #[default]
+    NarratorDefault,
+    /// A `[sink.session-title]` declaration with a `verbatim` mode: a
+    /// deterministic render, never dispatched to a narrator.
+    SinkVerbatim,
+    /// A `[sink.session-title]` declaration with a `generated` mode: the
+    /// assembled slot material became the narrator prompt's context.
+    SinkGenerated,
+}
+
 /// Persisted lifecycle of the optional narrator title. `None` on
 /// [`Provenance::session_title`] remains the unattempted state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -349,16 +382,35 @@ pub struct DependencyOverrideProvenance {
 #[schemars(rename_all = "kebab-case")]
 #[serde(tag = "state")]
 pub enum SessionTitleState {
-    InFlight { owner: String, attempts: u32 },
-    Retryable { attempts: u32 },
-    Resolved { attempts: u32, title: String },
-    Terminal { attempts: u32, reason: String },
+    InFlight {
+        owner: String,
+        attempts: u32,
+    },
+    Retryable {
+        attempts: u32,
+    },
+    Resolved {
+        attempts: u32,
+        title: String,
+        source: SessionTitleSource,
+    },
+    Terminal {
+        attempts: u32,
+        reason: String,
+    },
 }
 
 impl SessionTitleState {
     pub fn resolved_title(&self) -> Option<&str> {
         match self {
             Self::Resolved { title, .. } => Some(title),
+            _ => None,
+        }
+    }
+
+    pub fn resolved_source(&self) -> Option<SessionTitleSource> {
+        match self {
+            Self::Resolved { source, .. } => Some(*source),
             _ => None,
         }
     }
@@ -391,16 +443,25 @@ impl<'de> Deserialize<'de> for SessionTitleState {
                         serde::de::Error::custom("in-flight session title requires owner")
                     }),
                 "retryable" => Ok(Self::Retryable { attempts }),
-                "resolved" => object
-                    .get("title")
-                    .and_then(JsonValue::as_str)
-                    .map(|title| Self::Resolved {
-                        attempts,
-                        title: title.to_string(),
-                    })
-                    .ok_or_else(|| {
-                        serde::de::Error::custom("resolved session title requires title")
-                    }),
+                "resolved" => {
+                    let source = match object.get("source").and_then(JsonValue::as_str) {
+                        None => SessionTitleSource::NarratorDefault,
+                        Some(raw) => raw.parse::<SessionTitleSource>().map_err(|_| {
+                            serde::de::Error::custom("unknown session title source")
+                        })?,
+                    };
+                    object
+                        .get("title")
+                        .and_then(JsonValue::as_str)
+                        .map(|title| Self::Resolved {
+                            attempts,
+                            title: title.to_string(),
+                            source,
+                        })
+                        .ok_or_else(|| {
+                            serde::de::Error::custom("resolved session title requires title")
+                        })
+                }
                 "terminal" => object
                     .get("reason")
                     .and_then(JsonValue::as_str)
@@ -421,6 +482,7 @@ impl<'de> Deserialize<'de> for SessionTitleState {
                 Some(title) => Self::Resolved {
                     attempts: 1,
                     title: title.to_string(),
+                    source: SessionTitleSource::NarratorDefault,
                 },
                 None => Self::Terminal {
                     attempts: 1,
@@ -4980,6 +5042,7 @@ equals = "revise"
             session_title: Some(SessionTitleState::Resolved {
                 attempts: 2,
                 title: "Refactor the merge story".to_string(),
+                source: SessionTitleSource::NarratorDefault,
             }),
             task_digest: None,
             task_key: None,
@@ -5007,6 +5070,59 @@ equals = "revise"
     }
 
     #[test]
+    fn legacy_resolved_title_with_no_source_defaults_to_narrator_default() {
+        let provenance: Provenance = serde_json::from_str(
+            r#"{"started-by":{"surface":"test","caller":"c"},"state-source":"s","session-title":{"state":"resolved","attempts":1,"title":"Old title"}}"#,
+        )
+        .expect("pre-0110 resolved JSON with no source deserializes");
+        assert_eq!(
+            provenance.session_title,
+            Some(SessionTitleState::Resolved {
+                attempts: 1,
+                title: "Old title".to_string(),
+                source: SessionTitleSource::NarratorDefault,
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_attempted_with_title_defaults_to_narrator_default_source() {
+        let provenance: Provenance = serde_json::from_str(
+            r#"{"started-by":{"surface":"test","caller":"c"},"state-source":"s","session-title":{"attempted":true,"title":"Old style"}}"#,
+        )
+        .expect("attempted-with-title JSON deserializes");
+        assert_eq!(
+            provenance.session_title,
+            Some(SessionTitleState::Resolved {
+                attempts: 1,
+                title: "Old style".to_string(),
+                source: SessionTitleSource::NarratorDefault,
+            })
+        );
+    }
+
+    #[test]
+    fn resolved_source_round_trips() {
+        for source in [
+            SessionTitleSource::NarratorDefault,
+            SessionTitleSource::SinkVerbatim,
+            SessionTitleSource::SinkGenerated,
+        ] {
+            let state = SessionTitleState::Resolved {
+                attempts: 1,
+                title: "Title".to_string(),
+                source,
+            };
+            let json = serde_json::to_string(&state).expect("serialize");
+            assert!(json.contains(&format!("\"source\":\"{source}\"")));
+            assert_eq!(
+                serde_json::from_str::<SessionTitleState>(&json).expect("deserialize"),
+                state
+            );
+        }
+    }
+
+    #[test]
     fn every_session_title_lifecycle_state_round_trips() {
         for state in [
             SessionTitleState::InFlight {
@@ -5017,6 +5133,7 @@ equals = "revise"
             SessionTitleState::Resolved {
                 attempts: 3,
                 title: "Title".to_string(),
+                source: SessionTitleSource::SinkVerbatim,
             },
             SessionTitleState::Terminal {
                 attempts: 3,

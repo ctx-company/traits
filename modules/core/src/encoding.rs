@@ -236,6 +236,9 @@ pub fn decode_trait_with_warnings(
     crate::r#trait::scenario::validate_scenarios(&t.scenarios)?;
     crate::r#trait::eval::validate_evals(&t.evals)?;
 
+    let slot_ids: BTreeSet<&str> = t.slots.iter().map(|s| s.id.as_str()).collect();
+    crate::r#trait::sink::validate_sinks(&t.sinks, &slot_ids)?;
+
     Ok((t, warnings))
 }
 

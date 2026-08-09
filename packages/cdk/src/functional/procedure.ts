@@ -8,6 +8,8 @@
  */
 import type { ProcedureHandle, SequenceHandle } from "../handles.js";
 import type { ProcedureFields } from "../procedure.js";
+import type { SessionTitleSinkInput } from "../sink.js";
+import { attachSessionTitleSink } from "../sink.js";
 import { closeBuild, openBuild } from "./context.js";
 import { isThenable } from "./internal.js";
 
@@ -26,17 +28,20 @@ export function attachProcedureFrom<T extends (fields: ProcedureFields) => Proce
     from: (fields: ProcedureFromFields, body: () => void): ProcedureHandle => {
       openBuild();
       let result: unknown;
-      let items: readonly { readonly item: unknown; }[];
+      let closed: { readonly items: readonly { readonly item: unknown; }[]; readonly sessionTitleSink: unknown; };
       try {
         result = body();
       } finally {
-        items = closeBuild();
+        closed = closeBuild();
       }
       if (isThenable(result)) {
         throw new Error("procedure.from: async callbacks are not supported — the body must run synchronously");
       }
-      const sequenceItems = items.map((registered) => registered.item as SequenceHandle);
-      return base({ ...fields, sequence: sequenceItems });
+      const sequenceItems = closed.items.map((registered) => registered.item as SequenceHandle);
+      const handle = base({ ...fields, sequence: sequenceItems });
+      return closed.sessionTitleSink === undefined
+        ? handle
+        : attachSessionTitleSink(handle, closed.sessionTitleSink as SessionTitleSinkInput);
     },
   });
 }

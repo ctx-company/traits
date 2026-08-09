@@ -14,6 +14,7 @@ import { isSlug, toDraftJsonWithSourceMap } from "../normalize.js";
 import { port } from "../port.js";
 import { procedure as procedureOf } from "../procedure.js";
 import { ref } from "../ref.js";
+import type { SessionTitleSinkInput } from "../sink.js";
 import type { BehaviorFields, IntentSpec, SemVer, TraitFields, TraitMetadata } from "../trait.js";
 import { trait } from "../trait.js";
 import type { FrameMint, RegisteredItem, TraitFrame } from "./context.js";
@@ -305,11 +306,12 @@ export function evaluateTraitFunction(
   const ctx: TraitFunctionContext = { input: inputProxy(frame) };
   let result: unknown;
   let items: readonly RegisteredItem[];
+  let sessionTitleSink: unknown;
   let traitFrame: TraitFrame;
   try {
     result = fn(ctx);
   } finally {
-    items = closeBuild();
+    ({ items, sessionTitleSink } = closeBuild());
     traitFrame = closeTraitFrame();
   }
   if (isThenable(result)) {
@@ -387,6 +389,9 @@ export function evaluateTraitFunction(
     ...(resource === undefined ? {} : { resource }),
     ...(ports.length === 0 ? {} : { port: ports }),
     ...(procedureHandle === undefined ? {} : { procedure: procedureHandle }),
+    ...(sessionTitleSink === undefined
+      ? {}
+      : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
   };
 
   const handle = trait(traitFrame.slug as string, fields);

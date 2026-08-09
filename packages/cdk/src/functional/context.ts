@@ -90,6 +90,15 @@ export interface Scope {
 
 interface BuildFrame {
   readonly scopes: Scope[];
+  /**
+   * `effect.session.title(X)`'s payload (0110): session-global, not tied to
+   * a scope — set by `declareSessionTitleSink`, read back by `closeBuild`'s
+   * caller. Typed `unknown` here to keep this module free of `sink.ts`'s
+   * cdk-level types (this file has zero dependency on
+   * `sequence.ts`/`prompt.ts`, per the module doc above); the concrete
+   * `SessionTitleSinkInput` type is only known to `sink.ts`/`registrars.ts`.
+   */
+  sessionTitleSink?: unknown;
 }
 
 let activeBuild: BuildFrame | undefined;
@@ -105,17 +114,34 @@ export function openBuild(): void {
   activeBuild = { scopes: [{ kind: "root", items: [] }] };
 }
 
-/** Closes the root scope and returns its registered items — throws if scopes are unbalanced (a `flow.*` block never popped its scope). */
-export function closeBuild(): readonly RegisteredItem[] {
+/**
+ * `effect.session.title(X)`'s registrar: session-global (no enclosing scope
+ * required beyond an active build), position-free, and a build error on a
+ * second declaration — the same "declared once" rule `useBehavior`/
+ * `useIntent` enforce per field for a full trait-function frame.
+ */
+export function declareSessionTitleSink(value: unknown): void {
+  const build = requireBuild("effect.session.title");
+  if (build.sessionTitleSink !== undefined) {
+    throw new Error(
+      "effect.session.title: already declared once in this build — a session sink is position-free but not repeatable",
+    );
+  }
+  build.sessionTitleSink = value;
+}
+
+/** Closes the root scope and returns its registered items plus any `effect.session.title(...)` payload — throws if scopes are unbalanced (a `flow.*` block never popped its scope). */
+export function closeBuild(): { readonly items: readonly RegisteredItem[]; readonly sessionTitleSink: unknown; } {
   const build = activeBuild;
   if (build === undefined) throw new Error("procedure.from: no active build to close");
   if (build.scopes.length !== 1) {
     throw new Error("procedure.from: build closed with unbalanced open scopes — a flow.* block never returned");
   }
   const [root] = build.scopes;
+  const sessionTitleSink = build.sessionTitleSink;
   activeBuild = undefined;
   // oxlint-disable-next-line typescript/no-non-null-assertion -- scopes.length === 1 checked above
-  return root!.items;
+  return { items: root!.items, sessionTitleSink };
 }
 
 function requireBuild(caller: string): BuildFrame {

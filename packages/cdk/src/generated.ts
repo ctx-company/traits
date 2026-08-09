@@ -1678,6 +1678,15 @@ export type CanonicalSession = {
 };
 
 /**
+ * One `[sink.session-title]` declaration: `effect.session.title(X)`'s
+ * canonical projection.
+ */
+export type CanonicalSessionTitleSink = {
+  readonly "input": CanonicalSinkInput;
+  readonly "mode": CanonicalSinkMode;
+};
+
+/**
  * A `[[signal]]` declaration: a named event identity.
  */
 export type CanonicalSignal = {
@@ -1697,6 +1706,40 @@ export type CanonicalSignal = {
 export type CanonicalSignalEmissionRule = string | {
   readonly "signal": string;
   readonly "when": CanonicalGuardExpr;
+};
+
+/**
+ * A sink's declared input: the standard input union, no new value grammar.
+ * 
+ * `Scalar` covers a literal string, a template string using the prompt
+ * interpolation grammar (`{slot:<id>}`), or a bare `slot:<id>` ref — which
+ * of those it is (and therefore whether the sink is verbatim or generated)
+ * is classified at decode time, not by this shape. `Parts` is an array of
+ * slot refs, optionally decorated `{ slot = "slot:<id>", optional = true }`
+ * (P447); an array input is always generated.
+ */
+export type CanonicalSinkInput = string | readonly CanonicalSequenceInput[];
+
+/**
+ * How a sink's declared input becomes the applied value.
+ * 
+ * `Verbatim`: authored text (a literal string or a template) rendered
+ * deterministically, with zero model calls. `Generated`: material (a bare
+ * slot ref or an array of slot refs) assembled and handed to the host's
+ * existing generation path as context, replacing that path's default
+ * context. Stored explicitly in canonical even though it is fully derived
+ * from the shape of `input` at authoring time, so decoded documents never
+ * need to re-derive it.
+ */
+export type CanonicalSinkMode = "verbatim" | "generated";
+
+/**
+ * The closed set of host sinks a trait may declare. One optional field per
+ * sink — never an open map — so an unknown sink key is a decode-time
+ * error and a duplicate declaration is structurally impossible.
+ */
+export type CanonicalSinks = {
+  readonly "session-title"?: CanonicalSessionTitleSink | undefined;
 };
 
 /**
@@ -1878,6 +1921,11 @@ export type CanonicalTrait = {
    */
   readonly "signal"?: readonly CanonicalSignal[] | undefined;
   /**
+   * Host sink declarations (`[sink.<name>]`): a closed, typed set of
+   * trait output the host applies to its own surfaces (task 0110).
+   */
+  readonly "sink"?: CanonicalSinks | undefined;
+  /**
    * Slot definitions: procedure run ledger value contracts.
    */
   readonly "slot"?: readonly CanonicalSlot[] | undefined;
@@ -1988,6 +2036,11 @@ export type CanonicalTraitDraft = {
    * Declared signal identities for procedure sequence emission.
    */
   readonly "signal"?: readonly CanonicalSignal[] | undefined;
+  /**
+   * Host sink declarations (`[sink.<name>]`): a closed, typed set of
+   * trait output the host applies to its own surfaces (task 0110).
+   */
+  readonly "sink"?: CanonicalSinks | undefined;
   /**
    * Slot definitions: procedure run ledger value contracts.
    */

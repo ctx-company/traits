@@ -253,6 +253,7 @@ export type {
 } from "./sequence.js";
 export { session } from "./session.js";
 export type { SessionBinding, SessionFunction, SessionLifecycle, SessionOptions } from "./session.js";
+export type { SessionTitleSinkInput, SinkFields } from "./sink.js";
 export { operation, slot } from "./slot.js";
 export type { LiteralProjectionSource, OperationFunction, SlotFields, SlotFunction } from "./slot.js";
 export {

@@ -847,14 +847,7 @@ fn resolve_argv_ref_value(body: &str, state: &State) -> Option<String> {
 /// Canonical single-token rendering: text as-is, number/boolean canonical, and
 /// every non-scalar as compact JSON.
 fn render_argv_value(value: &JsonValue) -> Option<String> {
-    match value {
-        JsonValue::String(text) => Some(text.clone()),
-        JsonValue::Number(number) => Some(number.to_string()),
-        JsonValue::Bool(boolean) => Some(boolean.to_string()),
-        JsonValue::Null | JsonValue::Array(_) | JsonValue::Object(_) => {
-            serde_json::to_string(value).ok()
-        }
-    }
+    crate::r#trait::prompt::render_interpolation_value(value)
 }
 
 fn prompt_evidence(

@@ -25,6 +25,7 @@ import {
   useIntent,
   useResource,
 } from "@ctx-traits/cdk";
+import type { JsonObject } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
 describe("functional layer build rules (0106)", () => {
@@ -446,5 +447,88 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string; }[]; };
     const portIds = (draft.port ?? []).map((p) => `${p.id}:${p.direction}`).sort();
     expect(portIds).toEqual(["diff:input", "review:output"]);
+  });
+});
+
+describe("effect.session.title (0110)", () => {
+  it("a string input is a verbatim sink", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("sink-string");
+      effect.session.title("Fixed session title");
+    });
+    expect(envelope.draft).toMatchObject({
+      sink: { "session-title": { mode: "verbatim", input: "Fixed session title" } },
+    });
+  });
+
+  it("an input.prompt template (including one wrapping a slot) is a verbatim sink", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("sink-template", { procedure: "p" });
+      const topic = slot.text("topic");
+      step.command("Set Topic", { output: topic, input: input.command`echo hi` });
+      effect.session.title(input.prompt`Working on ${topic}`);
+      return { topic };
+    });
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    expect(draft.sink?.["session-title"]).toEqual({ mode: "verbatim", input: "Working on {slot:topic}" });
+  });
+
+  it("a bare slot input is a generated sink", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("sink-slot", { procedure: "p" });
+      const draftSlot = slot.text("draft");
+      step.command("Draft", { output: draftSlot, input: input.command`echo hi` });
+      effect.session.title(draftSlot);
+      return { draftSlot };
+    });
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    expect(draft.sink?.["session-title"]).toEqual({ mode: "generated", input: "slot:draft" });
+  });
+
+  it("an array of slots (with an optional part) is a generated sink", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("sink-array", { procedure: "p" });
+      const first = slot.text("first");
+      const second = slot.text("second");
+      step.command("Fill", { output: [first, second], input: input.command`echo hi` });
+      effect.session.title([first, input.optional(second)]);
+      return { first, second };
+    });
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    expect(draft.sink?.["session-title"]).toEqual({
+      mode: "generated",
+      input: ["slot:first", { slot: "slot:second", optional: true }],
+    });
+  });
+
+  it("a second effect.session.title declaration in the same build throws", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineTrait("sink-duplicate");
+        effect.session.title("First title");
+        effect.session.title("Second title");
+      })
+    ).toThrow(/effect\.session\.title: already declared once in this build/);
+  });
+
+  it("declaring the sink both via effect.session.title and the object-layer sink field is a build error", () => {
+    expect(() =>
+      toDraftJson(
+        trait("sink-both", {
+          summary: "Conflicting sink declarations.",
+          sink: { sessionTitle: "Object-layer title" },
+          procedure: procedure.from({ description: "p" }, () => {
+            effect.session.title("Functional title");
+          }),
+        }),
+      )
+    ).toThrow(/\[sink\.session-title\] declared twice/);
+  });
+
+  it("no declaration means no sink in the draft", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("sink-none");
+    });
+    expect((envelope.draft as { readonly sink?: unknown; }).sink).toBeUndefined();
   });
 });

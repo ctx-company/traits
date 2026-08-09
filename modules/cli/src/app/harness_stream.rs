@@ -1130,9 +1130,11 @@ pub(crate) fn narrator_system_prompt() -> &'static str {
 
 /// P552 one-time session-title prompt: a short noun-phrase title for the
 /// whole run, built only from the trait name and the run's own accepted
-/// input text — never a slot value, and never the narrator's thinking
-/// window, since this call happens once, before any step output exists to
-/// summarize.
+/// input text — never a slot value (that is only true for this, the
+/// auto-title path; a `generated` `[sink.session-title]` deliberately feeds
+/// assembled slot material instead, via [`session_title_prompt_from_material`]
+/// below), and never the narrator's thinking window, since this call happens
+/// once, before any step output exists to summarize.
 pub(crate) fn session_title_prompt(trait_name: &str, input_text: &str) -> String {
     let input_line = if input_text.trim().is_empty() {
         String::new()
@@ -1147,6 +1149,23 @@ Rules:\n\
 - No quotes, bullets, markdown, or trailing punctuation.\n\
 Trait: {trait_name}\n\
 {input_line}"
+    )
+}
+
+/// 0110 `generated` `[sink.session-title]` prompt: the same rules block as
+/// [`session_title_prompt`], but the context is the sink's own assembled
+/// slot material rather than the trait name and run input — the trait
+/// author explicitly opted into a slot-derived title by declaring a bare
+/// `slot:<id>` ref or an array of slot refs as the sink's `input`.
+pub(crate) fn session_title_prompt_from_material(trait_name: &str, material: &str) -> String {
+    format!(
+        "Give this run a short title, as a noun phrase describing the task.\n\
+Rules:\n\
+- Return only the title.\n\
+- Keep it under 60 characters.\n\
+- No quotes, bullets, markdown, or trailing punctuation.\n\
+Trait: {trait_name}\n\
+Context:\n{material}\n"
     )
 }
 

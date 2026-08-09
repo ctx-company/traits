@@ -491,6 +491,7 @@ pub fn plan_procedure_run(trait_ref: &Trait, run_id: Id) -> crate::Result<Plan> 
         producer_edges: nested_state.producer_edges,
         port_requirements,
         output_ports: output_port_records,
+        session_title_sink: trait_ref.sinks.session_title.clone(),
         acceptance: AcceptanceState::Pending,
     })
 }
@@ -943,4 +944,85 @@ pub fn plan_trait_runtime(trait_ref: &Trait, run_id: Id) -> crate::Result<TraitP
     }
     let plan = plan_procedure_run(trait_ref, run_id)?;
     Ok(TraitPlan::Planned(plan))
+}
+
+#[cfg(test)]
+mod session_title_sink_plan_tests {
+    use super::plan_procedure_run;
+    use crate::encoding::{Encoding, decode_trait};
+    use crate::procedure::run::Id;
+
+    fn decode(text: &str) -> crate::r#trait::Trait {
+        decode_trait(Encoding::Toml, text).expect("decode")
+    }
+
+    fn run_id() -> Id {
+        Id::new("plan-sink-run".to_string()).expect("run id")
+    }
+
+    /// 0110: dry-run performs no effects, but a declared sink must still be
+    /// visible in the plan — `plan_procedure_run` is a pure function (no
+    /// ledger write, no dispatch reachable from it at all), so surfacing the
+    /// declaration here is itself the "no effect" guarantee, not merely a
+    /// display nicety.
+    #[test]
+    fn a_declared_sink_appears_in_the_plan_with_no_effect() {
+        const FIXTURE: &str = r#"
+id = "plan-sink-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Plan Sink Fixture"
+summary = "Scratch fixture for the 0110 dry-plan sink surface."
+
+[[slot]]
+id = "done"
+schema = "schema:text"
+
+[procedure]
+description = "One step."
+
+[[procedure.sequence]]
+id = "noop"
+title = "Noop"
+kind = "command"
+cmd = "true"
+output = ["slot:done"]
+
+[sink.session-title]
+mode = "verbatim"
+input = "Fixed session title"
+"#;
+        let trait_ref = decode(FIXTURE);
+        let plan = plan_procedure_run(&trait_ref, run_id()).expect("plan");
+        let sink = plan.session_title_sink.expect("sink surfaced in the plan");
+        assert_eq!(sink.mode, crate::r#trait::SinkMode::Verbatim);
+    }
+
+    #[test]
+    fn no_declaration_means_no_sink_in_the_plan() {
+        const FIXTURE: &str = r#"
+id = "plan-no-sink-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Plan No Sink Fixture"
+summary = "Scratch fixture for the 0110 dry-plan sink surface."
+
+[[slot]]
+id = "done"
+schema = "schema:text"
+
+[procedure]
+description = "One step."
+
+[[procedure.sequence]]
+id = "noop"
+title = "Noop"
+kind = "command"
+cmd = "true"
+output = ["slot:done"]
+"#;
+        let trait_ref = decode(FIXTURE);
+        let plan = plan_procedure_run(&trait_ref, run_id()).expect("plan");
+        assert!(plan.session_title_sink.is_none());
+    }
 }

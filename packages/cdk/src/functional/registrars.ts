@@ -22,11 +22,13 @@ import type {
   SignalOutputValue,
 } from "../sequence.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
+import type { SessionTitleSinkInput } from "../sink.js";
 import { slot } from "../slot.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
 import {
   captureAuthorFrame,
   currentScope,
+  declareSessionTitleSink,
   installAgentPromptLowering,
   installSlotForEachLowering,
   nearestScope,
@@ -497,5 +499,21 @@ export const effect = {
     const scope = nearestScope("loop");
     if (scope?.loop === undefined) throw new Error("effect.onAbort(...) requires an enclosing flow.loop");
     scope.loop.onAbort.push(signal);
+  },
+  /**
+   * `[sink.session-title]` (task 0110): session-global, position-free (may
+   * be called anywhere in a `procedure.from(...)`/trait-function body, not
+   * just its root scope) — unlike `effect.on*`, this never attaches to
+   * `nearestScope`. Mode is inferred from the shape of `X`: a `string` or
+   * `input.prompt` template is verbatim; a bare slot or array of slots is
+   * generated. A second declaration in the same build is a build error (the
+   * `use*` overlap rule).
+   * @example `effect.session.title(input.prompt\`Working on ${topic}\`)`
+   * @example `effect.session.title(draft)`
+   */
+  session: {
+    title(input: SessionTitleSinkInput): void {
+      declareSessionTitleSink(input);
+    },
   },
 };

@@ -369,6 +369,12 @@ pub struct Plan {
     /// Planned output ports with value-slot completion evidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output_ports: Vec<PlannedOutputPort>,
+    /// A declared `[sink.session-title]` (task 0110), surfaced so a dry-run
+    /// plan shows the sink without firing it — the plan carries only the
+    /// declaration itself (mode + input), never a rendered/dispatched
+    /// title: dry-run performs no effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_title_sink: Option<crate::r#trait::SessionTitleSink>,
     /// The acceptance state.
     pub acceptance: AcceptanceState,
 }

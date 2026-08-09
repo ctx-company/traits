@@ -1133,16 +1133,44 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // writing frames — so a detached narrator thread never races a frame's
     // whole-ledger write, and a resumed drive never dispatches a second call.
     let pending_title = PendingSessionTitle::default();
-    let title_worker_dispatched = maybe_dispatch_session_title(
-        &input,
-        run_panel.0.as_ref(),
-        &session_for_lock,
-        &ledger_path,
-        &narrator_tokens,
-        &mut profile,
-        &pending_title,
-        driver_lock.title_claim_owner(),
-    );
+    // 0110: a fully-static `[sink.session-title]` (`verbatim` with no slot
+    // interpolation) is knowable before any frame runs — write it now,
+    // sanitized, and skip the auto-title path entirely: no claim, no
+    // worker, zero narrator dispatches. A slot-bearing sink (verbatim
+    // template or generated) still arms the pre-0110 auto-title path below
+    // until the frame-boundary sink watcher fires (P552 placeholder).
+    let title_worker_dispatched = if let Some(text) =
+        static_verbatim_sink_title(input.file, &session_for_lock)
+    {
+        let sanitized = ctx_traits_io::run_session::sanitize_session_title(&text);
+        if let Err(err) = ctx_traits_io::run_session::record_session_title_from_sink(
+            &ledger_path,
+            ctx_traits_core::procedure::session::SessionTitleSource::SinkVerbatim,
+            sanitized.clone(),
+        ) {
+            eprintln!("session title sink write failed: {err}");
+        } else if let Some(panel) = run_panel.0.as_ref() {
+            panel.set_title_state(Some(
+                ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+                    attempts: 0,
+                    title: sanitized,
+                    source: ctx_traits_core::procedure::session::SessionTitleSource::SinkVerbatim,
+                },
+            ));
+        }
+        false
+    } else {
+        maybe_dispatch_session_title(
+            &input,
+            run_panel.0.as_ref(),
+            &session_for_lock,
+            &ledger_path,
+            &narrator_tokens,
+            &mut profile,
+            &pending_title,
+            driver_lock.title_claim_owner(),
+        )
+    };
     let drive_result = drive_loop(
         input,
         drive_started,
@@ -1841,6 +1869,26 @@ fn drive_loop(
     // outlives main. `close()` is idempotent and late renders no-op on the
     // closed pane.
     let mut run_panel = RunPanelGuard(initial_run_panel);
+    // 0110: parsed once here, not reloaded every frame — the frame-boundary
+    // sink watcher below only ever needs the declaration itself, and a
+    // trait load per frame would be wasted I/O the pre-loop static path
+    // already avoids the same way.
+    let session_title_sink_load = ctx_traits_io::run::load_trait_for_session(
+        input.file,
+        None,
+        &session_for_baseline,
+        "drive",
+    )
+    .ok();
+    let session_title_trait_name = session_title_sink_load
+        .as_ref()
+        .map(|loaded| loaded.trait_ref.name.as_str().to_string())
+        .unwrap_or_default();
+    let session_title_sink =
+        session_title_sink_load.and_then(|loaded| loaded.trait_ref.sinks.session_title.clone());
+    // 0110: process-local re-entrancy guard for the `generated` sink's
+    // frame-boundary dispatch — see `maybe_fire_generated_sink_title`.
+    let generated_sink_in_flight = Arc::new(AtomicBool::new(false));
     let mut trace_warned = false;
     let mut trace_sequence = 0;
     let mut startup_announced = false;
@@ -1994,6 +2042,33 @@ fn drive_loop(
         }
         report.final_session_status = Some(outcome.session.status.clone());
         refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
+        // 0110: the frame-boundary sink watcher — same ownership point as
+        // `pending_title.flush` above, now that `outcome` carries this
+        // frame's accepted slot values. A slot-interpolating `verbatim`
+        // template writes synchronously; a `generated` sink dispatches a
+        // detached narrator call whose answer lands through
+        // `pending_title.flush` at a later frame boundary.
+        if let Some(sink) = session_title_sink.as_ref() {
+            fire_verbatim_slot_sink_if_ready(
+                sink,
+                &outcome.session.accepted_slot_values,
+                ledger_path,
+                run_panel.0.as_ref(),
+            );
+            maybe_fire_generated_sink_title(
+                sink,
+                &outcome.session.accepted_slot_values,
+                &session_title_trait_name,
+                ledger_path,
+                run_panel.0.as_ref(),
+                profile,
+                narrator_tokens,
+                pending_title,
+                &generated_sink_in_flight,
+                input.execution_dir,
+                &outcome.session,
+            );
+        }
         match outcome.session.status {
             ctx_traits_core::procedure::session::Status::Completed => {
                 report.status = "completed".to_string();
@@ -4145,6 +4220,13 @@ enum SessionTitleOutcome {
         /// claimed attempt rather than feeding the outer 0076 claim ladder.
         terminal: bool,
     },
+    /// 0110 `generated` `[sink.session-title]` success: no owner, since this
+    /// never went through the claim ladder — the sink always wins, so
+    /// `flush` writes it through `record_session_title_from_sink` instead of
+    /// the owner-gated `record_session_title`.
+    SinkGeneratedSuccess {
+        title: String,
+    },
 }
 
 impl PendingSessionTitle {
@@ -4190,6 +4272,14 @@ impl PendingSessionTitle {
         let result = match outcome {
             SessionTitleOutcome::Success { owner, title } => {
                 ctx_traits_io::run_session::record_session_title(ledger_path, &owner, title)
+            }
+            SessionTitleOutcome::SinkGeneratedSuccess { title } => {
+                ctx_traits_io::run_session::record_session_title_from_sink(
+                    ledger_path,
+                    ctx_traits_core::procedure::session::SessionTitleSource::SinkGenerated,
+                    title,
+                )
+                .map(|()| true)
             }
             SessionTitleOutcome::Failure {
                 owner,
@@ -4246,6 +4336,219 @@ fn close_out_unanswered_session_title(ledger_path: &camino::Utf8Path, claim_owne
     ) {
         eprintln!("session title claim could not be closed out: {err}");
     }
+}
+
+/// A `[sink.session-title]` declaration whose title is knowable before the
+/// drive loop ever starts (task 0110): `mode = "verbatim"` with an input
+/// that carries zero slot interpolations. Returns `None` for every other
+/// shape — no declaration, a slot-interpolating verbatim template, or a
+/// generated (slot-material) sink — all of which fire later, at a frame
+/// boundary, once their material is ready (see
+/// `fire_verbatim_slot_sink_if_ready`/`maybe_fire_generated_sink_title`), the
+/// way the pre-0110 auto-title path always has. A load failure degrades to
+/// `None` (falls through to the ordinary auto-title path) rather than
+/// failing the drive.
+fn static_verbatim_sink_title(
+    file: Option<&str>,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<String> {
+    let loaded = ctx_traits_io::run::load_trait_for_session(file, None, session, "drive").ok()?;
+    let sink = loaded.trait_ref.sinks.session_title.as_ref()?;
+    if sink.mode != ctx_traits_core::r#trait::SinkMode::Verbatim {
+        return None;
+    }
+    let ctx_traits_core::r#trait::SinkInput::Scalar(text) = &sink.input else {
+        return None;
+    };
+    let (interpolations, _diagnostics) =
+        ctx_traits_core::r#trait::prompt::scan_interpolations(text);
+    if interpolations.is_empty() {
+        Some(text.clone())
+    } else {
+        None
+    }
+}
+
+/// Frame-boundary watcher for a slot-interpolating `[sink.session-title]`
+/// `verbatim` template (task 0110): fires exactly once, the moment every
+/// interpolated slot has an accepted value, writing directly through
+/// [`ctx_traits_io::run_session::record_session_title_from_sink`] — no
+/// narrator call, no worker thread, so there is no race to serialize
+/// against beyond the ledger write itself. A no-op for a `generated` sink
+/// (bare slot ref or array — not yet wired to a runtime consumer), for a
+/// non-slot-bearing declaration (the fully-static case already resolved
+/// pre-loop, or no declaration at all), for a still-unready template (some
+/// interpolated slot has no accepted value yet), and — checked via the
+/// ledger's own recorded [`SessionTitleSource`], not local state — once the
+/// sink has already resolved, so a resumed drive never re-fires.
+fn session_title_already_sink_resolved(ledger_path: &camino::Utf8Path) -> bool {
+    use ctx_traits_core::procedure::session::{SessionTitleSource, SessionTitleState};
+    matches!(
+        ctx_traits_io::run_session::read_run_session(ledger_path)
+            .ok()
+            .and_then(|session| session.provenance.session_title)
+            .as_ref()
+            .and_then(SessionTitleState::resolved_source),
+        Some(SessionTitleSource::SinkVerbatim) | Some(SessionTitleSource::SinkGenerated)
+    )
+}
+
+fn fire_verbatim_slot_sink_if_ready(
+    sink: &ctx_traits_core::r#trait::SessionTitleSink,
+    accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
+    ledger_path: &camino::Utf8Path,
+    panel: Option<&run_view::RunPanel>,
+) {
+    let Some(rendered) =
+        ctx_traits_core::r#trait::render_verbatim_sink_title(sink, accepted_slot_values)
+    else {
+        return;
+    };
+    use ctx_traits_core::procedure::session::{SessionTitleSource, SessionTitleState};
+    if session_title_already_sink_resolved(ledger_path) {
+        return;
+    }
+    let sanitized = ctx_traits_io::run_session::sanitize_session_title(&rendered);
+    if let Err(err) = ctx_traits_io::run_session::record_session_title_from_sink(
+        ledger_path,
+        SessionTitleSource::SinkVerbatim,
+        sanitized.clone(),
+    ) {
+        eprintln!("session title sink write failed: {err}");
+        return;
+    }
+    if let Some(panel) = panel {
+        panel.set_title_state(Some(SessionTitleState::Resolved {
+            attempts: 0,
+            title: sanitized,
+            source: SessionTitleSource::SinkVerbatim,
+        }));
+    }
+}
+
+/// Frame-boundary watcher for a `generated` `[sink.session-title]` (a bare
+/// `slot:<id>` ref or a `Parts` array): on first readiness, assembles the
+/// material and dispatches a narrator call through the same detached-thread
+/// pattern [`maybe_dispatch_session_title`] uses, reusing the already-resolved
+/// `profile` (0079 watch item — no fresh resolution). Unlike the auto-title
+/// path, this never goes through [`ctx_traits_io::run_session::claim_session_title_attempt`]
+/// / [`ctx_traits_io::run_session::record_session_title`]'s owner-gated claim
+/// ladder — those exist to arbitrate between competing auto-title dispatches,
+/// and a sink is not one: "the sink wins" (0110), so its resolve always
+/// writes through [`ctx_traits_io::run_session::record_session_title_from_sink`],
+/// which overrides any standing `InFlight`/`Retryable`/`Resolved`
+/// (narrator-default) state unconditionally. `in_flight` is a process-local
+/// (not ledger-persisted) re-entrancy guard: it stops a still-answering
+/// dispatch from being re-spawned at the next frame boundary, while
+/// [`session_title_already_sink_resolved`] is what stops a resumed drive from
+/// re-firing after a prior process already resolved it.
+/// The readiness half of [`maybe_fire_generated_sink_title`], factored out
+/// so it is testable without a live [`ctx_traits_io::harness_config::ResolvedRuntimeAssignments`]
+/// profile: not a `generated` sink, already sink-resolved (resume case), a
+/// dispatch already in flight, or the material not yet assemblable all
+/// return `None` here — and, for the not-ready cases, clear `in_flight`
+/// again so a later frame boundary with the same still-unready readiness can
+/// retry cheaply instead of latching shut forever.
+fn generated_sink_ready_material(
+    sink: &ctx_traits_core::r#trait::SessionTitleSink,
+    accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
+    ledger_path: &camino::Utf8Path,
+    in_flight: &Arc<AtomicBool>,
+) -> Option<String> {
+    if sink.mode != ctx_traits_core::r#trait::SinkMode::Generated {
+        return None;
+    }
+    if session_title_already_sink_resolved(ledger_path) {
+        return None;
+    }
+    if in_flight.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let material =
+        ctx_traits_core::r#trait::assemble_generated_sink_material(sink, accepted_slot_values);
+    if material.is_none() {
+        in_flight.store(false, Ordering::Release);
+    }
+    material
+}
+
+#[allow(clippy::too_many_arguments)]
+fn maybe_fire_generated_sink_title(
+    sink: &ctx_traits_core::r#trait::SessionTitleSink,
+    accepted_slot_values: &[ctx_traits_core::procedure::runtime::Value],
+    trait_name: &str,
+    ledger_path: &camino::Utf8Path,
+    run_panel: Option<&run_view::RunPanel>,
+    profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    narrator_tokens: &harness_stream::NarratorTokenTracker,
+    pending: &PendingSessionTitle,
+    in_flight: &Arc<AtomicBool>,
+    execution_dir: Option<&camino::Utf8Path>,
+    session: &ctx_traits_core::procedure::session::Session,
+) {
+    let Some(material) =
+        generated_sink_ready_material(sink, accepted_slot_values, ledger_path, in_flight)
+    else {
+        return;
+    };
+    let Ok((worktree_env, confinement_payloads)) =
+        resolve_effective_worktree_env(execution_dir, profile)
+    else {
+        in_flight.store(false, Ordering::Release);
+        return;
+    };
+    let prompt = harness_stream::session_title_prompt_from_material(trait_name, &material);
+    let Some(config) = cold_narrator_config_for_session_title(
+        profile,
+        ColdNarratorContext {
+            run_id: session.run_id.as_str(),
+            session_id: session.session_id.as_str(),
+            env_overlay: &worktree_env,
+            confinement_payloads: confinement_payloads.as_ref(),
+            exec_dir: execution_dir,
+            trace_sequence: &Arc::new(AtomicU64::new(0)),
+        },
+    ) else {
+        in_flight.store(false, Ordering::Release);
+        return;
+    };
+    if let Some(panel) = run_panel {
+        panel.set_title_state(Some(
+            ctx_traits_core::procedure::session::SessionTitleState::InFlight {
+                owner: "sink:session-title".to_string(),
+                attempts: 1,
+            },
+        ));
+    }
+    let panel = run_panel.cloned();
+    let tokens = narrator_tokens.clone();
+    let pending = pending.clone();
+    let in_flight = in_flight.clone();
+    // Detached, exactly like `maybe_dispatch_session_title`'s own spawn — the
+    // drive thread keeps advancing frames while this call is outstanding, and
+    // the answer lands through `pending_title.flush` at the next safe point.
+    std::thread::spawn(move || {
+        tokens.begin_call();
+        let (result, call_total) = harness_stream::dispatch_narration(&config, prompt);
+        tokens.end_call(call_total);
+        if call_total > 0
+            && let Some(panel) = panel.as_ref()
+        {
+            panel.add_narrator_tokens(call_total);
+        }
+        match result {
+            Ok(title) => {
+                pending.put(SessionTitleOutcome::SinkGeneratedSuccess { title });
+            }
+            Err(error) => {
+                eprintln!("session title sink (generated) dispatch failed: {error}");
+                // Not a claim ladder — nothing was written to the ledger, so
+                // there is nothing to close out. Clear the re-entrancy guard
+                // so the next frame boundary (readiness unchanged) tries again.
+                in_flight.store(false, Ordering::Release);
+            }
+        }
+    });
 }
 
 /// Returns whether a title worker was actually spawned — i.e. an `in-flight`
@@ -4380,6 +4683,7 @@ fn maybe_dispatch_session_title(
                         ctx_traits_core::procedure::session::SessionTitleState::Resolved {
                             attempts,
                             title: title.clone(),
+                            source: ctx_traits_core::procedure::session::SessionTitleSource::NarratorDefault,
                         },
                     ));
                 }
@@ -9463,7 +9767,7 @@ mod session_title_flush_tests {
     use ctx_traits_core::digest::Digest;
     use ctx_traits_core::procedure::runtime::FinalState;
 
-    fn write_test_session(path: &Utf8Path) {
+    pub(super) fn write_test_session(path: &Utf8Path) {
         let run_id = ctx_traits_core::procedure::run::Id::new("title-flush-run".to_string())
             .expect("run id");
         let session = ctx_traits_core::procedure::session::Session {
@@ -9668,6 +9972,52 @@ mod session_title_flush_tests {
     }
 
     #[test]
+    fn a_generated_sink_success_overrides_a_standing_inflight_auto_claim() {
+        // 0110: "the sink wins" — a `generated` sink dispatch never went
+        // through the owner-gated claim ladder, so its resolve must override
+        // whatever the auto-title path had standing, not be silently dropped
+        // by an owner mismatch the way `record_session_title` would drop it.
+        let ledger_path = scratch_session_path();
+        write_test_session(&ledger_path);
+        assert!(matches!(
+            ctx_traits_io::run_session::claim_session_title_attempt(&ledger_path, "driver-owner")
+                .expect("claim title"),
+            ctx_traits_io::run_session::SessionTitleClaim::Claimed { attempts: 1 }
+        ));
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert!(matches!(
+            session.provenance.session_title,
+            Some(ctx_traits_core::procedure::session::SessionTitleState::InFlight { .. })
+        ));
+
+        let pending = PendingSessionTitle::default();
+        pending.put(SessionTitleOutcome::SinkGeneratedSuccess {
+            title: "Generated from slot material".to_string(),
+        });
+        pending.flush(&ledger_path, None);
+
+        let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
+            .expect("read persisted title state");
+        assert_eq!(
+            session
+                .provenance
+                .session_title
+                .as_ref()
+                .and_then(|s| s.resolved_title().map(str::to_string)),
+            Some("Generated from slot material".to_string())
+        );
+        assert_eq!(
+            session
+                .provenance
+                .session_title
+                .as_ref()
+                .and_then(ctx_traits_core::procedure::session::SessionTitleState::resolved_source),
+            Some(ctx_traits_core::procedure::session::SessionTitleSource::SinkGenerated)
+        );
+    }
+
+    #[test]
     fn a_harness_dispatched_title_failure_keeps_the_existing_retryable_ladder() {
         // The harness-dispatched path has no client-side retry of its own —
         // `terminal: false` must keep 0076's existing 3-attempt ladder alive
@@ -9815,6 +10165,202 @@ mod session_title_flush_tests {
         let session = ctx_traits_io::run_session::read_run_session(&ledger_path)
             .expect("read persisted title state");
         assert_eq!(session.provenance.session_title, None);
+    }
+}
+
+#[cfg(test)]
+mod sink_watcher_tests {
+    use super::{
+        fire_verbatim_slot_sink_if_ready, generated_sink_ready_material, session_title_flush_tests,
+    };
+    use camino::Utf8PathBuf;
+    use ctx_traits_core::digest::canonical_digest;
+    use ctx_traits_core::procedure::runtime::{AcceptanceStatus, Value, ValueSource};
+    use ctx_traits_core::procedure::session::SessionTitleSource;
+    use ctx_traits_core::r#trait::{SessionTitleSink, SinkInput, SinkMode};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    fn scratch_session_path() -> Utf8PathBuf {
+        let directory = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir")
+            .join(format!(
+                "ctx-drive-sink-watcher-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(directory.as_std_path());
+        std::fs::create_dir_all(directory.as_std_path()).expect("create scratch directory");
+        directory.join("ledger.json")
+    }
+
+    fn accepted(ref_text: &str, value: serde_json::Value) -> Value {
+        Value {
+            ref_text: ref_text.to_string(),
+            value_digest: canonical_digest(&value).unwrap(),
+            value,
+            schema_ref: None,
+            source: ValueSource::ModelOutput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn placeholder_stands_until_the_slot_fills_then_upgrades_exactly_once() {
+        let ledger_path = scratch_session_path();
+        session_title_flush_tests::write_test_session(&ledger_path);
+        let sink = SessionTitleSink {
+            mode: SinkMode::Verbatim,
+            input: SinkInput::Scalar("Working on {slot:topic}".to_string()),
+        };
+
+        // Deny/park before the slot fills: readiness never occurs, the
+        // placeholder (here: no title state at all) stands untouched.
+        fire_verbatim_slot_sink_if_ready(&sink, &[], &ledger_path, None);
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger_path).expect("read session");
+        assert_eq!(session.provenance.session_title, None);
+
+        // The slot fills: exactly one upgrade, at this frame boundary.
+        let accepted_values = [accepted(
+            "slot:topic",
+            serde_json::Value::String("the launch plan".to_string()),
+        )];
+        fire_verbatim_slot_sink_if_ready(&sink, &accepted_values, &ledger_path, None);
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger_path).expect("read session");
+        let state = session
+            .provenance
+            .session_title
+            .expect("title resolved after readiness");
+        assert_eq!(state.resolved_title(), Some("Working on the launch plan"));
+        assert_eq!(
+            state.resolved_source(),
+            Some(SessionTitleSource::SinkVerbatim)
+        );
+
+        // A resumed drive (a second frame boundary observing the same
+        // already-filled slot) must never re-fire.
+        fire_verbatim_slot_sink_if_ready(&sink, &accepted_values, &ledger_path, None);
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger_path).expect("read session");
+        assert_eq!(
+            session
+                .provenance
+                .session_title
+                .and_then(|state| state.resolved_title().map(str::to_string)),
+            Some("Working on the launch plan".to_string()),
+            "the sink must fire exactly once, not re-render on every frame"
+        );
+    }
+
+    #[test]
+    fn the_verbatim_watcher_never_fires_for_a_generated_sink() {
+        let ledger_path = scratch_session_path();
+        session_title_flush_tests::write_test_session(&ledger_path);
+        let sink = SessionTitleSink {
+            mode: SinkMode::Generated,
+            input: SinkInput::Scalar("slot:draft".to_string()),
+        };
+        let accepted_values = [accepted(
+            "slot:draft",
+            serde_json::Value::String("draft text".to_string()),
+        )];
+        fire_verbatim_slot_sink_if_ready(&sink, &accepted_values, &ledger_path, None);
+        let session =
+            ctx_traits_io::run_session::read_run_session(&ledger_path).expect("read session");
+        assert_eq!(
+            session.provenance.session_title, None,
+            "a generated sink's dispatch goes through maybe_fire_generated_sink_title, never the verbatim-render watcher"
+        );
+    }
+
+    #[test]
+    fn generated_readiness_waits_for_every_required_part() {
+        let ledger_path = scratch_session_path();
+        session_title_flush_tests::write_test_session(&ledger_path);
+        let sink = SessionTitleSink {
+            mode: SinkMode::Generated,
+            input: SinkInput::Scalar("slot:draft".to_string()),
+        };
+        let in_flight = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            generated_sink_ready_material(&sink, &[], &ledger_path, &in_flight),
+            None,
+            "no accepted slot value yet -- deny/park before fill leaves the placeholder standing"
+        );
+        // A not-ready readiness check must clear the guard again, so a later
+        // frame boundary (the slot now filled) is not left permanently locked
+        // out by an earlier speculative check.
+        assert!(!in_flight.load(std::sync::atomic::Ordering::Acquire));
+
+        let accepted_values = [accepted(
+            "slot:draft",
+            serde_json::Value::String("draft text".to_string()),
+        )];
+        assert_eq!(
+            generated_sink_ready_material(&sink, &accepted_values, &ledger_path, &in_flight),
+            Some("draft text".to_string())
+        );
+    }
+
+    #[test]
+    fn generated_readiness_is_a_reentrancy_guard_while_a_dispatch_is_in_flight() {
+        let ledger_path = scratch_session_path();
+        session_title_flush_tests::write_test_session(&ledger_path);
+        let sink = SessionTitleSink {
+            mode: SinkMode::Generated,
+            input: SinkInput::Scalar("slot:draft".to_string()),
+        };
+        let accepted_values = [accepted(
+            "slot:draft",
+            serde_json::Value::String("draft text".to_string()),
+        )];
+        let in_flight = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            generated_sink_ready_material(&sink, &accepted_values, &ledger_path, &in_flight),
+            Some("draft text".to_string())
+        );
+        // The guard is now held (simulating a dispatch thread still running);
+        // a second frame boundary before it answers must not re-fire.
+        assert!(in_flight.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(
+            generated_sink_ready_material(&sink, &accepted_values, &ledger_path, &in_flight),
+            None,
+            "a dispatch already in flight must not be re-spawned at the next frame boundary"
+        );
+    }
+
+    #[test]
+    fn generated_readiness_never_refires_once_the_ledger_shows_a_sink_resolve() {
+        let ledger_path = scratch_session_path();
+        session_title_flush_tests::write_test_session(&ledger_path);
+        let sink = SessionTitleSink {
+            mode: SinkMode::Generated,
+            input: SinkInput::Scalar("slot:draft".to_string()),
+        };
+        let accepted_values = [accepted(
+            "slot:draft",
+            serde_json::Value::String("draft text".to_string()),
+        )];
+        ctx_traits_io::run_session::record_session_title_from_sink(
+            &ledger_path,
+            SessionTitleSource::SinkGenerated,
+            "Draft text".to_string(),
+        )
+        .expect("record sink resolve");
+        let in_flight = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            generated_sink_ready_material(&sink, &accepted_values, &ledger_path, &in_flight),
+            None,
+            "a resumed drive observing an already sink-resolved ledger must never re-fire a paid call"
+        );
     }
 }
 

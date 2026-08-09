@@ -1468,10 +1468,11 @@ mod tests {
 
     #[test]
     fn a_resolved_title_never_regresses_to_a_pending_ledger_state() {
-        use ctx_traits_core::procedure::session::SessionTitleState;
+        use ctx_traits_core::procedure::session::{SessionTitleSource, SessionTitleState};
         let mut current = Some(SessionTitleState::Resolved {
             attempts: 1,
             title: "answered".to_string(),
+            source: SessionTitleSource::NarratorDefault,
         });
         // A frame refresh mid-first-frame still reads `in-flight` from the
         // ledger — it must not clobber the worker-painted title.
@@ -1504,6 +1505,7 @@ mod tests {
             Some(SessionTitleState::Resolved {
                 attempts: 2,
                 title: "late".to_string(),
+                source: SessionTitleSource::NarratorDefault,
             }),
         );
         assert!(matches!(pending, Some(SessionTitleState::Resolved { .. })));
@@ -1577,6 +1579,7 @@ mod tests {
             producer_edges: Vec::new(),
             port_requirements: Vec::new(),
             output_ports: Vec::new(),
+            session_title_sink: None,
             acceptance: ctx_traits_core::procedure::run::AcceptanceState::Pending,
         }
     }

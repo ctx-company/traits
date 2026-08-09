@@ -2786,6 +2786,7 @@ mod tests {
         let title_state = ctx_traits_core::procedure::session::SessionTitleState::Resolved {
             attempts: 1,
             title: "Refactor the merge story".to_string(),
+            source: ctx_traits_core::procedure::session::SessionTitleSource::NarratorDefault,
         };
         let title_line = title_row_line(
             Some(&title_state),

@@ -87,6 +87,8 @@ import {
   summaryFromTraitFields,
   withoutKeys,
 } from "./normalize.js";
+import type { SinkFields } from "./sink.js";
+import { readSessionTitleSink, sessionTitleSinkDraft } from "./sink.js";
 import { buildTraitFamily } from "./variant.js";
 import type { TraitFamilyMap } from "./variant.js";
 
@@ -206,6 +208,16 @@ export interface TraitFields {
   readonly scenario?: CanonicalScenario | readonly CanonicalScenario[];
   /** `[[eval]]` declarations: declared product evaluation checks. */
   readonly eval?: CanonicalEval | readonly CanonicalEval[];
+  /**
+   * `[sink.*]` declarations (task 0110): the host-owned closed sink set,
+   * e.g. `sink: { sessionTitle: input.prompt\`Working on ${topic}\` }`. The
+   * object-layer semantic authority — usable from a `variant({…})` shell
+   * before/without the functional DSL. Mutually exclusive with an
+   * `effect.session.title(...)` declaration made inside this trait's own
+   * `procedure.from(...)` body; declaring both is a build error.
+   * @see {@link effect}
+   */
+  readonly sink?: SinkFields;
   /**
    * The one sanctioned raw-JSON escape hatch: spread directly into the
    * canonical draft ahead of every other field, for canonical keys this
@@ -383,6 +395,13 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     merged = mergeDeclarationSets(merged, { port: inferred.ports });
   }
   const procedureValue = inferred?.procedure;
+  const proceduralSessionTitleSink = readSessionTitleSink(fields.procedure);
+  if (proceduralSessionTitleSink !== undefined && fields.sink?.sessionTitle !== undefined) {
+    throw new Error(
+      "[sink.session-title] declared twice: once via the object-layer `sink` field and once via `effect.session.title(...)` inside the procedure",
+    );
+  }
+  const sessionTitleSinkInput = fields.sink?.sessionTitle ?? proceduralSessionTitleSink;
   const draft = compact({
     ...fields.unsafeJson,
     ...withoutKeys(fields as Record<string, unknown>, [
@@ -409,9 +428,13 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
       "signals",
       "session",
       "sessions",
+      "sink",
       "unsafeJson",
       "variants",
     ]),
+    ...(sessionTitleSinkInput === undefined
+      ? {}
+      : { sink: { "session-title": sessionTitleSinkDraft(sessionTitleSinkInput) } }),
     "schema-version": fields["schema-version"] ?? "0.2",
     version: fields.version ?? "0.1.0",
     behavior: normalizeBehavior(fields.behavior),

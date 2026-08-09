@@ -29,6 +29,7 @@ pub mod schema;
 pub mod sequence;
 pub mod session;
 pub mod signal;
+pub mod sink;
 pub mod slot;
 
 pub use agent::{
@@ -56,6 +57,10 @@ pub use schema::{Schema, SchemaField};
 pub use sequence::{NamedSequence, NamedSequenceMap};
 pub use session::{Session, SessionBinding, parse_session_binding};
 pub use signal::{Signal, SignalTraceEvent, SignalTraceEvidence, SignalTraceScope};
+pub use sink::{
+    SessionTitleSink, SinkInput, SinkMode, Sinks, assemble_generated_sink_material,
+    render_verbatim_sink_title,
+};
 pub use slot::Slot;
 
 use derive_more::Display;
@@ -417,6 +422,11 @@ pub struct Trait {
     /// Product eval declarations: declared checks that can be run.
     #[serde(default, rename = "eval", skip_serializing_if = "Vec::is_empty")]
     pub evals: Vec<Eval>,
+
+    /// Host sink declarations (`[sink.<name>]`): a closed, typed set of
+    /// trait output the host applies to its own surfaces (task 0110).
+    #[serde(default, rename = "sink", skip_serializing_if = "Sinks::is_empty")]
+    pub sinks: Sinks,
 }
 
 impl Trait {

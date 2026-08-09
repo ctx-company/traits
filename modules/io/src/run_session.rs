@@ -383,6 +383,78 @@ pub fn append_out_of_tree_mutation(
 
 pub const SESSION_TITLE_ATTEMPT_LIMIT: u32 = 3;
 
+/// The host's terminal display constraints on a session title, applied at
+/// the write path regardless of source (task 0110): a narrator response and
+/// trait-authored sink text are both untrusted input for terminal
+/// formatting. Strips ANSI escape sequences, C0/C1 control characters, and
+/// Unicode bidi-formatting controls (the same class `tui::clean_live_text`
+/// strips from live output — duplicated here rather than reused because
+/// `ctx-traits-io` sits below `ctx-traits-cli` in the dependency graph),
+/// collapses to a single line, and clamps to 60 characters.
+pub const SESSION_TITLE_DISPLAY_CLAMP: usize = 60;
+
+pub fn sanitize_session_title(title: &str) -> String {
+    let mut cleaned = String::with_capacity(title.len());
+    let bytes = title.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0x1b {
+            index += 1;
+            match bytes.get(index).copied() {
+                Some(b'[') => {
+                    index += 1;
+                    while index < bytes.len() {
+                        let byte = bytes[index];
+                        index += 1;
+                        if (0x40..=0x7e).contains(&byte) {
+                            break;
+                        }
+                    }
+                }
+                Some(b']') => {
+                    index += 1;
+                    while index < bytes.len() {
+                        match bytes[index] {
+                            0x07 => {
+                                index += 1;
+                                break;
+                            }
+                            0x1b if bytes.get(index + 1) == Some(&b'\\') => {
+                                index += 2;
+                                break;
+                            }
+                            _ => index += 1,
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        let Some(ch) = title[index..].chars().next() else {
+            break;
+        };
+        index += ch.len_utf8();
+        let is_bidi_control = matches!(
+            ch,
+            '\u{200E}' | '\u{200F}'
+                | '\u{061C}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+        );
+        if ch.is_control() || is_bidi_control {
+            cleaned.push(' ');
+        } else {
+            cleaned.push(ch);
+        }
+    }
+    let single_line: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    single_line
+        .chars()
+        .take(SESSION_TITLE_DISPLAY_CLAMP)
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionTitleClaim {
     Claimed { attempts: u32 },
@@ -437,7 +509,7 @@ pub fn claim_session_title_attempt(
 /// Persist a successful title only when `owner` still owns the current claim.
 pub fn record_session_title(path: &Utf8Path, owner: &str, title: String) -> crate::Result<bool> {
     let mut session = read_run_session(path)?;
-    use ctx_traits_core::procedure::session::SessionTitleState;
+    use ctx_traits_core::procedure::session::{SessionTitleSource, SessionTitleState};
     let Some(SessionTitleState::InFlight {
         owner: current,
         attempts,
@@ -450,10 +522,47 @@ pub fn record_session_title(path: &Utf8Path, owner: &str, title: String) -> crat
     }
     session.provenance.session_title = Some(SessionTitleState::Resolved {
         attempts: *attempts,
-        title,
+        title: sanitize_session_title(&title),
+        source: SessionTitleSource::NarratorDefault,
     });
     write_run_session(path, &session)?;
     Ok(true)
+}
+
+/// Persist a title from `[sink.session-title]` (task 0110), bypassing the
+/// claim/attempt machine entirely: a sink write is not an "attempt" (a
+/// deterministic verbatim render costs nothing to retry and a generated
+/// dispatch is already claimed and resolved through the ordinary
+/// [`record_session_title`] path before this function is ever reached for
+/// that source). This unconditionally overrides any standing `InFlight` or
+/// `Retryable` auto-title claim — "the sink wins" — because a sink write
+/// only ever happens after the sink's own readiness fires, which the caller
+/// serializes against the frame boundary; there is no owner to check here,
+/// only a state to replace. `title` is sanitized again here regardless of
+/// what the caller already did — host display constraints are enforced at
+/// the write path for every source, belt-and-suspenders, so nothing reaches
+/// the ledger unsanitized even if a future caller forgets to pre-sanitize.
+pub fn record_session_title_from_sink(
+    path: &Utf8Path,
+    source: ctx_traits_core::procedure::session::SessionTitleSource,
+    title: String,
+) -> crate::Result<()> {
+    use ctx_traits_core::procedure::session::SessionTitleState;
+    let mut session = read_run_session(path)?;
+    let attempts = match session.provenance.session_title.as_ref() {
+        Some(SessionTitleState::InFlight { attempts, .. })
+        | Some(SessionTitleState::Retryable { attempts })
+        | Some(SessionTitleState::Resolved { attempts, .. })
+        | Some(SessionTitleState::Terminal { attempts, .. }) => *attempts,
+        None => 0,
+    };
+    session.provenance.session_title = Some(SessionTitleState::Resolved {
+        attempts,
+        title: sanitize_session_title(&title),
+        source,
+    });
+    write_run_session(path, &session)?;
+    Ok(())
 }
 
 /// Finish a claimed attempt as retryable or terminal. As with success, stale
@@ -1214,6 +1323,132 @@ mod session_title_tests {
         assert_eq!(
             claim_session_title_attempt(&path, "owner-b").expect("claim after success"),
             SessionTitleClaim::NotClaimable
+        );
+    }
+
+    #[test]
+    fn sink_verbatim_write_bypasses_the_attempt_claim_entirely() {
+        use ctx_traits_core::procedure::session::SessionTitleSource;
+        let path = scratch_session_path("sink-verbatim");
+        write_test_session(&path, "sink-verbatim-run");
+        record_session_title_from_sink(
+            &path,
+            SessionTitleSource::SinkVerbatim,
+            "Fixed title".to_string(),
+        )
+        .expect("sink write");
+        let session = read_run_session(&path).expect("read session back");
+        let state = session.provenance.session_title.expect("title state");
+        assert_eq!(state.resolved_title(), Some("Fixed title"));
+        assert_eq!(
+            state.resolved_source(),
+            Some(SessionTitleSource::SinkVerbatim)
+        );
+        // No claim was ever made, so the attempt count stays untouched at 0.
+        assert_eq!(
+            state,
+            ctx_traits_core::procedure::session::SessionTitleState::Resolved {
+                attempts: 0,
+                title: "Fixed title".to_string(),
+                source: SessionTitleSource::SinkVerbatim,
+            }
+        );
+    }
+
+    #[test]
+    fn sink_write_overrides_a_standing_in_flight_auto_claim() {
+        use ctx_traits_core::procedure::session::SessionTitleSource;
+        let path = scratch_session_path("sink-overrides-in-flight");
+        write_test_session(&path, "sink-overrides-in-flight-run");
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-a").expect("claim"),
+            SessionTitleClaim::Claimed { attempts: 1 }
+        );
+        record_session_title_from_sink(
+            &path,
+            SessionTitleSource::SinkGenerated,
+            "Sink wins".to_string(),
+        )
+        .expect("sink write");
+        let session = read_run_session(&path).expect("read session back");
+        assert_eq!(
+            session.provenance.session_title.unwrap().resolved_title(),
+            Some("Sink wins")
+        );
+    }
+
+    /// 0110: `ctx traits run-status --json`/the receipt path is a thin
+    /// read-and-reserialize of the raw ledger (`ctx_traits_io::run::status`
+    /// returns the session it read, unmodified) — so the source this test
+    /// asserts on-disk is exactly what that surface reports, with no
+    /// intermediate filtering that could silently drop it.
+    #[test]
+    fn a_sink_resolved_ledger_carries_its_source_in_the_raw_receipt_json() {
+        use ctx_traits_core::procedure::session::SessionTitleSource;
+        let path = scratch_session_path("sink-source-in-receipt-json");
+        write_test_session(&path, "sink-source-in-receipt-json-run");
+        record_session_title_from_sink(
+            &path,
+            SessionTitleSource::SinkGenerated,
+            "Generated title".to_string(),
+        )
+        .expect("sink write");
+        let raw = std::fs::read_to_string(path.as_std_path()).expect("read ledger bytes");
+        assert!(
+            raw.contains("\"source\": \"sink-generated\"")
+                || raw.contains("\"source\":\"sink-generated\""),
+            "the exact bytes a receipt/run-status reader loads must carry the resolved source: {raw}"
+        );
+    }
+
+    #[test]
+    fn late_auto_worker_write_after_sink_takeover_is_a_no_op() {
+        use ctx_traits_core::procedure::session::SessionTitleSource;
+        let path = scratch_session_path("late-auto-worker-no-op");
+        write_test_session(&path, "late-auto-worker-no-op-run");
+        assert_eq!(
+            claim_session_title_attempt(&path, "owner-a").expect("claim"),
+            SessionTitleClaim::Claimed { attempts: 1 }
+        );
+        record_session_title_from_sink(
+            &path,
+            SessionTitleSource::SinkGenerated,
+            "Sink wins".to_string(),
+        )
+        .expect("sink write");
+        // The stale auto worker (owner-a) delivers late, after the sink has
+        // already resolved the title — its write must be a silent no-op,
+        // never clobbering the sink's resolved state.
+        let recorded = record_session_title(&path, "owner-a", "Late narrator title".to_string())
+            .expect("record does not error");
+        assert!(!recorded, "a late auto-worker write must be a no-op");
+        let session = read_run_session(&path).expect("read session back");
+        let state = session.provenance.session_title.unwrap();
+        assert_eq!(state.resolved_title(), Some("Sink wins"));
+        assert_eq!(
+            state.resolved_source(),
+            Some(SessionTitleSource::SinkGenerated)
+        );
+    }
+
+    #[test]
+    fn sanitize_session_title_strips_control_chars_ansi_and_clamps_to_sixty() {
+        let dirty = format!(
+            "\u{1b}[31mTitle\u{1b}[0m\twith\ncontrol\u{7}chars {}",
+            "x".repeat(80)
+        );
+        let clean = sanitize_session_title(&dirty);
+        assert!(!clean.contains('\u{1b}'));
+        assert!(!clean.chars().any(|c| c.is_control()));
+        assert!(!clean.contains('\n') && !clean.contains('\t'));
+        assert_eq!(clean.chars().count(), SESSION_TITLE_DISPLAY_CLAMP);
+    }
+
+    #[test]
+    fn sanitize_session_title_collapses_whitespace_to_single_line() {
+        assert_eq!(
+            sanitize_session_title("  Fixing   the\n\nbug  "),
+            "Fixing the bug"
         );
     }
 

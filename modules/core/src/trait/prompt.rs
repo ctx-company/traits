@@ -379,6 +379,21 @@ pub fn scan_interpolations(text: &str) -> (Vec<Interpolation>, Vec<String>) {
     InterpolationScanner::new(text).run()
 }
 
+/// Canonical single-token text for a resolved interpolation value: text
+/// as-is, number/boolean canonical, and every non-scalar as compact JSON.
+/// Shared by every interpolation site (command argv, `[sink.*]` templates)
+/// so they render an accepted value identically.
+pub fn render_interpolation_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(boolean) => Some(boolean.to_string()),
+        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            serde_json::to_string(value).ok()
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

@@ -1062,6 +1062,7 @@ mod tests {
             producer_edges: Vec::new(),
             port_requirements: Vec::new(),
             output_ports: Vec::new(),
+            session_title_sink: None,
             acceptance: ctx_traits_core::procedure::run::AcceptanceState::Pending,
         }
     }
