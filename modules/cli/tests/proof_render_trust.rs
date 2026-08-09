@@ -351,7 +351,7 @@ fn host_update_reports_a_since_blocked_placement_as_an_error_entry_and_leaves_by
 }
 
 #[test]
-fn run_family_still_refuses_a_blocked_trait_with_its_own_unchanged_wording() {
+fn run_family_still_refuses_a_blocked_trait_naming_trust_and_never_manifest() {
     let scratch = ScratchRoot::new("render-trust-run-parity");
     let repo = draft_repo(&scratch);
 
@@ -368,8 +368,19 @@ fn run_family_still_refuses_a_blocked_trait_with_its_own_unchanged_wording() {
         "run must still refuse a blocked trait"
     );
     let (_, stderr) = support::utf8(&output);
+    // 0150: run's own refusal names the real trust condition and the exact
+    // remedy — never the generic `invalid manifest at
+    // run-session.lifecycle-trust` framing `invalid_request` used to produce.
     assert!(
-        stderr.contains("blocked.trust.blocked"),
-        "run's own refusal wording must be unchanged: {stderr}"
+        stderr.contains("trait trust refused") && stderr.contains("is blocked"),
+        "run's refusal must name the blocked trust condition: {stderr}"
+    );
+    assert!(
+        stderr.contains("ctx traits trust list"),
+        "run's refusal must point at `ctx traits trust list`: {stderr}"
+    );
+    assert!(
+        !stderr.contains("invalid manifest"),
+        "run's refusal must not reuse the manifest-error framing: {stderr}"
     );
 }

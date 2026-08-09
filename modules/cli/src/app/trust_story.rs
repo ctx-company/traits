@@ -178,6 +178,35 @@ pub(crate) fn approval_meaning() -> [&'static str; 3] {
     ]
 }
 
+/// Aggregate a package's per-variant trust verdict labels (each one of
+/// [`ctx_traits_core::r#trait::TrustVerdict::display_name`]'s three values)
+/// into one conservative summary word (0150): plain `verified` only when
+/// EVERY variant's current digest is verified — a family with even one
+/// unreviewed or blocked variant must never read as flatly `verified`, since
+/// that is exactly the bytes someone could run. The single wording site for
+/// this collapse, so a package-level trust cell (list header, dashboard
+/// summary) can never say something a per-variant table would contradict.
+pub(crate) fn aggregate_trust_label(variant_verdicts: &[&str]) -> String {
+    let total = variant_verdicts.len();
+    if total == 0 {
+        return TrustClass::Unreviewed.label().to_string();
+    }
+    let verified = variant_verdicts
+        .iter()
+        .filter(|verdict| **verdict == "verified")
+        .count();
+    if verified == total {
+        return TrustClass::Verified.label().to_string();
+    }
+    if variant_verdicts.contains(&"blocked") {
+        return format!("blocked ({verified}/{total} verified)");
+    }
+    if verified > 0 {
+        return format!("partial ({verified}/{total})");
+    }
+    TrustClass::Unreviewed.label().to_string()
+}
+
 /// The most recent readable run-ledger session on this machine whose
 /// `trait_id` and canonical digest matched the row being explained — pure
 /// evidence of "these bytes ran", never "who changed them" (§4.4).

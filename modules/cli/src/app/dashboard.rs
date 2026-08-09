@@ -282,6 +282,10 @@ struct TraitRow {
     /// than re-derived from `status`/`trust` text — the preview's degrade
     /// path (§4.6) checks this directly.
     error: Option<String>,
+    /// A native family's variant name, when this row is one of several
+    /// sharing `id` (0150) — `trait_row_label` renders `id:variant` for
+    /// these rows so they read as distinct entries rather than duplicates.
+    variant: Option<String>,
 }
 
 /// The reconstructed live-view pane for one TRAITS row (P471 §4.1),
@@ -2233,6 +2237,7 @@ fn load_traits_and_trust() -> crate::Result<(Vec<TraitRow>, Vec<TrustRow>)> {
             canonical_digest: row.canonical_digest.clone(),
             source_path: row.source_path.clone(),
             error: row.error.clone(),
+            variant: row.variant.clone(),
         })
         .collect();
     let trust = build_trust_rows(&all)?;
@@ -7670,9 +7675,13 @@ fn render_traits_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &
 }
 
 fn trait_row_label(row: &TraitRow) -> String {
+    let display_id = match &row.variant {
+        Some(variant) => format!("{}:{variant}", row.id),
+        None => row.id.clone(),
+    };
     let label = format!(
         "{} {} {} {}",
-        list_field(&row.id, 24),
+        list_field(&display_id, 24),
         list_field(&row.version, 10),
         list_field(&row.status, 18),
         list_field(&row.trust, 21),
@@ -9614,6 +9623,7 @@ mod tests {
             canonical_digest: String::new(),
             source_path: String::new(),
             error: None,
+            variant: None,
         };
         let trait_label = trait_row_label(&trait_row);
         assert_eq!(tui::display_width(&trait_label), LIST_LABEL_WIDTH);
@@ -9797,6 +9807,7 @@ mod tests {
             canonical_digest: digest.to_string(),
             source_path: "/traits/x/index.toml".to_string(),
             error: None,
+            variant: None,
         }
     }
 

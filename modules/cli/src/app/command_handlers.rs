@@ -456,11 +456,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     })
                 }
                 Some(subcommand) => handle_trust(merge_trust_json(subcommand, json)),
-                None => {
-                    let file =
-                        resolve_trait_target(trait_arg.as_deref(), file.as_deref(), "trust")?;
-                    crate::app::lifecycle_reporting::handle_trust_status(&file, json)
-                }
+                None => crate::app::lifecycle_reporting::handle_trust_status(
+                    trait_arg.as_deref(),
+                    file.as_deref(),
+                    json,
+                ),
             },
             Some(cli::TraitsCommand::Hygiene { trait_files, json }) => {
                 handle_hygiene(&trait_files, json)

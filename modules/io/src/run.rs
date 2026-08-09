@@ -584,19 +584,60 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
         &authorization.trust,
     );
     if !gates.is_empty() {
-        let trust_detail = match &authorization.decision {
-            crate::trust::StartTrust::Blocked(_) => "approval is blocked",
-            crate::trust::StartTrust::Unreviewed => "approval is required",
-            crate::trust::StartTrust::Verified(_) => "authorization was refused",
-        };
-        let message = format!(
-            "executable run blocked by lifecycle/trust gates: {}; {trust_detail}",
-            ctx_traits_core::r#trait::activation::format_gate_refusal(&gates)
-        );
         update(
             StartupStage::Trust,
             StartupStageState::Failed,
             "trait authorization was refused".to_string(),
+        );
+        // The trust gate names the real condition — unreviewed/blocked trust,
+        // the offending digest, and the exact approve command — instead of
+        // the generic `invalid manifest at run-session.lifecycle-trust`
+        // wrapping `invalid_request` produced. `<ref>` is the user-supplied
+        // `trait_id`/`--file` spelling, never the decoded document's id: a
+        // deliberate, narrow loosening of the pre-authorization generic-error
+        // rule for this one gate, using only caller-supplied text plus a
+        // computed digest — nothing document-derived (run.rs:543-546).
+        let is_trust_gate = |gate: &ctx_traits_core::r#trait::activation::Gate| {
+            gate.code == ctx_traits_core::r#trait::gate_code::TRUST_BLOCKED
+                || gate.code == ctx_traits_core::r#trait::gate_code::TRUST_UNREVIEWED
+        };
+        if gates.iter().any(is_trust_gate) {
+            let ref_display = request.trait_id.or(request.trait_file).unwrap_or("<trait>");
+            let mut message = match &authorization.decision {
+                crate::trust::StartTrust::Unreviewed => format!(
+                    "trait trust refused: {ref_display} (digest {}) is unreviewed on this machine; review and approve with `ctx traits trust approve {ref_display}`",
+                    loaded.canonical_digest
+                ),
+                crate::trust::StartTrust::Blocked(record) => format!(
+                    "trait trust refused: {ref_display} (digest {}) is blocked{}; review with `ctx traits trust list`",
+                    loaded.canonical_digest,
+                    record
+                        .reason
+                        .as_deref()
+                        .map(|reason| format!(" ({reason})"))
+                        .unwrap_or_default()
+                ),
+                crate::trust::StartTrust::Verified(_) => format!(
+                    "executable run blocked by lifecycle/trust gates: {}",
+                    ctx_traits_core::r#trait::activation::format_gate_refusal(&gates)
+                ),
+            };
+            let other_gates: Vec<_> = gates
+                .iter()
+                .filter(|gate| !is_trust_gate(gate))
+                .cloned()
+                .collect();
+            if !other_gates.is_empty() {
+                message.push_str(&format!(
+                    "; also blocked by {}",
+                    ctx_traits_core::r#trait::activation::format_gate_refusal(&other_gates)
+                ));
+            }
+            return Err(crate::Error::Usage { message });
+        }
+        let message = format!(
+            "executable run blocked by lifecycle/trust gates: {}",
+            ctx_traits_core::r#trait::activation::format_gate_refusal(&gates)
         );
         return if pre_authorization {
             invalid_request("run-session.lifecycle-trust", PRE_AUTHORIZATION_FAILURE)
@@ -1892,9 +1933,16 @@ mod startup_observer_tests {
         })
         .unwrap_err();
         let details = updates.lock().unwrap();
-        assert_eq!(
-            error.to_string(),
-            "invalid manifest at run-session.lifecycle-trust: trait authorization was refused"
+        let error_text = error.to_string();
+        assert!(
+            error_text.starts_with("trait trust refused: ")
+                && error_text.contains("is unreviewed on this machine")
+                && error_text.contains("ctx traits trust approve"),
+            "unexpected trust refusal message: {error_text}"
+        );
+        assert!(
+            !error_text.contains("invalid manifest"),
+            "trust refusal must not reuse the manifest-error framing: {error_text}"
         );
         assert_eq!(
             details

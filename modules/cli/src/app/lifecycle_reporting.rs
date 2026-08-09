@@ -818,6 +818,11 @@ type CurrentTraitDigestWithRoot = (String, Option<String>, String, String);
 pub(crate) fn current_trait_digests_with_roots() -> crate::Result<Vec<CurrentTraitDigestWithRoot>> {
     let context = ctx_traits_io::inventory::InventoryContext::discover()?;
     let mut targets = std::collections::BTreeMap::new();
+    // `resolve_trait_inventory` already expands a native family into one row
+    // per declared variant (0150), so it alone now supplies every
+    // (id, variant) target this needs — a second repo-only walk over
+    // `trait_package_variants` re-deriving the same rows would just be
+    // redundant load/lifecycle-resolution work.
     for row in resolve_trait_inventory(&context)? {
         if let TraitInventoryRow::Resolved(entry) = row {
             targets.insert(
@@ -831,31 +836,6 @@ pub(crate) fn current_trait_digests_with_roots() -> crate::Result<Vec<CurrentTra
             );
         }
     }
-    if matches!(
-        context.invocation(),
-        ctx_traits_io::state::InvocationRoot::Repo(_)
-    ) {
-        for entry in
-            ctx_traits_io::discovery::trait_package_variants(context.repo_root_for_paths())?
-        {
-            if entry.variant.is_none() {
-                continue;
-            }
-            let (trait_ref, trait_root, _source, canonical) =
-                ctx_traits_io::run::load_trait(entry.trait_path.as_str())?;
-            let variant = trait_ref.variant.clone().or(entry.variant);
-            let id = trait_ref.id.as_str().to_string();
-            targets.insert(
-                (id.clone(), variant.clone()),
-                (
-                    id,
-                    variant,
-                    canonical.as_str().to_string(),
-                    trait_root.to_string(),
-                ),
-            );
-        }
-    }
     Ok(targets.into_values().collect())
 }
 
@@ -863,6 +843,10 @@ pub(crate) fn current_trait_digests_with_roots() -> crate::Result<Vec<CurrentTra
 #[serde(rename_all = "kebab-case")]
 struct TrustStatusJson<'a> {
     trait_id: &'a str,
+    /// Additive (0150): the trait's variant name, when it is one member of a
+    /// native family — `None` for a family-less trait.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variant: Option<&'a str>,
     package_status: &'a str,
     current_digest: &'a str,
     verdict: &'a str,
@@ -871,11 +855,125 @@ struct TrustStatusJson<'a> {
     freshness: Option<ctx_traits_io::trust::TrustFreshness>,
 }
 
+/// `ctx traits trust <trait|family|family:variant>`: dispatches on the raw
+/// operand spelling, before any single-file resolution collapses a bare
+/// family id to its default variant — mirroring `handle_trust_approve`'s
+/// operand resolution order exactly, so what this reports for a family
+/// covers exactly what `trust approve <family>` would approve in one act
+/// (0150). A bare family operand reports every declared variant; anything
+/// else (a single trait id, `family:variant`, or `--file`) resolves and
+/// reports that one trait, echoing its variant when it has one.
+pub(crate) fn handle_trust_status(
+    trait_arg: Option<&str>,
+    file: Option<&str>,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    if let Some(operand) = trait_arg
+        && file.is_none()
+        && !operand.contains(':')
+        && let Some(variants) = family_variant_files(operand)?
+    {
+        return handle_trust_status_family(operand, &variants, json);
+    }
+    let resolved = crate::app::command_handlers::resolve_trait_target(trait_arg, file, "trust")?;
+    handle_trust_status_single(&resolved, json)
+}
+
+/// `ctx traits trust <family>`: one row per declared variant plus the
+/// conservative cross-variant aggregate — never a single verdict standing in
+/// for the whole family (0150's core invariant).
+fn handle_trust_status_family(
+    family: &str,
+    variant_files: &[String],
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    struct VariantStatus {
+        variant: String,
+        current_digest: String,
+        verdict: ctx_traits_core::r#trait::TrustVerdict,
+    }
+
+    let mut statuses = Vec::with_capacity(variant_files.len());
+    for path in variant_files {
+        let (trait_ref, _trait_root, _source_digest, canonical_digest) =
+            ctx_traits_io::run::load_trait(path)?;
+        let verdict = ctx_traits_io::lifecycle::resolve_trust_verdict_for_trait(
+            trait_ref.id.as_str(),
+            canonical_digest.as_str(),
+        )?;
+        statuses.push(VariantStatus {
+            variant: trait_ref.variant.unwrap_or_else(|| "default".to_string()),
+            current_digest: canonical_digest.as_str().to_string(),
+            verdict,
+        });
+    }
+    statuses.sort_by(|a, b| a.variant.cmp(&b.variant));
+    let verdict_labels: Vec<&str> = statuses
+        .iter()
+        .map(|status| status.verdict.display_name())
+        .collect();
+    let aggregate = super::trust_story::aggregate_trust_label(&verdict_labels);
+
+    if json {
+        print_json_report(
+            &TrustFamilyStatusJson {
+                family,
+                aggregate: &aggregate,
+                variants: statuses
+                    .iter()
+                    .map(|status| TrustFamilyVariantJson {
+                        variant: &status.variant,
+                        current_digest: &status.current_digest,
+                        verdict: status.verdict.display_name(),
+                    })
+                    .collect(),
+            },
+            "trust status (family)",
+        )?;
+    } else {
+        println!("ctx traits trust {family}");
+        println!("  aggregate: {aggregate}");
+        for status in &statuses {
+            println!(
+                "  variant={} current-digest={} verdict={}",
+                status.variant,
+                status.current_digest,
+                status.verdict.display_name()
+            );
+        }
+        // Pin the store semantics the aggregate above reports against: a
+        // family-wide `trust approve` covers every variant in one journaled
+        // act (`handle_trust_approve`), so this footer's remedy is never
+        // narrower than what actually clears the family's gates.
+        println!(
+            "  next: `ctx traits trust approve {family}` re-approves all {} variants in one act",
+            statuses.len()
+        );
+    }
+    Ok(CommandOutput::new(()))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct TrustFamilyVariantJson<'a> {
+    variant: &'a str,
+    current_digest: &'a str,
+    verdict: &'a str,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct TrustFamilyStatusJson<'a> {
+    family: &'a str,
+    aggregate: &'a str,
+    variants: Vec<TrustFamilyVariantJson<'a>>,
+}
+
 /// `ctx traits trust <trait>`: reports resolved trait ID, package status,
 /// current canonical digest, current verdict, and digest drift, joined from
 /// the same [`ctx_traits_io::trust::classify_records`] shared by `trust
 /// list` and `doctor`.
-pub(crate) fn handle_trust_status(file: &str, json: bool) -> crate::Result<CommandOutput<()>> {
+fn handle_trust_status_single(file: &str, json: bool) -> crate::Result<CommandOutput<()>> {
     let (trait_ref, trait_root, _source_digest, canonical_digest) =
         ctx_traits_io::run::load_trait(file)?;
     let package_status = ctx_traits_io::lifecycle::resolve_package_status(&trait_root)?;
@@ -906,10 +1004,20 @@ pub(crate) fn handle_trust_status(file: &str, json: bool) -> crate::Result<Comma
                 .and_then(|index| rows.get(index))
         });
 
+    // Echo the variant-qualified id whenever this trait is one member of a
+    // native family — a bare `ctx traits trust <id>` header for
+    // `<family>:<variant>` silently dropped the qualifier the caller asked
+    // about (0150).
+    let display_ref = match &trait_ref.variant {
+        Some(variant) => format!("{}:{variant}", trait_ref.id.as_str()),
+        None => trait_ref.id.as_str().to_string(),
+    };
+
     if json {
         print_json_report(
             &TrustStatusJson {
                 trait_id: trait_ref.id.as_str(),
+                variant: trait_ref.variant.as_deref(),
                 package_status: package_status.display_name(),
                 current_digest: canonical_digest.as_str(),
                 verdict: verdict.display_name(),
@@ -920,7 +1028,7 @@ pub(crate) fn handle_trust_status(file: &str, json: bool) -> crate::Result<Comma
             "trust status",
         )?;
     } else {
-        println!("ctx traits trust {}", trait_ref.id.as_str());
+        println!("ctx traits trust {display_ref}");
         println!("  package-status: {}", package_status.display_name());
         println!("  current-digest: {}", canonical_digest.as_str());
         println!("  verdict: {}", verdict.display_name());
@@ -936,7 +1044,7 @@ pub(crate) fn handle_trust_status(file: &str, json: bool) -> crate::Result<Comma
         let class = super::trust_story::classify_trust(recorded);
         println!("  drift: {}", super::trust_story::state_sentence(class));
         let surface = super::trust_story::Surface::Cli {
-            trait_id: trait_ref.id.as_str().to_string(),
+            trait_id: display_ref.clone(),
         };
         println!(
             "  next: {}",
@@ -1162,6 +1270,10 @@ enum ListEntry {
     Row(ListRow),
     Family {
         family: String,
+        /// The conservative cross-variant summary
+        /// ([`super::trust_story::aggregate_trust_label`]) — never plain
+        /// `verified` unless every member's trust is `verified` (0150).
+        trust: String,
         members: Vec<ListRow>,
     },
 }
@@ -1292,42 +1404,105 @@ pub(crate) fn resolve_trait_inventory(
             .shadowed
             .first()
             .map(|candidate| candidate.origin.clone());
-        match ctx_traits_io::run::load_trait(&path) {
-            Ok((trait_ref, trait_root, _, canonical_digest)) => {
-                let (status, trust) = ctx_traits_io::lifecycle::resolve_named(
-                    &trait_root,
-                    trait_ref.id.as_str(),
-                    canonical_digest.as_str(),
+
+        // A native family shares one candidate id across every variant, each
+        // with its own canonical digest and trust verdict. Reporting only the
+        // bare id's winner (the default variant) let one variant's verdict
+        // stand in for the whole family — the 0150 collapse. Reading the
+        // family table from the winner's package root, when present, expands
+        // the id into one row per declared variant instead of one row total;
+        // every reporting surface (`list`, TRAITS, TRUST) derives from this
+        // one scan, so the fix lands everywhere at once.
+        let family_table =
+            ctx_traits_io::layout::package_root_for_manifest(camino::Utf8Path::new(&path))
+                .and_then(|root| {
+                    ctx_traits_io::family_manifest::read_family_table(
+                        &ctx_traits_io::layout::package_manifest_path(root),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|table| (root.to_path_buf(), table))
+                });
+
+        if let Some((root, table)) = family_table {
+            for variant in table.variants.values() {
+                let variant_path = root.join(&variant.relative_path);
+                push_resolved_trait_row(
+                    &mut rows,
+                    &id,
+                    variant_path.as_str(),
+                    origin.clone(),
+                    shadow.clone(),
+                    // The `[family]` package table is the ground truth this
+                    // expansion is reading from — a native build stamps no
+                    // `metadata.family` slug on the canonical document
+                    // itself, so grouping must key off the family id this
+                    // scan already resolved from, not off a field the
+                    // variant's own bytes never carry.
+                    Some(id.clone()),
                 )?;
-                let family = trait_ref
+            }
+            continue;
+        }
+
+        push_resolved_trait_row(&mut rows, &id, &path, origin, shadow, None)?;
+    }
+    Ok(rows)
+}
+
+/// Load one trait file and push its resolved (or unreadable) inventory row.
+/// The one place [`resolve_trait_inventory`] turns a candidate manifest path
+/// into a [`TraitInventoryRow`], shared by both the single-id path and the
+/// per-variant family expansion so the two can never diverge on how a row is
+/// built. `family_override` is `Some(family_id)` for a variant reached via
+/// the `[family]` package-table expansion; `None` falls back to the
+/// document's own `metadata.family` slug, for a family-less trait or one
+/// declared that way outside the native-family mechanism.
+fn push_resolved_trait_row(
+    rows: &mut Vec<TraitInventoryRow>,
+    id: &str,
+    path: &str,
+    origin: Option<String>,
+    shadow: Option<String>,
+    family_override: Option<String>,
+) -> crate::Result<()> {
+    match ctx_traits_io::run::load_trait(path) {
+        Ok((trait_ref, trait_root, _, canonical_digest)) => {
+            let (status, trust) = ctx_traits_io::lifecycle::resolve_named(
+                &trait_root,
+                trait_ref.id.as_str(),
+                canonical_digest.as_str(),
+            )?;
+            let family = family_override.or_else(|| {
+                trait_ref
                     .metadata
                     .as_ref()
                     .and_then(|metadata| metadata.family.as_ref())
-                    .map(|slug| slug.as_str().to_string());
-                let variant = trait_ref.variant.clone();
-                rows.push(TraitInventoryRow::Resolved(Box::new(ResolvedTraitEntry {
-                    id: trait_ref.id.as_str().to_string(),
-                    version: trait_ref.version.as_str().to_string(),
-                    schema_version: trait_ref.schema_version.as_str().to_string(),
-                    status: status.display_name().to_string(),
-                    trust: trust.display_name().to_string(),
-                    canonical_digest: canonical_digest.as_str().to_string(),
-                    source_path: path,
-                    trait_root: trait_root.to_string(),
-                    origin,
-                    family,
-                    variant,
-                    shadow,
-                })));
-            }
-            Err(error) => rows.push(TraitInventoryRow::Unreadable {
-                id,
-                path,
-                error: error.to_string(),
-            }),
+                    .map(|slug| slug.as_str().to_string())
+            });
+            let variant = trait_ref.variant.clone();
+            rows.push(TraitInventoryRow::Resolved(Box::new(ResolvedTraitEntry {
+                id: trait_ref.id.as_str().to_string(),
+                version: trait_ref.version.as_str().to_string(),
+                schema_version: trait_ref.schema_version.as_str().to_string(),
+                status: status.display_name().to_string(),
+                trust: trust.display_name().to_string(),
+                canonical_digest: canonical_digest.as_str().to_string(),
+                source_path: path.to_string(),
+                trait_root: trait_root.to_string(),
+                origin,
+                family,
+                variant,
+                shadow,
+            })));
         }
+        Err(error) => rows.push(TraitInventoryRow::Unreadable {
+            id: id.to_string(),
+            path: path.to_string(),
+            error: error.to_string(),
+        }),
     }
-    Ok(rows)
+    Ok(())
 }
 
 /// One TRAITS-screen row: [`ResolvedTraitEntry`], or the read error for an
@@ -1675,7 +1850,19 @@ fn group_list_rows(rows: Vec<ListRow>) -> Vec<ListEntry> {
                 .cmp(&is_default_variant(a))
                 .then_with(|| a.sort_key().cmp(b.sort_key()))
         });
-        entries.push(ListEntry::Family { family, members });
+        let member_trust: Vec<&str> = members
+            .iter()
+            .filter_map(|member| match member {
+                ListRow::Trait { trust, .. } => Some(trust.as_str()),
+                ListRow::Unreadable { .. } | ListRow::SourceOnly { .. } => None,
+            })
+            .collect();
+        let trust = super::trust_story::aggregate_trust_label(&member_trust);
+        entries.push(ListEntry::Family {
+            family,
+            trust,
+            members,
+        });
     }
 
     entries.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
@@ -1705,8 +1892,12 @@ fn emit_plain_list(report: &ListReport) -> crate::Result<()> {
     for entry in &report.entries {
         match entry {
             ListEntry::Row(row) => w(plain_row_line(row, "  ", false))?,
-            ListEntry::Family { family, members } => {
-                w(format!("  family: {family}"))?;
+            ListEntry::Family {
+                family,
+                trust,
+                members,
+            } => {
+                w(format!("  family: {family} trust={trust}"))?;
                 for member in members {
                     w(plain_row_line(member, "    ", true))?;
                 }
@@ -1806,10 +1997,16 @@ fn styled_list_lines(report: &ListReport) -> Vec<crate::app::tui::Line> {
     for entry in &report.entries {
         match entry {
             ListEntry::Row(row) => lines.push(styled_list_row_line(row, "", false)),
-            ListEntry::Family { family, members } => {
+            ListEntry::Family {
+                family,
+                trust,
+                members,
+            } => {
                 let mut header = Line::blank();
                 header.push("family: ", Tone::Muted);
                 header.push(family.clone(), Tone::Default);
+                header.push(" trust=", Tone::Muted);
+                header.push(trust.clone(), Tone::Default);
                 lines.push(header);
                 for member in members {
                     lines.push(styled_list_row_line(member, "  ", true));
