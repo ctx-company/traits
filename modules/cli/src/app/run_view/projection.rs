@@ -994,7 +994,7 @@ pub(super) fn active_step_index(view: &RunView) -> Option<usize> {
 mod tests {
     use super::super::RunPanel;
     use super::super::planned::{stamp_control_stack_iterations, structural_step_key};
-    use super::super::render::{event_row_line, story_row_line};
+    use super::super::render::{EVENT_PREFIX_SEP, event_row_line, story_row_line};
     use super::*;
     use crate::app::tui_ratatui::RatatuiPane;
 
@@ -1681,7 +1681,7 @@ mod tests {
                 .segments()
                 .map(|(text, _)| text)
                 .collect::<String>()
-                .starts_with("00:00:10 ")
+                .starts_with(&format!("00:00:10{EVENT_PREFIX_SEP}"))
         );
     }
 
@@ -1879,7 +1879,9 @@ mod tests {
             assert!(row.tail.contains(&format!("{output_tokens} tok")));
             let line = event_row_line(&row, 80);
             let text = line.segments().map(|(text, _)| text).collect::<String>();
-            assert!(text.starts_with(&format!("00:00:{elapsed_seconds:02} {title}")));
+            assert!(text.starts_with(&format!(
+                "00:00:{elapsed_seconds:02}{EVENT_PREFIX_SEP}{title}"
+            )));
         }
     }
 
@@ -1897,7 +1899,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].at, Some(Duration::ZERO));
         let rendered = line_text(&event_row_line(&rows[0], 80));
-        assert!(rendered.starts_with("00:00:00 working"));
+        assert!(rendered.starts_with(&format!("00:00:00{EVENT_PREFIX_SEP}working")));
     }
 
     #[test]

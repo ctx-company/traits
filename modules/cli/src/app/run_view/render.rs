@@ -947,13 +947,13 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
 }
 
 /// P552 shared one-row event formatter for history and current-activity
-/// panes: a fixed `HH:MM:SS ` prefix (never truncated — a terminal
+/// panes: a fixed `HH:MM:SS · ` prefix (never truncated — a terminal
 /// narrower than the prefix itself is left to clip it, per the P552
 /// contract) followed by a cleaned tail, truncated by display width only in
 /// whatever budget remains after the prefix. Each call produces exactly one
 /// physical row; callers must not pass the result through
 /// `tui_panes::wrapped_lines`.
-pub(super) const EVENT_PREFIX_SEP: &str = " ";
+pub(super) const EVENT_PREFIX_SEP: &str = " \u{b7} ";
 
 pub(super) fn event_row_line(row: &EventRow, width: u16) -> tui::Line {
     let prefix = row
@@ -2038,14 +2038,14 @@ mod tests {
         };
         let line = event_row_line(&row, 20);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
-        assert!(rendered.starts_with("00:00:05 "));
+        assert!(rendered.starts_with(&format!("00:00:05{EVENT_PREFIX_SEP}")));
         assert!(rendered.ends_with("..."));
         assert!(tui::display_width(&rendered) <= 20);
         // Task 0023: the truncation was recorded, so a selection spanning
         // this row expands back to the full untruncated tail on copy.
         assert_eq!(
             tui_select::substitute_ledger(&rendered),
-            format!("00:00:05 {}", row.tail)
+            format!("00:00:05{EVENT_PREFIX_SEP}{}", row.tail)
         );
         tui_select::clear_ledger();
     }
@@ -2066,7 +2066,7 @@ mod tests {
         assert!(rendered.ends_with("..."));
         assert_eq!(
             tui_select::substitute_ledger(&rendered),
-            format!("00:00:01 {}", row.tail)
+            format!("00:00:01{EVENT_PREFIX_SEP}{}", row.tail)
         );
         tui_select::clear_ledger();
     }
@@ -2080,7 +2080,7 @@ mod tests {
         };
         let line = event_row_line(&row, 80);
         let rendered: String = line.segments().map(|(text, _)| text).collect();
-        assert!(rendered.starts_with("00:00:09 short"));
+        assert!(rendered.starts_with(&format!("00:00:09{EVENT_PREFIX_SEP}short")));
         assert!(!rendered.ends_with("..."));
     }
 
