@@ -3855,6 +3855,121 @@ mod tests {
         );
     }
 
+    /// (0093) A loop with neither a bound nor an exit guard can never end;
+    /// refusal must name `max-iterations`.
+    #[test]
+    fn loop_with_no_bound_and_no_guard_is_refused_by_name() {
+        const FIXTURE: &str = r#"
+id = "unbounded-no-guard-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Unbounded No Guard Fixture"
+summary = "Regression fixture: a loop with neither a bound nor until/abort-if is refused."
+
+[[agent]]
+id = "reviewer"
+description = "Produces the loop body output."
+summary = "Reviewer role."
+
+[prompt.review]
+text = "Do the loop body work."
+
+[[sequence.loop-body.sequence]]
+id = "produce-output"
+title = "Produce output"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+
+[procedure]
+description = "One loop with neither a bound nor an exit guard."
+
+[[procedure.sequence]]
+id = "unbounded-loop"
+title = "Unbounded loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+"#;
+        let trait_ref: crate::r#trait::Trait =
+            toml::from_str(FIXTURE).expect("fixture trait parses");
+        let error = validate(&trait_ref)
+            .expect_err("a loop with no bound and no exit guard can never end");
+        let message = format!("{error}");
+        assert!(
+            message.contains("max-iterations") && message.contains("can never end"),
+            "error must name max-iterations and explain why: {error}"
+        );
+    }
+
+    /// (0093) `on-exhausted` without a bound is meaningless — an unbounded
+    /// loop cannot exhaust; refusal must name `on-exhausted`.
+    #[test]
+    fn loop_with_on_exhausted_and_no_bound_is_refused_by_name() {
+        const FIXTURE: &str = r#"
+id = "unbounded-on-exhausted-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Unbounded On Exhausted Fixture"
+summary = "Regression fixture: on-exhausted without a bound is refused."
+
+[[agent]]
+id = "reviewer"
+description = "Produces the typed verdict for the loop."
+summary = "Reviewer role."
+
+[[slot]]
+id = "verdict"
+schema = "schema:verdict"
+description = "Typed verdict carrying a status field."
+
+[[schema]]
+id = "verdict"
+description = "Verdict object with a status enum."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved or revise."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[prompt.review]
+text = "Produce the typed verdict object."
+
+[[sequence.loop-body.sequence]]
+id = "produce-verdict"
+title = "Produce verdict"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+output = ["slot:verdict"]
+
+[procedure]
+description = "One unbounded loop that declares on-exhausted despite having no bound."
+
+[[procedure.sequence]]
+id = "verdict-loop"
+title = "Verdict loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+on-exhausted = "continue"
+
+[procedure.sequence.until]
+slot = "slot:verdict"
+field = "status"
+equals = "approved"
+"#;
+        let trait_ref: crate::r#trait::Trait =
+            toml::from_str(FIXTURE).expect("fixture trait parses");
+        let error = validate(&trait_ref)
+            .expect_err("on-exhausted without a bound must be refused");
+        let message = format!("{error}");
+        assert!(
+            message.contains("on-exhausted") && message.contains("cannot exhaust"),
+            "error must name on-exhausted and explain why: {error}"
+        );
+    }
+
     #[test]
     fn validate_exhaustion_target_accepts_keywords() {
         let signal_ids: BTreeSet<&str> = BTreeSet::new();

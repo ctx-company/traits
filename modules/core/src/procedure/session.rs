@@ -3205,6 +3205,168 @@ mod check_output_tests {
 }
 
 #[cfg(test)]
+mod unbounded_loop_tests {
+    use super::*;
+
+    /// (0093) A loop declaring `until` and no `max-iterations` — runtime
+    /// must advance past a "revise" verdict and stop on the guard once
+    /// "approved" lands, never touching exhaustion at all.
+    const FIXTURE: &str = r#"
+id = "unbounded-loop-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Unbounded Loop Fixture"
+summary = "Regression fixture: a loop with until and no bound stops on its own guard."
+
+[[agent]]
+id = "reviewer"
+description = "Produces the typed verdict for the loop."
+summary = "Reviewer role."
+
+[[slot]]
+id = "verdict"
+schema = "schema:verdict"
+description = "Typed verdict carrying a status field."
+
+[[schema]]
+id = "verdict"
+description = "Verdict object with a status enum."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved or revise."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[prompt.review]
+text = "Produce the typed verdict object."
+
+[[sequence.loop-body.sequence]]
+id = "produce-verdict"
+title = "Produce verdict"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+output = ["slot:verdict"]
+
+[procedure]
+description = "One unbounded loop stopping on its own until guard."
+
+[[procedure.sequence]]
+id = "verdict-loop"
+title = "Verdict loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+
+[procedure.sequence.until]
+slot = "slot:verdict"
+field = "status"
+equals = "approved"
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn submission_from_template(
+        template: &SequenceCallTemplate,
+        verdict: serde_json::Value,
+    ) -> CallSubmission {
+        CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots: [("slot:verdict".to_string(), verdict)]
+                .into_iter()
+                .collect(),
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: Some(CallerProvenance {
+                surface: "test".to_string(),
+                caller: "unbounded-loop-regression".to_string(),
+                agent: Some("reviewer".to_string()),
+                harness: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn until_only_loop_advances_on_revise_and_completes_on_approved() {
+        let trait_ref = fixture_trait();
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-unbounded-loop-test",
+            "run-id": "run-unbounded-loop-test",
+            "provenance": {
+                "started-by": {
+                    "surface": "test",
+                    "caller": "unbounded-loop-regression",
+                },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        let session = start_run_session(
+            &trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts");
+
+        let template = session
+            .next_frame
+            .as_ref()
+            .expect("loop frame is current")
+            .call_template
+            .clone()
+            .expect("call template attached");
+
+        // A "revise" verdict must advance to another iteration, not exhaust
+        // — there is no bound to exhaust against.
+        let revise = submit_run_call(
+            &trait_ref,
+            session,
+            submission_from_template(&template, serde_json::json!({"status": "revise"})),
+        )
+        .expect("revise call lands");
+        assert_eq!(
+            revise.response_kind,
+            CallResponseKind::AcceptedNextFrame,
+            "an unbounded loop must advance to the next iteration on a non-matching guard"
+        );
+
+        let next_template = revise
+            .session
+            .next_frame
+            .as_ref()
+            .expect("loop frame still current after revise")
+            .call_template
+            .clone()
+            .expect("call template attached");
+
+        // An "approved" verdict must stop the loop via the until guard.
+        let approved = submit_run_call(
+            &trait_ref,
+            revise.session,
+            submission_from_template(&next_template, serde_json::json!({"status": "approved"})),
+        )
+        .expect("approved call lands");
+        assert_eq!(
+            approved.response_kind,
+            CallResponseKind::AcceptedCompleted,
+            "the until guard must stop the unbounded loop once satisfied"
+        );
+    }
+}
+
+#[cfg(test)]
 mod correction_retry_tests {
     use super::*;
 

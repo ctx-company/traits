@@ -1,8 +1,9 @@
 schema-version = "0.2"
 key = "0093"
 title = "A loop may declare no iteration bound"
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-09"
 content = """
 
 
