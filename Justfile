@@ -102,6 +102,10 @@ test-full:
 	cargo build --workspace --bins
 	cargo test --workspace
 
+# 0151: these five recipes deliberately dispatch without --merge — the run
+# lands via `ctx traits merge <run-id>` after the report's own NOT-merged
+# line (`landing_state`), not automatically. Add --merge here if that
+# posture should change; the report fix stands either way.
 deep-research topic quality="standard" depth="standard":
 	ctx traits run deep-research --worktree --progress tui -- --topic={{quote(topic)}} --quality={{quote(quality)}} --depth={{quote(depth)}}
 

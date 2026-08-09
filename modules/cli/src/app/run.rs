@@ -509,7 +509,7 @@ pub(crate) fn handle_session_start(
                 &completion.session,
                 outcome.session_path.as_ref().map(|path| path.as_str()),
             );
-            crate::app::drive::print_report(&drive)?;
+            crate::app::drive::print_report(&drive, Some(&completion.session))?;
         }
         print_final_output(
             &completion.session,
@@ -577,6 +577,30 @@ pub(crate) enum CompletionDisposition {
     Merged,
     Parked,
     Failed,
+}
+
+/// The branch and merge command a "committed but not merged" report line
+/// names (0151) — extracted once so story, the run TUI, and the plain drive
+/// report render the same fact instead of drifting apart across three
+/// separate renderers.
+#[derive(Debug, Clone)]
+pub(crate) struct NotMergedFact {
+    pub(crate) branch: String,
+    pub(crate) merge_command: String,
+}
+
+/// `None` only when `session` was never a `--worktree` run, in which case
+/// [`ctx_traits_core::procedure::session::landing_state`] never resolves to
+/// `NotMerged` in the first place — this exists to hand the same two facts
+/// to every caller, not to re-derive whether they apply.
+pub(crate) fn not_merged_fact(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<NotMergedFact> {
+    let worktree = session.provenance.worktree.as_ref()?;
+    Some(NotMergedFact {
+        branch: worktree.branch.clone(),
+        merge_command: format!("ctx traits merge {}", session.run_id.as_str()),
+    })
 }
 
 pub(crate) fn disposition_for_report_status(status: &str) -> CompletionDisposition {

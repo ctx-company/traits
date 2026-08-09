@@ -1194,7 +1194,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 if json {
                     print_json_report(&run_envelope(report, true, true, false), "drive")?;
                 } else {
-                    crate::app::drive::print_report(&report)?;
+                    crate::app::drive::print_report(&report, Some(&completion.session))?;
                 }
                 completion.into_command_output()
             }

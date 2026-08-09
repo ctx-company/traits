@@ -608,6 +608,284 @@ impl MergeStatus {
     }
 }
 
+/// The first (in acceptance order) recorded slot revision whose command
+/// evidence is a successful, non-timed-out `git commit` — the single fact
+/// every landing-honesty surface reuses as "this run committed something",
+/// without a second, independent shell-out to check. Built-in commit tails
+/// are plain `argv: ["git", "commit", ...]` command steps, so this is a
+/// direct argv scan, not a subprocess call: `argv[0] == "git"`, the first
+/// non-flag argument is `"commit"`, `exit_code == Some(0)`, `!timed_out`.
+/// `None` for a clean-tree run (the `maybe-commit` guard records no
+/// revision at all) and for any ledger whose commit tail used a different
+/// shape (e.g. `sh -c "git commit ..."`), which this deliberately does not
+/// recognize — every shipped built-in uses the direct form.
+pub fn commit_receipt(
+    state: &State,
+) -> Option<&crate::procedure::runtime::CommandExecutionEvidence> {
+    state
+        .slot_revisions
+        .iter()
+        .filter_map(|revision| revision.command_execution.as_ref())
+        .find(|evidence| {
+            evidence.exit_code == Some(0)
+                && !evidence.timed_out
+                && evidence.argv.first().map(String::as_str) == Some("git")
+                && evidence
+                    .argv
+                    .iter()
+                    .skip(1)
+                    .find(|argument| !argument.starts_with('-'))
+                    .map(String::as_str)
+                    == Some("commit")
+        })
+}
+
+/// Terminal landing outcome of a completed run, classified once from the
+/// same evidence every reporting surface (story, TUI, plain drive report,
+/// summary JSON, dashboard) reuses — never a second derivation of "did it
+/// land". A merge frame history takes priority (it is the authoritative
+/// record of an actual `ctx traits merge` attempt); absent one, a completed
+/// `--worktree` drive with a [`commit_receipt`] is `NotMerged` — committed
+/// on the run branch, never landed. `None` covers every case that is not
+/// this defect's concern: a non-worktree run, a run still in progress, and
+/// a completed run with nothing committed (the clean-tree skip case).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LandingState {
+    Landed { revision: Option<String> },
+    NotMerged,
+    Parked,
+    MergeFailed,
+}
+
+/// Classify `session`'s landing state from its own persisted evidence. See
+/// [`LandingState`] for the precedence and exclusions.
+pub fn landing_state(session: &Session) -> Option<LandingState> {
+    let last_terminal_frame = session
+        .provenance
+        .merge_frames
+        .iter()
+        .rev()
+        .find(|frame| frame.status.is_terminal());
+    if let Some(frame) = last_terminal_frame {
+        return Some(match frame.status {
+            MergeStatus::Merged => LandingState::Landed {
+                revision: frame
+                    .evidence
+                    .first()
+                    .and_then(|entry| entry.strip_prefix("landed="))
+                    .map(str::to_string),
+            },
+            MergeStatus::Parked => LandingState::Parked,
+            MergeStatus::PostMergeCleanupFailure | MergeStatus::RecoveryFailure => {
+                LandingState::MergeFailed
+            }
+            MergeStatus::LockAcquired | MergeStatus::GatesPassed | MergeStatus::Reconciled => {
+                unreachable!("last_terminal_frame is filtered to is_terminal() frames only")
+            }
+        });
+    }
+    let drive_completed = session
+        .last_drive_outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.outcome.is_completed());
+    if session.status == Status::Completed
+        && drive_completed
+        && session.provenance.worktree.is_some()
+        && commit_receipt(&session.ledger).is_some()
+    {
+        return Some(LandingState::NotMerged);
+    }
+    None
+}
+
+#[cfg(test)]
+mod landing_honesty_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"
+id = "landing-honesty-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Landing Honesty Fixture"
+summary = "0151 unit-test fixture: one command step, so a Session is cheap to build."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+
+[procedure]
+description = "One command step, standing in for a commit tail."
+
+[[procedure.sequence]]
+id = "commit"
+title = "Commit"
+kind = "command"
+output = ["slot:commit-output"]
+
+[procedure.sequence.command]
+argv = ["git", "commit", "-m", "fixture"]
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn start_session() -> Session {
+        let trait_ref = fixture_trait();
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-landing-honesty",
+            "run-id": "run-landing-honesty",
+            "provenance": {
+                "started-by": { "surface": "test", "caller": "landing-honesty" },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        start_run_session(
+            &trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    fn commit_revision(argv: &[&str], exit_code: Option<i32>, timed_out: bool) -> SlotRevision {
+        SlotRevision {
+            slot_ref: Reference::parse("slot:commit-output").expect("slot ref parses"),
+            value_digest: Digest::source("commit"),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: Some(crate::procedure::runtime::CommandExecutionEvidence {
+                argv: argv.iter().map(|part| (*part).to_string()).collect(),
+                output_slot: "slot:commit-output".to_string(),
+                executable_digest: None,
+                exit_code,
+                timed_out,
+                output_tail: None,
+            }),
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    #[test]
+    fn commit_receipt_finds_a_successful_git_commit_revision() {
+        let mut session = start_session();
+        session.ledger.slot_revisions.push(commit_revision(
+            &["git", "commit", "-m", "msg"],
+            Some(0),
+            false,
+        ));
+        assert!(commit_receipt(&session.ledger).is_some());
+    }
+
+    #[test]
+    fn commit_receipt_ignores_a_failed_or_timed_out_or_non_git_commit_revision() {
+        let mut state = start_session().ledger;
+        state.slot_revisions.push(commit_revision(
+            &["git", "commit", "-m", "msg"],
+            Some(1),
+            false,
+        ));
+        assert!(commit_receipt(&state).is_none());
+
+        let mut state = start_session().ledger;
+        state.slot_revisions.push(commit_revision(
+            &["git", "commit", "-m", "msg"],
+            Some(0),
+            true,
+        ));
+        assert!(commit_receipt(&state).is_none());
+
+        let mut state = start_session().ledger;
+        state
+            .slot_revisions
+            .push(commit_revision(&["git", "status"], Some(0), false));
+        assert!(commit_receipt(&state).is_none());
+
+        let mut state = start_session().ledger;
+        state
+            .slot_revisions
+            .push(commit_revision(&["touch", "note.txt"], Some(0), false));
+        assert!(commit_receipt(&state).is_none());
+    }
+
+    fn completed_worktree_session() -> Session {
+        let mut session = start_session();
+        session.status = Status::Completed;
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::Completed,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+        });
+        session.provenance.worktree = Some(WorktreeProvenance {
+            id: "wt-fixture".to_string(),
+            branch: "ctx/run/wt-fixture".to_string(),
+            seed_snapshots: Vec::new(),
+            path: None,
+        });
+        session.ledger.slot_revisions.push(commit_revision(
+            &["git", "commit", "-m", "msg"],
+            Some(0),
+            false,
+        ));
+        session
+    }
+
+    #[test]
+    fn landing_state_is_not_merged_for_a_completed_worktree_run_with_a_commit_receipt() {
+        let session = completed_worktree_session();
+        assert_eq!(landing_state(&session), Some(LandingState::NotMerged));
+    }
+
+    #[test]
+    fn landing_state_is_none_for_a_clean_tree_completed_run() {
+        let mut session = completed_worktree_session();
+        session.ledger.slot_revisions.clear();
+        assert_eq!(landing_state(&session), None);
+    }
+
+    #[test]
+    fn landing_state_is_none_for_a_non_worktree_run() {
+        let mut session = completed_worktree_session();
+        session.provenance.worktree = None;
+        assert_eq!(landing_state(&session), None);
+    }
+
+    #[test]
+    fn landing_state_prefers_a_terminal_merge_frame_over_the_commit_receipt() {
+        let mut session = completed_worktree_session();
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: vec!["landed=abc123".to_string()],
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        assert_eq!(
+            landing_state(&session),
+            Some(LandingState::Landed {
+                revision: Some("abc123".to_string())
+            })
+        );
+    }
+}
+
 /// Typed detail for a [`MergeFrame`] whose `status` is [`MergeStatus::Parked`]
 /// for a reason that itself carries structured evidence, beyond the free-text
 /// `reason`/`evidence` every frame already has. `None` for every other park

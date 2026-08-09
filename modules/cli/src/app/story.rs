@@ -13,12 +13,15 @@ use std::collections::BTreeMap;
 use ctx_traits_core::procedure::activity::ActivityKind;
 use ctx_traits_core::procedure::runtime::FinalState;
 use ctx_traits_core::procedure::runtime::PathSegment;
-use ctx_traits_core::procedure::session::{MergeFrame, MergeStatus, Session};
+use ctx_traits_core::procedure::session::{
+    LandingState, MergeFrame, MergeStatus, Session, landing_state,
+};
 use ctx_traits_core::procedure::story::{self, StoryBeat, StoryLevel, StoryReport};
 use ctx_traits_core::response::CommandOutput;
 
 use crate::app::command_handlers::print_json_report;
 use crate::app::merge_story::{Explanation, GateRow, explain_frame, gate_rows, stage_sentence};
+use crate::app::run::not_merged_fact;
 use crate::app::run_format::render_runtime_path;
 use crate::app::run_view::{session_status, stop_reason_summary};
 use crate::app::tui::{self, Line, Tone, write_plain_line as w};
@@ -101,7 +104,12 @@ pub(crate) fn disposition_sentence(session: &Session, report: &StoryReport) -> S
             .as_ref()
             .expect("filtered to Some outcome above");
         return match landing.frame.status {
-            MergeStatus::Merged => "This run completed and merged to main.".to_string(),
+            MergeStatus::Merged => match landing_state(session) {
+                Some(LandingState::Landed {
+                    revision: Some(revision),
+                }) => format!("This run completed and merged to main (landed {revision})."),
+                _ => "This run completed and merged to main.".to_string(),
+            },
             MergeStatus::Parked => {
                 format!("This run parked during post-run: {}", explanation.sentence)
             }
@@ -124,7 +132,16 @@ pub(crate) fn disposition_sentence(session: &Session, report: &StoryReport) -> S
 
     let stop = stop_reason_summary(session);
     match (&report.final_state, stop) {
-        (FinalState::Completed, _) => "This run completed.".to_string(),
+        (FinalState::Completed, _) => match landing_state(session) {
+            Some(LandingState::NotMerged) => match not_merged_fact(session) {
+                Some(fact) => format!(
+                    "This run completed and committed on `{}` — NOT merged into main; next: `{}`.",
+                    fact.branch, fact.merge_command
+                ),
+                None => "This run completed.".to_string(),
+            },
+            _ => "This run completed.".to_string(),
+        },
         (FinalState::Blocked, Some(summary)) => format!("This run is blocked: {summary}."),
         (FinalState::Blocked, None) => "This run is blocked.".to_string(),
         (FinalState::Failed, Some(summary)) => format!("This run failed: {summary}."),
@@ -288,10 +305,35 @@ struct HumanStory {
 }
 
 fn human_story(session: &Session, report: &StoryReport, level: StoryLevel) -> HumanStory {
-    project_human_story(report, level, disposition_sentence(session, report))
+    project_human_story(
+        report,
+        level,
+        disposition_sentence(session, report),
+        landing_outcome_row(session),
+    )
 }
 
-fn project_human_story(report: &StoryReport, level: StoryLevel, disposition: String) -> HumanStory {
+/// The same "committed but not merged" fact [`disposition_sentence`] states
+/// up front, restated as one OUTCOME row so a reader who jumps straight to
+/// that section still sees it — never a second derivation of landing state.
+fn landing_outcome_row(session: &Session) -> Option<String> {
+    match landing_state(session) {
+        Some(LandingState::NotMerged) => not_merged_fact(session).map(|fact| {
+            format!(
+                "Committed on `{}` — NOT merged into main; next: `{}`.",
+                fact.branch, fact.merge_command
+            )
+        }),
+        _ => None,
+    }
+}
+
+fn project_human_story(
+    report: &StoryReport,
+    level: StoryLevel,
+    disposition: String,
+    landing_row: Option<String>,
+) -> HumanStory {
     let mut header = vec![
         disposition.clone(),
         format!(
@@ -318,7 +360,7 @@ fn project_human_story(report: &StoryReport, level: StoryLevel, disposition: Str
         },
         HumanSection {
             heading: "OUTCOME",
-            rows: outcome_rows(report, &disposition),
+            rows: outcome_rows(report, &disposition, landing_row.as_deref()),
         },
     ];
     HumanStory {
@@ -677,8 +719,11 @@ fn shell_command(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn outcome_rows(report: &StoryReport, disposition: &str) -> Vec<String> {
+fn outcome_rows(report: &StoryReport, disposition: &str, landing_row: Option<&str>) -> Vec<String> {
     let mut rows = Vec::new();
+    if let Some(landing_row) = landing_row {
+        rows.push(landing_row.to_string());
+    }
     for landing in landing_frames(&report.merge_frames) {
         rows.push(match landing.outcome {
             Some(explanation) => explanation.sentence,
@@ -1195,18 +1240,21 @@ mod tests {
             &story,
             StoryLevel::Detailed,
             "disposition".to_string(),
+            None,
         ))
         .join("\n");
         let default = human_lines(&project_human_story(
             &story,
             StoryLevel::Default,
             "disposition".to_string(),
+            None,
         ))
         .join("\n");
         let assisted = human_lines(&project_human_story(
             &story,
             StoryLevel::Assisted,
             "disposition".to_string(),
+            None,
         ))
         .join("\n");
         assert!(detailed.contains("branch choose-path matched=true arm=then"));
@@ -1220,7 +1268,7 @@ mod tests {
     fn outcome_prefers_specific_evidence_and_falls_back_to_disposition() {
         let mut story = report(Vec::new());
         assert_eq!(
-            outcome_rows(&story, "This run is blocked."),
+            outcome_rows(&story, "This run is blocked.", None),
             vec!["This run is blocked."]
         );
         story.completion = Some(CompletionNotification {
@@ -1230,7 +1278,7 @@ mod tests {
             final_session_digest: ctx_traits_core::digest::Digest::from_bytes(b"session"),
         });
         assert_eq!(
-            outcome_rows(&story, "unused"),
+            outcome_rows(&story, "unused", None),
             vec!["Completion: completed (completed, 0 final output(s))"]
         );
         story.completion = None;
@@ -1243,12 +1291,12 @@ mod tests {
             deep_decisions: Vec::new(),
         }];
         assert_ne!(
-            outcome_rows(&story, "This run is blocked."),
+            outcome_rows(&story, "This run is blocked.", None),
             vec!["This run is blocked."]
         );
         story.merge_frames[0].status = MergeStatus::Merged;
         assert!(
-            outcome_rows(&story, "This run is blocked.")
+            outcome_rows(&story, "This run is blocked.", None)
                 .iter()
                 .any(|row| row.contains("landed"))
         );
@@ -1260,9 +1308,18 @@ mod tests {
         beat.summary_line = Some("default\rsummary | value".to_string());
         beat.assisted_prose = Some("assisted\nsummary | value".to_string());
         let report = report(vec![beat]);
-        let default = project_human_story(&report, StoryLevel::Default, "disposition".to_string());
-        let assisted =
-            project_human_story(&report, StoryLevel::Assisted, "disposition".to_string());
+        let default = project_human_story(
+            &report,
+            StoryLevel::Default,
+            "disposition".to_string(),
+            None,
+        );
+        let assisted = project_human_story(
+            &report,
+            StoryLevel::Assisted,
+            "disposition".to_string(),
+            None,
+        );
         let default_markdown = markdown_lines(&default);
         let assisted_markdown = markdown_lines(&assisted);
         let headings = |lines: &[String]| {

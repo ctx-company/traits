@@ -2330,17 +2330,21 @@ fn classify_merge(
 }
 
 /// The list row's translated one-line headline (`MergeRow::headline`'s own
-/// doc contract: empty for `Mergeable`/`Landed`). A landed run has nothing
-/// to explain, so showing `merge_story`'s "landed cleanly" headline next to
-/// the `landed` class column would be redundant, not
-/// translated-vs-untranslated; a row with no terminal frame yet
-/// (`Mergeable`) has nothing to translate at all.
+/// doc contract: empty for `Mergeable`/`Landed`, except a `Mergeable` row
+/// with a commit receipt (0151), which reads "committed" so it is
+/// distinguishable in the list from a clean-tree completed run with nothing
+/// to land). A landed run has nothing to explain, so showing `merge_story`'s
+/// "landed cleanly" headline next to the `landed` class column would be
+/// redundant, not translated-vs-untranslated.
 fn merge_row_headline(
     class: MergeClass,
     last_terminal_frame: Option<&ctx_traits_core::procedure::session::MergeFrame>,
+    committed: bool,
 ) -> String {
     match (class, last_terminal_frame) {
-        (MergeClass::Landed, _) | (_, None) => String::new(),
+        (MergeClass::Landed, _) => String::new(),
+        (MergeClass::Mergeable, None) if committed => "committed".to_string(),
+        (_, None) => String::new(),
         (_, Some(frame)) => merge_story::explain_frame(frame).headline,
     }
 }
@@ -2380,7 +2384,9 @@ fn merges_from_inventory(
             continue;
         };
         let stage = last_terminal_frame.map(|frame| frame.stage);
-        let headline = merge_row_headline(class, last_terminal_frame);
+        let committed =
+            ctx_traits_core::procedure::session::commit_receipt(&session.ledger).is_some();
+        let headline = merge_row_headline(class, last_terminal_frame, committed);
         rows.push(MergeRow {
             session_id: row.session_id,
             run_id: session.run_id.as_str().to_string(),
@@ -9463,10 +9469,14 @@ mod tests {
             deep_decisions: Vec::new(),
         };
         assert_eq!(
-            merge_row_headline(MergeClass::Landed, Some(&merged_frame)),
+            merge_row_headline(MergeClass::Landed, Some(&merged_frame), false),
             ""
         );
-        assert_eq!(merge_row_headline(MergeClass::Mergeable, None), "");
+        assert_eq!(merge_row_headline(MergeClass::Mergeable, None, false), "");
+        assert_eq!(
+            merge_row_headline(MergeClass::Mergeable, None, true),
+            "committed"
+        );
 
         let parked_frame = MergeFrame {
             stage: MergeStage::Gates,
@@ -9476,7 +9486,7 @@ mod tests {
             park_reason: None,
             deep_decisions: Vec::new(),
         };
-        let headline = merge_row_headline(MergeClass::Parked, Some(&parked_frame));
+        let headline = merge_row_headline(MergeClass::Parked, Some(&parked_frame), false);
         assert!(!headline.is_empty());
         assert!(!headline.contains("unrecognized"));
     }

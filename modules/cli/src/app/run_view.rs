@@ -1688,6 +1688,7 @@ mod tests {
                 total: 0,
                 phase: "in-progress".to_string(),
                 completed: false,
+                landing_not_merged: None,
                 stopped: None,
                 stop_detail: None,
                 state_digest: String::new(),

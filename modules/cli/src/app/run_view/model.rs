@@ -162,6 +162,13 @@ pub(super) struct RunHeader {
     pub(super) total: usize,
     pub(super) phase: String,
     pub(super) completed: bool,
+    /// 0151: set only for a completed `--worktree` run that committed and
+    /// never merged (`LandingState::NotMerged`) — the branch and the exact
+    /// `ctx traits merge <run-id>` command to land it. `None` for every
+    /// other completed run (merged, parked, non-worktree, or nothing
+    /// committed), so the "digest-stamped" completion box never grows this
+    /// line unless a completed run's owner would otherwise be told nothing.
+    pub(super) landing_not_merged: Option<super::super::run::NotMergedFact>,
     pub(super) stopped: Option<String>,
     pub(super) stop_detail: Option<String>,
     pub(super) state_digest: String,

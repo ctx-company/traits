@@ -59,6 +59,13 @@ pub struct RunSummary {
     pub has_merge_frames: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_merge_status: Option<String>,
+    /// 0151: `session::landing_state`'s projection, as a stable wire word —
+    /// `"landed"`, `"not-merged"`, `"parked"`, or `"merge-failed"`. `None`
+    /// mid-run, for a non-worktree run, and for a completed clean-tree run
+    /// (nothing committed) — the sidecar stays honest on every intermediate
+    /// write, never guessing ahead of the ledger's own evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing: Option<String>,
 }
 
 impl RunSummary {
@@ -116,6 +123,22 @@ impl RunSummary {
                 .and_then(|usage| usage.guide_tokens),
             has_merge_frames: last_merge.is_some(),
             last_merge_status: last_merge.map(|frame| merge_status_str(frame.status)),
+            landing: ctx_traits_core::procedure::session::landing_state(session).map(|landing| {
+                match landing {
+                    ctx_traits_core::procedure::session::LandingState::Landed { .. } => {
+                        "landed".to_string()
+                    }
+                    ctx_traits_core::procedure::session::LandingState::NotMerged => {
+                        "not-merged".to_string()
+                    }
+                    ctx_traits_core::procedure::session::LandingState::Parked => {
+                        "parked".to_string()
+                    }
+                    ctx_traits_core::procedure::session::LandingState::MergeFailed => {
+                        "merge-failed".to_string()
+                    }
+                }
+            }),
         }
     }
 }

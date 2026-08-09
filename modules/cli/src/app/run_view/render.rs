@@ -1127,6 +1127,16 @@ pub(super) fn journey_lines_with_active_row(
         line.push("digest-stamped ", tui::Tone::Muted);
         line.push(view.header.state_digest.clone(), tui::Tone::Default);
         lines.push(JourneyRow(JourneyRowKind::Line(line)));
+        if let Some(fact) = &view.header.landing_not_merged {
+            let mut line = tui::Line::blank();
+            line.push(
+                format!("committed on `{}` — NOT merged into main", fact.branch),
+                tui::Tone::Warn,
+            );
+            line.push("; next: ", tui::Tone::Muted);
+            line.push(format!("`{}`", fact.merge_command), tui::Tone::Default);
+            lines.push(JourneyRow(JourneyRowKind::Line(line)));
+        }
         lines.push(JourneyRow(JourneyRowKind::Line(tui::Line::blank())));
         let mut outputs = Vec::new();
         render_outputs_box(&mut outputs, &view.outputs);
@@ -1638,6 +1648,7 @@ mod tests {
                 total: 0,
                 phase: "in-progress".to_string(),
                 completed: false,
+                landing_not_merged: None,
                 stopped: None,
                 stop_detail: None,
                 state_digest: String::new(),

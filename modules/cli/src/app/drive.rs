@@ -3699,7 +3699,17 @@ impl DriveReport {
     }
 }
 
-pub fn print_report(report: &DriveReport) -> crate::Result<()> {
+/// `session` is the final, rebuilt ledger this drive completed against —
+/// distinct from `report.session`, which is only the id string. `None` for
+/// the ephemeral no-session-persisted path, which never lands anywhere.
+/// Passed separately rather than folded into `DriveReport` because a
+/// `DriveReport` is JSON-serialized wire output (`ctx-summary.json`-adjacent
+/// automation reads it) and gaining a full `Session` field would be a
+/// visible, unrequested wire-format change (0151 leanness).
+pub fn print_report(
+    report: &DriveReport,
+    session: Option<&ctx_traits_core::procedure::session::Session>,
+) -> crate::Result<()> {
     let status = report.panel_status();
     let mut panel = Panel::new("ctx", "drive", status)
         .row(PanelRow::toned(
@@ -3750,6 +3760,24 @@ pub fn print_report(report: &DriveReport) -> crate::Result<()> {
                 capability.reason.as_deref().unwrap_or("")
             ),
             RowTone::Default,
+        ));
+    }
+    if let Some(fact) = session
+        .filter(|session| {
+            matches!(
+                ctx_traits_core::procedure::session::landing_state(session),
+                Some(ctx_traits_core::procedure::session::LandingState::NotMerged)
+            )
+        })
+        .and_then(crate::app::run::not_merged_fact)
+    {
+        panel = panel.row(PanelRow::toned(
+            "landing",
+            format!(
+                "committed on `{}` — not merged; next: `{}`",
+                fact.branch, fact.merge_command
+            ),
+            RowTone::Warn,
         ));
     }
     emit_human(

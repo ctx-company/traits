@@ -167,6 +167,12 @@ pub(super) fn run_view(
         total,
         phase: phase_text(session),
         completed: session.completion.is_some(),
+        landing_not_merged: matches!(
+            ctx_traits_core::procedure::session::landing_state(session),
+            Some(ctx_traits_core::procedure::session::LandingState::NotMerged)
+        )
+        .then(|| crate::app::run::not_merged_fact(session))
+        .flatten(),
         stopped: session
             .stop_reason
             .as_ref()
