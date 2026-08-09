@@ -5797,6 +5797,27 @@ fn sync_tasks_board(state: &mut State) {
 }
 
 fn sync_tasks_board_in(state: &mut State, dir: &camino::Utf8Path) {
+    match apply_board_snapshot(state, dir) {
+        Ok(clean) => {
+            state.message = Some(if clean {
+                "synced".to_string()
+            } else {
+                "synced — sync issues found, see task detail".to_string()
+            });
+        }
+        Err(error) => {
+            state.message = Some(format!("sync failed: {error}"));
+        }
+    }
+}
+
+/// Re-reads `dir` into `state.tasks_board` and its dependents, returning
+/// whether the sync report was clean. Shared by `sync_tasks_board_in` (the
+/// `s`-keypress path, which reports "synced" on top) and
+/// `resync_tasks_board_after_write_in` (which must not touch
+/// `state.message`, since the write that triggered it already set the
+/// confirmation the owner needs to see).
+fn apply_board_snapshot(state: &mut State, dir: &camino::Utf8Path) -> Result<bool, String> {
     match read_board_snapshot(dir) {
         Ok(board) => {
             let clean = board.sync_report.dangling_edges.is_empty()
@@ -5809,16 +5830,35 @@ fn sync_tasks_board_in(state: &mut State, dir: &camino::Utf8Path) {
             state.tasks_refresh_error = None;
             rebuild_visible_tasks(state);
             refresh_task_preview_for_selection(state);
-            state.message = Some(if clean {
-                "synced".to_string()
-            } else {
-                "synced — sync issues found, see task detail".to_string()
-            });
+            Ok(clean)
         }
         Err(error) => {
             state.tasks_refresh_error = Some(error.clone());
-            state.message = Some(format!("sync failed: {error}"));
+            Err(error)
         }
+    }
+}
+
+/// Resyncs the board after a write whose own success/refusal message is
+/// already in `state.message` (e.g. "0146 marked done — …") — unlike
+/// `sync_tasks_board`, this never overwrites that message with "synced".
+/// Previously every write handler called `sync_tasks_board` right after
+/// setting its confirmation, which `sync_tasks_board_in` immediately
+/// clobbered with "synced" (or, worse, "sync failed: …" on a transient
+/// re-read race), making a write that had just succeeded look like a
+/// silent no-op or an outright failure on the dashboard footer. A resync
+/// failure here is appended to the existing message instead of replacing
+/// it, so the write confirmation always survives.
+fn resync_tasks_board_after_write(state: &mut State) -> crate::Result<()> {
+    let dir = super::tasks::board_dir(None)?;
+    resync_tasks_board_after_write_in(state, &dir);
+    Ok(())
+}
+
+fn resync_tasks_board_after_write_in(state: &mut State, dir: &camino::Utf8Path) {
+    if let Err(error) = apply_board_snapshot(state, dir) {
+        let prefix = state.message.take().unwrap_or_default();
+        state.message = Some(format!("{prefix} (resync failed: {error})"));
     }
 }
 
@@ -6462,7 +6502,7 @@ fn apply_reconcile_step(
                             remove.from,
                             effects_summary(&outcome.effects)
                         ));
-                        sync_tasks_board(state);
+                        resync_tasks_board_after_write(state)?;
                     }
                     Err(error) => {
                         state.message = Some(format!("reconcile step refused: {error}"));
@@ -6643,7 +6683,7 @@ fn apply_split_step(
         }) {
             Ok(created) => {
                 state.message = Some(format!("created {} under {parent}", created.key));
-                sync_tasks_board(state);
+                resync_tasks_board_after_write(state)?;
             }
             Err(error) => {
                 state.message = Some(format!("split refused: {error}"));
@@ -6699,7 +6739,7 @@ fn apply_task_action(
             }) {
                 Ok(created) => {
                     state.message = Some(format!("created {} under {parent}", created.key));
-                    sync_tasks_board(state);
+                    resync_tasks_board_after_write(state)?;
                 }
                 Err(error) => {
                     state.message = Some(format!("split refused: {error}"));
@@ -6731,7 +6771,7 @@ fn apply_task_action(
                         "archived {key}{}",
                         effects_summary(&outcome.effects)
                     ));
-                    sync_tasks_board(state);
+                    resync_tasks_board_after_write(state)?;
                 }
                 Err(error) => {
                     state.message = Some(format!("archive refused: {error}"));
@@ -6754,7 +6794,7 @@ fn apply_task_action(
                 Ok(outcome) => {
                     state.message =
                         Some(format!("edited {key}{}", effects_summary(&outcome.effects)));
-                    sync_tasks_board(state);
+                    resync_tasks_board_after_write(state)?;
                 }
                 Err(error) => {
                     state.message = Some(format!("edit refused: {error}"));
@@ -6831,12 +6871,22 @@ fn apply_task_mark_done(
     digest: String,
     evidence: Vec<super::task_proposals::MergedRunEvidence>,
 ) -> crate::Result<()> {
+    let dir = super::tasks::board_dir(None)?;
+    apply_task_mark_done_in(state, &dir, key, digest, evidence)
+}
+
+fn apply_task_mark_done_in(
+    state: &mut State,
+    dir: &camino::Utf8Path,
+    key: String,
+    digest: String,
+    evidence: Vec<super::task_proposals::MergedRunEvidence>,
+) -> crate::Result<()> {
     let Some(latest) = evidence.last() else {
         state.message = Some(format!("mark done refused: {key} has no evidence"));
         return Ok(());
     };
-    let dir = super::tasks::board_dir(None)?;
-    let provider = FilesTaskBoard::open_read_write(dir);
+    let provider = FilesTaskBoard::open_read_write(dir.to_owned());
     let current = provider.get(&key).ok().flatten();
     let has_origin = current
         .as_ref()
@@ -6895,7 +6945,7 @@ fn apply_task_mark_done(
                 latest.sha,
                 effects_summary(&outcome.effects)
             ));
-            sync_tasks_board(state);
+            resync_tasks_board_after_write_in(state, dir);
         }
         Err(error) => {
             state.message = Some(format!("mark done refused: {error}"));
@@ -11332,6 +11382,78 @@ mod tests {
 
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
         assert!(state.tasks_refresh_error.is_some());
+    }
+
+    // -----------------------------------------------------------------
+    // 0149: `y`'s mark-done write must not have its own confirmation
+    // clobbered by the resync that follows it.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn mark_done_reports_the_confirmation_and_applies_status_and_archive() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+
+        let provider = FilesTaskBoard::open_read_write(dir.clone());
+        let digest = provider.get("0001").unwrap().expect("task resolves").digest;
+
+        apply_task_mark_done_in(
+            &mut state,
+            &dir,
+            "0001".to_string(),
+            digest,
+            vec![super::super::task_proposals::MergedRunEvidence {
+                run_id: "run-1".to_string(),
+                sha: "deadbeef".to_string(),
+            }],
+        )
+        .unwrap();
+
+        // The write's own confirmation must survive the resync that follows
+        // it — not be overwritten with "synced" (the bug this test guards).
+        let message = state.message.as_deref().unwrap_or("");
+        assert!(
+            message.contains("0001 marked done"),
+            "expected a mark-done confirmation, got {message:?}"
+        );
+
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(resolved.document.status, Some(TaskDocStatus::Done));
+        assert!(
+            dir.join("archived").join("0001-first.toml").exists(),
+            "archive placement must move the file under archived/"
+        );
+        assert!(!dir.join("0001-first.toml").exists());
+    }
+
+    #[test]
+    fn mark_done_refuses_and_reports_a_stale_digest_without_moving_the_file() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+
+        apply_task_mark_done_in(
+            &mut state,
+            &dir,
+            "0001".to_string(),
+            "sha256:stale-digest-that-never-matches".to_string(),
+            vec![super::super::task_proposals::MergedRunEvidence {
+                run_id: "run-1".to_string(),
+                sha: "deadbeef".to_string(),
+            }],
+        )
+        .unwrap();
+
+        let message = state.message.as_deref().unwrap_or("");
+        assert!(
+            message.contains("mark done refused"),
+            "expected a visible refusal, got {message:?}"
+        );
+        assert!(dir.join("0001-first.toml").exists());
+        assert!(!dir.join("archived").join("0001-first.toml").exists());
     }
 
     #[test]
