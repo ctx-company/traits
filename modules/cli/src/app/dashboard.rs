@@ -2667,7 +2667,7 @@ fn run_attached_observer(
     // P081 "ask: one deliberate rule" — the observer never dispatches a
     // fresh guide seat; the ONLY permitted handle is the one this dashboard
     // process already holds in-process from a `d`-handoff for this exact
-    // session. Every other session's attach leaves `state.ask` `None`,
+    // session. Every other session's attach leaves `state.guide` `None`,
     // which `poll_and_apply_keys` answers with a visible refusal.
     if guide_chat_session_id == Some(request.session_id.as_str())
         && let Some(chat) = guide_chat

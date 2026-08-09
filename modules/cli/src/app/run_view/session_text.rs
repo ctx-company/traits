@@ -21,7 +21,7 @@ pub(crate) fn title_prompt_context_for(
     (trait_name.to_string(), input_text(session))
 }
 
-pub(super) fn input_text(session: &ctx_traits_core::procedure::session::Session) -> String {
+pub(crate) fn input_text(session: &ctx_traits_core::procedure::session::Session) -> String {
     let inputs: Vec<String> = session
         .accepted_port_values
         .iter()

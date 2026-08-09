@@ -4892,8 +4892,8 @@ fn install_live_guide(
         tokens: tokens.clone(),
     };
     panel.set_guide(
-        Arc::new(move |question, context| {
-            crate::app::guide::dispatch(config.clone(), question, context).map(|reply| reply.text)
+        Arc::new(move |turn| {
+            crate::app::guide::dispatch(config.clone(), turn).map(|reply| reply.text)
         }),
         tokens,
         ledger_path,

@@ -11,9 +11,10 @@ use ctx_traits_io::harness_config::{HarnessCliConvention, HarnessDefinition, Pro
 use super::{agent_dispatch, harness_stream};
 
 pub(crate) const SYSTEM_PROMPT: &str = "You are a read-only run guide. Answer only from the handed evidence. If evidence is absent or truncated, say unknown. Do not run tools, propose mutations, or claim hidden state.";
-const MAX_EVIDENCE_CHARS: usize = 2_000;
+const MAX_EVIDENCE_CHARS: usize = 5_000;
+const MAX_ASSIGNMENT_FIELD_CHARS: usize = 1_200;
 const MAX_QUESTION_CHARS: usize = 1_000;
-const MAX_PROMPT_CHARS: usize = 3_200;
+const MAX_PROMPT_CHARS: usize = 8_000;
 
 #[derive(Clone)]
 pub(crate) struct GuideConfig {
@@ -28,6 +29,18 @@ pub(crate) struct GuideConfig {
 #[derive(Clone)]
 pub(crate) struct GuideReply {
     pub(crate) text: String,
+}
+
+/// One dispatched question: the fresh evidence composed at send, the prior
+/// answered exchanges (rendered as a transcript), and the question itself.
+#[derive(Clone, Default)]
+pub(crate) struct GuideTurn {
+    pub(crate) question: String,
+    /// Prior answered exchanges, oldest first, one rendered "You: …\nGuide:
+    /// …" block per turn — kept as whole turns so the prompt budget can trim
+    /// from the front without splitting a turn's question from its answer.
+    pub(crate) transcript: Vec<String>,
+    pub(crate) evidence: String,
 }
 
 /// Build a bounded, read-only story projection. It intentionally reads only
@@ -45,9 +58,18 @@ pub(crate) fn evidence(
     }
     let activity = ledger_path.and_then(crate::app::story::load_activity);
     let story = ctx_traits_core::procedure::story::build(session, Some(plan), activity.as_ref());
+    let assignment_value = bound_text(
+        &crate::app::run_view::session_text::input_text(session),
+        MAX_ASSIGNMENT_FIELD_CHARS,
+    );
     let mut fields = vec![
         field("Current step", current_step),
         field("Sequence statuses", statuses),
+        format!(
+            "Trait: {}",
+            bound_text(&plan.trait_id, MAX_ASSIGNMENT_FIELD_CHARS)
+        ),
+        format!("Run inputs: {assignment_value}"),
     ];
     if story.beats.is_empty() {
         fields.push("Accepted evidence: absent".to_string());
@@ -92,11 +114,7 @@ pub(crate) fn evidence(
     }
 }
 
-pub(crate) fn dispatch(
-    config: GuideConfig,
-    question: String,
-    context: String,
-) -> crate::Result<GuideReply> {
+pub(crate) fn dispatch(config: GuideConfig, turn: GuideTurn) -> crate::Result<GuideReply> {
     let call_total = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let counter = ctx_traits_io::harness::AttemptTokenAccumulator::new({
         let call_total = Arc::clone(&call_total);
@@ -117,7 +135,12 @@ pub(crate) fn dispatch(
         } else {
             format!("{SYSTEM_PROMPT}\n\n")
         };
-        let prompt = guide_prompt(&instructions, &context, &question);
+        let prompt = guide_prompt(
+            &instructions,
+            &turn.evidence,
+            &turn.transcript,
+            &turn.question,
+        );
         let outcome = agent_dispatch::run_one_shot(agent_dispatch::RunOneShotRequest {
             harness: &config.harness,
             argv,
@@ -155,14 +178,53 @@ fn bound_text(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
 }
 
-fn guide_prompt(instructions: &str, context: &str, question: &str) -> String {
+/// Assembles the guide prompt from instructions, evidence, prior transcript
+/// turns and the question. Question and evidence are reserved first; the
+/// transcript takes whatever room remains, trimmed oldest-turn-first (whole
+/// turns, never mid-turn) so a long conversation cannot starve the evidence
+/// that makes an answer correct.
+fn guide_prompt(
+    instructions: &str,
+    evidence: &str,
+    transcript: &[String],
+    question: &str,
+) -> String {
     let question = bound_text(question, MAX_QUESTION_CHARS);
     // Reserve this safety disclosure before bounding evidence.
     let notice =
         "\nEvidence may be partial or truncated; say unknown when omitted evidence is needed.";
     let prefix = format!("{instructions}Question: {question}\n\nEvidence:\n");
-    let room = MAX_PROMPT_CHARS.saturating_sub(prefix.chars().count() + notice.chars().count());
-    format!("{prefix}{}{}", bound_text(context, room), notice)
+    let evidence_room =
+        MAX_PROMPT_CHARS.saturating_sub(prefix.chars().count() + notice.chars().count());
+    let bounded_evidence = bound_text(evidence, evidence_room);
+    let used = prefix.chars().count() + bounded_evidence.chars().count() + notice.chars().count();
+    let transcript_room = MAX_PROMPT_CHARS.saturating_sub(used);
+    let transcript_section = fit_transcript(transcript, transcript_room);
+    format!("{prefix}{bounded_evidence}{transcript_section}{notice}")
+}
+
+/// Keeps as many of the most recent whole turns as fit in `room` chars,
+/// dropping older turns first. Returns an empty string when nothing fits.
+fn fit_transcript(transcript: &[String], room: usize) -> String {
+    if transcript.is_empty() || room == 0 {
+        return String::new();
+    }
+    let header = "\n\nPrior conversation:\n";
+    let mut kept: Vec<&str> = Vec::new();
+    let mut used = header.chars().count();
+    for turn in transcript.iter().rev() {
+        let addition = turn.chars().count() + 1;
+        if used + addition > room {
+            break;
+        }
+        used += addition;
+        kept.push(turn.as_str());
+    }
+    if kept.is_empty() {
+        return String::new();
+    }
+    kept.reverse();
+    format!("{header}{}", kept.join("\n"))
 }
 
 fn response_text(output: Option<&str>, stdout: &str) -> crate::Result<String> {
@@ -296,7 +358,7 @@ mod tests {
 
     #[test]
     fn guide_dispatch_prompt_fallback_includes_fixed_instructions() {
-        let prompt = guide_prompt(&format!("{SYSTEM_PROMPT}\n\n"), "facts", "question");
+        let prompt = guide_prompt(&format!("{SYSTEM_PROMPT}\n\n"), "facts", &[], "question");
         assert!(prompt.starts_with(SYSTEM_PROMPT));
         assert!(prompt.contains("Question: question"));
     }
@@ -306,7 +368,7 @@ mod tests {
         assert!(response_text(None, "   ").is_err());
         assert!(response_text(Some("claude-json"), "[]").is_err());
         assert_eq!(response_text(None, "plain answer").unwrap(), "plain answer");
-        let fallback = guide_prompt(&format!("{SYSTEM_PROMPT}\n\n"), "facts", "why?");
+        let fallback = guide_prompt(&format!("{SYSTEM_PROMPT}\n\n"), "facts", &[], "why?");
         assert!(fallback.contains(SYSTEM_PROMPT));
         assert!(fallback.contains("Evidence:\nfacts"));
     }
@@ -319,7 +381,12 @@ mod tests {
 
     #[test]
     fn guide_evidence_prompt_has_a_final_bound_and_keeps_question() {
-        let prompt = guide_prompt("instructions\n", &"x".repeat(9_000), &"q".repeat(2_000));
+        let prompt = guide_prompt(
+            "instructions\n",
+            &"x".repeat(9_000),
+            &[],
+            &"q".repeat(2_000),
+        );
         assert!(prompt.chars().count() <= MAX_PROMPT_CHARS);
         assert!(prompt.contains(&format!("Question: {}", "q".repeat(MAX_QUESTION_CHARS))));
         assert!(prompt.contains("say unknown"));
@@ -327,7 +394,7 @@ mod tests {
 
     #[test]
     fn guide_evidence_bounds_question_and_preserves_omission_notice() {
-        let prompt = guide_prompt("", "unrelated ledger secret", &"文".repeat(2_000));
+        let prompt = guide_prompt("", "unrelated ledger secret", &[], &"文".repeat(2_000));
         assert!(prompt.chars().count() <= MAX_PROMPT_CHARS);
         assert!(prompt.contains("Evidence may be partial or truncated"));
         assert_eq!(prompt.matches('文').count(), MAX_QUESTION_CHARS);
@@ -347,6 +414,7 @@ mod tests {
         let prompt = guide_prompt(
             "",
             &format!("{evidence}\n{}", "x".repeat(10_000)),
+            &[],
             "what failed?",
         );
         assert!(prompt.chars().count() <= MAX_PROMPT_CHARS);
@@ -357,5 +425,49 @@ mod tests {
         assert!(prompt.contains("say unknown"));
         assert!(!prompt.contains("previous question"));
         assert!(!prompt.contains("previous answer"));
+    }
+
+    #[test]
+    fn guide_prompt_carries_transcript_trimmed_oldest_first_without_starving_evidence() {
+        let transcript: Vec<String> = (0..50)
+            .map(|i| format!("You: q{i}\nGuide: {}", "a".repeat(200)))
+            .collect();
+        let prompt = guide_prompt("", "Current step: publish", &transcript, "what now?");
+        assert!(prompt.chars().count() <= MAX_PROMPT_CHARS);
+        assert!(prompt.contains("Current step: publish"));
+        assert!(prompt.contains("Prior conversation:"));
+        // Oldest turns are the first to be dropped.
+        assert!(!prompt.contains("You: q0\n"));
+        assert!(prompt.contains(&format!("You: q{}\n", transcript.len() - 1)));
+    }
+
+    #[test]
+    fn guide_prompt_omits_transcript_section_when_empty() {
+        let prompt = guide_prompt("", "evidence", &[], "question");
+        assert!(!prompt.contains("Prior conversation:"));
+    }
+
+    #[test]
+    fn guide_evidence_fully_populated_shape_fits_the_budget() {
+        // Worst case: every field maxed at its own bound plus six maxed
+        // beats — the same shape `evidence` assembles, sized without needing
+        // a full `Session`/`Plan`/story fixture.
+        let mut fields = vec![
+            "Current step: ".to_string() + &"x".repeat(360),
+            "Sequence statuses: ".to_string() + &"x".repeat(360),
+            "Trait: ".to_string() + &"x".repeat(MAX_ASSIGNMENT_FIELD_CHARS),
+            "Run inputs: ".to_string() + &"x".repeat(MAX_ASSIGNMENT_FIELD_CHARS),
+        ];
+        for _ in 0..6 {
+            fields.push("Accepted beat: ".to_string() + &"x".repeat(360));
+        }
+        fields.push("Activity evidence: recorded".to_string());
+        let text = bound_text(&fields.join("\n"), MAX_EVIDENCE_CHARS);
+        assert!(text.chars().count() <= MAX_EVIDENCE_CHARS);
+        // The budget must be sized to hold at least the assignment plus a
+        // couple of status lines and beats without truncating them away.
+        assert!(text.contains("Trait: "));
+        assert!(text.contains("Run inputs: "));
+        assert!(text.contains("Current step: "));
     }
 }

@@ -171,6 +171,7 @@ export interface RunTable {
     story?: StoryLevel;
     strictLoops?: boolean;
     totalSeconds?: number;
+    usageWarningThreshold?: number;
     wait?: boolean;
     worktree?: boolean;
 }

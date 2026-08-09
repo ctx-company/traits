@@ -832,12 +832,7 @@ impl RatatuiPane {
                 // dims uniformly, and no renderer needs to know about window
                 // focus; the next focused frame redraws from the widgets and
                 // restores full styling.
-                frame.buffer_mut().set_style(
-                    area,
-                    Style::default()
-                        .add_modifier(Modifier::DIM)
-                        .remove_modifier(Modifier::BOLD),
-                );
+                super::tui_kit::dim_backdrop(frame, area);
             }
             if selecting {
                 let area = frame.area();

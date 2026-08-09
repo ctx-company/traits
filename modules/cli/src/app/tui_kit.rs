@@ -753,6 +753,51 @@ pub(crate) fn keymap_footer(hints: impl Into<String>, message: Option<&str>) -> 
     Paragraph::new(lines)
 }
 
+/// The doctrine dim style: named-ANSI-safe `Modifier::DIM`, no color, no
+/// background — usable directly for chrome (borders/titles) that should read
+/// as inactive.
+pub(crate) fn dim_style() -> Style {
+    Style::default().add_modifier(Modifier::DIM)
+}
+
+/// Dims the given `rect` of `frame`'s buffer: `DIM` plus `BOLD` stripped.
+/// BOLD must come off, not merely gain DIM — terminals resolve bold+faint in
+/// their own favor (bold usually wins), so bold content within `rect` would
+/// hold full lightness while everything around it dimmed. Paints no
+/// background, so content underneath stays legible.
+pub(crate) fn dim_backdrop(frame: &mut ratatui::Frame<'_>, rect: Rect) {
+    frame.buffer_mut().set_style(
+        rect,
+        Style::default()
+            .add_modifier(Modifier::DIM)
+            .remove_modifier(Modifier::BOLD),
+    );
+}
+
+/// The conversation modal's caps — roughly 1.5x its former 70x18, ~3:2 given
+/// ~2:1-tall terminal cells.
+const CONVERSATION_MODAL_MAX_WIDTH: u16 = 105;
+const CONVERSATION_MODAL_MAX_HEIGHT: u16 = 27;
+
+/// The conversation modal's width/height for `area`: capped at 105x27, and
+/// below that cap degraded to ~85% of each axis rather than clipped — a
+/// ratio, not a fixed size. [`render_conversation_modal`] and
+/// [`conversation_body_rows`] both call this so the scroll reducer's rendered
+/// row count never desyncs from what is actually painted.
+pub(crate) fn conversation_modal_size(area: Rect) -> (u16, u16) {
+    let width = if area.width >= CONVERSATION_MODAL_MAX_WIDTH {
+        CONVERSATION_MODAL_MAX_WIDTH
+    } else {
+        ((u32::from(area.width) * 85) / 100).max(1) as u16
+    };
+    let height = if area.height >= CONVERSATION_MODAL_MAX_HEIGHT {
+        CONVERSATION_MODAL_MAX_HEIGHT
+    } else {
+        ((u32::from(area.height) * 85) / 100).max(1) as u16
+    };
+    (width.min(area.width).max(1), height.min(area.height).max(1))
+}
+
 /// A rect of `width` x `height` centered within `area`, clamped so it never
 /// exceeds `area`'s own bounds.
 fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
@@ -945,9 +990,13 @@ pub(crate) fn render_conversation_modal(
     scroll: &mut ViewportScroll,
     follow: bool,
 ) {
-    let width = area.width.clamp(1, 70);
-    let height = area.height.clamp(1, 18);
+    let (width, height) = conversation_modal_size(area);
     let rect = centered_rect(area, width, height);
+    // The backdrop dims what is behind the modal, not the modal itself:
+    // `Clear` resets the modal's own cells and the block draws after, so
+    // painting the dim over the whole area before that leaves the modal at
+    // full brightness while the run stays legible-but-dim underneath.
+    dim_backdrop(frame, area);
     frame.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -990,9 +1039,9 @@ pub(crate) fn render_conversation_modal(
     let (visible_input, input_cursor_col) = conversation_input_window(input, inner.width);
     frame.render_widget(
         Paragraph::new(vec![
-            RLine::from(format!("Ask: {visible_input}")),
+            RLine::from(format!("Guide: {visible_input}")),
             RLine::from(Span::styled(
-                "enter send  esc/q close  arrows/pg scroll",
+                "[enter] send · [ctrl-l] clear · [esc] close · [↑↓/pg] scroll",
                 Style::default().add_modifier(Modifier::DIM),
             )),
         ]),
@@ -1004,15 +1053,20 @@ pub(crate) fn render_conversation_modal(
         },
     );
     frame.set_cursor_position((
-        inner.x + (5u16.saturating_add(input_cursor_col as u16)).min(inner.width.saturating_sub(1)),
+        inner.x
+            + (CONVERSATION_INPUT_LABEL_WIDTH.saturating_add(input_cursor_col as u16))
+                .min(inner.width.saturating_sub(1)),
         input_y,
     ));
 }
 
+/// Width of the `"Guide: "` input-line label, in terminal columns.
+const CONVERSATION_INPUT_LABEL_WIDTH: u16 = 7;
+
 /// Returns the input window and the cursor's terminal-column offset within it.
 /// `TextInput` indexes chars, while terminals position cursors in display cells.
 fn conversation_input_window(input: &TextInput, width: u16) -> (String, usize) {
-    let available = width.saturating_sub(5) as usize;
+    let available = width.saturating_sub(CONVERSATION_INPUT_LABEL_WIDTH) as usize;
     let chars: Vec<char> = input.text().chars().collect();
     let cursor = input.cursor().min(chars.len());
     let char_width = |ch: char| {
@@ -1047,7 +1101,7 @@ fn conversation_input_window(input: &TextInput, width: u16) -> (String, usize) {
 
 /// The history viewport shared by conversation key reducers and rendering.
 pub(crate) fn conversation_body_rows(area: Rect) -> usize {
-    let height = area.height.clamp(1, 18);
+    let (_, height) = conversation_modal_size(area);
     height.saturating_sub(2).saturating_sub(2) as usize
 }
 
@@ -1285,11 +1339,16 @@ mod tests {
 
         // The input window follows the edited cursor instead of clipping the
         // suffix and leaving the cursor at an unrelated terminal column.
+        // `11` leaves the same 4-column budget as the pre-rename `"Ask: "`
+        // label's `9` did, now that the label is `"Guide: "` (2 columns wider).
         let input = TextInput::new("abcdefgh界");
-        assert_eq!(conversation_input_window(&input, 9), ("h界".to_string(), 3));
+        assert_eq!(
+            conversation_input_window(&input, 11),
+            ("h界".to_string(), 3)
+        );
 
         use ratatui::{Terminal, backend::TestBackend, layout::Position};
-        let mut terminal = Terminal::new(TestBackend::new(11, 6)).expect("terminal");
+        let mut terminal = Terminal::new(TestBackend::new(20, 20)).expect("terminal");
         let mut scroll = ViewportScroll::new();
         terminal
             .draw(|frame| {
@@ -1304,21 +1363,75 @@ mod tests {
                 );
             })
             .expect("draw");
-        let rendered: String = (0..11)
+        let rendered: String = (0..20)
             .map(|x| {
                 terminal
                     .backend()
                     .buffer()
-                    .cell((x, 3))
+                    .cell((x, 15))
                     .expect("cell")
                     .symbol()
             })
             .collect();
-        assert!(rendered.contains("h界"));
+        assert!(rendered.contains("Guide: defgh界"));
         assert_eq!(
             terminal.get_cursor_position().expect("cursor"),
-            Position::new(9, 3)
+            Position::new(16, 15)
         );
+    }
+
+    #[test]
+    fn conversation_modal_size_agrees_with_body_rows_at_small_medium_and_large_terminals() {
+        for area in [
+            Rect::new(0, 0, 20, 10),
+            Rect::new(0, 0, 80, 24),
+            Rect::new(0, 0, 200, 60),
+        ] {
+            let (_, height) = conversation_modal_size(area);
+            let expected_body_rows = height.saturating_sub(2).saturating_sub(2) as usize;
+            assert_eq!(
+                conversation_body_rows(area),
+                expected_body_rows,
+                "desynced at {area:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn conversation_modal_size_caps_at_one_point_five_x_and_degrades_below_it() {
+        // Well above the cap: clamps at exactly the 1.5x-of-70x18 caps.
+        assert_eq!(conversation_modal_size(Rect::new(0, 0, 200, 60)), (105, 27));
+        // Below the cap: degrades proportionally rather than filling the
+        // terminal or clipping.
+        let (width, height) = conversation_modal_size(Rect::new(0, 0, 40, 20));
+        assert!(width < 40 && width > 0);
+        assert!(height < 20 && height > 0);
+    }
+
+    #[test]
+    fn dim_backdrop_dims_only_the_given_rect() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut terminal = Terminal::new(TestBackend::new(10, 4)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                dim_backdrop(frame, Rect::new(2, 1, 4, 2));
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        for y in 0..4u16 {
+            for x in 0..10u16 {
+                let cell = buffer.cell((x, y)).expect("cell");
+                let inside = (2..6).contains(&x) && (1..3).contains(&y);
+                assert_eq!(
+                    cell.modifier.contains(Modifier::DIM),
+                    inside,
+                    "cell ({x},{y}) dim mismatch"
+                );
+                if inside {
+                    assert!(!cell.modifier.contains(Modifier::BOLD));
+                }
+            }
+        }
     }
 
     // Exercises the trait editor's master-detail width policy independently of

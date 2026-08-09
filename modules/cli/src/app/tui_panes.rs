@@ -176,7 +176,7 @@ pub(crate) fn render_pane(
     let chrome_style = if focused {
         Style::default()
     } else {
-        Style::default().add_modifier(Modifier::DIM)
+        tui_kit::dim_style()
     };
     let block = Block::bordered()
         .border_style(chrome_style)
@@ -339,7 +339,7 @@ pub(crate) fn tab_bar(titles: &[String], current: usize) -> Tabs<'static> {
             let style = if idx == current {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
-                Style::default().add_modifier(Modifier::DIM)
+                tui_kit::dim_style()
             };
             RLine::from(Span::styled(title.clone(), style))
         })

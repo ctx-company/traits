@@ -26,11 +26,11 @@ mod model;
 mod planned;
 mod projection;
 mod render;
-mod session_text;
+pub(crate) mod session_text;
 
 pub(crate) use guide::GuideChatHandle;
 use guide::GuideDispatch;
-use guide::apply_ask_key;
+use guide::apply_guide_key;
 
 #[allow(unused_imports)]
 pub(crate) use projection::{
@@ -304,7 +304,7 @@ struct RunPanelState {
     /// [`Self::refresh_from_ledger`]) so an abandoned claim (the driver that
     /// made it has since exited) stops claiming "(Generating…)" forever.
     title_generation_live: bool,
-    ask: Option<GuideChatHandle>,
+    guide: Option<GuideChatHandle>,
     guide_ledger_path: Option<camino::Utf8PathBuf>,
     /// Detached guide workers wake through this non-owning handle after they
     /// queue a result, so a completed answer does not wait for another event.
@@ -483,7 +483,7 @@ impl RunPanel {
             // possible here; observer construction narrows this immediately
             // below, before the first render.
             title_generation_live: true,
-            ask: None,
+            guide: None,
             guide_ledger_path: None,
             wake_state: Weak::new(),
             handoff: Arc::clone(&handoff),
@@ -669,7 +669,7 @@ impl RunPanel {
                 input_generation.fetch_add(1, Ordering::Release);
                 tick_weak(&weak_state, &cadence, &handoff);
             }));
-            state.ask = Some(chat);
+            state.guide = Some(chat);
             state.guide_ledger_path = Some(ledger_path);
             render_locked(&mut state);
         }
@@ -1163,7 +1163,7 @@ fn has_running_work(state: &RunPanelState) -> bool {
     state.active_started.is_some()
         // Presentation may be collapsed or reopened while the detached
         // request remains authoritative; keep polling until it settles.
-        || state.ask.as_ref().is_some_and(|ask| ask.lock().ask.in_flight)
+        || state.guide.as_ref().is_some_and(|guide| guide.lock().guide.in_flight)
         || state
             .merge_rows
             .iter()
@@ -1200,7 +1200,7 @@ fn rebuild_view(state: &mut RunPanelState, narration: Option<RunNarration>) {
             step_summary_at: &state.step_summary_at,
             narrator_tokens: state.narrator_tokens,
             guide_tokens: state
-                .ask
+                .guide
                 .as_ref()
                 .map_or(state.ledger_guide_tokens, GuideChatHandle::guide_tokens),
             run_started: state.run_started,
@@ -1276,8 +1276,8 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
 
 fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
     let mut changed = false;
-    if let Some(ask) = state.ask.as_ref() {
-        changed |= ask.poll_results();
+    if let Some(guide) = state.guide.as_ref() {
+        changed |= guide.poll_results();
     }
     let keys = state.repaint.poll_detach();
     for key in keys {
@@ -1285,7 +1285,7 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             changed = true;
             continue;
         }
-        if state.ask.is_some() && apply_ask_key(state, key) {
+        if state.guide.is_some() && apply_guide_key(state, key) {
             changed = true;
             continue;
         }
@@ -1294,11 +1294,12 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
         // ledger). Without an inherited handle, the ask-open key gets a
         // visible refusal — never silence, per the implementation draft's
         // "ask: one deliberate rule".
-        if state.observer && state.ask.is_none() && key.code == KeyCode::Char('?') {
+        if state.observer && state.guide.is_none() && key.code == KeyCode::Char('?') {
             let notice = StreamRow {
                 at: state.run_started.elapsed(),
                 kind: StreamRowKind::Narration,
-                text: "ask refused: this run is driven by another process — ask there".to_string(),
+                text: "guide refused: this run is driven by another process — open the guide there"
+                    .to_string(),
             };
             // Retained on the state (not just pushed into `current_stream`)
             // since `apply_ledger_seed` rebuilds that field wholesale on
@@ -1322,7 +1323,7 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
                 state.cadence.inactive();
                 state.handoff.request(
                     state.session.session_id.as_str().to_string(),
-                    state.ask.clone(),
+                    state.guide.clone(),
                 );
                 changed = true;
                 continue;
@@ -1937,10 +1938,11 @@ summary = "A test trait."
             RatatuiPane::new_detached_for_test(),
         );
 
-        let refusal_text = "ask refused: this run is driven by another process — ask there";
+        let refusal_text =
+            "guide refused: this run is driven by another process — open the guide there";
         {
             let mut state = panel.state.lock().expect("state lock");
-            assert!(state.observer && state.ask.is_none());
+            assert!(state.observer && state.guide.is_none());
             let notice = StreamRow {
                 at: state.run_started.elapsed(),
                 kind: StreamRowKind::Narration,
@@ -2145,7 +2147,7 @@ summary = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2175,7 +2177,7 @@ summary = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2227,7 +2229,7 @@ summary = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2332,7 +2334,7 @@ summary = "A test trait."
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2419,7 +2421,7 @@ summary = "A test trait."
                             focus: &mut focus,
                             pending_keys: keys,
                             modal: None,
-                            ask: None,
+                            guide: None,
                         },
                     );
                 })
@@ -2881,6 +2883,70 @@ summary = "A test trait."
         assert!(
             !cadence.should_run(),
             "detachment must disable timer admission for the remaining frame"
+        );
+    }
+
+    /// Evidence composition (`guide::evidence`, which reads the activity
+    /// sidecar off disk and rebuilds the story) must run only when a
+    /// question is about to dispatch — never per keystroke while someone is
+    /// still typing.
+    #[test]
+    fn guide_evidence_composes_only_on_dispatching_enter_not_every_keystroke() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "guide-compose-on-send-test"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Guide Compose On Send Test"
+summary = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let plan = attribution_plan(vec![planned_item(
+            "check",
+            ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+            0,
+            0,
+        )]);
+        let session = session_with_history_revisions(Vec::new(), Vec::new());
+        let panel = RunPanel::new_with_pane(
+            "guide-compose-on-send-test".to_string(),
+            trait_ref,
+            plan,
+            session,
+            RatatuiPane::new_detached_for_test(),
+        );
+        let chat = GuideChatHandle::test_handle();
+        panel.install_guide_handle(
+            chat.clone(),
+            camino::Utf8PathBuf::from("/tmp/nonexistent.jsonl"),
+        );
+        {
+            let state = panel.state.lock().expect("state lock");
+            state.guide.as_ref().unwrap().lock().guide.open = true;
+        }
+        // Typing must not compose evidence: it stays at its just-installed
+        // empty default through every non-dispatching key.
+        for ch in "why?".chars() {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_guide_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Char(ch), crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        assert!(chat.lock().evidence.is_empty(), "typing must not compose");
+        // Enter, with a non-empty question and no call in flight, is the
+        // sole key that composes.
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_guide_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        assert!(
+            !chat.lock().evidence.is_empty(),
+            "Enter with a non-empty question must compose"
         );
     }
 

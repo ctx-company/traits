@@ -8,12 +8,12 @@ use std::time::{Duration, Instant};
 use crossterm::event::KeyEvent;
 use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
 
-use super::guide::AskPane;
+use super::guide::GuidePane;
 use super::model::{
-    ASK_FOOTER_HINT, CURRENT_MIN_OUTER_ROWS, CURRENT_PANE, HISTORY_MIN_OUTER_ROWS, HistoryOutcome,
-    HistoryStep, JourneyRow, JourneyRowKind, LIVE_PANE_IDS, MergeRowState, MergeRowView,
-    NARROW_WIDTH_THRESHOLD, PaneData, PaneIds, RunHeader, RunNarration, RunOutput, RunStep,
-    RunView, StepState,
+    CURRENT_MIN_OUTER_ROWS, CURRENT_PANE, GUIDE_FOOTER_HINT, HISTORY_MIN_OUTER_ROWS,
+    HistoryOutcome, HistoryStep, JourneyRow, JourneyRowKind, LIVE_PANE_IDS, MergeRowState,
+    MergeRowView, NARROW_WIDTH_THRESHOLD, PaneData, PaneIds, RunHeader, RunNarration, RunOutput,
+    RunStep, RunView, StepState,
 };
 use super::planned::status_tone;
 use super::projection::{active_step_index, completed_narration, display_narration};
@@ -74,7 +74,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
         focus,
         pending_keys,
         modal,
-        ask,
+        guide,
         ..
     } = state;
     let modal = modal.as_ref();
@@ -97,7 +97,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
                 focus,
                 pending_keys,
                 modal,
-                ask: ask.as_ref(),
+                guide: guide.as_ref(),
             },
         );
     });
@@ -347,17 +347,18 @@ pub(super) struct LiveFrame<'a> {
     pub(super) focus: &'a mut FocusRing,
     pub(super) pending_keys: &'a mut Vec<KeyEvent>,
     pub(super) modal: Option<&'a tui_kit::Modal>,
-    pub(super) ask: Option<&'a GuideChatHandle>,
+    pub(super) guide: Option<&'a GuideChatHandle>,
 }
 
-pub(super) fn ask_lines(ask: &AskPane) -> Vec<String> {
-    ask.exchanges
+pub(super) fn guide_lines(guide: &GuidePane) -> Vec<String> {
+    guide
+        .exchanges
         .iter()
         .flat_map(|exchange| {
             let answer = exchange.answer.as_deref().unwrap_or("thinking...");
             [
                 format!("You: {}", exchange.question),
-                format!("Guide: {answer}"),
+                format!("Guide (at {}): {answer}", exchange.composed_step),
             ]
         })
         .collect()
@@ -402,14 +403,14 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
         focus,
         pending_keys,
         modal,
-        ask,
+        guide,
     } = state;
     let full_area = frame.area();
     let regions = live_frame_regions(full_area);
     frame.render_widget(
         tui_kit::keymap_footer(
-            if ask.is_some() {
-                ASK_FOOTER_HINT
+            if guide.is_some() {
+                GUIDE_FOOTER_HINT
             } else {
                 "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane"
             },
@@ -449,8 +450,8 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
     );
     if let Some(modal) = modal {
         tui_kit::render_modal(frame, full_area, modal);
-    } else if let Some(ask) = ask.filter(|ask| ask.is_open()) {
-        ask.render(frame, full_area);
+    } else if let Some(guide) = guide.filter(|guide| guide.is_open()) {
+        guide.render(frame, full_area);
     }
 }
 
@@ -2705,7 +2706,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 )
             })
@@ -2758,7 +2759,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2802,7 +2803,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2855,7 +2856,7 @@ mod tests {
                         focus: &mut focus,
                         pending_keys: &mut keys,
                         modal: None,
-                        ask: None,
+                        guide: None,
                     },
                 );
             })
@@ -2934,7 +2935,7 @@ mod tests {
     }
 
     #[test]
-    fn ask_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
+    fn guide_pane_layout_regions_are_disjoint_at_wide_narrow_and_short_sizes() {
         for area in [
             Rect::new(0, 0, 160, 40),
             Rect::new(0, 0, 70, 20),
@@ -2949,11 +2950,14 @@ mod tests {
     }
 
     #[test]
-    fn ask_footer_renders_every_hint_at_narrow_width_boundary() {
+    fn guide_footer_renders_every_hint_at_narrow_width_boundary() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        for width in [NARROW_WIDTH_THRESHOLD - 1, NARROW_WIDTH_THRESHOLD] {
+        // "guide" is two characters longer than "ask" was, so the footer's
+        // own minimum fit width grew past `NARROW_WIDTH_THRESHOLD - 1`; test
+        // at the threshold and just above it instead.
+        for width in [NARROW_WIDTH_THRESHOLD, NARROW_WIDTH_THRESHOLD + 1] {
             let mut terminal = Terminal::new(TestBackend::new(width, 12)).expect("test terminal");
             let mut scrolls = PaneScrolls::new();
             let mut progress_follow = true;
@@ -2962,7 +2966,7 @@ mod tests {
             let mut current_follow = true;
             let mut focus = FocusRing::new(vec![CURRENT_PANE]);
             let mut keys = Vec::new();
-            let ask = AskPane::default();
+            let guide = GuidePane::default();
             terminal
                 .draw(|frame| {
                     render_live_panes(
@@ -2983,13 +2987,13 @@ mod tests {
                             focus: &mut focus,
                             pending_keys: &mut keys,
                             modal: None,
-                            ask: Some(&GuideChatHandle(Arc::new(Mutex::new(GuideChat {
-                                ask,
-                                dispatch: Arc::new(|_, _| Ok(String::new())),
+                            guide: Some(&GuideChatHandle(Arc::new(Mutex::new(GuideChat {
+                                guide,
+                                dispatch: Arc::new(|_| Ok(String::new())),
                                 tokens: Default::default(),
                                 results: None,
                                 wake: None,
-                                context: String::new(),
+                                evidence: String::new(),
                             })))),
                         },
                     );
@@ -2999,7 +3003,7 @@ mod tests {
                 .map(|x| terminal.backend().buffer().cell((x, 11)).unwrap().symbol())
                 .collect();
             for hint in [
-                "[?] ask",
+                "[?] guide",
                 "[up/down] scroll",
                 "[pg] page",
                 "[home/end] jump",
@@ -3019,15 +3023,19 @@ mod tests {
 
     #[test]
     fn pending_guide_exchange_has_single_label() {
-        let ask = AskPane {
+        let guide = GuidePane {
             exchanges: vec![GuideExchange {
                 question: "question".to_string(),
                 generation: 1,
                 answer: None,
+                composed_step: "publish".to_string(),
             }],
-            ..AskPane::default()
+            ..GuidePane::default()
         };
-        assert_eq!(ask_lines(&ask), ["You: question", "Guide: thinking..."]);
+        assert_eq!(
+            guide_lines(&guide),
+            ["You: question", "Guide (at publish): thinking..."]
+        );
     }
 
     #[test]
