@@ -44,6 +44,8 @@ export type ObjectFieldRefs<Value> = {
   readonly [K in keyof Value]-?:
     & FieldRef<Value[K]>
     & (
+      // `unknown` here is the intersection identity (`T & unknown` = `T`) — a list or scalar field
+      // contributes no extra field-ref surface beyond `FieldRef<Value[K]>` above.
       Value[K] extends readonly unknown[] ? unknown
         : Value[K] extends object ? ObjectFieldRefs<Value[K]>
         : unknown
@@ -100,6 +102,7 @@ export type DeclaredSlotWithFields<Value = unknown> = DeclaredSlotHandle<Value> 
 export type SlotWithFields<Value = unknown> =
   & SlotHandle<Value>
   & (
+    // `unknown` here is the intersection identity — a list or scalar value adds no field-ref surface.
     Value extends readonly unknown[] ? unknown
       : Value extends object ? ObjectFieldRefs<Value>
       : unknown

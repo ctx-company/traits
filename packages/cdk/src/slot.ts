@@ -1,4 +1,5 @@
 import { dispatchSlotForEach, recordTraitMint } from "./functional/context.js";
+import type { ForEachRegistrarOptions } from "./functional/registrars.js";
 import type { JsonObject, JsonValue, WriteOperation } from "./generated.js";
 import type {
   DeclaredSlotHandle,
@@ -278,7 +279,7 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   return withHiddenField(
     withOptional,
     "forEach",
-    (title: string, opts: unknown, body: (item: SlotHandle) => void) =>
+    (title: string, opts: ForEachRegistrarOptions | undefined, body: (item: SlotHandle) => void) =>
       dispatchSlotForEach(withOptional, title, opts, body) as SequenceHandle,
   );
 }

@@ -140,7 +140,7 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
  * @see {@link sequence}
  */
 export function procedure(fields: ProcedureFields): ProcedureHandle {
-  const sequenceValues = arrayOf(fields.sequence).flatMap((item) =>
+  const sequenceValues = arrayOf<SequenceHandle | JsonObject>(fields.sequence).flatMap((item) =>
     materializeSequenceItem(item as SequenceHandle, { kind: "procedure" })
   );
   validateNoDuplicateTitles(sequenceValues, "procedure");
@@ -459,6 +459,14 @@ export function signal(fields: SignalFields): SignalHandle {
   return handle;
 }
 
-function arrayOf(value: unknown): unknown[] {
-  return value === undefined ? [] : Array.isArray(value) ? value : [value];
+/**
+ * `T` deliberately not narrowed to `SequenceHandle`: `ProcedureFields.sequence`'s declared type
+ * (`SequenceHandle | readonly SequenceHandle[] | readonly JsonObject[]`) also accepts a raw
+ * canonical-JSON step, which every call site here still treats as a `SequenceHandle` by
+ * construction (JSON step objects round-trip through `metaOf` the same way handles do) — a real
+ * generic signature would have to model that overlap, not just rename `unknown`.
+ */
+function arrayOf<T>(value: T | readonly T[] | undefined): readonly T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value as readonly T[] : [value as T];
 }

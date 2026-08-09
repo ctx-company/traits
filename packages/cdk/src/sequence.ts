@@ -70,7 +70,7 @@ import type { LiteralProjectionSource } from "./slot.js";
 /** Loop exhaustion policy spellings (P448): `sequence.flow.Continue`/`sequence.flow.Abort` evaluate to these. */
 export type ExhaustionPolicy = "continue" | "abort";
 /** A single loop-exhaustion signal ref, authored the same way as `onComplete`. */
-type ExhaustionSignalValue = string | RefHandle<"signal">;
+export type ExhaustionSignalValue = string | RefHandle<"signal">;
 type SequenceRefValue = string | RefHandle<"sequence"> | SequenceLinearHandle;
 type BranchArmValue = SequenceRefValue | readonly [SequenceHandle, ...SequenceHandle[]];
 type SequenceScope = { readonly kind: "procedure"; } | { readonly kind: "sequence"; readonly id: string; };
@@ -94,7 +94,7 @@ export type SequenceOutputValue<Value = unknown> =
   | OptionalSlotRead<Value>
   | OutputTemplateHandle;
 export type ArgvItem = string | SlotHandle | PortHandle | ResourceHandle;
-type SignalOutputValue = string | RefHandle<"signal"> | {
+export type SignalOutputValue = string | RefHandle<"signal"> | {
   readonly signal: string | RefHandle<"signal">;
   readonly when: GuardValue;
 };
@@ -1107,18 +1107,26 @@ function isSequenceKind<K extends NonNullable<SequenceFields["kind"]>>(
   return kind === expected;
 }
 
+/**
+ * The union of every `SequenceFields` member's shape for the handful of
+ * fields `sequenceOf` must read before it has narrowed to one specific
+ * member (via `kind`) — each field's real type across every member that
+ * declares it, so no member's non-`never` value for these keys is lost.
+ */
+interface SequenceFieldsProbe {
+  readonly text?: PromptTemplate;
+  readonly prompt?: PromptHandle | PromptTemplate;
+  readonly if?: GuardValue;
+  readonly then?: BranchArmValue;
+  readonly otherwise?: BranchArmValue;
+  readonly argvFrom?: PortHandle<string[]>;
+  readonly input?: SequenceInputValue | readonly SequenceInputValue[] | PromptTemplate | CommandTemplateValue;
+  readonly include?: SequenceInputValue | readonly SequenceInputValue[];
+}
+
 function sequenceOf(fields: SequenceFields): SequenceHandle {
   validateSlug(fields.id, "procedure.sequence.id");
-  const rawFields = fields as {
-    readonly text?: unknown;
-    readonly prompt?: unknown;
-    readonly if?: unknown;
-    readonly then?: unknown;
-    readonly otherwise?: unknown;
-    readonly argvFrom?: unknown;
-    readonly input?: unknown;
-    readonly include?: unknown;
-  };
+  const rawFields = fields as SequenceFieldsProbe;
   if (rawFields.prompt !== undefined) {
     recordDiagnostic(
       "cdk-legacy-sequence-prompt",
@@ -1147,7 +1155,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   // entries; with no `include:`, behavior is byte-identical to pre-include
   // emission.
   const legacyCommandDeps = commandTemplate === undefined ? fields.input : undefined;
-  const commandDeps = mergeCommandDeps(legacyCommandDeps, rawFields.include as SequenceFields["input"]);
+  const commandDeps = mergeCommandDeps(legacyCommandDeps, rawFields.include);
   const kind = fields.kind ?? (command ? "command" : prompt === undefined ? undefined : "prompt");
   if (kind === undefined) {
     throw new Error(
@@ -1232,7 +1240,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   const promptDeps = kind === "prompt" || kind === "ask"
     ? mergeCommandDeps(
       promptInputTemplate === undefined ? fields.input : undefined,
-      rawFields.include as SequenceFields["input"],
+      rawFields.include,
     )
     : undefined;
   const input = kind === "prompt" || kind === "ask"
@@ -1247,7 +1255,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     : kind === "check"
     ? commandInput(commandDeps, commandArgvFields, undefined, undefined)
     : isSequenceKind(fields, kind, "loop")
-    ? loopInput(mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"]), fields.iterations)
+    ? loopInput(mergeCommandDeps(fields.input, rawFields.include), fields.iterations)
     : kind === "project"
     ? (() => {
       // oxlint-disable-next-line typescript/no-non-null-assertion -- kind === "project" implies fields.project was supplied, so projections was built above
@@ -1258,7 +1266,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
     })()
     : (() => {
       const list = normalizeSequenceInputList(
-        mergeCommandDeps(fields.input, rawFields.include as SequenceFields["input"]),
+        mergeCommandDeps(fields.input, rawFields.include),
       );
       return list.length === 0 ? undefined : list;
     })();
@@ -1630,7 +1638,7 @@ function generatedLoopGateInvocationId(loopId: string): string {
 /** True for an `${slot.optional()}` output marker (P105): `{ slot, optional: true }`, mirroring `OptionalSlotInputValue` on the input side. */
 function isOptionalOutputItem(item: unknown): item is OptionalSlotRead {
   return item !== null && typeof item === "object" && !Array.isArray(item) && "slot" in item
-    && (item as { readonly optional?: unknown; }).optional === true;
+    && (item as { readonly optional?: boolean; }).optional === true;
 }
 function outputText(value: SequenceOutputValue, path: string): string {
   if (isOptionalOutputItem(value)) return refText(value.slot, path);
@@ -1680,7 +1688,7 @@ function outputList(
 function outputRefList(value: SequenceOutputValue | readonly SequenceOutputValue[] | undefined): string[] {
   return flattenOutputItems(value).map((item, index) => outputText(item, `sequence.output[${index}]`));
 }
-function promptRef(value: unknown, id: string): string {
+function promptRef(value: PromptHandle | PromptTemplate | undefined, id: string): string {
   const meta = metaOf(value);
   if (meta?.kind === "template") return `prompt:${id}`;
   if (meta?.ref !== undefined) return meta.ref;
@@ -1718,6 +1726,9 @@ function uniqueInputsInOrder(items: readonly NormalizedInputItem[]): NormalizedI
   return result;
 }
 
+// `item: unknown`: this is the runtime-validated boundary for every `SequenceFields["input"]`
+// member's per-item type across the whole union (`SequenceInputValue`, `ConditionalResourceInputValue`,
+// `OptionalSlotInputValue`) — same idiom as a type guard's `unknown` parameter, narrowed out below.
 function normalizeSequenceInputItem(item: unknown, path: string): NormalizedInputItem {
   if (item !== null && typeof item === "object" && !Array.isArray(item) && "resource" in item && "when" in item) {
     const conditional = item as ConditionalResourceInputValue;
@@ -1745,7 +1756,10 @@ function normalizeSequenceInputList(value: SequenceFields["input"]): NormalizedI
   return values.map((item, index) => normalizeSequenceInputItem(item, `sequence input item ${index}`));
 }
 
-function promptInput(value: SequenceFields["input"], prompt: unknown): NormalizedInputItem[] | undefined {
+function promptInput(
+  value: SequenceFields["input"],
+  prompt: PromptHandle | PromptTemplate | undefined,
+): NormalizedInputItem[] | undefined {
   const explicit = normalizeSequenceInputList(value);
   const explicitRefs = explicit.map(inputItemRefText);
   const promptMeta = metaOf(prompt);
@@ -1774,7 +1788,8 @@ function promptInput(value: SequenceFields["input"], prompt: unknown): Normalize
   return merged.length === 0 ? undefined : merged;
 }
 function isCommandTemplateValue(value: unknown): value is CommandTemplateValue {
-  return typeof value === "object" && value !== null && (value as { kind?: unknown; }).kind === "cdk-command-template";
+  return typeof value === "object" && value !== null
+    && (value as { readonly kind?: string; }).kind === "cdk-command-template";
 }
 /** True for an `input.prompt` tagged-template value — the prompt-step `input:` carrier. */
 function isPromptTemplateValue(value: unknown): value is PromptTemplate {
@@ -1849,7 +1864,7 @@ function attachInstructionOutputs(
  * this step does not own.
  */
 function mergePromptInstructionOutputs(
-  promptValue: unknown,
+  promptValue: PromptHandle | PromptTemplate | undefined,
   render: { readonly text: string; readonly refs: readonly string[]; readonly optionalRefs: readonly string[]; },
 ): PromptTemplate {
   const meta = metaOf(promptValue);
@@ -1859,9 +1874,11 @@ function mergePromptInstructionOutputs(
         + "not a named prompt(...) reference",
     );
   }
-  const baseText = typeof (promptValue as { readonly text?: unknown; }).text === "string"
-    ? (promptValue as { readonly text: string; }).text
-    : "";
+  // `PromptTemplate`'s declared shape is `CdkObject`-indexed (`unknown`), even though every
+  // `kind: "template"` instance is actually built as `{ text: string }` (prompt.ts's
+  // `promptBoundText`) — the one narrowing detour this boundary needs.
+  const promptText = (promptValue as { readonly text?: unknown; }).text;
+  const baseText = typeof promptText === "string" ? promptText : "";
   const text = `${baseText}\n\n${render.text}`;
   return withMeta({ text }, {
     kind: "template",
@@ -2049,7 +2066,7 @@ function scanInterpolationRefs(value: string): string[] {
 }
 function promptDeclaration(
   fields: SequenceFields,
-  value: unknown,
+  value: PromptHandle | PromptTemplate | undefined,
   input: readonly string[] | undefined,
   output: readonly string[],
 ): JsonObject | undefined {
@@ -2129,7 +2146,7 @@ function onCompleteRules(
   if (value === undefined) return undefined;
   return (Array.isArray(value) ? value : [value]).map((item, index) =>
     typeof item === "string" || metaOf(item)?.ref !== undefined
-      ? signalText(item, `sequence.on-complete[${index}]`)
+      ? signalText(item as string | RefHandle<"signal">, `sequence.on-complete[${index}]`)
       : compact({
         signal: signalText(item.signal, `sequence.on-complete[${index}].signal`),
         when: guardForOutput(item.when, outputs),
@@ -2138,7 +2155,7 @@ function onCompleteRules(
       }) as CanonicalSignalEmissionRule
   );
 }
-function signalText(value: unknown, path: string): string {
+function signalText(value: string | RefHandle<"signal">, path: string): string {
   const text = refText(value, path);
   if (!text.startsWith("signal:")) throw new Error(`${path}: expected signal:* ref`);
   return text;
@@ -2188,11 +2205,11 @@ function normalizeExhaustionTarget(
     if (value.length === 0) throw new Error(`${path}: must not be empty`);
     return value.map((entry, index) => signalText(entry, `${path}[${index}]`));
   }
-  return signalText(value as ExhaustionSignalValue, path);
+  return signalText(value as string | RefHandle<"signal">, path);
 }
 function normalizeFailureTarget(value: FailureTargetValue, path: string): CanonicalFailureTarget {
   if (typeof value === "string" || metaOf(value)?.ref !== undefined) {
-    return signalText(value, path);
+    return signalText(value as string | RefHandle<"signal">, path);
   }
   if (!value.step) throw new Error(`${path}.step: must name a recovery step`);
   // `value` stays a `FailureRoute | RefHandle<"signal">` union here (the
@@ -2201,7 +2218,9 @@ function normalizeFailureTarget(value: FailureTargetValue, path: string): Canoni
   // return, not per-field.
   return compact({
     step: value.step,
-    signal: value.signal === undefined ? undefined : signalText(value.signal, `${path}.signal`),
+    signal: value.signal === undefined
+      ? undefined
+      : signalText(value.signal as string | RefHandle<"signal">, `${path}.signal`),
   }) as CanonicalFailureRoute;
 }
 function commandArgv(cmd: string, path: string): string[] {

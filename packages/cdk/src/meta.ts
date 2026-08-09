@@ -26,7 +26,7 @@ import type {
   JsonObject,
   WriteOperation,
 } from "./generated.js";
-import type { Brand, SequenceHandle, WithHandleValue } from "./handles.js";
+import type { Brand, SequenceHandle, SlotHandle, WithHandleValue } from "./handles.js";
 
 /**
  * Canonical JSON shape of a declaration, keyed by the CDK's handle-brand
@@ -122,7 +122,7 @@ export interface Meta {
     readonly text: string;
     readonly refs: readonly string[];
     readonly optionalRefs?: readonly string[];
-    readonly slots: readonly unknown[];
+    readonly slots: readonly (SlotHandle | undefined)[];
   };
   /**
    * CDK-only provenance recording which step's `output.prompt` first
@@ -290,14 +290,7 @@ export function isOutputTemplateHandle(value: unknown): boolean {
 }
 
 /** The compiled instruction text + interpolated slot refs an `output.prompt` handle carries, or `undefined` if it isn't one. */
-export function outputTemplateContent(
-  value: unknown,
-): {
-  readonly text: string;
-  readonly refs: readonly string[];
-  readonly optionalRefs?: readonly string[];
-  readonly slots: readonly unknown[];
-} | undefined {
+export function outputTemplateContent(value: unknown): Meta["outputTemplate"] {
   const meta = metaOf(value);
   return meta?.kind === "output-template" ? meta.outputTemplate : undefined;
 }

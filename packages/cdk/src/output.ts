@@ -106,8 +106,8 @@ function buildInstructionOutput(
 function resolveOutputPromptRef(
   value: OutputPromptInterpolation,
   fieldPath: string,
-): { readonly ref: string; readonly optional: boolean; readonly slotValue: unknown; } {
-  const wrapper = value as { readonly slot?: unknown; readonly optional?: unknown; };
+): { readonly ref: string; readonly optional: boolean; readonly slotValue: SlotHandle; } {
+  const wrapper = value as OptionalSlotRead;
   if (
     value !== null && typeof value === "object" && !Array.isArray(value)
     && "slot" in wrapper && wrapper.optional === true
@@ -118,7 +118,7 @@ function resolveOutputPromptRef(
   }
   const ref = refText(value, fieldPath);
   if (!ref.startsWith("slot:")) throw new Error(`${fieldPath}: output.prompt interpolation must be a slot reference`);
-  return { ref, optional: false, slotValue: value };
+  return { ref, optional: false, slotValue: value as SlotHandle };
 }
 
 function buildOutputTemplate(
@@ -128,7 +128,7 @@ function buildOutputTemplate(
   let text = strings[0] ?? "";
   const refs: string[] = [];
   const optionalRefs: string[] = [];
-  const slotByRef = new Map<string, unknown>();
+  const slotByRef = new Map<string, SlotHandle>();
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (value === undefined) throw new Error(`output.prompt interpolation ${index}: expected a slot reference`);

@@ -9,16 +9,17 @@
 import type { BranchCheckValue, GuardValue } from "../condition.js";
 import { condition, lowerCheckGuard } from "../condition.js";
 import type { JsonValue } from "../generated.js";
-import type { AgentHandle, FieldRef, SequenceHandle, SequenceLinearHandle, SlotHandle } from "../handles.js";
+import type { FieldRef, SequenceHandle, SequenceLinearHandle, SlotHandle } from "../handles.js";
 import type {
   CheckSequenceFields,
   CommandSequenceFields,
   ExhaustionPolicy,
+  ExhaustionSignalValue,
   ForEachSequenceFields,
   LoopSequenceFields,
   ParallelBranchFailurePolicy,
   ProjectSequenceFields,
-  PromptRegistrarOptions,
+  SignalOutputValue,
 } from "../sequence.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
 import { slot } from "../slot.js";
@@ -65,7 +66,7 @@ function positionalUntilGuard(): GuardValue | undefined {
   if (loopScope?.loop?.untilCondition === undefined) return undefined;
   if (currentScope("flow positional lowering") !== loopScope) return undefined;
   return condition.not(
-    lowerCheckGuard(loopScope.loop.untilCondition as BranchCheckValue, "flow.until").guard,
+    lowerCheckGuard(loopScope.loop.untilCondition, "flow.until").guard,
   );
 }
 
@@ -149,13 +150,12 @@ export const step = {
 // agent.prompt / items.forEach lowering (installed into context.ts)
 // ---------------------------------------------------------------------------
 
-installAgentPromptLowering((agentHandle, title, opts) => {
-  requireBuild(`agent.prompt(${JSON.stringify(title as string)})`);
-  const promptOpts = opts as PromptRegistrarOptions;
-  const id = promptOpts.id ?? mintId(title as string);
-  const fields = withPositionalWhen({ ...promptOpts, title, agent: agentHandle as AgentHandle });
+installAgentPromptLowering((agentHandle, title, promptOpts) => {
+  requireBuild(`agent.prompt(${JSON.stringify(title)})`);
+  const id = promptOpts.id ?? mintId(title);
+  const fields = withPositionalWhen({ ...promptOpts, title, agent: agentHandle });
   const item = sequence.prompt({ ...fields, id } as never);
-  registerItem(`agent.prompt(${JSON.stringify(title as string)})`, item, title as string);
+  registerItem(`agent.prompt(${JSON.stringify(title)})`, item, title);
   return item;
 });
 
@@ -166,8 +166,7 @@ export interface ForEachRegistrarOptions {
   readonly onComplete?: ForEachSequenceFields["onComplete"];
 }
 
-installSlotForEachLowering((slotHandle, title, opts, body) => {
-  const titleText = title as string;
+installSlotForEachLowering((slotHandle, titleText, opts, body) => {
   requireBuild(`items.forEach(${JSON.stringify(titleText)})`);
   const id = mintId(titleText);
   const frame = captureAuthorFrame();
@@ -175,16 +174,16 @@ installSlotForEachLowering((slotHandle, title, opts, body) => {
   const { scope } = runInScope(
     "for-each",
     `items.forEach(${JSON.stringify(titleText)})`,
-    () => (body as (item: SlotHandle) => void)(itemSlot),
+    () => body(itemSlot),
   );
   checkDuplicateTitles(scope.items, `items.forEach(${JSON.stringify(titleText)})`);
   if (scope.items.length === 0) throw buildError(titleText, "items.forEach registered no steps", frame);
-  const forEachOpts = (opts ?? {}) as ForEachRegistrarOptions;
+  const forEachOpts = opts ?? {};
   const item = sequence.forEach(
     id,
     withPositionalWhen({
       title: titleText,
-      over: slotHandle as SlotHandle,
+      over: slotHandle,
       item: itemSlot,
       body: itemsOf(scope),
       limit: forEachOpts.limit,
@@ -209,15 +208,13 @@ export interface LoopParam {
 }
 
 function combineAbortIfArms(
-  arms: readonly { readonly title: string; readonly condition: unknown; }[],
+  arms: readonly { readonly title: string; readonly condition: BranchCheckValue; }[],
 ): BranchCheckValue | undefined {
   if (arms.length === 0) return undefined;
   // oxlint-disable-next-line typescript/no-non-null-assertion -- length === 1 checked above
-  if (arms.length === 1) return arms[0]!.condition as BranchCheckValue;
+  if (arms.length === 1) return arms[0]!.condition;
   return condition.any(
-    arms.map((arm) =>
-      lowerCheckGuard(arm.condition as BranchCheckValue, `flow.when(${JSON.stringify(arm.title)})`).guard
-    ),
+    arms.map((arm) => lowerCheckGuard(arm.condition, `flow.when(${JSON.stringify(arm.title)})`).guard),
   );
 }
 
@@ -262,11 +259,11 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
     title,
     body: itemsOf(scope),
     ...(loopState.maxIterationsValue === undefined ? {} : { maxIterations: loopState.maxIterationsValue }),
-    ...(loopState.untilCondition === undefined ? {} : { until: loopState.untilCondition as BranchCheckValue }),
+    ...(loopState.untilCondition === undefined ? {} : { until: loopState.untilCondition }),
     ...(abortIf === undefined ? {} : { abortIf }),
     ...(loopState.onExhausted === undefined ? {} : { onExhausted: loopState.onExhausted as ExhaustionPolicy }),
-    ...(loopState.onComplete.length === 0 ? {} : { onComplete: loopState.onComplete as never }),
-    ...(loopState.onAbort.length === 0 ? {} : { onAbort: loopState.onAbort as never }),
+    ...(loopState.onComplete.length === 0 ? {} : { onComplete: loopState.onComplete }),
+    ...(loopState.onAbort.length === 0 ? {} : { onAbort: loopState.onAbort }),
   });
   const item = sequence.loop(id, fields);
   registerItem(label, item, title);
@@ -486,7 +483,7 @@ export const flow = {
 // ---------------------------------------------------------------------------
 
 export const effect = {
-  onComplete(signal: unknown): void {
+  onComplete(signal: SignalOutputValue): void {
     const scope = nearestScope("loop");
     if (scope?.loop === undefined) throw new Error("effect.onComplete(...) requires an enclosing flow.loop");
     scope.loop.onComplete.push(signal);
@@ -496,7 +493,7 @@ export const effect = {
       "effect.onFailure(...) has no target here — a flow.loop declares no failure of its own to route (0102)",
     );
   },
-  onAbort(signal: unknown): void {
+  onAbort(signal: ExhaustionSignalValue): void {
     const scope = nearestScope("loop");
     if (scope?.loop === undefined) throw new Error("effect.onAbort(...) requires an enclosing flow.loop");
     scope.loop.onAbort.push(signal);

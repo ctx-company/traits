@@ -6,8 +6,9 @@
  * `assembleSingleTraitDraft` path (`../trait.js`) — no second emitter (0102
  * Watch).
  */
+import type { CanonicalPort, CanonicalSchemaForm, CanonicalSlot } from "../generated.js";
 import type { PortHandle, ResourceHandle, SequenceHandle, SlotHandle } from "../handles.js";
-import type { MetaDeclaration } from "../meta.js";
+import type { DeclKind, JsonObject, MetaDeclaration } from "../meta.js";
 import { metaOf, withMeta } from "../meta.js";
 import { isSlug, toDraftJsonWithSourceMap } from "../normalize.js";
 import { port } from "../port.js";
@@ -17,6 +18,7 @@ import type { BehaviorFields, IntentSpec, SemVer, TraitFields, TraitMetadata } f
 import { trait } from "../trait.js";
 import type { FrameMint, RegisteredItem, TraitFrame } from "./context.js";
 import { closeBuild, closeTraitFrame, currentTraitFrame, openBuild, openTraitFrame } from "./context.js";
+import { isThenable } from "./internal.js";
 
 /** `defineTrait`'s own fields: identity and metadata only — everything else is derived from `use*` calls, `ctx.input`, steps, and the return statement. */
 export interface DefineTraitFields {
@@ -115,10 +117,15 @@ export function defineTrait(slug: string, fields: DefineTraitFields = {}): void 
   frame.fields = { ...fields };
 }
 
+/** A built-in guidance reference (e.g. `intent.require.CiteEvidence`) — either a bare kebab-case slug or `{ id }`. */
+interface GuidanceRef {
+  readonly id?: string;
+}
+
 function guidanceSlug(value: unknown): string | undefined {
   if (typeof value === "string") return value;
-  if (value !== null && typeof value === "object" && typeof (value as { id?: unknown; }).id === "string") {
-    return (value as { id: string; }).id;
+  if (value !== null && typeof value === "object" && typeof (value as GuidanceRef).id === "string") {
+    return (value as GuidanceRef).id;
   }
   return undefined;
 }
@@ -224,10 +231,6 @@ export interface TraitFunctionContext {
   readonly input: Record<string, unknown>;
 }
 
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return typeof value === "object" && value !== null && typeof (value as { then?: unknown; }).then === "function";
-}
-
 /** Rebuilds a full declared port handle from its recorded mint, so a `ctx.input` access can be routed through `TraitFields.port` without needing the original module-scope handle reference. */
 function reconstructDeclaredPortHandle(mint: FrameMint): PortHandle {
   return withMeta<Record<string, never>, "port">({}, {
@@ -246,7 +249,7 @@ function outputPortFromReturn(key: string, value: unknown): PortHandle {
       }`,
     );
   }
-  const schemaRef = (meta.declaration as { readonly schema?: unknown; }).schema;
+  const schemaRef: CanonicalSchemaForm | undefined = (meta.declaration as CanonicalSlot).schema;
   if (typeof schemaRef !== "string") {
     throw new Error(`evaluateTraitFunction: return value ${JSON.stringify(key)}'s slot declares no schema`);
   }
@@ -261,13 +264,13 @@ function outputPortFromReturn(key: string, value: unknown): PortHandle {
  */
 function checkNeverReferenced(
   mints: readonly FrameMint[],
-  merged: Partial<Record<string, readonly { readonly id?: unknown; }[]>>,
+  merged: Partial<Record<DeclKind, readonly JsonObject[]>>,
 ): void {
   const referencedIds = new Map<string, Set<string>>();
   for (const kind of ["resource", "signal", "port", "slot"] as const) {
     referencedIds.set(
       kind,
-      new Set((merged[kind] ?? []).flatMap((item) => (typeof item.id === "string" ? [item.id] : []))),
+      new Set((merged[kind] ?? []).flatMap((item) => (typeof item["id"] === "string" ? [item["id"]] : []))),
     );
   }
   const problems: string[] = [];
@@ -291,6 +294,9 @@ function checkNeverReferenced(
  * everything downstream (drift, digest, lock, source maps) is unchanged.
  */
 export function evaluateTraitFunction(
+  // `unknown`, not the `Record<string, SlotHandle> | undefined` return contract: an invalid
+  // return value must fail with `outputPortFromReturn`'s runtime message (naming the bad key),
+  // not a compiler error — the same validated-boundary idiom as a type guard's `unknown` param.
   fn: (ctx: TraitFunctionContext) => unknown,
 ): ReturnType<typeof toDraftJsonWithSourceMap> {
   openBuild();
@@ -319,9 +325,7 @@ export function evaluateTraitFunction(
 
   const declaredInputPorts = new Map(
     traitFrame.mints
-      .filter((mint) =>
-        mint.kind === "port" && (mint.declaration as { readonly direction?: unknown; }).direction === "input"
-      )
+      .filter((mint) => mint.kind === "port" && (mint.declaration as CanonicalPort).direction === "input")
       .map((mint) => [mint.id, mint] as const),
   );
   const unknownInputs = [...traitFrame.inputAccessed].filter((id) => !declaredInputPorts.has(id));
@@ -338,7 +342,7 @@ export function evaluateTraitFunction(
     reconstructDeclaredPortHandle(declaredInputPorts.get(id)!)
   );
 
-  let outputPorts: unknown[] = [];
+  let outputPorts: PortHandle[] = [];
   if (result !== undefined) {
     if (typeof result !== "object" || result === null || Array.isArray(result)) {
       throw new Error(
@@ -386,7 +390,7 @@ export function evaluateTraitFunction(
   };
 
   const handle = trait(traitFrame.slug as string, fields);
-  const merged = (metaOf(handle)?.declarations ?? {}) as Partial<Record<string, readonly { readonly id?: unknown; }[]>>;
+  const merged: Partial<Record<DeclKind, readonly JsonObject[]>> = metaOf(handle)?.declarations ?? {};
   checkNeverReferenced(traitFrame.mints, merged);
   return toDraftJsonWithSourceMap(handle);
 }

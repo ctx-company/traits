@@ -489,7 +489,7 @@ export function normalizeIntent(value: IntentSpec | undefined): JsonObject | und
 function normalizeGuidanceItem(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return { id: value };
-  const item = value as { id?: unknown; summary?: unknown; description?: unknown; };
+  const item = value as { readonly id?: string; readonly summary?: string; readonly description?: string; };
   return compact({ id: item.id, summary: item.summary, description: item.description });
 }
 /** Normalizes a scalar-or-array guidance value into an array of stable guidance-item JSON. */

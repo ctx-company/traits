@@ -1,6 +1,7 @@
 import type { JsonObject } from "./generated.js";
 import type {
   InstructionOutputHandle,
+  OptionalSlotRead,
   PortHandle,
   PromptHandle,
   PromptTemplate,
@@ -26,6 +27,12 @@ export type PromptInterpolation<Value = unknown> =
   | SlotHandle<Value>
   | ResourceHandle<Value>
   | InstructionOutputHandle<Value>;
+
+/** `prompt.resource(...)`'s accepted shape: a bare resource ref, or a resource plus its own extra declared inputs. */
+export type PromptResourceValue = ResourceHandle | RefHandle | {
+  readonly resource: ResourceHandle | RefHandle | string;
+  readonly input?: PromptFields["input"];
+};
 
 export interface PromptFunction {
   <Input, Output = unknown>(
@@ -53,12 +60,7 @@ export interface PromptFunction {
    * prompt.resource(styleGuideResource);
    * ```
    */
-  resource<Input = unknown>(
-    value: ResourceHandle | RefHandle | {
-      readonly resource: ResourceHandle | RefHandle | string;
-      readonly input?: readonly unknown[];
-    },
-  ): PromptTemplate<Input>;
+  resource<Input = unknown>(value: PromptResourceValue): PromptTemplate<Input>;
 }
 
 /**
@@ -111,12 +113,7 @@ function promptFn(idOrFields: string | PromptFields, text?: string, fields?: Jso
 export const prompt = Object.assign(
   promptFn,
   {
-    resource: (
-      value: ResourceHandle | RefHandle | {
-        readonly resource: ResourceHandle | RefHandle | string;
-        readonly input?: readonly unknown[];
-      },
-    ): PromptTemplate => promptResource(value),
+    resource: (value: PromptResourceValue): PromptTemplate => promptResource(value),
   },
 ) as PromptFunction;
 
@@ -205,12 +202,12 @@ function resolvePromptRef(
   value: PromptInterpolation,
   fieldPath: string,
 ): { ref: string; optional: boolean; } {
-  const wrapper = value as { readonly slot?: unknown; readonly optional?: unknown; };
+  const wrapper = value as unknown as OptionalSlotRead;
   if (
     value !== null && typeof value === "object" && !Array.isArray(value)
     && "slot" in wrapper && wrapper.optional === true
   ) {
-    const inner = normalizeRefList(wrapper.slot as PromptInterpolation);
+    const inner = normalizeRefList(wrapper.slot);
     if (inner?.[0] === undefined) throw new Error(`${fieldPath}: expected a slot reference`);
     if (!inner[0].startsWith("slot:")) throw new Error(`${fieldPath}: optional() applies to slot refs only`);
     return { ref: inner[0], optional: true };
@@ -238,16 +235,13 @@ function resolvePromptRef(
   return { ref: normalized[0], optional: false };
 }
 
-function promptResource(
-  value: ResourceHandle | RefHandle | {
-    readonly resource: ResourceHandle | RefHandle | string;
-    readonly input?: readonly unknown[];
-  },
-): PromptTemplate {
+function promptResource(value: PromptResourceValue): PromptTemplate {
   const resource = "resource" in (value as object)
     ? (value as { readonly resource: ResourceHandle | RefHandle | string; }).resource
     : value as ResourceHandle | RefHandle;
-  const input = "input" in (value as object) ? (value as { readonly input?: readonly unknown[]; }).input : undefined;
+  const input = "input" in (value as object)
+    ? (value as { readonly input?: PromptFields["input"]; }).input
+    : undefined;
   const resourceRef = resourceSourceRef(resource, "prompt.resource.resource");
   const refs = input === undefined ? [resourceRef] : [resourceRef, ...(normalizeRefList(input) ?? [])];
   return withMeta({ source: resourceRef, input: normalizeRefList(input) }, {

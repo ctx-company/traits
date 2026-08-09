@@ -11,6 +11,18 @@
  * init.
  */
 
+import type { BranchCheckValue } from "../condition.js";
+import type { AgentHandle, ResourceHandle, SequenceHandle, SlotHandle } from "../handles.js";
+import type { MetaDeclaration } from "../meta.js";
+import type {
+  ExhaustionSignalValue,
+  ParallelBranchFailurePolicy,
+  PromptRegistrarOptions,
+  SignalOutputValue,
+} from "../sequence.js";
+import { isThenable } from "./internal.js";
+import type { ForEachRegistrarOptions } from "./registrars.js";
+
 /** Best-effort authoring location captured at a registrar call site. */
 export interface AuthorFrame {
   readonly file: string;
@@ -44,9 +56,9 @@ export function buildError(title: string | undefined, rule: string, frame?: Auth
 
 export type ScopeKind = "root" | "loop" | "when" | "match-arm" | "parallel" | "for-each";
 
-/** One item registered functionally, in registration order. Opaque to `context.ts` — never inspected beyond pass-through. */
+/** One item registered functionally, in registration order. Opaque to `context.ts` beyond its own bookkeeping — every registrar mints a `SequenceHandle`. */
 export interface RegisteredItem {
-  readonly item: unknown;
+  readonly item: SequenceHandle;
   readonly title: string | undefined;
 }
 
@@ -54,19 +66,19 @@ export type LoopExitPolicy = "continue" | "abort";
 
 export interface LoopScopeState {
   /** Once set, everything registered into this loop scope from this point onward — leaf or container — is guarded `not(cond)` (0106 positional lowering). */
-  untilCondition?: unknown;
-  readonly abortIfArms: { readonly title: string; readonly condition: unknown; }[];
+  untilCondition?: BranchCheckValue;
+  readonly abortIfArms: { readonly title: string; readonly condition: BranchCheckValue; }[];
   maxIterationsCalled: boolean;
   maxIterationsValue?: number;
   onExhausted?: LoopExitPolicy;
-  readonly onComplete: unknown[];
-  readonly onAbort: unknown[];
+  readonly onComplete: SignalOutputValue[];
+  readonly onAbort: ExhaustionSignalValue[];
   /** Overrides the loop's own emitted id (0109 F2) — set via `loop.id(...)`. */
   idOverride?: string;
 }
 
 export interface ParallelScopeState {
-  onFailurePolicy?: unknown;
+  onFailurePolicy?: ParallelBranchFailurePolicy;
 }
 
 export interface Scope {
@@ -150,10 +162,6 @@ function popScope(caller: string): Scope {
   return scope;
 }
 
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return typeof value === "object" && value !== null && typeof (value as { then?: unknown; }).then === "function";
-}
-
 /**
  * Runs `callback` inside a new scope, synchronously. Pops the scope in
  * `finally` regardless of how `callback` returns; a callback that returned a
@@ -179,7 +187,7 @@ export function runInScope<T>(
   return { result, scope };
 }
 
-export function registerItem(caller: string, item: unknown, title?: string): void {
+export function registerItem(caller: string, item: SequenceHandle, title?: string): void {
   currentScope(caller).items.push({ item, title });
 }
 
@@ -191,8 +199,13 @@ export function registerItem(caller: string, item: unknown, title?: string): voi
  * guarantees the installation has run before authoring code can call
  * `.prompt`/`.forEach` on a handle.
  */
-type AgentPromptLowering = (agentHandle: unknown, title: string, opts: unknown) => unknown;
-type SlotForEachLowering = (slotHandle: unknown, title: string, opts: unknown, body: unknown) => unknown;
+type AgentPromptLowering = (agentHandle: AgentHandle, title: string, opts: PromptRegistrarOptions) => SequenceHandle;
+type SlotForEachLowering = (
+  slotHandle: SlotHandle,
+  title: string,
+  opts: ForEachRegistrarOptions | undefined,
+  body: (item: SlotHandle) => void,
+) => SequenceHandle;
 
 let agentPromptLowering: AgentPromptLowering | undefined;
 let slotForEachLowering: SlotForEachLowering | undefined;
@@ -205,7 +218,11 @@ export function installSlotForEachLowering(fn: SlotForEachLowering): void {
   slotForEachLowering = fn;
 }
 
-export function dispatchAgentPrompt(agentHandle: unknown, title: string, opts: unknown): unknown {
+export function dispatchAgentPrompt(
+  agentHandle: AgentHandle,
+  title: string,
+  opts: PromptRegistrarOptions,
+): SequenceHandle {
   if (agentPromptLowering === undefined) {
     throw new Error(
       "agent.prompt: the functional layer has not loaded — import \"@ctx-traits/cdk\" before calling .prompt(...)",
@@ -214,7 +231,12 @@ export function dispatchAgentPrompt(agentHandle: unknown, title: string, opts: u
   return agentPromptLowering(agentHandle, title, opts);
 }
 
-export function dispatchSlotForEach(slotHandle: unknown, title: string, opts: unknown, body: unknown): unknown {
+export function dispatchSlotForEach(
+  slotHandle: SlotHandle,
+  title: string,
+  opts: ForEachRegistrarOptions | undefined,
+  body: (item: SlotHandle) => void,
+): SequenceHandle {
   if (slotForEachLowering === undefined) {
     throw new Error(
       "slot.forEach: the functional layer has not loaded — import \"@ctx-traits/cdk\" before calling .forEach(...)",
@@ -245,7 +267,7 @@ export interface FrameMint {
   readonly kind: "resource" | "signal" | "port" | "slot";
   readonly id: string;
   readonly ref: string;
-  readonly declaration: unknown;
+  readonly declaration: MetaDeclaration;
   readonly file: string | undefined;
 }
 
@@ -260,7 +282,7 @@ export interface TraitFrame {
   /** Accumulated across every `useIntent` call, keyed by `IntentSpec` facet name. */
   readonly intent: Record<string, unknown>;
   /** Resource handles passed to `useResource`, in call order. */
-  readonly resources: unknown[];
+  readonly resources: ResourceHandle[];
   /** Every `ctx.input.*` id (kebab-cased) accessed during the trait function's run. */
   readonly inputAccessed: Set<string>;
   /** Every resource/signal/port/slot minted while this frame was active. @see {@link FrameMint} */
@@ -312,7 +334,7 @@ export function currentTraitFrame(caller: string): TraitFrame {
  * leaves no trace. Called by `port.ts`/`slot.ts`/`procedure.ts`'s own
  * builders right after they mint a declaration.
  */
-export function recordTraitMint(kind: FrameMint["kind"], id: string, ref: string, declaration: unknown): void {
+export function recordTraitMint(kind: FrameMint["kind"], id: string, ref: string, declaration: MetaDeclaration): void {
   if (activeTraitFrame === undefined) return;
   activeTraitFrame.mints.push({ kind, id, ref, declaration, file: captureAuthorFrame()?.file });
 }
