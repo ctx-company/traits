@@ -300,6 +300,70 @@ fn read_capped_observed<R: Read>(
     Ok((buf, truncated))
 }
 
+/// Argv sentinel for the fork-free session-detach shim (2026-08-10). A spawn
+/// that needs `setsid` is rewritten as `ctx __ctx-setsid-exec <real argv…>`:
+/// the freshly spawned, still-single-threaded `ctx` calls `setsid()` as an
+/// ordinary syscall and then `exec`s the real argv — same pid, same stdio,
+/// same env, same pgid==pid contract `run_kill` needs. This exists because a
+/// `pre_exec` hook forces Rust's std down the classic `fork()`+`exec()` path,
+/// and `fork()` from the multithreaded `ctx` parent is not safe on macOS: the
+/// child runs libSystem's atfork handlers, and one that finds an os_once gate
+/// held by a thread that no longer exists aborts the child before `exec`
+/// (`_os_once_gate_corruption_abort`; two crash reports 2026-08-10, surfacing
+/// as `git failed: git rev-parse --show-toplevel (no exit code)`). With no
+/// `pre_exec`, std stays on `posix_spawn` and the parent never forks.
+pub const SETSID_EXEC_SENTINEL: &str = "__ctx-setsid-exec";
+
+/// The shim's entry hook: the `ctx` binary's `main` calls this FIRST, before
+/// argument parsing and before anything spawns a thread. A process launched
+/// with [`SETSID_EXEC_SENTINEL`] as its first argument detaches into its own
+/// session and `exec`s the remaining argv; every other invocation returns
+/// immediately. Never returns on the sentinel path.
+pub fn maybe_setsid_exec_shim() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let mut args = std::env::args_os();
+        let _own_binary = args.next();
+        match args.next() {
+            Some(first) if first == std::ffi::OsStr::new(SETSID_EXEC_SENTINEL) => {}
+            _ => return,
+        }
+        let Some(program) = args.next() else {
+            eprintln!("ctx {SETSID_EXEC_SENTINEL}: missing target argv");
+            std::process::exit(2);
+        };
+        // Mirrors the retired pre_exec contract: a setsid failure fails the
+        // spawn instead of silently running attached to the caller's session.
+        // SAFETY: plain syscall on this process's own session identity.
+        if unsafe { libc::setsid() } == -1 {
+            eprintln!(
+                "ctx {SETSID_EXEC_SENTINEL}: setsid failed: {}",
+                std::io::Error::last_os_error()
+            );
+            std::process::exit(71);
+        }
+        let error = std::process::Command::new(&program).args(args).exec();
+        eprintln!(
+            "ctx {SETSID_EXEC_SENTINEL}: cannot execute {}: {error}",
+            std::path::Path::new(&program).display()
+        );
+        std::process::exit(127);
+    }
+}
+
+/// The shim spawn prefix — `Some([current ctx binary, sentinel])` only when
+/// the current executable really is `ctx`. A proof/unit test binary links
+/// this crate but its `main` has no sentinel interception, so routing a spawn
+/// through it would re-run the test suite instead of the target command;
+/// those parents keep the legacy `pre_exec(setsid)` fallback (their spawns
+/// are short-lived and the fork hazard is the long-lived multithreaded `ctx`
+/// process, not libtest runners).
+pub(crate) fn setsid_shim_prefix() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    (exe.file_name()? == std::ffi::OsStr::new("ctx")).then_some(exe)
+}
+
 fn spawn_piped(
     request: &RunRequest<'_>,
     env_overlay: &BTreeMap<String, String>,
@@ -310,8 +374,24 @@ fn spawn_piped(
         });
     }
 
-    let mut command = Command::new(&request.argv[0]);
-    command.args(&request.argv[1..]);
+    let shim = if cfg!(unix) {
+        setsid_shim_prefix()
+    } else {
+        None
+    };
+    let mut command = match shim.as_deref() {
+        Some(shim_exe) => {
+            let mut command = Command::new(shim_exe);
+            command.arg(SETSID_EXEC_SENTINEL);
+            command.args(request.argv);
+            command
+        }
+        None => {
+            let mut command = Command::new(&request.argv[0]);
+            command.args(&request.argv[1..]);
+            command
+        }
+    };
     apply_env_overlay(&mut command, env_overlay);
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
@@ -331,7 +411,8 @@ fn spawn_piped(
         }
         command.current_dir(Utf8Path::new("."));
     }
-    // Own SESSION, not merely an own process group (2026-08-03).
+    // Own SESSION, not merely an own process group (2026-08-03), and since
+    // 2026-08-10 detached WITHOUT forking this process.
     //
     // P551 put every command child in its own process group so a live-pane
     // ctrl-c kill reaches it and anything it forks. That still left the
@@ -343,15 +424,24 @@ fn spawn_piped(
     // 2026-08-03: three concurrent gates sat in state `T` for half an hour,
     // doing nothing, until SIGCONT released them and they finished in
     // seconds; before that the same stall read as a gate timeout and parked
-    // three runs at round 1.
+    // three runs at round 1. `setsid` creates a new session with NO
+    // controlling terminal, so a `/dev/tty` open fails cleanly instead of
+    // stopping the process; the session leader's pgid equals its pid, which
+    // is exactly what `run_kill`'s `kill(-pgid, …)` needs.
     //
-    // `setsid` creates a new session with NO controlling terminal, so a
-    // `/dev/tty` open fails cleanly instead of stopping the process. The
-    // session leader is also a process-group leader whose pgid equals its
-    // pid, which is exactly what `run_kill`'s `kill(-pgid, …)` needs, so
-    // P551's kill path is unchanged.
+    // The 2026-08-10 change is WHERE setsid happens. As a `pre_exec` hook it
+    // forced std down the fork()+exec() path, and fork from this
+    // multithreaded process crashed spawns on macOS (see
+    // SETSID_EXEC_SENTINEL). When the current executable is `ctx`, the spawn
+    // is instead routed through the sentinel shim above — posix_spawn, no
+    // fork, setsid runs as a plain syscall in the single-threaded child
+    // before exec. Only a non-`ctx` parent (a test binary) takes the legacy
+    // pre_exec fallback below. One knowing behavior shift: PATH resolution
+    // of a bare program name now happens in the shim under the CHILD's env
+    // overlay rather than the parent's environment — the overlay is the more
+    // correct source, and no current overlay rewrites PATH.
     #[cfg(unix)]
-    {
+    if shim.is_none() {
         use std::os::unix::process::CommandExt;
         // SAFETY: `setsid` is async-signal-safe and only alters this child's
         // own session/process-group identity between fork and exec.
@@ -663,6 +753,21 @@ pub fn run_bytes_with_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The recursion guard the shim's whole safety rests on: a TEST binary
+    /// (this one) links this crate but its `main` has no sentinel
+    /// interception, so `setsid_shim_prefix` must refuse it — otherwise a
+    /// spawn routed through it would re-execute the test suite instead of
+    /// the target command. Only an executable literally named `ctx` may
+    /// serve as the shim.
+    #[test]
+    fn setsid_shim_prefix_refuses_a_non_ctx_executable() {
+        assert_eq!(
+            setsid_shim_prefix(),
+            None,
+            "a test binary must never be selected as the setsid shim"
+        );
+    }
 
     /// A `Read` implementation that yields a fixed number of bytes and then a
     /// genuine `io::Error`, never EOF — proving [`read_capped`] surfaces a

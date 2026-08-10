@@ -45,7 +45,26 @@ pub fn spawn_detached(
             source: e,
         })?;
 
-    let mut command = Command::new(exe.as_std_path());
+    // Session detach via the fork-free sentinel shim where possible (see
+    // `command::SETSID_EXEC_SENTINEL`): a `pre_exec` hook forces fork()+exec()
+    // and forking the multithreaded dashboard crashed spawned children on
+    // macOS. The shim's fresh single-threaded `ctx` calls setsid then execs
+    // the target, so the child still has no controlling terminal and is
+    // immune to signals delivered to the dashboard's terminal/process group.
+    let shim = if cfg!(unix) {
+        crate::command::setsid_shim_prefix()
+    } else {
+        None
+    };
+    let mut command = match shim.as_deref() {
+        Some(shim_exe) => {
+            let mut command = Command::new(shim_exe);
+            command.arg(crate::command::SETSID_EXEC_SENTINEL);
+            command.arg(exe.as_std_path());
+            command
+        }
+        None => Command::new(exe.as_std_path()),
+    };
     command
         .args(args)
         .current_dir(cwd.as_std_path())
@@ -56,19 +75,20 @@ pub fn spawn_detached(
         command.env(key, value);
     }
 
-    // SAFETY: `setsid` is called in the forked child before `exec`, between
-    // `fork` and `exec` where only async-signal-safe operations are
-    // permitted; `libc::setsid` is async-signal-safe and touches no memory
-    // shared with the parent. This detaches the child into its own session
-    // (and therefore process group) so it has no controlling terminal and is
-    // immune to signals delivered to the dashboard's terminal/process group.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+    #[cfg(unix)]
+    if shim.is_none() {
+        // SAFETY: `setsid` is called in the forked child before `exec`,
+        // between `fork` and `exec` where only async-signal-safe operations
+        // are permitted; `libc::setsid` is async-signal-safe and touches no
+        // memory shared with the parent.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
 
     command
