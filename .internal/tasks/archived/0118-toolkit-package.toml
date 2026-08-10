@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0118"
 title = "`@ctx-traits/toolkit`: the package the others are cut from"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-10"
+origin = "run run-1ee30c320aa41123877c7076c9430a1d5c9262e484cffeb5e64ca8568124531c merged as d2d3429e11d69caf569b77c003968210f8c805ee"
 content = """
 
 

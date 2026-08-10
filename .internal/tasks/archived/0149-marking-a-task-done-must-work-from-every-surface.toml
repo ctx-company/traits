@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0149"
 title = "Marking a task done must work from every surface that offers it"
-status = "ready"
+status = "done"
 raised = "2026-08-09"
+closed = "2026-08-10"
+origin = "run run-93db147109c43cf59331b1c953c8c83a4e3b4028d59ee2d6396a4a97dbb75201 merged as dc2b45c20791f188f8c9fa3ae6b28120bd6c6341"
 content = """
 
 

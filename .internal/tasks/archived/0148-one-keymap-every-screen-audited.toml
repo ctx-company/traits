@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0148"
 title = "One keymap: every dashboard command, hint and modal audited for consistency"
-status = "ready"
+status = "done"
 raised = "2026-08-07"
+closed = "2026-08-10"
+origin = "run run-4db3a6ffa65dedadc492219804efc4cc2060858bf3ddebe6cf4c05fa7a052758 merged as 32af9f9bf2a360d7cddfad80757b3f043d746bdb"
 content = """
 
 

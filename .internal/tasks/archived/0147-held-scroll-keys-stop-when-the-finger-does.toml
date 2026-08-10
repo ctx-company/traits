@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0147"
 title = "Held scroll keys stop when the finger does: coalesce input on TASKS and MERGES"
-status = "ready"
+status = "done"
 raised = "2026-08-07"
+closed = "2026-08-10"
+origin = "run run-c1d59ad7df7a59d9de8dc875cf5114d9f5542d9bd333be316a2b05be78defc9e merged as 66b29dc31f8a52e1e827397e573f4079ec586f4a"
 content = """
 
 

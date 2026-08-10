@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0144"
 title = "A task can close itself — but only when its done-conditions are checks a machine can run"
-status = "ready"
+status = "done"
 raised = "2026-08-07"
+closed = "2026-08-10"
+origin = "run run-1248f6cd230a4dcbd19dc9a5707927d16d1dfa9264cf53300e9c0d29cccab616 merged as f52bc1301c4092c63a37b84c1fba8577333ebd77"
 content = """
 
 

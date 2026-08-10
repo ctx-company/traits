@@ -1,8 +1,9 @@
 schema-version = "0.2"
 key = "0124"
 title = "`explain` becomes LLM-assisted like refine; deterministic stays default"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-10"
 content = """
 
 

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0146"
 title = "The attached view's current activity is narrated text, never raw stream JSON"
-status = "ready"
+status = "done"
 raised = "2026-08-07"
+closed = "2026-08-10"
+origin = "run run-ed3d9c05bc52533b33954210f4b5946016fd87e05c673a1510b977e4d5c90b34 merged as e65eec89180da52d86ce4f46a9ea78c443e737ed"
 content = """
 
 

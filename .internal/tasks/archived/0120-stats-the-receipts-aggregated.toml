@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0120"
 title = "`ctx traits stats`: the receipts, aggregated"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-10"
+origin = "run run-4db7f7b93dc3c08ae8bc1931954cd5eb034731a4abfc807ee00e37a4e1091956 merged as 4dbd862ec161fd1cc161571e5839563baa2fe8f9"
 content = """
 
 

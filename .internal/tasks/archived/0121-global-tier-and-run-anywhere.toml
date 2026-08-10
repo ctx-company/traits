@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0121"
 title = "Trait distribution: global tier + run-anywhere"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-10"
+origin = "run run-8e8f49cc6fa4431a0fa9d309690a7623fda92912b8354b961fe957854d60c2b5 merged as 770b5cf196e50582835a31805fedad917c7bfa25"
 content = """
 
 
