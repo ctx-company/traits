@@ -63,17 +63,17 @@ describe("defineConfig", () => {
 });
 
 describe("closed shapes reject typos and bad enum values at compile time", () => {
-  it("rejects an unknown top-level key", () => {
+  it("rejects an unrecognized top-level key", () => {
     defineConfig({
-      // @ts-expect-error unknown key is not part of CtxConfig
+      // @ts-expect-error unrecognized key is not part of CtxConfig
       unknownTopLevelKey: true,
     });
   });
 
-  it("rejects an unknown key inside a nested table", () => {
+  it("rejects an unrecognized key inside a nested table", () => {
     defineConfig({
       run: {
-        // @ts-expect-error unknown key is not part of RunTable
+        // @ts-expect-error unrecognized key is not part of RunTable
         notARealField: 1,
       },
     });
