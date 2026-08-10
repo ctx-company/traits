@@ -833,6 +833,178 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
     );
 }
 
+/// Pull, not push (2026-08-10, run-847b3945): the deep prompt names where
+/// the conflict lives — working-tree markers plus `git show :N:` stage
+/// pointers — instead of inlining every stage's whole file as base64. A
+/// ~300KB conflicted file used to produce a ~1.2MB prompt; it must now stay
+/// small, and the dispatch evidence must account for the prompt's size.
+#[test]
+fn deep_prompt_references_stages_instead_of_inlining_file_bytes() {
+    let scratch = ScratchRoot::new("p420-deep-prompt-by-reference");
+    let repo = scratch.home().join("repo");
+    let captured = repo.join("captured-prompt.txt");
+    let captured_text = captured.to_string_lossy().to_string();
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        // A large shared file: ~300KB of distinct lines, so any regression
+        // back to inline stage bytes trips the size bound loudly.
+        let body: String = (1..=12_000)
+            .map(|n| format!("shared line {n} with some padding text\n"))
+            .collect();
+        fs::write(repo.join("big-shared.txt"), body).unwrap();
+    });
+    // A merger that captures its prompt (the last argv) and refuses: the
+    // park path needs no conflict resolution machinery, and the captured
+    // prompt is what this proof is actually about.
+    let script = repo.join("capture-merger.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then echo merger-fixture-1.0; exit 0; fi\n\
+             eval last=\\${{$#}}\nprintf %s \"$last\" > '{captured_text}'\n\
+             printf '%s\\n' '{{\"result\":\"refuse\",\"reason\":\"fixture refuses, naming refuse-regression\",\"decisions\":[]}}'\n"
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let script_text = script
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    fs::write(
+        repo.join("ctx.toml"),
+        format!(
+            r#"schema-version = "0.2"
+
+[harness.capture]
+kind = "custom"
+bin = "{script_text}"
+transports = ["cli"]
+version-probe = ["--probe"]
+
+[harness.capture.cli]
+argv = []
+output = "raw-json"
+model-flag = "--model"
+reasoning-effort-flag = "--reasoning-effort"
+
+[agent.role.merger]
+harness = "capture"
+model = "fixture"
+reasoning-effort = "low"
+
+[worktree.confinement]
+sandbox = false
+"#
+        ),
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "capture merger fixture"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+
+    let run_output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&run_output, 0);
+    let run = value_json(&run_output);
+    let run_id = run["value"]["session"]["run-id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let worktree = Path::new(
+        run["value"]["session"]["provenance"]["worktree"]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    // Same line edited differently on both sides: a genuine rebase conflict.
+    let conflict_line = |side: &str| -> String {
+        (1..=12_000)
+            .map(|n| {
+                if n == 6_000 {
+                    format!("shared line {n} rewritten by {side}\n")
+                } else {
+                    format!("shared line {n} with some padding text\n")
+                }
+            })
+            .collect()
+    };
+    fs::write(worktree.join("big-shared.txt"), conflict_line("the run")).unwrap();
+    Command::new("git")
+        .args(["add", "big-shared.txt"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "run side"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    fs::write(repo.join("big-shared.txt"), conflict_line("main")).unwrap();
+    Command::new("git")
+        .args(["add", "big-shared.txt"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "main side"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+
+    let output = run_ctx(
+        &["traits", "merge", &run_id, "--deep", "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&output, EXIT_MERGE_PARKED);
+
+    let prompt = fs::read_to_string(&captured).expect("the merger captured its prompt");
+    assert!(
+        prompt.len() < 20_000,
+        "the deep prompt must stay small for a ~300KB conflicted file, got {} bytes",
+        prompt.len()
+    );
+    assert!(
+        prompt.contains("git show :1:") && prompt.contains("git show :3:"),
+        "the prompt must point at the index stages: {prompt}"
+    );
+    assert!(
+        prompt.contains("hunk:") && prompt.contains("big-shared.txt"),
+        "the prompt must list the conflicted path with hunk ids: {prompt}"
+    );
+    assert!(
+        prompt.contains("stages: ancestor present"),
+        "the prompt must state per-stage presence with byte counts: {prompt}"
+    );
+    let ledger_text = fs::read_to_string(run["value"]["session-path"].as_str().unwrap()).unwrap();
+    assert!(
+        ledger_text.contains("merger-prompt-bytes="),
+        "dispatch evidence must account for the prompt size: {ledger_text}"
+    );
+}
+
 /// Owner ruling 2026-08-10 (run-847b3945): a merger DISPATCH failure — the
 /// call never produced a verdict — with a conflict-free rebase lands
 /// mechanically behind the declared gate instead of parking. The fixture

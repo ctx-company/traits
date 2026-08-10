@@ -3671,6 +3671,16 @@ fn dispatch_merger(call: MergerCall<'_>) -> crate::Result<(MergerDecision, Vec<S
         .and_then(|payloads| payloads.spawn_sandbox.clone());
 
     let mut call_evidence: Vec<String> = Vec::new();
+    // 2026-08-10 (run-847b3945): the prompt's own size accounting, so a
+    // bloated composition names itself in the park/landed evidence instead
+    // of being excavated from a debug trace. `paths`/`hunks` count the
+    // conflict surface this call was asked to adjudicate.
+    call_evidence.push(format!(
+        "merger-prompt-bytes={} paths={} hunks={}",
+        base_prompt.len(),
+        call.conflicted_paths.len(),
+        hunks.len(),
+    ));
     // P475: the resolved per-call budget this dispatch actually ran under,
     // and whether it came from the seat's own declared budget or the
     // built-in default — the honest-timeout-park text above names the same
@@ -4105,13 +4115,29 @@ fn deep_merger_system_prompt() -> String {
         .to_string()
 }
 
-/// Build a P420 `--deep` merger prompt: exact base64 conflict-stage bytes and
-/// per-path `main`-side history for every currently conflicted path (see
-/// [`ConflictBlobs`](ctx_traits_io::worktree::ConflictBlobs)'s rebase
-/// stage-to-side labeling), the same accepted-slot/final-output run context
-/// [`merger_prompt`] gives the standard merger, and the five doctrines
-/// verbatim in operational form. Returns the prompt text and the
-/// deterministic per-path hunk ids the reply's receipt must cover.
+/// Build a P420 `--deep` merger prompt: per-path hunk ids with their
+/// working-tree conflict-marker line ranges, retrieval pointers for the three
+/// conflict stages, per-path `main`-side history, the same
+/// accepted-slot/final-output run context [`merger_prompt`] gives the
+/// standard merger, and the five doctrines verbatim in operational form.
+/// Returns the prompt text and the deterministic per-path hunk ids the
+/// reply's receipt must cover.
+///
+/// Pull, not push (2026-08-10, run-847b3945): this prompt used to inline
+/// every conflicted file's ENTIRE stage-1/2/3 content as base64 — one
+/// 480KB source file became a 1.9MB prompt (~500K tokens), which first
+/// E2BIG-killed the dispatch and, once transported by reference, drowned
+/// the model twice into receipt-invalid parks. The merger is an agent
+/// standing INSIDE the conflicted worktree: the working-tree file already
+/// carries git's interleaved conflict markers (exactly what
+/// `conflict_marker_regions` derives the hunk ids from), and the full
+/// stage contents stay addressable via `git show :1:/:2:/:3:` from the
+/// still-conflicted index, immutable for the whole call (ctx alone runs
+/// `rebase --continue`, after the receipt). So the prompt names where
+/// everything is and the model reads what it needs — the same
+/// by-reference doctrine resources and the task board already follow.
+/// The stage BYTES are still read here — `deep_hunk_id` derives the
+/// byte-identical hunk ids from them — they just never enter the prompt.
 fn build_deep_prompt(call: &MergerCall<'_>) -> crate::Result<(String, Vec<DeepHunk>)> {
     let mut sections = vec![
         format!("run-id: {}", call.session.run_id.as_str()),
@@ -4129,10 +4155,15 @@ fn build_deep_prompt(call: &MergerCall<'_>) -> crate::Result<(String, Vec<DeepHu
         ));
     } else {
         sections.push(
-            "Conflicted paths (currently marked unmerged in the worktree), each with exact \
-             whole-file conflict-stage bytes and one or more listed hunk ids (one per distinct \
-             conflict region in the file, or a single whole-file hunk when no region is \
-             separately identified):"
+            "Conflicted paths (currently marked unmerged in the worktree), each with one or \
+             more listed hunk ids (one per distinct conflict region in the file, or a single \
+             whole-file hunk when no region is separately identified). The working-tree file \
+             at each path contains git's interleaved conflict markers \
+             (<<<<<<</=======/>>>>>>>) for exactly those regions — read it with your file \
+             tools. For any full pre-conflict version, read the index stages with git: \
+             `git show :1:<path>` (common ancestor), `git show :2:<path>` (the branch being \
+             rebased onto), `git show :3:<path>` (this run branch's replayed content); a \
+             stage marked absent below has no content on that side (add/delete conflict):"
                 .to_string(),
         );
         let mut history_warnings = ctx_traits_io::worktree::RetryWarnings::new();
@@ -4154,18 +4185,11 @@ fn build_deep_prompt(call: &MergerCall<'_>) -> crate::Result<(String, Vec<DeepHu
             };
             sections.push(format!("- path: {path}"));
             sections.push(format!(
-                "  stage-1 common-ancestor (base64, absent for an add conflict): {}",
-                blob_field(blobs.base.as_deref())
-            ));
-            sections.push(format!(
-                "  stage-2 {}-side (the branch being rebased ONTO; base64, absent for a {}-side delete): {}",
+                "  stages: ancestor {}, {}-side {}, branch-side {}",
+                stage_presence(blobs.base.as_deref()),
                 call.default_branch,
-                call.default_branch,
-                blob_field(blobs.main_side.as_deref())
-            ));
-            sections.push(format!(
-                "  stage-3 branch-side (the run branch's own replayed commit content; base64, absent for a branch-side delete): {}",
-                blob_field(blobs.branch_side.as_deref())
+                stage_presence(blobs.main_side.as_deref()),
+                stage_presence(blobs.branch_side.as_deref()),
             ));
             for (region_index, region) in region_specs.into_iter().enumerate() {
                 let hunk_id = deep_hunk_id(
@@ -4210,6 +4234,17 @@ fn build_deep_prompt(call: &MergerCall<'_>) -> crate::Result<(String, Vec<DeepHu
 fn blob_field(bytes: Option<&[u8]>) -> String {
     match bytes {
         Some(bytes) => ctx_traits_io::worktree::base64_encode(bytes),
+        None => "<absent>".to_string(),
+    }
+}
+
+/// One stage's presence line for the pull-style deep prompt: byte count when
+/// the stage exists (so the model can gauge whether a full `git show` read is
+/// worth it before issuing one), `<absent>` for the missing side of an
+/// add/delete conflict.
+fn stage_presence(bytes: Option<&[u8]>) -> String {
+    match bytes {
+        Some(bytes) => format!("present ({} bytes)", bytes.len()),
         None => "<absent>".to_string(),
     }
 }
