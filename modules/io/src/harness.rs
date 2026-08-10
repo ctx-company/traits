@@ -243,6 +243,13 @@ pub struct HarnessRunOutcome {
     #[serde(default)]
     pub killed: bool,
     pub duration_ms: u128,
+    /// How the prompt reached the harness (2026-08-10): `"arg"`, `"stdin"`,
+    /// or `"arg-spilled sha256:<digest> bytes=<n>"` when the prompt exceeded
+    /// the argv budget and was delivered as a file reference (see
+    /// [`spill_oversized_prompt`]). `None` on outcomes persisted before this
+    /// field existed and on transports where delivery has no channel choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_delivery: Option<String>,
 }
 
 #[derive(Debug)]
@@ -276,26 +283,89 @@ pub struct HarnessSession {
 /// cannot regress a dispatch that previously worked anywhere.
 const ARGV_PROMPT_BUDGET_BYTES: usize = 128 * 1024;
 
+/// An oversized `Arg` prompt spilled to a file for the child's lifetime:
+/// holds the path so `Drop` removes it when the dispatch — success, failure,
+/// or timeout — returns. The stub delivered on argv instead carries the
+/// path, the content digest, and a hard read-first instruction.
+struct SpilledPrompt {
+    path: std::path::PathBuf,
+    stub: String,
+    evidence: String,
+}
+
+impl Drop for SpilledPrompt {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Deliver an over-budget `Arg` prompt by reference instead of refusing
+/// (owner ruling 2026-08-10: prompt size must never fail a dispatch — the
+/// old typed refusal here still made authors think about argv budgets, and
+/// its E2BIG-adjacent ancestor parked a deep merge). The full prompt is
+/// written to a unique file under the temp dir (readable under the P480
+/// sandbox, which denies only writes) and the argv carries a short stub
+/// naming the path, the sha256, and the byte count, instructing the model to
+/// read the file completely before acting. Provenance is unchanged: frame
+/// prompt digests are recorded against the real prompt at the ledger layer;
+/// this only changes the transport channel, and the outcome's
+/// `prompt_delivery` records that it happened.
+fn spill_oversized_prompt(prompt: &str) -> crate::Result<SpilledPrompt> {
+    let digest = ctx_traits_core::digest::source_digest(prompt);
+    let dir = std::env::temp_dir().join("ctx-prompt-spill");
+    std::fs::create_dir_all(&dir).map_err(|source| crate::environment::Error::Filesystem {
+        path: dir.display().to_string(),
+        source,
+    })?;
+    let digest_text = digest.as_str();
+    let short = digest_text
+        .trim_start_matches("sha256:")
+        .get(..16)
+        .unwrap_or("prompt");
+    let path = dir.join(format!("prompt-{short}-{}.md", std::process::id()));
+    std::fs::write(&path, prompt).map_err(|source| crate::environment::Error::Filesystem {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let stub = format!(
+        "Your full prompt is {} bytes — too large for argv delivery — and has been written to:\n\
+         {}\n\
+         ({digest_text})\n\
+         Read that file completely with your file tools before doing anything else. Its contents \
+         are your entire instructions for this call and take precedence over everything else in \
+         this message. Do not modify or delete the file.",
+        prompt.len(),
+        path.display(),
+    );
+    let evidence = format!("arg-spilled {digest_text} bytes={}", prompt.len());
+    Ok(SpilledPrompt {
+        path,
+        stub,
+        evidence,
+    })
+}
+
 pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
     validate_argv(&request.argv)?;
-    if matches!(request.prompt_delivery, PromptDelivery::Arg)
+    let spilled = if matches!(request.prompt_delivery, PromptDelivery::Arg)
         && request.prompt.len() > ARGV_PROMPT_BUDGET_BYTES
     {
-        return Err(crate::Error::Usage {
-            message: format!(
-                "refusing to dispatch {}: prompt is {} bytes, over the {}-byte argv budget \
-                 (would risk \"Argument list too long\"); the full prompt is in the debug \
-                 trace, not repeated here",
-                request.argv[0],
-                request.prompt.len(),
-                ARGV_PROMPT_BUDGET_BYTES,
-            ),
-        });
-    }
+        Some(spill_oversized_prompt(&request.prompt)?)
+    } else {
+        None
+    };
+    let prompt_delivery_evidence = match (&request.prompt_delivery, spilled.as_ref()) {
+        (_, Some(spill)) => spill.evidence.clone(),
+        (PromptDelivery::Arg, None) => "arg".to_string(),
+        (PromptDelivery::Stdin, None) => "stdin".to_string(),
+    };
 
     let mut argv = request.argv.clone();
     if matches!(request.prompt_delivery, PromptDelivery::Arg) {
-        argv.push(request.prompt.clone());
+        argv.push(match spilled.as_ref() {
+            Some(spill) => spill.stub.clone(),
+            None => request.prompt.clone(),
+        });
     }
     let spawn_argv = sandboxed_argv(&argv, request.sandbox.as_ref());
     let mut command = Command::new(&spawn_argv[0]);
@@ -447,6 +517,9 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
             timed_out: false,
             message: "stderr capture thread panicked".to_string(),
         })?;
+    // Keeps the spill file alive until the child has fully exited; dropped
+    // here, removing it, on every path out.
+    drop(spilled);
     Ok(HarnessRunOutcome {
         argv,
         exit_code: status.code(),
@@ -458,6 +531,7 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
         idle_timed_out,
         killed,
         duration_ms: started.elapsed().as_millis(),
+        prompt_delivery: Some(prompt_delivery_evidence),
     })
 }
 
@@ -705,6 +779,9 @@ impl HarnessSession {
             idle_timed_out,
             killed: crate::run_kill::was_killed(),
             duration_ms: started.elapsed().as_millis(),
+            // Persistent sessions write the prompt over the session's own
+            // stdin channel; there is no per-call channel choice to record.
+            prompt_delivery: None,
         })
     }
 
@@ -1198,14 +1275,81 @@ mod output_token_counter_tests {
         "x".repeat(super::ARGV_PROMPT_BUDGET_BYTES + 1)
     }
 
+    /// Owner ruling 2026-08-10: prompt size never fails a dispatch. An
+    /// over-budget Arg prompt spills to a file and the child receives a stub
+    /// naming the path and digest; the child can read the full prompt from
+    /// that path while it runs, and the file is gone once run() returns.
     #[test]
-    fn oversized_arg_prompt_refuses_before_spawn() {
+    fn oversized_arg_prompt_spills_to_a_file_the_child_can_read() {
         let prompt = oversized_prompt();
-        let error = super::run(HarnessRunRequest {
-            argv: vec!["does-not-matter".to_string()],
+        let digest = ctx_traits_core::digest::source_digest(&prompt);
+        // The stub's second line is the bare spill path; cat it back out, so
+        // stdout proves the child could read the full prompt by reference.
+        let script = r#"p=$(printf '%s\n' "$1" | sed -n 2p); cat "$p""#;
+        let outcome = super::run(HarnessRunRequest {
+            argv: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                "sh".to_string(),
+            ],
             env_overlay: BTreeMap::new(),
             env_remove: Vec::new(),
             prompt: prompt.clone(),
+            prompt_delivery: PromptDelivery::Arg,
+            timeout_ms: 10_000,
+            idle_timeout_ms: None,
+            capture_limit: 2 * super::ARGV_PROMPT_BUDGET_BYTES,
+            stream: false,
+            stdout_observer: None,
+            tick_observer: None,
+            exec_dir: None,
+            sandbox: None,
+        })
+        .expect("an over-budget argv prompt must dispatch via the spill file");
+        assert_eq!(outcome.exit_code, Some(0), "{}", outcome.stderr);
+        assert_eq!(
+            outcome.stdout, prompt,
+            "the child must read the full prompt back from the spill path"
+        );
+        let delivery = outcome.prompt_delivery.as_deref().unwrap_or_default();
+        assert!(
+            delivery.starts_with("arg-spilled sha256:")
+                && delivery.contains(&format!("bytes={}", prompt.len())),
+            "delivery evidence must name the spill: {delivery}"
+        );
+        // The spill file is removed once the dispatch returns.
+        let spill_dir = std::env::temp_dir().join("ctx-prompt-spill");
+        let digest_prefix = digest
+            .as_str()
+            .trim_start_matches("sha256:")
+            .get(..16)
+            .unwrap()
+            .to_string();
+        let leftover = std::fs::read_dir(&spill_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.file_name().to_string_lossy().contains(&digest_prefix))
+            })
+            .unwrap_or(false);
+        assert!(!leftover, "the spill file must be deleted after the run");
+    }
+
+    /// A right-sized Arg prompt keeps byte-identical delivery — the spill
+    /// path only ever engages above the budget.
+    #[test]
+    fn right_sized_arg_prompt_is_delivered_verbatim() {
+        let outcome = super::run(HarnessRunRequest {
+            argv: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf %s \"$1\"".to_string(),
+                "sh".to_string(),
+            ],
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            prompt: "small prompt body".to_string(),
             prompt_delivery: PromptDelivery::Arg,
             timeout_ms: 5_000,
             idle_timeout_ms: None,
@@ -1216,12 +1360,9 @@ mod output_token_counter_tests {
             exec_dir: None,
             sandbox: None,
         })
-        .expect_err("an over-budget argv prompt must refuse before spawn");
-        let message = error.to_string();
-        assert!(message.contains("does-not-matter"), "{message}");
-        assert!(message.contains(&(prompt.len()).to_string()), "{message}");
-        assert!(!message.contains(&prompt), "{message}");
-        assert!(!message.contains("os error 7"), "{message}");
+        .expect("a small argv prompt dispatches directly");
+        assert_eq!(outcome.stdout, "small prompt body");
+        assert_eq!(outcome.prompt_delivery.as_deref(), Some("arg"));
     }
 
     #[test]
