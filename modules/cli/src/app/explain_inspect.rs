@@ -18,6 +18,11 @@ pub(crate) struct ExplainInputs<'a> {
     pub(crate) trait_id: Option<&'a str>,
     pub(crate) source_map: Option<&'a str>,
     pub(crate) verbose: bool,
+    pub(crate) llm_assisted: bool,
+    pub(crate) candidate_path: Option<&'a str>,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) run_profile: Option<&'a str>,
+    pub(crate) assignments: &'a [String],
 }
 
 pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandOutput<()>> {
@@ -114,15 +119,26 @@ pub(crate) fn handle_explain(input: ExplainInputs<'_>) -> crate::Result<CommandO
     Ok(CommandOutput::new(()))
 }
 
-fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOutput<()>> {
-    if input.trait_files.len() != 1 {
-        return Err(crate::Error::Command {
-            message: "explain --scaffold requires exactly one --file".to_string(),
-        });
-    }
-    let file = &input.trait_files[0];
+/// Deterministic evidence shared by every `explain --scaffold` path: the
+/// rebased source map, the check receipt, and the receipt-anchored scaffold
+/// built from them. The deterministic path, the `--llm-assisted` path, and
+/// the dashboard's `explain-trait` runner all build this the same way and
+/// must never drift from one another (task 0124).
+pub(crate) struct ExplainEvidence {
+    pub(crate) scaffold: ctx_traits_core::scaffold::ExplainScaffold,
+    pub(crate) check_report: ctx_traits_core::check::CheckReport,
+    pub(crate) trait_ref: ctx_traits_core::r#trait::Trait,
+    pub(crate) source_digest: ctx_traits_core::digest::Digest,
+    pub(crate) source_map: ctx_traits_core::source_map::SourceMap,
+    pub(crate) map_path: camino::Utf8PathBuf,
+}
+
+pub(crate) fn build_explain_evidence(
+    file: &str,
+    source_map_arg: Option<&str>,
+) -> crate::Result<ExplainEvidence> {
     let trait_path = camino::Utf8Path::new(file);
-    let map_path = match input.source_map {
+    let map_path = match source_map_arg {
         Some(path) => camino::Utf8Path::new(path).to_path_buf(),
         None => crate::app::cdk_build::package_source_map(trait_path)?,
     };
@@ -152,31 +168,81 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
     let scaffold =
         ctx_traits_core::scaffold::build_explain_scaffold(&check_report, &trait_ref, &source_map)?;
     scaffold.validate(&source_map)?;
-    let candidate = ctx_traits_core::assist::plan_deterministic_boundary(
-        ctx_traits_core::assist::BoundaryRequest {
-            operation: ctx_traits_core::assist::Operation::Explain,
-            source_trait_ids: vec![trait_ref.id.as_str().to_string()],
-            source_paths: vec![file.to_string()],
-            source_digests: vec![source_digest],
-            user_request: "deterministic receipt-grounded explanation".to_string(),
-            model: None,
-            target_path: "advisory-no-write-target".to_string(),
-            provider_available: false,
-            context: serde_json::json!({ "source-map": source_map }),
-        },
-    )?;
-    let raw = serde_json::to_string(&scaffold)
-        .map_err(|error| crate::Error::json("serialize explain scaffold", error))?;
-    let evaluation =
-        ctx_traits_core::assist::evaluate_supplied_explain_scaffold(candidate, &raw, &source_map);
-    let mut candidate =
-        ctx_traits_core::assist::attach_check_report(evaluation.candidate, check_report);
-    if candidate.gate_summary.all_passed() {
-        candidate = ctx_traits_core::assist::with_context_evidence(
-            candidate,
-            serde_json::json!({ "explain-scaffold": scaffold }),
-        );
+    Ok(ExplainEvidence {
+        scaffold,
+        check_report,
+        trait_ref,
+        source_digest,
+        source_map,
+        map_path,
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct ExplainAssistContext<'a> {
+    trait_id: &'a str,
+    receipt_digest: &'a str,
+    scaffold: &'a ctx_traits_core::scaffold::ExplainScaffold,
+}
+
+fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOutput<()>> {
+    if input.trait_files.len() != 1 {
+        return Err(crate::Error::Command {
+            message: "explain --scaffold requires exactly one --file".to_string(),
+        });
     }
+    let file = &input.trait_files[0];
+    let ExplainEvidence {
+        scaffold,
+        check_report,
+        trait_ref,
+        source_digest,
+        source_map,
+        map_path,
+    } = build_explain_evidence(file, input.source_map)?;
+
+    let candidate = if input.llm_assisted {
+        handle_explain_llm_assisted(
+            &input,
+            file,
+            &scaffold,
+            check_report.clone(),
+            &trait_ref,
+            &source_digest,
+            &source_map,
+        )?
+    } else {
+        let boundary_candidate = ctx_traits_core::assist::plan_deterministic_boundary(
+            ctx_traits_core::assist::BoundaryRequest {
+                operation: ctx_traits_core::assist::Operation::Explain,
+                source_trait_ids: vec![trait_ref.id.as_str().to_string()],
+                source_paths: vec![file.to_string()],
+                source_digests: vec![source_digest],
+                user_request: "deterministic receipt-grounded explanation".to_string(),
+                model: None,
+                target_path: "advisory-no-write-target".to_string(),
+                provider_available: false,
+                context: serde_json::json!({ "source-map": source_map }),
+            },
+        )?;
+        let raw = serde_json::to_string(&scaffold)
+            .map_err(|error| crate::Error::json("serialize explain scaffold", error))?;
+        let evaluation = ctx_traits_core::assist::evaluate_supplied_explain_scaffold(
+            boundary_candidate,
+            &raw,
+            &source_map,
+        );
+        let mut candidate =
+            ctx_traits_core::assist::attach_check_report(evaluation.candidate, check_report);
+        if candidate.gate_summary.all_passed() {
+            candidate = ctx_traits_core::assist::with_context_evidence(
+                candidate,
+                serde_json::json!({ "explain-scaffold": scaffold }),
+            );
+        }
+        candidate
+    };
 
     use crate::app::presentation::{
         HumanOutputMode, OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human,
@@ -242,6 +308,121 @@ fn handle_explain_scaffold(input: ExplainInputs<'_>) -> crate::Result<CommandOut
     }
 
     Ok(CommandOutput::new(()))
+}
+
+/// `--llm-assisted` path: run `explain-trait` (or read `--candidate`) to
+/// narrate the same deterministic scaffold every other path builds, then
+/// gate it through `explain`'s own receipt-grounding gate
+/// (`evaluate_supplied_explain_scaffold`) plus an evidence-equality check —
+/// the narrator may add `explanation`, never alter a fact, anchor, or
+/// section (Watch: "narrates, never invents"). Always returns a `Candidate`,
+/// blocked or not, so the caller's single print/gate-check path handles
+/// every outcome uniformly, exactly like the deterministic branch.
+#[allow(clippy::too_many_arguments)]
+fn handle_explain_llm_assisted(
+    input: &ExplainInputs<'_>,
+    file: &str,
+    scaffold: &ctx_traits_core::scaffold::ExplainScaffold,
+    check_report: ctx_traits_core::check::CheckReport,
+    trait_ref: &ctx_traits_core::r#trait::Trait,
+    source_digest: &ctx_traits_core::digest::Digest,
+    source_map: &ctx_traits_core::source_map::SourceMap,
+) -> crate::Result<ctx_traits_core::assist::Candidate> {
+    let trait_id = trait_ref.id.as_str();
+    let boundary_candidate =
+        ctx_traits_core::assist::plan_assist_boundary(ctx_traits_core::assist::BoundaryRequest {
+            operation: ctx_traits_core::assist::Operation::Explain,
+            source_trait_ids: vec![trait_id.to_string()],
+            source_paths: vec![file.to_string()],
+            source_digests: vec![source_digest.clone()],
+            user_request: "receipt-grounded narrated explanation".to_string(),
+            model: input.model.map(str::to_string),
+            target_path: "advisory-no-write-target".to_string(),
+            provider_available: input.candidate_path.is_none(),
+            context: serde_json::to_value(ExplainAssistContext {
+                trait_id,
+                receipt_digest: scaffold.receipt_digest.as_str(),
+                scaffold,
+            })
+            .map_err(|error| crate::Error::json("serialize explain assist context", error))?,
+        })?;
+
+    let raw = match input.candidate_path {
+        Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
+        None => {
+            let run_profile_document = input
+                .run_profile
+                .map(camino::Utf8Path::new)
+                .map(ctx_traits_io::harness_config::load_run_profile_document)
+                .transpose()?;
+            let scaffold_text = serde_json::to_string(scaffold)
+                .map_err(|error| crate::Error::json("serialize explain scaffold input", error))?;
+            match crate::app::generate::run_builtin_trait(
+                "explain-trait",
+                vec![
+                    crate::app::generate::runtime_input("source-trait-id", trait_id),
+                    crate::app::generate::runtime_input(
+                        "receipt-digest",
+                        scaffold.receipt_digest.as_str(),
+                    ),
+                    crate::app::generate::runtime_input("scaffold", scaffold_text),
+                ],
+                input.assignments,
+                input.model,
+                run_profile_document.as_ref(),
+            ) {
+                Ok(outcome) => outcome.output,
+                Err(error) => {
+                    let mut candidate = boundary_candidate;
+                    candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+                    candidate.warnings.push(error.to_string());
+                    return Ok(candidate);
+                }
+            }
+        }
+    };
+
+    let evaluation = ctx_traits_core::assist::evaluate_supplied_explain_scaffold(
+        boundary_candidate,
+        &raw,
+        source_map,
+    );
+    let mut candidate = evaluation.candidate;
+    let Some(narrated) = evaluation.scaffold else {
+        // `evaluate_supplied_explain_scaffold` already blocked `candidate`
+        // and recorded a diagnostic/warning for the parse/normalize/audit
+        // failure; nothing further to add.
+        return Ok(candidate);
+    };
+    if narrated
+        .explanation
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+        candidate
+            .warnings
+            .push("explain narration explanation must not be empty".to_string());
+        return Ok(candidate);
+    }
+    if !narrated.evidence_matches(scaffold) {
+        candidate.status = ctx_traits_core::assist::CandidateStatus::Blocked;
+        candidate
+            .warnings
+            .push("explain narration altered the deterministic evidence".to_string());
+        return Ok(candidate);
+    }
+
+    candidate = ctx_traits_core::assist::attach_check_report(candidate, check_report);
+    if candidate.gate_summary.all_passed() {
+        candidate = ctx_traits_core::assist::with_context_evidence(
+            candidate,
+            serde_json::json!({ "explain-scaffold": narrated }),
+        );
+    }
+    Ok(candidate)
 }
 
 fn activation_capability_reports() -> Vec<ctx_traits_core::response::CapabilityReport> {

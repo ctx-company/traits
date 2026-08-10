@@ -34,6 +34,7 @@ fn main() -> ExitCode {
             Some("scribe") => role_scribe(),
             Some("generator") => role_generator(args.next()),
             Some("refiner") => role_refiner(args.next()),
+            Some("explainer") => role_explainer(args.next()),
             other => {
                 eprintln!("ctx-fixture-agent: unknown --role {other:?}");
                 ExitCode::FAILURE
@@ -166,6 +167,46 @@ fn role_refiner(prompt: Option<String>) -> ExitCode {
         .unwrap_or_else(|| "candidate".to_string());
     println!("{{\"{field}\":{}}}", invalid_candidate_json());
     ExitCode::SUCCESS
+}
+
+/// `explain-trait`'s single narration step (task 0124): echoes the
+/// deterministic scaffold embedded in the compiled prompt verbatim, adding
+/// only a fixed advisory `explanation` string, so the CLI's grounding gate
+/// (`evidence_matches`) sees an unaltered echo and the run converges to a
+/// gated narrated explanation without a live provider.
+fn role_explainer(prompt: Option<String>) -> ExitCode {
+    let prompt = prompt.unwrap_or_default();
+    let field = requested_output_field(&prompt).unwrap_or_else(|| "explain-trait".to_string());
+    // The compiled prompt reindents every line of interpolated multi-line
+    // template text (task 0046: prompt wrap never dedents), so the markers'
+    // surrounding newlines carry extra leading whitespace — search for the
+    // bare marker tokens and trim the extracted content instead of matching
+    // an exact `\n`-adjacent marker.
+    let Some(scaffold) = extract_between(&prompt, "<<<SCAFFOLD>>>", "<<<END SCAFFOLD>>>") else {
+        eprintln!("ctx-fixture-agent: explainer role could not find scaffold markers in prompt");
+        return ExitCode::FAILURE;
+    };
+    let trimmed = scaffold.trim();
+    let Some(insert_at) = trimmed.rfind('}') else {
+        eprintln!("ctx-fixture-agent: explainer role scaffold is not a JSON object");
+        return ExitCode::FAILURE;
+    };
+    let narrated = format!(
+        "{}{}{}",
+        &trimmed[..insert_at],
+        r#","explanation":"Fixture-narrated explanation, grounded strictly in the supplied scaffold."}"#,
+        &trimmed[insert_at + 1..],
+    );
+    println!("{{\"{field}\":{narrated}}}");
+    ExitCode::SUCCESS
+}
+
+/// The substring strictly between `start_marker` and `end_marker`'s first
+/// occurrence in `text`, or `None` if either marker is absent.
+fn extract_between<'a>(text: &'a str, start_marker: &str, end_marker: &str) -> Option<&'a str> {
+    let start = text.find(start_marker)? + start_marker.len();
+    let end = text[start..].find(end_marker)? + start;
+    Some(&text[start..end])
 }
 
 /// Deliberately invalid candidate text, JSON-string-encoded: fails to parse

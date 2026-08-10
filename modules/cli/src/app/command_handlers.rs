@@ -505,6 +505,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 trait_id,
                 source_map,
                 verbose,
+                llm_assisted,
+                candidate,
+                model,
+                profile,
+                assignments,
             }) => {
                 if let Some(file) = resolve_optional_trait_target(trait_arg.as_deref(), None)? {
                     trait_files.push(file);
@@ -523,6 +528,11 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     trait_id: trait_id.as_deref(),
                     source_map: source_map.as_deref(),
                     verbose,
+                    llm_assisted,
+                    candidate_path: candidate.as_deref(),
+                    model: model.as_deref(),
+                    run_profile: profile.as_deref(),
+                    assignments: &assignments,
                 })
             }
             Some(cli::TraitsCommand::Inspect {

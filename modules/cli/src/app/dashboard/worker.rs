@@ -174,14 +174,18 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
             &request.trait_id,
             &request.canonical_digest,
             || -> Result<ctx_traits_io::cache::TraitExplanation, String> {
-                let (trait_ref, _, _, canonical_digest) =
-                    ctx_traits_io::run::load_trait(&request.canonical_path)
-                        .map_err(|error| error.to_string())?;
-                if canonical_digest.as_str() != request.canonical_digest {
+                let evidence = crate::app::explain_inspect::build_explain_evidence(
+                    &request.canonical_path,
+                    None,
+                )
+                .map_err(|error| error.to_string())?;
+                if evidence.trait_ref.id.as_str() != request.trait_id
+                    || evidence.source_digest.as_str() != request.canonical_digest
+                {
                     return Err("selected trait changed before explanation generation".to_string());
                 }
-                let canonical = serde_json::to_string(&trait_ref)
-                    .map_err(|error| format!("serialize canonical trait: {error}"))?;
+                let scaffold_text = serde_json::to_string(&evidence.scaffold)
+                    .map_err(|error| format!("serialize explain scaffold: {error}"))?;
                 let raw = crate::app::generate::run_builtin_trait(
                     "explain-trait",
                     vec![
@@ -190,10 +194,10 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
                             request.trait_id.as_str(),
                         ),
                         crate::app::generate::runtime_input(
-                            "canonical-digest",
-                            request.canonical_digest.as_str(),
+                            "receipt-digest",
+                            evidence.scaffold.receipt_digest.as_str(),
                         ),
-                        crate::app::generate::runtime_input("canonical-trait", canonical),
+                        crate::app::generate::runtime_input("scaffold", scaffold_text),
                     ],
                     &[],
                     None,
@@ -201,16 +205,13 @@ fn explain(request: ExplanationRequest) -> ExplanationResult {
                 )
                 .map_err(|error| error.to_string())?
                 .output;
-                let narration = ctx_traits_core::assist::validate_trait_narration(
-                    &raw,
-                    &request.trait_id,
-                    request.canonical_digest.as_str(),
-                )?;
+                let explanation =
+                    ctx_traits_core::assist::decode_explain_narration(&raw, &evidence.scaffold)?;
                 Ok(ctx_traits_io::cache::TraitExplanation {
                     version: 1,
                     trait_id: request.trait_id.clone(),
                     canonical_digest: request.canonical_digest.clone(),
-                    explanation: narration.explanation.clone(),
+                    explanation,
                 })
             },
         )?;

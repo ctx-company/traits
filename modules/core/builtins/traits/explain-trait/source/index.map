@@ -4,20 +4,20 @@
     "start": 3,
     "end": 3
   },
-  "port:canonical-digest": {
+  "port:explanation": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 42,
+    "end": 42
+  },
+  "port:receipt-digest": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
     "start": 8,
     "end": 8
   },
-  "port:canonical-trait": {
+  "port:scaffold": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
     "start": 9,
     "end": 9
-  },
-  "port:explanation": {
-    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 26,
-    "end": 26
   },
   "port:source-trait-id": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
@@ -26,22 +26,32 @@
   },
   "prompt:explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 35,
+    "end": 35
   },
-  "schema:trait-narration": {
+  "schema:explain-scaffold": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 16,
-    "end": 16
+    "start": 23,
+    "end": 23
+  },
+  "schema:explain-section": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 13,
+    "end": 13
+  },
+  "schema:source-anchor": {
+    "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
+    "start": 12,
+    "end": 12
   },
   "sequence:procedure/explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 35,
+    "end": 35
   },
   "trait:explain-trait": {
     "file": "modules/core/builtins/traits/explain-trait/source/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 44,
+    "end": 44
   }
 }

@@ -49,49 +49,6 @@ pub enum Operation {
     GenerateEvals,
 }
 
-/// The narrowly typed result accepted from the advisory trait narrator.
-/// Identity is repeated in the payload so a provider cannot substitute a
-/// different selected trait while retaining a superficially valid response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct TraitNarration {
-    pub source_trait_id: String,
-    pub canonical_digest: String,
-    pub explanation: String,
-}
-
-/// Decode and audit a generated narration before it crosses into CLI/IO
-/// cache or dashboard state. Advisory findings are retained by callers' audit
-/// reporting; warning and critical findings block display and persistence.
-pub fn validate_trait_narration(
-    raw: &str,
-    source_trait_id: &str,
-    canonical_digest: &str,
-) -> Result<TraitNarration, String> {
-    let narration: TraitNarration = serde_json::from_str(raw)
-        .map_err(|error| format!("trait narration must be valid JSON: {error}"))?;
-    if narration.source_trait_id != source_trait_id {
-        return Err("trait narration source-trait-id does not match request".to_string());
-    }
-    if narration.canonical_digest != canonical_digest {
-        return Err("trait narration canonical-digest does not match request".to_string());
-    }
-    if narration.explanation.trim().is_empty() {
-        return Err("trait narration explanation must not be empty".to_string());
-    }
-    if scan_hidden_content(
-        &narration.explanation,
-        source_trait_id,
-        Some("trait-narration"),
-    )
-    .iter()
-    .any(|finding| !matches!(finding.severity, Severity::Advisory))
-    {
-        return Err("trait narration failed hidden-content audit".to_string());
-    }
-    Ok(narration)
-}
-
 impl Operation {
     pub fn as_str(self) -> &'static str {
         self.into()
@@ -807,6 +764,37 @@ pub fn evaluate_supplied_review_scaffold(
         evaluation.candidate.candidate_trait_id = Some(scaffold.source_trait_id.clone());
     }
     evaluation
+}
+
+/// Decode and audit a generated explain narration before it crosses into
+/// CLI/IO cache or dashboard state — the dashboard's narrower analog of the
+/// CLI's `evaluate_supplied_explain_scaffold` gate pipeline. Both enforce the
+/// same rule: the narrator may add `explanation`, never alter a fact,
+/// anchor, or section the deterministic scaffold established.
+pub fn decode_explain_narration(
+    raw: &str,
+    deterministic: &ExplainScaffold,
+) -> Result<String, String> {
+    if scan_hidden_content(
+        raw,
+        deterministic.trait_id.as_str(),
+        Some("explain-scaffold"),
+    )
+    .iter()
+    .any(|finding| !matches!(finding.severity, Severity::Advisory))
+    {
+        return Err("explain narration failed hidden-content audit".to_string());
+    }
+    let narrated: ExplainScaffold = serde_json::from_str(raw)
+        .map_err(|error| format!("explain narration must be valid JSON: {error}"))?;
+    if !narrated.evidence_matches(deterministic) {
+        return Err("explain narration altered the deterministic evidence".to_string());
+    }
+    let explanation = narrated.explanation.unwrap_or_default();
+    if explanation.trim().is_empty() {
+        return Err("explain narration explanation must not be empty".to_string());
+    }
+    Ok(explanation)
 }
 
 /// Evaluate an explanation scaffold through the same structured candidate flow.

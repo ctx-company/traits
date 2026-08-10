@@ -261,6 +261,10 @@ pub struct ExplainScaffold {
     pub sections: Vec<ExplainSection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Advisory narration added by the LLM-assisted path
+    /// (`explain --llm-assisted`); absent from the deterministic scaffold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -316,6 +320,17 @@ impl ExplainScaffold {
         }
         Ok(())
     }
+
+    /// Whether `self` carries the same grounding evidence as `deterministic`
+    /// — every field except `explanation`, the one field an LLM-assisted
+    /// narration is allowed to add. Used to block a candidate that echoed
+    /// altered or invented facts instead of narrating the supplied scaffold.
+    pub fn evidence_matches(&self, deterministic: &ExplainScaffold) -> bool {
+        self.trait_id == deterministic.trait_id
+            && self.receipt_digest == deterministic.receipt_digest
+            && self.sections == deterministic.sections
+            && self.warnings == deterministic.warnings
+    }
 }
 
 /// Build a deterministic source-anchored explanation from a check receipt.
@@ -369,6 +384,7 @@ pub fn build_explain_scaffold(
         receipt_digest: Digest::source(&receipt_json).as_str().to_string(),
         sections,
         warnings,
+        explanation: None,
     })
 }
 

@@ -725,6 +725,37 @@ pub enum TraitsCommand {
         /// Show the full candidate/scaffold detail report instead of the compact summary.
         #[arg(long)]
         verbose: bool,
+
+        /// Narrate the --scaffold evidence through the explain-trait runner
+        /// instead of stopping at the deterministic scaffold. No effect
+        /// without --scaffold; deterministic explain is unchanged.
+        #[arg(long = "llm-assisted")]
+        llm_assisted: bool,
+
+        /// Path to raw narrated explain-scaffold output (for testing gates
+        /// without a provider). No effect without --llm-assisted.
+        #[arg(long)]
+        candidate: Option<String>,
+
+        /// Provider/model ID for the explain-trait narrator. No effect
+        /// without --llm-assisted.
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Path to a narrow runtime profile (`[assign.<role>]` plus
+        /// `[budget]`) selecting the harness/model/budget routing for the
+        /// --llm-assisted explain-trait runner. No effect without
+        /// --llm-assisted or with --candidate.
+        #[arg(long, value_name = "PATH")]
+        profile: Option<String>,
+
+        /// Override the explain-trait generator agent assignment. No effect
+        /// without --llm-assisted.
+        #[arg(
+            long = "assign",
+            value_name = "ROLE[.SEAT]=HARNESS[:TRANSPORT[:SESSION_MODE[:MODEL]]]"
+        )]
+        assignments: Vec<String>,
     },
     /// Inspect trait identity, lifecycle, scenarios, evals, or dry-run plan.
     #[command(hide = true)]
