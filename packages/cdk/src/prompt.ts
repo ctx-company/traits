@@ -198,16 +198,17 @@ function requirePromptRef(value: PromptInterpolation, fieldPath: string): string
  * it is resolved here and carried to the step's `input` array — never onto
  * the slot declaration itself.
  */
+function isOptionalSlotRead(value: unknown): value is OptionalSlotRead {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && "slot" in value && (value as { readonly optional?: unknown; }).optional === true;
+}
+
 function resolvePromptRef(
   value: PromptInterpolation,
   fieldPath: string,
 ): { ref: string; optional: boolean; } {
-  const wrapper = value as unknown as OptionalSlotRead;
-  if (
-    value !== null && typeof value === "object" && !Array.isArray(value)
-    && "slot" in wrapper && wrapper.optional === true
-  ) {
-    const inner = normalizeRefList(wrapper.slot);
+  if (isOptionalSlotRead(value)) {
+    const inner = normalizeRefList(value.slot);
     if (inner?.[0] === undefined) throw new Error(`${fieldPath}: expected a slot reference`);
     if (!inner[0].startsWith("slot:")) throw new Error(`${fieldPath}: optional() applies to slot refs only`);
     return { ref: inner[0], optional: true };

@@ -32,7 +32,7 @@ export interface SinkFields {
   readonly sessionTitle?: SessionTitleSinkInput;
 }
 
-function isPromptTemplate(value: unknown): value is PromptTemplate {
+function isPromptTemplate(value: unknown): value is PromptTemplate & { readonly text: string; } {
   return metaOf(value)?.kind === "template";
 }
 
@@ -41,7 +41,7 @@ function isOptionalSlotInput(value: unknown): value is OptionalSlotInputValue {
     value !== null
     && typeof value === "object"
     && !Array.isArray(value)
-    && "slot" in (value as Record<string, unknown>)
+    && "slot" in value
     && (value as { readonly optional?: unknown; }).optional === true
   );
 }
@@ -56,8 +56,7 @@ export function sessionTitleSinkDraft(value: SessionTitleSinkInput): JsonObject 
     return { mode: "verbatim", input: value };
   }
   if (isPromptTemplate(value)) {
-    const text = (value as unknown as { readonly text: string; }).text;
-    return { mode: "verbatim", input: text };
+    return { mode: "verbatim", input: value.text };
   }
   if (Array.isArray(value)) {
     if (value.length === 0) {
