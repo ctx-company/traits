@@ -101,7 +101,12 @@ test-full:
 	# then dies on missing tools ("sh: dprint: command not found", observed
 	# 2026-08-10 when packages/toolkit landed). Frozen install is a no-op
 	# (~1s) when already current, and exactly what CI runs before its gate.
-	pnpm install --frozen-lockfile
+	# CI=true is load-bearing (run-1da991df): when the worktree's modules dir
+	# predates a workspace-layout change, headless pnpm shows a purge prompt,
+	# auto-answers it, and EXITS 0 WITHOUT INSTALLING — the placebo that
+	# parked a merge on "vitest: command not found". CI mode purges and
+	# reinstalls for real instead of prompting.
+	CI=true pnpm install --frozen-lockfile
 	just sdk-check
 	just ts-format-check
 	# CI runs ts-typecheck/ts-test as separate steps after test-full; the
