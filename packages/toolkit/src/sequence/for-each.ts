@@ -1,5 +1,6 @@
 import type {
   ForEachSequenceFields,
+  JsonValue,
   RefHandle,
   SequenceHandle,
   SequenceOutputValue,
@@ -10,7 +11,7 @@ import { sequence } from "@ctx-traits/cdk";
 /** `sequence.forEach`'s own `sequence` field type — not itself exported by `@ctx-traits/cdk`, so derived from the field it governs. */
 type SequenceRef = NonNullable<ForEachSequenceFields["sequence"]>;
 
-export type ForEachJoinedOptions<Item = unknown> = {
+export type ForEachJoinedOptions<Item = JsonValue> = {
   readonly id: string;
   readonly title?: string;
   /** The list slot to fan out over. */
@@ -48,7 +49,7 @@ export type ForEachJoinedOptions<Item = unknown> = {
  * });
  * ```
  */
-export function forEachJoined<Item = unknown>(options: ForEachJoinedOptions<Item>): SequenceHandle {
+export function forEachJoined<Item = JsonValue>(options: ForEachJoinedOptions<Item>): SequenceHandle {
   const { id, title, over, item, body, output, maxItems, limit, concurrent } = options;
   // `Array.isArray` does not negatively narrow `body` here (its non-array
   // arm, `SequenceRef`, is itself a plain-object handle type TS cannot

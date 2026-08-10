@@ -1,4 +1,4 @@
-import type { SlotHandle } from "@ctx-traits/cdk";
+import type { JsonValue, SlotHandle } from "@ctx-traits/cdk";
 import { condition, flow, operation, step } from "@ctx-traits/cdk";
 
 /**
@@ -35,7 +35,7 @@ import { condition, flow, operation, step } from "@ctx-traits/cdk";
  */
 export function deriveParkReportStep(
   verdicts: SlotHandle | SlotHandle[],
-  opts: { parkReportSlot: SlotHandle<unknown[]>; },
+  opts: { parkReportSlot: SlotHandle<JsonValue[]>; },
 ): void {
   const targetParkReport = opts.parkReportSlot;
   const verdictList = Array.isArray(verdicts) ? verdicts : [verdicts];

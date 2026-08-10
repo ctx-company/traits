@@ -55,7 +55,8 @@ export function commitTail(options: CommitTailOptions): readonly SequenceHandle[
     input: input.command`git status --porcelain`,
     output: status,
   });
-  const ownedScribe = "text" in (scribe as Record<string, unknown>) ? (scribe as GuardedProductionRole) : undefined;
+  const isOwnedScribe = (s: AgentHandle | GuardedProductionRole): s is GuardedProductionRole => "text" in s;
+  const ownedScribe = isOwnedScribe(scribe) ? scribe : undefined;
   const scribeAgent: AgentHandle = ownedScribe ? ownedScribe.agent : (scribe as AgentHandle);
   const scribeStep = sequence.prompt(`${id}-message`, {
     title: "Write the commit message (scribe)",
