@@ -1,0 +1,57 @@
+schema-version = "0.2"
+key = "0154"
+title = "release: a gated version-bump/changelog/tag/publish trait"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+The lifecycle has research -> plan -> implement -> refactor but nothing for the
+end of a cycle: cutting a release. Today that is hand-run (version bumps,
+Formula/, release.yml, tags), which is exactly the kind of high-stakes,
+checklist-shaped work the product exists to prove and gate. Owner ruling
+2026-08-10: build a `release` trait before the new project ships anything.
+
+"""
+scope = """
+## Decisions
+
+- **Single-variant to start** (family split only when a second real shape
+  exists — single-trait-packages rule): preflight -> version bump -> changelog
+  -> tag -> publish, every mutating step behind a gate or an explicit owner
+  confirmation.
+- **Steps sketch**: (1) preflight command gates — clean tree, on the release
+  branch, full landing gate green; (2) version-bump step (workspace manifests
+  + any Formula/ pins) with a reviewer pass over the diff; (3) changelog
+  drafted by a scribe FROM LANDED COMMITS since the last tag (never invented),
+  reviewed; (4) commit tail (two-step stage recipe) + annotated tag;
+  (5) publish step(s) as declared repo commands — the trait executes only
+  what the repository declares (mirroring the [merge] gate philosophy), it
+  never hardcodes a registry.
+- **Owner in the loop for the irreversible edge**: tagging/publishing waits on
+  an explicit confirmation step — reuse the 0098 ctx-gate/guarded pattern or a
+  plain ask step; pushing a tag is not something a run does silently.
+- **Repo-agnostic**: version locations and publish commands come from ports/
+  declared config, not from ctx-trait's own layout; this repo (Formula/,
+  release.yml) is merely the first consumer.
+
+"""
+validation = """
+## Watch
+
+- Never let the run push tags/artifacts without the confirmation step — parked
+  is the correct outcome for an unconfirmed release.
+- Changelog grounding: every entry must trace to a landed commit (scribe reads
+  git log; reviewer spot-checks) — no marketing prose from thin air.
+- Scratch-fixture proofs: a fake repo with fake version files and a fake
+  publish command proves the pipeline, the gate refusals, and the
+  no-confirmation park; never the real Formula/.
+
+## Done when
+
+A worktree `ctx traits run release` on a scratch consumer repo bumps versions,
+writes a commit-grounded changelog, waits for explicit confirmation, tags, and
+runs the declared publish commands — with every refusal path (dirty tree, red
+gate, unconfirmed) parking honestly; proofs cover the happy path and each
+refusal.
+"""

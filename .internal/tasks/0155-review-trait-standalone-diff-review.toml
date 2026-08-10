@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0155"
+title = "review: standalone diff/PR review outside the implement loop (future)"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+implement's reviewers are locked inside its build loop — there is no way to
+point a reviewer at an arbitrary diff, branch, or PR without running an
+implementation. Once collaborators or external PRs exist for the new project,
+a standalone `review` trait becomes the daily surface for that. Filed
+2026-08-10 as deliberately FUTURE work — not scheduled until the need is
+real; do not dispatch ahead of 0153/0154.
+
+"""
+scope = """
+## Decisions (sketch, to be firmed when picked up)
+
+- Input: a ref/range or PR identifier port; the reviewer inspects the actual
+  diff with its own tools (index pattern: stat inventory in the prompt, never
+  patch bodies — the run-e20bc187 lesson).
+- Output: the typed reviewVerdict from @ctx-traits/agents plus a rendered
+  human review document; NO write access to the reviewed code — review is
+  read-only by contract.
+- Likely two variants eventually (quick pass vs dual-review deep), but start
+  single-variant per the single-trait-packages rule.
+
+"""
+validation = """
+## Watch
+
+- Read-only contract is the invariant: confinement should deny edits to the
+  reviewed tree outright.
+
+## Done when
+
+(To be written when scheduled.) A reviewer can be pointed at a branch/PR and
+returns a typed verdict + review document without mutating anything.
+"""

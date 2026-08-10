@@ -1,0 +1,87 @@
+schema-version = "0.2"
+key = "0153"
+title = "research: a family package where the variant is the guarantee — replaces deep-research"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+deep-research (v0.2.0) is the owner's pre-ctx skill wearing a trait costume: one
+597-line monolith whose guarantees are a NUMERIC rubric (0-3 scores across six
+dimensions, gated on a threshold), with quality+depth input knobs, a
+deliverables-manifest schema, campaign/heartbeat vocabulary, and a hardcoded
+research/<slug>/01_...06_metadata output tree. The implement/refactor families
+guarantee things structurally instead: the variant IS the guarantee — which
+steps exist, how many reviewers, how many loop rounds, what parks.
+
+Owner ruling 2026-08-10: build a NEW family package `research` in that image and
+retire deep-research (and auto-research) behind it. Depth and quality stop being
+inputs you request and become properties of the variant you chose.
+
+"""
+scope = """
+## Decisions
+
+- **New package `research`**, family layout: `index.ts` +
+  `variants/{quick,default,deep}.ts` + shared `core.ts`/`data.ts`, functional
+  authoring layer (`procedure.from`/`step.*`/`flow.*`), never object-style
+  `sequence.linear` chains.
+- **Review loops use the typed `reviewVerdict` from `@ctx-traits/agents`**
+  (approved/revise + blockers, verbatim carry across rounds, park-report on
+  exhaustion) — no numeric verdict schema anywhere.
+- **Variant ladder** (structure replaces scores):
+  - `quick`: inline scope note -> one bounded evidence pass -> one reviewer
+    pass -> writes `brief.md` + `sources.md`.
+  - `default`: plan step (2-4 streams, deterministic cardinality gate) ->
+    serial per-stream research (for-each, max-items is the guarantee) ->
+    triangulate -> single-reviewer grind loop (bounded, parks on exhaustion)
+    -> adds `report.md`, `bibliography.md`, `evidence.csv`.
+  - `deep`: plan 4-6 streams with a MANDATORY counterevidence stream ->
+    Chain-of-Verification loop PLUS an independent second reviewer
+    (dual-review like implement:default) -> adds `verification.md`.
+- **Delivery contract**: input port `output-dir`, package-defaulted to
+  `.internal/research` via `[defaults.port]`; steps write a FLAT
+  `{port:output-dir}/<topic-slug>/` — no numbered dirs, no manifests, no
+  heartbeats. Output ports: `research-report` (text) + `report-path`. All
+  three variants end in the family commit tail (two-step stage recipe:
+  `git add -A` then `git reset -q -- .agents/runs`) so `--worktree --merge`
+  lands research like any implement run.
+- **Kill**: quality/depth ports+enums, deliverables-manifest,
+  quality-dimension-score/quality-dimensions schemas, the numeric quality
+  gate, research-readme/brief templates, campaign vocabulary, the
+  01_-06_ output-layout prose.
+- **Keep, folded in** (3 resources total): `research-standards.md`
+  (REWRITTEN for the flat layout + CoV prompt content),
+  `source-quality-guide.md` (the qualitative A-E scale), `citation-style.md`.
+- **Portability**: repo-agnostic — a new project consumes this via
+  `ctx traits dependency add`; nothing ctx-trait-specific in any path or
+  prompt. `.internal/research` is only the default, carried by the port.
+- **Same arc, after the package is green**: Justfile recipes
+  (`research topic` -> research:default, plus quick/deep forms), then DELETE
+  the deep-research and auto-research packages (the board + implement loop
+  owns post-research follow-through).
+
+"""
+validation = """
+## Watch
+
+- Proofs are scratch-fixture behavioral only (2026-08-08 ruling): fixture
+  agents drive each variant end to end; never assert on committed repo
+  content.
+- The commit tail must use the two-step stage recipe — the excluding-add
+  pathspec is the known gitignored-.agents poison pill (run-42bd7fb2).
+- CDK build time: the family adds variants to the ICU-sort cost (task 0152);
+  if `ctx traits build research` nears the 120s ceiling, note it on 0152
+  rather than tuning here.
+- Trust: new package + deleted packages change the trust surface; the owner
+  re-approves after landing.
+
+## Done when
+
+`ctx traits run research:quick|default|deep -- --topic=...` each produce their
+declared file set under `{output-dir}/<slug>/` in a worktree run and land via
+merge; every review loop parks honestly on exhaustion with a typed park
+report; deep provably runs a counterevidence stream and a second independent
+reviewer; deep-research and auto-research are deleted; Justfile has the three
+recipes; scratch-fixture proofs cover each variant's structural guarantees.
+"""
