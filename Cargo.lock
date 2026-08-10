@@ -323,6 +323,7 @@ dependencies = [
  "serial_test",
  "sha2",
  "support",
+ "tar",
  "thiserror",
  "toml",
 ]

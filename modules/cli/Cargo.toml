@@ -33,6 +33,7 @@ regex-lite.workspace = true
 serial_test.workspace = true
 flate2.workspace = true
 sha2.workspace = true
+tar.workspace = true
 # P477: `tests/support` is its own crate (not a `mod support;` included
 # inline by each integration-test binary) specifically so a helper used by
 # one proof suite but not another is not flagged as per-binary dead code —

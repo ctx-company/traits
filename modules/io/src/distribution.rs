@@ -378,12 +378,12 @@ pub struct ResolvedRegistryBase {
 /// Resolve the effective registry base URL and its source layer for
 /// `start_dir` (P492) — the one place the `CTX_TRAITS_REGISTRY_BASE` >
 /// `[registry] base` > [`crate::registry::DEFAULT_REGISTRY_BASE`] precedence
-/// is encoded. `CTX_TRAITS_REGISTRY_BASE` is also how the deterministic
-/// local-registry proof in `scripts/byte_compare.rs`, driven by `just test`,
-/// points a real `ctx` invocation at an in-process fixture instead of the
-/// public npm registry, with no `node`/`npm`/`pnpm` process and no network
-/// dependency. Env-on-top matches `ConfigLayer::Environment` sitting above
-/// `Repo` everywhere else in this crate.
+/// is encoded. `CTX_TRAITS_REGISTRY_BASE` is also how
+/// `modules/cli/tests/proof_global_tier.rs`'s in-process fixture registry
+/// points a real `ctx` invocation at itself instead of the public npm
+/// registry, with no `node`/`npm`/`pnpm` process and no network dependency.
+/// Env-on-top matches `ConfigLayer::Environment` sitting above `Repo`
+/// everywhere else in this crate.
 pub fn resolve_registry_base_with_source(start_dir: &Utf8Path) -> ResolvedRegistryBase {
     if let Ok(base) = std::env::var("CTX_TRAITS_REGISTRY_BASE")
         && !base.is_empty()
