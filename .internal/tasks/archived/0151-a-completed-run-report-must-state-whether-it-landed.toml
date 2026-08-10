@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0151"
 title = "A completed run's report must state whether the work actually landed"
-status = "ready"
+status = "done"
 raised = "2026-08-09"
 content = """
 
