@@ -72,6 +72,12 @@ const TICK: Duration = Duration::from_millis(250);
 /// preview/attach pane on — never the 250ms draw loop (see its own doc).
 const RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 
+/// 0147: ceiling on how many buffered selection keys `run_with_initial_
+/// session` folds into one aggregate move per draw. Generous relative to any
+/// real autorepeat burst — it exists only so a pathological event flood
+/// still yields back to a draw periodically instead of draining forever.
+const MAX_KEY_BATCH: usize = 128;
+
 /// Cadence of the periodic full liveness sweep, in reload ticks
 /// (`RELOAD_INTERVAL` apart). Every 10th tick at the default 2s interval is
 /// 20s — bounded cost (still far fewer probes than an every-row,
@@ -2634,7 +2640,29 @@ fn run_with_initial_session(
         // Dashboard action failures are rendered in-place. Terminal polling
         // and drawing remain fatal because the terminal can no longer be
         // safely owned after either fails.
-        if let Err(error) = handle_key(&mut pane, &mut state, key) {
+        //
+        // 0147: a held scroll key's autorepeat piles up in the pump
+        // channel while each draw runs (TASKS/MERGES fall behind visibly
+        // since their per-selection refresh is pricier than SESSIONS').
+        // Outside a modal/story-view focus trap — where `j`/`k` are edit
+        // keystrokes, not navigation — drain the backlog and apply one
+        // aggregate move instead of one refresh per buffered keystroke; a
+        // different-kind key (including the opposite direction) ends the
+        // batch and is still routed through `handle_key` afterward, so
+        // order is preserved and no keystroke is dropped.
+        if !state.modal_host.is_open()
+            && state.story_view.is_none()
+            && let Some(delta) = selection_delta(&key)
+        {
+            let (aggregate, terminator) =
+                coalesce_selection_keys(delta, MAX_KEY_BATCH, || pane.try_key());
+            apply_selection_move(&mut state, aggregate);
+            if let Some(terminator) = terminator
+                && let Err(error) = handle_key(&mut pane, &mut state, terminator)
+            {
+                state.message = Some(error.to_string());
+            }
+        } else if let Err(error) = handle_key(&mut pane, &mut state, key) {
             state.message = Some(error.to_string());
         }
         last_reload = std::time::Instant::now();
@@ -2928,25 +2956,72 @@ fn queue_sessions_pane_key(state: &mut State, key: &crossterm::event::KeyEvent) 
 /// direct page-scroll path below is for the OTHER screens (Traits/Merges/
 /// Trust) only, whose single preview pane has no shared-renderer input path
 /// of its own.
-fn handle_navigation_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
-    let selection_delta = match key.code {
+/// Down/`j` moves the list selection +1, Up/`k` moves it -1 — every other
+/// key (including these two with `Alt` held, which `handle_key` routes to
+/// pane movement before navigation is ever consulted) is not a selection
+/// key. Pulled out so 0147's batch coalescer in `run_with_initial_session`
+/// classifies keys identically to `handle_navigation_key`'s own branch.
+fn selection_delta(key: &crossterm::event::KeyEvent) -> Option<i32> {
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return None;
+    }
+    match key.code {
         KeyCode::Down | KeyCode::Char('j') => Some(1),
         KeyCode::Up | KeyCode::Char('k') => Some(-1),
         _ => None,
-    };
-    if let Some(delta) = selection_delta {
-        // Moving the list must also make its focus and SESSIONS attachment
-        // agree with the row the next preview request will address.
-        focus_pane(&mut state.focus, list_pane_id(state.screen));
-        state.move_selection(delta);
-        state.trait_explanation = None;
-        match state.screen {
-            Screen::Sessions => refresh_preview_for_selection(state),
-            Screen::Traits => refresh_trait_preview_for_selection(state),
-            Screen::Merges => refresh_merge_preview_for_selection(state),
-            Screen::Trust => refresh_trust_preview_for_selection(state),
-            Screen::Tasks => refresh_task_preview_for_selection(state),
+    }
+}
+
+/// The selection-move side effects shared by a single navigation keypress
+/// and 0147's coalesced batch: moving the list must also make its focus and
+/// SESSIONS attachment agree with the row the next preview request will
+/// address, then rebuild that row's preview once. `delta` is the aggregate
+/// of however many same-direction keys were folded into this call —
+/// `move_selection`'s clamp (`move_by`) accepts any magnitude already, so a
+/// batched delta needs no extra clamping here.
+fn apply_selection_move(state: &mut State, delta: i32) {
+    focus_pane(&mut state.focus, list_pane_id(state.screen));
+    state.move_selection(delta);
+    state.trait_explanation = None;
+    match state.screen {
+        Screen::Sessions => refresh_preview_for_selection(state),
+        Screen::Traits => refresh_trait_preview_for_selection(state),
+        Screen::Merges => refresh_merge_preview_for_selection(state),
+        Screen::Trust => refresh_trust_preview_for_selection(state),
+        Screen::Tasks => refresh_task_preview_for_selection(state),
+    }
+}
+
+/// Drains buffered keys via `next` (one already-received key, or `None` once
+/// the channel is empty) as long as they keep matching `first_delta`'s
+/// direction, summing their deltas; a different-kind key (including the
+/// opposite direction) stops the drain and is returned as the terminator to
+/// route through `handle_key` unchanged, after the aggregate move applies.
+/// Draining also stops once `max_events` total keys (the first plus drained
+/// ones) have been folded in, so a pathological flood still yields back to
+/// the caller's draw.
+fn coalesce_selection_keys(
+    first_delta: i32,
+    max_events: usize,
+    mut next: impl FnMut() -> Option<crossterm::event::KeyEvent>,
+) -> (i32, Option<crossterm::event::KeyEvent>) {
+    let mut aggregate = first_delta;
+    let sign = first_delta.signum();
+    for _ in 1..max_events {
+        let Some(key) = next() else {
+            break;
+        };
+        match selection_delta(&key) {
+            Some(delta) if delta.signum() == sign => aggregate += delta,
+            _ => return (aggregate, Some(key)),
         }
+    }
+    (aggregate, None)
+}
+
+fn handle_navigation_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool {
+    if let Some(delta) = selection_delta(key) {
+        apply_selection_move(state, delta);
         return true;
     }
 
@@ -8791,6 +8866,64 @@ mod tests {
                 > 0
         );
         assert_eq!(state.list_sessions.selected(), 0);
+    }
+
+    fn key(code: KeyCode) -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// 0147: three held `j` presses fold into one aggregate delta with no
+    /// terminator — a real held key never produces a terminator mid-burst,
+    /// only release (an empty channel) ends the batch.
+    #[test]
+    fn coalesce_selection_keys_folds_same_direction_run() {
+        let mut queued = vec![key(KeyCode::Char('j')), key(KeyCode::Char('j'))].into_iter();
+        let (aggregate, terminator) = coalesce_selection_keys(1, MAX_KEY_BATCH, || queued.next());
+        assert_eq!(aggregate, 3);
+        assert_eq!(terminator, None);
+    }
+
+    /// A burst ended by a non-navigation key (e.g. `Enter`) must still
+    /// aggregate the movement and hand back the ending key as the
+    /// terminator, unmodified, so it is applied after the move — not
+    /// dropped.
+    #[test]
+    fn coalesce_selection_keys_stops_at_a_different_kind_key() {
+        let enter = key(KeyCode::Enter);
+        let mut queued = vec![key(KeyCode::Char('j')), enter].into_iter();
+        let (aggregate, terminator) = coalesce_selection_keys(1, MAX_KEY_BATCH, || queued.next());
+        assert_eq!(aggregate, 2);
+        assert_eq!(terminator, Some(enter));
+    }
+
+    /// The opposite direction is a "different kind" key for coalescing
+    /// purposes, not something that partially cancels the aggregate —
+    /// it ends the batch and is retained as the terminator.
+    #[test]
+    fn coalesce_selection_keys_does_not_merge_opposite_direction() {
+        let up = key(KeyCode::Char('k'));
+        let mut queued = vec![up].into_iter();
+        let (aggregate, terminator) = coalesce_selection_keys(1, MAX_KEY_BATCH, || queued.next());
+        assert_eq!(aggregate, 1);
+        assert_eq!(terminator, Some(up));
+    }
+
+    /// `selection_delta` backs both `handle_navigation_key`'s single-key
+    /// path and the loop's batch gate — `Alt`+`Down` must stay `None` since
+    /// `handle_key` routes that combination to pane movement before
+    /// navigation is ever consulted (dashboard.rs's `Alt` branch above).
+    #[test]
+    fn selection_delta_excludes_alt_modified_keys() {
+        assert_eq!(selection_delta(&key(KeyCode::Down)), Some(1));
+        assert_eq!(selection_delta(&key(KeyCode::Char('j'))), Some(1));
+        assert_eq!(selection_delta(&key(KeyCode::Up)), Some(-1));
+        assert_eq!(
+            selection_delta(&crossterm::event::KeyEvent::new(
+                KeyCode::Down,
+                KeyModifiers::ALT
+            )),
+            None
+        );
     }
 
     /// P552 review `live-run-pane-contract-absent`, `done-when`: `Tab` must

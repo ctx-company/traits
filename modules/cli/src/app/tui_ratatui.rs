@@ -883,6 +883,17 @@ impl RatatuiPane {
         }
     }
 
+    /// Non-blocking companion to [`Self::poll_key`]: returns an
+    /// already-buffered key without waiting, or `None` if the channel is
+    /// empty right now. Lets a caller drain autorepeat backlog between a
+    /// blocking `poll_key` and its own draw.
+    pub(crate) fn try_key(&mut self) -> Option<crossterm::event::KeyEvent> {
+        if self.detached() {
+            return None;
+        }
+        self.keys.try_recv().ok()
+    }
+
     /// Mark this pane detached from an explicit dashboard-level action (e.g.
     /// the top-level quit key), restoring the terminal exactly like
     /// [`Self::poll_detach`]'s quit path.
