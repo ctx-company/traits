@@ -740,6 +740,117 @@ pub(crate) fn title_bar(title: impl Into<String>) -> Paragraph<'static> {
     )))
 }
 
+/// One key's entry in a footer/hint line, in display order. Shared by every
+/// key-hint surface (dashboard screens, the live run view, the guide modal,
+/// story view) so a rebind can't leave a hand-written hint string stale next
+/// to its key handler — see task 0148.
+#[derive(Clone, Copy)]
+pub(crate) struct Binding {
+    pub key: &'static str,
+    pub hint: &'static str,
+}
+
+/// Renders bindings as `"[key] hint · [key] hint · ..."`, the shape the live
+/// run view and guide modal already used.
+pub(crate) fn render_hint_list(bindings: impl IntoIterator<Item = Binding>) -> String {
+    bindings
+        .into_iter()
+        .map(|b| format!("[{}] {}", b.key, b.hint))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// Renders bindings as `"key hint  key hint  ..."` (no brackets), the shape
+/// dashboard screen footers and the story-view footer already used.
+pub(crate) fn render_hint_line(bindings: impl IntoIterator<Item = Binding>) -> String {
+    bindings
+        .into_iter()
+        .map(|b| format!("{} {}", b.key, b.hint))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+/// The live/attached run view's key bindings (task 0148). `?` (open the
+/// guide) is a separate entry rather than a member of this slice: it is only
+/// live — and only hinted — when a guide seat exists (`state.guide.is_some()`
+/// in [`crate::app::run_view::render::render_live_panes`]).
+pub(crate) const LIVE_VIEW: &[Binding] = &[
+    Binding {
+        key: "d",
+        hint: "dash",
+    },
+    Binding {
+        key: "q",
+        hint: "exit",
+    },
+    Binding {
+        key: "ctrl-c",
+        hint: "kill",
+    },
+    Binding {
+        key: "up/down",
+        hint: "scroll",
+    },
+    Binding {
+        key: "pg",
+        hint: "page",
+    },
+    Binding {
+        key: "home/end",
+        hint: "jump",
+    },
+    Binding {
+        key: "tab",
+        hint: "pane",
+    },
+];
+
+/// The live view's `?` binding — only bound and hinted when a guide seat is
+/// attached, so it lives apart from [`LIVE_VIEW`] rather than inside it.
+pub(crate) const LIVE_VIEW_GUIDE_ENTRY: Binding = Binding {
+    key: "?",
+    hint: "guide",
+};
+
+/// The guide modal's key bindings (task 0148) — used by both the input hint
+/// row (`render_conversation_modal`, below) and the live view's guide-open
+/// footer hint.
+pub(crate) const GUIDE_MODAL: &[Binding] = &[
+    Binding {
+        key: "enter",
+        hint: "send",
+    },
+    Binding {
+        key: "ctrl-l",
+        hint: "clear",
+    },
+    Binding {
+        key: "esc",
+        hint: "close",
+    },
+    Binding {
+        key: "\u{2191}\u{2193}/pg",
+        hint: "scroll",
+    },
+];
+
+/// The story-view overlay's key bindings (task 0148), rendered by
+/// [`crate::app::dashboard::footer_line`] when a story is open.
+pub(crate) const STORY_VIEW: &[Binding] = &[
+    Binding {
+        key: "\u{2191}\u{2193}/jk",
+        hint: "scroll",
+    },
+    Binding {
+        key: "PgUp/PgDn",
+        hint: "page",
+    },
+    Binding {
+        key: "q/Esc/S",
+        hint: "close",
+    },
+];
+
 /// A dim keymap-hints row, plus an optional message row beneath it — the
 /// same shape every screen's status footer renders.
 pub(crate) fn keymap_footer(hints: impl Into<String>, message: Option<&str>) -> Paragraph<'static> {
@@ -1041,7 +1152,7 @@ pub(crate) fn render_conversation_modal(
         Paragraph::new(vec![
             RLine::from(format!("Guide: {visible_input}")),
             RLine::from(Span::styled(
-                "[enter] send · [ctrl-l] clear · [esc] close · [↑↓/pg] scroll",
+                render_hint_list(GUIDE_MODAL.iter().copied()),
                 Style::default().add_modifier(Modifier::DIM),
             )),
         ]),
@@ -1800,5 +1911,73 @@ mod tests {
         let (lines, hidden) = budgeted_body_lines(&body, 10, 20, 1);
         assert_eq!(lines, vec!["a".repeat(10), "a".repeat(10), "a".repeat(5)]);
         assert_eq!(hidden, 0);
+    }
+
+    /// 0148 self-consistency proof (c), extended to the live view (with its
+    /// guide entry attached, since that is the union actually rendered when
+    /// a guide seat exists), the guide modal, and story view: no context
+    /// binds the same key twice.
+    #[test]
+    fn no_duplicate_key_within_live_view_guide_modal_or_story_view() {
+        let live_with_guide: Vec<&str> = std::iter::once(LIVE_VIEW_GUIDE_ENTRY.key)
+            .chain(LIVE_VIEW.iter().map(|b| b.key))
+            .collect();
+        for (context, keys) in [
+            ("live view (with guide)", live_with_guide),
+            ("guide modal", GUIDE_MODAL.iter().map(|b| b.key).collect()),
+            ("story view", STORY_VIEW.iter().map(|b| b.key).collect()),
+        ] {
+            let mut seen = std::collections::HashSet::new();
+            for key in &keys {
+                assert!(
+                    seen.insert(*key),
+                    "{context} binds {key} more than once: {keys:?}"
+                );
+            }
+        }
+    }
+
+    /// 0148 self-consistency proof (a), extended to the live view, guide
+    /// modal, and story view: every bound key's hint appears in that
+    /// context's rendered hint text.
+    #[test]
+    fn every_binding_appears_in_live_view_guide_modal_and_story_view_hints() {
+        let live_no_guide = render_hint_list(LIVE_VIEW.iter().copied());
+        for binding in LIVE_VIEW {
+            let expected = format!("[{}] {}", binding.key, binding.hint);
+            assert!(
+                live_no_guide.contains(&expected),
+                "live view hint missing {expected:?}: {live_no_guide}"
+            );
+        }
+
+        let live_with_guide = render_hint_list(
+            std::iter::once(LIVE_VIEW_GUIDE_ENTRY).chain(LIVE_VIEW.iter().copied()),
+        );
+        for binding in std::iter::once(&LIVE_VIEW_GUIDE_ENTRY).chain(LIVE_VIEW.iter()) {
+            let expected = format!("[{}] {}", binding.key, binding.hint);
+            assert!(
+                live_with_guide.contains(&expected),
+                "live view (with guide) hint missing {expected:?}: {live_with_guide}"
+            );
+        }
+
+        let guide_modal_hint = render_hint_list(GUIDE_MODAL.iter().copied());
+        for binding in GUIDE_MODAL {
+            let expected = format!("[{}] {}", binding.key, binding.hint);
+            assert!(
+                guide_modal_hint.contains(&expected),
+                "guide modal hint missing {expected:?}: {guide_modal_hint}"
+            );
+        }
+
+        let story_view_hint = render_hint_line(STORY_VIEW.iter().copied());
+        for binding in STORY_VIEW {
+            let expected = format!("{} {}", binding.key, binding.hint);
+            assert!(
+                story_view_hint.contains(&expected),
+                "story view hint missing {expected:?}: {story_view_hint}"
+            );
+        }
     }
 }

@@ -60,6 +60,7 @@ use ctx_traits_core::task::provider::{
 use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
 use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
 
+mod keymap;
 mod worker;
 
 const TICK: Duration = Duration::from_millis(250);
@@ -2846,8 +2847,11 @@ fn handle_key(
             }
         }
         KeyCode::Char(' ') if state.screen == Screen::Tasks => toggle_selected_task_group(state),
-        KeyCode::Char('s') if state.screen == Screen::Tasks => sync_tasks_board(state),
-        KeyCode::Char('S') if state.screen == Screen::Tasks => open_task_split_modal(state),
+        // 0148 rebind: sync acts on the whole board (screen-level -> uppercase),
+        // split acts on the selected task only (row-level -> lowercase).
+        // Old->new: sync `s`->`S`, split `S`->`s`.
+        KeyCode::Char('S') if state.screen == Screen::Tasks => sync_tasks_board(state),
+        KeyCode::Char('s') if state.screen == Screen::Tasks => open_task_split_modal(state),
         KeyCode::Char('R') if state.screen == Screen::Tasks => open_task_reconcile(state),
         KeyCode::Char('a') if state.screen == Screen::Tasks => open_task_archive_modal(state),
         KeyCode::Char('e') if state.screen == Screen::Tasks => open_task_edit_modal(state),
@@ -7856,53 +7860,40 @@ fn task_row_label(summary: &TaskSummary, has_proposal: bool) -> String {
 fn footer_line(state: &State) -> Paragraph<'static> {
     if state.story_view.is_some() {
         return tui_kit::keymap_footer(
-            "↑↓/jk scroll  PgUp/PgDn page  q/Esc/S close",
+            tui_kit::render_hint_line(tui_kit::STORY_VIEW.iter().copied()),
             state.message.as_deref(),
         );
     }
-    let scope_suffix = if state.all_repos { " [ALL]" } else { "" };
     let navigation = "↑↓/jk list  PgUp/PgDn preview  Enter focus  Esc list";
+    let bindings = keymap::hint_line(state.screen);
+    let global_tail = keymap::global_tail_hint();
     let hint = match state.screen {
-        Screen::Sessions => {
-            format!(
-                "{navigation}  Enter attach/expand  space expand  a answer  s resume  S story  x stop  d delete  n spawn  v {}  r reload  Tab/1-5 screens  q quit{scope_suffix}",
-                if state.all_repos {
-                    "this repo only"
-                } else {
-                    "all repos"
-                }
-            )
-        }
-        Screen::Traits => {
-            format!(
-                "{navigation}  a approve  b block  e edit source  x explain  r reload  Tab/1-5 screens  q quit"
-            )
-        }
-        Screen::Merges => format!(
-            "{navigation}  m merge  d deep-merge  p print path  x drop  v {}  r reload  Tab/1-5 screens  q quit{scope_suffix}",
-            if state.all_repos {
+        Screen::Sessions | Screen::Merges => {
+            let scope_verb = if state.all_repos {
                 "this repo only"
             } else {
                 "all repos"
-            }
-        ),
-        Screen::Trust => format!(
-            "{navigation}  a approve  b block  space mark  A approve family/marked  o {} {} orphaned  r reload  Tab/1-5 screens  q quit  [{} marked]",
-            if state.show_trust_orphans {
+            };
+            let scope_suffix = if state.all_repos { " [ALL]" } else { "" };
+            format!("{navigation}  {bindings}  v {scope_verb}  {global_tail}{scope_suffix}")
+        }
+        Screen::Traits | Screen::Tasks => format!("{navigation}  {bindings}  {global_tail}"),
+        Screen::Trust => {
+            let orphan_verb = if state.show_trust_orphans {
                 "hide"
             } else {
                 "show"
-            },
-            state
+            };
+            let orphan_count = state
                 .trust
                 .iter()
                 .filter(|row| row.class == trust_story::TrustClass::Orphaned)
-                .count(),
-            state.trust_marks.len(),
-        ),
-        Screen::Tasks => format!(
-            "{navigation}  space expand  s sync  S split  R reconcile  a archive  e edit  y mark done  d dispatch  r reload  Tab/1-5 screens  q quit"
-        ),
+                .count();
+            format!(
+                "{navigation}  {bindings}  o {orphan_verb} {orphan_count} orphaned  {global_tail}  [{} marked]",
+                state.trust_marks.len(),
+            )
+        }
     };
     let hint = format!("{hint}  [{}]", state.current_list().position_text());
     let generated_task = state

@@ -10,10 +10,9 @@ use ctx_traits_core::procedure::activity::{ActivityEvent, ActivityKind};
 
 use super::guide::GuidePane;
 use super::model::{
-    CURRENT_MIN_OUTER_ROWS, CURRENT_PANE, GUIDE_FOOTER_HINT, HISTORY_MIN_OUTER_ROWS,
-    HistoryOutcome, HistoryStep, JourneyRow, JourneyRowKind, LIVE_PANE_IDS, MergeRowState,
-    MergeRowView, NARROW_WIDTH_THRESHOLD, PaneData, PaneIds, RunHeader, RunNarration, RunOutput,
-    RunStep, RunView, StepState,
+    CURRENT_MIN_OUTER_ROWS, CURRENT_PANE, HISTORY_MIN_OUTER_ROWS, HistoryOutcome, HistoryStep,
+    JourneyRow, JourneyRowKind, LIVE_PANE_IDS, MergeRowState, MergeRowView, NARROW_WIDTH_THRESHOLD,
+    PaneData, PaneIds, RunHeader, RunNarration, RunOutput, RunStep, RunView, StepState,
 };
 use super::planned::status_tone;
 use super::projection::{active_step_index, completed_narration, display_narration};
@@ -376,6 +375,20 @@ pub(super) fn drawable_pane_ids(tree: &PaneTree, layout: &PaneLayoutResult) -> V
         .collect()
 }
 
+/// The live view's footer hint (task 0148): [`tui_kit::LIVE_VIEW`], with the
+/// `?` guide entry prepended only when a guide seat is attached — `?` is
+/// otherwise unbound, so it must never be hinted-but-inert.
+fn live_view_hint(with_guide: bool) -> String {
+    if with_guide {
+        tui_kit::render_hint_list(
+            std::iter::once(tui_kit::LIVE_VIEW_GUIDE_ENTRY)
+                .chain(tui_kit::LIVE_VIEW.iter().copied()),
+        )
+    } else {
+        tui_kit::render_hint_list(tui_kit::LIVE_VIEW.iter().copied())
+    }
+}
+
 /// The live run surface's own footer chrome, wrapping the shared
 /// [`render_pane_body`] for its title row + four-pane body — the live run
 /// has no standing-facts `progress` source separate from `tree_lines` today
@@ -408,14 +421,7 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
     let full_area = frame.area();
     let regions = live_frame_regions(full_area);
     frame.render_widget(
-        tui_kit::keymap_footer(
-            if guide.is_some() {
-                GUIDE_FOOTER_HINT
-            } else {
-                "[d] dashboard · [q] exit · [ctrl-c] kill · [up/down] scroll · [pgup/pgdn] page · [home/end] jump · [tab] cycle pane"
-            },
-            None,
-        ),
+        tui_kit::keymap_footer(live_view_hint(guide.is_some()), None),
         regions[1],
     );
     let data = PaneData {
@@ -3014,18 +3020,15 @@ mod tests {
             let rendered: String = (0..width)
                 .map(|x| terminal.backend().buffer().cell((x, 11)).unwrap().symbol())
                 .collect();
-            for hint in [
-                "[?] guide",
-                "[up/down] scroll",
-                "[pg] page",
-                "[home/end] jump",
-                "[tab] pane",
-                "[d] dash",
-                "[q] exit",
-                "[ctrl-c] kill",
-            ] {
+            // Map-derived (task 0148): every binding in the guide-present hint
+            // set — tui_kit::LIVE_VIEW_GUIDE_ENTRY plus tui_kit::LIVE_VIEW —
+            // must still fit and render at this narrow width.
+            for binding in
+                std::iter::once(&tui_kit::LIVE_VIEW_GUIDE_ENTRY).chain(tui_kit::LIVE_VIEW.iter())
+            {
+                let hint = format!("[{}] {}", binding.key, binding.hint);
                 assert!(
-                    rendered.contains(hint),
+                    rendered.contains(&hint),
                     "width {width} omits {hint}: {rendered}"
                 );
             }

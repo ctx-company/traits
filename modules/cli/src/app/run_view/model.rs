@@ -22,7 +22,6 @@ pub(super) const CURRENT_MIN_OUTER_ROWS: u16 = 8;
 /// re-evaluated against the extra journey pane/borders and confirmed still
 /// wide enough for a 60/40 two-column split to stay usable.
 pub(super) const NARROW_WIDTH_THRESHOLD: u16 = 109;
-pub(super) const GUIDE_FOOTER_HINT: &str = "[?] guide · [up/down] scroll · [pg] page · [home/end] jump · [tab] pane · [d] dash · [q] exit · [ctrl-c] kill";
 
 /// P552: the (up to) four panes a run's presentation contract can show,
 /// identified once so [`pane_tree`], [`render_pane_body`], and every caller
