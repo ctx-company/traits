@@ -920,6 +920,12 @@ if (typeof cdk.isTraitFamilyHandle === 'function' && cdk.isTraitFamilyHandle(dra
   envelope = await cdk.resolveTraitFamily(draft);
 } else if (typeof draft === 'function' && typeof cdk.evaluateTraitFunction === 'function') {
   envelope = cdk.evaluateTraitFunction(draft);
+  // A hook-style FAMILY function (defineTrait + useVariant bindings)
+  // evaluates to a family handle, not a draft envelope — resolve it through
+  // the same flattening path an object-style family module takes.
+  if (typeof cdk.isTraitFamilyHandle === 'function' && cdk.isTraitFamilyHandle(envelope)) {
+    envelope = await cdk.resolveTraitFamily(envelope);
+  }
 } else if (typeof cdk.toDraftJsonWithSourceMap === 'function') {
   envelope = cdk.toDraftJsonWithSourceMap(draft);
 }

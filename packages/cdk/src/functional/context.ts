@@ -297,10 +297,29 @@ export interface FrameMint {
   readonly file: string | undefined;
 }
 
+/**
+ * One variant bound into a hook-style family via `useVariant` (0107 family
+ * extension): either a hook-style variant function (evaluated in its own
+ * frame after the family function returns — frames never nest) or a legacy
+ * object-style variant handle bridged in with an explicit key.
+ */
+export interface BoundVariant {
+  /** The `useVariant` argument, verbatim: a variant function or an object-style variant handle. */
+  readonly value: unknown;
+  /** Present only for object-handle bindings — a function binding's key comes from its own `defineVariant` call at evaluation time. */
+  readonly key: string | undefined;
+  /** Flipped by the `useVariant(...).default()` chain. */
+  isDefault: boolean;
+}
+
 /** Accumulated state for one `evaluateTraitFunction` call. Opaque to `context.ts` beyond its own bookkeeping — `functional/trait.ts` reads/writes the field contents. */
 export interface TraitFrame {
+  /** `"trait"` for a `defineTrait` module/family shell; `"variant"` for a `defineVariant` module evaluated by its family. */
+  readonly frameKind: "trait" | "variant";
   defineTraitCalled: boolean;
   slug: string | undefined;
+  /** Variants bound by `useVariant`, in call order; non-empty makes this frame a family shell. */
+  readonly boundVariants: BoundVariant[];
   /** `defineTrait`'s own fields payload, validated but otherwise untyped here — see `functional/trait.ts`'s `DefineTraitFields`. */
   fields: Record<string, unknown> | undefined;
   /** Accumulated across every `useBehavior` call, keyed by `BehaviorFields` field name. */
@@ -321,13 +340,15 @@ export function isTraitFrameActive(): boolean {
   return activeTraitFrame !== undefined;
 }
 
-export function openTraitFrame(): void {
+export function openTraitFrame(frameKind: "trait" | "variant" = "trait"): void {
   if (activeTraitFrame !== undefined) {
     throw new Error("evaluateTraitFunction: a trait function is already being evaluated — one at a time");
   }
   activeTraitFrame = {
+    frameKind,
     defineTraitCalled: false,
     slug: undefined,
+    boundVariants: [],
     fields: undefined,
     behavior: {},
     intent: {},

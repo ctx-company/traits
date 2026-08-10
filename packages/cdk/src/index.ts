@@ -19,6 +19,7 @@ export type {
 } from "./condition.js";
 export {
   defineTrait,
+  defineVariant,
   effect,
   evaluateTraitFunction,
   flow,
@@ -26,9 +27,11 @@ export {
   useBehavior,
   useIntent,
   useResource,
+  useVariant,
 } from "./functional/index.js";
 export type {
   DefineTraitFields,
+  DefineVariantFields,
   FieldMatchArms,
   ForEachRegistrarOptions,
   GuardMatchArms,
@@ -37,6 +40,7 @@ export type {
   ProcedureFromFields,
   ProcedureFromFunction,
   TraitFunctionContext,
+  UseVariantHandle,
 } from "./functional/index.js";
 export type {
   AgentModelTier,

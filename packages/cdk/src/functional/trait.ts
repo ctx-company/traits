@@ -17,6 +17,7 @@ import { ref } from "../ref.js";
 import type { SessionTitleSinkInput } from "../sink.js";
 import type { BehaviorFields, IntentSpec, SemVer, TraitFields, TraitMetadata } from "../trait.js";
 import { trait } from "../trait.js";
+import { variant as variantOf } from "../variant.js";
 import type { FrameMint, RegisteredItem, TraitFrame } from "./context.js";
 import { closeBuild, closeTraitFrame, currentTraitFrame, openBuild, openTraitFrame } from "./context.js";
 import { isThenable } from "./internal.js";
@@ -105,6 +106,11 @@ function assertJsonLiteral(value: unknown, path: string): void {
  */
 export function defineTrait(slug: string, fields: DefineTraitFields = {}): void {
   const frame = currentTraitFrame("defineTrait");
+  if (frame.frameKind === "variant") {
+    throw new Error(
+      "defineTrait: called inside a variant function — a variant module declares itself with defineVariant; identity and version belong to the family",
+    );
+  }
   if (frame.defineTraitCalled) {
     throw new Error("defineTrait: called more than once — a trait function declares its identity exactly once");
   }
@@ -116,6 +122,91 @@ export function defineTrait(slug: string, fields: DefineTraitFields = {}): void 
   frame.defineTraitCalled = true;
   frame.slug = slug;
   frame.fields = { ...fields };
+}
+
+/** `defineVariant`'s own fields: metadata only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
+export interface DefineVariantFields {
+  readonly name?: string;
+  readonly summary?: string;
+  readonly metadata?: TraitMetadata;
+  /** The variant procedure's description text. Required exactly when the variant function registers at least one step. */
+  readonly procedure?: string;
+}
+
+const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "summary", "metadata", "procedure"];
+
+/**
+ * Declares a hook-style variant module's identity — exactly once, inside a
+ * variant function evaluated via its family's `useVariant` binding. The slug
+ * is the family map key, so it lives with the variant it names instead of
+ * drifting in the family shell.
+ * @example `defineVariant("quick", { name: "Refactor (Quick)", summary: "Fast pass.", procedure: "..." })`
+ */
+export function defineVariant(slug: string, fields: DefineVariantFields = {}): void {
+  const frame = currentTraitFrame("defineVariant");
+  if (frame.frameKind === "trait") {
+    throw new Error(
+      "defineVariant: called inside a trait function — a family shell declares itself with defineTrait and binds variants with useVariant",
+    );
+  }
+  if (frame.defineTraitCalled) {
+    throw new Error("defineVariant: called more than once — a variant function declares its identity exactly once");
+  }
+  if (!isSlug(slug)) {
+    throw new Error(`defineVariant: expected a lowercase slug, got ${JSON.stringify(slug)}`);
+  }
+  assertKnownKeys(fields as Record<string, unknown>, DEFINE_VARIANT_KEYS, "defineVariant");
+  assertJsonLiteral(fields, "defineVariant fields");
+  frame.defineTraitCalled = true;
+  frame.slug = slug;
+  frame.fields = { ...fields };
+}
+
+/** The chain handle `useVariant` returns — `.default()` marks that binding the family default, exactly once per family. */
+export interface UseVariantHandle {
+  default(): void;
+}
+
+/**
+ * Binds one variant into the family being defined. A hook-style variant is a
+ * function module (its `defineVariant` call names the family key); a legacy
+ * object-style `variant({...})` handle is bridged in with an explicit `key`
+ * so a family can migrate one module at a time. Evaluation is deferred:
+ * bindings are recorded here and each variant function runs in its own frame
+ * after the family function returns — frames never nest.
+ * @example `useVariant(quick)` · `useVariant(defaultVariant).default()` · `useVariant(legacyHandle, "strict")`
+ */
+export function useVariant(value: unknown, key?: string): UseVariantHandle {
+  const frame = currentTraitFrame("useVariant");
+  if (frame.frameKind === "variant") {
+    throw new Error("useVariant: called inside a variant function — only a family shell binds variants");
+  }
+  if (typeof value === "function") {
+    if (key !== undefined) {
+      throw new Error(
+        "useVariant: a variant function carries its own key via defineVariant — do not pass one here",
+      );
+    }
+  } else if (metaOf(value) !== undefined || (value !== null && typeof value === "object")) {
+    if (key === undefined || !isSlug(key)) {
+      throw new Error(
+        "useVariant: an object-style variant handle needs an explicit family key — useVariant(handle, \"quick\")",
+      );
+    }
+  } else {
+    throw new Error(
+      `useVariant: expected a variant function or a variant({...}) handle, got ${
+        value === null ? "null" : typeof value
+      }`,
+    );
+  }
+  const binding = { value, key, isDefault: false };
+  frame.boundVariants.push(binding);
+  return {
+    default(): void {
+      binding.isDefault = true;
+    },
+  };
 }
 
 /** A built-in guidance reference (e.g. `intent.require.CiteEvidence`) — either a bare kebab-case slug or `{ id }`. */
@@ -243,6 +334,21 @@ function reconstructDeclaredPortHandle(mint: FrameMint): PortHandle {
 
 function outputPortFromReturn(key: string, value: unknown): PortHandle {
   const meta = metaOf(value);
+  // A fully-declared output port passes through untouched, so a decorated
+  // port (title, description, optional, format) loses nothing by being
+  // returned instead of listed — the fidelity a slot-derived port cannot
+  // carry.
+  if (meta?.kind === "port") {
+    const direction = (meta.declaration as CanonicalPort | undefined)?.direction;
+    if (direction !== "output") {
+      throw new Error(
+        `evaluateTraitFunction: return value ${
+          JSON.stringify(key)
+        } is an input port — only output ports and slots may be returned`,
+      );
+    }
+    return value as PortHandle;
+  }
   if (meta?.kind !== "slot" || meta.declaration === undefined) {
     throw new Error(
       `evaluateTraitFunction: return value ${JSON.stringify(key)} must be a slot handle written by a step, got ${
@@ -294,14 +400,21 @@ function checkNeverReferenced(
  * shape `toDraftJsonWithSourceMap` produces for an object-layer trait, so
  * everything downstream (drift, digest, lock, source maps) is unchanged.
  */
-export function evaluateTraitFunction(
-  // `unknown`, not the `Record<string, SlotHandle> | undefined` return contract: an invalid
-  // return value must fail with `outputPortFromReturn`'s runtime message (naming the bad key),
-  // not a compiler error — the same validated-boundary idiom as a type guard's `unknown` param.
+/** One evaluated function frame: the closed frame plus everything its run produced. */
+interface EvaluatedFrame {
+  readonly traitFrame: TraitFrame;
+  readonly items: readonly RegisteredItem[];
+  readonly sessionTitleSink: unknown;
+  readonly result: unknown;
+}
+
+/** Opens a build+frame pair, runs `fn` synchronously, and closes both — the one evaluation shape trait and variant functions share. */
+function runFrame(
   fn: (ctx: TraitFunctionContext) => unknown,
-): ReturnType<typeof toDraftJsonWithSourceMap> {
+  frameKind: "trait" | "variant",
+): EvaluatedFrame {
   openBuild();
-  openTraitFrame();
+  openTraitFrame(frameKind);
   const frame = currentTraitFrame("evaluateTraitFunction");
   const ctx: TraitFunctionContext = { input: inputProxy(frame) };
   let result: unknown;
@@ -319,12 +432,33 @@ export function evaluateTraitFunction(
       "evaluateTraitFunction: async trait functions are not supported — the function must run synchronously",
     );
   }
+  return { traitFrame, items, sessionTitleSink, result };
+}
+
+export function evaluateTraitFunction(
+  // `unknown`, not the `Record<string, SlotHandle> | undefined` return contract: an invalid
+  // return value must fail with `outputPortFromReturn`'s runtime message (naming the bad key),
+  // not a compiler error — the same validated-boundary idiom as a type guard's `unknown` param.
+  fn: (ctx: TraitFunctionContext) => unknown,
+): ReturnType<typeof toDraftJsonWithSourceMap> | ReturnType<typeof trait> {
+  const { traitFrame, items, sessionTitleSink, result } = runFrame(fn, "trait");
   if (!traitFrame.defineTraitCalled) {
     throw new Error(
       "evaluateTraitFunction: defineTrait(...) was never called — every trait function must call it exactly once",
     );
   }
+  if (traitFrame.boundVariants.length > 0) {
+    return assembleFamily(traitFrame, items);
+  }
+  return assembleSingleTrait(traitFrame, items, sessionTitleSink, result);
+}
 
+function assembleSingleTrait(
+  traitFrame: TraitFrame,
+  items: readonly RegisteredItem[],
+  sessionTitleSink: unknown,
+  result: unknown,
+): ReturnType<typeof toDraftJsonWithSourceMap> {
   const declaredInputPorts = new Map(
     traitFrame.mints
       .filter((mint) => mint.kind === "port" && (mint.declaration as CanonicalPort).direction === "input")
@@ -398,4 +532,147 @@ export function evaluateTraitFunction(
   const merged: Partial<Record<DeclKind, readonly JsonObject[]>> = metaOf(handle)?.declarations ?? {};
   checkNeverReferenced(traitFrame.mints, merged);
   return toDraftJsonWithSourceMap(handle);
+}
+
+/**
+ * Assembles the fields a hook-style VARIANT function produced — the same
+ * derivation `assembleSingleTrait` performs, minus identity/version (the
+ * family owns both) and minus `checkNeverReferenced` (a variant handle
+ * carries no merged declarations until family flattening, which is where
+ * unreferenced declarations already fail).
+ */
+function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknown> {
+  const { traitFrame, items, sessionTitleSink, result } = evaluated;
+  const declaredInputPorts = new Map(
+    traitFrame.mints
+      .filter((mint) => mint.kind === "port" && (mint.declaration as CanonicalPort).direction === "input")
+      .map((mint) => [mint.id, mint] as const),
+  );
+  const unknownInputs = [...traitFrame.inputAccessed].filter((id) => !declaredInputPorts.has(id));
+  if (unknownInputs.length > 0) {
+    const declaredIds = [...declaredInputPorts.keys()].sort();
+    throw new Error(
+      `ctx.input: unknown input port(s) ${unknownInputs.sort().join(", ")} — declared input ports are: ${
+        declaredIds.length === 0 ? "(none)" : declaredIds.join(", ")
+      }`,
+    );
+  }
+  const inputPorts = [...traitFrame.inputAccessed].map((id) =>
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- every id in inputAccessed passed the unknownInputs check above
+    reconstructDeclaredPortHandle(declaredInputPorts.get(id)!)
+  );
+
+  let outputPorts: PortHandle[] = [];
+  if (result !== undefined) {
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
+      throw new Error(
+        "defineVariant: the variant function's return value must be a plain object mapping output names to slot/output-port handles, or undefined",
+      );
+    }
+    outputPorts = Object.entries(result as Record<string, unknown>).map(([key, value]) =>
+      outputPortFromReturn(key, value)
+    );
+  }
+
+  let procedureHandle: TraitFields["procedure"];
+  if (items.length > 0) {
+    const description = traitFrame.fields?.procedure;
+    if (typeof description !== "string" || description.trim() === "") {
+      throw new Error(
+        "defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { procedure: \"...\" }) — a text description of the procedure",
+      );
+    }
+    procedureHandle = procedureOf({
+      description,
+      sequence: items.map((registered) => registered.item as SequenceHandle),
+    });
+  }
+
+  const behavior = Object.keys(traitFrame.behavior).length > 0 ? (traitFrame.behavior as BehaviorFields) : undefined;
+  const intent = Object.keys(traitFrame.intent).length > 0 ? (traitFrame.intent as IntentSpec) : undefined;
+  const resource = traitFrame.resources.length > 0 ? (traitFrame.resources as ResourceHandle[]) : undefined;
+  const ports = [...inputPorts, ...outputPorts] as PortHandle[];
+  const name = traitFrame.fields?.name as string | undefined;
+  const summary = traitFrame.fields?.summary as string | undefined;
+  const metadata = traitFrame.fields?.metadata as TraitMetadata | undefined;
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(summary === undefined ? {} : { summary }),
+    ...(metadata === undefined ? {} : { metadata }),
+    ...(behavior === undefined ? {} : { behavior }),
+    ...(intent === undefined ? {} : { intent }),
+    ...(resource === undefined ? {} : { resource }),
+    ...(ports.length === 0 ? {} : { port: ports }),
+    ...(procedureHandle === undefined ? {} : { procedure: procedureHandle }),
+    ...(sessionTitleSink === undefined
+      ? {}
+      : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
+  };
+}
+
+/**
+ * Finalizes a hook-style FAMILY: evaluates every `useVariant`-bound variant
+ * function in its own frame (deferred — frames never nest), bridges
+ * object-style handles through untouched, validates key uniqueness and the
+ * exactly-one-default rule, and lowers through the object-layer
+ * `trait(slug, { variants })` path — no second emitter (0102 Watch). The
+ * returned family handle is what the build script's `resolveTraitFamily`
+ * branch consumes, exactly as for an object-style family module.
+ */
+function assembleFamily(familyFrame: TraitFrame, familyItems: readonly RegisteredItem[]): ReturnType<typeof trait> {
+  if (familyItems.length > 0) {
+    throw new Error(
+      "useVariant: a family shell must not register its own steps — procedures belong to the variants",
+    );
+  }
+  const variants: Record<string, unknown> = {};
+  let defaultKey: string | undefined;
+  for (const binding of familyFrame.boundVariants) {
+    let key: string;
+    let handle: unknown;
+    if (typeof binding.value === "function") {
+      const evaluated = runFrame(binding.value as (ctx: TraitFunctionContext) => unknown, "variant");
+      if (!evaluated.traitFrame.defineTraitCalled) {
+        throw new Error(
+          "useVariant: a bound variant function never called defineVariant(...) — every variant module declares its identity exactly once",
+        );
+      }
+      key = evaluated.traitFrame.slug as string;
+      handle = variantOf(assembleVariantFields(evaluated) as Parameters<typeof variantOf>[0]);
+    } else {
+      key = binding.key as string;
+      handle = binding.value;
+    }
+    if (key in variants) {
+      throw new Error(`useVariant: duplicate variant key ${JSON.stringify(key)} — family keys must be unique`);
+    }
+    if (binding.isDefault) {
+      if (defaultKey !== undefined) {
+        throw new Error(
+          `useVariant: both ${JSON.stringify(defaultKey)} and ${
+            JSON.stringify(key)
+          } marked default — exactly one variant may be the family default`,
+        );
+      }
+      defaultKey = key;
+      handle = (handle as { default(): unknown; }).default();
+    }
+    variants[key] = handle;
+  }
+  if (defaultKey === undefined) {
+    throw new Error(
+      "useVariant: no variant marked default — chain .default() onto exactly one useVariant(...) call",
+    );
+  }
+  const name = familyFrame.fields?.name as string | undefined;
+  const version = familyFrame.fields?.version as SemVer | undefined;
+  const summary = familyFrame.fields?.summary as string | undefined;
+  const metadata = familyFrame.fields?.metadata as TraitMetadata | undefined;
+  return trait(familyFrame.slug as string, {
+    ...(name === undefined ? {} : { name }),
+    ...(version === undefined ? {} : { version }),
+    ...(summary === undefined ? {} : { summary }),
+    ...(metadata === undefined ? {} : { metadata }),
+    variants: variants as TraitFields["variants"],
+  } as TraitFields);
 }

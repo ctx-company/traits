@@ -24,7 +24,9 @@ import {
   useBehavior,
   useIntent,
   useResource,
+  useVariant,
 } from "@ctx-traits/cdk";
+import { defineVariant, isTraitFamilyHandle, resolveTraitFamily, variant } from "@ctx-traits/cdk";
 import type { JsonObject } from "@ctx-traits/cdk";
 import { describe, expect, it } from "vitest";
 
@@ -447,6 +449,166 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string; }[]; };
     const portIds = (draft.port ?? []).map((p) => `${p.id}:${p.direction}`).sort();
     expect(portIds).toEqual(["diff:input", "review:output"]);
+  });
+});
+
+describe("defineVariant/useVariant hook-style families", () => {
+  const quickVariant = (ctx: unknown) => {
+    void ctx;
+    defineVariant("quick", {
+      name: "Family (Quick)",
+      summary: "Fast pass.",
+      procedure: "One step.",
+    });
+    useBehavior({ tone: tone.Direct });
+    const out = slot.text("result");
+    agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
+      input: input.prompt`Do it.`,
+      output: out,
+    });
+    return { result: out };
+  };
+
+  it("a family shell binds hook variants and resolves through the object family path", async () => {
+    const family = evaluateTraitFunction(function() {
+      defineTrait("hook-family", { version: "0.1.0" });
+      useVariant(quickVariant).default();
+    });
+    expect(isTraitFamilyHandle(family)).toBe(true);
+    const resolved = await resolveTraitFamily(family as unknown as Parameters<typeof resolveTraitFamily>[0]);
+    expect(resolved.id).toBe("hook-family");
+    const paths = resolved.variants.map((entry) => entry.path);
+    expect(paths).toContain("quick");
+    const quick = resolved.variants.find((entry) => entry.path === "quick");
+    const draft = quick?.draft as JsonObject | undefined;
+    expect(draft?.["name"]).toBe("Family (Quick)");
+    expect((draft?.["procedure"] as JsonObject | undefined)?.["description"]).toBe("One step.");
+  });
+
+  it("defineVariant inside a trait frame is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(() => {
+        defineVariant("nope");
+      })
+    ).toThrow(/defineVariant: called inside a trait function/);
+  });
+
+  it("defineTrait inside a variant function is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(() => {
+          defineTrait("wrong-call");
+        }).default();
+      })
+    ).toThrow(/defineTrait: called inside a variant function/);
+  });
+
+  it("a variant function that never calls defineVariant is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(() => undefined).default();
+      })
+    ).toThrow(/never called defineVariant/);
+  });
+
+  it("duplicate variant keys are a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(quickVariant).default();
+        useVariant(quickVariant);
+      })
+    ).toThrow(/duplicate variant key "quick"/);
+  });
+
+  it("no default marked is a build error, and two defaults are too", () => {
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(quickVariant);
+      })
+    ).toThrow(/no variant marked default/);
+    const other = (ctx: unknown) => {
+      void ctx;
+      defineVariant("other", { procedure: "One step." });
+      const out = slot.text("out");
+      agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
+        input: input.prompt`Do it.`,
+        output: out,
+      });
+    };
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(quickVariant).default();
+        useVariant(other).default();
+      })
+    ).toThrow(/exactly one variant may be the family default/);
+  });
+
+  it("a family shell registering its own steps is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(quickVariant).default();
+        step.command("Stray step", { argv: ["true"], output: slot.text("stray") });
+      })
+    ).toThrow(/family shell must not register its own steps/);
+  });
+
+  it("an object-style handle bridges in with an explicit key; a function must not pass one", () => {
+    const legacy = variant({
+      summary: "Legacy object variant.",
+      procedure: procedure({
+        description: "No steps.",
+        sequence: [],
+      }),
+    });
+    const family = evaluateTraitFunction(function() {
+      defineTrait("mixed-family", { version: "0.1.0" });
+      useVariant(quickVariant).default();
+      useVariant(legacy, "legacy");
+    });
+    expect(isTraitFamilyHandle(family)).toBe(true);
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(legacy);
+      })
+    ).toThrow(/needs an explicit family key/);
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("family-shell", { version: "0.1.0" });
+        useVariant(quickVariant, "quick");
+      })
+    ).toThrow(/carries its own key via defineVariant/);
+  });
+
+  it("a returned decorated output port passes through with its declaration intact", () => {
+    const draft = evaluateTraitFunction(function() {
+      defineTrait("decorated-output", { version: "0.1.0", procedure: "One step." });
+      const out = slot.text("payload");
+      agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
+        input: input.prompt`Do it.`,
+        output: out,
+      });
+      return {
+        report: port.output.text({
+          id: "report",
+          title: "Report",
+          description: "The decorated output.",
+          optional: true,
+          value: out,
+        }),
+      };
+    }) as { draft: JsonObject; };
+    const ports = (draft.draft as { port?: JsonObject[]; }).port ?? [];
+    const report = ports.find((p) => p["id"] === "report");
+    expect(report).toBeDefined();
+    expect(report?.["title"]).toBe("Report");
+    expect(report?.["optional"]).toBe(true);
   });
 });
 
