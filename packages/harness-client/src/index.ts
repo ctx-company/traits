@@ -3,9 +3,10 @@ import { execFile } from "node:child_process";
 import type {
   ContextPlanRow,
   ContextPlanValue,
-  Envelope,
   HostFacts,
   InjectedTrait,
+  JsonObject,
+  JsonValue,
   PromptResponse,
   ResolveCandidate,
   ResolveResponse,
@@ -63,20 +64,20 @@ function runCtx(ctxPath: string, args: readonly string[], cwd: string): Promise<
   });
 }
 
-function parseJson(raw: string, context: string): unknown {
+function parseJson(raw: string, context: string): JsonValue {
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw) as JsonValue;
   } catch (cause) {
     throw new CtxCliError(`ctx.traits: malformed JSON from ${context}: ${(cause as Error).message}`);
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: JsonValue | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Every field `ctx_traits_core::resolve::Candidate` mirrors — see {@link ResolveCandidate}. */
-function isResolveCandidate(value: unknown): value is ResolveCandidate {
+function isResolveCandidate(value: JsonValue): value is ResolveCandidate & JsonObject {
   return isRecord(value)
     && typeof value["trait-id"] === "string"
     && typeof value["version"] === "string"
@@ -96,7 +97,7 @@ function isResolveCandidate(value: unknown): value is ResolveCandidate {
  * structurally-incompatible response (e.g. a CLI version skew, or a non-JSON error
  * object) must never silently become "no selection" — it must throw.
  */
-function asResolveResponse(raw: unknown, context: string): ResolveResponse {
+function asResolveResponse(raw: JsonValue, context: string): ResolveResponse {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
   }
@@ -114,13 +115,15 @@ function asResolveResponse(raw: unknown, context: string): ResolveResponse {
   return raw;
 }
 
-function isResolveResponse(value: Record<string, unknown>): value is Record<string, unknown> & ResolveResponse {
-  return (value["selected"] === undefined || (value["selected"] as readonly unknown[]).every(isResolveCandidate))
-    && (value["rejected"] === undefined || (value["rejected"] as readonly unknown[]).every(isResolveCandidate));
+function isResolveResponse(value: JsonObject): value is JsonObject & ResolveResponse {
+  return (value["selected"] === undefined
+    || (Array.isArray(value["selected"]) && value["selected"].every(isResolveCandidate)))
+    && (value["rejected"] === undefined
+      || (Array.isArray(value["rejected"]) && value["rejected"].every(isResolveCandidate)));
 }
 
 /** Full structural check for `ctx traits prompt <id> --json`'s response shape. */
-function asPromptResponse(raw: unknown, context: string): PromptResponse {
+function asPromptResponse(raw: JsonValue, context: string): PromptResponse {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
   }
@@ -153,26 +156,25 @@ function asPromptResponse(raw: unknown, context: string): PromptResponse {
  * error envelope, must throw — never silently degrade to "no traits", since
  * the resolver is the sole activation authority.
  */
-function unwrapEnvelope<T>(raw: unknown, context: string, checkValue: (value: unknown, context: string) => T): T {
+function unwrapEnvelope<T>(raw: JsonValue, context: string, checkValue: (value: JsonValue, context: string) => T): T {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed envelope from ${context}: expected a JSON object`);
   }
-  const envelope = raw as Partial<Envelope<unknown>>;
-  if (envelope.ok !== true) {
-    const error = envelope.error;
+  if (raw["ok"] !== true) {
+    const error = raw["error"];
     if (isRecord(error) && typeof error["code"] === "string" && typeof error["message"] === "string") {
       throw new CtxCliError(`ctx.traits: ${context} returned an error envelope: ${error["code"]}: ${error["message"]}`);
     }
     throw new CtxCliError(`ctx.traits: ${context} returned a non-ok envelope with no structured error`);
   }
-  if (envelope.value === undefined) {
+  if (raw["value"] === undefined) {
     throw new CtxCliError(`ctx.traits: ${context} returned an ok envelope with no "value"`);
   }
-  return checkValue(envelope.value, context);
+  return checkValue(raw["value"], context);
 }
 
 /** Every field `ContextPlanRowReport` mirrors — see {@link ContextPlanRow}. */
-function isContextPlanRow(value: unknown): value is ContextPlanRow {
+function isContextPlanRow(value: JsonValue): value is ContextPlanRow & JsonObject {
   return isRecord(value)
     && typeof value["trait-id"] === "string"
     && typeof value["model-view-digest"] === "string"
@@ -182,7 +184,7 @@ function isContextPlanRow(value: unknown): value is ContextPlanRow {
 }
 
 /** Full structural check for `ContextPlanReport`'s (`ContextPlanValue`) shape. */
-function asContextPlanValue(raw: unknown, context: string): ContextPlanValue {
+function asContextPlanValue(raw: JsonValue, context: string): ContextPlanValue {
   if (!isRecord(raw)) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: expected a JSON object`);
   }

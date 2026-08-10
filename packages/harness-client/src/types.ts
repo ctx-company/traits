@@ -71,6 +71,20 @@ export interface EnvelopeError {
   readonly details?: Record<string, string>;
 }
 
+/** Mirrors `core::response::Warning`. */
+export interface Warning {
+  readonly code: string;
+  readonly message: string;
+  readonly path: string | null;
+}
+
+/** Mirrors `core::response::CapabilityReport`. */
+export interface CapabilityReport {
+  readonly capability: string;
+  readonly supported: boolean;
+  readonly reason: string | null;
+}
+
 /**
  * Mirrors `core::response::Envelope<T>`, the JSON ABI envelope shape used by
  * `ctx traits context plan --json` (unlike `resolve --json` / `prompt --json`,
@@ -81,6 +95,11 @@ export interface Envelope<T> {
   readonly ok: boolean;
   readonly value?: T;
   readonly error?: EnvelopeError;
-  readonly warnings: readonly unknown[];
-  readonly capabilities: readonly unknown[];
+  readonly warnings: readonly Warning[];
+  readonly capabilities: readonly CapabilityReport[];
 }
+
+// JSON grammar aliases, matching `packages/cdk/src/generated.ts` verbatim. Not part of the
+// package's public surface — index.ts imports them but does not re-export.
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
+export type JsonObject = { readonly [key: string]: JsonValue | undefined; };
