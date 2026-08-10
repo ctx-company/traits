@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.9.0"
+version = "0.10.0"
 name = "Refactor (Strict)"
 summary = "Surveyed refactoring procedure with verbatim execution: survey, frame, design, implement the agreed design exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
 variant = "strict"
@@ -99,6 +99,11 @@ id = "survey"
 schema = "schema:text"
 description = "Numbered refactoring candidates for the target: cluster, why coupled, smell ids, test impact. No interface proposals."
 hint = "The friction encountered while reading IS the signal. Deferred candidates stay listed here."
+
+[[slot]]
+id = "unstage-output"
+schema = "schema:text"
+description = "Output evidence from the runtime-state unstage step (git reset -- .agents/runs); empty when nothing was staged there."
 
 [[slot]]
 id = "work-summary"
@@ -414,7 +419,7 @@ output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
 id = "git-stage"
-title = "Stage all changes except runtime state"
+title = "Stage all changes"
 output = ["slot:stage-output"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
@@ -422,8 +427,20 @@ argv = [
     "git",
     "add",
     "-A",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-unstage-runtime"
+title = "Unstage runtime state"
+output = ["slot:unstage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "-q",
     "--",
-    ":(exclude).agents/runs",
+    ".agents/runs",
 ]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]

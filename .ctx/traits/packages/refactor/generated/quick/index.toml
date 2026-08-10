@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.9.0"
+version = "0.10.0"
 name = "Refactor (Quick)"
 summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
 variant = "quick"
@@ -69,6 +69,11 @@ description = "smart-1's single review verdict for the implemented checklist."
 id = "stage-output"
 schema = "schema:text"
 description = "Output evidence from the git staging command step."
+
+[[slot]]
+id = "unstage-output"
+schema = "schema:text"
+description = "Output evidence from the runtime-state unstage step (git reset -- .agents/runs); empty when nothing was staged there."
 
 [[slot]]
 id = "work-summary"
@@ -274,7 +279,7 @@ output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
 id = "git-stage"
-title = "Stage all changes except runtime state"
+title = "Stage all changes"
 output = ["slot:stage-output"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
@@ -282,8 +287,20 @@ argv = [
     "git",
     "add",
     "-A",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "git-unstage-runtime"
+title = "Unstage runtime state"
+output = ["slot:unstage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "-q",
     "--",
-    ":(exclude).agents/runs",
+    ".agents/runs",
 ]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]

@@ -6,19 +6,19 @@ generated-at = "not-recorded"
 [[trait]]
 id = "refactor"
 variant = "default"
-requested-version = "0.9.0"
-resolved-version = "0.9.0"
+requested-version = "0.10.0"
+resolved-version = "0.10.0"
 
 [trait.digests]
-source = "sha256:8c1f5ff1d4e5db322a62d0a1f9d9feed20fadcddebbf2ddf4e35df8979ca8870"
-canonical = "sha256:0815a4e967670422fab1067be7b3c7d56831ee41ffa4aeb5baa63890ab46b872"
-model-visible = "sha256:8febe545f2e70df55f78f560169f0e2867ccfee8d64a4f2070ac38741231d384"
+source = "sha256:128ca5ecd1e0e8b0e7fd2c20d239288047caf08dae46c66a71d42a488894d94e"
+canonical = "sha256:93f349dcf6530789c3b53053b519ca717a5b84793a4581a08acd2a92d6f4deab"
+model-visible = "sha256:f0dadbaf5949851c2f9437defabe4ea4e47c27e467e4027742f3f0a8d443d3d5"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/refactor-default/SKILL.md"
-digest = "sha256:1a60c2ad0f441f72a646df0bd1f94607c8acdd94da4db9f84536ad4aafc42415"
+digest = "sha256:67722559bee96d143c861a91e3c1379d0f8da7a333fec76c24f6212a92eacd85"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -26,11 +26,11 @@ renderer-version = "0.1.0-alpha.1"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:8c1f5ff1d4e5db322a62d0a1f9d9feed20fadcddebbf2ddf4e35df8979ca8870"
-canonical = "sha256:0815a4e967670422fab1067be7b3c7d56831ee41ffa4aeb5baa63890ab46b872"
-model-visible = "sha256:8febe545f2e70df55f78f560169f0e2867ccfee8d64a4f2070ac38741231d384"
-render = "sha256:833ddd60708efaf419775f1ff58a1bfa5f6cc783e9e17c9ac7549ec6c1eb4563"
-generated-markdown = "sha256:1a60c2ad0f441f72a646df0bd1f94607c8acdd94da4db9f84536ad4aafc42415"
+source = "sha256:128ca5ecd1e0e8b0e7fd2c20d239288047caf08dae46c66a71d42a488894d94e"
+canonical = "sha256:93f349dcf6530789c3b53053b519ca717a5b84793a4581a08acd2a92d6f4deab"
+model-visible = "sha256:f0dadbaf5949851c2f9437defabe4ea4e47c27e467e4027742f3f0a8d443d3d5"
+render = "sha256:96c87f84251719dab74aff0464f8045cfcbe15daf9f5d8a5c63448f429029aac"
+generated-markdown = "sha256:67722559bee96d143c861a91e3c1379d0f8da7a333fec76c24f6212a92eacd85"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
@@ -51,12 +51,12 @@ options = ["--profile=agent-skills"]
 [[trait]]
 id = "refactor"
 variant = "direct"
-requested-version = "0.9.0"
-resolved-version = "0.9.0"
+requested-version = "0.10.0"
+resolved-version = "0.10.0"
 
 [trait.digests]
-source = "sha256:fcd2a298d6e19e09bafd124cdaed776bf797d2d71637518687c25bf297b9cf45"
-canonical = "sha256:9c525df4e8a52a0e27c010427569476712486ed066798115ccda2909993f91b4"
+source = "sha256:e6f7df1d556abedf5eb0fa71e27df868f2f37caa0248ceddcef420095fe86710"
+canonical = "sha256:abe65c96b215958cd972f9c89a04cfcf4ba1ce756ac7d95b0c0ebbf6213c7e7d"
 model-visible = "sha256:60acd44385c90bfdd05eaef094512c34e744a963e41bd1f641c0c4008619e828"
 resource-manifest = "sha256:d44252c6cf774f41cb7c7b1bd6a190ee1ea26702ef46cfa328fa0d8887fa4f51"
 
@@ -68,13 +68,13 @@ digest = "sha256:f475494b19ed36ef5d4d2334071481a61833d41d51ed908fd9409b2b93c3012
 [[trait]]
 id = "refactor"
 variant = "quick"
-requested-version = "0.9.0"
-resolved-version = "0.9.0"
+requested-version = "0.10.0"
+resolved-version = "0.10.0"
 
 [trait.digests]
-source = "sha256:210efb0469ea58cd71d924ea17e48ee0f74ac8cf6f5352e4d092e71ccb3c4362"
-canonical = "sha256:bb6140ff755148e0c33416d1b0734e37ac94e2e2c2c7bc619dce890eed5825aa"
-model-visible = "sha256:31947c9f7f62d424128d1aa1371639fb82d4a4497863dc44451979c28330f26d"
+source = "sha256:0a92da5e9b25df83019fe5548148bbb604d0005320e66edc049d029df83e6382"
+canonical = "sha256:c65399775f244dc4b65b4b81e53ffaa77cf2116b27be3dc9ecec1a82062b1ae0"
+model-visible = "sha256:c4c30fd9179cf67b8afd40a00bc9c360c6d05521a1a16bd92404a089119c7aad"
 resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
 
 [[trait.export]]
@@ -85,12 +85,12 @@ digest = "sha256:0d5bb1912b8dfbe6ec4a339baa110eda2b62d192b267ed72ea73962c4ec0583
 [[trait]]
 id = "refactor"
 variant = "smart"
-requested-version = "0.9.0"
-resolved-version = "0.9.0"
+requested-version = "0.10.0"
+resolved-version = "0.10.0"
 
 [trait.digests]
-source = "sha256:d658494480c1ee69b9dc8e5ef739e5bc3f07ef6b25ac2606c21928fe6075a12e"
-canonical = "sha256:9b9d3be7702abb0e32a931a56533689dba95dae47f201cb7ed15b0650d1f0ea4"
+source = "sha256:7ad6814c4f4f15ca17d11298bf09709d0774981af0285b493fc60d5a5c38fc51"
+canonical = "sha256:4d15f00a0a501e437f7304ecd5d2dfe580bbe1fea936a97f2579fec829a09104"
 model-visible = "sha256:916daa345f797c6ab662316c41190c8f8ffe11afe68066c2a5cb77aec94972a4"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
@@ -102,13 +102,13 @@ digest = "sha256:ea944b857b7c2bf05815f645f7fcd5f316cbba097aa21935d205c248f6e0c7d
 [[trait]]
 id = "refactor"
 variant = "strict"
-requested-version = "0.9.0"
-resolved-version = "0.9.0"
+requested-version = "0.10.0"
+resolved-version = "0.10.0"
 
 [trait.digests]
-source = "sha256:30d8d194f958b2bac51332be7b2590b689b0de22dca37dbc8bb0cbd4f62194cc"
-canonical = "sha256:44a452cbecf65e054501921c66cb34f6c7c93c17092e13729dc60136403d5ddc"
-model-visible = "sha256:268cba5bcc64aec80cf909118b5956e1309c0dae0e65f32777a6b6921d69aa03"
+source = "sha256:7e0b42cfbe3f65817d9a8ad86c77241502064d5b69d4a0613053e61b49033285"
+canonical = "sha256:8f29cc413e09b697f0ba7fd860dbc5bcb207ba408e13bf176dafac0c4a3a4c0b"
+model-visible = "sha256:e8f5dbb3e01bb81fa9d6d0dd4b4337fec8cb1a0a2477f580f2e2f09d5d99f9a0"
 resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
 
 [[trait.export]]

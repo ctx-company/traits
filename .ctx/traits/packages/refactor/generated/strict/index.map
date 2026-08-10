@@ -101,18 +101,23 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 142,
-    "end": 142
+    "start": 145,
+    "end": 145
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 120,
-    "end": 120
+    "start": 123,
+    "end": 123
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-stage": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 119,
-    "end": 119
+    "start": 121,
+    "end": 121
+  },
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-unstage-runtime": {
+    "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
+    "start": 122,
+    "end": 122
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/summarization": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
@@ -121,8 +126,8 @@
   },
   "sequence:procedure/check-git-status": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 160,
-    "end": 160
+    "start": 163,
+    "end": 163
   },
   "sequence:procedure/design": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
@@ -141,13 +146,13 @@
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 161,
-    "end": 161
+    "start": 164,
+    "end": 164
   },
   "sequence:procedure/refinement-loop": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 150,
-    "end": 150
+    "start": 153,
+    "end": 153
   },
   "sequence:procedure/survey": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
@@ -156,8 +161,8 @@
   },
   "sequence:refine-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 152,
-    "end": 152
+    "start": 155,
+    "end": 155
   },
   "sequence:refine-refactor/apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
@@ -224,6 +229,11 @@
     "start": 9,
     "end": 9
   },
+  "slot:unstage-output": {
+    "file": ".ctx/traits/packages/refactor/source/data.ts",
+    "start": 34,
+    "end": 34
+  },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/refactor/source/data.ts",
     "start": 24,
@@ -231,7 +241,7 @@
   },
   "trait:refactor": {
     "file": ".ctx/traits/packages/refactor/source/variants/strict.ts",
-    "start": 122,
-    "end": 122
+    "start": 125,
+    "end": 125
   }
 }

@@ -34,6 +34,10 @@ const stageOutput = slot.text({
     id: "stage-output",
     description: "Output evidence from the git staging command step.",
 });
+const unstageOutput = slot.text({
+    id: "unstage-output",
+    description: "Output evidence from the runtime-state unstage step (git reset -- .agents/runs); empty when nothing was staged there.",
+});
 const commitOutput = slot.text({
     id: "commit-output",
     description: "Output evidence from the git commit command step: committed hash and subject.",
@@ -163,11 +167,19 @@ export default variant({
                         Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.`,
                         output: commitMessage,
                     }),
+                    // Two steps, not one excluding add — a pathspec that
+                    // mentions a gitignored `.agents` exits 1 (run-42bd7fb2).
                     sequence.command({
                         id: "git-stage",
-                        title: "Stage all changes except runtime state",
-                        argv: ["git", "add", "-A", "--", ":(exclude).agents/runs"],
+                        title: "Stage all changes",
+                        argv: ["git", "add", "-A"],
                         output: stageOutput,
+                    }),
+                    sequence.command({
+                        id: "git-unstage-runtime",
+                        title: "Unstage runtime state",
+                        argv: ["git", "reset", "-q", "--", ".agents/runs"],
+                        output: unstageOutput,
                     }),
                     sequence.command({
                         id: "git-commit",
