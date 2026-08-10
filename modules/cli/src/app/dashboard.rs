@@ -6365,13 +6365,18 @@ fn open_task_edit_modal(state: &mut State) {
     );
 }
 
-/// `y`: accept a merge-time done-proposal (0063.8). Refuses inline (no
-/// modal) when the selected task has no derived proposal or the board's
-/// last-synced resolve has nothing for its key; otherwise reads the task
-/// fresh (the digest the eventual write is validated against) and opens a
-/// confirm showing the run id, merged sha per cited run, and the task's own
-/// `validation` prose — the owner judges against the contract, not the
-/// commit's existence.
+/// `y`: mark the selected task done. When a merge-time done-proposal
+/// (0063.8) exists for it, the confirm cites the run id and merged sha per
+/// cited run as evidence; when none does — the common case for a task
+/// raised or finished outside a bound run, or whose run's ledger entry is
+/// no longer readable — the confirm still opens, sourced from a fresh board
+/// read, and says so plainly rather than refusing the verb the footer
+/// advertises (0149: every surface offering "done" must be able to do it).
+/// Refuses inline (no modal) only when the board's last-synced resolve has
+/// nothing for the key; otherwise reads the task fresh (the digest the
+/// eventual write is validated against) and opens a confirm showing
+/// whatever evidence exists plus the task's own `validation` prose — the
+/// owner judges against the contract, not the commit's existence.
 fn open_task_mark_done_modal(state: &mut State) {
     let Ok(dir) = super::tasks::board_dir(None) else {
         state.message =
@@ -6396,10 +6401,13 @@ fn open_task_mark_done_modal_in(
         return;
     };
     let key = summary.key.clone();
-    let Some(proposal) = state.task_proposals.get(&key).cloned() else {
-        state.message = Some(format!("{key}: no merge-time done-proposal"));
-        return;
-    };
+    // 4086d63e (task 0149): no proposal gate — a task with no merge-time
+    // done-proposal still opens the confirm modal, with empty evidence.
+    let evidence = state
+        .task_proposals
+        .get(&key)
+        .map(|proposal| proposal.evidence.clone())
+        .unwrap_or_default();
     let Some(document) = state
         .tasks_board
         .as_ref()
@@ -6418,8 +6426,7 @@ fn open_task_mark_done_modal_in(
     };
     // 0144: evaluate once against the latest cited sha — self-close skips
     // the modal entirely; a `Proposal` disposition strengthens it below.
-    let evaluation = proposal
-        .evidence
+    let evaluation = evidence
         .last()
         .and_then(|latest| evaluate_task_close(&document, repo_root, &latest.sha));
     if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
@@ -6429,18 +6436,24 @@ fn open_task_mark_done_modal_in(
             dir,
             &key,
             digest,
-            &proposal.evidence,
+            &evidence,
             Some(closure.clone()),
             true,
         );
         return;
     }
     let mut body = String::new();
-    for evidence in &proposal.evidence {
+    if evidence.is_empty() {
         body.push_str(&format!(
-            "run {} for {key} merged as {} — mark done?\n",
-            evidence.run_id, evidence.sha
+            "no merge-time evidence on file for {key} — mark done anyway?\n"
         ));
+    } else {
+        for item in &evidence {
+            body.push_str(&format!(
+                "run {} for {key} merged as {} — mark done?\n",
+                item.run_id, item.sha
+            ));
+        }
     }
     if !document.validation.trim().is_empty() {
         body.push_str("\ndone-when:\n");
@@ -6448,13 +6461,18 @@ fn open_task_mark_done_modal_in(
     }
     match &evaluation {
         Some((closure, disposition)) => append_check_disposition(&mut body, closure, disposition),
+        // 4086d63e: with no merge-time evidence the declared checks cannot
+        // run at confirm — say so instead of promising they will.
+        None if evidence.is_empty() => {
+            append_declared_checks_skipped_notice(&mut body, &document.checks)
+        }
         None => append_declared_checks_notice(&mut body, &document.checks),
     }
     state.modal_host.open(
         Action::Task(TaskAction::MarkDone {
             key: key.clone(),
             digest,
-            evidence: proposal.evidence.clone(),
+            evidence,
             closure: evaluation.map(|(closure, _)| closure),
         }),
         Modal::confirm(format!("mark {key} done"), body),
@@ -6470,6 +6488,24 @@ fn append_declared_checks_notice(body: &mut String, checks: &[ctx_traits_core::t
         return;
     }
     body.push_str("\n\ndeclared checks (run on confirm):\n");
+    for check in checks {
+        body.push_str(&format!("- {}: {}\n", check.name, check.command));
+    }
+}
+
+/// The no-evidence counterpart of [`append_declared_checks_notice`] — with
+/// no merge-time proposal there is no cited sha to check declared checks
+/// against, so `apply_task_mark_done_in` skips the 0144 closure branch
+/// entirely (mirrors the CLI's `tasks update`, which never runs checks
+/// either). The body must say so, never claim a gate the apply path skips.
+fn append_declared_checks_skipped_notice(
+    body: &mut String,
+    checks: &[ctx_traits_core::task::Check],
+) {
+    if checks.is_empty() {
+        return;
+    }
+    body.push_str("\n\ndeclared checks (NOT run — no merge-time evidence to check at):\n");
     for check in checks {
         body.push_str(&format!("- {}: {}\n", check.name, check.command));
     }
@@ -7165,22 +7201,18 @@ fn write_task_close(
     closure: Option<Closure>,
     self_closed: bool,
 ) -> crate::Result<()> {
-    let Some(latest) = evidence.last() else {
-        state.message = Some(format!("mark done refused: {key} has no evidence"));
-        return Ok(());
-    };
+    let latest = evidence.last();
     let provider = FilesTaskBoard::open_read_write(dir.to_owned());
     let current = provider.get(key).ok().flatten();
     let has_origin = current
         .as_ref()
         .is_some_and(|resolved| resolved.document.origin.is_some());
-    let set_origin = if has_origin {
-        None
-    } else {
-        Some(Some(format!(
+    let set_origin = match (has_origin, latest) {
+        (false, Some(latest)) => Some(Some(format!(
             "run {} merged as {}",
             latest.run_id, latest.sha
-        )))
+        ))),
+        _ => None,
     };
     let checks_summary = closure.as_ref().map(|closure| {
         if closure.checks.is_empty() {
@@ -7214,12 +7246,18 @@ fn write_task_close(
             let checks_clause = checks_summary
                 .map(|summary| format!(" — {summary}"))
                 .unwrap_or_default();
-            state.message = Some(format!(
-                "{key} {verb} — run {} merged as {}{checks_clause}{}",
-                latest.run_id,
-                latest.sha,
-                effects_summary(&outcome.effects)
-            ));
+            state.message = Some(match latest {
+                Some(latest) => format!(
+                    "{key} {verb} — run {} merged as {}{checks_clause}{}",
+                    latest.run_id,
+                    latest.sha,
+                    effects_summary(&outcome.effects)
+                ),
+                None => format!(
+                    "{key} {verb} — no merge evidence on file{checks_clause}{}",
+                    effects_summary(&outcome.effects)
+                ),
+            });
             resync_tasks_board_after_write_in(state, dir);
         }
         Err(error) => {
@@ -11778,6 +11816,104 @@ mod tests {
             "archive placement must move the file under archived/"
         );
         assert!(!dir.join("0001-first.toml").exists());
+    }
+
+    #[test]
+    fn mark_done_with_no_evidence_still_applies_status_and_archive() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+
+        let provider = FilesTaskBoard::open_read_write(dir.clone());
+        let digest = provider.get("0001").unwrap().expect("task resolves").digest;
+
+        // No proposal cache entry, so no evidence — the task board also has
+        // no live merged run for it. `y` must still be able to mark it
+        // done, matching what the CLI's `tasks update --status done`
+        // already does end to end (0149).
+        apply_task_mark_done_in(&mut state, &dir, "0001".to_string(), digest, Vec::new(), None)
+            .unwrap();
+
+        let message = state.message.as_deref().unwrap_or("");
+        assert!(
+            message.contains("0001 marked done"),
+            "expected a mark-done confirmation, got {message:?}"
+        );
+        assert!(
+            !message.contains("refused"),
+            "no-evidence mark done must not be treated as a refusal, got {message:?}"
+        );
+
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(resolved.document.status, Some(TaskDocStatus::Done));
+        assert!(
+            dir.join("archived").join("0001-first.toml").exists(),
+            "archive placement must move the file under archived/"
+        );
+        assert!(!dir.join("0001-first.toml").exists());
+    }
+
+    #[test]
+    fn open_task_mark_done_modal_opens_without_a_cached_proposal() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        assert!(
+            state.task_proposals.is_empty(),
+            "no run inventory was joined, so no proposal should be derived"
+        );
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0001"))
+            .expect("task row");
+        state.list_tasks.set_selected(index);
+
+        open_task_mark_done_modal(&mut state);
+
+        assert!(
+            state.modal_host.is_open(),
+            "the confirm modal must open even absent a merge-time proposal"
+        );
+    }
+
+    #[test]
+    fn open_task_mark_done_modal_with_no_evidence_does_not_claim_checks_will_run() {
+        let dir = tasks_board_tempdir();
+        std::fs::write(
+            dir.join("0001-first.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title 0001\"\nstatus = \"ready\"\n\n[[checks]]\nname = \"unit tests\"\ncommand = \"cargo test -p ctx-traits-core\"\n",
+        )
+        .unwrap();
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        assert!(
+            state.task_proposals.is_empty(),
+            "no run inventory was joined, so no proposal should be derived"
+        );
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0001"))
+            .expect("task row");
+        state.list_tasks.set_selected(index);
+
+        open_task_mark_done_modal(&mut state);
+
+        let body = match state.modal_host.modal() {
+            Some(Modal::Confirm { body, .. }) => body.clone(),
+            _ => panic!("expected an open confirm modal"),
+        };
+        assert!(
+            !body.contains("run on confirm"),
+            "no-evidence confirm must never claim declared checks will run, got {body:?}"
+        );
+        assert!(
+            body.contains("NOT run"),
+            "no-evidence confirm must state declared checks are skipped, got {body:?}"
+        );
     }
 
     #[test]
