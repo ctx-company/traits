@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0150"
 title = "Trust must never report verified while the bytes someone can run are unreviewed"
-status = "ready"
+status = "done"
 raised = "2026-08-09"
 content = """
 
