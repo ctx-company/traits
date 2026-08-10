@@ -19,6 +19,7 @@ import {
   rule,
   schema,
   searcher,
+  seats,
   sequence,
   session,
   signal,
@@ -2042,6 +2043,56 @@ describe("agent.* templates vs deprecated bare exports (P459)", () => {
         message: "Bare `worker(...)` is deprecated; use `agent.worker(...)` instead.",
       },
     ]);
+  });
+});
+
+describe("seats (0162)", () => {
+  it("mints byte-identical output to hand-numbered agent(...) calls", () => {
+    const minted = seats(agent, "smart", 2, { description: "Reviews the diff." });
+    const handWritten = [
+      agent("smart-1", { description: "Reviews the diff." }),
+      agent("smart-2", { description: "Reviews the diff." }),
+    ];
+
+    expect(minted.map((h) => toDraftJson(h))).toEqual(
+      handWritten.map((h) => toDraftJson(h)),
+    );
+  });
+
+  it("mints byte-identical output to hand-numbered agent.reviewer(...) calls", () => {
+    const minted = seats(agent.reviewer, "smart", 2, { description: "Reviews the diff." });
+    const handWritten = [
+      agent.reviewer("smart-1", { description: "Reviews the diff." }),
+      agent.reviewer("smart-2", { description: "Reviews the diff." }),
+    ];
+
+    expect(minted.map((h) => toDraftJson(h))).toEqual(
+      handWritten.map((h) => toDraftJson(h)),
+    );
+  });
+
+  it("mints ids in positional order", () => {
+    const minted = seats(agent, "smart", 3, { description: "Seat." });
+
+    expect(minted.map((h) => toDraftJson(h).id)).toEqual(["smart-1", "smart-2", "smart-3"]);
+  });
+
+  it("reordering the destructure reorders which id each variable holds", () => {
+    const minted = seats(agent, "smart", 2, { description: "Seat." });
+    const [a, b] = minted;
+    const [b2, a2] = [minted[1], minted[0]];
+
+    expect(toDraftJson(a).id).toBe(toDraftJson(a2).id);
+    expect(toDraftJson(b).id).toBe(toDraftJson(b2).id);
+  });
+
+  it("rejects a non-positive-integer count", () => {
+    expect(() => seats(agent, "smart", 0, { description: "Seat." })).toThrow(/seats\.count/);
+    expect(() => seats(agent, "smart", 1.5, { description: "Seat." })).toThrow(/seats\.count/);
+  });
+
+  it("rejects a non-slug role", () => {
+    expect(() => seats(agent, "Not_A_Slug", 2, { description: "Seat." })).toThrow(/seats\.role/);
   });
 });
 

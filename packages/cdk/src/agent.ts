@@ -1,7 +1,7 @@
 import { dispatchAgentPrompt } from "./functional/context.js";
 import { agentTemplates } from "./generated.js";
 import type { AgentTemplateDefinition } from "./generated.js";
-import type { DeclaredAgentHandle, SequenceHandle } from "./handles.js";
+import type { AgentHandle, DeclaredAgentHandle, SequenceHandle } from "./handles.js";
 import { withDeclaration, withHiddenField } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
@@ -164,6 +164,39 @@ export const agent: AgentFunction = Object.assign(
     searcher: agentTemplate(agentTemplates.searcher),
   } satisfies AgentTemplateFunctions,
 );
+
+/**
+ * Mints `count` explicitly ordered `<role>-1..<role>-N` agent handles from a
+ * single call, one per seat, in place of hand-numbered mint calls repeated
+ * per seat.
+ *
+ * The id format (`${role}-${n}`, 1-based) is not a new numbering authority —
+ * it hardcodes the same format the harness config's seat-alias expansion
+ * uses (`expand_role_seats`, `modules/io/src/harness_config.rs:6223`), so
+ * canonical output is byte-identical to hand-numbered calls to `mint`.
+ *
+ * @param mint Any existing agent mint function: `agent`, `agent.reviewer`/
+ * `agent.worker`/etc., or a project-specific wrapper like `reviewerRole`.
+ * @param role Base role slug (validated the same way as `agent.id`).
+ * @param count Number of seats to mint; must be a positive integer.
+ * @param args Remaining arguments forwarded to `mint` for every seat.
+ * @example
+ * ```ts
+ * const [smart1, smart2] = seats(reviewerRole, "smart", 2, "Reviews the diff.");
+ * ```
+ */
+export function seats<A extends unknown[], H extends AgentHandle>(
+  mint: (id: string, ...args: A) => H,
+  role: string,
+  count: number,
+  ...args: A
+): readonly H[] {
+  validateSlug(role, "seats.role");
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`seats.count: expected a positive integer, got ${JSON.stringify(count)}`);
+  }
+  return Array.from({ length: count }, (_, i) => mint(`${role}-${i + 1}`, ...args));
+}
 
 /** @deprecated Use {@link agent}.worker — same declaration, kept for source compatibility during the migration window. */
 export const worker = deprecatedBareAgentTemplate("worker", agentTemplates.worker);

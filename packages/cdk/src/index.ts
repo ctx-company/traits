@@ -1,7 +1,7 @@
 import { attachProcedureFrom } from "./functional/procedure.js";
 import { procedure as procedureBase } from "./procedure.js";
 
-export { agent, oracle, planner, reviewer, searcher, worker } from "./agent.js";
+export { agent, oracle, planner, reviewer, searcher, seats, worker } from "./agent.js";
 export type {
   AgentFields,
   AgentFunction,

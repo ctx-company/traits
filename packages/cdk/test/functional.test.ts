@@ -16,6 +16,7 @@ import {
   procedure,
   resource,
   schema,
+  seats,
   slot,
   step,
   toDraftJson,
@@ -449,6 +450,28 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string; }[]; };
     const portIds = (draft.port ?? []).map((p) => `${p.id}:${p.direction}`).sort();
     expect(portIds).toEqual(["diff:input", "review:output"]);
+  });
+
+  it("a seats(...)-minted agent's .prompt registrar compiles to canonical output identical to hand-numbering (0162)", () => {
+    const buildWith = (smart1: ReturnType<typeof agent.reviewer>, smart2: ReturnType<typeof agent.reviewer>) =>
+      evaluateTraitFunction((ctx) => {
+        defineTrait("seat-sugar-shape", { summary: "Two reviewers.", procedure: "Review a diff." });
+        port.input.text({ id: "diff" });
+        const review1 = slot.text("review-1");
+        const review2 = slot.text("review-2");
+        smart1.prompt("Review (smart-1)", { input: input.prompt`Review ${ctx.input.diff as never}.`, output: review1 });
+        smart2.prompt("Review (smart-2)", { input: input.prompt`Review ${ctx.input.diff as never}.`, output: review2 });
+        return { review1, review2 };
+      });
+
+    const [seatSmart1, seatSmart2] = seats(agent.reviewer, "smart", 2);
+    const seatDraft = buildWith(seatSmart1, seatSmart2).draft;
+
+    const handSmart1 = agent.reviewer("smart-1");
+    const handSmart2 = agent.reviewer("smart-2");
+    const handDraft = buildWith(handSmart1, handSmart2).draft;
+
+    expect(JSON.stringify(seatDraft)).toBe(JSON.stringify(handDraft));
   });
 });
 
