@@ -24,11 +24,11 @@ hint = "The three Rust validation gates (fmt --check, check, clippy -D warnings)
 trigger = "on-activation"
 
 [[agent]]
-id = "worker"
-description = "Implements a draft or agreed Rust design and applies reviewer fixes. Holds every change to this repo's Rust engineering-standards and gate-conventions."
-summary = "Implementation role."
-
-[[agent]]
 id = "reviewer"
 description = "Drafts and/or reviews Rust work in a bounded refinement loop. Judges the work against this repo's Rust engineering-standards and gate-conventions."
 summary = "Rust review role."
+
+[[agent]]
+id = "worker"
+description = "Implements a draft or agreed Rust design and applies reviewer fixes. Holds every change to this repo's Rust engineering-standards and gate-conventions."
+summary = "Implementation role."

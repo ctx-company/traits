@@ -25,6 +25,7 @@ import { FAMILY_BEHAVIOR, QUICK_INTENT } from "../core.ts";
 import {
     deriveParkReportStep,
     familyCommitTail,
+    gateAndDiffEvidence,
     gateTimedOut,
     gateTimedOutAbortIf,
     repoGatesPassed,
@@ -80,17 +81,7 @@ export function quickProcedure(gate?: { prefix: string; title?: string; timeoutM
                 include: [slot.verdict.optional(), slot.workSummary.optional(), repoGatesPassed.optional()],
             });
 
-            step.check("Run the repository gate chain", {
-                id: "repo-gates",
-                argv: ["just", "test"],
-                output: repoGatesPassed,
-            });
-
-            step.command("Capture the changed-file inventory", {
-                id: "capture-diff",
-                argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
-                output: reviewDiff,
-            });
+            gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
             agent.smart.prompt("Building Review", {
                 input: quickReviewText,

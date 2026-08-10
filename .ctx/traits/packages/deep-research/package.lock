@@ -17,4 +17,28 @@ resource-manifest = "sha256:e71c53162c005e5944a8674f0973ce4796da23d1c68f922cbf48
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/deep-research/SKILL.md"
-digest = "sha256:af36a89b7805e92de5da3429032de3a9b30ee07ce90614b5371a1c7a28884f73"
+digest = "sha256:7e9cc58e7788878e57ad2f90dc8fe3fdba8b469f920b2294571a7a0a37d5273b"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:95c09777cc61d4fdb6ca7f8e4be6e3ed2c3bcb69fd92f4c08c504a367f55f0e4"
+canonical = "sha256:b672355c92f7700c366ed1b0a5e5ab5bd982a2c1aa1014ce8a319be96ae3ea1a"
+model-visible = "sha256:3540fb11a246bea43f3f00d3263f3b4d2085a6cbd7661dd8c8e8c49fa9fadef1"
+render = "sha256:4a71789075fc659b9598862ee88dd2ac79b631b9e4ef90557c387f46b78d4cd1"
+generated-markdown = "sha256:7e9cc58e7788878e57ad2f90dc8fe3fdba8b469f920b2294571a7a0a37d5273b"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/deep-research/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]

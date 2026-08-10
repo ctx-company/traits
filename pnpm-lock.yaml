@@ -20,12 +20,18 @@ importers:
       '@ctx-traits/rust':
         specifier: workspace:*
         version: link:packages/rust
+      '@ctx-traits/toolkit':
+        specifier: workspace:*
+        version: link:packages/toolkit
 
   packages/agents:
     dependencies:
       '@ctx-traits/cdk':
         specifier: workspace:*
         version: link:../cdk
+      '@ctx-traits/toolkit':
+        specifier: workspace:*
+        version: link:../toolkit
     devDependencies:
       '@types/node':
         specifier: 25.3.3
@@ -99,9 +105,28 @@ importers:
 
   packages/rust:
     dependencies:
-      '@ctx-traits/agents':
+      '@ctx-traits/cdk':
         specifier: workspace:*
-        version: link:../agents
+        version: link:../cdk
+      '@ctx-traits/toolkit':
+        specifier: workspace:*
+        version: link:../toolkit
+    devDependencies:
+      '@types/node':
+        specifier: 25.3.3
+        version: 25.3.3
+      dprint:
+        specifier: 0.55.1
+        version: 0.55.1
+      oxlint:
+        specifier: 1.73.0
+        version: 1.73.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/toolkit:
+    dependencies:
       '@ctx-traits/cdk':
         specifier: workspace:*
         version: link:../cdk

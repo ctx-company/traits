@@ -28,26 +28,26 @@ schema = "schema:text"
 description = "Crate, module, or file path to refactor."
 
 [[slot]]
-id = "work-summary"
-schema = "schema:text"
-description = "Worker's report of the refactored state."
-hint = "What changed (files), and the exact gate commands (fmt --check, check, clippy) run and their result."
-
-[[slot]]
 id = "review-notes"
 schema = "schema:text"
 description = "Reviewer's judgment of the implemented refactor against the gate-conventions and engineering-standards."
 hint = "Whether the gates actually pass, and any blocking defect found by inspecting the working tree directly."
 
-[[agent]]
-id = "worker"
-description = "Implements the requested Rust refactor and holds it to the repo's own gates. Holds every change to this repo's Rust engineering-standards and gate-conventions."
-summary = "Implementation role."
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's report of the refactored state."
+hint = "What changed (files), and the exact gate commands (fmt --check, check, clippy) run and their result."
 
 [[agent]]
 id = "reviewer"
 description = "Reviews the implemented Rust refactor once against the repo's engineering-standards and gate-conventions. Judges the work against this repo's Rust engineering-standards and gate-conventions."
 summary = "Rust review role."
+
+[[agent]]
+id = "worker"
+description = "Implements the requested Rust refactor and holds it to the repo's own gates. Holds every change to this repo's Rust engineering-standards and gate-conventions."
+summary = "Implementation role."
 
 [prompt.implement]
 text = """

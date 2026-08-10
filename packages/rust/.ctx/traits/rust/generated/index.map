@@ -1,11 +1,11 @@
 {
   "agent:reviewer": {
-    "file": "packages/agents/src/index.ts",
+    "file": "packages/toolkit/src/agent.ts",
     "start": 35,
     "end": 35
   },
   "agent:worker": {
-    "file": "packages/agents/src/index.ts",
+    "file": "packages/toolkit/src/agent.ts",
     "start": 11,
     "end": 11
   },

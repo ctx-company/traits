@@ -28,6 +28,7 @@ import { condition, effect, flow, input, procedure, step, variant } from "@ctx-t
 import { FAMILY_BEHAVIOR, GATED_INTENT } from "../core.ts";
 import {
     deriveParkReportStep,
+    gateAndDiffEvidence,
     gateTimedOut,
     gateTimedOutAbortIf,
     repoGatesPassed,
@@ -149,17 +150,7 @@ const procedureBody = procedure.from(
                 ],
             });
 
-            step.check("Run the repository gate chain", {
-                id: "repo-gates",
-                argv: ["just", "test"],
-                output: repoGatesPassed,
-            });
-
-            step.command("Capture the changed-file inventory", {
-                id: "capture-diff",
-                argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
-                output: reviewDiff,
-            });
+            gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
             agent.smart.prompt("Building Review", {
                 input: gatedReviewText,

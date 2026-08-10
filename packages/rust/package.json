@@ -41,8 +41,8 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@ctx-traits/agents": "workspace:*",
-    "@ctx-traits/cdk": "workspace:*"
+    "@ctx-traits/cdk": "workspace:*",
+    "@ctx-traits/toolkit": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.3.3",

@@ -1,4 +1,5 @@
 import { agent, condition, input, operation, port, procedure, resource, schema, sequence, slot, trait } from "@ctx-traits/cdk";
+import { forEachJoined } from "@ctx-traits/toolkit";
 
 const researchStandards = resource.file("research-standards", {
     path: "resources/research-standards.md",
@@ -438,11 +439,12 @@ const researchOneStream = sequence.prompt("research-stream", {
         Return one research-finding object with stream-id, target, summary, citation-count, source-types, and contradictions.`,
     output: operation.over(findings, operation.Append),
 });
-const researchStreamsStep = sequence.forEach("research-streams", {
+const researchStreamsStep = forEachJoined({
+    id: "research-streams",
     title: "Research streams serially",
     over: streamList,
     item: currentStream,
-    sequence: sequence.linear("research-one-stream", [researchOneStream]),
+    body: sequence.linear("research-one-stream", [researchOneStream]),
     maxItems: 6,
     output: findings,
 });

@@ -4,6 +4,7 @@ node_modules/
 packages/cdk/dist/
 packages/agents/dist/
 packages/rust/dist/
+packages/toolkit/dist/
 packages/harness-client/dist/
 
 .configs/plugins/opencode/dist/

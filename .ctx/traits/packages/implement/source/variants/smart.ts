@@ -9,6 +9,7 @@ import {
     deriveParkReportStep,
     draft,
     familyCommitTail,
+    gateAndDiffEvidence,
     gateTimedOut,
     gateTimedOutAbortIf,
     leftovers,
@@ -217,12 +218,7 @@ const procedureBody = procedure.from(
                 ],
             });
 
-            step.check("Run the repository gate chain", { id: "repo-gates", argv: ["just", "test"], output: repoGatesPassed });
-            step.command("Capture the changed-file inventory", {
-                id: "capture-diff",
-                argv: ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"],
-                output: reviewDiff,
-            });
+            gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
             smart1.prompt("Building Review 1", {
                 id: "building-review-1",

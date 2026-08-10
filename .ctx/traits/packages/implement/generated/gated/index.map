@@ -1,13 +1,13 @@
 {
   "agent:smart-1": {
-    "file": "packages/agents/src/index.ts",
-    "start": 55,
-    "end": 55
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
   },
   "agent:worker": {
-    "file": "packages/agents/src/index.ts",
-    "start": 31,
-    "end": 31
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
   },
   "port:brief-report": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/port.ts",
@@ -31,33 +31,33 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 55,
-    "end": 55
+    "start": 56,
+    "end": 56
   },
   "prompt:building-review": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 63,
-    "end": 63
+    "start": 64,
+    "end": 64
   },
   "prompt:draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 100,
-    "end": 100
+    "start": 101,
+    "end": 101
   },
   "prompt:plan-refine": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 130,
-    "end": 130
+    "start": 131,
+    "end": 131
   },
   "prompt:round-briefing": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 72,
-    "end": 72
+    "start": 73,
+    "end": 73
   },
   "prompt:summary-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 78,
-    "end": 78
+    "start": 79,
+    "end": 79
   },
   "resource:task-board": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/resource.ts",
@@ -65,14 +65,14 @@
     "end": 3
   },
   "schema:blocker": {
-    "file": "packages/agents/src/index.ts",
-    "start": 227,
-    "end": 227
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 104,
+    "end": 104
   },
   "schema:blocker-step": {
-    "file": "packages/agents/src/index.ts",
-    "start": 207,
-    "end": 207
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 84,
+    "end": 84
   },
   "schema:brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/schema.ts",
@@ -91,8 +91,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 130,
-    "end": 130
+    "start": 131,
+    "end": 131
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/schema.ts",
@@ -101,128 +101,128 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 141,
-    "end": 141
+    "start": 142,
+    "end": 142
   },
   "sequence:building-body/building-review": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 164,
-    "end": 164
+    "start": 155,
+    "end": 155
   },
   "sequence:building-body/capture-diff": {
-    "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 158,
-    "end": 158
+    "file": "packages/toolkit/src/sequence/evidence.ts",
+    "start": 35,
+    "end": 35
   },
   "sequence:building-body/owner-gate": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 179,
-    "end": 179
+    "start": 170,
+    "end": 170
   },
   "sequence:building-body/park-report-clear": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 317,
-    "end": 317
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 42,
+    "end": 42
   },
   "sequence:building-body/park-report-record": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 322,
-    "end": 322
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 47,
+    "end": 47
   },
   "sequence:building-body/repo-gates": {
-    "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 152,
-    "end": 152
+    "file": "packages/toolkit/src/sequence/evidence.ts",
+    "start": 34,
+    "end": 34
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/display-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 260,
-    "end": 260
+    "start": 251,
+    "end": 251
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 287,
-    "end": 287
+    "start": 278,
+    "end": 278
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-stage": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 277,
-    "end": 277
+    "start": 268,
+    "end": 268
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-unstage-runtime": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 282,
-    "end": 282
+    "start": 273,
+    "end": 273
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/lift-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 239,
-    "end": 239
+    "start": 230,
+    "end": 230
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/summary-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 234,
-    "end": 234
+    "start": 225,
+    "end": 225
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/write-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 246,
-    "end": 246
+    "start": 237,
+    "end": 237
   },
   "sequence:ctx-branch-arm-s-13-building-body-10-owner-gate-then/owner-review": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 201,
-    "end": 201
+    "start": 192,
+    "end": 192
   },
   "sequence:ctx-branch-arm-s-13-building-body-10-owner-gate-then/round-briefing": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 186,
-    "end": 186
+    "start": 177,
+    "end": 177
   },
   "sequence:ctx-branch-arm-s-13-building-body-18-park-report-record-then/park-report-append": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 323,
-    "end": 323
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 48,
+    "end": 48
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 138,
-    "end": 138
+    "start": 139,
+    "end": 139
   },
   "sequence:procedure/draft-writing": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 98,
-    "end": 98
+    "start": 99,
+    "end": 99
   },
   "sequence:procedure/plan-owner-review": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 115,
-    "end": 115
+    "start": 116,
+    "end": 116
   },
   "sequence:procedure/plan-refine": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 128,
-    "end": 128
+    "start": 129,
+    "end": 129
   },
   "sequence:procedure/preflight-binary": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 92,
-    "end": 92
+    "start": 93,
+    "end": 93
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 233,
-    "end": 233
+    "start": 224,
+    "end": 224
   },
   "sequence:procedure/shipping-status": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 227,
-    "end": 227
+    "start": 218,
+    "end": 218
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 168,
-    "end": 168
+    "start": 169,
+    "end": 169
   },
   "slot:brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
@@ -296,13 +296,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 126,
-    "end": 126
+    "start": 127,
+    "end": 127
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 114,
-    "end": 114
+    "start": 115,
+    "end": 115
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
@@ -331,7 +331,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 297,
-    "end": 297
+    "start": 288,
+    "end": 288
   }
 }
