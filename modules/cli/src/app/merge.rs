@@ -1108,6 +1108,10 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     };
     let is_true_fast_forward = base_rev == main_rev;
 
+    // 2026-08-10 dispatch-failure fallback markers, carried onto the terminal
+    // Merged frame when the fallback fires (see the dispatch error arm in the
+    // reconciliation loop). Empty on every other path.
+    let mut dispatch_fallback_evidence: Vec<String> = Vec::new();
     let (landed_rev, merger_evidence_tag) = if mechanical_only {
         if let Some(live) = input.live.as_ref() {
             live.emit(&MergeProgress::StageEntered(MergeStage::Rebase));
@@ -1511,6 +1515,40 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                 merger_stdout_observer: input.merger_stdout_observer.as_ref(),
             }) {
                 Ok(pair) => pair,
+                // Owner ruling 2026-08-10 (run-847b3945): a merger DISPATCH
+                // failure — the call never produced a verdict (spawn error,
+                // provider down; historically E2BIG argv) — must not throw
+                // away a conflict-free rebase. With no unresolved source
+                // conflicts there is nothing requiring judgment: fall back to
+                // the mechanical landing the machine already has, loudly, and
+                // let the landing gate (which still runs before main moves)
+                // be the protection. A merger that RAN and parked is a
+                // judgment and still parks; a dispatch failure with real
+                // conflicts still parks too — there is nothing mechanical to
+                // fall back to there.
+                Err(error) if source_conflicted_paths.is_empty() => {
+                    let mut reason = error.to_string();
+                    reason.truncate(300);
+                    let failed = format!("merger-dispatch-failed={reason}");
+                    let fallback = "merger-dispatch-fallback=mechanical-gated (no source \
+                                    conflicts; the landing gate is the protection)"
+                        .to_string();
+                    // Onto BOTH vectors: `merger_evidence` is what a later
+                    // park carries; `dispatch_fallback_evidence` is what the
+                    // terminal Merged frame carries (the landed path records
+                    // only the merger tag from `merger_evidence`, so pushes
+                    // there alone would vanish on success).
+                    merger_evidence.push(failed.clone());
+                    merger_evidence.push(fallback.clone());
+                    dispatch_fallback_evidence.push(failed);
+                    dispatch_fallback_evidence.push(fallback);
+                    (
+                        MergerDecision::Proceed {
+                            deep_decisions: Vec::new(),
+                        },
+                        Vec::new(),
+                    )
+                }
                 Err(error) => {
                     return parked_on_error(
                         &worktree_path,
@@ -1943,6 +1981,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     let mut landed_evidence = vec![format!("landed={landed_rev}")];
     landed_evidence.extend(overlap_evidence.iter().cloned());
     landed_evidence.push(merger_evidence_tag);
+    landed_evidence.extend(dispatch_fallback_evidence);
 
     // --- Declared pre-landing gate (P477): every landing path — clean
     // fast-forward, standard no-flag reconciliation, and `--deep` alike —

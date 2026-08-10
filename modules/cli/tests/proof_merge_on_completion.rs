@@ -833,6 +833,144 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
     );
 }
 
+/// Owner ruling 2026-08-10 (run-847b3945): a merger DISPATCH failure — the
+/// call never produced a verdict — with a conflict-free rebase lands
+/// mechanically behind the declared gate instead of parking. The fixture
+/// merger deletes itself when probed, so assignment resolution succeeds and
+/// the dispatch spawn then fails with ENOENT: exactly the "clean rebase,
+/// dead phone call" shape that used to throw the landing away.
+#[test]
+fn merger_dispatch_failure_with_clean_rebase_lands_mechanically() {
+    let scratch = ScratchRoot::new("p478-dispatch-failure-fallback");
+    let repo = scratch.home().join("repo");
+    let marker = repo.join("merger-calls");
+    init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
+        // A shared file both sides will edit in DIFFERENT regions: the rebase
+        // replays clean, but the same-path touch is a stale-base overlap, so
+        // the merger is consulted — the exact run-847b shape.
+        let body: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        fs::write(repo.join("shared.txt"), body).unwrap();
+    });
+    install_counting_merger(&repo, &marker);
+    // Re-arm the merger script as self-deleting: the probe answers once and
+    // removes the binary, so the later dispatch spawn fails ENOENT.
+    let script = repo.join("counting-merger.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\nif [ \"$1\" = \"--probe\" ]; then rm -f \"$0\"; echo merger-fixture-1.0; exit 0; fi\nexit 70\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "self-deleting merger fixture"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+
+    let run_output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/demo/generated/index.toml",
+            "--worktree",
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &scratch.home(),
+    );
+    assert_exit_code(&run_output, 0);
+    let run = value_json(&run_output);
+    let run_id = run["value"]["session"]["run-id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let worktree = Path::new(
+        run["value"]["session"]["provenance"]["worktree"]["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let mut run_side: Vec<String> = (1..=20).map(|n| format!("line {n}")).collect();
+    run_side[0] = "line 1 edited by the run".to_string();
+    fs::write(worktree.join("shared.txt"), run_side.join("\n") + "\n").unwrap();
+    Command::new("git")
+        .args(["add", "shared.txt"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "run work commit"])
+        .current_dir(worktree)
+        .status()
+        .unwrap();
+    // Diverge main in the SAME file's far end: textually clean under rebase,
+    // but a stale-base overlap on the path — the merger must be consulted.
+    let mut main_side: Vec<String> = (1..=20).map(|n| format!("line {n}")).collect();
+    main_side[19] = "line 20 edited by main".to_string();
+    fs::write(repo.join("shared.txt"), main_side.join("\n") + "\n").unwrap();
+    Command::new("git")
+        .args(["add", "shared.txt"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-qm", "main side commit"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+
+    let output = run_ctx(
+        &["traits", "merge", &run_id, "--json"],
+        &repo,
+        &scratch.home(),
+    );
+    let report = value_json(&output);
+    assert_exit_code(&output, 0);
+    assert_eq!(
+        report["value"]["status"], "merged",
+        "a dispatch failure over a clean rebase must land mechanically: {report}"
+    );
+    let session_path = run["value"]["session-path"].as_str().unwrap();
+    let ledger_text = fs::read_to_string(session_path).unwrap();
+    assert!(
+        ledger_text.contains("merger-dispatch-failed="),
+        "the dispatch failure must be recorded in evidence: {ledger_text}"
+    );
+    assert!(
+        ledger_text.contains("merger-dispatch-fallback=mechanical-gated"),
+        "the fallback must be named in evidence: {ledger_text}"
+    );
+    assert_eq!(
+        fs::read_to_string(&marker)
+            .unwrap_or_default()
+            .lines()
+            .count(),
+        0,
+        "the merger must never have produced a receipt"
+    );
+    let log = Command::new("git")
+        .args(["log", "--oneline", "-3"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let log_text = String::from_utf8_lossy(&log.stdout).to_string();
+    assert!(
+        log_text.contains("run work commit") && log_text.contains("main side commit"),
+        "both sides must be on main after the mechanical landing: {log_text}"
+    );
+}
+
 /// A target movement after the first gate is a mechanical race: the next
 /// attempt rebases against the new target and reruns the declared gate without
 /// asking an owner to intervene.
