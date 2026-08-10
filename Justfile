@@ -118,11 +118,14 @@ test-full:
 # lands via `ctx traits merge <run-id>` after the report's own NOT-merged
 # line (`landing_state`), not automatically. Add --merge here if that
 # posture should change; the report fix stands either way.
-deep-research topic quality="standard" depth="standard":
-	ctx traits run deep-research --worktree --progress tui -- --topic={{quote(topic)}} --quality={{quote(quality)}} --depth={{quote(depth)}}
+research topic:
+	ctx traits run research --worktree --progress tui -- --topic={{quote(topic)}}
 
-auto-research input:
-	ctx traits run auto-research --worktree --progress tui -- --input={{quote(input)}}
+research-quick topic:
+	ctx traits run research:quick --worktree --progress tui -- --topic={{quote(topic)}}
+
+research-deep topic:
+	ctx traits run research:deep --worktree --progress tui -- --topic={{quote(topic)}}
 
 plan task:
     ctx traits run plan --worktree --progress tui -- --task={{quote(task)}}

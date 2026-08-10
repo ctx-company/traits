@@ -29,7 +29,7 @@ export {
 } from "@ctx-traits/toolkit";
 export { FEASIBILITY_DOCTRINE, feasibilityGate, feasibilityVerdictSchema } from "./feasibility.ts";
 export type { FeasibilityGateOptions, FeasibilityVerdictValue } from "./feasibility.ts";
-export { commitTail, guardedProduction, reviewerVerdict } from "./process.ts";
+export { commitTail, deriveParkReportStep, familyCommitTail, guardedProduction, reviewerVerdict } from "./process.ts";
 export type {
   CommitTailOptions,
   GuardedProductionHandle,

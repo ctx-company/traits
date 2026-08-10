@@ -1,9 +1,0 @@
-[package]
-id = "auto-research"
-version = "0.1.0"
-name = "Auto Research"
-status = "ready"
-
-[publish]
-name = "@ctx-traits/auto-research"
-access = "public"

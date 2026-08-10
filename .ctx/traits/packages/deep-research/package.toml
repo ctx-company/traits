@@ -1,9 +1,0 @@
-[package]
-id = "deep-research"
-version = "0.2.0"
-name = "Deep Research"
-status = "ready"
-
-[publish]
-name = "@ctx-traits/deep-research"
-access = "public"

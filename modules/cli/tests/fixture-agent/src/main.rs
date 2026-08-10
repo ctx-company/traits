@@ -12,10 +12,11 @@
 //! convention's default); it is read but never inspected, since each role
 //! here is dedicated to exactly one prompt.
 //!
-//! Only the roles P461 slices 1-2 consume are implemented — no speculative
-//! roles. The concurrency slice (P461 deferred slice 2) extends this same
-//! binary with marker/wait/fail worker roles rather than forking a second
-//! one.
+//! Only the roles consuming proof suites actually need are implemented — no
+//! speculative roles. The concurrency slice (P461 deferred slice 2) extends
+//! this same binary with marker/wait/fail worker roles rather than forking a
+//! second one; 0153 (`proof_research_family.rs`) adds the `planner` role the
+//! same way, for the research family's typed-plan cardinality gate.
 
 use std::env;
 use std::fs;
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
         Some("--role") => match args.next().as_deref() {
             Some("worker") => role_worker(),
             Some("reviewer") => role_reviewer(args.next(), args.next()),
+            Some("planner") => role_planner(args.next()),
             Some("scribe") => role_scribe(),
             Some("generator") => role_generator(args.next()),
             Some("refiner") => role_refiner(args.next()),
@@ -117,6 +119,20 @@ fn requested_output_field(prompt: &str) -> Option<String> {
     let rest = &block[key_start..];
     let key_end = rest.find('"')?;
     Some(rest[..key_end].to_string())
+}
+
+/// 0153's research-family cardinality-gate proof: always returns the same
+/// fixed typed list, read verbatim (already valid JSON) from
+/// `CTX_FIXTURE_PLANNER_STREAMS` — a deliberately STATIC plan, since the
+/// gate this proves ("does the loop accept/reject this exact plan") never
+/// needs the plan to vary round over round: an always-invalid plan proves
+/// exhaustion, an always-valid one proves the gate accepts round 1.
+fn role_planner(prompt: Option<String>) -> ExitCode {
+    let field = requested_output_field(&prompt.unwrap_or_default())
+        .unwrap_or_else(|| "stream-plan".to_string());
+    let streams = env::var("CTX_FIXTURE_PLANNER_STREAMS").unwrap_or_else(|_| "[]".to_string());
+    println!("{{\"{field}\":{streams}}}");
+    ExitCode::SUCCESS
 }
 
 fn role_scribe() -> ExitCode {

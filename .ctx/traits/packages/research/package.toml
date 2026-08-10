@@ -1,0 +1,26 @@
+[package]
+id = "research"
+version = "0.1.0"
+name = "Research"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.quick]
+path = "generated/quick/index.toml"
+aliases = ["research-quick"]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["research-default"]
+
+[family.variant.deep]
+path = "generated/deep/index.toml"
+aliases = ["research-deep"]
+
+[publish]
+name = "@ctx-traits/research"
+access = "public"

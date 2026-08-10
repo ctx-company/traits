@@ -1,6 +1,8 @@
 // Shared implementation concepts used by the native implement family leaves.
 import {
     clerkRole,
+    deriveParkReportStep,
+    familyCommitTail,
     feasibilityGate,
     feasibilityVerdictSchema,
     leftoverSchema,
@@ -10,15 +12,14 @@ import {
     scribeRole,
     workerRole,
 } from "@ctx-traits/agents";
-import type { GuardedProductionRole } from "@ctx-traits/agents";
-import { deriveParkReportStep, gateAndDiffEvidence } from "@ctx-traits/toolkit";
+import { gateAndDiffEvidence } from "@ctx-traits/toolkit";
 import type {
     AgentHandle,
     ResourceHandle,
     SequenceHandle,
     SlotHandle,
 } from "@ctx-traits/cdk";
-import { condition, effect, flow, input, port, resource, schema, signal, slot, step } from "@ctx-traits/cdk";
+import { condition, effect, flow, input, port, resource, schema, signal, slot } from "@ctx-traits/cdk";
 
 // P450 S3, repointed at the task board (2026-07-31): the board is the
 // owner's status surface (P486) — a run never writes it at all. Progress
@@ -277,68 +278,4 @@ export function taskExtractionStep(agentHandle: AgentHandle, taskBoardHandle: Re
     });
 }
 
-/**
- * The functional-layer equivalent of `@ctx-traits/agents`' `commitTail`
- * (0109): the clean-tree-guarded git tail. Simplified to the shape every
- * caller actually uses — a caller-owned `{agent, text}` scribe role; the
- * kit's own default-scribe-prose fallback has no consumer in this family and
- * is not reproduced (leanness).
- */
-export function familyCommitTail(opts: {
-    id: string;
-    scribe: GuardedProductionRole;
-    receipt: SlotHandle;
-    /** 0098: routes the commit through an external approval gate — e.g. `ctx-gate run --`. Absent, the commit command is untouched. */
-    gate?: { prefix: string; title?: string; timeoutMs?: number };
-}): void {
-    const { id, scribe, receipt, gate } = opts;
-    const status = slot.text({
-        id: `${id}-status`,
-        description:
-            "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
-        hint:
-            "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
-    });
-    const message = slot.text({ id: `${id}-message`, description: "The commit message the scribe writes for the completed work." });
-    const stageOutput = slot.text({ id: `${id}-stage-output`, description: "Verbatim output of the git-add staging command." });
-    const unstageOutput = slot.text({
-        id: `${id}-unstage-output`,
-        description: "Verbatim output of the runtime-state unstage command (git reset -- .agents/runs); empty when nothing was staged there.",
-    });
-
-    step.command("Check working tree status", { id: `${id}-status`, input: input.command`git status --porcelain`, output: status });
-
-    flow.when("Shipping Maybe Commit", condition.not(condition.equals(status, "")), () => {
-        scribe.agent.prompt("Write the commit message (scribe)", { id: `${id}-message`, input: scribe.text, output: message });
-        // Two steps, not one `git add -A -- ':!.agents/runs'` (2026-08-10,
-        // run-42bd7fb2): git exits 1 whenever an add PATHSPEC merely mentions
-        // a gitignored path that exists — even as an exclusion — so the old
-        // spelling failed the whole run the first time a build materialised
-        // `.agents/` in a repo that gitignores it. Plain `add -A` skips
-        // ignored paths natively; the reset then unstages runtime state in
-        // repos where `.agents/runs` is tracked (the exclusion's original
-        // purpose), and is a quiet no-op everywhere else.
-        step.command("Stage all changes", {
-            id: `${id}-stage`,
-            input: input.command`git add -A`,
-            output: stageOutput,
-        });
-        step.command("Unstage runtime state", {
-            id: `${id}-unstage-runtime`,
-            input: input.command`git reset -q -- .agents/runs`,
-            output: unstageOutput,
-        });
-        const commitInput = gate === undefined ? input.command`git commit -m ${message}` : (() => {
-            const strings = [`${gate.prefix} git commit -m `, ``];
-            return input.command(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, message);
-        })();
-        step.command(gate?.title ?? "Commit the work", {
-            id: `${id}-commit`,
-            input: commitInput,
-            output: receipt,
-            ...(gate?.timeoutMs === undefined ? {} : { timeoutMs: gate.timeoutMs }),
-        });
-    });
-}
-
-export { deriveParkReportStep, gateAndDiffEvidence, ownerItemSchema };
+export { deriveParkReportStep, familyCommitTail, gateAndDiffEvidence, ownerItemSchema };
