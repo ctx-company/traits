@@ -1,0 +1,54 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "review"
+variant = "default"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:c1b0f4edbb619b5b55d9acca8487877f6ac98497cf4b740bf2c30981dc596865"
+canonical = "sha256:a5caf620fc6f3095db569bc63f5c9d30939cb9fa7463deb1b6c817718dc01aa5"
+model-visible = "sha256:01df3aad5312bfa3be231cc10cd25f6765f533ee756edb130ad6f1a01c479cc7"
+resource-manifest = "sha256:355cf9c76d5b62fdbeaf7cb842541dbdc760245189aff6f4d743afad5716f1cb"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/review-default/SKILL.md"
+digest = "sha256:9850e007652e20858e0c07d82b01a6ca1ca812d0a1e318d49ee3712affe3d879"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:c1b0f4edbb619b5b55d9acca8487877f6ac98497cf4b740bf2c30981dc596865"
+canonical = "sha256:a5caf620fc6f3095db569bc63f5c9d30939cb9fa7463deb1b6c817718dc01aa5"
+model-visible = "sha256:01df3aad5312bfa3be231cc10cd25f6765f533ee756edb130ad6f1a01c479cc7"
+render = "sha256:f55cf66b8e3c8605468f4f1ae081398b6411fef4e07a837b8729d8bd51cfc90a"
+generated-markdown = "sha256:9850e007652e20858e0c07d82b01a6ca1ca812d0a1e318d49ee3712affe3d879"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.review-document-report output contract has no title",
+    "port.review-document-report output contract has no format guidance",
+    "port.review-verdict-report output contract has no title",
+    "port.review-verdict-report output contract has no format guidance",
+    "port.tree-status-report output contract has no title",
+    "port.tree-status-report output contract has no format guidance",
+    'section "Procedure" redacted: 1 blocking finding(s) remained after field sanitation',
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/review-default/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]

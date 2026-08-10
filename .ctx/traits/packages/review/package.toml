@@ -1,0 +1,18 @@
+[package]
+id = "review"
+version = "0.1.0"
+name = "Review"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["review-default"]
+
+[publish]
+name = "@ctx-traits/review"
+access = "public"
