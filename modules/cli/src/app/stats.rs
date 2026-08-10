@@ -35,13 +35,16 @@ pub(crate) fn handle_stats(
         return Ok(CommandOutput::new(()));
     }
 
-    // 0130: pricing is config, not code — resolved here at the IO boundary
-    // (same as every other run-config knob) and handed to the pure printer
-    // as plain data, never read by `ctx_traits_core::procedure::stats`.
-    let pricing = ctx_traits_io::harness_config::resolve_runtime_assignments(&[])
-        .map(|assignments| assignments.pricing)
+    // 0130: pricing/billing are config, not code — resolved here at the IO
+    // boundary (same as every other run-config knob) and handed to the pure
+    // printer as plain data, never read by `ctx_traits_core::procedure::stats`.
+    let profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[]).ok();
+    let billing = profile
+        .as_ref()
+        .map(crate::app::drive::current_model_billing_map)
         .unwrap_or_default();
-    emit_plain_stats(&report, &pricing)?;
+    let pricing = profile.map(|p| p.pricing).unwrap_or_default();
+    emit_plain_stats(&report, &pricing, &billing)?;
     Ok(CommandOutput::new(()))
 }
 
@@ -56,6 +59,7 @@ fn opt_str(value: Option<&str>) -> String {
 fn emit_plain_stats(
     report: &StatsReport,
     pricing: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::ModelPricing>,
+    billing: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::BillingMode>,
 ) -> crate::Result<()> {
     w("ctx traits stats")?;
     w(format!("  schema-version: {}", report.schema_version))?;
@@ -134,13 +138,11 @@ fn emit_plain_stats(
     if report.tokens_by_model.is_empty() {
         w("  tokens-by-model: (none)")?;
     } else {
-        w("  tokens-by-model (0130; estimated $ from [pricing], api billing assumed):")?;
+        w(
+            "  tokens-by-model (0130; estimated $ by billing mode, resolved from the current config — subscription models always $0):",
+        )?;
         for (model, tokens) in &report.tokens_by_model {
-            let cost = pricing
-                .get(model)
-                .and_then(|entry| entry.usd_per_mtok)
-                .map(|price| format!("${:.4}", *tokens as f64 / 1_000_000.0 * price))
-                .unwrap_or_else(|| "no pricing configured".to_string());
+            let cost = crate::app::drive::model_cost_label(pricing, billing, model, *tokens);
             w(format!("    {model}: {tokens} tokens ({cost})"))?;
         }
     }

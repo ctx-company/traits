@@ -4202,13 +4202,19 @@ pub fn print_budget_pause(
         // renders `$0 (subscription)`; an api-billed model with no pricing
         // entry renders `no pricing configured` rather than a fabricated $0.
         let profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[]).ok();
+        let billing = profile
+            .as_ref()
+            .map(current_model_billing_map)
+            .unwrap_or_default();
+        let empty_pricing = BTreeMap::new();
+        let pricing = profile.as_ref().map_or(&empty_pricing, |p| &p.pricing);
         for (model, tokens) in tokens_by_model {
             panel = panel.row(PanelRow::toned(
                 "tokens",
                 format!("{model}: {tokens}"),
                 RowTone::Default,
             ));
-            let cost = model_cost_label(profile.as_ref(), model, *tokens);
+            let cost = model_cost_label(pricing, &billing, model, *tokens);
             panel = panel.row(PanelRow::toned(
                 "estimated-cost",
                 format!("{model}: {cost}"),
@@ -4235,19 +4241,143 @@ pub fn print_budget_pause(
     )
 }
 
-/// 0130: this model's estimated cost from the resolved `[pricing]` table —
-/// `"no pricing configured"` rather than a fabricated `$0` when absent, per
-/// `evaluate_budget_ceiling`'s same honesty rule.
-fn model_cost_label(
-    profile: Option<&ctx_traits_io::harness_config::ResolvedRuntimeAssignments>,
+/// 0130: this model's estimated cost — billing-aware (shared by
+/// [`print_budget_pause`] and `ctx traits stats`). A subscription-billed
+/// model is marginal-cost-zero by construction (draft scope item 4) and
+/// always renders `$0 (subscription)`, never priced from `[pricing]`
+/// regardless of whether a pricing entry happens to exist for its model id.
+/// An api-billed model with no `[pricing]` entry renders `"no pricing
+/// configured"` rather than a fabricated `$0`, per `evaluate_budget_ceiling`'s
+/// same honesty rule. `billing` is resolved from the *current* config, so
+/// labeling a historical run's tokens reflects today's billing declaration,
+/// not necessarily the mode in effect when those tokens were observed. Takes
+/// `pricing` directly (rather than a full `ResolvedRuntimeAssignments`) so
+/// this stays a pure, independently unit-testable function.
+pub(crate) fn model_cost_label(
+    pricing: &BTreeMap<String, ctx_traits_io::harness_config::ModelPricing>,
+    billing: &BTreeMap<String, ctx_traits_io::harness_config::BillingMode>,
     model: &str,
     tokens: u64,
 ) -> String {
-    profile
-        .and_then(|profile| profile.pricing.get(model))
+    if matches!(
+        billing.get(model),
+        Some(ctx_traits_io::harness_config::BillingMode::Subscription)
+    ) {
+        return "$0 (subscription)".to_string();
+    }
+    pricing
+        .get(model)
         .and_then(|entry| entry.usd_per_mtok)
         .map(|price| format!("${:.4}", tokens as f64 / 1_000_000.0 * price))
         .unwrap_or_else(|| "no pricing configured".to_string())
+}
+
+#[cfg(test)]
+mod model_cost_label_tests {
+    use super::model_cost_label;
+    use ctx_traits_io::harness_config::{BillingMode, ModelPricing};
+    use std::collections::BTreeMap;
+
+    /// 0130 draft's required estimator proof: identical per-model token
+    /// evidence, priced once as `billing = "api"` (nonzero $ from
+    /// `[pricing]`) and once as `billing = "subscription"` (`$0
+    /// (subscription)`, tokens still implied by the caller's own row).
+    #[test]
+    fn same_evidence_api_billing_prices_nonzero_subscription_billing_is_zero() {
+        let mut pricing = BTreeMap::new();
+        pricing.insert(
+            "claude-sonnet-5".to_string(),
+            ModelPricing {
+                usd_per_mtok: Some(3.0),
+            },
+        );
+        let tokens = 2_000_000u64;
+
+        let mut api_billing = BTreeMap::new();
+        api_billing.insert("claude-sonnet-5".to_string(), BillingMode::Api);
+        assert_eq!(
+            model_cost_label(&pricing, &api_billing, "claude-sonnet-5", tokens),
+            "$6.0000"
+        );
+
+        let mut subscription_billing = BTreeMap::new();
+        subscription_billing.insert("claude-sonnet-5".to_string(), BillingMode::Subscription);
+        assert_eq!(
+            model_cost_label(&pricing, &subscription_billing, "claude-sonnet-5", tokens),
+            "$0 (subscription)"
+        );
+    }
+
+    /// A subscription-billed model must never be priced from `[pricing]`
+    /// even when a pricing entry happens to exist for its model id — the
+    /// exact defect this test guards against regressing.
+    #[test]
+    fn subscription_billing_wins_over_a_present_pricing_entry() {
+        let mut pricing = BTreeMap::new();
+        pricing.insert(
+            "claude-opus-5".to_string(),
+            ModelPricing {
+                usd_per_mtok: Some(15.0),
+            },
+        );
+        let mut billing = BTreeMap::new();
+        billing.insert("claude-opus-5".to_string(), BillingMode::Subscription);
+
+        assert_eq!(
+            model_cost_label(&pricing, &billing, "claude-opus-5", 1_000_000),
+            "$0 (subscription)"
+        );
+    }
+
+    /// An api-billed (or unattributed) model with no `[pricing]` entry
+    /// reports the honest gap rather than a fabricated `$0`.
+    #[test]
+    fn no_pricing_entry_reports_gap_not_fabricated_zero() {
+        let pricing = BTreeMap::new();
+        let billing = BTreeMap::new();
+        assert_eq!(
+            model_cost_label(&pricing, &billing, "unattributed-model", 500),
+            "no pricing configured"
+        );
+    }
+}
+
+/// 0130: the *current* config-resolved billing mode for every model this
+/// config has a known role/narrator/guide assignment for — used to label
+/// [`print_budget_pause`] and `ctx traits stats` output. Unlike
+/// [`seed_model_billing_map`] (which classifies a specific prior drive's
+/// recorded `AgentAssignment`s for cost-ceiling accounting), this walks every
+/// currently declared role so a rendering call site needs only the resolved
+/// profile, not a session's assignment history. A model with no resolvable
+/// seat is simply absent from the map (rendered as api-billed by
+/// [`model_cost_label`]'s default `Some(BillingMode::Api)`-equivalent
+/// fallthrough), consistent with [`HarnessDefinition::billing`]'s own
+/// conservative default.
+pub(crate) fn current_model_billing_map(
+    profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+) -> BTreeMap<String, ctx_traits_io::harness_config::BillingMode> {
+    let mut billing = BTreeMap::new();
+    let mut note = |assignment: Option<ctx_traits_io::harness_config::ProfileAssignment>| {
+        let Some(assignment) = assignment else {
+            return;
+        };
+        let (Some(model), Some(harness)) =
+            (assignment.model.as_deref(), assignment.harness.as_deref())
+        else {
+            return;
+        };
+        if let Some(definition) = profile.registry.harness.get(harness) {
+            billing
+                .entry(model.to_string())
+                .or_insert_with(|| definition.billing.unwrap_or_default());
+        }
+    };
+    for role in profile.assignments.keys() {
+        note(profile.assignment_for_role(role));
+    }
+    note(profile.narrator_assignment());
+    note(profile.guide_assignment());
+    billing
 }
 
 /// See [`pause_frame_label`]'s doc — same rule, for a [`BudgetExhaustedPause`].
