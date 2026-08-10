@@ -351,6 +351,43 @@ pub struct ProviderCreditsPause {
     pub limit_type: Option<String>,
 }
 
+/// Which declared 0130 ceiling a [`BudgetExhaustedPause`] tripped: the run's
+/// (or a seat's) `max-tokens`, or the run's `max-cost-usd` estimate over
+/// api-billed models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum BudgetCeilingKind {
+    Tokens,
+    CostUsd,
+}
+
+/// Typed context persisted on a session's `last-drive-outcome` when a drive
+/// pauses because observed tokens/estimated cost reached a declared 0130
+/// ceiling, modeled on [`ProviderCreditsPause`]. Enforced only at the
+/// frame-dispatch boundary (never mid-frame): the frame that pushed the
+/// ledger over the ceiling has already completed by the time this is
+/// recorded, so `observed` can be at or slightly past `ceiling`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct BudgetExhaustedPause {
+    pub ceiling_kind: BudgetCeilingKind,
+    pub ceiling: f64,
+    pub observed: f64,
+    /// The seat this ceiling scopes to, for a per-seat `max-tokens` pause.
+    /// `None` for a run-wide ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    pub frame_title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_item_id: Option<String>,
+    /// See [`ProviderCreditsPause::frame_run_index`].
+    #[serde(default)]
+    pub frame_run_index: usize,
+    pub detail: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

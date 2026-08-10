@@ -674,6 +674,7 @@ pub fn record_drive_outcome(
     store: Option<&str>,
     outcome: &str,
     provider_credits_pause: Option<ctx_traits_core::procedure::runtime::ProviderCreditsPause>,
+    budget_pause: Option<ctx_traits_core::procedure::runtime::BudgetExhaustedPause>,
     evidence: ctx_traits_core::procedure::session::DriveTerminalEvidence,
 ) -> crate::Result<()> {
     let path = resolve_session_path(session, store)?;
@@ -686,6 +687,8 @@ pub fn record_drive_outcome(
         token_usage: evidence.token_usage,
         exit_code: evidence.exit_code,
         rate_limit: evidence.rate_limit,
+        budget_pause,
+        tokens_by_model: evidence.tokens_by_model,
     });
     write_run_session(&path, &loaded)
 }
@@ -704,6 +707,8 @@ pub fn record_interrupted_outcome(path: &Utf8Path) -> crate::Result<()> {
         token_usage: None,
         exit_code: None,
         rate_limit: None,
+        budget_pause: None,
+        tokens_by_model: None,
     });
     write_run_session(path, &loaded)
 }

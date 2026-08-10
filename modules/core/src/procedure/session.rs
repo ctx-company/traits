@@ -15,10 +15,10 @@ use serde_json::Value as JsonValue;
 use crate::digest::Digest;
 use crate::procedure::run::Id;
 use crate::procedure::runtime::{
-    AcceptanceStatus, AgentRole, ControlFrame, ControlKind, EffectBuffer, NextSequenceFrameResult,
-    OutputPortStatus, PathSegment, ProviderCreditsPause, RejectedAttempt, ResourceEvidence,
-    SchemaStatus, SequenceCallTemplate, SequenceCallerTemplate, SequenceFrame, SequenceFrameKind,
-    SequenceSignalTemplate, SignalEmission, SlotRevision, State, StepNextAction,
+    AcceptanceStatus, AgentRole, BudgetExhaustedPause, ControlFrame, ControlKind, EffectBuffer,
+    NextSequenceFrameResult, OutputPortStatus, PathSegment, ProviderCreditsPause, RejectedAttempt,
+    ResourceEvidence, SchemaStatus, SequenceCallTemplate, SequenceCallerTemplate, SequenceFrame,
+    SequenceFrameKind, SequenceSignalTemplate, SignalEmission, SlotRevision, State, StepNextAction,
     StepOutputEnvelope, StepSignalOutput, StepSlotOutput, StepValidationReport, StopReason, Value,
     ValueSource, apply_step_output, apply_terminal_frame_failure, bind_current_for_each_item,
     next_sequence_frame, rollback_active_parallel_branch, start_procedure_run,
@@ -893,6 +893,8 @@ argv = ["git", "commit", "-m", "fixture"]
             token_usage: None,
             exit_code: None,
             rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
         });
         session.provenance.worktree = Some(WorktreeProvenance {
             id: "wt-fixture".to_string(),
@@ -1101,6 +1103,9 @@ pub enum DriveOutcomeKind {
     Killed,
     Blocked,
     PausedProviderCredits,
+    /// P130: a declared run/seat token or estimated-cost ceiling was reached
+    /// at the frame-dispatch boundary. See [`BudgetExhaustedPause`].
+    PausedBudgetExhausted,
     DriverLockBusy,
     ConcurrencyConductorBusy,
     TotalBudgetExhausted,
@@ -1138,6 +1143,7 @@ impl DriveOutcomeKind {
             "killed" => Self::Killed,
             "blocked" => Self::Blocked,
             "paused-provider-credits" => Self::PausedProviderCredits,
+            "paused-budget-exhausted" => Self::PausedBudgetExhausted,
             "driver-lock-busy" => Self::DriverLockBusy,
             "concurrency-conductor-busy" => Self::ConcurrencyConductorBusy,
             "total-budget-exhausted" => Self::TotalBudgetExhausted,
@@ -1173,6 +1179,7 @@ impl DriveOutcomeKind {
             Self::Killed => "killed",
             Self::Blocked => "blocked",
             Self::PausedProviderCredits => "paused-provider-credits",
+            Self::PausedBudgetExhausted => "paused-budget-exhausted",
             Self::DriverLockBusy => "driver-lock-busy",
             Self::ConcurrencyConductorBusy => "concurrency-conductor-busy",
             Self::TotalBudgetExhausted => "total-budget-exhausted",
@@ -1265,6 +1272,18 @@ pub struct DriveOutcome {
     pub rate_limit: Option<
         std::collections::BTreeMap<String, crate::procedure::activity::RateLimitObservation>,
     >,
+    /// Present only when `outcome` is `paused-budget-exhausted` (0130). `None`
+    /// on every existing ledger (this field is new and additive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_pause: Option<BudgetExhaustedPause>,
+    /// Observed output tokens attributed to the resolved model id that
+    /// produced them (0130): the work seat's `AgentAssignment.model`,
+    /// narrator/guide's own agent-table model, or `"unknown"` for a
+    /// model-less/attach-transport seat. `None` on every existing ledger
+    /// (this field is new and additive) and for a drive that observed no
+    /// tokens at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
 }
 
 /// The effective drive budget recorded as evidence alongside a
@@ -1289,10 +1308,13 @@ pub struct DriveBudgetEvidence {
 
 /// Observed output-token usage evidence for one drive (P445). This is an
 /// observational liveness signal (the same stream-shape-aware counter the
-/// live TUI already uses), never a billing-grade provider usage total, and
-/// it never gates execution. Each total is `None` when nothing was observed
-/// (an unsupported harness, or narration never invoked) rather than a
-/// fabricated zero.
+/// live TUI already uses), never a billing-grade provider usage total. Since
+/// 0130 the ledger's own deterministic observations MAY gate dispatch when a
+/// `[budget] max-tokens`/`max-cost-usd` ceiling is declared (see
+/// [`BudgetExhaustedPause`]) — enforcement never reads a provider billing
+/// API, only this same counted evidence. Each total is `None` when nothing
+/// was observed (an unsupported harness, or narration never invoked) rather
+/// than a fabricated zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[schemars(rename_all = "kebab-case")]
@@ -1336,6 +1358,8 @@ pub struct DriveTerminalEvidence {
     pub rate_limit: Option<
         std::collections::BTreeMap<String, crate::procedure::activity::RateLimitObservation>,
     >,
+    /// See [`DriveOutcome::tokens_by_model`] (0130).
+    pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -5007,6 +5031,46 @@ equals = "revise"
             DriveOutcomeKind::Killed
         );
         assert_eq!(DriveOutcomeKind::Killed.as_str(), "killed");
+    }
+
+    #[test]
+    fn budget_exhausted_drive_outcome_kind_round_trips_the_wire_value() {
+        assert_eq!(
+            DriveOutcomeKind::from_wire("paused-budget-exhausted"),
+            DriveOutcomeKind::PausedBudgetExhausted
+        );
+        assert_eq!(
+            DriveOutcomeKind::PausedBudgetExhausted.as_str(),
+            "paused-budget-exhausted"
+        );
+    }
+
+    #[test]
+    fn budget_exhausted_pause_json_round_trips() {
+        let pause = BudgetExhaustedPause {
+            ceiling_kind: crate::procedure::runtime::BudgetCeilingKind::Tokens,
+            ceiling: 1000.0,
+            observed: 1200.0,
+            role: Some("worker".to_string()),
+            frame_title: "step".to_string(),
+            frame_item_id: None,
+            frame_run_index: 2,
+            detail: "run token ceiling reached".to_string(),
+        };
+        let json = serde_json::to_string(&pause).expect("pause serializes");
+        let decoded: BudgetExhaustedPause = serde_json::from_str(&json).expect("pause decodes");
+        assert_eq!(decoded, pause);
+        assert!(json.contains("\"ceiling-kind\":\"tokens\""));
+    }
+
+    /// A ledger written before 0130 (no `budget-pause`/`tokens-by-model`
+    /// fields at all) must still deserialize, with both fields absent.
+    #[test]
+    fn drive_outcome_json_predating_0130_deserializes_with_budget_fields_absent() {
+        let json = r#"{"outcome":"completed","recorded-at-epoch":0}"#;
+        let outcome: DriveOutcome = serde_json::from_str(json).expect("old-shaped outcome decodes");
+        assert_eq!(outcome.budget_pause, None);
+        assert_eq!(outcome.tokens_by_model, None);
     }
 
     #[test]

@@ -1011,6 +1011,14 @@ fn print_final_output(
         crate::app::drive::print_credits_pause(pause, &drive.session)?;
         return Ok(());
     }
+    if let Some(pause) = &drive.budget_pause {
+        crate::app::drive::print_budget_pause(
+            pause,
+            drive.tokens_by_model.as_ref(),
+            &drive.session,
+        )?;
+        return Ok(());
+    }
 
     let mode = if verbose {
         HumanOutputMode::Verbose

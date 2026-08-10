@@ -317,6 +317,13 @@ pub struct DriveReport {
             ctx_traits_core::procedure::activity::RateLimitObservation,
         >,
     >,
+    /// Present only when `status` is `paused-budget-exhausted` (0130).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_pause: Option<ctx_traits_core::procedure::runtime::BudgetExhaustedPause>,
+    /// See [`ctx_traits_core::procedure::session::DriveOutcome::tokens_by_model`]
+    /// (0130). `None` when this drive observed no tokens at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_by_model: Option<std::collections::BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -409,6 +416,48 @@ impl WorkTokenTotal {
 
     fn get(&self) -> u64 {
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// The bucket a work attempt's tokens are attributed to when no model is
+/// resolvable — an attach-transport or model-less seat (0130). Kept distinct
+/// from a real model id so it is never silently merged into one.
+const UNKNOWN_MODEL_BUCKET: &str = "unknown";
+
+/// Drive-wide accumulator keyed by an arbitrary string (0130): either a
+/// resolved model id (for `tokens_by_model` evidence and cost estimation) or
+/// a role name (for per-seat `max-tokens` enforcement). Two independent
+/// instances of this same shape, fed by the same `WorkTokenCounterHandle`
+/// callback that already feeds `WorkTokenTotal` above.
+#[derive(Clone, Default)]
+struct KeyedTokenTotals(Arc<std::sync::Mutex<BTreeMap<String, u64>>>);
+
+impl KeyedTokenTotals {
+    fn add(&self, key: &str, delta: u64) {
+        if delta == 0 {
+            return;
+        }
+        let mut totals = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *totals.entry(key.to_string()).or_insert(0) += delta;
+    }
+
+    fn get(&self, key: &str) -> u64 {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn snapshot(&self) -> BTreeMap<String, u64> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -745,6 +794,36 @@ impl WorkTokenCounterHandle {
                 total.add(delta);
                 if let Some(panel) = &panel {
                     panel.add_output_tokens(delta);
+                }
+            }),
+        }
+    }
+
+    /// 0130 variant: also attributes this attempt's tokens to a resolved
+    /// model id (`tokens_by_model` evidence, cost estimation) and to the
+    /// dispatching role (per-seat `max-tokens` enforcement), alongside the
+    /// same drive-wide total and live panel `new` already feeds.
+    #[allow(clippy::too_many_arguments)]
+    fn new_attributed(
+        total: WorkTokenTotal,
+        panel: Option<run_view::RunPanel>,
+        model_totals: KeyedTokenTotals,
+        model: String,
+        role_totals: KeyedTokenTotals,
+        role: String,
+        api_model_totals: KeyedTokenTotals,
+        is_api_billed: bool,
+    ) -> Self {
+        Self {
+            accumulator: ctx_traits_io::harness::AttemptTokenAccumulator::new(move |delta| {
+                total.add(delta);
+                if let Some(panel) = &panel {
+                    panel.add_output_tokens(delta);
+                }
+                model_totals.add(&model, delta);
+                role_totals.add(&role, delta);
+                if is_api_billed {
+                    api_model_totals.add(&model, delta);
                 }
             }),
         }
@@ -1134,6 +1213,8 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             merge: None,
             bound_fired: None,
             rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
         };
         push_capability(
             &mut report,
@@ -1155,6 +1236,40 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     // readable afterward — the accumulators are cheap-clone `Arc` handles,
     // not part of `drive_loop`'s own return value.
     let work_total = WorkTokenTotal::default();
+    // 0130: per-model/per-role accumulators, fed alongside `work_total`
+    // above by every attempt's `WorkTokenCounterHandle`.
+    let model_totals = KeyedTokenTotals::default();
+    let role_totals = KeyedTokenTotals::default();
+    let api_model_totals = KeyedTokenTotals::default();
+    // 0130: a `[budget] max-tokens`/`max-cost-usd` ceiling is a RUN-wide
+    // cumulative cap, not a per-invocation one — a run that pauses and is
+    // re-driven several times without raising the cap must still see its
+    // earlier drives' spend. Seed this invocation's accumulators from the
+    // prior drive's own persisted evidence (which, by this same seeding,
+    // already carries every drive before it) before any dispatch runs.
+    // `work_total` seeds from `token_usage.work_tokens` specifically — the
+    // same work-only quantity `evaluate_budget_ceiling`'s `max-tokens` check
+    // reads within one drive — not the broader work+narrator+guide
+    // `tokens_by_model` total.
+    if let Some(prior) = session_for_lock.last_drive_outcome.as_ref() {
+        if let Some(work_tokens) = prior.token_usage.and_then(|usage| usage.work_tokens) {
+            work_total.add(work_tokens);
+        }
+        if let Some(tokens_by_model) = prior.tokens_by_model.as_ref() {
+            let billing = seed_model_billing_map(
+                &profile,
+                session_for_lock.provenance.agent_assignments.as_deref(),
+            );
+            for (model, tokens) in tokens_by_model {
+                model_totals.add(model, *tokens);
+                let is_api = billing.get(model).copied().unwrap_or_default()
+                    == ctx_traits_io::harness_config::BillingMode::Api;
+                if is_api {
+                    api_model_totals.add(model, *tokens);
+                }
+            }
+        }
+    }
     let narrator_tokens = harness_stream::NarratorTokenTracker::default();
     let guide_tokens = harness_stream::OneShotTokenTracker::default();
     install_live_guide(
@@ -1217,6 +1332,9 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &mut profile,
         &budget,
         &work_total,
+        &model_totals,
+        &role_totals,
+        &api_model_totals,
         &narrator_tokens,
         session_for_lock,
         tripwire.as_mut(),
@@ -1314,11 +1432,37 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         guide_tokens: guide_snapshot.tokens,
         guide_complete: guide_snapshot.complete,
     });
+    // 0130: fold this drive's per-model work-token split with the narrator's
+    // and guide's own resolved model (each a single model for the whole
+    // drive, unlike work seats which can vary per attempt/wave) into one
+    // `tokens_by_model` map. `None` when nothing was observed at all, same
+    // absence rule as `token_usage` above.
+    let mut tokens_by_model_map = model_totals.snapshot();
+    if let Some(tokens) = narrator_snapshot.tokens
+        && tokens > 0
+    {
+        let model = profile
+            .narrator_assignment()
+            .and_then(|assignment| assignment.model.clone())
+            .unwrap_or_else(|| UNKNOWN_MODEL_BUCKET.to_string());
+        *tokens_by_model_map.entry(model).or_insert(0) += tokens;
+    }
+    if let Some(tokens) = guide_snapshot.tokens
+        && tokens > 0
+    {
+        let model = profile
+            .guide_assignment()
+            .and_then(|assignment| assignment.model.clone())
+            .unwrap_or_else(|| UNKNOWN_MODEL_BUCKET.to_string());
+        *tokens_by_model_map.entry(model).or_insert(0) += tokens;
+    }
+    let tokens_by_model = (!tokens_by_model_map.is_empty()).then_some(tokens_by_model_map);
     let evidence = ctx_traits_core::procedure::session::DriveTerminalEvidence {
         effective_budget: Some(budget_evidence(&budget)),
         token_usage,
         exit_code: Some(drive_report_exit_code(&report.status)),
         rate_limit: report.rate_limit.clone(),
+        tokens_by_model: tokens_by_model.clone(),
     };
     // Stamp why the conductor exited; the ledger status alone cannot tell a
     // timed-out drive from one that is still running. Best-effort: a marker
@@ -1330,16 +1474,19 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         session_store,
         &report.status,
         report.credits_pause.clone(),
+        report.budget_pause.clone(),
         evidence,
     ) {
-        if report.credits_pause.is_some() {
+        if report.credits_pause.is_some() || report.budget_pause.is_some() {
             report.status = "harness-failed".to_string();
             report.credits_pause = None;
+            report.budget_pause = None;
         }
         report
             .warnings
             .push(format!("drive outcome marker not recorded: {error}"));
     }
+    report.tokens_by_model = tokens_by_model;
     if let Some(status) = report.final_session_status.as_ref() {
         let outcome =
             ctx_traits_core::procedure::session::DriveOutcomeKind::from_wire(report.status.clone());
@@ -1504,6 +1651,8 @@ fn busy_report(input: &DriveInputs<'_>) -> DriveReport {
         merge: None,
         bound_fired: None,
         rate_limit: None,
+        budget_pause: None,
+        tokens_by_model: None,
     }
 }
 
@@ -1757,6 +1906,9 @@ fn drive_loop(
     profile: &mut ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
     budget: &Budget,
     work_total: &WorkTokenTotal,
+    model_totals: &KeyedTokenTotals,
+    role_totals: &KeyedTokenTotals,
+    api_model_totals: &KeyedTokenTotals,
     narrator_tokens: &harness_stream::NarratorTokenTracker,
     session_for_baseline: ctx_traits_core::procedure::session::Session,
     mut tripwire: Option<&mut ctx_traits_io::tripwire::Tripwire>,
@@ -1858,6 +2010,8 @@ fn drive_loop(
         merge: None,
         bound_fired: None,
         rate_limit: None,
+        budget_pause: None,
+        tokens_by_model: None,
     };
     report
         .capabilities
@@ -2218,6 +2372,30 @@ fn drive_loop(
             .as_ref()
             .and_then(|agent| agent.structural_seat);
         let role_budget = profile.budget_for_seat(role, structural_seat);
+        // 0130: evaluated right here — after this frame resolved but before
+        // any dispatch it might cause — so a ceiling reached by the PREVIOUS
+        // frame pauses before this one starts, never mid-frame.
+        if let Some(pause) = evaluate_budget_ceiling(
+            &profile.budget,
+            &role_budget,
+            &profile.pricing,
+            work_total,
+            role_totals,
+            api_model_totals,
+            role,
+            &frame,
+        ) {
+            report.status = "paused-budget-exhausted".to_string();
+            report.events.push(DriveEvent {
+                event: "budget-exhausted".to_string(),
+                role: Some(role.to_string()),
+                harness: None,
+                detail: pause.detail.clone(),
+                duration_ms: None,
+            });
+            report.budget_pause = Some(pause);
+            return Ok(report);
+        }
         let frame_role_budget = frame_budget(budget, &input, &profile.budget, &role_budget);
         let budget = &frame_role_budget;
         let plan = match assignment_for_role(profile, &outcome.session, role, structural_seat)? {
@@ -2675,6 +2853,9 @@ fn drive_loop(
                     confinement_payloads: confinement_payloads.as_ref(),
                     run_panel: run_panel.0.as_ref(),
                     work_total,
+                    model_totals,
+                    role_totals,
+                    api_model_totals,
                     drive_probes: &mut drive_probes,
                 },
             ) {
@@ -2916,6 +3097,11 @@ fn drive_loop(
                             },
                             work_total: work_total.clone(),
                             token_panel: run_panel.0.clone(),
+                            model_totals: model_totals.clone(),
+                            role_totals: role_totals.clone(),
+                            api_model_totals: api_model_totals.clone(),
+                            billing: harness.billing.unwrap_or_default(),
+                            model: plan.model.clone(),
                         },
                     )?
                 }
@@ -3904,6 +4090,9 @@ pub fn print_report(
     if let Some(pause) = &report.credits_pause {
         print_credits_pause(pause, &report.session)?;
     }
+    if let Some(pause) = &report.budget_pause {
+        print_budget_pause(pause, report.tokens_by_model.as_ref(), &report.session)?;
+    }
     if let Some(merge) = &report.merge {
         crate::app::merge::print_report(merge)?;
     }
@@ -3976,6 +4165,102 @@ pub fn print_credits_pause(
         crate::app::presentation::HumanOutputMode::Compact,
         || Ok(()),
     )
+}
+
+/// 0130 rendering counterpart to [`print_credits_pause`]: same panel shape,
+/// two-tone doctrine, `blocked (budget)` status, plus the observed
+/// `tokens by model` block the ledger evidence carries.
+pub fn print_budget_pause(
+    pause: &ctx_traits_core::procedure::runtime::BudgetExhaustedPause,
+    tokens_by_model: Option<&std::collections::BTreeMap<String, u64>>,
+    session: &str,
+) -> crate::Result<()> {
+    let ceiling_label = match pause.ceiling_kind {
+        ctx_traits_core::procedure::runtime::BudgetCeilingKind::Tokens => "max-tokens",
+        ctx_traits_core::procedure::runtime::BudgetCeilingKind::CostUsd => "max-cost-usd",
+    };
+    let mut panel = Panel::new(
+        "ctx",
+        "drive",
+        PanelStatus::Blocked("paused (budget)".to_string()),
+    )
+    .row(PanelRow::toned("ceiling", ceiling_label, RowTone::Default))
+    .row(PanelRow::toned(
+        "scope",
+        pause.role.clone().unwrap_or_else(|| "run".to_string()),
+        RowTone::Default,
+    ))
+    .row(PanelRow::toned(
+        "frame",
+        budget_pause_frame_label(pause),
+        RowTone::Default,
+    ));
+    if let Some(tokens_by_model) = tokens_by_model {
+        // 0130 "two truths": tokens by model (always shown), and — resolved
+        // here from the same `[pricing]`/`billing` config every other layer
+        // reads — estimated $ per model. A subscription-billed model always
+        // renders `$0 (subscription)`; an api-billed model with no pricing
+        // entry renders `no pricing configured` rather than a fabricated $0.
+        let profile = ctx_traits_io::harness_config::resolve_runtime_assignments(&[]).ok();
+        for (model, tokens) in tokens_by_model {
+            panel = panel.row(PanelRow::toned(
+                "tokens",
+                format!("{model}: {tokens}"),
+                RowTone::Default,
+            ));
+            let cost = model_cost_label(profile.as_ref(), model, *tokens);
+            panel = panel.row(PanelRow::toned(
+                "estimated-cost",
+                format!("{model}: {cost}"),
+                RowTone::Default,
+            ));
+        }
+    }
+    let panel = panel
+        .row(PanelRow::toned(
+            "detail",
+            pause.detail.as_str(),
+            RowTone::Default,
+        ))
+        .next(PanelRow::toned(
+            "resume",
+            format!("ctx traits drive --session {session}"),
+            RowTone::Default,
+        ));
+    emit_human(
+        false,
+        &panel,
+        crate::app::presentation::HumanOutputMode::Compact,
+        || Ok(()),
+    )
+}
+
+/// 0130: this model's estimated cost from the resolved `[pricing]` table —
+/// `"no pricing configured"` rather than a fabricated `$0` when absent, per
+/// `evaluate_budget_ceiling`'s same honesty rule.
+fn model_cost_label(
+    profile: Option<&ctx_traits_io::harness_config::ResolvedRuntimeAssignments>,
+    model: &str,
+    tokens: u64,
+) -> String {
+    profile
+        .and_then(|profile| profile.pricing.get(model))
+        .and_then(|entry| entry.usd_per_mtok)
+        .map(|price| format!("${:.4}", tokens as f64 / 1_000_000.0 * price))
+        .unwrap_or_else(|| "no pricing configured".to_string())
+}
+
+/// See [`pause_frame_label`]'s doc — same rule, for a [`BudgetExhaustedPause`].
+fn budget_pause_frame_label(
+    pause: &ctx_traits_core::procedure::runtime::BudgetExhaustedPause,
+) -> String {
+    if !pause.frame_title.is_empty() {
+        return pause.frame_title.clone();
+    }
+    if let Some(item_id) = &pause.frame_item_id {
+        return item_id.clone();
+    }
+    format!("sequence position {}", pause.frame_run_index)
 }
 
 /// A `rate_limit_event`'s `resetsAt` (and every other epoch this pause
@@ -4089,6 +4374,134 @@ fn frame_budget(
             .or(sidecar_budget.idle_seconds)
             .or(role_budget.idle_seconds),
     }
+}
+
+/// 0130: the current (config-resolved-now, not historical) billing mode for
+/// every model this session has a known resolved seat for — used only to
+/// classify a PRIOR drive's carried-forward `tokens_by_model` entries into
+/// `api_model_totals` when seeding this drive's cost-ceiling accumulator.
+/// A model with no resolvable seat defaults to [`BillingMode::Api`] (the
+/// same conservative default `HarnessDefinition::billing` itself uses) so an
+/// unattributable model still counts toward a cost ceiling rather than
+/// silently escaping it.
+fn seed_model_billing_map(
+    profile: &ctx_traits_io::harness_config::ResolvedRuntimeAssignments,
+    prior_assignments: Option<&[ctx_traits_core::procedure::session::AgentAssignment]>,
+) -> BTreeMap<String, ctx_traits_io::harness_config::BillingMode> {
+    let mut billing = BTreeMap::new();
+    let mut note = |model: Option<&str>, harness: Option<&str>| {
+        let (Some(model), Some(harness)) = (model, harness) else {
+            return;
+        };
+        if let Some(definition) = profile.registry.harness.get(harness) {
+            billing
+                .entry(model.to_string())
+                .or_insert_with(|| definition.billing.unwrap_or_default());
+        }
+    };
+    for assignment in prior_assignments.into_iter().flatten() {
+        note(
+            assignment.model.as_deref(),
+            Some(assignment.harness.as_str()),
+        );
+    }
+    if let Some(narrator) = profile.narrator_assignment() {
+        note(narrator.model.as_deref(), narrator.harness.as_deref());
+    }
+    if let Some(guide) = profile.guide_assignment() {
+        note(guide.model.as_deref(), guide.harness.as_deref());
+    }
+    billing
+}
+
+/// 0130: evaluate the run-wide and (if declared) per-seat token/cost
+/// ceilings against this invocation's own observed evidence, at the same
+/// frame-dispatch boundary the `max-frames` gate uses — never mid-frame.
+/// Returns the first ceiling exceeded, if any: run `max-tokens`, then run
+/// `max-cost-usd`, then the seat's own `max-tokens` — an arbitrary but
+/// stable order. `observed` can be at or past `ceiling` since the frame
+/// that pushed the ledger over it has already completed by the time this
+/// runs (the same boundary-only overshoot 0117 accepted for its own gates).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_budget_ceiling(
+    run_budget: &ctx_traits_io::harness_config::RunProfileBudget,
+    role_budget: &ctx_traits_io::harness_config::RoleBudget,
+    pricing: &BTreeMap<String, ctx_traits_io::harness_config::ModelPricing>,
+    work_total: &WorkTokenTotal,
+    role_totals: &KeyedTokenTotals,
+    api_model_totals: &KeyedTokenTotals,
+    role: &str,
+    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
+) -> Option<ctx_traits_core::procedure::runtime::BudgetExhaustedPause> {
+    use ctx_traits_core::procedure::runtime::{BudgetCeilingKind, BudgetExhaustedPause};
+
+    let build =
+        |ceiling_kind, ceiling: f64, observed: f64, scope: Option<String>, detail: String| {
+            BudgetExhaustedPause {
+                ceiling_kind,
+                ceiling,
+                observed,
+                role: scope,
+                frame_title: frame.title.clone(),
+                frame_item_id: frame.item_id.clone(),
+                frame_run_index: frame.run_index.unwrap_or_default(),
+                detail,
+            }
+        };
+
+    if let Some(max_tokens) = run_budget.max_tokens {
+        let observed = work_total.get();
+        if observed >= max_tokens {
+            return Some(build(
+                BudgetCeilingKind::Tokens,
+                max_tokens as f64,
+                observed as f64,
+                None,
+                format!(
+                    "run token ceiling reached: observed {observed} >= max-tokens {max_tokens} (boundary-only: the frame that crossed it has already completed)"
+                ),
+            ));
+        }
+    }
+    if let Some(max_cost_usd) = run_budget.max_cost_usd {
+        let observed: f64 = api_model_totals
+            .snapshot()
+            .into_iter()
+            .map(|(model, tokens)| {
+                let price = pricing
+                    .get(&model)
+                    .and_then(|entry| entry.usd_per_mtok)
+                    .unwrap_or(0.0);
+                tokens as f64 / 1_000_000.0 * price
+            })
+            .sum();
+        if observed >= max_cost_usd {
+            return Some(build(
+                BudgetCeilingKind::CostUsd,
+                max_cost_usd,
+                observed,
+                None,
+                format!(
+                    "run estimated-cost ceiling reached: observed ${observed:.4} >= max-cost-usd ${max_cost_usd:.4} (api-billed models only; subscription-billed tokens never contribute)"
+                ),
+            ));
+        }
+    }
+    if let Some(max_tokens) = role_budget.max_tokens {
+        let observed = role_totals.get(role);
+        if observed >= max_tokens {
+            return Some(build(
+                BudgetCeilingKind::Tokens,
+                max_tokens as f64,
+                observed as f64,
+                Some(role.to_string()),
+                format!(
+                    "seat {role:?} token ceiling reached: observed {observed} >= max-tokens {max_tokens}"
+                ),
+            ));
+        }
+    }
+    None
 }
 
 fn wait_for_attach_advance(
@@ -6064,6 +6477,11 @@ struct ConcurrentWaveRequest<'a> {
     /// Drive-wide work-token accumulator (P445), shared with the sequential
     /// path so a wave's siblings contribute to the same running total.
     work_total: &'a WorkTokenTotal,
+    /// 0130: drive-wide per-model/per-role/api-billed accumulators, shared
+    /// with the sequential path exactly like `work_total` above.
+    model_totals: &'a KeyedTokenTotals,
+    role_totals: &'a KeyedTokenTotals,
+    api_model_totals: &'a KeyedTokenTotals,
     /// Shared with the sequential path's own `ensure_drive_probe` calls
     /// (same cache, same probe-once-per-harness guarantee) so a sibling
     /// dispatched through a harness the sequential path already probed
@@ -6855,6 +7273,11 @@ fn attempt_concurrent_wave(
                 },
                 work_total: request.work_total.clone(),
                 token_panel: request.run_panel.cloned(),
+                model_totals: request.model_totals.clone(),
+                role_totals: request.role_totals.clone(),
+                api_model_totals: request.api_model_totals.clone(),
+                billing: sibling.harness.billing.unwrap_or_default(),
+                model: sibling.plan.model.clone(),
             },
         ));
     }
@@ -7349,6 +7772,22 @@ struct CliHarnessRun<'a> {
     /// independent of `stdout_observer`'s live-narration wiring above (see
     /// `WorkTokenCounterHandle`).
     token_panel: Option<run_view::RunPanel>,
+    /// 0130: drive-wide per-model and per-role token accumulators, fed
+    /// alongside `work_total` by this attempt's counter.
+    model_totals: KeyedTokenTotals,
+    role_totals: KeyedTokenTotals,
+    /// 0130: drive-wide per-model accumulator of ONLY api-billed tokens (see
+    /// `billing` below) — the denominator `estimated $ by billing mode`
+    /// prices against `[pricing]`. Subscription-billed attempts still feed
+    /// `model_totals`/`role_totals` above, but never this one.
+    api_model_totals: KeyedTokenTotals,
+    /// This attempt's resolved harness billing mode (`[harness.<id>]
+    /// billing`, default `api`).
+    billing: ctx_traits_io::harness_config::BillingMode,
+    /// The resolved model this attempt dispatched against (`AssignmentPlan::model`),
+    /// `None` for a model-less/attach-transport seat — attributed to
+    /// [`UNKNOWN_MODEL_BUCKET`].
+    model: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -7618,7 +8057,18 @@ fn begin_harness_trace(
     Option<ctx_traits_io::harness::OutputObserver>,
     WorkTokenCounterHandle,
 ) {
-    let counter = WorkTokenCounterHandle::new(run.work_total.clone(), run.token_panel.clone());
+    let counter = WorkTokenCounterHandle::new_attributed(
+        run.work_total.clone(),
+        run.token_panel.clone(),
+        run.model_totals.clone(),
+        run.model
+            .clone()
+            .unwrap_or_else(|| UNKNOWN_MODEL_BUCKET.to_string()),
+        run.role_totals.clone(),
+        run.role.to_string(),
+        run.api_model_totals.clone(),
+        run.billing == ctx_traits_io::harness_config::BillingMode::Api,
+    );
     *trace_sequence = trace_sequence.saturating_add(1);
     let trace = HarnessAttemptWriter::start(&HarnessAttemptStart {
         run_id: run.trace.run_id,

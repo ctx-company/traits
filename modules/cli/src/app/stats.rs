@@ -35,7 +35,13 @@ pub(crate) fn handle_stats(
         return Ok(CommandOutput::new(()));
     }
 
-    emit_plain_stats(&report)?;
+    // 0130: pricing is config, not code — resolved here at the IO boundary
+    // (same as every other run-config knob) and handed to the pure printer
+    // as plain data, never read by `ctx_traits_core::procedure::stats`.
+    let pricing = ctx_traits_io::harness_config::resolve_runtime_assignments(&[])
+        .map(|assignments| assignments.pricing)
+        .unwrap_or_default();
+    emit_plain_stats(&report, &pricing)?;
     Ok(CommandOutput::new(()))
 }
 
@@ -47,7 +53,10 @@ fn opt_str(value: Option<&str>) -> String {
     value.map_or("none".to_string(), str::to_string)
 }
 
-fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
+fn emit_plain_stats(
+    report: &StatsReport,
+    pricing: &std::collections::BTreeMap<String, ctx_traits_io::harness_config::ModelPricing>,
+) -> crate::Result<()> {
     w("ctx traits stats")?;
     w(format!("  schema-version: {}", report.schema_version))?;
     w(format!(
@@ -122,6 +131,19 @@ fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
         report.token_evidence.guide_tokens_observed_runs,
         report.token_evidence.guide_tokens_missing_runs
     ))?;
+    if report.tokens_by_model.is_empty() {
+        w("  tokens-by-model: (none)")?;
+    } else {
+        w("  tokens-by-model (0130; estimated $ from [pricing], api billing assumed):")?;
+        for (model, tokens) in &report.tokens_by_model {
+            let cost = pricing
+                .get(model)
+                .and_then(|entry| entry.usd_per_mtok)
+                .map(|price| format!("${:.4}", *tokens as f64 / 1_000_000.0 * price))
+                .unwrap_or_else(|| "no pricing configured".to_string());
+            w(format!("    {model}: {tokens} tokens ({cost})"))?;
+        }
+    }
     if report.traits.is_empty() {
         w("  traits: (none)")?;
         return Ok(());

@@ -73,6 +73,10 @@ pub struct RunRecord {
     pub work_tokens: Option<u64>,
     pub narrator_tokens: Option<u64>,
     pub guide_tokens: Option<u64>,
+    /// 0130: this run's latest recorded `tokens-by-model` evidence, same
+    /// latest-drive-not-cumulative semantics as the token fields above.
+    /// Empty when the ledger predates 0130 or observed no tokens.
+    pub tokens_by_model: BTreeMap<String, u64>,
     /// Highest per-slot revision count among accepted `-verdict`-suffixed
     /// slots, or `None` when no such slot has a recorded revision. See the
     /// module doc's refinement-rounds heuristic.
@@ -94,6 +98,9 @@ impl RunRecord {
             work_tokens: token_usage.and_then(|usage| usage.work_tokens),
             narrator_tokens: token_usage.and_then(|usage| usage.narrator_tokens),
             guide_tokens: token_usage.and_then(|usage| usage.guide_tokens),
+            tokens_by_model: last_drive_outcome
+                .and_then(|outcome| outcome.tokens_by_model.clone())
+                .unwrap_or_default(),
             verdict_rounds: verdict_slot_rounds(&session.slot_revisions),
         }
     }
@@ -210,6 +217,12 @@ pub struct StatsReport {
     pub matched_runs: u64,
     pub outcomes: OutcomeCounts,
     pub token_evidence: TokenEvidence,
+    /// 0130: observed tokens summed across matched runs' latest-recorded
+    /// `tokens-by-model` evidence, keyed by model id. Empty when no matched
+    /// run carries this evidence (every ledger predates 0130, or none
+    /// observed tokens).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tokens_by_model: BTreeMap<String, u64>,
     pub refinement_rounds: RefinementRoundsEvidence,
     pub traits: Vec<TraitRow>,
 }
@@ -367,6 +380,12 @@ pub fn aggregate(
     };
 
     let token_evidence = accumulate_token_evidence(matched.iter().copied());
+    let mut tokens_by_model: BTreeMap<String, u64> = BTreeMap::new();
+    for record in &matched {
+        for (model, tokens) in &record.tokens_by_model {
+            *tokens_by_model.entry(model.clone()).or_insert(0) += tokens;
+        }
+    }
 
     let mut by_trait: BTreeMap<String, Vec<&RunRecord>> = BTreeMap::new();
     for record in &matched {
@@ -420,6 +439,7 @@ pub fn aggregate(
             other_values,
         },
         token_evidence,
+        tokens_by_model,
         refinement_rounds,
         traits,
     }
@@ -454,6 +474,7 @@ mod tests {
             work_tokens: None,
             narrator_tokens: None,
             guide_tokens: None,
+            tokens_by_model: BTreeMap::new(),
             verdict_rounds,
         }
     }

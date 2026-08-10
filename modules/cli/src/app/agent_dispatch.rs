@@ -500,6 +500,7 @@ mod tests {
             version_probe: vec![],
             cli: None,
             mcp: None,
+            billing: None,
         }
     }
 

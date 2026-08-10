@@ -57,6 +57,26 @@ pub struct HarnessDefinition {
     pub cli: Option<HarnessCliConvention>,
     #[serde(default)]
     pub mcp: Option<HarnessMcpConvention>,
+    /// 0130: `None` means "not stated here", resolving to
+    /// [`BillingMode::Api`] — the same claude CLI can be seat-billed
+    /// (subscription) or key-billed (api) depending on how it is invoked, so
+    /// this is config-declared, never inferred from the harness id.
+    #[serde(default)]
+    pub billing: Option<BillingMode>,
+}
+
+/// 0130: how a harness's tokens translate to cost. `Subscription` means
+/// marginal-cost-zero (a flat-fee seat) — never priced against `[pricing]`
+/// even when a pricing entry exists for the model. `Api` prices tokens
+/// against `[pricing."<model-id>"] usd-per-mtok`.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum BillingMode {
+    Subscription,
+    #[default]
+    Api,
 }
 
 /// The kind a harness gets when nothing states one: a user-defined harness
@@ -112,6 +132,7 @@ impl HarnessDefinition {
                 (Some(over), None) => Some(over.clone()),
                 (None, under) => under.cloned(),
             },
+            billing: self.billing.or(base.billing),
         }
     }
 }
@@ -855,7 +876,7 @@ impl RunProfileAssignment {
             reasoning_effort: None,
             system_prompt: None,
             extra_args: Vec::new(),
-            budget: RoleBudget::default(),
+            budget: Box::default(),
             api: Box::default(),
             count: None,
         }
@@ -906,6 +927,14 @@ pub struct RuntimeConfig {
     /// P492 registry base URL policy.
     #[serde(default)]
     pub registry: Option<RegistryTable>,
+    /// 0130 `[pricing."<model-id>"]`: the estimated-cost table an api-billed
+    /// harness's tokens are priced against. Additive across layers, keyed
+    /// per model id, same precedence as `[run.build-cache.<name>]` (a repo
+    /// layer entry wins over the same key declared elsewhere; otherwise
+    /// first-occurrence). Config, never code — there are no built-in price
+    /// constants.
+    #[serde(default)]
+    pub pricing: BTreeMap<String, ModelPricing>,
     /// P451: `[repo."<key>"]` blocks, keyed by the P426 repo registry key.
     /// Accepted only in the carried GLOBAL config file — a non-empty entry
     /// declared in any other layer is a hard config error (see
@@ -991,6 +1020,10 @@ enum ConfigLeaf {
     RunInlinePromptBytes,
     RunStory,
     RunUsageWarningThreshold,
+    /// 0130 `[run] max-tokens`: the run-cumulative token ceiling.
+    RunMaxTokens,
+    /// 0130 `[run] max-cost-usd`: the run-cumulative estimated-cost ceiling.
+    RunMaxCostUsd,
     MergeWait,
     MergeOverlap,
     MergeAuto,
@@ -1011,6 +1044,9 @@ enum ConfigLeaf {
     AgentDynamic,
     HostDynamic,
     RepoDynamic,
+    /// 0130 `[pricing."<model-id>"]`: dynamic map, same table-shape
+    /// representation as `HarnessDynamic`/`HostDynamic` above.
+    PricingDynamic,
 }
 
 impl ConfigLeaf {
@@ -1047,6 +1083,8 @@ impl ConfigLeaf {
         Self::RunInlinePromptBytes,
         Self::RunStory,
         Self::RunUsageWarningThreshold,
+        Self::RunMaxTokens,
+        Self::RunMaxCostUsd,
         Self::MergeWait,
         Self::MergeOverlap,
         Self::MergeAuto,
@@ -1067,6 +1105,7 @@ impl ConfigLeaf {
         Self::AgentDynamic,
         Self::HostDynamic,
         Self::RepoDynamic,
+        Self::PricingDynamic,
     ];
 
     fn path(self) -> &'static str {
@@ -1103,6 +1142,8 @@ impl ConfigLeaf {
             Self::RunInlinePromptBytes => "run.inline-prompt-bytes",
             Self::RunStory => "run.story",
             Self::RunUsageWarningThreshold => "run.usage-warning-threshold",
+            Self::RunMaxTokens => "run.max-tokens",
+            Self::RunMaxCostUsd => "run.max-cost-usd",
             Self::MergeWait => "merge.wait",
             Self::MergeOverlap => "merge.overlap",
             Self::MergeAuto => "merge.auto",
@@ -1123,6 +1164,7 @@ impl ConfigLeaf {
             Self::AgentDynamic => "agent.*",
             Self::HostDynamic => "host.*",
             Self::RepoDynamic => "repo.*",
+            Self::PricingDynamic => "pricing",
         }
     }
 
@@ -1150,6 +1192,7 @@ impl ConfigLeaf {
             | Self::AgentDynamic
             | Self::HostDynamic
             | Self::RepoDynamic
+            | Self::PricingDynamic
             | Self::TraitDynamic => ConfigSemantic::Default,
             Self::SchemaVersion
             | Self::WorktreeSetup
@@ -1174,6 +1217,8 @@ impl ConfigLeaf {
             | Self::RunMaxInFlight
             | Self::RunStrictLoops
             | Self::RunInlinePromptBytes
+            | Self::RunMaxTokens
+            | Self::RunMaxCostUsd
             | Self::MergeOverlap
             | Self::MergeBranch
             | Self::MergeGate
@@ -2000,9 +2045,13 @@ pub struct ProfileAssignment {
     pub extra_args: Vec<String>,
     /// P475: this seat's own time/retry limits. Empty (never serialized) for
     /// every assignment that declares none, so existing evidence/ledger
-    /// bytes are unaffected until an operator actually declares one.
+    /// bytes are unaffected until an operator actually declares one. Boxed
+    /// since 0130 (`max-tokens` pushed [`RoleBudget`] past the size that
+    /// keeps [`ProfileAssignment`] — and, through it, [`RoleAssignmentValue`]'s
+    /// `Single` variant vs. `List`'s `Vec` pointer — under clippy's
+    /// `large_enum_variant`, same reasoning as the API-transport fields below.
     #[serde(default, skip_serializing_if = "RoleBudget::is_empty")]
-    pub budget: RoleBudget,
+    pub budget: Box<RoleBudget>,
     /// 0079 `transport = "api"` endpoint fields, boxed and flattened: boxed
     /// so this rarely-populated cluster does not grow every
     /// [`ProfileAssignment`] (and, through it, [`RoleAssignmentValue`]'s
@@ -2105,7 +2154,7 @@ impl<'de> Deserialize<'de> for ProfileAssignment {
             reasoning_effort: raw.reasoning_effort,
             system_prompt: raw.system_prompt,
             extra_args: raw.extra_args,
-            budget: raw.budget,
+            budget: Box::new(raw.budget),
             api: Box::new(ApiEndpoint {
                 base_url: raw.base_url,
                 wire: raw.wire,
@@ -2147,15 +2196,34 @@ pub struct RoleBudget {
     pub idle_seconds: Option<u64>,
     #[serde(default)]
     pub max_retries: Option<u64>,
+    /// 0130: the per-seat token ceiling. Enforced at frame dispatch only
+    /// (never mid-frame), and only gates dispatches for this seat's own
+    /// role — a separate scope from `[budget] max-tokens`, which gates the
+    /// whole run.
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
 }
 
 impl RoleBudget {
     pub fn is_empty(&self) -> bool {
-        self.frame_seconds.is_none() && self.idle_seconds.is_none() && self.max_retries.is_none()
+        self.frame_seconds.is_none()
+            && self.idle_seconds.is_none()
+            && self.max_retries.is_none()
+            && self.max_tokens.is_none()
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+/// 0130: one `[pricing."<model-id>"]` entry. Output-token estimate only —
+/// the transport rarely reports an input/output split, and this stays an
+/// estimate per `claim_evidence`'s doctrine, never exact provider billing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ModelPricing {
+    #[serde(default)]
+    pub usd_per_mtok: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RunProfileBudget {
     #[serde(default)]
@@ -2183,6 +2251,19 @@ pub struct RunProfileBudget {
     /// resolves to `crate::command::DEFAULT_COMMAND_IDLE_MS`.
     #[serde(default)]
     pub command_idle_seconds: Option<u64>,
+    /// 0130 `[budget] max-tokens`: the run-cumulative output-token ceiling
+    /// (observed evidence, never a provider billing total). Enforced only at
+    /// the frame-dispatch boundary, same seam as `max-frames`.
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    /// 0130 `[budget] max-cost-usd`: the run-cumulative estimated-cost
+    /// ceiling, priced from `[pricing]` over api-billed models only
+    /// (subscription-billed models never contribute). A ceiling declared
+    /// with no `[pricing]` table for any dispatched model can never fire —
+    /// `resolve_runtime_assignments` warns at decode time rather than
+    /// silently accepting a cost cap that is a lie.
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2227,6 +2308,9 @@ pub struct ResolvedRuntimeAssignments {
     /// same config-layer overlay as every other `[run]` knob. `None` (off)
     /// unless a layer sets one.
     pub usage_warning_threshold: Option<f64>,
+    /// 0130 `[pricing]`, resolved through the same overlay as every other
+    /// additive map (`[run.build-cache.*]`, `[host.*]`).
+    pub pricing: BTreeMap<String, ModelPricing>,
     pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
     model_catalogs: BTreeMap<String, ModelCatalogState>,
     model_catalog_capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
@@ -2394,7 +2478,7 @@ impl ResolvedRuntimeAssignments {
             1 => 0,
             len => (structural_seat.unwrap_or(0) as usize) % len,
         };
-        seats[index].0.budget.clone()
+        (*seats[index].0.budget).clone()
     }
 
     pub fn model_catalog_capability_reports(
@@ -2750,6 +2834,7 @@ fn resolve_runtime_assignments_impl(
         .run
         .as_ref()
         .and_then(|run| run.usage_warning_threshold);
+    let pricing = runtime_config.pricing.clone();
     // `resolve_runtime_config` (via `resolve_config_report`) already folded
     // declared named build caches into `worktree.build_cache` (P428).
     let worktree = runtime_config.worktree;
@@ -2884,6 +2969,7 @@ fn resolve_runtime_assignments_impl(
         budget,
         worktree,
         usage_warning_threshold,
+        pricing,
         port_defaults,
         model_catalogs: BTreeMap::new(),
         model_catalog_capability_reports: Vec::new(),
@@ -3259,6 +3345,12 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
     if next.command_idle_seconds.is_some() {
         base.command_idle_seconds = next.command_idle_seconds;
     }
+    if next.max_tokens.is_some() {
+        base.max_tokens = next.max_tokens;
+    }
+    if next.max_cost_usd.is_some() {
+        base.max_cost_usd = next.max_cost_usd;
+    }
 }
 
 /// Load the optional package-root `config.toml` sidecar (legacy, P312;
@@ -3401,7 +3493,7 @@ pub fn render_package_runtime_config(
 }
 
 fn push_budget_lines(text: &mut String, budget: &RunProfileBudget) {
-    let fields: [(&str, Option<u64>); 8] = [
+    let fields: [(&str, Option<u64>); 9] = [
         ("max-frames", budget.max_frames),
         ("frame-seconds", budget.frame_seconds),
         ("total-seconds", budget.total_seconds),
@@ -3410,11 +3502,15 @@ fn push_budget_lines(text: &mut String, budget: &RunProfileBudget) {
         ("idle-seconds", budget.idle_seconds),
         ("command-seconds", budget.command_seconds),
         ("command-idle-seconds", budget.command_idle_seconds),
+        ("max-tokens", budget.max_tokens),
     ];
     for (key, value) in fields {
         if let Some(value) = value {
             text.push_str(&format!("{key} = {value}\n"));
         }
+    }
+    if let Some(max_cost_usd) = budget.max_cost_usd {
+        text.push_str(&format!("max-cost-usd = {max_cost_usd}\n"));
     }
 }
 
@@ -3696,6 +3792,11 @@ pub fn prepare_run_assignments(
         probe_harnesses(&resolved.registry, &configured_probe_ids);
     warnings.extend(seat_warnings);
     warnings.extend(resolved.builtin_fallback_warnings());
+    if resolved.budget.max_cost_usd.is_some() && resolved.pricing.is_empty() {
+        warnings.push(
+            "budget.max-cost-usd is declared but no [pricing] table is configured; this ceiling can never fire — add [pricing.\"<model-id>\"] usd-per-mtok for the dispatched models or drop max-cost-usd".to_string(),
+        );
+    }
     for id in &fallback_ids {
         let Some(row) = resolved
             .builtin_detection()
@@ -4117,6 +4218,20 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
                 .as_ref()
                 .and_then(|run| run.budget.command_idle_seconds)
         }
+        ConfigLeaf::RunMaxTokens => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .max_tokens = source.run.as_ref().and_then(|run| run.budget.max_tokens)
+        }
+        ConfigLeaf::RunMaxCostUsd => {
+            target
+                .run
+                .get_or_insert_with(RunTable::default)
+                .budget
+                .max_cost_usd = source.run.as_ref().and_then(|run| run.budget.max_cost_usd)
+        }
         ConfigLeaf::MergeOverlap => {
             target.merge.get_or_insert_with(MergeTable::default).overlap =
                 source.merge.as_ref().and_then(|merge| merge.overlap)
@@ -4185,6 +4300,7 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::AgentDynamic
         | ConfigLeaf::HostDynamic
         | ConfigLeaf::RepoDynamic
+        | ConfigLeaf::PricingDynamic
         | ConfigLeaf::TraitDynamic => {
             unreachable!("only requirement leaves are applied directly")
         }
@@ -4463,6 +4579,7 @@ fn apply_additive_values(
     runtime.worktree.warm.clear();
     runtime.worktree.env.clear();
     runtime.worktree.tripwire.sentinel.clear();
+    runtime.pricing.clear();
     if let Some(run) = runtime.run.as_mut() {
         run.build_cache.clear();
     }
@@ -4526,6 +4643,21 @@ fn apply_additive_values(
                     target.build_cache.insert(name.clone(), cache.clone());
                     effective.insert(format!("run.build-cache.{name}"), contributor);
                 }
+            }
+        }
+        for (model, pricing) in &document.pricing {
+            let contributor = ConfigContributor {
+                layer: *layer,
+                source: Some(path.to_string()),
+            };
+            record_additive_contributor(
+                &mut contributors,
+                format!("pricing.{model}"),
+                contributor.clone(),
+            );
+            if *layer == ConfigLayer::Repo || !runtime.pricing.contains_key(model) {
+                runtime.pricing.insert(model.clone(), *pricing);
+                effective.insert(format!("pricing.{model}"), contributor);
             }
         }
         if let Some(publish) = &document.publish
@@ -5639,6 +5771,8 @@ fn overlay_run_table(
             "command-idle-seconds",
             next.budget.command_idle_seconds.is_some(),
         ),
+        ("max-tokens", next.budget.max_tokens.is_some()),
+        ("max-cost-usd", next.budget.max_cost_usd.is_some()),
     ] {
         if present {
             record_winner(winners, format!("run.{key}"), layer, source.clone());
@@ -6269,7 +6403,7 @@ pub fn parse_assignment_overrides(overrides: &[String]) -> crate::Result<Assignm
             reasoning_effort,
             system_prompt: None,
             extra_args: Vec::new(),
-            budget: RoleBudget::default(),
+            budget: Box::default(),
             api: Box::default(),
             count: None,
         };
@@ -7476,6 +7610,7 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
         (
             "claude-code",
             HarnessDefinition {
+                billing: None,
                 kind: Some("claude-code".to_string()),
                 bin: Some("claude".to_string()),
                 transports: vec![RunTransport::Cli, RunTransport::Mcp],
@@ -7558,6 +7693,7 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
         (
             "opencode",
             HarnessDefinition {
+                billing: None,
                 kind: Some("opencode".to_string()),
                 bin: Some("opencode".to_string()),
                 transports: vec![RunTransport::Cli],
@@ -7600,6 +7736,7 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
         (
             "pi",
             HarnessDefinition {
+                billing: None,
                 kind: Some("pi".to_string()),
                 bin: Some("pi".to_string()),
                 transports: vec![RunTransport::Cli],
@@ -7631,6 +7768,7 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
         (
             "codex",
             HarnessDefinition {
+                billing: None,
                 kind: Some("codex".to_string()),
                 bin: Some("codex".to_string()),
                 transports: vec![RunTransport::Cli],
@@ -8931,6 +9069,8 @@ mod config_tests {
             (ConfigLeaf::RunMaxInFlight, "1", "2"),
             (ConfigLeaf::RunStrictLoops, "false", "true"),
             (ConfigLeaf::RunInlinePromptBytes, "1", "2"),
+            (ConfigLeaf::RunMaxTokens, "1", "2"),
+            (ConfigLeaf::RunMaxCostUsd, "1.0", "2.0"),
             (ConfigLeaf::MergeOverlap, "\"land\"", "\"park\""),
             (ConfigLeaf::MergeBranch, "\"repo\"", "\"environment\""),
             (ConfigLeaf::MergeGate, "[[\"repo\"]]", "[[\"environment\"]]"),
@@ -10315,6 +10455,102 @@ mod config_tests {
     }
 
     #[test]
+    fn budget_max_tokens_and_max_cost_usd_decode_and_overlay() {
+        let base: RuntimeConfig =
+            toml::from_str("[run]\nmax-tokens = 1000\n").expect("run.max-tokens decodes");
+        let mut budget = base.run.expect("run table").budget;
+        assert_eq!(budget.max_tokens, Some(1000));
+        assert_eq!(budget.max_cost_usd, None);
+
+        let next: RuntimeConfig =
+            toml::from_str("[run]\nmax-cost-usd = 2.5\n").expect("run.max-cost-usd decodes");
+        overlay_budget(&mut budget, &next.run.expect("run table").budget);
+        assert_eq!(
+            budget.max_tokens,
+            Some(1000),
+            "overlay must not clear an unset field"
+        );
+        assert_eq!(budget.max_cost_usd, Some(2.5));
+
+        // `push_budget_lines`/`render_package_runtime_config` round trip:
+        // the rendered document decodes back to the same resolved budget.
+        let rendered =
+            render_package_runtime_config(&budget, &PortDefaults::default(), &BTreeMap::new());
+        assert!(rendered.contains("max-tokens = 1000"));
+        assert!(rendered.contains("max-cost-usd = 2.5"));
+    }
+
+    #[test]
+    fn role_budget_max_tokens_decodes_and_deny_unknown_fields_still_rejects_stray_keys() {
+        let decoded: RoleBudget =
+            toml::from_str("max-tokens = 500\n").expect("role budget max-tokens decodes");
+        assert_eq!(decoded.max_tokens, Some(500));
+        assert!(!decoded.is_empty());
+
+        let rejected = toml::from_str::<RoleBudget>("max-tokens = 500\nbogus = 1\n");
+        assert!(
+            rejected.is_err(),
+            "an unknown key in a role budget table must still be a hard decode error"
+        );
+    }
+
+    #[test]
+    fn pricing_table_and_billing_mode_decode() {
+        let config: RuntimeConfig = toml::from_str(
+            "[pricing.\"claude-opus\"]\nusd-per-mtok = 15.0\n\n[harness.claude-code]\nbilling = \"subscription\"\n",
+        )
+        .expect("pricing/billing decode");
+        assert_eq!(
+            config
+                .pricing
+                .get("claude-opus")
+                .and_then(|entry| entry.usd_per_mtok),
+            Some(15.0)
+        );
+        assert_eq!(
+            config.harness.get("claude-code").and_then(|h| h.billing),
+            Some(BillingMode::Subscription)
+        );
+        // Unstated billing resolves to `api`, never fabricated as a
+        // subscription default.
+        let unstated: RuntimeConfig = toml::from_str("[harness.custom]\nbin = \"x\"\n")
+            .expect("harness without billing decodes");
+        assert_eq!(unstated.harness.get("custom").and_then(|h| h.billing), None);
+    }
+
+    #[test]
+    fn pricing_table_merges_additively_with_repo_winning_conflicting_keys() {
+        let mut winners = BTreeMap::new();
+        let documents = vec![
+            (
+                ConfigLayer::UserGlobal,
+                Utf8PathBuf::from("global.toml"),
+                toml::from_str::<RuntimeConfig>(
+                    "[pricing.\"model-a\"]\nusd-per-mtok = 1.0\n\n[pricing.\"model-b\"]\nusd-per-mtok = 2.0\n",
+                )
+                .unwrap(),
+            ),
+            (
+                ConfigLayer::Repo,
+                Utf8PathBuf::from("repo.toml"),
+                toml::from_str::<RuntimeConfig>("[pricing.\"model-a\"]\nusd-per-mtok = 9.0\n").unwrap(),
+            ),
+        ];
+        let mut runtime = RuntimeConfig::default();
+        apply_additive_values(&mut runtime, &documents, &[], &mut winners);
+        assert_eq!(
+            runtime.pricing.get("model-a").and_then(|p| p.usd_per_mtok),
+            Some(9.0),
+            "repo layer must win the conflicting key"
+        );
+        assert_eq!(
+            runtime.pricing.get("model-b").and_then(|p| p.usd_per_mtok),
+            Some(2.0),
+            "a key declared only globally survives untouched"
+        );
+    }
+
+    #[test]
     fn trait_port_defaults_merge_leafwise_and_environment_wins_with_provenance() {
         let parse = |text: &str| toml::from_str::<RuntimeConfig>(text).expect("config decodes");
         let mut effective = RuntimeConfig::default();
@@ -10372,6 +10608,7 @@ mod config_tests {
             budget: RunProfileBudget::default(),
             worktree: WorktreeConfig::default(),
             usage_warning_threshold: None,
+            pricing: BTreeMap::new(),
             port_defaults: BTreeMap::new(),
             model_catalogs: BTreeMap::new(),
             model_catalog_capability_reports: Vec::new(),

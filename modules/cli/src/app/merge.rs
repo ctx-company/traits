@@ -243,7 +243,7 @@ pub(crate) fn resolved_merger_role_budget(
                 .and_then(|value| value.entries().first())
         });
     table
-        .map(|assignment| assignment.budget.clone())
+        .map(|assignment| (*assignment.budget).clone())
         .unwrap_or_default()
 }
 
