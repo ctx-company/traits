@@ -4,6 +4,7 @@ export interface CtxConfig {
     harness?: Record<string, HarnessDefinition>;
     host?: Record<string, HostOverride>;
     merge?: MergeTable;
+    pricing?: Record<string, ModelPricing>;
     publish?: PublishTable;
     registry?: RegistryTable;
     repo?: Record<string, RepoOverride>;
@@ -20,6 +21,7 @@ export interface AgentDefaults {
 }
 export type AgentModelTier = "top" | "fast";
 export type AutoClosePolicy = "confirm" | "checked" | "merge";
+export type BillingMode = "subscription" | "api";
 export interface BuildCacheConfig {
     env: string;
 }
@@ -46,6 +48,7 @@ export interface HarnessCliConvention {
     warmArgv?: string[];
 }
 export interface HarnessDefinition {
+    billing?: BillingMode;
     bin?: string;
     cli?: HarnessCliConvention;
     kind?: string;
@@ -80,6 +83,9 @@ export interface MergeTable {
     retryAttempts?: number;
     retryBackoffMs?: number;
     wait?: boolean;
+}
+export interface ModelPricing {
+    usdPerMtok?: number;
 }
 export interface PortDefaults {
     port?: Record<string, string>;
@@ -154,6 +160,7 @@ export interface RoleBudget {
     frameSeconds?: number;
     idleSeconds?: number;
     maxRetries?: number;
+    maxTokens?: number;
 }
 export type RunAssignmentMode = "harness" | "attach";
 export type RunSessionMode = "per-frame" | "persistent";
@@ -165,9 +172,11 @@ export interface RunTable {
     frameSeconds?: number;
     idleSeconds?: number;
     inlinePromptBytes?: number;
+    maxCostUsd?: number;
     maxFrames?: number;
     maxInFlight?: number;
     maxRetries?: number;
+    maxTokens?: number;
     story?: StoryLevel;
     strictLoops?: boolean;
     totalSeconds?: number;

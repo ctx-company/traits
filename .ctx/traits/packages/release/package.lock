@@ -1,0 +1,51 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "release"
+variant = "default"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:e56513df007c13014aad61dd28a26c03825442a45e4f35a73749babc2a1f5067"
+canonical = "sha256:ebba1b1a667844e44813f3017af51c44776fee30e4c7e3ba8b0550c1b1dd4407"
+model-visible = "sha256:f497ad308afe052cce3c4f9b197a0f8ee87749e77b2a2b0068c1dc223647c728"
+resource-manifest = "sha256:d86f894b483f1bbc7740594e09b4ad4f5669d2fb12e0e5271120b3f03ed1c577"
+
+[[trait.export]]
+target = "agent-skills"
+path = ".agents/skills/release-default/SKILL.md"
+digest = "sha256:b4bd1ac81cec66f6c93cc36b26f0d2671fa50deada243182040d56475b436755"
+
+[[trait.projection]]
+target-profile = "agent-skills"
+renderer-version = "0.1.0-alpha.1"
+profile-version = "agent-skills"
+
+[trait.projection.digests]
+source = "sha256:e56513df007c13014aad61dd28a26c03825442a45e4f35a73749babc2a1f5067"
+canonical = "sha256:ebba1b1a667844e44813f3017af51c44776fee30e4c7e3ba8b0550c1b1dd4407"
+model-visible = "sha256:f497ad308afe052cce3c4f9b197a0f8ee87749e77b2a2b0068c1dc223647c728"
+render = "sha256:584737c14f74a740801e85ee9b0955cc7d0cfd758a965e95117a2fde1c3f6620"
+generated-markdown = "sha256:b4bd1ac81cec66f6c93cc36b26f0d2671fa50deada243182040d56475b436755"
+
+[trait.projection.warnings]
+semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]
+advisory-policy = [
+    "port.commit-report output contract has no title",
+    "port.commit-report output contract has no format guidance",
+    "port.publish-report output contract has no title",
+    "port.publish-report output contract has no format guidance",
+]
+
+[trait.projection.static-output]
+drift-status = "in-sync"
+path = "./.agents/skills/release-default/SKILL.md"
+
+[trait.projection.provenance]
+command = "ctx traits export --update-skill-lock"
+profile = "agent-skills"
+options = ["--profile=agent-skills"]

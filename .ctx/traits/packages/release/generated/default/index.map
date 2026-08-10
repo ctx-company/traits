@@ -1,0 +1,297 @@
+{
+  "agent:reviewer": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:scribe": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 21,
+    "end": 21
+  },
+  "agent:worker": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:commit-report": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 108,
+    "end": 108
+  },
+  "port:publish-report": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 115,
+    "end": 115
+  },
+  "port:version": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 4,
+    "end": 4
+  },
+  "prompt:changelog-draft": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 48,
+    "end": 48
+  },
+  "prompt:changelog-review": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 53,
+    "end": 53
+  },
+  "prompt:changelog-write": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 58,
+    "end": 58
+  },
+  "prompt:commit-message": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 63,
+    "end": 63
+  },
+  "prompt:version-bump": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 36,
+    "end": 36
+  },
+  "prompt:version-review": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 43,
+    "end": 43
+  },
+  "resource:release-manifest": {
+    "file": ".ctx/traits/packages/release/source/resource.ts",
+    "start": 9,
+    "end": 9
+  },
+  "schema:decision": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 21,
+    "end": 21
+  },
+  "schema:release-gate-result": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 22,
+    "end": 22
+  },
+  "schema:reviewer-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 18,
+    "end": 18
+  },
+  "sequence:ctx-branch-arm-p-20-preflight-clean-tree-then/preflight-gate": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 96,
+    "end": 96
+  },
+  "sequence:ctx-branch-arm-p-20-preflight-clean-tree-then/preflight-gate-green": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 103,
+    "end": 103
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/changelog-write": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 148,
+    "end": 148
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/commit": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 166,
+    "end": 166
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/commit-message": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 153,
+    "end": 153
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/stage": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 160,
+    "end": 160
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/tag": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 172,
+    "end": 172
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/tagged": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 178,
+    "end": 178
+  },
+  "sequence:ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then/unstage-runtime": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 161,
+    "end": 161
+  },
+  "sequence:ctx-branch-arm-s-192-ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then-6-tagged-then/gated-publish": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 187,
+    "end": 187
+  },
+  "sequence:ctx-branch-arm-s-192-ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then-6-tagged-then/gated-push": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 181,
+    "end": 181
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/commit-log": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 109,
+    "end": 109
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/last-tag": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 104,
+    "end": 104
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/version-bump": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 119,
+    "end": 119
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/version-bump-approved": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 135,
+    "end": 135
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/version-diff": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 124,
+    "end": 124
+  },
+  "sequence:ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then/version-review": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 129,
+    "end": 129
+  },
+  "sequence:ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then/changelog-approved": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 147,
+    "end": 147
+  },
+  "sequence:ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then/changelog-draft": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 136,
+    "end": 136
+  },
+  "sequence:ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then/changelog-review": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 141,
+    "end": 141
+  },
+  "sequence:procedure/preflight-branch": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 87,
+    "end": 87
+  },
+  "sequence:procedure/preflight-clean-tree": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 93,
+    "end": 93
+  },
+  "sequence:procedure/preflight-status": {
+    "file": ".ctx/traits/packages/release/source/variants/default.ts",
+    "start": 82,
+    "end": 82
+  },
+  "slot:changelog-entry": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 65,
+    "end": 65
+  },
+  "slot:changelog-verdict": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 69,
+    "end": 69
+  },
+  "slot:changelog-write-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 74,
+    "end": 74
+  },
+  "slot:commit-log": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 36,
+    "end": 36
+  },
+  "slot:commit-message": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 87,
+    "end": 87
+  },
+  "slot:commit-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 91,
+    "end": 91
+  },
+  "slot:current-branch": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 28,
+    "end": 28
+  },
+  "slot:gate-passed": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 20,
+    "end": 20
+  },
+  "slot:git-status": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 11,
+    "end": 11
+  },
+  "slot:last-tag": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 32,
+    "end": 32
+  },
+  "slot:new-version": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 45,
+    "end": 45
+  },
+  "slot:publish-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 103,
+    "end": 103
+  },
+  "slot:push-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 99,
+    "end": 99
+  },
+  "slot:stage-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 79,
+    "end": 79
+  },
+  "slot:tag-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 95,
+    "end": 95
+  },
+  "slot:unstage-output": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 83,
+    "end": 83
+  },
+  "slot:version-diff": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 55,
+    "end": 55
+  },
+  "slot:version-summary": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 51,
+    "end": 51
+  },
+  "slot:version-verdict": {
+    "file": ".ctx/traits/packages/release/source/data.ts",
+    "start": 59,
+    "end": 59
+  },
+  "trait:release": {
+    "file": "[eval1]",
+    "start": 47,
+    "end": 47
+  }
+}

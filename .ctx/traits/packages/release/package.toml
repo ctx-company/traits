@@ -1,0 +1,18 @@
+[package]
+id = "release"
+version = "0.1.0"
+name = "Release"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant]
+
+[family.variant.default]
+path = "generated/default/index.toml"
+aliases = ["release-default"]
+
+[publish]
+name = "@ctx-traits/release"
+access = "public"
