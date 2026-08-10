@@ -1,5 +1,5 @@
 import { deviationReportSchema, INTEGRITY_DOCTRINE, STRICT_VARIANT_DOCTRINE } from "@ctx-traits/agents";
-import { condition, input, intent, procedure, schema, sequence, slot, variant } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, input, intent, schema, slot, step, useIntent, useResource } from "@ctx-traits/cdk";
 import { agreedDesign, commitMessage, commitOutput, commitReport, gitStatus, refactorFrame, stageOutput, survey, target, unstageOutput, workSummary } from "../data.ts";
 import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
 import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
@@ -22,50 +22,31 @@ const verdictSchema = reviewVerdictSchema("strict");
 const verdict1 = verdictSlot("review-verdict-1", "smart-1", verdictSchema);
 const verdict2 = verdictSlot("review-verdict-2", "smart-2", verdictSchema);
 
-const surveyStep = sequence.prompt("survey", {
-    title: "Survey the target (smart-1)", agent: smart1,
-    text: input.prompt`
+const surveyText = input.prompt`
             Survey ${target} for refactoring opportunities.
             Read the target and its callers/callees with your tools — explore organically; the friction you encounter while reading IS the signal. Ground every observation in the architecture dialect (${architectureDialect}) and the smell catalog (${smellCatalog}); cite smell ids (S1-S10) or a named deep-module violation for each.
             Sweep is mandatory and complete: (a) walk ALL ten smells S1-S10 in catalog order and for each report findings or explicitly "S<n>: none found"; (b) then assess the three dialect pillars — boundaries (missing Interface/Service contracts, mixed control/view/trace responsibilities, surface-coupled layers), data flow (untyped events/commands, string dispatch), entity containment (entity vocabulary leaked across modules).
             Return a numbered candidate list — for each: the cluster of code involved (paths), why it is coupled, which smell ids or dialect pillar it violates, and how the boundary would change what tests can prove.
-            Do NOT propose interfaces or fixes yet. List every real candidate even if it cannot fit one run.`,
-    output: survey,
-});
+            Do NOT propose interfaces or fixes yet. List every real candidate even if it cannot fit one run.`;
 
-const frameStep = sequence.prompt("frame", {
-    title: "Frame the problem (smart-1)", agent: smart1,
-    text: input.prompt`
+const frameText = input.prompt`
             From the survey ${survey} of ${target}, select the highest-value candidate set that honestly fits one refactoring run; name the deferred candidates explicitly so they are not lost.
             Verify the selection against the actual code with your tools, then write the problem framing: the constraints any new boundary must satisfy (callers, serialized shapes that must stay byte-stable, gates), the dependencies involved, and a short illustrative sketch that grounds the space without prescribing the answer.
-            Judge with ${architectureDialect} and ${smellCatalog}; behavior-preserving is the default contract.`,
-    output: refactorFrame,
-});
+            Judge with ${architectureDialect} and ${smellCatalog}; behavior-preserving is the default contract.`;
 
-const designStep = sequence.prompt("design", {
-    title: "Design the boundary (smart-1)", agent: smart1,
-    text: input.prompt`
+const designText = input.prompt`
             Design the refactor for the framed problem ${refactorFrame} on ${target}.
             Optimize for both faces of the standard at once: the deepest practical module — few entry points hiding the full implementation — expressed in the house dialect in ${architectureDialect} (Interface/Service pairing per responsibility, surface-agnostic layers over typed Request/Response, typed Event/Command enums normalized once at the edge, entity containment, Context carriage where values re-thread, typed module-owned errors, Response enums instead of display strings). Where depth and dialect pull apart, be opinionated about the trade and say why; weigh how much the design DELETES — replacement that consumes its predecessor beats addition beside it (S9).
-            Return the complete agreed design ready to implement from: final boundaries and types, the interface signatures with one usage example per caller class, what complexity gets hidden, file-by-file migration steps, what stays byte-stable, the expected net line delta with what any growth buys, and the validation plan (the repo's standard gates). Close with an explicit "MUST" and "MUST-NOT" list — the concrete, checkable requirements a reviewer enforcing plan fidelity applies verbatim; do not leave fidelity to be inferred from prose elsewhere in the design. Stay within the framing's constraints.`,
-    output: agreedDesign,
-});
+            Return the complete agreed design ready to implement from: final boundaries and types, the interface signatures with one usage example per caller class, what complexity gets hidden, file-by-file migration steps, what stays byte-stable, the expected net line delta with what any growth buys, and the validation plan (the repo's standard gates). Close with an explicit "MUST" and "MUST-NOT" list — the concrete, checkable requirements a reviewer enforcing plan fidelity applies verbatim; do not leave fidelity to be inferred from prose elsewhere in the design. Stay within the framing's constraints.`;
 
-const implementStep = sequence.prompt("implement", {
-    title: "Implement the design verbatim (worker)",
-    agent: worker,
-    text: input.prompt`
+const implementText = input.prompt`
                     Implement the agreed design ${agreedDesign} for ${target} VERBATIM: execute exactly as specified, with no improvisation and no ACTUAL departure from what is written, however minor.
                     If the design is unsatisfiable as written — it contradicts the actual code, omits a step you need, or cannot be executed against reality — STOP and say so plainly in your work summary rather than adapting around it; do not implement a modified version.
                     If you notice a place the design could be improved, do NOT take it: record it as a typed deviation report entry instead — what was planned, what you actually did (which must match the design verbatim), the rationale for the proposed improvement, and disposition "rejected — implemented verbatim". A deviation report entry never records something you actually did differently from the design; an actual departure means the design was unsatisfiable, and that means STOP, not a recorded deviation.
                     Respect the dialect (${architectureDialect}); do not widen any interface to make a caller compile — fix the caller. Run the repo validation gates before reporting.
-                    Return exactly two outputs: work-summary (what changed, files, gate results, open concerns) and deviation-report (every rejected-but-considered improvement recorded above; an empty list when none arose).`,
-    output: [workSummary, deviationReport],
-});
+                    Return exactly two outputs: work-summary (what changed, files, gate results, open concerns) and deviation-report (every rejected-but-considered improvement recorded above; an empty list when none arose).`;
 
-const review1 = sequence.prompt("review-1", {
-    title: "Review refactor (smart-1)", agent: smart1,
-    text: input.prompt(
+const review1Text = input.prompt(
         `Review the refactored state of {target} against the agreed design {agreedDesign}. Current work summary: {workSummary}. Recorded deviations: {deviationReport}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the design verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
@@ -74,14 +55,9 @@ const review1 = sequence.prompt("review-1", {
             Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
             ${INTEGRITY_DOCTRINE}`,
         { target, agreedDesign, workSummary, phaseBrief: agreedDesign, productBrief: architectureDialect, deviationReport },
-    ),
-    output: verdict1,
-    input: [target, agreedDesign, workSummary, deviationReport],
-});
+    );
 
-const review2 = sequence.prompt("review-2", {
-    title: "Review refactor (smart-2)", agent: smart2,
-    text: input.prompt(
+const review2Text = input.prompt(
         `Independently review the refactored state of {target} against the agreed design {agreedDesign}. Current work summary: {workSummary}. Recorded deviations: {deviationReport}. Verify every recorded deviation is a genuinely rejected-but-considered proposal — the actual implementation still matches the design verbatim on that point — not a departure that was actually taken; silent adaptation not recorded here is itself a BLOCKER.
             A BLOCKER always includes a behavior or byte-stability break, a NEW S1-S10 smell introduced by this change (including S9 — code this change supersedes surviving beside its replacement), or an interface widened to make a caller compile; cite the smell id or the deep-module violation. Fidelity to the agreed design is judged SOLELY by the authority rule below — apply it directly, with no separate categorical "any design violation is a blocker" rule layered on top. Residual pre-existing smells outside the framed change, code the agreed design did not cover, and further refactoring the survey deferred are ADVISORY.
             Review the AGREED framed change, not the whole surface: approve when the framed change is correct, behavior-preserving, and adds no new smell — even if the broader ideal remains — and record everything else as advisory for the deferred list. Do not block because the surface is not yet fully ideal.
@@ -90,45 +66,30 @@ const review2 = sequence.prompt("review-2", {
             Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below — this family splices the leaner, family-compatible INTEGRITY_DOCTRINE in its place, not the implement-phase doctrine.
             ${INTEGRITY_DOCTRINE}`,
         { target, agreedDesign, workSummary, phaseBrief: agreedDesign, productBrief: architectureDialect, deviationReport },
-    ),
-    output: verdict2,
-    input: [target, agreedDesign, workSummary, deviationReport],
-});
+    );
 
-const applyFixesVerbatim = sequence.prompt("apply-fixes", {
-    title: "Apply reviewer fixes verbatim (worker)",
-    agent: worker,
-    text: input.prompt`
+const applyFixesText = input.prompt`
                             Apply the reviewer findings for ${target}: ${verdict1} and ${verdict2}.
                             Fix every BLOCKER named in either verdict while staying strictly verbatim to the agreed design ${agreedDesign} — never introduce a new ACTUAL departure to satisfy a finding. If a blocker can only be fixed by actually departing from the design, do not deviate: STOP and say so plainly in the work summary so the loop can exhaust and block rather than silently adapting. Respect the dialect (${architectureDialect}). Re-run the repo validation gates.
-                            Return exactly two outputs: work-summary (replacing the prior one: what changed, files, gate results, open concerns) and deviation-report (the complete updated list of rejected-but-considered proposals, including any new ones this round; never an entry describing an actual departure).`,
-    output: [workSummary, deviationReport],
-});
+                            Return exactly two outputs: work-summary (replacing the prior one: what changed, files, gate results, open concerns) and deviation-report (the complete updated list of rejected-but-considered proposals, including any new ones this round; never an entry describing an actual departure).`;
 
-const commitMessageStep = sequence.prompt("summarization", {
-    title: "Write the commit message (scribe)", agent: scribe,
-    text: input.prompt`
+const commitMessageText = input.prompt`
             The refinement loop for the refactor of ${target} has ended and the work is being committed. The final reviewer verdicts are ${verdict1} and ${verdict2} — read their status fields FIRST. The loop exits early once both approve, so a status still set to revise means the rounds ran out with that reviewer unsatisfied: say so plainly rather than implying a clean approval.
             Write the commit message from the agreed design ${agreedDesign}, the survey ${survey}, and those verdicts: subject line "refactor(${target}): <boundary in a few words>", then one paragraph summarizing the new boundary and behavior preservation, then a short "Deferred candidates:" list copied from the survey (omit the list if none were deferred).
             If either verdict status is revise, end the message with an "Unresolved reviewer blockers:" section listing each open blocker in one line — the honest record that the budget ran out before every reviewer was satisfied. Never write that section when there are none.
             Return exactly that message as your output; the runtime injects it into the git commit step.
-            Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.`,
-    output: commitMessage,
-});
+            Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.`;
 
-// Two steps, not one excluding add — a pathspec that mentions a gitignored
-// `.agents` exits 1 (see implement's familyCommitTail, run-42bd7fb2).
-const gitStageStep = sequence.command({ id: "git-stage", title: "Stage all changes", argv: ["git", "add", "-A"], output: stageOutput });
-const gitUnstageStep = sequence.command({ id: "git-unstage-runtime", title: "Unstage runtime state", argv: ["git", "reset", "-q", "--", ".agents/runs"], output: unstageOutput });
-const gitCommitStep = sequence.command({ id: "git-commit", title: "Commit the refactor", argv: ["git", "commit", "-m", commitMessage], output: commitOutput });
-
-export default variant({
-    name: "Refactor (Strict)",
-    summary:
-        "Surveyed refactoring procedure with verbatim execution: survey, frame, design, implement the agreed design exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve.",
-    metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
-    resource: [architectureDialect, smellCatalog],
-    intent: {
+export default function () {
+    defineVariant("strict", {
+        name: "Refactor (Strict)",
+        summary:
+            "Surveyed refactoring procedure with verbatim execution: survey, frame, design, implement the agreed design exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve.",
+        metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
+        procedure:
+            "Refactor one module or entity end to end with verbatim design execution: standards-grounded survey, problem framing, boundary design, verbatim implementation with a typed deviation record, bounded dual-reviewer refinement, commit — blocking rather than adapting when the design cannot be satisfied.",
+    });
+    useIntent({
         require: [
             intent.require.ReviewBeforeFinal,
             intent.require.BoundedRefinement,
@@ -140,28 +101,53 @@ export default variant({
             intent.avoid.InterfaceWidening,
             intent.avoid.SilentDeviation,
         ],
-    },
-    port: commitReport,
-    procedure: procedure({
-        description:
-            "Refactor one module or entity end to end with verbatim design execution: standards-grounded survey, problem framing, boundary design, verbatim implementation with a typed deviation record, bounded dual-reviewer refinement, commit — blocking rather than adapting when the design cannot be satisfied.",
-        sequence: [
-            surveyStep,
-            frameStep,
-            designStep,
-            implementStep,
-            sequence.loop("refinement-loop", {
-                title: "Doubly-reviewed verbatim refinement",
-                sequence: sequence.linear("refine-refactor", [review1, review2, applyFixesVerbatim]),
-                until: condition.all([
-                    condition.fieldEquals(verdict1, "status", "approved"),
-                    condition.fieldEquals(verdict2, "status", "approved"),
-                ]),
-                iterations: 6,
-                onExhausted: "abort",
-            }),
-            sequence.command({ id: "check-git-status", title: "Check working tree status", argv: ["git", "status", "--porcelain"], output: gitStatus }),
-            sequence.when("maybe-commit", { if: condition.not(condition.equals(gitStatus, "")), then: [commitMessageStep, gitStageStep, gitUnstageStep, gitCommitStep] }),
-        ],
-    }),
-});
+    });
+    useResource([architectureDialect, smellCatalog]);
+
+    smart1.prompt("Survey the target (smart-1)", { id: "survey", input: surveyText, output: survey });
+    smart1.prompt("Frame the problem (smart-1)", { id: "frame", input: frameText, output: refactorFrame });
+    smart1.prompt("Design the boundary (smart-1)", { id: "design", input: designText, output: agreedDesign });
+    worker.prompt("Implement the design verbatim (worker)", {
+        id: "implement",
+        input: implementText,
+        output: [workSummary, deviationReport],
+    });
+
+    flow.loop("Doubly-reviewed verbatim refinement", (loop) => {
+        loop.id("refinement-loop");
+        loop.maxIterations(6, { onExhausted: "abort" });
+        smart1.prompt("Review refactor (smart-1)", {
+            id: "review-1",
+            input: review1Text,
+            output: verdict1,
+            include: [target, agreedDesign, workSummary, deviationReport],
+        });
+        smart2.prompt("Review refactor (smart-2)", {
+            id: "review-2",
+            input: review2Text,
+            output: verdict2,
+            include: [target, agreedDesign, workSummary, deviationReport],
+        });
+        worker.prompt("Apply reviewer fixes verbatim (worker)", {
+            id: "apply-fixes",
+            input: applyFixesText,
+            output: [workSummary, deviationReport],
+        });
+        flow.until(condition.all([
+            condition.fieldEquals(verdict1, "status", "approved"),
+            condition.fieldEquals(verdict2, "status", "approved"),
+        ]));
+    });
+
+    step.command("Check working tree status", { id: "check-git-status", argv: ["git", "status", "--porcelain"], output: gitStatus });
+    flow.when("Maybe Commit", condition.not(condition.equals(gitStatus, "")), { id: "maybe-commit" }, () => {
+        scribe.prompt("Write the commit message (scribe)", { id: "summarization", input: commitMessageText, output: commitMessage });
+        // Two steps, not one excluding add — a pathspec that mentions a
+        // gitignored `.agents` exits 1 (run-42bd7fb2).
+        step.command("Stage all changes", { id: "git-stage", argv: ["git", "add", "-A"], output: stageOutput });
+        step.command("Unstage runtime state", { id: "git-unstage-runtime", argv: ["git", "reset", "-q", "--", ".agents/runs"], output: unstageOutput });
+        step.command("Commit the refactor", { id: "git-commit", argv: ["git", "commit", "-m", commitMessage], output: commitOutput });
+    });
+
+    return { commitReport };
+}

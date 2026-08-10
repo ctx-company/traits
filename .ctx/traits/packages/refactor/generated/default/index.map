@@ -31,43 +31,43 @@
   },
   "prompt:apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 85,
-    "end": 85
+    "start": 57,
+    "end": 57
   },
   "prompt:design": {
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
+    "start": 27,
+    "end": 27
+  },
+  "prompt:frame": {
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
+    "start": 22,
+    "end": 22
+  },
+  "prompt:implement": {
+    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
+    "start": 32,
+    "end": 32
+  },
+  "prompt:review-1": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
     "start": 37,
     "end": 37
   },
-  "prompt:frame": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 28,
-    "end": 28
-  },
-  "prompt:implement": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 46,
-    "end": 46
-  },
-  "prompt:review-1": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 55,
-    "end": 55
-  },
   "prompt:review-2": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 70,
-    "end": 70
+    "start": 47,
+    "end": 47
   },
   "prompt:summarization": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 94,
-    "end": 94
+    "start": 62,
+    "end": 62
   },
   "prompt:survey": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 17,
-    "end": 17
+    "start": 15,
+    "end": 15
   },
   "resource:architecture-dialect": {
     "file": ".ctx/traits/packages/refactor/source/resource.ts",
@@ -94,85 +94,75 @@
     "start": 6,
     "end": 6
   },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 129,
-    "end": 129
-  },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 107,
-    "end": 107
+    "start": 127,
+    "end": 127
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-stage": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 105,
-    "end": 105
+    "start": 125,
+    "end": 125
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-unstage-runtime": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 106,
-    "end": 106
+    "start": 126,
+    "end": 126
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/summarization": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 92,
-    "end": 92
+    "start": 122,
+    "end": 122
   },
   "sequence:procedure/check-git-status": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 146,
-    "end": 146
+    "start": 120,
+    "end": 120
   },
   "sequence:procedure/design": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 35,
-    "end": 35
+    "start": 95,
+    "end": 95
   },
   "sequence:procedure/frame": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 26,
-    "end": 26
+    "start": 94,
+    "end": 94
   },
   "sequence:procedure/implement": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 44,
-    "end": 44
+    "start": 96,
+    "end": 96
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 147,
-    "end": 147
+    "start": 121,
+    "end": 121
   },
   "sequence:procedure/refinement-loop": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 137,
-    "end": 137
+    "start": 98,
+    "end": 98
   },
   "sequence:procedure/survey": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 15,
-    "end": 15
+    "start": 93,
+    "end": 93
   },
-  "sequence:refine-refactor": {
+  "sequence:refinement-loop-body/apply-fixes": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 139,
-    "end": 139
+    "start": 113,
+    "end": 113
   },
-  "sequence:refine-refactor/apply-fixes": {
+  "sequence:refinement-loop-body/review-1": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 83,
-    "end": 83
+    "start": 101,
+    "end": 101
   },
-  "sequence:refine-refactor/review-1": {
+  "sequence:refinement-loop-body/review-2": {
     "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 53,
-    "end": 53
-  },
-  "sequence:refine-refactor/review-2": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 68,
-    "end": 68
+    "start": 107,
+    "end": 107
   },
   "slot:agreed-design": {
     "file": ".ctx/traits/packages/refactor/source/data.ts",
@@ -230,8 +220,8 @@
     "end": 24
   },
   "trait:refactor": {
-    "file": ".ctx/traits/packages/refactor/source/variants/default.ts",
-    "start": 109,
-    "end": 109
+    "file": "[eval1]",
+    "start": 47,
+    "end": 47
   }
 }

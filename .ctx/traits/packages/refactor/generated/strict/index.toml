@@ -457,7 +457,7 @@ argv = [
     "{slot:commit-message}",
 ]
 
-[[sequence.refine-refactor.sequence]]
+[[sequence.refinement-loop-body.sequence]]
 id = "review-1"
 title = "Review refactor (smart-1)"
 agent = "agent:smart-1"
@@ -471,7 +471,7 @@ input = [
 ]
 output = ["slot:review-verdict-1"]
 
-[[sequence.refine-refactor.sequence]]
+[[sequence.refinement-loop-body.sequence]]
 id = "review-2"
 title = "Review refactor (smart-2)"
 agent = "agent:smart-2"
@@ -485,7 +485,7 @@ input = [
 ]
 output = ["slot:review-verdict-2"]
 
-[[sequence.refine-refactor.sequence]]
+[[sequence.refinement-loop-body.sequence]]
 id = "apply-fixes"
 title = "Apply reviewer fixes verbatim (worker)"
 agent = "agent:worker"
@@ -563,7 +563,7 @@ output = [
 id = "refinement-loop"
 title = "Doubly-reviewed verbatim refinement"
 kind = "loop"
-sequence = "sequence:refine-refactor"
+sequence = "sequence:refinement-loop-body"
 max-iterations = 6
 on-exhausted = "abort"
 
