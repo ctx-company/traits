@@ -11832,8 +11832,15 @@ mod tests {
         // no live merged run for it. `y` must still be able to mark it
         // done, matching what the CLI's `tasks update --status done`
         // already does end to end (0149).
-        apply_task_mark_done_in(&mut state, &dir, "0001".to_string(), digest, Vec::new(), None)
-            .unwrap();
+        apply_task_mark_done_in(
+            &mut state,
+            &dir,
+            "0001".to_string(),
+            digest,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
 
         let message = state.message.as_deref().unwrap_or("");
         assert!(
