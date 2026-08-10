@@ -23,8 +23,33 @@ skill export. RIDER: the claude-code pack also emits
 `.claude-plugin/marketplace.json` so exported traits are one-click installable
 through the marketplace UI.
 
+
+**State of the tree (verified 2026-08-10):** the loop itself is real —
+`run <trait> --no-drive --json` -> session id -> hidden `next`/`call` with
+typed JSON envelopes, mirrored by the MCP surface (`modules/io/src/mcp.rs`);
+`ctx traits export` covers seven profiles and `ctx traits host
+install|update|status|remove` covers nine hosts. What is missing is exactly
+the manual and the packs — and prior work EXISTS on a dead branch: commit
+`39d41e8f` ("P421 Mode B: host instruction packs… canonical operator manual,
+byte-comparison harness") built `.configs/plugins/agent-operator/SKILL.md`
+and the marketplace/pack machinery, but is NOT an ancestor of HEAD; it
+survives only on stale `ctx/run/wt-*` branches, while `.docs/PRODUCT.md`
+still cites that path as the canonical single source. FIRST STEP: harvest or
+consciously discard `39d41e8f` — do not write from scratch without reading
+it. Note also: `next`/`call` document no exit codes today (typed contract =
+exit 0, error = exit 1; the 3/4/5/6 codes belong to the driven run/merge
+path) — the ergonomics pass should state that contract explicitly.
+
 """
 validation = """
+## Watch
+
+- Workers already reach for this surface unprompted: run worktrees have been
+  found with `.agents/skills/<trait>/SKILL.md` written by agents invoking
+  `ctx traits export` by hand mid-run (it broke a run's `git add` once, task
+  0114's park, 2026-08-10). The manual is not speculative — the demand is
+  observed.
+
 ## Done when
 
 A cold agent completes a trait run driven only by the manual; all three host packs

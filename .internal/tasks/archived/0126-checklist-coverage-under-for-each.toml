@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0126"
 title = "Checklist coverage under `for-each`, or a stated refusal"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
 content = """
 
@@ -27,4 +27,15 @@ completes, or fails validation at authoring time with a message pointing at the
 replace shape — no third silent option.
 
 Full original contract: `archived/board/execution-plan.md` (Group 101, P404).
+
+## Closed 2026-08-10 — the second arm exists
+
+`validate_for_each_no_scalar_checklist_verdict`
+(`modules/core/src/trait/procedure/validate.rs:2151-2176`, called from the
+for-each validator at `:2147`) statically refuses a for-each whose body writes a
+scalar checklist verdict, recursing through nested sequence/branch arms, with a
+message pointing at the whole-list replace shape — exactly the "stated refusal"
+this task's Done-when names as a sufficient outcome. `append` remains refused at
+`validate.rs:2317-2352`; whole-list `replace` coverage remains
+`schema_validation.rs:93-163`. No silent third option remains.
 """

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0141"
 title = "Frame persona envelope (parked)"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
 content = """
 
@@ -33,4 +33,17 @@ it on.
 **Depends on.** The P493 shared emitters (landed).
 
 Full original text: `archived/board/future.md`.
+
+## Closed 2026-08-10 — premise superseded by landed render work
+
+Driven frames DO carry the trait's behavioral layer now: the frame-level
+`<information>` element emits the trait's intent and behavior guidance
+(`frame_information_section`, `modules/cli/src/app/frame_prompt.rs:1449-1476`,
+sourced from `ctx_traits_core::model_view::frame_guidance` — the same directive
+registry `ctx traits explain` and the static model view use, across the
+format/verbosity/directness/scope-control/initiative/uncertainty axes). What
+this parked idea wanted has shipped in substance, minus the `<persona>` element
+name. The only honest residual — measure per-frame token cost of the guidance
+block — is not worth a standing task; raise it fresh if frame budgets become a
+problem.
 """

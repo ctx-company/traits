@@ -1,41 +1,50 @@
 schema-version = "0.2"
 key = "0125"
-title = "Conditional system v2: presence-aware guards, designed properly"
+title = "Conditional system v2 remainder: fail-closed conditional binding"
 status = "ready"
 raised = "2026-08-05"
 content = """
 
 
-Guards are static predicates over always-present fields. They cannot express "this
-cap binds only when the caller supplied it", "this field may be absent", or "these
-two list counts must match". That wall forces trait forks: auto-research needed a
-2-condition and a 6-condition keep-guard as two traits, and deep-research's
-cardinality guard cannot compare two counts.
+Re-verified against the tree 2026-08-10 — three quarters of the original scope
+landed under schema-version 0.3 and this task now covers only the remainder.
 
-Candidate scope: presence conditions over optional ports and optional fields
-(present/absent with defined truth semantics per operator); conditional binding
-with FAIL-CLOSED semantics (a cap that is supplied but unmeasurable in the result
-DISCARDS rather than passes); count-to-count comparison; composition with existing
-all/any/not; static validation that every referenced optional field/port is
-declared optional.
+**Landed (do not rebuild):**
+- Presence conditions: `present`/`absent` with tri-state truth semantics
+  (Matched/NotMatched/Unmeasurable) over optional ports and declared-optional
+  fields — `modules/core/src/trait/condition.rs:112`, validation at
+  `:1186-1310` (refuses presence over required ports/fields); CDK
+  `condition.present`/`condition.absent`.
+- Count-to-count comparison: `validate_count_threshold`
+  (`condition.rs:1454-1499`) with a `CountOperand` RHS; CDK
+  `condition.count(...)` chains.
+- The check-polymorphism rider: loop `until`/`abort-if` accept a
+  `sequence.check` step directly through the same `lowerCheckGuard` branch
+  `check:` uses (`packages/cdk/src/sequence.ts:360-361`, `:1045-1049`).
+  (Spelling note: the field is `abort-if` — `stop-if` never existed.)
 
-Explicitly OUT: arithmetic between arbitrary fields, ordered folds/replay logic
-(stays in pinned scripts by design), and any general canonical expression language
-(standing house refusal).
+**Remaining scope — conditional binding with FAIL-CLOSED semantics:** a cap or
+constraint that is SUPPLIED by the caller but unmeasurable in the result must
+DISCARD the candidate rather than pass it. `present` routes a boolean; it binds
+nothing. Design the binding form (likely a guard modifier or a typed
+keep-guard shape), with static validation that every referenced optional
+field/port is declared optional.
 
-RIDER (2026-07-23, CDK audit): loop `until:`/`stop-if:` gain the same
-check-polymorphism P458 gave branch `check:` — a `sequence.check` gate step
-directly as the loop guard, killing the boolean-slot + `condition.equals` two-step;
-same desugaring, no extra schema surface.
+Explicitly OUT (unchanged): arithmetic between arbitrary fields, ordered
+folds/replay logic (stays in pinned scripts by design), any general canonical
+expression language (standing house refusal).
 
 """
 validation = """
 ## Done when
 
-The design doc enumerates the vocabulary with absent/present truth semantics for
-every operator; implementation passes a fixture matrix covering absent-port,
-absent-field, supplied-but-unmeasurable (fail-closed), and count-vs-count; the
-auto-research unification's single keep-guard (landed P434 shape) is expressible.
+First step: run the original acceptance probe — express the auto-research
+unification's single keep-guard (landed P434 shape) with today's
+present/absent + count vocabulary; if it is already expressible with fail-closed
+behavior, close this task with that evidence instead of building. Otherwise: a
+fixture matrix covering supplied-but-unmeasurable (fail-closed) alongside the
+existing absent-port/absent-field/count cases passes, and the keep-guard is
+expressible.
 
 Full original contract: `archived/board/execution-plan.md` (Group 104, P432).
 """

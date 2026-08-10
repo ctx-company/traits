@@ -1,43 +1,60 @@
 schema-version = "0.2"
 key = "0134"
-title = "Store consolidation gate: rebuild, relock, re-approve, and gate `.ctx/traits/*` drift"
+title = "Trait drift gate: nothing repo-level proves source and canonical agree"
 status = "ready"
 raised = "2026-08-05"
 content = """
 
 
-Nothing gates `.ctx/traits/*` for source-vs-canonical drift — the builtin drift
-gate covers only `modules/core/builtins/`, which is exactly how a store canonical
-once went stale unnoticed.
+Re-scoped 2026-08-10. The original task's audit half is DONE and its baseline
+claim was wrong in the bad direction.
 
-First step is a reconciliation audit of the family folds the original group
-ordered, since the tree has moved: the implement family IS folded (one package,
-five `variant.import()` leaves + run-configs) — P530 landed in substance. Verify
-P531's half: whether `refactor` and `plan` are single packages resolving all their
-variant names, and whether `refactor-direct`'s annotation-driven leaf folded or
-deliberately stayed separate (either is fine — record which).
+**Audit half — done, recorded here:** `refactor` and `plan` are each ONE family
+package resolving all their variant names (`[family.variant]` tables in their
+package.toml; `refactor-direct` is the `direct` VARIANT with an alias, not a
+separate package — deliberate, either outcome was acceptable). The implement
+family fold (P530) landed long since.
 
-Then the gate itself: rebuild every surviving package's `generated/index.toml`
-from source; refresh every lock; re-approve machine trust for moved digests (a
-human step — digests are the trust boundary); extend the drift gate to repo traits
-so a source edit without a rebuild fails, handling the legitimately-source-less
-package rather than failing it.
+**The real baseline — there is NO drift gate anywhere, including builtins:**
+- The per-trait comparison EXISTS and is real: the `cdk-drift` section of
+  `ctx traits check` re-synthesizes from CDK source and compares canonical
+  digest AND raw bytes AND source map
+  (`modules/cli/src/app/report_check.rs:2170-2296`). But it only runs when
+  someone runs `check` — nothing repo-level ever does: `just test`,
+  `just test-full`, CI, and the `[merge] gate` never invoke `ctx traits
+  check` or `build`.
+- The original claim "the builtin drift gate covers `modules/core/builtins/`"
+  is FALSE: `modules/core/build.rs:121-183` embeds whatever bytes are
+  committed and never re-synthesizes or compares. A stale builtin canonical
+  ships silently today.
+
+**Remaining scope:** wire a repo-level gate that runs the existing cdk-drift
+comparison over every `.ctx/traits/packages/*` package (and decide whether
+builtins get the same treatment) so a source edit without a rebuild fails
+before landing; handle the legitimately-source-less package rather than
+failing it; then one rebuild/relock/re-approve pass to establish the clean
+baseline (trust re-approval is deliberately human).
 
 """
 validation = """
 ## Watch
 
 - Trust re-approval is deliberately human.
-- The gate lands only after churn settles — gating a shape mid-refactor creates
-  noise. Coordinate with 0118 (toolkit) which moves every consumer's imports.
-- The pragmatism doctrine binds any residual folding: fewer, well-named files;
-  every variant still resolves by its existing name; behavior preserved exactly.
+- The gate lands only after churn settles — gating a shape mid-refactor
+  creates noise. Coordinate with 0118 (toolkit) which moves every consumer's
+  imports.
+- `ctx traits check` also carries hidden-content audit findings that block on
+  some packages (accepted ShellSubstitution class) — the gate must run the
+  cdk-drift section specifically (or `--skip` the unrelated sections), not
+  demand a fully green `check` that owner trust policy already accepts as
+  blocked.
 
 ## Done when
 
-Every `.ctx/traits/*` package rebuilds byte-identically from its source; locks
-current; trust clean; a deliberate source edit without a rebuild fails the gate;
-the fold-state of refactor/plan is verified and recorded.
+Every `.ctx/traits/packages/*` package rebuilds byte-identically from source
+under a gate that `just test-full` (or the merge gate) actually runs; a
+deliberate source edit without a rebuild fails it; locks current; trust clean;
+the builtin-coverage decision is recorded either way.
 
-Full original contract: `archived/board/execution-plan.md` (Group 128, P530–P532).
+Full original contract: `archived/board/execution-plan.md` (Group 128, P530-P532).
 """

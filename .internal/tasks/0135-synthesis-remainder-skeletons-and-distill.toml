@@ -6,10 +6,15 @@ raised = "2026-08-05"
 content = """
 
 
-The dynamic-path family: `story` landed (P383); `do` (P380) may be partially
-covered by the existing `synth`/`generate` surface — verify what `ctx traits
-synth` actually does before building, and treat `do` as in-scope here only if the
-gap is real. The two clearly-open halves:
+The dynamic-path family: `story` landed (P383). Verified 2026-08-10:
+`ctx traits synth` is the deterministic draft-JSON -> canonical compiler (not
+generation), and `ctx traits generate` is the LLM path (rung ladder, typed
+envelope, offline `--candidate` gates) — P380's `do` is substantially covered
+by `generate` and is OUT of scope here. Also verified genuinely absent: no
+`distill` command in any form; zero skeleton machinery (the five
+`builtin_templates` wire only to `ctx traits new`, `generate` has no
+template/skeleton flag, and synth provenance carries no skeleton/parameter
+fields). The two open halves stand exactly as written:
 
 **Skeleton-constrained synthesis** (was P381): freeform generation produces
 plausible-but-novel shapes; synthesized traits should START inside proven shapes.

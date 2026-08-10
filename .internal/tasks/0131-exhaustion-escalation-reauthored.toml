@@ -1,38 +1,53 @@
 schema-version = "0.2"
 key = "0131"
-title = "Exhaustion escalation, re-authored against the current substrate"
+title = "Exhaustion escalation: the owner design decision, against current semantics"
 status = "ready"
 raised = "2026-08-05"
 content = """
 
 
-The original P277 wanted (a) an escalation branch when a refinement loop exhausts
-(instead of a silent Blocked halt) and (b) dropping the `.git/CTX_COMMITMSG`
-file-hop. Both premises have moved:
+Re-authored 2026-08-10 after every premise of the migrated text moved. This is
+an OWNER DESIGN DECISION task, not implementation.
 
-- The file-hop clause is already satisfied (3df765f: argv slot injection in
-  `implement`; verified 2026-07-21 — though note the plannotate/guarded-change
-  packages still use the file-hop pattern by choice for `-F` composability).
-- The exhaustion premise predates v0.15 (exhaustion continues with verdicts
-  attached) and the leftovers machinery (P408–P410 landed: approved-with-leftovers
-  is a first-class outcome), and partially overlaps 0141 (blocked-is-an-error).
+**Current semantics (verified):** loop `on-exhausted` is `continue` (default;
+declared signals emitted, run proceeds past the loop) or `abort`
+(`Status::Blocked`, stop-reason `max-iterations-exhausted`) — there is no
+`block` policy name anymore; `--strict-loops` forces every exhaustion to the
+abort behavior (`modules/core/src/procedure/runtime/control_flow.rs:1783-1817`).
+The typed park report is trait-authored evidence: implement-family loops
+project the verdict into `slot:park-report` every round
+(`deriveParkReportStep`), and the run parks ON those entries when it exhausts
+unapproved — the runtime attaches nothing itself. Task 0140
+(truly-blocked-is-an-error: zero commits, typed park, distinct exit code,
+standing-wall sibling refusal) is DONE and archived — the prior text of this
+task mis-cited it as "0141". The `.git/CTX_COMMITMSG` file-hop clause is fully
+satisfied: no package uses it (plannotate dropped it at 0.2.0); commit tails
+use argv slot injection everywhere.
 
-What remains genuinely open is the owner call the board recorded under "DESIGN
-DECISION PENDING": what should a run DO when it exhausts — today it blocks and
-commits nothing, which may be the whole answer. If an escalation shape is wanted
-(a report step, an owner ask via the peer interface (0087/0088), or a typed park
-with routed leftovers), it must be authored against: v0.15 exhaustion semantics,
-the leftovers contract, task 0093 (unbounded loops exist now), and 0141's
-blocked-is-error classification.
+**The genuinely open question, with a fresh cost exhibit:** what should a run
+DO when the loop cannot reach approval? Today it grinds the full budget. Run
+`run-5d96bf56…` (task 0116, 2026-08-09) burned ~10 identical review rounds
+AFTER the reviewer had already set `escalation = needs-owner` with a specific
+clearing action — the worker correctly changed nothing and the reviewer
+re-verified the same clean state round after round, ~107k work tokens. The
+concrete design question: should a `needs-owner` escalation (or a repeated
+identical verdict) end the loop early with the park, instead of re-grinding?
+
+If an escalation shape is wanted beyond early exit — a report step, an owner
+ask via the peer interface — note 0087/0088 (peer ask machinery) are still
+`ready`, unbuilt; `sequence.ask` exists as an ordinary authored step kind with
+no exhaustion binding.
 
 """
 validation = """
 ## Done when
 
-An owner design session either (a) ratifies "exhaustion blocks and commits
-nothing" as the permanent answer and this task closes with that recorded, or
-(b) produces a re-authored contract for the escalation shape, filed as its own
-implementable task.
+An owner design session either (a) ratifies current semantics as permanent
+(grind the budget, park honestly) and this task closes with that recorded, or
+(b) produces a re-authored contract — most plausibly: early loop exit on
+`needs-owner` escalation or verdict-fixpoint detection, park immediately —
+filed as its own implementable task against `control_flow.rs`'s exhaustion
+path and the trait-authored park-report shape.
 
 Full original contract: `archived/board/execution-plan.md` (Group 70, P277).
 """

@@ -19,15 +19,26 @@ free-form scripting: the SDK's verbs are exactly the lifecycle
 programmatic orchestration inherits provenance by construction; loosening comes
 later, if ever. Design lives with this task.
 
+
+**State of the tree (verified 2026-08-10):** `ctx traits running --json`
+(hidden) already IS the jobs list — liveness-index-backed rows with session,
+run id, worktree, pid, log path (`modules/cli/src/app/running.rs`); the
+design should promote/rename it, not rebuild it. The dashboard covers
+attach/resume/answer/spawn/kill; kill maps to a derived `Cancelled` session
+state BUT records no actor and no reason (`record_interrupted_outcome`
+stamps only outcome + epoch — the "ledger records who/why" clause is real
+work even where cancel exists). `steer` has no substrate at all: no
+injection path into a next frame's prompt exists. No lifecycle SDK exists
+(`sdk-generate` is schema codegen, unrelated).
+
 """
 validation = """
 ## Watch
 
 - Steering is a LEDGER EVENT, not a side channel — every steer is provenance.
-- Note: parts of the surface have since landed elsewhere (the dashboard lists,
-  attaches, spawns and kills sessions; killing has a typed cancelled outcome) —
-  the design should absorb what exists rather than duplicate it; the net-new core
-  is `steer` and the programmatic lifecycle SDK.
+- The design absorbs what exists rather than duplicating it; the net-new core
+  is `steer`, who/why provenance on cancellation, and the programmatic
+  lifecycle SDK.
 
 ## Done when
 
