@@ -1,0 +1,73 @@
+schema-version = "0.2"
+key = "0162"
+title = "Multi-seat roles without hand-numbered declarations — seat sugar now, position-keyed rotation if wanted"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+Owner ask 2026-08-10: declare `[[agent.role.smart]]` as a list and address it
+as bare `smart` in trait code, with successive uses rotating through the
+entries (first use model A, second use model B).
+
+What exists (P456 + 0025, landed b48aad96): the list form and `count`
+expansion produce NAMED seats (`smart-1`/`smart-2`), per-seat `--assign
+role.N=` overrides, and an out-of-range typed refusal. A bare-role lookup
+against a list deliberately resolves to nothing ("a role-only lookup never
+silently selects a list's first entry", harness_config.rs ~6423). There is no
+runtime rotation anywhere.
+
+Design ruling captured at filing (challenge accepted by the owner filing
+this): INVOCATION-COUNTER round-robin is rejected —
+(1) it makes model assignment a function of execution history, breaking
+replay identity (correction retries, resumes, and variable loop rounds all
+shift the counter) or forcing rotation state into the ledger;
+(2) seat identity is load-bearing (0025's own Watch: park reports attribute
+per seat, dual-review's value IS reviewer distinguishability) — bare `smart`
+twice against a 1-entry list would silently collapse independence where
+today `smart-2` errors;
+(3) the actual pain is authoring ergonomics, solvable without touching the
+runtime.
+
+"""
+scope = """
+## Decisions
+
+- **Part A (build it): seat sugar at authoring time.** An agents-kit/CDK
+  helper minting numbered seat handles from one call — e.g.
+  `const [reviewer1, reviewer2] = seats(reviewerRole, "smart", 2, {...})` —
+  so a trait author writes the role once and receives distinct, explicitly
+  ordered `smart-1`/`smart-2` handles. Canonical output stays byte-identical
+  to hand-numbered declarations (the contract remains explicit; provenance,
+  park attribution, and the OOB refusal all unchanged). Works in both object
+  and hook styles.
+- **Part B (decide, then maybe build): position-keyed per-iteration
+  rotation.** If the real want is different models across LOOP ROUNDS
+  (perspective diversity: round 1 reviewed by seat 1, round 2 by seat 2),
+  make it deterministic: seat index = pure function of the frame's position
+  path (iteration index mod list length), declared on the list (e.g.
+  `rotate = "per-iteration"`), never a runtime counter. Same frame -> same
+  seat on retry AND on resume; ledger provenance records the resolved seat.
+  This part ships only if the owner confirms round-diversity is wanted —
+  Part A alone closes the ergonomics ask.
+- **Never**: invocation-order rotation state, in config or runtime.
+
+"""
+validation = """
+## Watch
+
+- Part A must not introduce a second numbering authority: the helper mints
+  the SAME `<role>-<n>` ids 0025 expansion resolves; reordering the
+  destructure must visibly reorder the ids (explicit beats implicit).
+- Part B, if built: prove retry and resume yield the identical seat for the
+  same position path (scratch-fixture proof through the runtime, not a unit
+  test of the mod function alone).
+
+## Done when
+
+Part A: a trait declares N seats of one role in a single authoring call and
+compiles byte-identical to hand-numbered declarations; proofs cover order
+stability. Part B (only if ruled in): a loop's review seat provably varies by
+iteration index under a declared rotation, deterministically across
+retry/resume, with the resolved seat in frame provenance.
+"""
