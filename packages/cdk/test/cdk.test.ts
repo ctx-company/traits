@@ -434,7 +434,7 @@ describe("schema authoring sugar", () => {
 
   it("throws naming the slot and field on unknown field access", () => {
     const noteSchema = schema.object("sugar-unknown-field-note", { status: schema.text() });
-    const noteSlot = slot({ id: "sugar-unknown-field-note-slot", schema: noteSchema }) as unknown as {
+    const noteSlot = slot({ id: "sugar-unknown-field-note-slot", schema: noteSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
       readonly nope: unknown;
     };
 
@@ -468,7 +468,7 @@ describe("schema authoring sugar", () => {
     // on unknown access.
     const decisionSchema = schema.object("sugar-0085-scalar-leaf-decision", { behavior: schema.text() });
     const hookOutputSchema = schema.object("sugar-0085-scalar-leaf-hook-output", { decision: decisionSchema });
-    const hookSlot = slot({ id: "sugar-0085-scalar-leaf-slot", schema: hookOutputSchema }) as unknown as {
+    const hookSlot = slot({ id: "sugar-0085-scalar-leaf-slot", schema: hookOutputSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
       readonly decision: { readonly behavior: { readonly nope: unknown; }; };
     };
 
@@ -478,7 +478,7 @@ describe("schema authoring sugar", () => {
   it("stops recursion at a list field", () => {
     const itemSchema = schema.object("sugar-0085-list-item", { value: schema.text() });
     const containerSchema = schema.object("sugar-0085-list-container", { items: schema.list(itemSchema) });
-    const containerSlot = slot({ id: "sugar-0085-list-slot", schema: containerSchema }) as unknown as {
+    const containerSlot = slot({ id: "sugar-0085-list-slot", schema: containerSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
       readonly items: { readonly value: unknown; };
     };
 
@@ -488,7 +488,7 @@ describe("schema authoring sugar", () => {
   it("throws naming the slot and the full dotted path on an unknown nested field", () => {
     const decisionSchema = schema.object("sugar-0085-unknown-nested-decision", { behavior: schema.text() });
     const hookOutputSchema = schema.object("sugar-0085-unknown-nested-hook-output", { decision: decisionSchema });
-    const hookSlot = slot({ id: "sugar-0085-unknown-nested-slot", schema: hookOutputSchema }) as unknown as {
+    const hookSlot = slot({ id: "sugar-0085-unknown-nested-slot", schema: hookOutputSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
       readonly decision: { readonly nope: unknown; };
     };
 
@@ -661,8 +661,8 @@ describe("retired canonical fields", () => {
     expectTypeOf(tone.direct);
     // @ts-expect-error legacy uppercase namespace is not exported publicly.
     expectTypeOf(publicCdk.Tone);
-    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined();
-    expect((tone as unknown as Record<string, unknown>).Tone).toBeUndefined();
+    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((tone as unknown as Record<string, unknown>).Tone).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
     expect((publicCdk as Record<string, unknown>).Tone).toBeUndefined();
   });
 
@@ -1985,7 +1985,7 @@ describe("public brands and values", () => {
     const textPort = port.input.text({ id: "request" });
     const textSlot = slot.text("result");
     const listSlot = slot.texts("results");
-    const promptHandle = {} as unknown as PromptHandle<string, number>;
+    const promptHandle = {} as unknown as PromptHandle<string, number>; // audited-unknown-cast: opaque branded fixture mint for a pure type-level assertion
 
     expectTypeOf(textPort).toMatchTypeOf<PortHandle<string>>();
     expectTypeOf(textSlot).toMatchTypeOf<SlotHandle<string>>();
@@ -2468,8 +2468,8 @@ describe("vocabulary casing", () => {
   it("exposes only qualified PascalCase built-in leaves", () => {
     expect(tone.Direct).toBe("direct");
     expect(intent.avoid.ScopeCreep).toBe("scope-creep");
-    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined();
-    expect((tone as unknown as Record<string, unknown>).DIRECT).toBeUndefined();
-    expect((intent as unknown as Record<string, unknown>).ScopeCreep).toBeUndefined();
+    expect((tone as unknown as Record<string, unknown>).direct).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((tone as unknown as Record<string, unknown>).DIRECT).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    expect((intent as unknown as Record<string, unknown>).ScopeCreep).toBeUndefined(); // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
   });
 });

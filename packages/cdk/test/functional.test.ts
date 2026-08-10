@@ -474,8 +474,10 @@ describe("defineVariant/useVariant hook-style families", () => {
       defineTrait("hook-family", { version: "0.1.0" });
       useVariant(quickVariant).default();
     });
-    expect(isTraitFamilyHandle(family)).toBe(true);
-    const resolved = await resolveTraitFamily(family as unknown as Parameters<typeof resolveTraitFamily>[0]);
+    if (!isTraitFamilyHandle(family)) {
+      throw new Error("expected a trait family handle");
+    }
+    const resolved = await resolveTraitFamily(family);
     expect(resolved.id).toBe("hook-family");
     const paths = resolved.variants.map((entry) => entry.path);
     expect(paths).toContain("quick");
