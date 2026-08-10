@@ -94,6 +94,13 @@ test-full:
 	set -euo pipefail
 	export CARGO_TARGET_DIR="{{gate_target_dir}}"
 	target_dir="$CARGO_TARGET_DIR"
+	# The gate runs wherever the merge does — usually a run worktree created
+	# before the latest landings. A landing that adds a workspace package (or
+	# bumps JS deps) leaves that worktree's node_modules stale, and the gate
+	# then dies on missing tools ("sh: dprint: command not found", observed
+	# 2026-08-10 when packages/toolkit landed). Frozen install is a no-op
+	# (~1s) when already current, and exactly what CI runs before its gate.
+	pnpm install --frozen-lockfile
 	just sdk-check
 	just ts-format-check
 	# CI runs ts-typecheck/ts-test as separate steps after test-full; the
