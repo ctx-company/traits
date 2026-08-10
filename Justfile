@@ -58,6 +58,7 @@ ts-format-check:
 ts-test:
 	pnpm --dir packages/cdk run test
 	pnpm --dir packages/config run test
+	pnpm --dir packages/toolkit run test
 
 lint:
 	cargo fmt --check

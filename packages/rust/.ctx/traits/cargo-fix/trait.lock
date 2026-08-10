@@ -1,0 +1,15 @@
+[metadata]
+schema-version = "0.1"
+generated-by = "ctx traits sync"
+generated-at = "not-recorded"
+
+[[trait]]
+id = "cargo-fix"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:46e7a009c2674edc87e8dc645ebded20dd9b6dda6e154e5fa63a31ac6e48927a"
+canonical = "sha256:46e7de25967acaa90ed55e6518e2bb2aabe86b889c2fea0a30f40b5649804f9f"
+model-visible = "sha256:82385628c74ca9869fae5fd563e280c0b6a7638baced3d6eb0c6cd7a909626d9"
+resource-manifest = "sha256:b792eadf74da273051eea4b893076fe8f4155bcccb99915293f027da93c3d423"

@@ -1,0 +1,7 @@
+[package]
+id = "cargo-fix"
+version = "0.1.0"
+name = "Cargo Fix"
+status = "ready"
+
+[dependencies]

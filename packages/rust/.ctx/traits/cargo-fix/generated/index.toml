@@ -1,0 +1,348 @@
+id = "cargo-fix"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Cargo Fix"
+summary = "The compiler is the reviewer: capture and reduce a real cargo check + clippy run into a deduplicated, deterministically ordered diagnostic list, then drive a worker through bounded fix rounds — each followed by a fresh recapture — until the list is clean. A round that cannot clear it blocks rather than committing."
+
+[metadata]
+family = "cargo-fix"
+tag = [
+    "first-party",
+    "rust",
+    "gate-driven",
+]
+
+[[port]]
+id = "scope"
+direction = "input"
+schema = "schema:text"
+description = "Optional -p <package> scope passed to both cargo check and cargo clippy; empty scopes to the whole workspace."
+
+[port.default]
+value = ""
+
+[[slot]]
+id = "cargo-fix-diagnostics"
+schema = "[schema:cargo-diagnostic]"
+description = "Runtime slot cargo-fix-diagnostics."
+
+[[slot]]
+id = "cargo-fix-fix-summary"
+schema = "schema:text"
+description = "Runtime slot cargo-fix-fix-summary."
+
+[[schema]]
+id = "cargo-diagnostic"
+description = 'One `reason == "compiler-message"` diagnostic from a cargo check/clippy run, deduplicated across both on (file, line, column, code) and sorted by that same key.'
+
+[schema.fields.code]
+schema = "schema:text"
+required = true
+description = "message.code.code, or the empty string when cargo reports no lint/error code."
+
+[schema.fields.column]
+schema = "schema:integer"
+required = true
+description = "message.spans[].column_start of the primary span."
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+description = "message.spans[].file_name of the diagnostic's primary span."
+
+[schema.fields.level]
+schema = "schema:text"
+required = true
+description = 'message.level verbatim (e.g. "error", "warning").'
+
+[schema.fields.line]
+schema = "schema:integer"
+required = true
+description = "message.spans[].line_start of the primary span."
+
+[schema.fields.message]
+schema = "schema:text"
+required = true
+description = "message.message verbatim."
+
+[[agent]]
+id = "worker"
+description = "Fixes cargo check/clippy diagnostics until a fresh capture is clean. Holds every change to this repo's Rust engineering-standards and gate-conventions."
+summary = "Implementation role."
+
+[prompt.cargo-fix-fix]
+text = """
+
+      Fix every diagnostic in {slot:cargo-fix-diagnostics}. Each carries the file, line, column, and cargo/clippy code the compiler reported, plus its level and message.
+      Change only what each diagnostic requires.
+      Return a short summary of what you changed."""
+input = ["slot:cargo-fix-diagnostics"]
+output = ["slot:cargo-fix-fix-summary"]
+
+[[sequence.cargo-fix-loop-body.sequence]]
+id = "cargo-fix-fix"
+title = "Fix cargo diagnostics (worker)"
+agent = "agent:worker"
+prompt = "prompt:cargo-fix-fix"
+input = ["slot:cargo-fix-diagnostics"]
+output = ["slot:cargo-fix-fix-summary"]
+
+[[sequence.cargo-fix-loop-body.sequence]]
+id = "cargo-fix-recapture"
+title = "Capture and reduce cargo check + clippy diagnostics"
+input = ["port:scope"]
+output = ["slot:cargo-fix-diagnostics"]
+
+[sequence.cargo-fix-loop-body.sequence.command]
+argv = [
+    "node",
+    "--eval",
+    '''
+"use strict";
+const cp = require("node:child_process");
+const fs = require("node:fs");
+
+function fail(message) {
+  process.stderr.write("cargo-fix: " + message + "\n");
+  process.exit(1);
+}
+
+function readCargoLines(cmd, args) {
+  const result = cp.spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 256 });
+  if (result.error) fail(cmd + " " + args.join(" ") + " failed to spawn: " + result.error.message);
+  if (result.status !== 0 && result.status !== 101) {
+    fail(cmd + " " + args.join(" ") + " exited " + String(result.status) + ": " + String(result.stderr).slice(0, 2000));
+  }
+  return String(result.stdout).split("\n").filter(Boolean);
+}
+
+function extractDiagnostic(parsed) {
+  if (parsed === null || typeof parsed !== "object") { fail("compiler-message line is not an object"); }
+  const inner = parsed.message;
+  if (inner === null || typeof inner !== "object") { fail("compiler-message.message missing or malformed"); }
+  if (typeof inner.message !== "string") { fail("compiler-message.message.message missing"); }
+  if (typeof inner.level !== "string") { fail("compiler-message.message.level missing"); }
+  const spans = inner.spans;
+  if (!Array.isArray(spans)) { fail("compiler-message.message.spans missing or not an array"); }
+  let primary = null;
+  for (const span of spans) {
+    if (span && span.is_primary === true) { primary = span; break; }
+  }
+  if (primary === null) return null;
+  if (typeof primary.file_name !== "string" || typeof primary.line_start !== "number" || typeof primary.column_start !== "number") {
+    fail("compiler-message primary span missing file_name/line_start/column_start");
+  }
+  let code = "";
+  if (inner.code !== null && inner.code !== undefined) {
+    if (typeof inner.code !== "object" || typeof inner.code.code !== "string") {
+      fail("compiler-message.message.code malformed");
+    }
+    code = inner.code.code;
+  }
+  return {
+    file: primary.file_name,
+    line: primary.line_start,
+    column: primary.column_start,
+    code: code,
+    level: inner.level,
+    message: inner.message,
+  };
+}
+
+function main() {
+  const args = process.argv.slice(1);
+  const stdinMode = args.indexOf("--stdin") !== -1;
+  let lines;
+  if (stdinMode) {
+    lines = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
+  } else {
+    const config = JSON.parse(args[0]);
+    const scopeArg = args.find(function (arg) { return arg.indexOf("--scope=") === 0; });
+    const scope = scopeArg === undefined ? "" : scopeArg.slice("--scope=".length);
+    const scopeArgs = scope === "" ? [] : ["-p", scope];
+    lines = readCargoLines("cargo", ["check", "--quiet", "--message-format", "json"].concat(config.checkArgs).concat(scopeArgs));
+    if (config.clippyArgs !== null) {
+      lines = lines.concat(
+        readCargoLines("cargo", ["clippy", "--quiet", "--message-format", "json"].concat(config.clippyArgs).concat(scopeArgs)),
+      );
+    }
+  }
+
+  const deduped = new Map();
+  for (const line of lines) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch (error) {
+      fail("unparseable JSON line: " + line);
+      return;
+    }
+    if (parsed.reason !== "compiler-message") continue;
+    const diagnostic = extractDiagnostic(parsed);
+    if (diagnostic === null) continue;
+    const key = diagnostic.file + "\u0000" + String(diagnostic.line) + "\u0000" + String(diagnostic.column) + "\u0000" + diagnostic.code;
+    deduped.set(key, diagnostic);
+  }
+
+  const sorted = Array.from(deduped.values()).sort(function (a, b) {
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    if (a.line !== b.line) return a.line - b.line;
+    if (a.column !== b.column) return a.column - b.column;
+    if (a.code !== b.code) return a.code < b.code ? -1 : 1;
+    return 0;
+  });
+
+  process.stdout.write(JSON.stringify(sorted));
+}
+
+main();''',
+    "--",
+    '{"checkArgs":[],"clippyArgs":[]}',
+    "--scope={port:scope}",
+]
+timeout-ms = 600000
+
+[[sequence.ctx-branch-arm-p-19-cargo-fix-maybe-fix-then.sequence]]
+id = "cargo-fix-loop"
+title = "Cargo Fix Loop"
+kind = "loop"
+sequence = "sequence:cargo-fix-loop-body"
+max-iterations = 4
+on-exhausted = "abort"
+
+[sequence.ctx-branch-arm-p-19-cargo-fix-maybe-fix-then.sequence.until]
+field = "level"
+equals = 0
+count = "slot:cargo-fix-diagnostics"
+field-equals = "error"
+
+[procedure]
+description = "Capture cargo check/clippy diagnostics, drive the worker through bounded fix rounds against the reduced list, and block if a fresh capture never comes back clean."
+input = ["port:scope"]
+
+[[procedure.sequence]]
+id = "cargo-fix-capture"
+title = "Capture and reduce cargo check + clippy diagnostics"
+input = ["port:scope"]
+output = ["slot:cargo-fix-diagnostics"]
+
+[procedure.sequence.command]
+argv = [
+    "node",
+    "--eval",
+    '''
+"use strict";
+const cp = require("node:child_process");
+const fs = require("node:fs");
+
+function fail(message) {
+  process.stderr.write("cargo-fix: " + message + "\n");
+  process.exit(1);
+}
+
+function readCargoLines(cmd, args) {
+  const result = cp.spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 256 });
+  if (result.error) fail(cmd + " " + args.join(" ") + " failed to spawn: " + result.error.message);
+  if (result.status !== 0 && result.status !== 101) {
+    fail(cmd + " " + args.join(" ") + " exited " + String(result.status) + ": " + String(result.stderr).slice(0, 2000));
+  }
+  return String(result.stdout).split("\n").filter(Boolean);
+}
+
+function extractDiagnostic(parsed) {
+  if (parsed === null || typeof parsed !== "object") { fail("compiler-message line is not an object"); }
+  const inner = parsed.message;
+  if (inner === null || typeof inner !== "object") { fail("compiler-message.message missing or malformed"); }
+  if (typeof inner.message !== "string") { fail("compiler-message.message.message missing"); }
+  if (typeof inner.level !== "string") { fail("compiler-message.message.level missing"); }
+  const spans = inner.spans;
+  if (!Array.isArray(spans)) { fail("compiler-message.message.spans missing or not an array"); }
+  let primary = null;
+  for (const span of spans) {
+    if (span && span.is_primary === true) { primary = span; break; }
+  }
+  if (primary === null) return null;
+  if (typeof primary.file_name !== "string" || typeof primary.line_start !== "number" || typeof primary.column_start !== "number") {
+    fail("compiler-message primary span missing file_name/line_start/column_start");
+  }
+  let code = "";
+  if (inner.code !== null && inner.code !== undefined) {
+    if (typeof inner.code !== "object" || typeof inner.code.code !== "string") {
+      fail("compiler-message.message.code malformed");
+    }
+    code = inner.code.code;
+  }
+  return {
+    file: primary.file_name,
+    line: primary.line_start,
+    column: primary.column_start,
+    code: code,
+    level: inner.level,
+    message: inner.message,
+  };
+}
+
+function main() {
+  const args = process.argv.slice(1);
+  const stdinMode = args.indexOf("--stdin") !== -1;
+  let lines;
+  if (stdinMode) {
+    lines = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
+  } else {
+    const config = JSON.parse(args[0]);
+    const scopeArg = args.find(function (arg) { return arg.indexOf("--scope=") === 0; });
+    const scope = scopeArg === undefined ? "" : scopeArg.slice("--scope=".length);
+    const scopeArgs = scope === "" ? [] : ["-p", scope];
+    lines = readCargoLines("cargo", ["check", "--quiet", "--message-format", "json"].concat(config.checkArgs).concat(scopeArgs));
+    if (config.clippyArgs !== null) {
+      lines = lines.concat(
+        readCargoLines("cargo", ["clippy", "--quiet", "--message-format", "json"].concat(config.clippyArgs).concat(scopeArgs)),
+      );
+    }
+  }
+
+  const deduped = new Map();
+  for (const line of lines) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch (error) {
+      fail("unparseable JSON line: " + line);
+      return;
+    }
+    if (parsed.reason !== "compiler-message") continue;
+    const diagnostic = extractDiagnostic(parsed);
+    if (diagnostic === null) continue;
+    const key = diagnostic.file + "\u0000" + String(diagnostic.line) + "\u0000" + String(diagnostic.column) + "\u0000" + diagnostic.code;
+    deduped.set(key, diagnostic);
+  }
+
+  const sorted = Array.from(deduped.values()).sort(function (a, b) {
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    if (a.line !== b.line) return a.line - b.line;
+    if (a.column !== b.column) return a.column - b.column;
+    if (a.code !== b.code) return a.code < b.code ? -1 : 1;
+    return 0;
+  });
+
+  process.stdout.write(JSON.stringify(sorted));
+}
+
+main();''',
+    "--",
+    '{"checkArgs":[],"clippyArgs":[]}',
+    "--scope={port:scope}",
+]
+timeout-ms = 600000
+
+[[procedure.sequence]]
+id = "cargo-fix-maybe-fix"
+title = "Cargo Fix Maybe Fix"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-19-cargo-fix-maybe-fix-then"
+
+[procedure.sequence.when.not]
+field = "level"
+equals = 0
+count = "slot:cargo-fix-diagnostics"
+field-equals = "error"

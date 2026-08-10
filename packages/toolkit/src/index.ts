@@ -31,6 +31,8 @@ export {
   reviewVerdictSchema,
 } from "./schema.ts";
 export type { FeasibilityVerdictValue, ReviewerVerdictValue } from "./schema.ts";
+export { cargoDiagnosticSchema, cargoFixLoop } from "./sequence/cargo-fix.ts";
+export type { CargoDiagnostic, CargoFixLoopOptions, CargoFixLoopScope } from "./sequence/cargo-fix.ts";
 export { commitTail } from "./sequence/commit-tail.ts";
 export type { CommitTailOptions } from "./sequence/commit-tail.ts";
 export { gateAndDiffEvidence } from "./sequence/evidence.ts";

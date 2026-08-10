@@ -1,0 +1,72 @@
+{
+  "agent:worker": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:scope": {
+    "file": "packages/rust/.ctx/traits/cargo-fix/source/index.ts",
+    "start": 6,
+    "end": 6
+  },
+  "prompt:cargo-fix-fix": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 235,
+    "end": 235
+  },
+  "schema:cargo-diagnostic": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 14,
+    "end": 14
+  },
+  "sequence:cargo-fix-loop-body": {
+    "file": "packages/rust/.ctx/traits/cargo-fix/source/index.ts",
+    "start": 13,
+    "end": 13
+  },
+  "sequence:cargo-fix-loop-body/cargo-fix-fix": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 232,
+    "end": 232
+  },
+  "sequence:cargo-fix-loop-body/cargo-fix-recapture": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 212,
+    "end": 212
+  },
+  "sequence:ctx-branch-arm-p-19-cargo-fix-maybe-fix-then": {
+    "file": "packages/rust/.ctx/traits/cargo-fix/source/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "sequence:ctx-branch-arm-p-19-cargo-fix-maybe-fix-then/cargo-fix-loop": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 247,
+    "end": 247
+  },
+  "sequence:procedure/cargo-fix-capture": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 212,
+    "end": 212
+  },
+  "sequence:procedure/cargo-fix-maybe-fix": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 256,
+    "end": 256
+  },
+  "slot:cargo-fix-diagnostics": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 204,
+    "end": 204
+  },
+  "slot:cargo-fix-fix-summary": {
+    "file": "packages/toolkit/src/sequence/cargo-fix.ts",
+    "start": 231,
+    "end": 231
+  },
+  "trait:cargo-fix": {
+    "file": "packages/rust/.ctx/traits/cargo-fix/source/index.ts",
+    "start": 13,
+    "end": 13
+  }
+}

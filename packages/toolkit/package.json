@@ -34,9 +34,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --deny-warnings src",
+    "lint": "oxlint --deny-warnings src test",
     "format": "dprint fmt",
     "format:check": "dprint check",
+    "test": "vitest run",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
@@ -46,6 +47,7 @@
     "@types/node": "25.3.3",
     "dprint": "0.55.1",
     "oxlint": "1.73.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "4.1.10"
   }
 }

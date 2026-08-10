@@ -30,7 +30,8 @@
   "files": [
     "dist",
     "README.md",
-    ".ctx/traits/rust"
+    ".ctx/traits/rust",
+    ".ctx/traits/cargo-fix"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -15,7 +15,7 @@ pnpm add -D @ctx-traits/rust
 ```
 
 ```ts
-import { rustReviewerRole, rustWorkerRole } from "@ctx-traits/rust";
+import { cargoFixLoop, rustReviewerRole, rustWorkerRole } from "@ctx-traits/rust";
 import { port, prompt, sequence, slot, trait } from "@ctx-traits/cdk";
 
 const worker = rustWorkerRole("worker", "Implements the requested Rust refactor.");
@@ -28,6 +28,10 @@ Rust-specific description text, never a reimplementation of the shared
 doctrine. This import is authoring-time only: it resolves through ordinary
 package management, never through `ctx.traits` dependency resolution, and
 the consumer's synthesized `generated/index.toml` stays fully self-contained.
+
+`cargoFixLoop` is the third export: a `@ctx-traits/toolkit` sequence factory
+(re-exported here) that turns a real `cargo check` + `cargo clippy` run into
+the fix loop described under "Consumption mode 3" below.
 
 ## Consumption mode 2 — canonical trait dependency
 
@@ -63,6 +67,46 @@ addressable through typed refs without auto-activating any behavior. The
 `refactor-rust` showcase trait in this same package (`.ctx/traits/refactor-rust/`)
 demonstrates consuming the two resources via `ref.resource({ id, dependency: "rust" })`.
 
+## Consumption mode 3 — the `cargo-fix` trait
+
+The compiler is the reviewer (task 0119): `.ctx/traits/cargo-fix/` is a
+standalone canonical trait wiring `cargoFixLoop` to a `rustWorkerRole` seat.
+No model is ever on the diagnostic-parsing path — a deterministic Node
+script (embedded in the built canonical, run via `node --eval`) spawns
+`cargo check`/`cargo clippy --message-format json` itself, keeps only
+`reason == "compiler-message"` lines, projects `{file, line, column, code,
+level, message}` from each diagnostic's primary span, dedupes across both
+commands on `(file, line, column, code)`, and sorts by that same key —
+byte-identical evidence across runs. An unrecognized diagnostic shape
+degrades loudly (stderr + non-zero exit) rather than silently dropping it.
+
+The bounded loop that follows drives the worker through the reduced list,
+recapturing after every round, until a fresh capture is clean (default
+policy: errors block, warnings are reported but don't block —
+`cargoFixLoop({ denyWarnings: true })` widens the guard to require zero
+diagnostics of any level). A run that never clears the list exhausts into
+`onExhausted: "abort"`: it blocks rather than reaching a commit with
+unresolved compiler diagnostics.
+
+```toml
+# .ctx/traits/<consumer>/trait.toml
+[dependencies]
+cargo-fix = { npm = "@ctx-traits/rust", version = "0.1.0", package-path = ".ctx/traits/cargo-fix" }
+```
+
+Or compose the factory directly in your own trait source instead of
+depending on the packaged trait:
+
+```ts
+import { cargoFixLoop, rustWorkerRole } from "@ctx-traits/rust";
+
+const worker = rustWorkerRole("worker", "Fixes cargo diagnostics.");
+// sequence: [...cargoFixLoop({ worker, rounds: 4 })]
+```
+
+Running the packaged trait is an owner step — see "Running `refactor-rust` /
+`cargo-fix`" below.
+
 ## Package contents
 
 - `src/index.ts` — the single authored source: `rustWorkerRole`,
@@ -82,7 +126,13 @@ demonstrates consuming the two resources via `ref.resource({ id, dependency: "ru
   referencing its two resources by typed ref. This is repository showcase
   source only — it demonstrates consuming `rust` as a dependency and is not
   listed in `package.json`'s `files`, so it is excluded from the published
-  npm tarball; only `.ctx/traits/rust/` ships in consumption mode 2.
+  npm tarball; only `.ctx/traits/rust/` and `.ctx/traits/cargo-fix/` ship in
+  the published tarball.
+- `.ctx/traits/cargo-fix/` — the `cargo-fix` canonical trait for
+  consumption mode 3: a `rustWorkerRole` seat wired to the
+  `cargoFixLoop` factory, no `rust` trait dependency (it needs neither
+  resource). Listed in `package.json`'s `files`, unlike `refactor-rust` —
+  this is the package's product demo, not showcase source.
 
 ## Build
 
@@ -95,27 +145,32 @@ pnpm --dir packages/rust run lint
 pnpm --dir packages/rust run format:check
 ctx traits build packages/rust/.ctx/traits/rust/source/index.ts
 ctx traits build packages/rust/.ctx/traits/refactor-rust/source/index.ts
+ctx traits build packages/rust/.ctx/traits/cargo-fix/source/index.ts
 ctx traits sync --file packages/rust/.ctx/traits/rust/generated/index.toml
 ctx traits sync --file packages/rust/.ctx/traits/refactor-rust/generated/index.toml
+ctx traits sync --file packages/rust/.ctx/traits/cargo-fix/generated/index.toml
 ctx traits check --file packages/rust/.ctx/traits/rust/generated/index.toml
 ctx traits check --file packages/rust/.ctx/traits/refactor-rust/generated/index.toml
+ctx traits check --file packages/rust/.ctx/traits/cargo-fix/generated/index.toml
 ```
 
 `ctx traits sync --file` takes the generated (synthesized) trait file, never the
 hand-authored `trait.toml` manifest — this matches every other package in this
 repo. The unlocked `ctx traits check` above is this package's green DoD gate;
-it reports `passed: true` for both traits.
+it reports `passed: true` for all three traits.
 
 ### Known limitation — `--locked` checking
 
 `ctx traits check --file <generated/index.toml> --locked` currently reports
-`passed: false` for both traits, for two separate reasons that are both
-pre-existing CLI behavior outside this package's scope:
+`passed: false` for `rust` and `refactor-rust` (`cargo-fix` passes: it
+declares no `[[dependency]]`, so neither reason below applies to it), for
+two separate reasons that are both pre-existing CLI behavior outside this
+package's scope:
 
 - **Missing locked export evidence** (`rust` and `refactor-rust`) — only
-  `ctx traits export --update-skill-lock` records that evidence, and no trait
-  in this repo runs it by default; `packages/agents`'s own `agents` trait has
-  the identical gap. This is parity, not a regression.
+  `ctx traits export --update-skill-lock` records that evidence, and no
+  trait in this repo runs it by default; `packages/agents`'s own `agents`
+  trait has the identical gap. This is parity, not a regression.
 - **Model-view digest mismatch** (`refactor-rust` only) —
   `ctx_traits_io::export::infer_repo_root_from_trait_file`
   (`modules/io/src/export.rs:106`) unwraps exactly one `.ctx/traits/<id>`
@@ -129,7 +184,7 @@ pre-existing CLI behavior outside this package's scope:
   package and needs a fix in `modules/io/src/export.rs`, not a change in
   `packages/rust` — tracked as a follow-up phase.
 
-## Running `refactor-rust`
+## Running `refactor-rust` / `cargo-fix`
 
 `ctx traits run` needs live model credentials and an owner-configured
 `.ctx/config.toml` (harness registry, `[agent.role.<role>]` routing, and
@@ -141,6 +196,7 @@ mapping:
 
 ```sh
 ctx traits run --file packages/rust/.ctx/traits/refactor-rust/generated/index.toml --set target=<crate-or-module-path>
+ctx traits run --file packages/rust/.ctx/traits/cargo-fix/generated/index.toml --set scope=<optional-package-name>
 ```
 
 The run session ledger lands under `~/.config/ctx/runs/<repo-key>/`, this
