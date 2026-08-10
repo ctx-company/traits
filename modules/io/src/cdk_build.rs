@@ -9,7 +9,15 @@ use std::time::{Duration, Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
-pub const DEFAULT_BUILD_TIMEOUT_MS: u64 = 30_000;
+/// 2026-08-10: raised from 30s after the implement family's build crossed
+/// the old ceiling (~34s measured) — a legitimately slow build, not a hang:
+/// `normalize.ts` sorts canonical keys with `localeCompare` (an ICU call per
+/// comparison), and cost scales with family size, so the 7-variant family's
+/// de-abstraction pushed it over. The ceiling is a hang backstop, not a
+/// performance budget; the comparator hotspot is tracked as its own task
+/// (0152 — changing sort order drifts every canonical digest, so it cannot
+/// be a drive-by fix).
+pub const DEFAULT_BUILD_TIMEOUT_MS: u64 = 120_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CdkSourceKind {

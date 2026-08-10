@@ -1,0 +1,56 @@
+schema-version = "0.2"
+key = "0152"
+title = "CDK canonical normalization must not pay ICU per key comparison"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+Found 2026-08-10 while diagnosing `ctx traits build implement` timing out at the
+30s CDK ceiling: the build is not hung — it legitimately takes ~34s, and a
+`sample` of the node process lands in `Builtins_ArrayPrototypeSort` →
+`Builtins_StringFastLocaleCompare`. `packages/cdk/src/normalize.ts` sorts every
+canonical object's keys (and declaration lists, and diagnostics) with
+`a.localeCompare(b)` — an ICU collation call per comparison — at seven sites
+(lines ~313, 329, 345, 576, 631, 731, 761). Cost scales with family size:
+refactor (2 variants) builds in ~5s, implement (7 variants, post-de-abstraction)
+~34s, and both spend ~85% of wall time in this class. The immediate symptom was
+patched by raising DEFAULT_BUILD_TIMEOUT_MS to 120s (a hang backstop, not a
+performance budget); the underlying cost stays and grows with every package.
+
+"""
+scope = """
+## Decisions
+
+- **Replace ICU collation with a deterministic, locale-independent comparator**
+  (code-unit or code-point order) in every canonical-sorting site of
+  normalize.ts — canonical output must not depend on ICU tables/locale anyway,
+  so this is a correctness improvement as well as a performance one.
+- **The order CHANGE is the whole risk**: `localeCompare` and code-unit order
+  disagree on case and non-ASCII ("a" < "B" under ICU, "B" < "a" by code unit).
+  Any key/id where the two disagree reorders canonical output → every affected
+  package's canonical digest drifts → rebuild + re-export + trust re-approval
+  churn across the board. This task therefore lands as ONE deliberate sweep:
+  comparator change + rebuild of every in-repo package + skill-lock updates in
+  the same commit, with the digest churn named in the commit message.
+- Survey first: if every key the sorts ever see is already lowercase-kebab
+  ASCII (likely), the order is IDENTICAL and the digest churn is zero — verify
+  by rebuilding all packages and diffing generated/ before committing to the
+  full-churn path.
+
+"""
+validation = """
+## Watch
+
+- `ctx traits check`'s cdk-drift section rebuilds from source — it must stay
+  byte-stable against the new comparator on every package.
+- Do not touch the 120s build ceiling back down in the same change; leave
+  headroom.
+
+## Done when
+
+`ctx traits build implement` completes in low single-digit seconds; no
+normalize.ts sort calls localeCompare; every in-repo package rebuilds
+byte-identical or the digest churn is landed knowingly in the same sweep; a
+CDK unit test pins the comparator as locale-independent.
+"""
