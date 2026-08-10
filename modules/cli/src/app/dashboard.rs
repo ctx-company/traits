@@ -57,6 +57,7 @@ use ctx_traits_core::task::provider::{
     EffectKind, EffectOutcome, EffectRecord, NewTask, ResolvedTask, SyncReport, TaskProvider,
     TaskProviderMut, TaskSummary, TaskUpdate,
 };
+use ctx_traits_core::task::{Check, CheckOutcome, Closure};
 use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
 use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
 
@@ -743,20 +744,26 @@ enum TaskAction {
     /// at modal-open, same stale-write discipline as `Archive`/`Edit`;
     /// `evidence` is every merged bound run the proposal cited, carried
     /// through so the accept can fold it into `origin` and the reported
-    /// result.
+    /// result. `closure` (0144) is [`evaluate_task_close`]'s own result at
+    /// modal-open, already carrying whatever check results ran — `None`
+    /// only when no `auto-close` policy resolves for this task at all.
     MarkDone {
         key: String,
         digest: String,
         evidence: Vec<super::task_proposals::MergedRunEvidence>,
+        closure: Option<Closure>,
     },
     /// `R`: one step of the reconcile review queue (0064). `digest` is
     /// captured at modal-open against the proposal's own task (`task_key`
     /// for `MarkDone`, `from` for `RemoveDependsOn`) — same stale-write
     /// discipline as every other write. Reject (`Cancelled`) and accept
-    /// (`Confirmed`) alike advance to the next queued proposal.
+    /// (`Confirmed`) alike advance to the next queued proposal. `closure`
+    /// (0144) mirrors `MarkDone`'s own field — `None` for `RemoveDependsOn`
+    /// steps, which never close anything.
     ReconcileStep {
         proposal: super::task_proposals::ReconcileProposal,
         digest: String,
+        closure: Option<Closure>,
     },
     /// `S` when the selected task's latest bound blocked run carries a park
     /// report or an oversized feasibility verdict: one step of the
@@ -4728,8 +4735,12 @@ fn apply_action(
     // `Action`, where `Cancelled` is a dead end. So these two route BEFORE
     // the generic early return below, not through it.
     match tag {
-        Action::Task(TaskAction::ReconcileStep { proposal, digest }) => {
-            return apply_reconcile_step(state, proposal, digest, outcome);
+        Action::Task(TaskAction::ReconcileStep {
+            proposal,
+            digest,
+            closure,
+        }) => {
+            return apply_reconcile_step(state, proposal, digest, closure, outcome);
         }
         Action::Task(TaskAction::SplitStep { parent, child }) => {
             return apply_split_step(state, parent, child, outcome);
@@ -6287,6 +6298,24 @@ fn open_task_edit_modal(state: &mut State) {
 /// `validation` prose — the owner judges against the contract, not the
 /// commit's existence.
 fn open_task_mark_done_modal(state: &mut State) {
+    let Ok(dir) = super::tasks::board_dir(None) else {
+        state.message =
+            Some("mark done refused: could not resolve the board directory".to_string());
+        return;
+    };
+    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
+        state.message =
+            Some("mark done refused: could not resolve the repository root".to_string());
+        return;
+    };
+    open_task_mark_done_modal_in(state, &dir, &repo_root);
+}
+
+fn open_task_mark_done_modal_in(
+    state: &mut State,
+    dir: &camino::Utf8Path,
+    repo_root: &camino::Utf8Path,
+) {
     let Some(summary) = selected_task(state) else {
         state.message = Some("no task selected".to_string());
         return;
@@ -6296,21 +6325,41 @@ fn open_task_mark_done_modal(state: &mut State) {
         state.message = Some(format!("{key}: no merge-time done-proposal"));
         return;
     };
-    let Some(resolved) = state
+    let Some(document) = state
         .tasks_board
         .as_ref()
         .and_then(|board| board.resolved.get(&key))
+        .map(|resolved| resolved.document.clone())
     else {
         state.message = Some(format!("{key}: not resolvable at the last sync"));
         return;
     };
-    let digest = match fetch_task_digest(&key) {
+    let digest = match fetch_task_digest_in(dir, &key) {
         Ok(digest) => digest,
         Err(error) => {
             state.message = Some(format!("mark done refused: {error}"));
             return;
         }
     };
+    // 0144: evaluate once against the latest cited sha — self-close skips
+    // the modal entirely; a `Proposal` disposition strengthens it below.
+    let evaluation = proposal
+        .evidence
+        .last()
+        .and_then(|latest| evaluate_task_close(&document, repo_root, &latest.sha));
+    if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
+    {
+        let _ = write_task_close(
+            state,
+            dir,
+            &key,
+            digest,
+            &proposal.evidence,
+            Some(closure.clone()),
+            true,
+        );
+        return;
+    }
     let mut body = String::new();
     for evidence in &proposal.evidence {
         body.push_str(&format!(
@@ -6318,16 +6367,20 @@ fn open_task_mark_done_modal(state: &mut State) {
             evidence.run_id, evidence.sha
         ));
     }
-    if !resolved.document.validation.trim().is_empty() {
+    if !document.validation.trim().is_empty() {
         body.push_str("\ndone-when:\n");
-        body.push_str(resolved.document.validation.trim());
+        body.push_str(document.validation.trim());
     }
-    append_declared_checks_notice(&mut body, &resolved.document.checks);
+    match &evaluation {
+        Some((closure, disposition)) => append_check_disposition(&mut body, closure, disposition),
+        None => append_declared_checks_notice(&mut body, &document.checks),
+    }
     state.modal_host.open(
         Action::Task(TaskAction::MarkDone {
             key: key.clone(),
             digest,
             evidence: proposal.evidence.clone(),
+            closure: evaluation.map(|(closure, _)| closure),
         }),
         Modal::confirm(format!("mark {key} done"), body),
     );
@@ -6352,7 +6405,11 @@ fn append_declared_checks_notice(body: &mut String, checks: &[ctx_traits_core::t
 /// is validated against what is on disk right now.
 fn fetch_task_digest(key: &str) -> crate::Result<String> {
     let dir = super::tasks::board_dir(None)?;
-    let provider = FilesTaskBoard::open_read(dir);
+    fetch_task_digest_in(&dir, key)
+}
+
+fn fetch_task_digest_in(dir: &camino::Utf8Path, key: &str) -> crate::Result<String> {
+    let provider = FilesTaskBoard::open_read(dir.to_owned());
     let resolved = provider
         .get(key)
         .map_err(|e| crate::Error::Command {
@@ -6421,16 +6478,59 @@ fn open_task_reconcile(state: &mut State) {
 /// (`Confirmed` or `Cancelled` alike), so the queue always ends either
 /// empty or on an open modal.
 fn open_next_reconcile_step(state: &mut State) {
+    let Ok(dir) = super::tasks::board_dir(None) else {
+        state.message =
+            Some("reconcile refused: could not resolve the board directory".to_string());
+        return;
+    };
+    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
+        state.message =
+            Some("reconcile refused: could not resolve the repository root".to_string());
+        return;
+    };
+    open_next_reconcile_step_in(state, &dir, &repo_root);
+}
+
+fn open_next_reconcile_step_in(
+    state: &mut State,
+    dir: &camino::Utf8Path,
+    repo_root: &camino::Utf8Path,
+) {
     while !state.reconcile_queue.is_empty() {
         let proposal = state.reconcile_queue.remove(0);
         let task_key = proposal.task_key().to_string();
-        let digest = match fetch_task_digest(&task_key) {
+        let digest = match fetch_task_digest_in(dir, &task_key) {
             Ok(digest) => digest,
             Err(error) => {
                 state.message = Some(format!("reconcile: skipping {task_key} — {error}"));
                 continue;
             }
         };
+        // 0144: evaluate once per `MarkDone` step, reused for both the
+        // self-close decision and the modal body below — an `AutoClose`
+        // disposition closes right here, no modal, and the loop moves to
+        // the next queued proposal; `RemoveDependsOn` never has one.
+        let mut evaluation = None;
+        if let super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } = &proposal
+            && let Ok(Some(resolved)) = FilesTaskBoard::open_read(dir.to_owned()).get(task_key)
+            && let Some(latest) = evidence.last()
+        {
+            evaluation = evaluate_task_close(&resolved.document, repo_root, &latest.sha);
+            if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) =
+                &evaluation
+            {
+                let _ = write_task_close(
+                    state,
+                    dir,
+                    task_key,
+                    digest,
+                    evidence,
+                    Some(closure.clone()),
+                    true,
+                );
+                continue;
+            }
+        }
         let (title, body) = match &proposal {
             super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
                 let mut body = String::new();
@@ -6440,10 +6540,17 @@ fn open_next_reconcile_step(state: &mut State) {
                         e.run_id, e.sha
                     ));
                 }
-                if let Ok(dir) = super::tasks::board_dir(None)
-                    && let Ok(Some(resolved)) = FilesTaskBoard::open_read(dir).get(task_key)
-                {
-                    append_declared_checks_notice(&mut body, &resolved.document.checks);
+                match &evaluation {
+                    Some((closure, disposition)) => {
+                        append_check_disposition(&mut body, closure, disposition)
+                    }
+                    None => {
+                        if let Ok(Some(resolved)) =
+                            FilesTaskBoard::open_read(dir.to_owned()).get(task_key)
+                        {
+                            append_declared_checks_notice(&mut body, &resolved.document.checks);
+                        }
+                    }
                 }
                 (format!("reconcile: mark {task_key} done"), body)
             }
@@ -6458,7 +6565,11 @@ fn open_next_reconcile_step(state: &mut State) {
             ),
         };
         state.modal_host.open(
-            Action::Task(TaskAction::ReconcileStep { proposal, digest }),
+            Action::Task(TaskAction::ReconcileStep {
+                proposal,
+                digest,
+                closure: evaluation.map(|(closure, _)| closure),
+            }),
             Modal::confirm(title, body),
         );
         return;
@@ -6492,12 +6603,13 @@ fn apply_reconcile_step(
     state: &mut State,
     proposal: super::task_proposals::ReconcileProposal,
     digest: String,
+    closure: Option<Closure>,
     outcome: ModalOutcome,
 ) -> crate::Result<()> {
     if outcome == ModalOutcome::Confirmed {
         match proposal {
             super::task_proposals::ReconcileProposal::MarkDone { task_key, evidence } => {
-                apply_task_mark_done(state, task_key, digest, evidence)?;
+                apply_task_mark_done(state, task_key, digest, evidence, closure)?;
             }
             super::task_proposals::ReconcileProposal::RemoveDependsOn(remove) => {
                 let dir = super::tasks::board_dir(None)?;
@@ -6724,12 +6836,13 @@ fn apply_task_action(
         key,
         digest,
         evidence,
+        closure,
     } = action
     {
         if outcome != ModalOutcome::Confirmed {
             return Ok(());
         }
-        return apply_task_mark_done(state, key, digest, evidence);
+        return apply_task_mark_done(state, key, digest, evidence, closure);
     }
     let ModalOutcome::Submitted(text) = outcome else {
         return Ok(());
@@ -6841,17 +6954,10 @@ fn resolve_task_close_policy(
 /// one declared check — the no-checks flow never reaches here.
 fn run_declared_checks(
     checks: &[ctx_traits_core::task::Check],
+    repo_root: &camino::Utf8Path,
     sha: &str,
 ) -> Vec<ctx_traits_core::task::CheckRecord> {
-    let Ok(repo_root) = super::command_handlers::resolve_repo_root(None) else {
-        return vec![ctx_traits_core::task::CheckRecord {
-            name: "(check set)".to_string(),
-            command: String::new(),
-            outcome: ctx_traits_core::task::CheckOutcome::Unrunnable,
-            detail: "could not resolve the repository root".to_string(),
-        }];
-    };
-    match super::task_checks::run_checks(checks, &repo_root, sha) {
+    match super::task_checks::run_checks(checks, repo_root, sha) {
         Ok(records) => records,
         Err(unrunnable) => vec![ctx_traits_core::task::CheckRecord {
             name: "(check set)".to_string(),
@@ -6859,6 +6965,76 @@ fn run_declared_checks(
             outcome: ctx_traits_core::task::CheckOutcome::Unrunnable,
             detail: unrunnable.reason,
         }],
+    }
+}
+
+/// 0144: what a hardened `MarkDone` candidate's declared checks resolve to
+/// for one task document at proposal-build time, against the cited `sha` —
+/// the single evaluation both modal builders ([`open_task_mark_done_modal`],
+/// [`open_next_reconcile_step`]) run once and carry forward, so a later
+/// confirm never re-executes the commands (the double-execution risk the
+/// task's own draft calls out). `None` when no `auto-close` policy resolves
+/// for this document at all — the pre-0144 confirm-only flow, untouched.
+/// `Some` always carries a `Closure` (checks empty under `merge` with none
+/// declared, recording `unchecked` per the Done-when) alongside the
+/// disposition that decides whether a keypress is needed. `repo_root` is
+/// the checkout declared checks run against — production always resolves
+/// it fresh via [`super::command_handlers::resolve_repo_root`]; tests pass
+/// a scratch git repo, never the real one.
+fn evaluate_task_close(
+    document: &ctx_traits_core::task::TaskDocument,
+    repo_root: &camino::Utf8Path,
+    sha: &str,
+) -> Option<(Closure, super::task_proposals::CloseDisposition)> {
+    let policy = resolve_task_close_policy(document)?;
+    let results = if document.checks.is_empty() {
+        None
+    } else {
+        Some(run_declared_checks(&document.checks, repo_root, sha))
+    };
+    let disposition =
+        super::task_proposals::close_disposition(policy, &document.checks, results.as_deref());
+    let checks = match &disposition {
+        super::task_proposals::CloseDisposition::AutoClose { checks } => checks.clone(),
+        super::task_proposals::CloseDisposition::Proposal { .. } => results.unwrap_or_default(),
+    };
+    Some((
+        Closure {
+            mode: policy,
+            commit: Some(sha.to_string()),
+            checks,
+        },
+        disposition,
+    ))
+}
+
+/// Render `closure.checks`' per-check outcome into a modal body, plus the
+/// disposition's own reason line when it has one — 0144's Done-when scope
+/// example ("all 3 checks passed — mark done?"): the checks already ran at
+/// modal-build time, so this shows the confirm's own write ahead of time,
+/// never a promise of what running them later would find.
+fn append_check_disposition(
+    body: &mut String,
+    closure: &Closure,
+    disposition: &super::task_proposals::CloseDisposition,
+) {
+    if let super::task_proposals::CloseDisposition::Proposal {
+        reason: Some(reason),
+    } = disposition
+    {
+        body.push_str(&format!("\n{reason}\n"));
+    }
+    if closure.checks.is_empty() {
+        return;
+    }
+    body.push_str("\nchecks:\n");
+    for check in &closure.checks {
+        let outcome = match check.outcome {
+            CheckOutcome::Passed => "passed",
+            CheckOutcome::Failed => "failed",
+            CheckOutcome::Unrunnable => "unrunnable",
+        };
+        body.push_str(&format!("- {} ({outcome}): {}\n", check.name, check.detail));
     }
 }
 
@@ -6871,23 +7047,21 @@ fn run_declared_checks(
 /// either way). Declared close effects (0063.6) run as usual, reported the
 /// same way `Archive`/`Edit` already report them.
 ///
-/// 0144: when the task declares checks and an `auto-close` policy resolves
-/// (document override or `[tasks] auto-close`), the checks run here against
-/// the cited sha before the write, and their disposition
-/// ([`super::task_proposals::close_disposition`]) decides the outcome — a
-/// disposition of `AutoClose` writes `set_closure` alongside `status:
-/// done`; `Proposal` (a failing or un-runnable check under `checked`)
-/// refuses the write and names why, leaving the task open for a later,
-/// corrected attempt. A task with no declared checks, or no policy
-/// configured, takes the exact path it took before this feature.
+/// 0144: `closure` is whatever [`evaluate_task_close`] found at modal-build
+/// time (`None` when no policy resolves — the pre-0144 flow, unchanged).
+/// The confirm keypress is the human authority: it always closes, with
+/// `closure` recording whatever check results are in hand, whether they all
+/// passed or not — the disposition decided only whether this keypress was
+/// needed, never whether it is honored.
 fn apply_task_mark_done(
     state: &mut State,
     key: String,
     digest: String,
     evidence: Vec<super::task_proposals::MergedRunEvidence>,
+    closure: Option<Closure>,
 ) -> crate::Result<()> {
     let dir = super::tasks::board_dir(None)?;
-    apply_task_mark_done_in(state, &dir, key, digest, evidence)
+    apply_task_mark_done_in(state, &dir, key, digest, evidence, closure)
 }
 
 fn apply_task_mark_done_in(
@@ -6896,13 +7070,32 @@ fn apply_task_mark_done_in(
     key: String,
     digest: String,
     evidence: Vec<super::task_proposals::MergedRunEvidence>,
+    closure: Option<Closure>,
+) -> crate::Result<()> {
+    write_task_close(state, dir, &key, digest, &evidence, closure, false)
+}
+
+/// The single write both a self-close ([`open_task_mark_done_modal`],
+/// [`open_next_reconcile_step`], 0144's keypress-free lane) and a confirmed
+/// mark-done keypress ([`apply_task_mark_done_in`]) share: `status: done`,
+/// folding the newest evidence into `origin` when the document has none yet
+/// (0063.8), plus `closure` when 0144's policy resolved. `self_closed` only
+/// changes the reported message's verb.
+fn write_task_close(
+    state: &mut State,
+    dir: &camino::Utf8Path,
+    key: &str,
+    digest: String,
+    evidence: &[super::task_proposals::MergedRunEvidence],
+    closure: Option<Closure>,
+    self_closed: bool,
 ) -> crate::Result<()> {
     let Some(latest) = evidence.last() else {
         state.message = Some(format!("mark done refused: {key} has no evidence"));
         return Ok(());
     };
     let provider = FilesTaskBoard::open_read_write(dir.to_owned());
-    let current = provider.get(&key).ok().flatten();
+    let current = provider.get(key).ok().flatten();
     let has_origin = current
         .as_ref()
         .is_some_and(|resolved| resolved.document.origin.is_some());
@@ -6914,48 +7107,40 @@ fn apply_task_mark_done_in(
             latest.run_id, latest.sha
         )))
     };
-
-    let mut set_closure = None;
-    if let Some(resolved) = &current
-        && !resolved.document.checks.is_empty()
-        && let Some(policy) = resolve_task_close_policy(&resolved.document)
-    {
-        let results = run_declared_checks(&resolved.document.checks, &latest.sha);
-        match super::task_proposals::close_disposition(
-            policy,
-            &resolved.document.checks,
-            Some(&results),
-        ) {
-            super::task_proposals::CloseDisposition::AutoClose { checks } => {
-                set_closure = Some(ctx_traits_core::task::Closure {
-                    mode: policy,
-                    commit: Some(latest.sha.clone()),
-                    checks,
-                });
-            }
-            super::task_proposals::CloseDisposition::Proposal { reason } => {
-                state.message = Some(format!(
-                    "{key}: not closed — {}",
-                    reason.unwrap_or_else(|| "declared checks did not clear".to_string())
-                ));
-                return Ok(());
-            }
+    let checks_summary = closure.as_ref().map(|closure| {
+        if closure.checks.is_empty() {
+            "unchecked".to_string()
+        } else {
+            let passed = closure
+                .checks
+                .iter()
+                .filter(|check| check.outcome == CheckOutcome::Passed)
+                .count();
+            format!("{passed}/{} checks passed", closure.checks.len())
         }
-    }
+    });
 
     match provider.update(
-        &key,
+        key,
         TaskUpdate {
             status: Some(TaskDocStatus::Done),
             expected_digest: Some(digest),
             set_origin,
-            set_closure,
+            set_closure: closure,
             ..Default::default()
         },
     ) {
         Ok(outcome) => {
+            let verb = if self_closed {
+                "closed itself"
+            } else {
+                "marked done"
+            };
+            let checks_clause = checks_summary
+                .map(|summary| format!(" — {summary}"))
+                .unwrap_or_default();
             state.message = Some(format!(
-                "{key} marked done — run {} merged as {}{}",
+                "{key} {verb} — run {} merged as {}{checks_clause}{}",
                 latest.run_id,
                 latest.sha,
                 effects_summary(&outcome.effects)
@@ -7027,7 +7212,8 @@ fn dispatch_selected_task(state: &mut State) {
             Some(ctx_traits_io::dispatch_preflight::dependency_refusal_message(&key, &unmet));
         return;
     }
-    open_spawn_modal_for_task(state, &key);
+    let checks = resolved.document.checks.clone();
+    open_spawn_modal_for_task(state, &key, &checks);
 }
 
 /// The existing spawn modal (§5050), seeded with `--set`/`task=<key>` lines
@@ -7041,12 +7227,12 @@ fn dispatch_selected_task(state: &mut State) {
 /// cached on `State`, so a config edit takes effect on the next dispatch.
 /// Absent config, the modal opens as before (blank first line) but its
 /// leading comment names exactly the missing key.
-fn open_spawn_modal_for_task(state: &mut State, key: &str) {
+fn open_spawn_modal_for_task(state: &mut State, key: &str, checks: &[Check]) {
     let dispatch_trait =
         ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
             .ok()
             .and_then(|config| config.effective_dispatch_trait());
-    let seed = spawn_modal_seed(dispatch_trait.as_deref(), key);
+    let seed = spawn_modal_seed(dispatch_trait.as_deref(), checks, key);
     state.modal_host.open(
         Action::Session(SessionAction::Spawn),
         Modal::text_input("spawn run", seed, true),
@@ -7058,15 +7244,29 @@ fn open_spawn_modal_for_task(state: &mut State, key: &str) {
 /// configured — the spawn modal's own contract requires a trait id as the
 /// first non-comment line — or, absent config, a leading comment naming
 /// exactly the missing key so the owner is never left guessing.
-fn spawn_modal_seed(dispatch_trait: Option<&str>, key: &str) -> String {
+///
+/// 0144 (G5): when the task declares checks, a leading `#`-prefixed block
+/// names the exact commands before this dispatch's own run ever merges and
+/// could trigger the keypress-free self-close lane — the dispatch keypress
+/// is this run's own trust gate, the same posture as seeding the trait id
+/// itself. A task with no declared checks leaves the seed untouched.
+fn spawn_modal_seed(dispatch_trait: Option<&str>, checks: &[Check], key: &str) -> String {
+    let mut notice = String::new();
+    if !checks.is_empty() {
+        notice.push_str("# 0144 declared checks (run after this run's merge):\n");
+        for check in checks {
+            notice.push_str(&format!("# - {}: {}\n", check.name, check.command));
+        }
+        notice.push('\n');
+    }
     // `--task-dispatch` is what makes this a BOARD dispatch: without it the
     // run treats `task=<key>` as plain port text and never binds, preflights,
     // or materialises the board document. This seed is the one place the
     // flow supplies it automatically.
     match dispatch_trait {
-        Some(trait_id) => format!("{trait_id}\n--task-dispatch\n--set\ntask={key}\n"),
+        Some(trait_id) => format!("{notice}{trait_id}\n--task-dispatch\n--set\ntask={key}\n"),
         None => format!(
-            "# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--task-dispatch\n--set\ntask={key}\n"
+            "{notice}# no dispatch trait configured — set [tasks] dispatch-trait in config.toml\n\n--task-dispatch\n--set\ntask={key}\n"
         ),
     }
 }
@@ -11047,7 +11247,7 @@ mod tests {
 
     #[test]
     fn spawn_modal_seed_leads_with_the_configured_dispatch_trait() {
-        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+        let seed = spawn_modal_seed(Some("implement-quick"), &[], "0063");
         let mut lines = seed.lines();
         assert_eq!(lines.next(), Some("implement-quick"));
         assert_eq!(lines.next(), Some("--task-dispatch"));
@@ -11062,7 +11262,7 @@ mod tests {
     /// form is not a distinct seam.
     #[test]
     fn spawn_modal_seed_two_line_set_form_parses_as_traits_run() {
-        let seed = spawn_modal_seed(Some("implement-quick"), "0063");
+        let seed = spawn_modal_seed(Some("implement-quick"), &[], "0063");
         let user_args: Vec<String> = seed
             .lines()
             .map(str::trim)
@@ -11099,7 +11299,7 @@ mod tests {
 
     #[test]
     fn spawn_modal_seed_names_the_missing_config_key_absent_a_default() {
-        let seed = spawn_modal_seed(None, "0063");
+        let seed = spawn_modal_seed(None, &[], "0063");
         let mut lines = seed.lines();
         let comment = lines.next().expect("comment line");
         assert!(comment.starts_with('#'));
@@ -11421,6 +11621,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 sha: "deadbeef".to_string(),
             }],
+            None,
         )
         .unwrap();
 
@@ -11457,6 +11658,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 sha: "deadbeef".to_string(),
             }],
+            None,
         )
         .unwrap();
 
@@ -11467,6 +11669,242 @@ mod tests {
         );
         assert!(dir.join("0001-first.toml").exists());
         assert!(!dir.join("archived").join("0001-first.toml").exists());
+    }
+
+    // -----------------------------------------------------------------
+    // 0144: a task can close itself when its checks can run.
+    // -----------------------------------------------------------------
+
+    /// A scratch git repo (`git init` + one commit), isolated from this
+    /// checkout's own repository — `evaluate_task_close`'s declared checks
+    /// run against this, via an explicit `repo_root` param, never the real
+    /// dev repo (`task_checks.rs`'s own `runner_against_a_scratch_repo_...`
+    /// test is the precedent this mirrors). Returns the resolved commit sha
+    /// (never the literal ref `"HEAD"`) — the runner's scratch worktree
+    /// path is derived from the sha's own text, so two parallel tests
+    /// citing the literal `"HEAD"` would race on the identical path; a
+    /// unique file per repo keeps the resolved shas apart too.
+    fn scratch_git_repo() -> (camino::Utf8PathBuf, String) {
+        let dir = tasks_board_tempdir();
+        let run_git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.as_std_path())
+                .status()
+                .expect("git runs")
+        };
+        assert!(run_git(&["init", "-q"]).success());
+        assert!(run_git(&["config", "user.email", "t@example.com"]).success());
+        assert!(run_git(&["config", "user.name", "t"]).success());
+        std::fs::write(dir.join("f.txt").as_std_path(), format!("hello {dir}\n")).unwrap();
+        assert!(run_git(&["add", "."]).success());
+        assert!(run_git(&["commit", "-q", "-m", "init"]).success());
+        let sha = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir.as_std_path())
+            .output()
+            .expect("git runs");
+        let sha = String::from_utf8(sha.stdout).unwrap().trim().to_string();
+        (dir, sha)
+    }
+
+    fn write_task_toml_with_checks(
+        dir: &camino::Utf8Path,
+        file_name: &str,
+        key: &str,
+        auto_close: &str,
+        checks_toml: &str,
+    ) {
+        std::fs::write(
+            dir.join(file_name).as_std_path(),
+            format!(
+                "schema-version = \"0.2\"\nkey = \"{key}\"\ntitle = \"title {key}\"\nstatus = \"ready\"\nauto-close = \"{auto_close}\"\n{checks_toml}"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn select_task_row(state: &mut State, key: &str) {
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(k) if k == key))
+            .expect("task row visible");
+        state.list_tasks.set_selected(index);
+    }
+
+    fn insert_proposal(state: &mut State, key: &str, sha: &str) {
+        state.task_proposals.insert(
+            key.to_string(),
+            super::super::task_proposals::DoneProposal {
+                task_key: key.to_string(),
+                evidence: vec![super::super::task_proposals::MergedRunEvidence {
+                    run_id: "run-1".to_string(),
+                    sha: sha.to_string(),
+                }],
+            },
+        );
+    }
+
+    #[test]
+    fn open_task_mark_done_modal_in_self_closes_under_checked_policy_when_all_checks_pass() {
+        let board_dir = tasks_board_tempdir();
+        let (repo_root, sha) = scratch_git_repo();
+        write_task_toml_with_checks(
+            &board_dir,
+            "0001-first.toml",
+            "0001",
+            "checked",
+            "[[checks]]\nname = \"t\"\ncommand = \"true\"\n",
+        );
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &board_dir);
+        select_task_row(&mut state, "0001");
+        insert_proposal(&mut state, "0001", &sha);
+
+        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+
+        assert!(
+            !state.modal_host.is_open(),
+            "an all-pass checked-policy candidate must self-close, not open a modal"
+        );
+        let message = state.message.as_deref().unwrap_or("");
+        assert!(
+            message.contains("closed itself"),
+            "expected a self-close confirmation, got {message:?}"
+        );
+
+        let provider = FilesTaskBoard::open_read(board_dir.clone());
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(resolved.document.status, Some(TaskDocStatus::Done));
+        let closure = resolved.document.closure.expect("closure recorded");
+        assert_eq!(
+            closure.mode,
+            ctx_traits_core::task::AutoClosePolicy::Checked
+        );
+        assert_eq!(closure.checks.len(), 1);
+        assert_eq!(closure.checks[0].outcome, CheckOutcome::Passed);
+    }
+
+    #[test]
+    fn open_task_mark_done_modal_in_downgrades_to_a_modal_naming_the_failing_check_and_a_confirm_still_closes()
+     {
+        let board_dir = tasks_board_tempdir();
+        let (repo_root, sha) = scratch_git_repo();
+        write_task_toml_with_checks(
+            &board_dir,
+            "0001-first.toml",
+            "0001",
+            "checked",
+            "[[checks]]\nname = \"t\"\ncommand = \"false\"\n",
+        );
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &board_dir);
+        select_task_row(&mut state, "0001");
+        insert_proposal(&mut state, "0001", &sha);
+
+        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+
+        assert!(
+            state.modal_host.is_open(),
+            "a failing check under checked must downgrade to a modal, not refuse or self-close"
+        );
+        let Modal::Confirm { body, .. } = state.modal_host.modal().expect("modal open") else {
+            panic!("expected a confirm modal")
+        };
+        assert!(
+            body.contains("failed"),
+            "expected the failing check named in the modal body, got {body:?}"
+        );
+
+        // G1: the confirm keypress is the human authority — it must still
+        // close, recording the failing check, never refuse the write.
+        // `apply_task_mark_done_in` (not `apply_task_action`, which resolves
+        // the board dir via the real repository root) is the testable
+        // counterpart, same precedent as every other write test here.
+        let (tag, outcome) = state
+            .modal_host
+            .handle_key(&crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::NONE,
+            ))
+            .expect("confirm resolves the open modal");
+        assert_eq!(outcome, ModalOutcome::Confirmed);
+        let Action::Task(TaskAction::MarkDone {
+            key,
+            digest,
+            evidence,
+            closure,
+        }) = tag
+        else {
+            panic!("expected a mark-done task action")
+        };
+        apply_task_mark_done_in(&mut state, &board_dir, key, digest, evidence, closure).unwrap();
+
+        let provider = FilesTaskBoard::open_read(board_dir);
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(resolved.document.status, Some(TaskDocStatus::Done));
+        let closure = resolved
+            .document
+            .closure
+            .expect("closure recorded despite the failing check");
+        assert_eq!(closure.checks[0].outcome, CheckOutcome::Failed);
+    }
+
+    #[test]
+    fn open_task_mark_done_modal_in_self_closes_under_merge_policy_recording_unchecked() {
+        let board_dir = tasks_board_tempdir();
+        let (repo_root, sha) = scratch_git_repo();
+        write_task_toml_with_checks(&board_dir, "0001-first.toml", "0001", "merge", "");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &board_dir);
+        select_task_row(&mut state, "0001");
+        insert_proposal(&mut state, "0001", &sha);
+
+        open_task_mark_done_modal_in(&mut state, &board_dir, &repo_root);
+
+        assert!(
+            !state.modal_host.is_open(),
+            "merge policy closes on merge alone, no modal"
+        );
+        let provider = FilesTaskBoard::open_read(board_dir);
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(resolved.document.status, Some(TaskDocStatus::Done));
+        let closure = resolved.document.closure.expect("closure recorded");
+        assert_eq!(closure.mode, ctx_traits_core::task::AutoClosePolicy::Merge);
+        assert!(
+            closure.checks.is_empty(),
+            "no checks declared must record unchecked (empty), not a fabricated pass"
+        );
+    }
+
+    #[test]
+    fn spawn_modal_seed_names_declared_checks_as_a_leading_comment_block() {
+        let checks = vec![Check {
+            name: "unit tests".to_string(),
+            command: "cargo test".to_string(),
+            timeout_ms: None,
+            expect: None,
+        }];
+        let seed = spawn_modal_seed(Some("implement-quick"), &checks, "0063");
+        let mut lines = seed.lines();
+        let comment = lines.next().expect("comment line");
+        assert!(comment.starts_with('#'));
+        assert!(comment.contains("0144"));
+        let check_line = lines.next().expect("check line");
+        assert!(check_line.starts_with('#'));
+        assert!(check_line.contains("unit tests"));
+        assert!(check_line.contains("cargo test"));
+        let user_args: Vec<String> = seed
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            user_args,
+            vec!["implement-quick", "--task-dispatch", "--set", "task=0063"]
+        );
     }
 
     #[test]
