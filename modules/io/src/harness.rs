@@ -437,20 +437,31 @@ pub fn run(request: HarnessRunRequest) -> crate::Result<HarnessRunOutcome> {
                     path: spawn_failure_path(&argv),
                     source: std::io::Error::other("failed to open harness stdin"),
                 })?;
-        if let Err(source) = stdin
+        match stdin
             .write_all(request.prompt.as_bytes())
             .and_then(|()| stdin.flush())
         {
-            let _ = child.kill();
-            let _ = child.wait();
-            crate::run_kill::clear(pgid);
-            let _ = stdout_handle.join();
-            let _ = stderr_handle.join();
-            return Err(crate::environment::Error::Filesystem {
-                path: spawn_failure_path(&argv),
-                source,
+            Ok(()) => {}
+            // A broken pipe means the child closed stdin — usually because it
+            // already finished and exited, which is legitimate (a fast
+            // fixture, a CLI mode that never reads stdin). Its exit code and
+            // captured output judge the dispatch below; failing here killed a
+            // healthy child and flaked a full gate under load (2026-08-10,
+            // run-8eae68d4: proof_repo_qualifier's stub exited before the
+            // 156-byte prompt write landed).
+            Err(source) if source.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(source) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                crate::run_kill::clear(pgid);
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err(crate::environment::Error::Filesystem {
+                    path: spawn_failure_path(&argv),
+                    source,
+                }
+                .into());
             }
-            .into());
         }
     }
 
@@ -1363,6 +1374,34 @@ mod output_token_counter_tests {
         .expect("a small argv prompt dispatches directly");
         assert_eq!(outcome.stdout, "small prompt body");
         assert_eq!(outcome.prompt_delivery.as_deref(), Some("arg"));
+    }
+
+    /// A child that exits without ever reading stdin closes the pipe; the
+    /// prompt write then hits EPIPE. That is the child's prerogative — its
+    /// exit code and output judge the dispatch — so the runner must not kill
+    /// it or fail (2026-08-10, run-8eae68d4's gate flake). The oversized
+    /// prompt makes the EPIPE deterministic: `exit 0` closes stdin long
+    /// before a multi-hundred-KB write_all can complete.
+    #[test]
+    fn stdin_child_that_never_reads_the_prompt_still_dispatches() {
+        let outcome = super::run(HarnessRunRequest {
+            argv: vec!["sh".to_string(), "-c".to_string(), "echo done".to_string()],
+            env_overlay: BTreeMap::new(),
+            env_remove: Vec::new(),
+            prompt: "x".repeat(4 * 1024 * 1024),
+            prompt_delivery: PromptDelivery::Stdin,
+            timeout_ms: 10_000,
+            idle_timeout_ms: None,
+            capture_limit: 0,
+            stream: false,
+            stdout_observer: None,
+            tick_observer: None,
+            exec_dir: None,
+            sandbox: None,
+        })
+        .expect("a child closing stdin early must not fail the dispatch");
+        assert_eq!(outcome.exit_code, Some(0), "{}", outcome.stderr);
+        assert!(outcome.stdout.contains("done"));
     }
 
     #[test]
