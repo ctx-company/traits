@@ -418,7 +418,7 @@ const PASSTHROUGH_PREVIEW_CHARS: usize = 100;
 
 /// Wrap a raw model text delta as a one-line quoted preview for the passthrough
 /// panel: control characters collapsed to spaces, head-truncated with an ellipsis.
-fn quote_line(text: &str) -> String {
+pub(crate) fn quote_line(text: &str) -> String {
     let cleaned = clean_live_text(text);
     let trimmed = cleaned.trim();
     let preview: String = trimmed.chars().take(PASSTHROUGH_PREVIEW_CHARS).collect();

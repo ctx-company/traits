@@ -42,6 +42,17 @@ pub enum ActivityRecord {
     /// waiting out the first frame. Same doctrine as every sidecar record:
     /// derived evidence, never authority.
     SessionTitle { at_epoch_ms: u64, title: String },
+    /// P146: a resolved narrator summary, parked here the moment it exists
+    /// so a ledger-observing surface (the dashboard's attach) can show the
+    /// same words the live panel showed instead of re-deriving from raw
+    /// stream text. `frame_id` is the recorder's current frame at the
+    /// moment the narration resolved (see `record_narration`'s doc for the
+    /// async-attribution caveat). Derived evidence, never authority.
+    Narration {
+        at_epoch_ms: u64,
+        frame_id: String,
+        text: String,
+    },
 }
 
 impl ActivityRecord {
@@ -50,6 +61,7 @@ impl ActivityRecord {
             ActivityRecord::Activity { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::StepSummary { at_epoch_ms, .. } => *at_epoch_ms,
             ActivityRecord::SessionTitle { at_epoch_ms, .. } => *at_epoch_ms,
+            ActivityRecord::Narration { at_epoch_ms, .. } => *at_epoch_ms,
         }
     }
 }
@@ -128,6 +140,17 @@ impl ActivitySidecarWriter {
         self.append_line(&ActivityRecord::SessionTitle {
             at_epoch_ms: current_epoch_ms(),
             title,
+        });
+    }
+
+    /// Append a resolved narration line. Safe alongside the drive thread's
+    /// own writer under the same one-whole-line `O_APPEND` discipline as
+    /// `append_session_title`.
+    pub fn append_narration(&mut self, frame_id: String, text: String) {
+        self.append_line(&ActivityRecord::Narration {
+            at_epoch_ms: current_epoch_ms(),
+            frame_id,
+            text,
         });
     }
 }
@@ -268,6 +291,26 @@ mod tests {
         let (records, skipped) = read_activity(&ledger_path);
         assert_eq!(skipped, 0);
         assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn round_trips_narration_record_alongside_other_kinds() {
+        let dir = scratch_dir("narration");
+        let ledger_path = dir.join("session-fixture.json");
+        let mut writer = ActivitySidecarWriter::open(&ledger_path);
+        writer.append_activity(fixture_event(1));
+        writer.append_narration("frame-1".to_string(), "Reading the config file".to_string());
+        let (records, skipped) = read_activity(&ledger_path);
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 2);
+        assert!(matches!(records[0], ActivityRecord::Activity { .. }));
+        match &records[1] {
+            ActivityRecord::Narration { frame_id, text, .. } => {
+                assert_eq!(frame_id, "frame-1");
+                assert_eq!(text, "Reading the config file");
+            }
+            other => panic!("expected Narration record, got {other:?}"),
+        }
     }
 
     #[test]

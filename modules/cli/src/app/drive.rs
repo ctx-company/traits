@@ -451,6 +451,10 @@ struct ActivityRecorderState {
     events: Vec<ctx_traits_core::procedure::activity::ActivityEvent>,
     sink: Option<ctx_traits_io::activity_sidecar::ActivitySidecarWriter>,
     pending: Option<PendingCoalesce>,
+    /// The frame id of the most recently recorded event — stamped onto a
+    /// narration that resolves after it, since the narrator worker itself
+    /// carries no frame id (P146).
+    current_frame_id: String,
 }
 
 struct PendingCoalesce {
@@ -519,6 +523,20 @@ impl ActivityRecorder {
         }
     }
 
+    /// Persist a resolved narration, stamped with the current frame id — the
+    /// same words the live panel's narration pane shows, parked so the
+    /// attach observer can read them back (P146). A narration that resolves
+    /// after its frame has advanced gets attributed to the newer frame; see
+    /// the P146 draft's Risks for why that is accepted as-is.
+    fn record_narration(&self, text: &str) {
+        if let Ok(mut state) = self.inner.lock() {
+            let frame_id = state.current_frame_id.clone();
+            if let Some(sink) = state.sink.as_mut() {
+                sink.append_narration(frame_id, text.to_string());
+            }
+        }
+    }
+
     /// Flush any pending coalesced record for `frame_id` — called at frame
     /// completion so a frame's last thinking/output burst is never left
     /// unwritten until a later, unrelated frame's first event happens to
@@ -559,6 +577,7 @@ impl ActivityRecorder {
         };
         state.sequence += 1;
         event.sequence = state.sequence;
+        state.current_frame_id = event.frame_id.clone();
         state.events.push(event.clone());
         if state.sink.is_none() {
             return;
@@ -695,6 +714,27 @@ mod activity_recorder_tests {
         recorder.emit("frame-a", ActivityKind::Dispatching);
         let (records, _) = ctx_traits_io::activity_sidecar::read_activity(&ledger_path);
         assert_eq!(records.len(), 2);
+    }
+
+    #[test]
+    fn record_narration_stamps_the_most_recently_recorded_frame_id() {
+        let ledger_path = scratch_ledger_path("narration");
+        let recorder = ActivityRecorder::default();
+        recorder.attach_sink(
+            ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(&ledger_path),
+        );
+        recorder.emit("frame-a", ActivityKind::Dispatching);
+        recorder.emit("frame-b", ActivityKind::Dispatching);
+        recorder.record_narration("Reading the config file");
+        let (records, skipped) = ctx_traits_io::activity_sidecar::read_activity(&ledger_path);
+        assert_eq!(skipped, 0);
+        let ctx_traits_io::activity_sidecar::ActivityRecord::Narration { frame_id, text, .. } =
+            records.last().expect("narration record present")
+        else {
+            panic!("expected the last record to be a narration");
+        };
+        assert_eq!(frame_id, "frame-b");
+        assert_eq!(text, "Reading the config file");
     }
 }
 
@@ -8419,10 +8459,14 @@ fn live_harness_output(
         let step_summary_sink = panel.clone();
         let thinking_tokens_sink = panel.clone();
         let step_summary_activity = activity.clone();
+        let summary_activity = activity.clone();
         let stream_narrator = harness_stream::StreamNarrator::new(
             narrator,
             harness_stream::NarratorSinks {
-                summary: Arc::new(move |summary| sink.push_summary(summary)),
+                summary: Arc::new(move |summary| {
+                    summary_activity.record_narration(&summary);
+                    sink.push_summary(summary)
+                }),
                 tokens: Arc::new(move |tokens| tokens_sink.add_narrator_tokens(tokens)),
                 step_summary: Arc::new(
                     move |context: harness_stream::StepSummaryContext, summary: String| {

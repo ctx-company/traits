@@ -160,6 +160,20 @@ pub struct TimedStepSummary {
     pub text: String,
 }
 
+/// One persisted P146 narration line, parked by the drive's narrator summary
+/// sink the moment it resolves — the words the live panel's CURRENT pane
+/// showed. Story rendering does not consume this: it is carried purely so
+/// the CLI's observer projection can read narrations back through the same
+/// single tolerant `load_activity` read the story pipeline already does.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct TimedNarration {
+    pub at_epoch_ms: u64,
+    pub frame_id: String,
+    pub text: String,
+}
+
 /// The activity sidecar's contents, already read and parsed by the CLI/IO
 /// boundary — core does no IO, so `build` only ever receives this typed,
 /// already-tolerant-parsed value (or `None` when no sidecar was found).
@@ -169,6 +183,10 @@ pub struct TimedStepSummary {
 pub struct ActivityInput {
     pub events: Vec<TimedActivityEvent>,
     pub step_summaries: Vec<TimedStepSummary>,
+    /// P146 narration lines, carried through for the CLI's observer
+    /// projection; story rendering keeps ignoring them (it reads its own
+    /// sources — `events`/`step_summaries` above).
+    pub narrations: Vec<TimedNarration>,
     /// Trailing lines the sidecar reader could not parse (a truncated last
     /// line from a killed process) — reported so `Detailed`/`Assisted` can
     /// say so honestly rather than silently under-counting.
@@ -1054,6 +1072,7 @@ mod activity_enrichment_tests {
                 role: "agent:worker".to_string(),
                 text: "wrote a.rs".to_string(),
             }],
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
         let (summary, source, bullets) = enrich_from_activity(
@@ -1067,11 +1086,56 @@ mod activity_enrichment_tests {
         assert!(!bullets.is_empty());
     }
 
+    /// P146: `ActivityInput.narrations` is carried through for the CLI's
+    /// observer projection only — story rendering must keep ignoring it.
+    #[test]
+    fn narrations_do_not_change_enrich_from_activity_output() {
+        let base_activity = ActivityInput {
+            events: vec![timed_tool(
+                "step-a",
+                ActivityKind::RunningTool,
+                Some("path=/tmp/a.rs"),
+                Some("edit"),
+                None,
+            )],
+            step_summaries: vec![TimedStepSummary {
+                at_epoch_ms: 1,
+                key: "step-a".to_string(),
+                role: "agent:worker".to_string(),
+                text: "wrote a.rs".to_string(),
+            }],
+            narrations: Vec::new(),
+            skipped_lines: 0,
+        };
+        let narrated_activity = ActivityInput {
+            narrations: vec![TimedNarration {
+                at_epoch_ms: 1,
+                frame_id: "step-a".to_string(),
+                text: "Editing a.rs".to_string(),
+            }],
+            ..base_activity.clone()
+        };
+        let without_narrations = enrich_from_activity(
+            Some(&base_activity),
+            Some("step-a"),
+            Some("typed fallback"),
+            None,
+        );
+        let with_narrations = enrich_from_activity(
+            Some(&narrated_activity),
+            Some("step-a"),
+            Some("typed fallback"),
+            None,
+        );
+        assert_eq!(without_narrations, with_narrations);
+    }
+
     #[test]
     fn falls_back_to_typed_output_when_no_step_summary_recorded() {
         let activity = ActivityInput {
             events: Vec::new(),
             step_summaries: Vec::new(),
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
         let (summary, source, _) = enrich_from_activity(
@@ -1099,6 +1163,7 @@ mod activity_enrichment_tests {
                 timed("step-b", ActivityKind::RunningTool, Some("unrelated"), None),
             ],
             step_summaries: Vec::new(),
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
         let (summary, source, bullets) =
@@ -1130,6 +1195,7 @@ mod activity_enrichment_tests {
                 ),
             ],
             step_summaries: Vec::new(),
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
         let bullets = derive_bullets(&activity, "step-a", None);

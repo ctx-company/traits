@@ -215,6 +215,7 @@ pub(crate) fn load_activity(
     let (records, skipped_lines) = ctx_traits_io::activity_sidecar::read_activity(ledger_path);
     let mut events = Vec::new();
     let mut step_summaries = Vec::new();
+    let mut narrations = Vec::new();
     for record in records {
         match record {
             ctx_traits_io::activity_sidecar::ActivityRecord::Activity { at_epoch_ms, event } => {
@@ -239,11 +240,26 @@ pub(crate) fn load_activity(
             // The parked session title is a dashboard presentation record;
             // the story reads titles from the ledger's own provenance.
             ctx_traits_io::activity_sidecar::ActivityRecord::SessionTitle { .. } => {}
+            // Narrations are carried for the observer projection only;
+            // story rendering keeps ignoring them (it reads `events`/
+            // `step_summaries` above, per P146's scope).
+            ctx_traits_io::activity_sidecar::ActivityRecord::Narration {
+                at_epoch_ms,
+                frame_id,
+                text,
+            } => {
+                narrations.push(ctx_traits_core::procedure::story::TimedNarration {
+                    at_epoch_ms,
+                    frame_id,
+                    text,
+                });
+            }
         }
     }
     Some(ctx_traits_core::procedure::story::ActivityInput {
         events,
         step_summaries,
+        narrations,
         skipped_lines,
     })
 }

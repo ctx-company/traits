@@ -8932,11 +8932,16 @@ mod tests {
     }
 
     fn append_activity_event(ledger_path: &camino::Utf8Path, frame_id: &str, text: &str) {
+        // `StreamingOutput`, not `RunningTool`: P146 fallback rendering
+        // drops a `RunningTool` row's raw `text` (it is the adapter's raw
+        // tool-input JSON in production) and shows only the tool label, so
+        // a fixture asserting the sidecar's own text reaches the current
+        // pane needs a kind whose text is legitimately shown (quoted).
         ctx_traits_io::activity_sidecar::ActivitySidecarWriter::open(ledger_path).append_activity(
             ctx_traits_core::procedure::activity::ActivityEvent {
                 sequence: 0,
                 frame_id: frame_id.to_string(),
-                kind: ctx_traits_core::procedure::activity::ActivityKind::RunningTool,
+                kind: ctx_traits_core::procedure::activity::ActivityKind::StreamingOutput,
                 text: Some(text.to_string()),
                 tool: None,
                 tokens: None,

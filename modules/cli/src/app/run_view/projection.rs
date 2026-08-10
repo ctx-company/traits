@@ -621,16 +621,23 @@ pub(super) fn apply_ledger_seed(state: &mut RunPanelState, ledger_path: &camino:
     state.ledger_guide_tokens = seed.guide_tokens;
     state.step_summaries = seed.step_summaries;
     state.step_summary_at = seed.step_summary_at;
-    let current_rows = seed
+    let current_frame = seed
         .activity
         .as_ref()
-        .map(|activity| latest_frame_event_rows(activity, seed.started_at_epoch))
-        .unwrap_or_default();
-    state.current_stream = current_rows
+        .map(|activity| latest_frame_event_rows(activity, seed.started_at_epoch));
+    let narrated = current_frame.as_ref().is_some_and(|frame| frame.narrated);
+    let row_kind = if narrated {
+        StreamRowKind::Narration
+    } else {
+        StreamRowKind::ModelText
+    };
+    state.current_stream = current_frame
+        .map(|frame| frame.rows)
+        .unwrap_or_default()
         .into_iter()
         .map(|row| StreamRow {
             at: row.at.unwrap_or_default(),
-            kind: StreamRowKind::ModelText,
+            kind: row_kind,
             text: row.tail,
         })
         .collect();
@@ -870,7 +877,7 @@ fn current_and_degraded(
 ) -> (Vec<EventRow>, Option<String>) {
     let current = activity
         .as_ref()
-        .map(|activity| latest_frame_event_rows(activity, started_at_epoch))
+        .map(|activity| latest_frame_event_rows(activity, started_at_epoch).rows)
         .unwrap_or_default();
     let degraded = match activity {
         None => Some("no activity was recorded for this run".to_string()),
@@ -910,40 +917,90 @@ pub(super) fn sidecar_step_summary_maps(
     (summaries, at)
 }
 
-/// P552 attached CURRENT-activity source (item 8 of the implementation
-/// draft): the most recently observed frame's own events, in order — not
-/// every event ever recorded, and never a debug-trace tail.
+/// P146: whether [`latest_frame_event_rows`] found parked narrations for the
+/// latest frame — the observer's `apply_ledger_seed` needs this to know
+/// whether to paint `current_stream` rows as `StreamRowKind::Narration`
+/// (same words the live panel showed) or `ModelText` (the quoted fallback).
+pub(super) struct LatestFrameRows {
+    pub(super) rows: Vec<EventRow>,
+    pub(super) narrated: bool,
+}
+
+/// P552/P146 attached CURRENT-activity source: the most recently observed
+/// frame's rows, in order — not every event ever recorded, and never a
+/// debug-trace tail. Prefers parked narrations for that frame (P146: the
+/// same words the live panel's narration pane showed); falls back to the
+/// frame's raw events, quoted, when no narration was parked (older
+/// sessions, narrator disabled) — never the adapter's raw tool-input JSON.
 pub(super) fn latest_frame_event_rows(
     activity: &ctx_traits_core::procedure::story::ActivityInput,
     started_at_epoch: Option<u64>,
-) -> Vec<EventRow> {
+) -> LatestFrameRows {
     let Some(latest_frame_id) = activity
         .events
         .last()
         .map(|event| event.event.frame_id.clone())
     else {
-        return Vec::new();
+        return LatestFrameRows {
+            rows: Vec::new(),
+            narrated: false,
+        };
     };
-    activity
+    let narration_rows: Vec<EventRow> = activity
+        .narrations
+        .iter()
+        .filter(|narration| narration.frame_id == latest_frame_id)
+        .map(|narration| {
+            EventRow::new(
+                (narration.at_epoch_ms > 0)
+                    .then(|| epoch_ms_to_duration(started_at_epoch, narration.at_epoch_ms)),
+                narration.text.clone(),
+                tui::Tone::Default,
+            )
+        })
+        .collect();
+    if !narration_rows.is_empty() {
+        return LatestFrameRows {
+            rows: narration_rows,
+            narrated: true,
+        };
+    }
+    let rows = activity
         .events
         .iter()
         .filter(|event| event.event.frame_id == latest_frame_id)
         .map(|event| {
             EventRow::new(
                 Some(epoch_ms_to_duration(started_at_epoch, event.at_epoch_ms)),
-                activity_event_tail(&event.event),
+                activity_event_fallback_tail(&event.event),
                 activity_event_tone(&event.event.kind),
             )
         })
-        .collect()
+        .collect();
+    LatestFrameRows {
+        rows,
+        narrated: false,
+    }
 }
 
-fn activity_event_tail(event: &ActivityEvent) -> String {
-    event
-        .text
-        .clone()
-        .or_else(|| event.tool.clone())
-        .unwrap_or_else(|| activity_kind_label(&event.kind).to_string())
+/// The no-narration fallback tail for a raw activity event: `StreamingOutput`/
+/// `Thinking` quote the agent's own message text (never rendered raw); a
+/// `RunningTool` row shows only the tool label, dropping its raw tool-input
+/// JSON `text`; every other kind keeps its kind label. House ruling: quoted
+/// agent text or a label, never raw stream JSON.
+fn activity_event_fallback_tail(event: &ActivityEvent) -> String {
+    match event.kind {
+        ActivityKind::StreamingOutput | ActivityKind::Thinking => event
+            .text
+            .as_deref()
+            .map(tui::quote_line)
+            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
+        ActivityKind::RunningTool => event
+            .tool
+            .clone()
+            .unwrap_or_else(|| activity_kind_label(&event.kind).to_string()),
+        _ => activity_kind_label(&event.kind).to_string(),
+    }
 }
 
 fn activity_kind_label(kind: &ActivityKind) -> &'static str {
@@ -1897,16 +1954,76 @@ mod tests {
         let activity = ctx_traits_core::procedure::story::ActivityInput {
             events: vec![ctx_traits_core::procedure::story::TimedActivityEvent {
                 at_epoch_ms: 0,
-                event: activity_event("frame", ActivityKind::RunningTool, Some("working")),
+                event: activity_event("frame", ActivityKind::StreamingOutput, Some("working")),
             }],
             step_summaries: Vec::new(),
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
-        let rows = latest_frame_event_rows(&activity, None);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].at, Some(Duration::ZERO));
-        let rendered = line_text(&event_row_line(&rows[0], 80));
-        assert!(rendered.starts_with(&format!("00:00:00{EVENT_PREFIX_SEP}working")));
+        let frame = latest_frame_event_rows(&activity, None);
+        assert!(!frame.narrated);
+        assert_eq!(frame.rows.len(), 1);
+        assert_eq!(frame.rows[0].at, Some(Duration::ZERO));
+        let rendered = line_text(&event_row_line(&frame.rows[0], 80));
+        assert!(rendered.starts_with(&format!("00:00:00{EVENT_PREFIX_SEP}\"working\"")));
+    }
+
+    #[test]
+    fn latest_frame_prefers_parked_narrations_over_raw_events() {
+        let activity = ctx_traits_core::procedure::story::ActivityInput {
+            events: vec![ctx_traits_core::procedure::story::TimedActivityEvent {
+                at_epoch_ms: 0,
+                event: activity_event("frame", ActivityKind::RunningTool, Some("{\"path\":\"a\"}")),
+            }],
+            step_summaries: Vec::new(),
+            narrations: vec![
+                ctx_traits_core::procedure::story::TimedNarration {
+                    at_epoch_ms: 1,
+                    frame_id: "frame".to_string(),
+                    text: "Reading a.rs".to_string(),
+                },
+                ctx_traits_core::procedure::story::TimedNarration {
+                    at_epoch_ms: 2,
+                    frame_id: "frame".to_string(),
+                    text: "Editing a.rs".to_string(),
+                },
+            ],
+            skipped_lines: 0,
+        };
+        let frame = latest_frame_event_rows(&activity, None);
+        assert!(frame.narrated);
+        assert_eq!(frame.rows.len(), 2);
+        assert_eq!(frame.rows[0].tail, "Reading a.rs");
+        assert_eq!(frame.rows[1].tail, "Editing a.rs");
+        for row in &frame.rows {
+            assert!(!row.tail.contains("path"));
+        }
+    }
+
+    #[test]
+    fn latest_frame_fallback_never_shows_raw_tool_json() {
+        let activity = ctx_traits_core::procedure::story::ActivityInput {
+            events: vec![ctx_traits_core::procedure::story::TimedActivityEvent {
+                at_epoch_ms: 0,
+                event: {
+                    let mut event = activity_event(
+                        "frame",
+                        ActivityKind::RunningTool,
+                        Some("{\"path\":\"a\"}"),
+                    );
+                    event.tool = Some("edit".to_string());
+                    event
+                },
+            }],
+            step_summaries: Vec::new(),
+            narrations: Vec::new(),
+            skipped_lines: 0,
+        };
+        let frame = latest_frame_event_rows(&activity, None);
+        assert!(!frame.narrated);
+        assert_eq!(frame.rows.len(), 1);
+        assert_eq!(frame.rows[0].tail, "edit");
+        assert!(!frame.rows[0].tail.contains("path"));
     }
 
     #[test]
@@ -1919,6 +2036,7 @@ mod tests {
                 role: "worker".to_string(),
                 text: "completed".to_string(),
             }],
+            narrations: Vec::new(),
             skipped_lines: 0,
         };
         let (summaries, summary_at) = sidecar_step_summary_maps(&activity, None);
