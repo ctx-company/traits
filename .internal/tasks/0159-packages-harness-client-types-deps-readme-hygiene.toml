@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0159"
+title = "packages/harness-client: purge 14 src unknown mentions, deps, README already lean"
+status = "ready"
+raised = "2026-08-10"
+content = """
+
+
+Pre-release CDK-surface hygiene (owner directive 2026-08-10, one task per
+package under packages/): eliminate `unknown`/`any`, update dependencies to
+newest versions, keep every gate green, and trim READMEs to the lean CDK
+model.
+
+Package state, measured at filing: src carries 14 `unknown` mentions (grep 2026-08-10) to replace with precise types; tests measured clean.
+
+"""
+scope = """
+## Decisions
+
+- **Types**: replace every `unknown`/`any` in src/ and test/ with precise
+  types. Type-level prose in comments does not count; type positions do. A
+  cast that provably cannot be expressed stays only with an
+  `audited-unknown-cast` marker + justification comment, and the work summary
+  counts the survivors.
+- **Dependencies**: bump package.json deps/devDeps to newest published
+  versions (workspace-internal deps stay workspace:*); update the lockfile
+  once at the root (`pnpm install`); note any major-version bump that forced
+  a code change.
+- **Gates**: `just ts-typecheck`, `just ts-lint`, `just ts-test`,
+  `just ts-format-check` all green — plus the full `just test-full` before
+  merge (the landing gate runs it anyway).
+- **README**: README.md is 22 lines — already near the model; only touch if trimming further. Model: packages/cdk/README.md — one-paragraph purpose,
+  Install, Source; no architecture essays (those live in code comments and
+  the docs tree).
+
+"""
+validation = """
+## Watch
+
+- No behavior changes ride along: this is types/deps/docs only. If a dep bump
+  forces an API change, keep the adaptation minimal and name it.
+- Do not touch generated.ts type surfaces by hand where they are emitted by
+  sdk-generate — regenerate instead (`just sdk-generate`) if the fix belongs
+  in the generator.
+- The 2026-08-08 test ruling stands: no new pattern-scan tests to enforce
+  this; the grep evidence lives in the work summary, not in a frozen proof.
+
+## Done when
+
+`grep -rn "\bunknown\b" packages/harness-client/src packages/harness-client/test` (excluding
+audited-cast lines and comment prose) reports zero type-position hits and the
+summary proves it; `any` likewise; deps are current with the lockfile
+updated; all four TS gates and `just test-full` green; README matches the
+lean model.
+"""
