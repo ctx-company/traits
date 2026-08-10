@@ -73,6 +73,11 @@ fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
     w(format!("    completed: {}", report.outcomes.completed))?;
     w(format!("    blocked: {}", report.outcomes.blocked))?;
     w(format!(
+        "    exhausted-unapproved: {}",
+        report.outcomes.exhausted_unapproved
+    ))?;
+    w(format!("    killed: {}", report.outcomes.killed))?;
+    w(format!(
         "    no-outcome-recorded: {}",
         report.outcomes.no_outcome_recorded
     ))?;
@@ -80,6 +85,24 @@ fn emit_plain_stats(report: &StatsReport) -> crate::Result<()> {
     for OutcomeValueCount { value, runs } in &report.outcomes.other_values {
         w(format!("      {value}: {runs}"))?;
     }
+    w(
+        "  refinement-rounds-to-approval (completed runs only, name-pattern heuristic over accepted `-verdict` slots):",
+    )?;
+    w(format!(
+        "    average-rounds: {}",
+        report
+            .refinement_rounds
+            .average_rounds
+            .map_or("none".to_string(), |value| format!("{value:.2}"))
+    ))?;
+    w(format!(
+        "    completed-runs-observed: {}",
+        report.refinement_rounds.completed_runs_observed
+    ))?;
+    w(format!(
+        "    completed-runs-missing: {}",
+        report.refinement_rounds.completed_runs_missing
+    ))?;
     w("  token-evidence (latest-drive evidence, not cumulative):")?;
     w(format!(
         "    work-tokens-total: {} (observed {} run(s), missing {} run(s))",

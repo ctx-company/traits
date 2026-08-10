@@ -6,28 +6,36 @@
 //! [`Session`](crate::procedure::session::Session) plus each unreadable
 //! ledger's count in here for deterministic counting.
 //!
-//! Outcome classification prefers the session's typed [`Status`] over the
-//! free-form `last-drive-outcome.outcome` string wherever the typed value is
-//! unambiguous: `Status::Completed` always counts as `completed`, and the
-//! two unassignment/permission blocked variants (`BlockedAgentUnassigned`,
-//! `BlockedCommandPermissionRequired`) always count as `blocked`, regardless
-//! of what (if anything) the latest drive outcome recorded. `Status::Blocked`
-//! whose recorded [`StopReason`] is the loop runtime's own
-//! `max-iterations-exhausted` token is deliberately NOT counted as `blocked`:
-//! a bounded loop that spent its iteration budget without matching `until`
-//! is exhaustion, not a hard block, and the ledger schema has no typed
-//! marker distinguishing a genuinely unapproved exhaustion from one that
-//! later completed by another route — so that case falls through to the raw
-//! `outcome` string like any other ambiguous status. Every other status
-//! (including plain `Status::Blocked` with any other or no stop reason)
-//! falls back to the raw `outcome` string: `None` is `no-outcome-recorded`,
-//! `"completed"`/`"blocked"` are their buckets, and anything else —
-//! including exhaustion, kill, or other free-form values the ledger schema
-//! does not type — is preserved verbatim in the sorted `other` breakdown
-//! rather than coerced into an invented bucket such as
-//! `exhausted-unapproved` or `killed`. Token totals sum only the evidence
-//! present in the latest recorded `token_usage` per run; they are latest-
-//! drive evidence, not cumulative lifetime usage.
+//! Outcome classification prefers the session's typed [`Status`] and typed
+//! [`DriveOutcomeKind`] over the free-form `last-drive-outcome.outcome`
+//! string wherever a typed value is unambiguous: `Status::Completed` always
+//! counts as `completed`, and the two unassignment/permission blocked
+//! variants (`BlockedAgentUnassigned`, `BlockedCommandPermissionRequired`)
+//! always count as `blocked`, regardless of what (if anything) the latest
+//! drive outcome recorded. `Status::Blocked` whose recorded [`StopReason`]
+//! is the loop runtime's own `max-iterations-exhausted` token counts as
+//! `exhausted-unapproved`: a bounded loop that spent its iteration budget
+//! without matching `until` and is still terminally blocked is exhaustion
+//! that was never approved, distinct from a hard block. A loop that
+//! exhausts under `on-exhausted = "continue"` and later completes reads as
+//! `Status::Completed`, not this bucket — only a terminal blocked exhaustion
+//! counts. Every other non-completed, non-blocked status checks the typed
+//! `DriveOutcomeKind::Killed` marker (P551's live-TUI kill) and counts it as
+//! `killed` before falling back to the raw `outcome` string: `None` is
+//! `no-outcome-recorded`, `"completed"`/`"blocked"` are their buckets, and
+//! anything else — including `max-frames-exhausted`,
+//! `total-budget-exhausted`, or other free-form values the ledger schema
+//! does not type into one of the above — is preserved verbatim in the
+//! sorted `other` breakdown rather than coerced into an invented bucket.
+//! Token totals sum only the evidence present in the latest recorded
+//! `token_usage` per run; they are latest-drive evidence, not cumulative
+//! lifetime usage. Average refinement rounds to approval is derived, not
+//! separately persisted telemetry: for each completed run it is the highest
+//! per-slot revision count among accepted slots whose reference ends in
+//! `-verdict` (the P449 `guardedProduction` kit's one-revision-per-round
+//! convention) — a name-pattern heuristic, not a typed round counter, so a
+//! completed run with no such slot reads as missing coverage rather than
+//! zero rounds.
 
 use std::collections::BTreeMap;
 
@@ -35,8 +43,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::digest::Digest;
-use crate::procedure::runtime::StopReason;
-use crate::procedure::session::{Session, Status};
+use crate::procedure::runtime::{SlotRevision, StopReason};
+use crate::procedure::session::{DriveOutcomeKind, Session, Status};
 
 /// The loop runtime's own stop-reason token for iteration-budget exhaustion
 /// (`modules/core/src/procedure/runtime/state.rs`'s
@@ -44,7 +52,11 @@ use crate::procedure::session::{Session, Status};
 /// here rather than widening that module's visibility for one string).
 const STOP_MAX_ITERATIONS_EXHAUSTED: &str = "max-iterations-exhausted";
 
-pub const STATS_SCHEMA_VERSION: &str = "1";
+/// Suffix identifying an accepted slot as a review-verdict slot for the
+/// refinement-rounds heuristic (see module doc).
+const VERDICT_SLOT_SUFFIX: &str = "-verdict";
+
+pub const STATS_SCHEMA_VERSION: &str = "2";
 
 /// One readable ledger's evidence, extracted by the IO boundary from a
 /// loaded [`Session`] before calling [`aggregate`]. Kept minimal and owned
@@ -55,11 +67,16 @@ pub struct RunRecord {
     pub canonical_digest: Option<Digest>,
     pub status: Status,
     pub stop_reason: Option<StopReason>,
+    pub drive_outcome_kind: Option<DriveOutcomeKind>,
     pub outcome: Option<String>,
     pub recorded_at_epoch: Option<u64>,
     pub work_tokens: Option<u64>,
     pub narrator_tokens: Option<u64>,
     pub guide_tokens: Option<u64>,
+    /// Highest per-slot revision count among accepted `-verdict`-suffixed
+    /// slots, or `None` when no such slot has a recorded revision. See the
+    /// module doc's refinement-rounds heuristic.
+    pub verdict_rounds: Option<u64>,
 }
 
 impl RunRecord {
@@ -71,21 +88,42 @@ impl RunRecord {
             canonical_digest: session.canonical_digest.clone(),
             status: session.status.clone(),
             stop_reason: session.stop_reason.clone(),
+            drive_outcome_kind: last_drive_outcome.map(|outcome| outcome.outcome.clone()),
             outcome: last_drive_outcome.map(|outcome| outcome.outcome.as_str().to_string()),
             recorded_at_epoch: last_drive_outcome.map(|outcome| outcome.recorded_at_epoch),
             work_tokens: token_usage.and_then(|usage| usage.work_tokens),
             narrator_tokens: token_usage.and_then(|usage| usage.narrator_tokens),
             guide_tokens: token_usage.and_then(|usage| usage.guide_tokens),
+            verdict_rounds: verdict_slot_rounds(&session.slot_revisions),
         }
     }
 }
 
+/// Highest per-slot revision count among `slot_revisions` whose slot
+/// reference ends in [`VERDICT_SLOT_SUFFIX`], across every loop that wrote
+/// one. `None` when no revision matches (missing coverage, not zero
+/// rounds).
+fn verdict_slot_rounds(slot_revisions: &[SlotRevision]) -> Option<u64> {
+    let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
+    for revision in slot_revisions {
+        let slot_text = revision.slot_ref.as_str();
+        if slot_text.ends_with(VERDICT_SLOT_SUFFIX) {
+            *counts.entry(slot_text).or_insert(0) += 1;
+        }
+    }
+    counts.into_values().max()
+}
+
 /// Which outcome bucket a record belongs in, per the precedence documented
 /// on this module: the typed [`Status`] wins when it unambiguously means
-/// completed or blocked; otherwise the raw `outcome` string decides.
+/// completed, blocked, or exhausted-unapproved; then the typed
+/// [`DriveOutcomeKind::Killed`] marker; otherwise the raw `outcome` string
+/// decides.
 enum OutcomeBucket {
     Completed,
     Blocked,
+    ExhaustedUnapproved,
+    Killed,
     NoOutcomeRecorded,
     Other(String),
 }
@@ -101,7 +139,11 @@ fn classify_outcome(record: &RunRecord) -> OutcomeBucket {
         Status::BlockedAgentUnassigned | Status::BlockedCommandPermissionRequired => {
             OutcomeBucket::Blocked
         }
-        Status::Blocked if !is_exhausted_block => OutcomeBucket::Blocked,
+        Status::Blocked if is_exhausted_block => OutcomeBucket::ExhaustedUnapproved,
+        Status::Blocked => OutcomeBucket::Blocked,
+        _ if matches!(record.drive_outcome_kind, Some(DriveOutcomeKind::Killed)) => {
+            OutcomeBucket::Killed
+        }
         _ => match record.outcome.as_deref() {
             None => OutcomeBucket::NoOutcomeRecorded,
             Some("completed") => OutcomeBucket::Completed,
@@ -152,7 +194,7 @@ fn accumulate_token_evidence<'a>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename_all = "kebab-case")]
 pub struct StatsReport {
@@ -168,6 +210,7 @@ pub struct StatsReport {
     pub matched_runs: u64,
     pub outcomes: OutcomeCounts,
     pub token_evidence: TokenEvidence,
+    pub refinement_rounds: RefinementRoundsEvidence,
     pub traits: Vec<TraitRow>,
 }
 
@@ -177,12 +220,28 @@ pub struct StatsReport {
 pub struct OutcomeCounts {
     pub completed: u64,
     pub blocked: u64,
+    pub exhausted_unapproved: u64,
+    pub killed: u64,
     pub no_outcome_recorded: u64,
     pub other: u64,
     /// Every non-empty, non-`completed`/`blocked` `outcome` value actually
     /// observed among matched runs, with its exact count, sorted by value.
     /// Preserves the `other` total losslessly rather than collapsing it.
     pub other_values: Vec<OutcomeValueCount>,
+}
+
+/// Average refinement rounds to approval, derived from
+/// [`RunRecord::verdict_rounds`] and averaged only over `Completed` matched
+/// runs (see the module doc's heuristic). `average_rounds` is `None` when no
+/// completed run carries verdict-slot evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct RefinementRoundsEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average_rounds: Option<f64>,
+    pub completed_runs_observed: u64,
+    pub completed_runs_missing: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -268,12 +327,29 @@ pub fn aggregate(
 
     let mut completed = 0u64;
     let mut blocked = 0u64;
+    let mut exhausted_unapproved = 0u64;
+    let mut killed = 0u64;
     let mut no_outcome_recorded = 0u64;
     let mut other_counts: BTreeMap<String, u64> = BTreeMap::new();
+    let mut refinement_rounds_total = 0u64;
+    let mut completed_runs_observed = 0u64;
+    let mut completed_runs_missing = 0u64;
     for record in &matched {
-        match classify_outcome(record) {
+        let bucket = classify_outcome(record);
+        if matches!(bucket, OutcomeBucket::Completed) {
+            match record.verdict_rounds {
+                Some(rounds) => {
+                    refinement_rounds_total += rounds;
+                    completed_runs_observed += 1;
+                }
+                None => completed_runs_missing += 1,
+            }
+        }
+        match bucket {
             OutcomeBucket::Completed => completed += 1,
             OutcomeBucket::Blocked => blocked += 1,
+            OutcomeBucket::ExhaustedUnapproved => exhausted_unapproved += 1,
+            OutcomeBucket::Killed => killed += 1,
             OutcomeBucket::NoOutcomeRecorded => no_outcome_recorded += 1,
             OutcomeBucket::Other(value) => *other_counts.entry(value).or_insert(0) += 1,
         }
@@ -283,6 +359,12 @@ pub fn aggregate(
         .into_iter()
         .map(|(value, runs)| OutcomeValueCount { value, runs })
         .collect();
+    let refinement_rounds = RefinementRoundsEvidence {
+        average_rounds: (completed_runs_observed > 0)
+            .then(|| refinement_rounds_total as f64 / completed_runs_observed as f64),
+        completed_runs_observed,
+        completed_runs_missing,
+    };
 
     let token_evidence = accumulate_token_evidence(matched.iter().copied());
 
@@ -331,11 +413,260 @@ pub fn aggregate(
         outcomes: OutcomeCounts {
             completed,
             blocked,
+            exhausted_unapproved,
+            killed,
             no_outcome_recorded,
             other,
             other_values,
         },
         token_evidence,
+        refinement_rounds,
         traits,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reference::{Kind, Reference};
+
+    fn record(
+        trait_id: &str,
+        status: Status,
+        stop_reason: Option<&str>,
+        drive_outcome_kind: Option<DriveOutcomeKind>,
+        outcome: Option<&str>,
+        recorded_at_epoch: Option<u64>,
+        verdict_rounds: Option<u64>,
+    ) -> RunRecord {
+        RunRecord {
+            trait_id: trait_id.to_string(),
+            canonical_digest: None,
+            status,
+            stop_reason: stop_reason.map(|reason| StopReason {
+                reason: reason.to_string(),
+                at: Vec::new(),
+                last_check: None,
+            }),
+            drive_outcome_kind,
+            outcome: outcome.map(str::to_string),
+            recorded_at_epoch,
+            work_tokens: None,
+            narrator_tokens: None,
+            guide_tokens: None,
+            verdict_rounds,
+        }
+    }
+
+    fn verdict_revision(slot_id: &str) -> SlotRevision {
+        SlotRevision {
+            slot_ref: Reference::local(Kind::Slot, slot_id).expect("valid slot ref"),
+            value_digest: Digest::source(slot_id),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: None,
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        }
+    }
+
+    #[test]
+    fn empty_input_is_a_clean_zero_report() {
+        let report = aggregate(&[], 0, 0, None, None);
+        assert_eq!(report.schema_version, STATS_SCHEMA_VERSION);
+        assert_eq!(report.total_runs, 0);
+        assert_eq!(report.unreadable_runs, 0);
+        assert_eq!(report.matched_runs, 0);
+        assert_eq!(report.outcomes.completed, 0);
+        assert_eq!(report.outcomes.killed, 0);
+        assert_eq!(report.outcomes.exhausted_unapproved, 0);
+        assert_eq!(report.refinement_rounds.average_rounds, None);
+        assert!(report.traits.is_empty());
+    }
+
+    #[test]
+    fn outcome_bucket_precedence_hand_counted() {
+        let records = vec![
+            // Status::Completed always wins, regardless of outcome string.
+            record(
+                "t",
+                Status::Completed,
+                None,
+                None,
+                Some("interrupted"),
+                Some(1),
+                Some(2),
+            ),
+            // Typed unassignment/permission-blocked statuses are `blocked`.
+            record(
+                "t",
+                Status::BlockedAgentUnassigned,
+                None,
+                None,
+                None,
+                Some(1),
+                None,
+            ),
+            // Status::Blocked with the loop runtime's own exhaustion stop
+            // reason is `exhausted-unapproved`, not `blocked`.
+            record(
+                "t",
+                Status::Blocked,
+                Some("max-iterations-exhausted"),
+                None,
+                None,
+                Some(1),
+                None,
+            ),
+            // Status::Blocked with any other stop reason stays `blocked`.
+            record(
+                "t",
+                Status::Blocked,
+                Some("some-other-reason"),
+                None,
+                None,
+                Some(1),
+                None,
+            ),
+            // A typed Killed drive outcome kind counts as `killed` even
+            // though the raw outcome string also says "killed".
+            record(
+                "t",
+                Status::AwaitingAgentOutput,
+                None,
+                Some(DriveOutcomeKind::Killed),
+                Some("killed"),
+                Some(1),
+                None,
+            ),
+            // No recorded drive outcome at all.
+            record(
+                "t",
+                Status::AwaitingAgentOutput,
+                None,
+                None,
+                None,
+                Some(1),
+                None,
+            ),
+            // An untyped, non-completed/blocked outcome string is preserved
+            // verbatim in `other`, never coerced into an invented bucket.
+            record(
+                "t",
+                Status::Failed,
+                None,
+                None,
+                Some("max-frames-exhausted"),
+                Some(1),
+                None,
+            ),
+        ];
+        let report = aggregate(&records, 7, 0, None, None);
+        assert_eq!(report.outcomes.completed, 1);
+        assert_eq!(report.outcomes.blocked, 2);
+        assert_eq!(report.outcomes.exhausted_unapproved, 1);
+        assert_eq!(report.outcomes.killed, 1);
+        assert_eq!(report.outcomes.no_outcome_recorded, 1);
+        assert_eq!(report.outcomes.other, 1);
+        assert_eq!(
+            report.outcomes.other_values,
+            vec![OutcomeValueCount {
+                value: "max-frames-exhausted".to_string(),
+                runs: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn since_and_trait_filters_compose() {
+        let records = vec![
+            record(
+                "alpha",
+                Status::Completed,
+                None,
+                None,
+                None,
+                Some(100),
+                None,
+            ),
+            record("alpha", Status::Completed, None, None, None, Some(50), None),
+            record("beta", Status::Completed, None, None, None, Some(100), None),
+        ];
+        let report = aggregate(&records, 3, 0, Some(100), Some("alpha"));
+        assert_eq!(report.trait_matched_runs, 2);
+        assert_eq!(report.matched_runs, 1);
+        assert_eq!(report.outcomes.completed, 1);
+        assert_eq!(report.traits.len(), 1);
+        assert_eq!(report.traits[0].trait_id, "alpha");
+        assert_eq!(report.traits[0].runs, 1);
+    }
+
+    #[test]
+    fn timestamp_missing_runs_are_counted_but_excluded_from_since_matches() {
+        let records = vec![
+            record("t", Status::Completed, None, None, None, None, None),
+            record("t", Status::Completed, None, None, None, Some(10), None),
+        ];
+        let report = aggregate(&records, 2, 0, Some(0), None);
+        assert_eq!(report.trait_matched_runs, 2);
+        assert_eq!(report.timestamp_missing_runs, 1);
+        assert_eq!(report.matched_runs, 1);
+    }
+
+    #[test]
+    fn refinement_rounds_average_over_completed_runs_with_missing_coverage() {
+        let records = vec![
+            record("t", Status::Completed, None, None, None, Some(1), Some(3)),
+            record("t", Status::Completed, None, None, None, Some(1), Some(1)),
+            // Completed but no verdict-slot evidence: missing, not zero.
+            record("t", Status::Completed, None, None, None, Some(1), None),
+            // Not completed: never counted toward the average either way.
+            record(
+                "t",
+                Status::Blocked,
+                Some("some-other-reason"),
+                None,
+                None,
+                Some(1),
+                Some(5),
+            ),
+        ];
+        let report = aggregate(&records, 4, 0, None, None);
+        assert_eq!(report.refinement_rounds.completed_runs_observed, 2);
+        assert_eq!(report.refinement_rounds.completed_runs_missing, 1);
+        assert_eq!(report.refinement_rounds.average_rounds, Some(2.0));
+    }
+
+    #[test]
+    fn verdict_slot_rounds_takes_the_max_revision_count_across_loops_and_ignores_non_verdict_slots()
+    {
+        let revisions = vec![
+            verdict_revision("review-a-verdict"),
+            verdict_revision("review-a-verdict"),
+            verdict_revision("review-b-verdict"),
+            verdict_revision("review-a-verdict"),
+            verdict_revision("draft"),
+        ];
+        assert_eq!(verdict_slot_rounds(&revisions), Some(3));
+        assert_eq!(verdict_slot_rounds(&[verdict_revision("draft")]), None);
+        assert_eq!(verdict_slot_rounds(&[]), None);
+    }
+
+    #[test]
+    fn unreadable_runs_pass_through_total_and_unreadable_counts_untouched() {
+        let report = aggregate(&[], 5, 3, None, None);
+        assert_eq!(report.total_runs, 5);
+        assert_eq!(report.unreadable_runs, 3);
+        assert_eq!(report.trait_matched_runs, 0);
+        assert_eq!(report.matched_runs, 0);
     }
 }
