@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0117"
 title = "Subscription pressure is a run signal, not a surprise"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-10"
+origin = "behavior landed by 22cad8dc (2026-08-09); this run is an audit-and-close pass verifying all Done-when/Watch clauses against the working tree, no code changes required"
 content = """
 
 
