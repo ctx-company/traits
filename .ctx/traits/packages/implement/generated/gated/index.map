@@ -141,13 +141,18 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-commit": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 280,
-    "end": 280
+    "start": 287,
+    "end": 287
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-stage": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 273,
-    "end": 273
+    "start": 277,
+    "end": 277
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/git-unstage-runtime": {
+    "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
+    "start": 282,
+    "end": 282
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/lift-brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
@@ -251,8 +256,8 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
-    "start": 89,
-    "end": 89
+    "start": 93,
+    "end": 93
   },
   "slot:draft": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
@@ -314,6 +319,11 @@
     "start": 85,
     "end": 85
   },
+  "slot:unstage-output": {
+    "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
+    "start": 89,
+    "end": 89
+  },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
     "start": 25,
@@ -321,7 +331,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/gated.ts",
-    "start": 290,
-    "end": 290
+    "start": 297,
+    "end": 297
   }
 }

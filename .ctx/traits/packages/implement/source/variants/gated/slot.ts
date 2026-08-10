@@ -86,6 +86,10 @@ export const stageOutput = slot.text({
     id: "stage-output",
     description: "Output evidence from the git staging command step.",
 });
+export const unstageOutput = slot.text({
+    id: "unstage-output",
+    description: "Output evidence from the runtime-state unstage step (git reset -- .agents/runs); empty when nothing was staged there.",
+});
 export const commitOutput = slot.text({
     id: "commit-output",
     description: "Output evidence from the git commit command step: committed hash and subject.",

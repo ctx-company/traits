@@ -1,6 +1,6 @@
 id = "implement"
 schema-version = "0.3"
-version = "0.23.0"
+version = "0.24.0"
 name = "Implement (Quick)"
 summary = "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit."
 variant = "quick"
@@ -120,6 +120,11 @@ id = "shipping-status"
 schema = "schema:text"
 description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
+
+[[slot]]
+id = "shipping-unstage-output"
+schema = "schema:text"
+description = "Verbatim output of the runtime-state unstage command (git reset -- .agents/runs); empty when nothing was staged there."
 
 [[slot]]
 id = "work-summary"
@@ -439,7 +444,7 @@ output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-stage"
-title = "Stage all changes except runtime state"
+title = "Stage all changes"
 output = ["slot:shipping-stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
@@ -447,8 +452,20 @@ argv = [
     "git",
     "add",
     "-A",
+]
+
+[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
+id = "shipping-unstage-runtime"
+title = "Unstage runtime state"
+output = ["slot:shipping-unstage-output"]
+
+[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "-q",
     "--",
-    ":!.agents/runs",
+    ".agents/runs",
 ]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]

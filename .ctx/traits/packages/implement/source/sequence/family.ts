@@ -351,15 +351,32 @@ export function familyCommitTail(opts: {
     });
     const message = slot.text({ id: `${id}-message`, description: "The commit message the scribe writes for the completed work." });
     const stageOutput = slot.text({ id: `${id}-stage-output`, description: "Verbatim output of the git-add staging command." });
+    const unstageOutput = slot.text({
+        id: `${id}-unstage-output`,
+        description: "Verbatim output of the runtime-state unstage command (git reset -- .agents/runs); empty when nothing was staged there.",
+    });
 
     step.command("Check working tree status", { id: `${id}-status`, input: input.command`git status --porcelain`, output: status });
 
     flow.when("Shipping Maybe Commit", condition.not(condition.equals(status, "")), () => {
         scribe.agent.prompt("Write the commit message (scribe)", { id: `${id}-message`, input: scribe.text, output: message });
-        step.command("Stage all changes except runtime state", {
+        // Two steps, not one `git add -A -- ':!.agents/runs'` (2026-08-10,
+        // run-42bd7fb2): git exits 1 whenever an add PATHSPEC merely mentions
+        // a gitignored path that exists — even as an exclusion — so the old
+        // spelling failed the whole run the first time a build materialised
+        // `.agents/` in a repo that gitignores it. Plain `add -A` skips
+        // ignored paths natively; the reset then unstages runtime state in
+        // repos where `.agents/runs` is tracked (the exclusion's original
+        // purpose), and is a quiet no-op everywhere else.
+        step.command("Stage all changes", {
             id: `${id}-stage`,
-            input: input.command`git add -A -- :!.agents/runs`,
+            input: input.command`git add -A`,
             output: stageOutput,
+        });
+        step.command("Unstage runtime state", {
+            id: `${id}-unstage-runtime`,
+            input: input.command`git reset -q -- .agents/runs`,
+            output: unstageOutput,
         });
         const commitInput = gate === undefined ? input.command`git commit -m ${message}` : (() => {
             const strings = [`${gate.prefix} git commit -m `, ``];

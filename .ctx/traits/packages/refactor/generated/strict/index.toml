@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.8.0"
+version = "0.9.0"
 name = "Refactor (Strict)"
 summary = "Surveyed refactoring procedure with verbatim execution: survey, frame, design, implement the agreed design exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
 variant = "strict"

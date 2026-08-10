@@ -1,7 +1,7 @@
 import { trait, variant } from "@ctx-traits/cdk";
 
 export default trait("implement", {
-    version: "0.23.0",
+    version: "0.24.0",
     variants: {
         quick: variant.import("./variants/quick.ts"),
         default: variant.import("./variants/default.ts").default(),

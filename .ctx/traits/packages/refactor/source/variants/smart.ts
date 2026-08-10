@@ -1,6 +1,6 @@
 import { INTEGRITY_DOCTRINE, planAmendmentSchema, SMART_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import { condition, input, intent, procedure, schema, sequence, slot, variant } from "@ctx-traits/cdk";
-import { agreedDesign, commitMessage, commitOutput, commitReport, gitStatus, refactorFrame, stageOutput, survey, target, workSummary } from "../data.ts";
+import { agreedDesign, commitMessage, commitOutput, commitReport, gitStatus, refactorFrame, stageOutput, survey, target, unstageOutput, workSummary } from "../data.ts";
 import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
 import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
 import { architectureDialect, smellCatalog } from "../resource.ts";
@@ -132,7 +132,10 @@ const commitMessageStep = sequence.prompt("summarization", {
     output: commitMessage,
 });
 
-const gitStageStep = sequence.command({ id: "git-stage", title: "Stage all changes except runtime state", argv: ["git", "add", "-A", "--", ":(exclude).agents/runs"], output: stageOutput });
+// Two steps, not one excluding add — a pathspec that mentions a gitignored
+// `.agents` exits 1 (see implement's familyCommitTail, run-42bd7fb2).
+const gitStageStep = sequence.command({ id: "git-stage", title: "Stage all changes", argv: ["git", "add", "-A"], output: stageOutput });
+const gitUnstageStep = sequence.command({ id: "git-unstage-runtime", title: "Unstage runtime state", argv: ["git", "reset", "-q", "--", ".agents/runs"], output: unstageOutput });
 const gitCommitStep = sequence.command({ id: "git-commit", title: "Commit the refactor", argv: ["git", "commit", "-m", commitMessage], output: commitOutput });
 
 export default variant({
@@ -174,7 +177,7 @@ export default variant({
                 iterations: 6,
             }),
             sequence.command({ id: "check-git-status", title: "Check working tree status", argv: ["git", "status", "--porcelain"], output: gitStatus }),
-            sequence.when("maybe-commit", { if: condition.not(condition.equals(gitStatus, "")), then: [commitMessageStep, gitStageStep, gitCommitStep] }),
+            sequence.when("maybe-commit", { if: condition.not(condition.equals(gitStatus, "")), then: [commitMessageStep, gitStageStep, gitUnstageStep, gitCommitStep] }),
         ],
     }),
 });

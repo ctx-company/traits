@@ -181,18 +181,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 368,
-    "end": 368
+    "start": 385,
+    "end": 385
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 358,
-    "end": 358
+    "start": 362,
+    "end": 362
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 359,
-    "end": 359
+    "start": 371,
+    "end": 371
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-unstage-runtime": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 376,
+    "end": 376
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -226,13 +231,13 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 357,
-    "end": 357
+    "start": 361,
+    "end": 361
   },
   "sequence:procedure/shipping-status": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 355,
-    "end": 355
+    "start": 359,
+    "end": 359
   },
   "sequence:procedure/task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -313,6 +318,11 @@
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 345,
     "end": 345
+  },
+  "slot:shipping-unstage-output": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 354,
+    "end": 354
   },
   "slot:task-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",

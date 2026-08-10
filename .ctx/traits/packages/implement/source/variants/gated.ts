@@ -270,12 +270,19 @@ const procedureBody = procedure.from(
                 idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
                 output: slot.briefDisplayOutput,
             });
-            step.command("Stage all changes except runtime state", {
+            // Two steps, not one excluding add — a pathspec that mentions a
+            // gitignored `.agents` exits 1 (see familyCommitTail, run-42bd7fb2).
+            // The brief under .internal/briefs/ is inside this stage — it
+            // ships in the same commit as the work it describes.
+            step.command("Stage all changes", {
                 id: "git-stage",
-                // The brief under .internal/briefs/ is inside this stage — it
-                // ships in the same commit as the work it describes.
-                argv: ["git", "add", "-A", "--", ":(exclude).agents/runs"],
+                argv: ["git", "add", "-A"],
                 output: slot.stageOutput,
+            });
+            step.command("Unstage runtime state", {
+                id: "git-unstage-runtime",
+                argv: ["git", "reset", "-q", "--", ".agents/runs"],
+                output: slot.unstageOutput,
             });
             step.command("Commit the work", {
                 id: "git-commit",
