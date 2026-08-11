@@ -18,6 +18,7 @@ import {
   schema,
   seats,
   slot,
+  stage,
   step,
   toDraftJson,
   tone,
@@ -312,6 +313,35 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("second-call");
       })
     ).toThrow(/defineTrait: called more than once/);
+  });
+
+  it("stage(...).step registers a prompt or command step from the stage's own fields", () => {
+    const target = slot.text("stage-target");
+    const notes = slot.text("stage-notes");
+    const probe = slot.text("stage-probe");
+    const surveyStage = stage({
+      agent: agent.worker("stage-worker"),
+      input: input.prompt`Survey ${target}.`,
+      output: notes,
+    });
+    const statusStage = stage({
+      input: input.command`git status --porcelain`,
+      output: probe,
+    });
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("stage-step-shape", { procedure: "One-line stage steps." });
+      surveyStage.step("Survey the target");
+      statusStage.step("Check working tree status");
+    });
+    const draft = envelope.draft as {
+      readonly procedure?: {
+        readonly sequence?: readonly { readonly id?: string; readonly output?: unknown; }[];
+      };
+    };
+    expect(draft.procedure?.sequence?.[0]?.id).toBe("survey-the-target");
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual(["slot:stage-notes"]);
+    expect(draft.procedure?.sequence?.[1]?.id).toBe("check-working-tree-status");
+    expect(draft.procedure?.sequence?.[1]?.output).toEqual(["slot:stage-probe"]);
   });
 
   it("defineTrait derives the canonical id from a display name and keeps the name", () => {

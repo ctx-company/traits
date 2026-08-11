@@ -9,6 +9,8 @@ export { attachProcedureFrom } from "./procedure.js";
 export type { ProcedureFromFields, ProcedureFromFunction } from "./procedure.js";
 export { effect, flow, step } from "./registrars.js";
 export type { FieldMatchArms, ForEachRegistrarOptions, GuardMatchArms, LoopParam, ParParam } from "./registrars.js";
+export { stage } from "./stage.js";
+export type { CommandStageFields, PromptStageFields, Stage, StageFields } from "./stage.js";
 export {
   defineTrait,
   defineVariant,

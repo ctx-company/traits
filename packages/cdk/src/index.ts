@@ -23,6 +23,7 @@ export {
   effect,
   evaluateTraitFunction,
   flow,
+  stage,
   step,
   useBehavior,
   useIntent,
@@ -39,6 +40,8 @@ export type {
   ParParam,
   ProcedureFromFields,
   ProcedureFromFunction,
+  Stage,
+  StageFields,
   TraitFunctionContext,
   UseVariantHandle,
 } from "./functional/index.js";
