@@ -10,10 +10,10 @@ requested-version = "0.11.0"
 resolved-version = "0.11.0"
 
 [trait.digests]
-source = "sha256:05a6e585ca6e462287e73cbfbd449ea6738c1ce26b90046815a273bfe76516ba"
-canonical = "sha256:55e18d3035a4b944589941fce31bd25bae68aa1d02954ec691bcd505c50dc462"
-model-visible = "sha256:6e155136a3475888b49ff9ca7f31a3ff43750efe0a365f642924b70d98248d53"
-resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
+source = "sha256:45424b7ac2c85ba4cce9167db9d381a115179b773f936e4b65c3b2ca2e3c0749"
+canonical = "sha256:253d963d6e35ca213dad38e6295b79c8db6dc5067f528ec2283bf98d23c232b8"
+model-visible = "sha256:d4cd4f7f68fcedfe54e602ada9c582eb8a5a641838efab2afb36475a740b0130"
+resource-manifest = "sha256:1bbad2c4fa38711ec9b883155512e9ae44436418d21bae8beffe9019522ebde4"
 
 [[trait]]
 id = "refactor"
@@ -84,10 +84,10 @@ requested-version = "0.11.0"
 resolved-version = "0.11.0"
 
 [trait.digests]
-source = "sha256:706537aa54065b9bfd242b36551af89684c3643d90031222540542ac55b2dcf3"
-canonical = "sha256:c466a30f4a1cca5f522317631f2b66805ecfb66176296a98bfd8c68143756cb7"
-model-visible = "sha256:83ea4f8f8b0e1787c878085e27cfcf113a817b604b136294e2be3c4ff6f289d5"
-resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
+source = "sha256:d97092b13bc7bc25d0d4b756ccc14070b5ee064520ec666664b958390416b379"
+canonical = "sha256:58e86512552e824622d50739c5a786826cc7b6be2142b1bc6b9388ec8b5ff8de"
+model-visible = "sha256:7c9b86186ea7a0c9318780af05dfec76957ed818bfd200b5ef4c19ea23404c78"
+resource-manifest = "sha256:1bbad2c4fa38711ec9b883155512e9ae44436418d21bae8beffe9019522ebde4"
 
 [[trait]]
 id = "refactor"
@@ -96,10 +96,10 @@ requested-version = "0.11.0"
 resolved-version = "0.11.0"
 
 [trait.digests]
-source = "sha256:c3f90569deb9f0d26dbe9ba9a219957f220e10fdea5eecc3e688442b19aacd2c"
-canonical = "sha256:ab2b0d5e5faded0f256bb080b922efe857cec1f0442865241a4164de04012b9f"
-model-visible = "sha256:608360a020ff5c207a89e2d325c29150b1f6efdcbb030316de4819d3049a4086"
-resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
+source = "sha256:d2bbe057ee1ec758c2f80998d7e5a9d993bd81f0db974433645b5987daa770da"
+canonical = "sha256:1b2a833b8e416dbaeddfe920aadd3fe1a65b9fc73e93ef2fd2b41783426ee118"
+model-visible = "sha256:98525675a43036eb665b263e1fbef87ac34b7a69c795b42247c180b5e0364617"
+resource-manifest = "sha256:1bbad2c4fa38711ec9b883155512e9ae44436418d21bae8beffe9019522ebde4"
 
 [[trait.export]]
 target = "agent-skills"

@@ -18,12 +18,12 @@ const input = cdk.input.prompt(
     },
 );
 
-export const reviewFirstStage = cdk.stage({
+export const first = cdk.stage({
     agent: smart1,
     input,
     output: reviewVerdict1,
 });
-export const reviewSecondStage = cdk.stage({
+export const second = cdk.stage({
     agent: smart2,
     input,
     output: reviewVerdict2,

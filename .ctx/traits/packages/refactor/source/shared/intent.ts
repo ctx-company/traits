@@ -3,15 +3,19 @@ import * as cdk from "@ctx-traits/cdk";
 
 export const intent: IntentSpec = {
     require: [
+        cdk.intent.require.AnnotationFidelity,
         cdk.intent.require.BehaviorPreservingDefault,
         cdk.intent.require.BoundedRefinement,
         cdk.intent.require.GatesGreenBeforeCommit,
+        cdk.intent.require.PreserveScope,
         cdk.intent.require.ReviewBeforeFinal,
         cdk.intent.require.VerbatimExecution,
     ],
     avoid: [
         cdk.intent.avoid.InterfaceWidening,
+        cdk.intent.avoid.OverEngineering,
         cdk.intent.avoid.RubberStampReview,
+        cdk.intent.avoid.ScopeCreep,
         cdk.intent.avoid.SilentDeviation,
     ],
 };

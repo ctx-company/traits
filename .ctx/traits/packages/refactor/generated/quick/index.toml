@@ -14,16 +14,40 @@ tag = [
 ]
 
 [[intent.require]]
-id = "review-before-final"
+id = "annotation-fidelity"
 
 [[intent.require]]
 id = "behavior-preserving-default"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.require]]
+id = "gates-green-before-commit"
+
+[[intent.require]]
+id = "preserve-scope"
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "verbatim-execution"
+
+[[intent.avoid]]
+id = "interface-widening"
+
+[[intent.avoid]]
+id = "over-engineering"
 
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
 [[intent.avoid]]
-id = "interface-widening"
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "silent-deviation"
 
 [[port]]
 id = "commit-report"
@@ -90,6 +114,12 @@ hint = "What changed (files), how behavior was preserved, gate results, open con
 id = "architecture-dialect"
 path = "resources/architecture-dialect.md"
 hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
+trigger = "on-activation"
+
+[[resource]]
+id = "smell-catalog"
+path = "resources/smell-catalog.md"
+hint = "Eight detectable refactoring smells with detection patterns, before/after shapes, and when-not-to-apply guards."
 trigger = "on-activation"
 
 [[schema]]

@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart1 } from "../agent.ts";
 import { survey, target } from "../data.ts";
 
-export const surveyStage = cdk.stage({
+export const gather = cdk.stage({
     agent: smart1,
     input: cdk.input.prompt`
     Survey ${target} for refactoring opportunities.

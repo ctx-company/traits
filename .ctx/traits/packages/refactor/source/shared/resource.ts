@@ -13,3 +13,5 @@ export const smellCatalog = resource({
     hint: "Eight detectable refactoring smells with detection patterns, before/after shapes, and when-not-to-apply guards.",
     trigger: "on-activation",
 });
+export const resources = [architectureDialect, smellCatalog];
+

@@ -5,7 +5,7 @@ import { smart1 } from "../agent.ts";
 import { plan, reviewVerdict1, workSummary } from "../data.ts";
 import { architectureDialect } from "../resource.ts";
 
-export const reviewStage = cdk.stage({
+export const judge = cdk.stage({
     agent: smart1,
     input: cdk.input.prompt(
         `Review the implemented state of the working tree against the plan {plan}.

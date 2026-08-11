@@ -1,40 +1,36 @@
-import { condition, defineVariant, flow, intent, useIntent, useResource } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, useIntent, useResource } from "@ctx-traits/cdk";
 
-import { commitReport } from "../../shared/data.ts";
-import { architectureDialect } from "../../shared/resource.ts";
-import { checklistStage } from "../../shared/stage/checklist.ts";
-import { implementStage } from "../../shared/stage/implement.ts";
-import { reviewStage } from "../../shared/stage/review.ts";
+import * as shared from "../../shared/index.ts";
 
-import * as git from "./stage/git.ts";
+import * as stage from "./stage/index.ts";
 
 export default function () {
     defineVariant("Quick", {
-        summary: "Quick refactoring procedure.",
-        metadata: { tag: ["first-party", "refactoring", "review", "multi-agent"] },
-        procedure: "Refactor quickly: checklist, implementation, reviewer, commit.",
+        summary:
+            "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit.",
+        metadata: { tag: shared.tag },
+        procedure:
+            "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit.",
     });
-    useIntent({
-        require: [intent.require.ReviewBeforeFinal, intent.require.BehaviorPreservingDefault],
-        avoid: [intent.avoid.RubberStampReview, intent.avoid.InterfaceWidening],
-    });
-    useResource(architectureDialect);
 
-    checklistStage("Checklist the target");
+    useIntent(shared.intent);
+    useResource(shared.resources);
+
+    shared.stage.checklist.compose("Checklist the target");
 
     flow.loop("Reviewed refinement", (loop) => {
         loop.maxIterations(2, { onExhausted: "continue" });
-        implementStage("Implement the checklist");
-        reviewStage("Review the implementation");
-        flow.until(condition.fieldEquals(reviewStage.output, "status", "approved"));
+        shared.stage.implement.apply("Implement the checklist");
+        shared.stage.review.judge("Review the implementation");
+        flow.until(condition.fieldEquals(shared.stage.review.judge.output, "status", "approved"));
     });
 
-    git.status("Check working tree status");
-    flow.when("Maybe Commit", condition.not(condition.empty(git.status.output)), () => {
-        git.commitMessage("Write the commit message");
-        git.commitStage("Stage all changes");
-        git.commitSubmit("Commit the refactor");
+    stage.git.status("Check working tree status");
+    flow.when("Maybe Commit", condition.not(condition.empty(stage.git.status.output)), () => {
+        stage.git.commitMessage("Write the commit message");
+        stage.git.commitStage("Stage all changes");
+        stage.git.commitSubmit("Commit the refactor");
     });
 
-    return { commitReport };
+    return { commitReport: shared.data.commitReport };
 }

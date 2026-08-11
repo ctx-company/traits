@@ -3,7 +3,7 @@ import * as cdk from "@ctx-traits/cdk";
 import { smart1 } from "../agent.ts";
 import { plan, target } from "../data.ts";
 
-export const checklistStage = cdk.stage({
+export const compose = cdk.stage({
     agent: smart1,
     input: cdk.input.prompt`
     Turn ${target} into an actionable refactoring checklist.
