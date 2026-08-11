@@ -314,12 +314,19 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     ).toThrow(/defineTrait: called more than once/);
   });
 
-  it("defineTrait with a bad slug is a build error", () => {
-    expect(() =>
-      evaluateTraitFunction(() => {
-        defineTrait("Not_A_Slug");
-      })
-    ).toThrow(/expected a lowercase slug/);
+  it("defineTrait derives the canonical id from a display name and keeps the name", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("Display Name");
+    });
+    expect(envelope.draft).toMatchObject({ id: "display-name", name: "Display Name" });
+  });
+
+  it("defineTrait with a bare slug injects no name", () => {
+    const envelope = evaluateTraitFunction(() => {
+      defineTrait("bare-slug");
+    });
+    expect(envelope.draft).toMatchObject({ id: "bare-slug" });
+    expect((envelope.draft as { name?: unknown; }).name).toBeUndefined();
   });
 
   it("defineTrait with a computed (non-literal) field is a build error", () => {

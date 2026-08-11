@@ -14,6 +14,7 @@ import { isSlug, toDraftJsonWithSourceMap } from "../normalize.js";
 import { port } from "../port.js";
 import { procedure as procedureOf } from "../procedure.js";
 import { ref } from "../ref.js";
+import { idFromTitle } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
 import type { BehaviorFields, IntentSpec, SemVer, TraitFields, TraitMetadata } from "../trait.js";
 import { trait } from "../trait.js";
@@ -104,7 +105,7 @@ function assertJsonLiteral(value: unknown, path: string): void {
  * data only. Missing, duplicate, or computed identity is a build error.
  * @example `defineTrait("code-review", { version: "0.1.0", summary: "Reviews a diff." })`
  */
-export function defineTrait(slug: string, fields: DefineTraitFields = {}): void {
+export function defineTrait(name: string, fields: DefineTraitFields = {}): void {
   const frame = currentTraitFrame("defineTrait");
   if (frame.frameKind === "variant") {
     throw new Error(
@@ -114,14 +115,18 @@ export function defineTrait(slug: string, fields: DefineTraitFields = {}): void 
   if (frame.defineTraitCalled) {
     throw new Error("defineTrait: called more than once — a trait function declares its identity exactly once");
   }
-  if (!isSlug(slug)) {
-    throw new Error(`defineTrait: expected a lowercase slug, got ${JSON.stringify(slug)}`);
-  }
+  // Same practice as step titles (0109 F2 direction): the first argument is
+  // the NAME; the canonical id is its kebab-casing. A bare slug derives to
+  // itself, so slug-first call sites keep byte-identical canonicals.
+  const slug = idFromTitle(name);
   assertKnownKeys(fields as Record<string, unknown>, DEFINE_TRAIT_KEYS, "defineTrait");
   assertJsonLiteral(fields, "defineTrait fields");
   frame.defineTraitCalled = true;
   frame.slug = slug;
-  frame.fields = { ...fields };
+  // A display name (anything beyond the bare slug) becomes the `name` field
+  // unless one was given explicitly; a bare slug injects nothing, keeping
+  // existing canonicals untouched.
+  frame.fields = fields.name === undefined && name !== slug ? { ...fields, name } : { ...fields };
 }
 
 /** `defineVariant`'s own fields: metadata only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
@@ -142,7 +147,7 @@ const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "summary", "metadata", "
  * drifting in the family shell.
  * @example `defineVariant("quick", { name: "Refactor (Quick)", summary: "Fast pass.", procedure: "..." })`
  */
-export function defineVariant(slug: string, fields: DefineVariantFields = {}): void {
+export function defineVariant(name: string, fields: DefineVariantFields = {}): void {
   const frame = currentTraitFrame("defineVariant");
   if (frame.frameKind === "trait") {
     throw new Error(
@@ -152,14 +157,17 @@ export function defineVariant(slug: string, fields: DefineVariantFields = {}): v
   if (frame.defineTraitCalled) {
     throw new Error("defineVariant: called more than once — a variant function declares its identity exactly once");
   }
-  if (!isSlug(slug)) {
-    throw new Error(`defineVariant: expected a lowercase slug, got ${JSON.stringify(slug)}`);
-  }
+  // Name -> kebab-cased canonical id, exactly like defineTrait and step
+  // titles; a bare slug derives to itself. NOTE: the variant id is a public
+  // surface (`ctx traits run family:variant`, manifest keys, generated
+  // paths), so a variant is named by its own word ("Strict"), never the
+  // composed display form ("Refactor (Strict)" would mint refactor-strict).
+  const slug = idFromTitle(name);
   assertKnownKeys(fields as Record<string, unknown>, DEFINE_VARIANT_KEYS, "defineVariant");
   assertJsonLiteral(fields, "defineVariant fields");
   frame.defineTraitCalled = true;
   frame.slug = slug;
-  frame.fields = { ...fields };
+  frame.fields = fields.name === undefined && name !== slug ? { ...fields, name } : { ...fields };
 }
 
 /** The chain handle `useVariant` returns — `.default()` marks that binding the family default, exactly once per family. */
