@@ -5432,6 +5432,23 @@ fn global_runtime_config_paths() -> crate::Result<Vec<Utf8PathBuf>> {
     ])
 }
 
+/// True when `dir` (already canonicalized) is the resolved `ctx` config-home
+/// directory — the same resolution [`global_runtime_config_paths`] anchors
+/// to. `ctx traits config build` uses this to decide whether a `config.ts`
+/// it is compiling is the user-global layer (where `[repo.*]`/`defineRepo`
+/// is legal) or a repo-local one — the authoring-time mirror of the
+/// `ConfigLayer::UserGlobal` check this module already applies at read
+/// time.
+pub fn is_user_global_config_dir(dir: &Utf8Path) -> bool {
+    let Ok(ctx_dir) = crate::state::global_ctx_root() else {
+        return false;
+    };
+    let Ok(ctx_dir) = ctx_dir.canonicalize_utf8() else {
+        return false;
+    };
+    dir == ctx_dir
+}
+
 fn absolute_utf8_path(path: &Utf8Path, field_path: &str) -> crate::Result<Utf8PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());

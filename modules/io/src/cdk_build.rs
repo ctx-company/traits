@@ -55,6 +55,10 @@ pub struct CdkBuildRequest {
     pub repo_root: Option<Utf8PathBuf>,
     pub timeout_ms: u64,
     pub capture_limit: usize,
+    /// Extra environment variables passed to the spawned `node` process —
+    /// e.g. `config build`'s `CTX_CONFIG_BUILD_LAYER`. Empty for every other
+    /// caller (draft synthesis has no build-time parameter to pass).
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +211,9 @@ pub fn run_node_module(
     let argv = argv_for_source(source_kind, &source_path, script);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
+    for (key, value) in &request.env {
+        command.env(key, value);
+    }
     // Anchors bare-specifier resolution (e.g. `@ctx-traits/cdk`,
     // `@ctx-traits/config`) to the repo's `node_modules` regardless of the
     // invoking process's actual cwd — Node resolves `--eval` bare imports by
@@ -1069,10 +1076,23 @@ registerHooks({
   },
 });
 const module = await import(pathToFileURL(sourcePath).href);
-const config = module.default;
+let config = module.default;
 if (config === undefined) {
-  console.error('config module must export a default value (defineConfig(...))');
+  console.error('config module must export a default value (defineConfig(...) or a define* registrar function)');
   process.exit(1);
+}
+if (typeof config === 'function') {
+  const pkg = await import('@ctx-traits/config');
+  if (typeof pkg.evaluateConfigFunction !== 'function') {
+    console.error('the installed @ctx-traits/config package does not support hook-style config.ts (evaluateConfigFunction is missing) — update @ctx-traits/config');
+    process.exit(1);
+  }
+  try {
+    config = pkg.evaluateConfigFunction(config, { layer: process.env.CTX_CONFIG_BUILD_LAYER });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
 process.stdout.write(`${JSON.stringify({ config, sources: Array.from(sources) }, null, 2)}\n`);
 "#;

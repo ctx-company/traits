@@ -131,6 +131,7 @@ pub(crate) fn synthesize_cdk_source_any(
             repo_root: Some(repo_root.clone()),
             timeout_ms: ctx_traits_io::cdk_build::DEFAULT_BUILD_TIMEOUT_MS,
             capture_limit: ctx_traits_io::harness::DEFAULT_CAPTURE_LIMIT,
+            env: Vec::new(),
         })?;
     let emitted_json: serde_json::Value = serde_json::from_str(&run.stdout).map_err(|source| {
         crate::Error::json(
@@ -638,36 +639,44 @@ fn orphan_diagnostics(
     // representation identical for filtering and anchor enrichment.
     let source_root = ctx_traits_io::cdk_build::source_root_for_entry(source_path);
     let source_root = canonicalize_utf8(source_root).unwrap_or_else(|| source_root.to_path_buf());
-    let diagnostics = declarations.iter().filter_map(|declaration| {
-        if !matches!(declaration.kind.as_str(), "slot" | "schema")
-            || source_map.contains_key(&declaration.reference)
-        {
-            return None;
-        }
-        let source = declaration.source.as_ref()?;
-        let file = Utf8Path::new(&source.file);
-        let canonical_file = canonicalize_utf8(file).unwrap_or_else(|| file.to_path_buf());
-        if canonical_file.strip_prefix(&source_root).is_err() {
-            return None;
-        }
-        let id = declaration
-            .declaration
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(&declaration.reference);
-        let binding = std::fs::read_to_string(file).ok().and_then(|text| {
-            text.lines().nth(source.start.saturating_sub(1)).and_then(|line| {
-                let marker = line.find("const ")?;
-                let rest = &line[marker + 6..];
-                let end = rest.find(|character: char| !character.is_ascii_alphanumeric() && character != '_' && character != '$')?;
-                Some(rest[..end].to_string())
-            })
-        });
-        Some(CdkAuthoringDiagnostic {
-            severity: "warning".to_string(),
-            code: "cdk-orphan-declaration".to_string(),
-            field_path: declaration.reference.clone(),
-            message: format!(
+    let diagnostics = declarations
+        .iter()
+        .filter_map(|declaration| {
+            if !matches!(declaration.kind.as_str(), "slot" | "schema")
+                || source_map.contains_key(&declaration.reference)
+            {
+                return None;
+            }
+            let source = declaration.source.as_ref()?;
+            let file = Utf8Path::new(&source.file);
+            let canonical_file = canonicalize_utf8(file).unwrap_or_else(|| file.to_path_buf());
+            if canonical_file.strip_prefix(&source_root).is_err() {
+                return None;
+            }
+            let id = declaration
+                .declaration
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&declaration.reference);
+            let binding = std::fs::read_to_string(file).ok().and_then(|text| {
+                text.lines()
+                    .nth(source.start.saturating_sub(1))
+                    .and_then(|line| {
+                        let marker = line.find("const ")?;
+                        let rest = &line[marker + 6..];
+                        let end = rest.find(|character: char| {
+                            !character.is_ascii_alphanumeric()
+                                && character != '_'
+                                && character != '$'
+                        })?;
+                        Some(rest[..end].to_string())
+                    })
+            });
+            Some(CdkAuthoringDiagnostic {
+                severity: "warning".to_string(),
+                code: "cdk-orphan-declaration".to_string(),
+                field_path: declaration.reference.clone(),
+                message: format!(
                 "authored {} {}{} is unreachable and absent from emitted canonical output ({}:{})",
                 declaration.kind,
                 id,
@@ -675,8 +684,9 @@ fn orphan_diagnostics(
                 source.file,
                 source.start,
             ),
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     Ok(diagnostics)
 }
 

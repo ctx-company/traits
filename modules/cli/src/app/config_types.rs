@@ -209,6 +209,19 @@ pub(crate) fn render() -> crate::Result<String> {
     let mut names: Vec<&String> = defs.keys().collect();
     names.sort();
     for name in names {
+        // 0171 cleanup: `model-tier` is retired (`has_tier_declaration` in
+        // `ctx_traits_io::harness_config` keeps warning it, not rejecting
+        // it) — pruned from the *rendered TS surface* only, so authoring
+        // completion stops offering it, while `camel_to_kebab` (sharing
+        // this same `load_schema`) still renames a legacy author's
+        // `modelTier` for the loader's retired-warning path to catch. Do
+        // not remove `model-tier` handling from `camel_to_kebab` to
+        // "unify" with this skip-list — that would turn a legacy
+        // `modelTier` key into an unknown-field decode error instead of
+        // the warn-and-accept path.
+        if name == "AgentModelTier" {
+            continue;
+        }
         let def =
             defs.get(name)
                 .and_then(Value::as_object)
@@ -270,6 +283,13 @@ fn render_interface(name: &str, schema: &serde_json::Map<String, Value>) -> crat
     names.sort();
     let mut body = String::new();
     for property_name in names {
+        // 0171 cleanup: `model-tier` is retired — see the matching skip in
+        // `render` for why this asymmetric (render-only) prune is
+        // deliberate.
+        if property_name == "model-tier" && (name == "AgentDefaults" || name == "ProfileAssignment")
+        {
+            continue;
+        }
         let property_schema = &properties[property_name];
         let ts_ty = ts_type(property_schema)?;
         let optional = !required.contains(property_name);
@@ -443,4 +463,46 @@ fn to_camel_case(name: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 0171: `modelTier` is gone from the rendered TS surface, but
+    /// `camel_to_kebab` — shared with the loader's `load_schema` — must
+    /// still rename a legacy author's `modelTier` key to `model-tier` so
+    /// `RuntimeConfig`'s retired-warning path handles it, instead of a
+    /// `deny_unknown_fields` decode error.
+    #[test]
+    fn camel_to_kebab_still_renames_legacy_model_tier() {
+        let input = serde_json::json!({
+            "agent": {
+                "role": {
+                    "worker": { "modelTier": "top" }
+                }
+            }
+        });
+        let converted = camel_to_kebab(&input).expect("camel_to_kebab");
+        assert_eq!(
+            converted["agent"]["role"]["worker"]["model-tier"],
+            serde_json::json!("top")
+        );
+    }
+
+    /// The rendered TS surface omits both the retired `model-tier` field
+    /// (on `AgentDefaults`/`ProfileAssignment`) and the now-orphaned
+    /// `AgentModelTier` type.
+    #[test]
+    fn render_omits_retired_model_tier_surface() {
+        let rendered = render().expect("render");
+        assert!(
+            !rendered.contains("AgentModelTier"),
+            "rendered TS surface still contains AgentModelTier:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("modelTier"),
+            "rendered TS surface still contains modelTier:\n{rendered}"
+        );
+    }
 }

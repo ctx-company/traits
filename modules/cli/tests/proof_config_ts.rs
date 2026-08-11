@@ -599,3 +599,252 @@ fn linked_dependency_files_never_enter_the_manifest_or_trip_drift() {
         "stdout={stdout} stderr={stderr}"
     );
 }
+
+// --- 0171: hook-style config.ts (define* registrars) ---------------------
+
+/// The hook fixture and its object-literal twin, exercising a multi-seat
+/// `defineRole("smart", [a, b])` array assignment to pin that shape.
+const CONFIG_TS_HOOK: &str = "import { defineRole, defineRun, definePricing } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineRun({ maxRetries: 3 });\n\
+  defineRole(\"master\", { harness: \"claude\", model: \"claude-opus-5\" });\n\
+  defineRole(\"smart\", [\n\
+    { harness: \"claude\", model: \"claude-opus-5\" },\n\
+    { harness: \"codex\", model: \"gpt-5.2\" },\n\
+  ]);\n\
+  definePricing(\"claude-opus-5\", { usdPerMtok: 15 });\n\
+}\n";
+
+const CONFIG_TS_OBJECT_TWIN: &str = "import { defineConfig } from \"@ctx-traits/config\";\n\
+\n\
+export default defineConfig({\n\
+  run: { maxRetries: 3 },\n\
+  agent: {\n\
+    role: {\n\
+      master: { harness: \"claude\", model: \"claude-opus-5\" },\n\
+      smart: [\n\
+        { harness: \"claude\", model: \"claude-opus-5\" },\n\
+        { harness: \"codex\", model: \"gpt-5.2\" },\n\
+      ],\n\
+    },\n\
+  },\n\
+  pricing: { \"claude-opus-5\": { usdPerMtok: 15 } },\n\
+});\n";
+
+/// Strips the source-manifest header (`# ctx:generated` / `# ctx:source`
+/// lines) — the two fixtures' headers necessarily differ, since the source
+/// files differ — leaving only the generated TOML body for comparison.
+fn strip_manifest_header(generated: &str) -> &str {
+    let mut lines = generated.lines();
+    for line in generated.lines() {
+        if !line.starts_with('#') {
+            break;
+        }
+        lines.next();
+    }
+    let body_start = generated
+        .lines()
+        .take_while(|line| line.starts_with('#'))
+        .map(|line| line.len() + 1)
+        .sum();
+    &generated[body_start..]
+}
+
+/// The hook fixture compiles to a `config.toml` body byte-identical to its
+/// object-literal twin (Done-when's byte-identity claim).
+#[test]
+fn hook_form_and_object_form_compile_byte_identical() {
+    let scratch = ScratchRoot::new("p0171-byte-identity");
+
+    let hook_proj = scaffold_repo(&scratch, "hook-repo");
+    fs::write(hook_proj.join(".ctx/config.ts"), CONFIG_TS_HOOK).unwrap();
+    let hook_build = build_config(&hook_proj, &scratch.home());
+    let (stdout, stderr) = utf8(&hook_build);
+    assert_eq!(
+        hook_build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+
+    let object_proj = scaffold_repo(&scratch, "object-repo");
+    fs::write(object_proj.join(".ctx/config.ts"), CONFIG_TS_OBJECT_TWIN).unwrap();
+    let object_build = build_config(&object_proj, &scratch.home());
+    let (stdout, stderr) = utf8(&object_build);
+    assert_eq!(
+        object_build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+
+    let hook_generated = fs::read_to_string(hook_proj.join(".ctx/config.toml")).unwrap();
+    let object_generated = fs::read_to_string(object_proj.join(".ctx/config.toml")).unwrap();
+    assert!(
+        hook_generated.starts_with("# ctx:generated"),
+        "{hook_generated}"
+    );
+    assert!(
+        object_generated.starts_with("# ctx:generated"),
+        "{object_generated}"
+    );
+    assert_eq!(
+        strip_manifest_header(&hook_generated),
+        strip_manifest_header(&object_generated),
+        "hook={hook_generated}\nobject={object_generated}"
+    );
+}
+
+/// A second `defineRun` call in one hook build fails with a named error,
+/// surfaced through the emit script's try/catch as clean stderr rather than
+/// a raw Node stack.
+#[test]
+fn singleton_registrar_double_call_fails_named() {
+    let scratch = ScratchRoot::new("p0171-singleton-dup");
+    let proj = scaffold_repo(&scratch, "repo");
+    fs::write(
+        proj.join(".ctx/config.ts"),
+        "import { defineRun } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineRun({ maxRetries: 1 });\n\
+  defineRun({ maxRetries: 2 });\n\
+}\n",
+    )
+    .unwrap();
+
+    let build = build_config(&proj, &scratch.home());
+    let (stdout, stderr) = utf8(&build);
+    assert_ne!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(stderr.contains("defineRun was already called"), "{stderr}");
+}
+
+/// A duplicate key in one hook build's keyed registrar fails with a named
+/// error.
+#[test]
+fn keyed_registrar_duplicate_key_fails_named() {
+    let scratch = ScratchRoot::new("p0171-keyed-dup");
+    let proj = scaffold_repo(&scratch, "repo");
+    fs::write(
+        proj.join(".ctx/config.ts"),
+        "import { defineHarness } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineHarness(\"claude\", { bin: \"claude\" });\n\
+  defineHarness(\"claude\", { bin: \"claude-2\" });\n\
+}\n",
+    )
+    .unwrap();
+
+    let build = build_config(&proj, &scratch.home());
+    let (stdout, stderr) = utf8(&build);
+    assert_ne!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("defineHarness(\"claude\", ...) was already called"),
+        "{stderr}"
+    );
+}
+
+/// Mixing `defineConfig({...})` with `define*` registrar calls inside the
+/// default-export function is a named error, not a silent merge.
+#[test]
+fn mixed_authoring_forms_fail_named() {
+    let scratch = ScratchRoot::new("p0171-mixed-form");
+    let proj = scaffold_repo(&scratch, "repo");
+    fs::write(
+        proj.join(".ctx/config.ts"),
+        "import { defineConfig, defineRun } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineRun({ maxRetries: 1 });\n\
+  defineConfig({});\n\
+}\n",
+    )
+    .unwrap();
+
+    let build = build_config(&proj, &scratch.home());
+    let (stdout, stderr) = utf8(&build);
+    assert_ne!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(stderr.contains("mixes defineConfig"), "{stderr}");
+}
+
+/// `defineRepo` in a repo-local (non-user-global) build fails with a named
+/// error naming the repo key.
+#[test]
+fn define_repo_outside_user_global_layer_fails_named() {
+    let scratch = ScratchRoot::new("p0171-repo-layer");
+    let proj = scaffold_repo(&scratch, "repo");
+    fs::write(
+        proj.join(".ctx/config.ts"),
+        "import { defineRepo } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineRepo(\"my-repo\", {});\n\
+}\n",
+    )
+    .unwrap();
+
+    let build = build_config(&proj, &scratch.home());
+    let (stdout, stderr) = utf8(&build);
+    assert_ne!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("defineRepo(\"my-repo\", ...) is only allowed"),
+        "{stderr}"
+    );
+}
+
+/// `defineRepo` succeeds when the build targets the resolved user-global
+/// config-home directory (`$XDG_CONFIG_HOME/ctx/config.ts` — under this
+/// suite's controlled environment, `controlled_command` sets
+/// `XDG_CONFIG_HOME=home` directly, so `global_ctx_root()` resolves to
+/// `home/ctx`).
+#[test]
+fn define_repo_inside_user_global_layer_succeeds() {
+    let scratch = ScratchRoot::new("p0171-repo-layer-ok");
+    let home = scratch.home();
+    let global_dir = home.join("ctx");
+    fs::create_dir_all(&global_dir).unwrap();
+    git_init(&global_dir);
+    symlink_node_modules(&global_dir);
+    fs::write(
+        global_dir.join("config.ts"),
+        "import { defineRepo } from \"@ctx-traits/config\";\n\
+\n\
+export default function () {\n\
+  defineRepo(\"my-repo\", { git: { longSeconds: 60 } });\n\
+}\n",
+    )
+    .unwrap();
+
+    let source_path = global_dir.join("config.ts");
+    let build = run_ctx(
+        &["traits", "config", "build", source_path.to_str().unwrap()],
+        &global_dir,
+        &home,
+    );
+    let (stdout, stderr) = utf8(&build);
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+
+    let generated = fs::read_to_string(global_dir.join("config.toml")).unwrap();
+    assert!(generated.contains("[repo.my-repo.git]"), "{generated}");
+    assert!(generated.contains("long-seconds = 60"), "{generated}");
+}

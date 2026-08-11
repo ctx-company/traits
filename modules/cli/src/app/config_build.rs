@@ -56,12 +56,22 @@ pub(crate) fn handle_config_build(
         })
     })?;
     let repo_root = crate::app::cdk_build::stable_repo_root(&canonical_source)?;
+    let config_dir_for_layer = canonical_source
+        .parent()
+        .unwrap_or_else(|| Utf8Path::new("."))
+        .to_path_buf();
+    let layer = if ctx_traits_io::harness_config::is_user_global_config_dir(&config_dir_for_layer) {
+        "user-global"
+    } else {
+        "repo"
+    };
     let run = ctx_traits_io::cdk_build::run_node_module(
         ctx_traits_io::cdk_build::CdkBuildRequest {
             source_path: source_path.clone(),
             repo_root: Some(repo_root.clone()),
             timeout_ms: ctx_traits_io::cdk_build::DEFAULT_BUILD_TIMEOUT_MS,
             capture_limit: ctx_traits_io::harness::DEFAULT_CAPTURE_LIMIT,
+            env: vec![("CTX_CONFIG_BUILD_LAYER".to_string(), layer.to_string())],
         },
         ctx_traits_io::cdk_build::NODE_EMIT_CONFIG_SCRIPT.as_str(),
         "@ctx-traits/config",

@@ -37,7 +37,6 @@ describe("defineConfig", () => {
       repo: {
         "repo-key": {
           agent: {
-            modelTier: { top: assignment({ model: "top-model" }) },
             role: { worker: assignment({ model: "personal-model" }) },
             variant: { fast: { role: { worker: assignment({ model: "fast-model" }) } } },
           },
@@ -90,6 +89,13 @@ describe("closed shapes reject typos and bad enum values at compile time", () =>
     assignment({
       // @ts-expect-error sessionMode must be "per-frame" | "persistent"
       sessionMode: "not-a-real-mode",
+    });
+  });
+
+  it("rejects the retired modelTier field", () => {
+    assignment({
+      // @ts-expect-error modelTier was pruned from the generated TS surface — the loader retired-warns it, but authoring it is a compile error
+      modelTier: "top",
     });
   });
 });

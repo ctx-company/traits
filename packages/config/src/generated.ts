@@ -19,12 +19,9 @@ export interface CtxConfig {
 }
 
 export interface AgentDefaults {
-  modelTier?: Record<string, ProfileAssignment>;
   role?: Record<string, RoleAssignmentValue>;
   variant?: Record<string, VariantOverride>;
 }
-
-export type AgentModelTier = "top" | "fast";
 
 export type AutoClosePolicy = "confirm" | "checked" | "merge";
 
@@ -119,7 +116,6 @@ export interface ProfileAssignment {
   harness?: string;
   mode?: RunAssignmentMode;
   model?: string;
-  modelTier?: AgentModelTier;
   readTimeoutMs?: number;
   reasoningEffort?: string;
   retries?: number;
