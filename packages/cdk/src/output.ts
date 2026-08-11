@@ -1,4 +1,10 @@
-import type { InstructionOutputHandle, OptionalSlotRead, OutputTemplateHandle, SlotHandle } from "./handles.js";
+import type {
+  InstructionOutputHandle,
+  OptionalSlotRead,
+  OutputPromptInterpolation,
+  OutputTemplateHandle,
+  SlotHandle,
+} from "./handles.js";
 import {
   attachInstructionOutput,
   instructionOutputContent,
@@ -70,7 +76,7 @@ export interface OutputFunction {
 }
 
 /** Values that can be interpolated into an `output.prompt` output template. */
-export type OutputPromptInterpolation<Value = unknown> = SlotHandle<Value> | OptionalSlotRead<Value>;
+export type { OutputPromptInterpolation } from "./handles.js";
 
 function buildInstructionOutput(
   strings: TemplateStringsArray,

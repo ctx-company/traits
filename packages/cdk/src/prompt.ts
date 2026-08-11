@@ -1,9 +1,9 @@
 import type { JsonObject } from "./generated.js";
 import type {
-  InstructionOutputHandle,
   OptionalSlotRead,
   PortHandle,
   PromptHandle,
+  PromptInterpolation,
   PromptTemplate,
   RefHandle,
   ResourceHandle,
@@ -30,14 +30,7 @@ export interface PromptFields {
   readonly source?: string | ResourceHandle | RefHandle | PromptTemplate;
 }
 
-/** Values that can be interpolated into a prompt and therefore become prompt inputs. */
-export type PromptInterpolation<Value = unknown> =
-  | PortHandle<Value>
-  | SlotHandle<Value>
-  | ResourceHandle<Value>
-  | InstructionOutputHandle<Value>
-  | OptionalSlotRead<Value>
-  | PromptTemplate<Value>;
+export type { PromptInterpolation } from "./handles.js";
 
 /** `prompt.resource(...)`'s accepted shape: a bare resource ref, or a resource plus its own extra declared inputs. */
 export type PromptResourceValue = ResourceHandle | RefHandle | {

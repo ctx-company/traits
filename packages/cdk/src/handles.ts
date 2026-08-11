@@ -1,8 +1,6 @@
 import type { ForEachRegistrarOptions } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, RefKind } from "./generated.js";
 import type { CdkObject } from "./meta.js";
-import type { OutputPromptInterpolation } from "./output.js";
-import type { PromptInterpolation } from "./prompt.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
 
 declare const HANDLE_BRAND: unique symbol;
@@ -157,6 +155,25 @@ export type TraitHandle = Handle<"trait">;
  * `Handle` — a family is never referenced by ref the way a declared item is.
  */
 export type TraitFamilyHandle = CdkHandle<"trait-family">;
+/**
+ * Values that can be interpolated into a prompt and therefore become prompt
+ * inputs. Defined HERE, not in prompt.ts: PromptTemplate.extend below
+ * references this union, and hosting it in a module that imports handles
+ * created the cross-file type-alias cycle TS2456 rejects under
+ * bundler-resolution consumers (trait-source tsc, tsserver). prompt.ts
+ * re-exports it, so the public import path is unchanged.
+ */
+export type PromptInterpolation<Value = unknown> =
+  | PortHandle<Value>
+  | SlotHandle<Value>
+  | ResourceHandle<Value>
+  | InstructionOutputHandle<Value>
+  | OptionalSlotRead<Value>
+  | PromptTemplate<Value>;
+
+/** One `output.prompt` interpolation site: a slot or an optional slot read. Lives here for the same anti-cycle reason; output.ts re-exports. */
+export type OutputPromptInterpolation<Value = unknown> = SlotHandle<Value> | OptionalSlotRead<Value>;
+
 export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input> & {
   /**
    * Returns a NEW template with the extension's text appended (newline
