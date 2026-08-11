@@ -1,0 +1,81 @@
+schema-version = "0.2"
+key = "0168"
+title = "#trait/* imports: trait sources reference their source root without ../ chains"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+Deep trait-source files address family modules by relative walking —
+`import { plan } from "../../../shared/data.ts"` from a variant stage
+file — and every restructure (this week moved the refactor family
+three times) rewrites the dot-chains. Owner ruling 2026-08-11: a
+source-root alias, spelled `#trait/*`:
+
+    import { plan } from "#trait/shared/data.ts";
+
+Spelling rationale, recorded so it is not relitigated: Node's ESM
+resolver reserves exactly one native package-internal alias mechanism —
+subpath imports, specifiers starting with `#` — because `#` can never
+appear in a package name. `~/...` is a bare specifier for a package
+named "~" (custom resolve hook + tsconfig paths + editor config at
+every layer, forever) and reads as $HOME to shell eyes; `#/...` is
+empirically REJECTED by Node (ERR_INVALID_MODULE_SPECIFIER — bare `#`
+and the `#/` prefix are reserved-invalid, verified 2026-08-11 on Node
+24); named prefixes like `#trait/*` verified working. Native support
+means Node evaluation, tsc/tsserver (the `imports` field is honored
+under moduleResolution bundler/nodenext — the CLI-flag typecheck and
+LSP need zero config), and bundlers all resolve it for free.
+
+"""
+scope = """
+## Decisions
+
+- **Mapping**: each trait package's own package.json gains
+  `"imports": { "#trait/*": "./source/*" }`. Nearest-package.json
+  semantics scope the alias to its package by construction — a
+  `#trait/` import can never escape into another package.
+- **The one real work item is Rust**: the import-graph walk in
+  modules/io/src/cdk_build.rs (the `relative_specifiers` consumers at
+  both call sites) collects RELATIVE specifiers only. A file reachable
+  only through a `#trait/` import today silently drops out of the
+  package file inventory — broken packaging, wrong digests. Teach the
+  walk to resolve `#trait/*` against the package manifest's imports
+  mapping (prefer reading the manifest so the mapping has one source of
+  truth; alternatively validate the manifest declares exactly the
+  `#trait/*` -> `./source/*` convention and hard-code it — implementer
+  decides, but a package.json whose mapping disagrees with what the
+  walk assumes must be a build error, never a silent divergence).
+- **Adoption**: add the imports entry to every first-party trait
+  package.json and to whatever scaffolds new packages. Converting the
+  refactor family's existing `../` chains is the OWNER's edit (active
+  rework zone) — this task must not touch .ctx/traits/packages/*
+  sources beyond the package.json entries.
+- Emit-wrapper unaffected: only files INSIDE a package use the alias;
+  the wrapper imports the entry by path.
+
+## Watch
+
+- The literalness/text scans and source-map anchoring that share the
+  scanning posture must treat `#trait/` specifiers like relative ones
+  wherever file identity matters.
+- A `#trait/` import naming a file that does not exist must fail the
+  build with the resolved path in the message, matching relative-import
+  behavior.
+- Node version floor: subpath imports + native type-stripping are both
+  long-stable for the supported floor, but state the floor explicitly
+  in the error message if resolution is unavailable.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a fixture package whose variant imports
+`#trait/shared/data.ts` builds green, its file inventory/lock includes
+the aliased file, and the canonical is byte-identical to the same
+package written with relative imports; a `#trait/` import to a missing
+file fails with the resolved path; a package.json mapping that
+disagrees with the walk's resolution is a build error. The CLI-flag
+strict tsc invocation typechecks a `#trait/` import with no tsconfig.
+First-party package.jsons carry the entry; `just test` green.
+"""
