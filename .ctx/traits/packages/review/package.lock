@@ -10,15 +10,15 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:c1b0f4edbb619b5b55d9acca8487877f6ac98497cf4b740bf2c30981dc596865"
-canonical = "sha256:a5caf620fc6f3095db569bc63f5c9d30939cb9fa7463deb1b6c817718dc01aa5"
-model-visible = "sha256:01df3aad5312bfa3be231cc10cd25f6765f533ee756edb130ad6f1a01c479cc7"
+source = "sha256:a41bde17387fdaf1b2e0d07822d83f227a9de50695500e40a8502688ba4385c7"
+canonical = "sha256:966f84b827f0ade977b21d652c2631b5fd4c7a09c8236f1303071d01396495ab"
+model-visible = "sha256:3c2e77487b8e1318b93ebd777ffa1d9026f08e5b2567cf5b9e7e3bb952af9681"
 resource-manifest = "sha256:355cf9c76d5b62fdbeaf7cb842541dbdc760245189aff6f4d743afad5716f1cb"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/review-default/SKILL.md"
-digest = "sha256:9850e007652e20858e0c07d82b01a6ca1ca812d0a1e318d49ee3712affe3d879"
+digest = "sha256:4d765111921b2ef2d3f9e92c2efa0c80f9dd7922f0f9499045e24b7f30d99413"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -26,11 +26,11 @@ renderer-version = "0.1.0-alpha.1"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:c1b0f4edbb619b5b55d9acca8487877f6ac98497cf4b740bf2c30981dc596865"
-canonical = "sha256:a5caf620fc6f3095db569bc63f5c9d30939cb9fa7463deb1b6c817718dc01aa5"
-model-visible = "sha256:01df3aad5312bfa3be231cc10cd25f6765f533ee756edb130ad6f1a01c479cc7"
-render = "sha256:f55cf66b8e3c8605468f4f1ae081398b6411fef4e07a837b8729d8bd51cfc90a"
-generated-markdown = "sha256:9850e007652e20858e0c07d82b01a6ca1ca812d0a1e318d49ee3712affe3d879"
+source = "sha256:a41bde17387fdaf1b2e0d07822d83f227a9de50695500e40a8502688ba4385c7"
+canonical = "sha256:966f84b827f0ade977b21d652c2631b5fd4c7a09c8236f1303071d01396495ab"
+model-visible = "sha256:3c2e77487b8e1318b93ebd777ffa1d9026f08e5b2567cf5b9e7e3bb952af9681"
+render = "sha256:4968de00b614473f544c325ee3baa435afa38b19f24c1ca4fc28d0b43949ee8b"
+generated-markdown = "sha256:4d765111921b2ef2d3f9e92c2efa0c80f9dd7922f0f9499045e24b7f30d99413"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]

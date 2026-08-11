@@ -91,13 +91,11 @@ const procedureBody = procedure.from(
         // First step, before any prompt frame: a missing binary fails here,
         // not after a model call has already been spent.
         step.command("Confirm plannotator is installed", {
-            id: "preflight-binary",
             argv: ["sh", "-c", "command -v plannotator"],
             output: slot.preflightOutput,
         });
 
         agent.smart.prompt("Draft the work", {
-            id: "draft-writing",
             input: input.prompt`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
@@ -114,7 +112,6 @@ const procedureBody = procedure.from(
         // plan window flows into plan-refine as a deny, and only the gated
         // briefing steps below carry the distinguishable "dismissed" verdict.
         step.command("Annotate the plan (plannotator, plan mode)", {
-            id: "plan-owner-review",
             argv: [
                 "sh",
                 "-c",
@@ -127,7 +124,6 @@ const procedureBody = procedure.from(
         });
 
         agent.smart.prompt("Refine the plan against the owner's annotations", {
-            id: "plan-refine",
             input: input.prompt`
         Refine the draft ${slot.draft} into the final plan, using plannotator's plan-mode verdict ${slot.planDecision}.
         If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.
@@ -175,7 +171,6 @@ const procedureBody = procedure.from(
                 ]),
                 () => {
                     agent.smart.prompt("Write the round briefing", {
-                        id: "round-briefing",
                         input: gatedBriefingText,
                         output: slot.ownerBriefing,
                     });
@@ -190,7 +185,6 @@ const procedureBody = procedure.from(
                     // decision JSON is echoed first so the failure evidence
                     // carries the verdict.
                     step.command("Summon the owner (plannotator, gated)", {
-                        id: "owner-review",
                         argv: [
                             "sh",
                             "-c",
@@ -216,14 +210,12 @@ const procedureBody = procedure.from(
         // only when there is something to commit, and ships in the same
         // commit as the work it describes.
         step.command("Check working tree status", {
-            id: "shipping-status",
             argv: ["git", "status", "--porcelain"],
             output: slot.shippingStatus,
         });
 
         flow.when("Shipping Maybe Commit", condition.not(condition.equals(slot.shippingStatus, "")), () => {
             agent.smart.prompt("Write the brief and commit message", {
-                id: "summary-brief",
                 input: gatedBriefText,
                 output: slot.brief,
             });
@@ -235,7 +227,6 @@ const procedureBody = procedure.from(
                 ],
             });
             step.command("Save the brief to .internal/briefs/", {
-                id: "write-brief",
                 argv: [
                     "sh",
                     "-c",
@@ -249,7 +240,6 @@ const procedureBody = procedure.from(
             // No `--gate`: the brief is a record, not a decision — closing it
             // is the step's normal end, never a halt.
             step.command("Show the brief to the owner (plannotator, display only)", {
-                id: "display-brief",
                 argv: [
                     "sh",
                     "-c",
@@ -266,17 +256,14 @@ const procedureBody = procedure.from(
             // The brief under .internal/briefs/ is inside this stage — it
             // ships in the same commit as the work it describes.
             step.command("Stage all changes", {
-                id: "git-stage",
                 argv: ["git", "add", "-A"],
                 output: slot.stageOutput,
             });
             step.command("Unstage runtime state", {
-                id: "git-unstage-runtime",
                 argv: ["git", "reset", "-q", "--", ".agents/runs"],
                 output: slot.unstageOutput,
             });
             step.command("Commit the work", {
-                id: "git-commit",
                 argv: ["git", "commit", "-m", "{slot:commit-message}"],
                 input: [slot.commitMessage],
                 output: slot.commitOutput,

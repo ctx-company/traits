@@ -594,6 +594,18 @@ output = [
     "slot:leftovers",
 ]
 
+[prompt.copy-the-task-contract]
+text = """
+
+            Copy the task file for {port:task} EXACTLY as written.
+            Open the task-board directory named in {resource:task-board} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
+            Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost."""
+input = [
+    "port:task",
+    "resource:task-board",
+]
+output = ["slot:task-brief"]
+
 [prompt.planning-produce]
 text = """
 Create an implementation draft for {port:task}.
@@ -637,18 +649,6 @@ input = [
     "slot:task-brief",
 ]
 output = ["slot:shipping-message"]
-
-[prompt.task-extraction]
-text = """
-
-            Copy the task file for {port:task} EXACTLY as written.
-            Open the task-board directory named in {resource:task-board} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
-            Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost."""
-input = [
-    "port:task",
-    "resource:task-board",
-]
-output = ["slot:task-brief"]
 
 [[sequence.building-body.sequence]]
 id = "building-unseal"
@@ -916,10 +916,10 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "task-extraction"
-title = "Copy the task contract (clerk)"
+id = "copy-the-task-contract"
+title = "Copy the task contract"
 agent = "agent:clerk"
-prompt = "prompt:task-extraction"
+prompt = "prompt:copy-the-task-contract"
 input = [
     "port:task",
     "resource:task-board",

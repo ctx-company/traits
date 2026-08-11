@@ -64,7 +64,6 @@ export function quickProcedure(gate?: { prefix: string; title?: string; timeoutM
     },
     () => {
         agent.smart.prompt("Draft the work", {
-            id: "draft-writing",
             input: input.prompt`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.

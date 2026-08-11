@@ -256,7 +256,7 @@ id = "reviewer"
 description = "Reviews an arbitrary git ref/range with no task board governing the run and writes both the typed verdict and the human review document."
 summary = "Standalone review role."
 
-[prompt.review]
+[prompt.review-the-range]
 text = """
 Review the range {slot:range-resolved} (from the range/ref you were given: {port:range}). Commit log: {slot:commit-log}. File-level diff inventory (never the full patch): {slot:diff-stat}.
     Open the actual content yourself with your own tools — "git show", "git diff {slot:range-resolved} -- <file>" — the inventory above is only an index of where the changes landed.
@@ -280,7 +280,7 @@ output = [
 ]
 
 [[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "diff-stat"
+id = "capture-the-diff-inventory"
 title = "Capture the diff inventory"
 input = ["slot:range-resolved"]
 output = ["slot:diff-stat"]
@@ -295,7 +295,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
-id = "commit-log"
+id = "capture-the-commit-log"
 title = "Capture the commit log"
 input = ["slot:range-resolved"]
 output = ["slot:commit-log"]
@@ -320,10 +320,10 @@ slot = "slot:diff-stat"
 equals = ""
 
 [[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence]]
-id = "review"
-title = "Review the range (reviewer)"
+id = "review-the-range"
+title = "Review the range"
 agent = "agent:reviewer"
-prompt = "prompt:review"
+prompt = "prompt:review-the-range"
 input = [
     "port:range",
     "slot:range-resolved",
@@ -336,7 +336,7 @@ output = [
 ]
 
 [[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence]]
-id = "tree-status"
+id = "assert-the-reviewed-tree-stayed-clean"
 title = "Assert the reviewed tree stayed clean"
 kind = "check"
 output = ["slot:tree-status"]
@@ -358,7 +358,7 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "range-resolve"
+id = "resolve-the-range"
 title = "Resolve the range"
 input = ["port:range"]
 output = ["slot:range-resolved"]

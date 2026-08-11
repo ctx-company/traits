@@ -202,56 +202,7 @@ id = "worker"
 description = "Bumps the version files the release manifest declares."
 summary = "Implementation role."
 
-[prompt.changelog-draft]
-text = """
-
-    Draft the changelog entry for version {slot:new-version} from the commit log since the last tag: {slot:commit-log}. Do not consult anything else.
-    Every line must trace to a specific commit hash in that log — never invent, embellish, or infer beyond what a commit's own summary states.
-    Write the entry in the format the manifest {resource:release-manifest} declares for its changelog file, ready to insert at the top of the changelog section for unreleased entries."""
-input = [
-    "slot:new-version",
-    "slot:commit-log",
-    "resource:release-manifest",
-]
-output = ["slot:changelog-entry"]
-
-[prompt.changelog-review]
-text = """
-
-    Spot-check the changelog entry {slot:changelog-entry} against the commit log {slot:commit-log}. Open a few of the cited commits with "git show" and try to REFUTE each line — default to blocking on any line you cannot verify against an actual commit, rather than assuming it is grounded.
-    A blocker is any line not traceable to a listed commit, or any commit in the log with no corresponding line.
-    approved only once every line survives the refutation attempt."""
-input = [
-    "slot:changelog-entry",
-    "slot:commit-log",
-]
-output = ["slot:changelog-verdict"]
-
-[prompt.changelog-write]
-text = """
-
-    The changelog entry {slot:changelog-entry} for version {slot:new-version} has been approved. Read the release manifest {resource:release-manifest} with your tools to find the changelog file path.
-    Insert the approved entry at the top of that file's unreleased/new-version section. Edit ONLY that one file — no other files.
-    Return a one-line confirmation of the exact file path you edited."""
-input = [
-    "slot:changelog-entry",
-    "slot:new-version",
-    "resource:release-manifest",
-]
-output = ["slot:changelog-write-output"]
-
-[prompt.commit-message]
-text = """
-
-    The version-bump and changelog reviews have both approved. Write the release commit message: subject line "release: v{slot:new-version}", then the changelog entry {slot:changelog-entry} as the body.
-    Return exactly that message. Do not run git commands and do not write files."""
-input = [
-    "slot:new-version",
-    "slot:changelog-entry",
-]
-output = ["slot:commit-message"]
-
-[prompt.version-bump]
+[prompt.bump-the-declared-version-files]
 text = """
 
     Read the release manifest {resource:release-manifest} with your tools: the version-file locations to bump, the changelog path, and the release branch.
@@ -271,7 +222,33 @@ output = [
     "slot:version-summary",
 ]
 
-[prompt.version-review]
+[prompt.draft-the-changelog-entry]
+text = """
+
+    Draft the changelog entry for version {slot:new-version} from the commit log since the last tag: {slot:commit-log}. Do not consult anything else.
+    Every line must trace to a specific commit hash in that log — never invent, embellish, or infer beyond what a commit's own summary states.
+    Write the entry in the format the manifest {resource:release-manifest} declares for its changelog file, ready to insert at the top of the changelog section for unreleased entries."""
+input = [
+    "slot:new-version",
+    "slot:commit-log",
+    "resource:release-manifest",
+]
+output = ["slot:changelog-entry"]
+
+[prompt.insert-the-changelog-entry-into-the-changelog-file]
+text = """
+
+    The changelog entry {slot:changelog-entry} for version {slot:new-version} has been approved. Read the release manifest {resource:release-manifest} with your tools to find the changelog file path.
+    Insert the approved entry at the top of that file's unreleased/new-version section. Edit ONLY that one file — no other files.
+    Return a one-line confirmation of the exact file path you edited."""
+input = [
+    "slot:changelog-entry",
+    "slot:new-version",
+    "resource:release-manifest",
+]
+output = ["slot:changelog-write-output"]
+
+[prompt.review-the-version-bump]
 text = """
 
     Review the version bump. Current branch: {slot:current-branch}. New version: {slot:new-version}. Worker's summary: {slot:version-summary}. Scoped diff: {slot:version-diff}.
@@ -285,8 +262,31 @@ input = [
 ]
 output = ["slot:version-verdict"]
 
+[prompt.spot-check-the-changelog]
+text = """
+
+    Spot-check the changelog entry {slot:changelog-entry} against the commit log {slot:commit-log}. Open a few of the cited commits with "git show" and try to REFUTE each line — default to blocking on any line you cannot verify against an actual commit, rather than assuming it is grounded.
+    A blocker is any line not traceable to a listed commit, or any commit in the log with no corresponding line.
+    approved only once every line survives the refutation attempt."""
+input = [
+    "slot:changelog-entry",
+    "slot:commit-log",
+]
+output = ["slot:changelog-verdict"]
+
+[prompt.write-the-release-commit-message]
+text = """
+
+    The version-bump and changelog reviews have both approved. Write the release commit message: subject line "release: v{slot:new-version}", then the changelog entry {slot:changelog-entry} as the body.
+    Return exactly that message. Do not run git commands and do not write files."""
+input = [
+    "slot:new-version",
+    "slot:changelog-entry",
+]
+output = ["slot:commit-message"]
+
 [[sequence.ctx-branch-arm-p-20-preflight-clean-tree-then.sequence]]
-id = "preflight-gate"
+id = "run-the-repository-gate-chain"
 title = "Run the repository gate chain"
 kind = "check"
 output = ["slot:gate-passed"]
@@ -310,10 +310,10 @@ field = "ok"
 equals = true
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "changelog-write"
-title = "Insert the changelog entry into the changelog file (worker)"
+id = "insert-the-changelog-entry-into-the-changelog-file"
+title = "Insert the changelog entry into the changelog file"
 agent = "agent:worker"
-prompt = "prompt:changelog-write"
+prompt = "prompt:insert-the-changelog-entry-into-the-changelog-file"
 input = [
     "slot:changelog-entry",
     "slot:new-version",
@@ -322,10 +322,10 @@ input = [
 output = ["slot:changelog-write-output"]
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "commit-message"
-title = "Write the release commit message (scribe)"
+id = "write-the-release-commit-message"
+title = "Write the release commit message"
 agent = "agent:scribe"
-prompt = "prompt:commit-message"
+prompt = "prompt:write-the-release-commit-message"
 input = [
     "slot:new-version",
     "slot:changelog-entry",
@@ -333,7 +333,7 @@ input = [
 output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "stage"
+id = "stage-all-changes"
 title = "Stage all changes"
 output = ["slot:stage-output"]
 
@@ -345,7 +345,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "unstage-runtime"
+id = "unstage-runtime-state"
 title = "Unstage runtime state"
 output = ["slot:unstage-output"]
 
@@ -359,7 +359,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "commit"
+id = "commit-the-release"
 title = "Commit the release"
 input = ["slot:commit-message"]
 output = ["slot:commit-output"]
@@ -373,7 +373,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then.sequence]]
-id = "tag"
+id = "tag-the-release-local"
 title = "Tag the release (local)"
 input = [
     "slot:new-version",
@@ -402,7 +402,7 @@ slot = "slot:commit-output"
 equals = ""
 
 [[sequence.ctx-branch-arm-s-192-ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then-6-tagged-then.sequence]]
-id = "gated-push"
+id = "push-the-tag-awaiting-ctx-gate-approval"
 title = "Push the tag (awaiting ctx-gate approval)"
 output = ["slot:push-output"]
 
@@ -418,7 +418,7 @@ argv = [
 timeout-ms = 28800000
 
 [[sequence.ctx-branch-arm-s-192-ctx-branch-arm-s-144-ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then-18-changelog-approved-then-6-tagged-then.sequence]]
-id = "gated-publish"
+id = "publish-the-release-awaiting-ctx-gate-approval"
 title = "Publish the release (awaiting ctx-gate approval)"
 output = ["slot:publish-output"]
 
@@ -433,7 +433,7 @@ argv = [
 timeout-ms = 28800000
 
 [[sequence.ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then.sequence]]
-id = "last-tag"
+id = "find-the-last-tag"
 title = "Find the last tag"
 output = ["slot:last-tag"]
 
@@ -445,7 +445,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then.sequence]]
-id = "commit-log"
+id = "capture-the-commit-log-since-the-last-tag"
 title = "Capture the commit log since the last tag"
 input = ["slot:last-tag"]
 output = ["slot:commit-log"]
@@ -460,10 +460,10 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then.sequence]]
-id = "version-bump"
-title = "Bump the declared version files (worker)"
+id = "bump-the-declared-version-files"
+title = "Bump the declared version files"
 agent = "agent:worker"
-prompt = "prompt:version-bump"
+prompt = "prompt:bump-the-declared-version-files"
 input = [
     "resource:release-manifest",
     "slot:current-branch",
@@ -477,7 +477,7 @@ output = [
 ]
 
 [[sequence.ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then.sequence]]
-id = "version-diff"
+id = "capture-the-version-file-diff"
 title = "Capture the version-file diff"
 output = ["slot:version-diff"]
 
@@ -489,10 +489,10 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then.sequence]]
-id = "version-review"
-title = "Review the version bump (reviewer)"
+id = "review-the-version-bump"
+title = "Review the version bump"
 agent = "agent:reviewer"
-prompt = "prompt:version-review"
+prompt = "prompt:review-the-version-bump"
 input = [
     "slot:current-branch",
     "slot:new-version",
@@ -513,10 +513,10 @@ field = "status"
 equals = "approved"
 
 [[sequence.ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then.sequence]]
-id = "changelog-draft"
-title = "Draft the changelog entry (scribe)"
+id = "draft-the-changelog-entry"
+title = "Draft the changelog entry"
 agent = "agent:scribe"
-prompt = "prompt:changelog-draft"
+prompt = "prompt:draft-the-changelog-entry"
 input = [
     "slot:new-version",
     "slot:commit-log",
@@ -525,10 +525,10 @@ input = [
 output = ["slot:changelog-entry"]
 
 [[sequence.ctx-branch-arm-s-94-ctx-branch-arm-s-45-ctx-branch-arm-p-20-preflight-clean-tree-then-20-preflight-gate-green-then-21-version-bump-approved-then.sequence]]
-id = "changelog-review"
-title = "Spot-check the changelog (reviewer)"
+id = "spot-check-the-changelog"
+title = "Spot-check the changelog"
 agent = "agent:reviewer"
-prompt = "prompt:changelog-review"
+prompt = "prompt:spot-check-the-changelog"
 input = [
     "slot:changelog-entry",
     "slot:commit-log",
@@ -555,7 +555,7 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "preflight-status"
+id = "check-working-tree-status"
 title = "Check working tree status"
 output = ["slot:git-status"]
 
@@ -567,7 +567,7 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "preflight-branch"
+id = "capture-the-current-branch"
 title = "Capture the current branch"
 output = ["slot:current-branch"]
 

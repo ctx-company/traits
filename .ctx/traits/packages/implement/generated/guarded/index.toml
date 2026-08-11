@@ -330,7 +330,7 @@ input = [
 ]
 output = ["slot:review-verdict"]
 
-[prompt.draft-writing]
+[prompt.draft-the-work]
 text = """
 
         Create an implementation draft for {port:task} from its file on the task board {resource:task-board}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
@@ -511,10 +511,10 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "draft-writing"
+id = "draft-the-work"
 title = "Draft the work"
 agent = "agent:smart-1"
-prompt = "prompt:draft-writing"
+prompt = "prompt:draft-the-work"
 input = [
     "port:task",
     "resource:task-board",

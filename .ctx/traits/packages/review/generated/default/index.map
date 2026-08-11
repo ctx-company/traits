@@ -24,7 +24,7 @@
     "start": 59,
     "end": 59
   },
-  "prompt:review": {
+  "prompt:review-the-range": {
     "file": ".ctx/traits/packages/review/source/variants/default.ts",
     "start": 24,
     "end": 24
@@ -54,40 +54,40 @@
     "start": 283,
     "end": 283
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/commit-log": {
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
     "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 58,
-    "end": 58
+    "start": 56,
+    "end": 56
   },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/diff-non-empty": {
-    "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 64,
-    "end": 64
-  },
-  "sequence:ctx-branch-arm-p-14-range-resolved-then/diff-stat": {
-    "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 53,
-    "end": 53
-  },
-  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/review": {
-    "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 65,
-    "end": 65
-  },
-  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/tree-status": {
-    "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 74,
-    "end": 74
-  },
-  "sequence:procedure/range-resolve": {
-    "file": ".ctx/traits/packages/review/source/variants/default.ts",
-    "start": 46,
-    "end": 46
-  },
-  "sequence:procedure/range-resolved": {
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-diff-inventory": {
     "file": ".ctx/traits/packages/review/source/variants/default.ts",
     "start": 52,
     "end": 52
+  },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/diff-non-empty": {
+    "file": ".ctx/traits/packages/review/source/variants/default.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/assert-the-reviewed-tree-stayed-clean": {
+    "file": ".ctx/traits/packages/review/source/variants/default.ts",
+    "start": 70,
+    "end": 70
+  },
+  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/review-the-range": {
+    "file": ".ctx/traits/packages/review/source/variants/default.ts",
+    "start": 62,
+    "end": 62
+  },
+  "sequence:procedure/range-resolved": {
+    "file": ".ctx/traits/packages/review/source/variants/default.ts",
+    "start": 51,
+    "end": 51
+  },
+  "sequence:procedure/resolve-the-range": {
+    "file": ".ctx/traits/packages/review/source/variants/default.ts",
+    "start": 46,
+    "end": 46
   },
   "slot:commit-log": {
     "file": ".ctx/traits/packages/review/source/data.ts",

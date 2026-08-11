@@ -44,26 +44,22 @@ export default function () {
     });
 
     step.command("Resolve the range", {
-        id: "range-resolve",
         input: input.command`sh -c 'r="$1"; case "$r" in *...*|*..*) resolved="$r" ;; *) git rev-parse --verify "$r" >/dev/null 2>&1 || exit 0; base=$(git merge-base HEAD "$r" 2>/dev/null) || exit 0; resolved="$base..$r" ;; esac; git rev-list "$resolved" >/dev/null 2>&1 && echo "$resolved"; exit 0' _ ${range}`,
         output: rangeResolved,
     });
 
     flow.when("Range Resolved", condition.not(condition.equals(rangeResolved, "")), () => {
         step.command("Capture the diff inventory", {
-            id: "diff-stat",
             input: input.command`sh -c 'git diff --stat "$1"' _ ${rangeResolved}`,
             output: diffStat,
         });
         step.command("Capture the commit log", {
-            id: "commit-log",
             input: input.command`sh -c 'git log --oneline "$1"' _ ${rangeResolved}`,
             output: commitLog,
         });
 
         flow.when("Diff Non-Empty", condition.not(condition.equals(diffStat, "")), () => {
-            reviewer.prompt("Review the range (reviewer)", {
-                id: "review",
+            reviewer.prompt("Review the range", {
                 input: reviewText,
                 output: [reviewVerdict, reviewDocument],
             });
@@ -72,7 +68,6 @@ export default function () {
             // deny-all-writes mode is runtime work, filed as a leftover
             // rather than built here (ship-pragmatic/park-rigorous).
             step.check("Assert the reviewed tree stayed clean", {
-                id: "tree-status",
                 argv: ["sh", "-c", "test -z \"$(git status --porcelain)\""],
                 output: treeStatus,
             });

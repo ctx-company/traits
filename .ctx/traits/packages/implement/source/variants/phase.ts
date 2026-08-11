@@ -269,14 +269,12 @@ const procedureBody = procedure.from(
             loop.maxIterations(2, { onExhausted: "continue" });
 
             smart1.prompt("Planning Produce", {
-                id: "planning-produce",
                 input: draftText,
                 output: draft,
                 include: [planningVerdict.optional(), draft.optional()],
             });
 
             smart2.prompt("Planning Review", {
-                id: "planning-review",
                 input: planReviewText,
                 output: planningVerdict,
                 include: [planningVerdict.optional()],
@@ -293,7 +291,6 @@ const procedureBody = procedure.from(
             step.project("Building Unseal", { projections: [{ source: operation.literal(false), destination: sealed }] });
 
             worker.prompt("Building Produce", {
-                id: "building-produce",
                 input: produceText,
                 output: workSummary,
                 include: [verdict1.optional(), verdict2.optional(), workSummary.optional(), leftovers.optional(), repoGatesPassed.optional()],
@@ -302,13 +299,11 @@ const procedureBody = procedure.from(
             gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
             smart1.prompt("Building Review 1", {
-                id: "building-review-1",
                 input: review1Text,
                 output: [verdict1, leftovers],
                 include: [verdict1.optional()],
             });
             smart2.prompt("Building Review 2", {
-                id: "building-review-2",
                 input: review2Text,
                 output: [verdict2, leftovers],
                 include: [verdict2.optional()],

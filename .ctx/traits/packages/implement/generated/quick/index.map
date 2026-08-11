@@ -39,10 +39,10 @@
     "start": 46,
     "end": 46
   },
-  "prompt:draft-writing": {
+  "prompt:draft-the-work": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 68,
-    "end": 68
+    "start": 67,
+    "end": 67
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
@@ -76,13 +76,13 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 78,
-    "end": 78
+    "start": 77,
+    "end": 77
   },
   "sequence:building-body/building-review": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 86,
-    "end": 86
+    "start": 85,
+    "end": 85
   },
   "sequence:building-body/capture-diff": {
     "file": "packages/toolkit/src/sequence/evidence.ts",
@@ -131,10 +131,10 @@
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 75,
-    "end": 75
+    "start": 74,
+    "end": 74
   },
-  "sequence:procedure/draft-writing": {
+  "sequence:procedure/draft-the-work": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
     "start": 66,
     "end": 66
@@ -211,7 +211,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/quick.ts",
-    "start": 113,
-    "end": 113
+    "start": 112,
+    "end": 112
   }
 }

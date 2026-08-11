@@ -428,7 +428,7 @@ input = [
 ]
 output = ["slot:review-verdict"]
 
-[prompt.draft-writing]
+[prompt.draft-the-work]
 text = """
 
         Create an implementation draft for {port:task} from its file on the task board {resource:task-board}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
@@ -440,7 +440,7 @@ input = [
 ]
 output = ["slot:draft"]
 
-[prompt.plan-refine]
+[prompt.refine-the-plan-against-the-owner-s-annotations]
 text = """
 
         Refine the draft {slot:draft} into the final plan, using plannotator's plan-mode verdict {slot:plan-decision}.
@@ -453,22 +453,7 @@ input = [
 ]
 output = ["slot:plan"]
 
-[prompt.round-briefing]
-text = """
-
-    The reviewer has approved this round's work for {port:task} with the repository gate green, and the owner is about to be summoned to confirm it ships. Plan: {slot:plan}. Work summary: {slot:work-summary}. Reviewer verdict: {slot:review-verdict}.
-    Inspect the working tree with your tools (git diff, git status, the changed files) so the briefing reflects what actually changed, not just what the summary claims.
-    Write a short markdown briefing for the owner, to be read cold — the owner has not seen the working tree: what changed and why, what the review checked and found (including advisory notes worth the owner's attention), and what the owner is being asked to confirm.
-    Return only the briefing markdown."""
-input = [
-    "port:task",
-    "slot:plan",
-    "slot:work-summary",
-    "slot:review-verdict",
-]
-output = ["slot:owner-briefing"]
-
-[prompt.summary-brief]
+[prompt.write-the-brief-and-commit-message]
 text = """
 
     The build loop for {port:task} has ended in a double approval (reviewer and owner) and the work is being recorded and committed. Plan: {slot:plan}. Work summary: {slot:work-summary}. Final reviewer verdict: {slot:review-verdict}.
@@ -482,6 +467,21 @@ input = [
     "slot:review-verdict",
 ]
 output = ["slot:brief"]
+
+[prompt.write-the-round-briefing]
+text = """
+
+    The reviewer has approved this round's work for {port:task} with the repository gate green, and the owner is about to be summoned to confirm it ships. Plan: {slot:plan}. Work summary: {slot:work-summary}. Reviewer verdict: {slot:review-verdict}.
+    Inspect the working tree with your tools (git diff, git status, the changed files) so the briefing reflects what actually changed, not just what the summary claims.
+    Write a short markdown briefing for the owner, to be read cold — the owner has not seen the working tree: what changed and why, what the review checked and found (including advisory notes worth the owner's attention), and what the owner is being asked to confirm.
+    Return only the briefing markdown."""
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
+]
+output = ["slot:owner-briefing"]
 
 [[sequence.building-body.sequence]]
 id = "building-produce"
@@ -581,10 +581,10 @@ field = "ok"
 equals = true
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "summary-brief"
+id = "write-the-brief-and-commit-message"
 title = "Write the brief and commit message"
 agent = "agent:smart-1"
-prompt = "prompt:summary-brief"
+prompt = "prompt:write-the-brief-and-commit-message"
 input = [
     "port:task",
     "slot:plan",
@@ -620,7 +620,7 @@ field = "commit-message"
 destination = "slot:commit-message"
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "write-brief"
+id = "save-the-brief-to-internal-briefs"
 title = "Save the brief to .internal/briefs/"
 input = [
     "slot:brief-markdown",
@@ -639,7 +639,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "display-brief"
+id = "show-the-brief-to-the-owner-plannotator-display-only"
 title = "Show the brief to the owner (plannotator, display only)"
 input = [
     "slot:brief-slug",
@@ -658,7 +658,7 @@ argv = [
 idle-timeout-ms = 14400000
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "git-stage"
+id = "stage-all-changes"
 title = "Stage all changes"
 output = ["slot:stage-output"]
 
@@ -670,7 +670,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "git-unstage-runtime"
+id = "unstage-runtime-state"
 title = "Unstage runtime state"
 output = ["slot:unstage-output"]
 
@@ -684,7 +684,7 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "git-commit"
+id = "commit-the-work"
 title = "Commit the work"
 input = ["slot:commit-message"]
 output = ["slot:commit-output"]
@@ -698,10 +698,10 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-s-13-building-body-10-owner-gate-then.sequence]]
-id = "round-briefing"
+id = "write-the-round-briefing"
 title = "Write the round briefing"
 agent = "agent:smart-1"
-prompt = "prompt:round-briefing"
+prompt = "prompt:write-the-round-briefing"
 input = [
     "port:task",
     "slot:plan",
@@ -711,7 +711,7 @@ input = [
 output = ["slot:owner-briefing"]
 
 [[sequence.ctx-branch-arm-s-13-building-body-10-owner-gate-then.sequence]]
-id = "owner-review"
+id = "summon-the-owner-plannotator-gated"
 title = "Summon the owner (plannotator, gated)"
 input = ["slot:owner-briefing"]
 output = ["slot:owner-decision"]
@@ -751,7 +751,7 @@ output = [
 ]
 
 [[procedure.sequence]]
-id = "preflight-binary"
+id = "confirm-plannotator-is-installed"
 title = "Confirm plannotator is installed"
 output = ["slot:preflight-output"]
 
@@ -763,10 +763,10 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "draft-writing"
+id = "draft-the-work"
 title = "Draft the work"
 agent = "agent:smart-1"
-prompt = "prompt:draft-writing"
+prompt = "prompt:draft-the-work"
 input = [
     "port:task",
     "resource:task-board",
@@ -774,7 +774,7 @@ input = [
 output = ["slot:draft"]
 
 [[procedure.sequence]]
-id = "plan-owner-review"
+id = "annotate-the-plan-plannotator-plan-mode"
 title = "Annotate the plan (plannotator, plan mode)"
 input = ["slot:draft"]
 output = ["slot:plan-decision"]
@@ -790,10 +790,10 @@ argv = [
 idle-timeout-ms = 14400000
 
 [[procedure.sequence]]
-id = "plan-refine"
+id = "refine-the-plan-against-the-owner-s-annotations"
 title = "Refine the plan against the owner's annotations"
 agent = "agent:smart-1"
-prompt = "prompt:plan-refine"
+prompt = "prompt:refine-the-plan-against-the-owner-s-annotations"
 input = [
     "slot:draft",
     "slot:plan-decision",
@@ -830,7 +830,7 @@ field = "timed-out"
 equals = true
 
 [[procedure.sequence]]
-id = "shipping-status"
+id = "check-working-tree-status"
 title = "Check working tree status"
 output = ["slot:shipping-status"]
 

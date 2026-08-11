@@ -80,12 +80,10 @@ export default function () {
     useResource([releaseManifest]);
 
     step.command("Check working tree status", {
-        id: "preflight-status",
         argv: ["git", "status", "--porcelain"],
         output: gitStatus,
     });
     step.command("Capture the current branch", {
-        id: "preflight-branch",
         argv: ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         output: currentBranch,
     });
@@ -94,7 +92,6 @@ export default function () {
         // Fixed argv, mirroring `[merge] gate = [["just", "test"]]`: the
         // trait never composes a gate command from model output.
         step.check("Run the repository gate chain", {
-            id: "preflight-gate",
             argv: ["just", "test"],
             output: gatePassed,
             timeoutMs: 600_000,
@@ -102,12 +99,10 @@ export default function () {
 
         flow.when("Preflight Gate Green", condition.fieldEquals(gatePassed, "ok", true), () => {
             step.command("Find the last tag", {
-                id: "last-tag",
                 input: input.command`sh -c "git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0"`,
                 output: lastTag,
             });
             step.command("Capture the commit log since the last tag", {
-                id: "commit-log",
                 // First release: `lastTag` is the v0.0.0 sentinel, not a
                 // resolvable ref, so `lastTag..HEAD` is fatal — fall back to
                 // the full history, the correct grounding set for a first
@@ -116,61 +111,51 @@ export default function () {
                 output: commitLog,
             });
 
-            worker.prompt("Bump the declared version files (worker)", {
-                id: "version-bump",
+            worker.prompt("Bump the declared version files", {
                 input: versionBumpText,
                 output: [newVersion, versionSummary],
             });
             step.command("Capture the version-file diff", {
-                id: "version-diff",
                 argv: ["git", "diff", "--stat"],
                 output: versionDiff,
             });
-            reviewer.prompt("Review the version bump (reviewer)", {
-                id: "version-review",
+            reviewer.prompt("Review the version bump", {
                 input: versionReviewText,
                 output: versionVerdict,
             });
 
             flow.when("Version Bump Approved", condition.fieldEquals(versionVerdict, "status", "approved"), () => {
-                scribe.prompt("Draft the changelog entry (scribe)", {
-                    id: "changelog-draft",
+                scribe.prompt("Draft the changelog entry", {
                     input: changelogDraftText,
                     output: changelogEntry,
                 });
-                reviewer.prompt("Spot-check the changelog (reviewer)", {
-                    id: "changelog-review",
+                reviewer.prompt("Spot-check the changelog", {
                     input: changelogReviewText,
                     output: changelogVerdict,
                 });
 
                 flow.when("Changelog Approved", condition.fieldEquals(changelogVerdict, "status", "approved"), () => {
-                    worker.prompt("Insert the changelog entry into the changelog file (worker)", {
-                        id: "changelog-write",
+                    worker.prompt("Insert the changelog entry into the changelog file", {
                         input: changelogWriteText,
                         output: changelogWriteOutput,
                     });
-                    scribe.prompt("Write the release commit message (scribe)", {
-                        id: "commit-message",
+                    scribe.prompt("Write the release commit message", {
                         input: commitMessageText,
                         output: commitMessage,
                     });
                     // Two steps, not one excluding pathspec — a pathspec that
                     // mentions a gitignored `.agents` exits 1 (run-42bd7fb2).
-                    step.command("Stage all changes", { id: "stage", argv: ["git", "add", "-A"], output: stageOutput });
+                    step.command("Stage all changes", { argv: ["git", "add", "-A"], output: stageOutput });
                     step.command("Unstage runtime state", {
-                        id: "unstage-runtime",
                         argv: ["git", "reset", "-q", "--", ".agents/runs"],
                         output: unstageOutput,
                     });
                     step.command("Commit the release", {
-                        id: "commit",
                         argv: ["git", "commit", "-m", commitMessage],
                         output: commitOutput,
                     });
                     // Local annotated tag only — still reversible, not gated.
                     step.command("Tag the release (local)", {
-                        id: "tag",
                         input: input.command`sh -c 'git tag -a "v$1" -m "$2"' _ ${newVersion} ${commitMessage}`,
                         output: tagOutput,
                     });
@@ -179,13 +164,11 @@ export default function () {
                         // Irreversible edge, owner-gated (0098): fixed argv,
                         // the trait never composes shell from model output.
                         step.command("Push the tag (awaiting ctx-gate approval)", {
-                            id: "gated-push",
                             argv: ["ctx-gate", "run", "--", "git", "push", "--follow-tags"],
                             output: pushOutput,
                             timeoutMs: 28_800_000,
                         });
                         step.command("Publish the release (awaiting ctx-gate approval)", {
-                            id: "gated-publish",
                             argv: ["ctx-gate", "run", "--", "just", "release-publish"],
                             output: publishOutput,
                             timeoutMs: 28_800_000,

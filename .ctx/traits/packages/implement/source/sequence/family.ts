@@ -266,10 +266,8 @@ export function feasibilityStep(agentHandle: AgentHandle, contract: ResourceHand
     });
 }
 
-/** Functional-layer form (0109 F2): `task-extraction`'s hand-chosen id never matched `idFromTitle` of its own title, so it needs the `id:` override — the same known gap as the seven baseline steps, just uncounted in the 0108 pilot since quick never called this step. */
 export function taskExtractionStep(agentHandle: AgentHandle, taskBoardHandle: ResourceHandle): void {
-    agentHandle.prompt("Copy the task contract (clerk)", {
-        id: "task-extraction",
+    agentHandle.prompt("Copy the task contract", {
         input: input.prompt`
             Copy the task file for ${task} EXACTLY as written.
             Open the task-board directory named in ${taskBoardHandle} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.

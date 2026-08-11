@@ -59,6 +59,11 @@
     "start": 240,
     "end": 240
   },
+  "prompt:copy-the-task-contract": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 271,
+    "end": 271
+  },
   "prompt:planning-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
     "start": 195,
@@ -71,13 +76,8 @@
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 336,
-    "end": 336
-  },
-  "prompt:task-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 273,
-    "end": 273
+    "start": 331,
+    "end": 331
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -151,28 +151,28 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 295,
-    "end": 295
+    "start": 293,
+    "end": 293
   },
   "sequence:building-body/building-review-1": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 304,
-    "end": 304
+    "start": 301,
+    "end": 301
   },
   "sequence:building-body/building-review-2": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 310,
-    "end": 310
+    "start": 306,
+    "end": 306
   },
   "sequence:building-body/building-seal": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 319,
-    "end": 319
+    "start": 314,
+    "end": 314
   },
   "sequence:building-body/building-unseal": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 293,
-    "end": 293
+    "start": 291,
+    "end": 291
   },
   "sequence:building-body/capture-diff": {
     "file": "packages/toolkit/src/sequence/evidence.ts",
@@ -236,13 +236,18 @@
   },
   "sequence:planning-body/planning-review": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 278,
-    "end": 278
+    "start": 277,
+    "end": 277
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 290,
-    "end": 290
+    "start": 288,
+    "end": 288
+  },
+  "sequence:procedure/copy-the-task-contract": {
+    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
+    "start": 270,
+    "end": 270
   },
   "sequence:procedure/planning": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -259,11 +264,6 @@
     "start": 58,
     "end": 58
   },
-  "sequence:procedure/task-extraction": {
-    "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 271,
-    "end": 271
-  },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
     "start": 170,
@@ -271,8 +271,8 @@
   },
   "slot:building-sealed": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 288,
-    "end": 288
+    "start": 286,
+    "end": 286
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
@@ -351,7 +351,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
-    "start": 354,
-    "end": 354
+    "start": 349,
+    "end": 349
   }
 }
