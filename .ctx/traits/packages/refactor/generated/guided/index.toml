@@ -1,29 +1,28 @@
 id = "refactor"
 schema-version = "0.3"
 version = "0.11.0"
-name = "Quick"
-summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
-variant = "quick"
+name = "Guided"
+summary = "Turns human annotations into implemented, reviewed changes."
+variant = "guided"
 
 [metadata]
 tag = [
     "first-party",
     "refactoring",
-    "review",
-    "multi-agent",
+    "annotations",
 ]
 
 [[intent.require]]
-id = "review-before-final"
+id = "annotation-fidelity"
 
 [[intent.require]]
-id = "behavior-preserving-default"
+id = "preserve-scope"
 
 [[intent.avoid]]
-id = "rubber-stamp-review"
+id = "scope-creep"
 
 [[intent.avoid]]
-id = "interface-widening"
+id = "over-engineering"
 
 [[port]]
 id = "commit-report"
@@ -33,11 +32,10 @@ optional = true
 description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
 value = "slot:commit-output"
 
-[[port]]
-id = "target"
-direction = "input"
-schema = "schema:text"
-description = 'Module, file path, or entity to refactor; append an optional emphasis after a dash (e.g. "modules/cli/src/app/run_view.rs", "crate::lockfile — typed errors only").'
+[[slot]]
+id = "annotations"
+schema = "schema:annotations-doc"
+description = "Typed ctx-annotate output, validated against this schema before use."
 
 [[slot]]
 id = "commit-message"
@@ -91,6 +89,33 @@ id = "architecture-dialect"
 path = "resources/architecture-dialect.md"
 hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
 trigger = "on-activation"
+
+[[schema]]
+id = "annotation"
+description = "One human annotation captured by ctx-annotate."
+
+[schema.fields.file]
+schema = "schema:text"
+required = true
+description = "Repo-relative path of the annotated file."
+
+[schema.fields.lines]
+schema = "([schema:integer]|[schema:line-point])"
+required = true
+description = "Whole-line form: [start, end] line numbers, BOTH inclusive. Free-text form: exactly two line-point objects marking the start and end of the exact range."
+
+[schema.fields.text]
+schema = "schema:text"
+required = true
+description = "The human's instruction for this annotated range."
+
+[[schema]]
+id = "annotations-doc"
+description = "The typed ctx-annotate output document."
+
+[schema.fields.annotations]
+schema = "[schema:annotation]"
+required = true
 
 [[schema]]
 id = "blocker"
@@ -191,6 +216,20 @@ required = true
 description = "Why the departure occurred."
 
 [[schema]]
+id = "line-point"
+description = "One end of an exact text range."
+
+[schema.fields.column]
+schema = "schema:integer"
+required = true
+description = "1-based column within the line."
+
+[schema.fields.number]
+schema = "schema:integer"
+required = true
+description = "1-based line number."
+
+[[schema]]
 id = "review-verdict"
 description = "Typed review verdict. The loop blocks only on blockers; an incomplete migration of the broader ideal is advisory-deferred, not a blocker, so a correct framed refactor converges."
 
@@ -226,18 +265,14 @@ id = "worker"
 description = "Implements the agreed refactor design and applies reviewer fixes."
 summary = "Implementation role."
 
-[prompt.checklist-the-target]
+[prompt.build-the-checklist]
 text = """
-
-    Turn {port:target} into an actionable refactoring checklist.
-    Read the target with your tools; list concrete steps only — no framing prose, no illustrative design.
-    Keep it to what honestly fits one quick run.
-
+Turn the captured annotations {slot:annotations} into a checklist.
 
 
     Return the checklist (slot:plan).
 """
-input = ["port:target"]
+input = ["slot:annotations"]
 output = ["slot:plan"]
 
 [prompt.implement-the-checklist]
@@ -280,8 +315,8 @@ output = ["slot:review-verdict-1"]
 [prompt.write-the-commit-message]
 text = """
 
-    The review for the refactor of {port:target} has ended and the work is being
-    committed. The final reviewer verdict is {slot:review-verdict-1}.
+    The review of the implemented annotation checklist has ended and the work is being committed.
+    The final reviewer verdict is {slot:review-verdict-1}.
     Write the commit message from the checklist {slot:plan}.
 
 
@@ -290,7 +325,6 @@ text = """
     the git commit step (slot:commit-message)
 """
 input = [
-    "port:target",
     "slot:review-verdict-1",
     "slot:plan",
 ]
@@ -302,7 +336,6 @@ title = "Write the commit message"
 agent = "agent:scribe"
 prompt = "prompt:write-the-commit-message"
 input = [
-    "port:target",
     "slot:review-verdict-1",
     "slot:plan",
 ]
@@ -362,16 +395,24 @@ input = [
 output = ["slot:review-verdict-1"]
 
 [procedure]
-description = "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit."
-input = ["port:target"]
+description = "Collect human annotations interactively, plan them as a checklist, implement every item in a reviewed loop, and commit."
 output = ["port:commit-report"]
 
 [[procedure.sequence]]
-id = "checklist-the-target"
-title = "Checklist the target"
+id = "collect-annotations-ctx-annotate"
+title = "Collect annotations (ctx-annotate)"
+output = ["slot:annotations"]
+
+[procedure.sequence.command]
+argv = ["ctx-annotate"]
+timeout-ms = 3600000
+
+[[procedure.sequence]]
+id = "build-the-checklist"
+title = "Build the checklist"
 agent = "agent:smart-1"
-prompt = "prompt:checklist-the-target"
-input = ["port:target"]
+prompt = "prompt:build-the-checklist"
+input = ["slot:annotations"]
 output = ["slot:plan"]
 
 [[procedure.sequence]]

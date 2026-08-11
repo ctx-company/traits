@@ -5,6 +5,18 @@ generated-at = "not-recorded"
 
 [[trait]]
 id = "refactor"
+variant = "complex"
+requested-version = "0.11.0"
+resolved-version = "0.11.0"
+
+[trait.digests]
+source = "sha256:05a6e585ca6e462287e73cbfbd449ea6738c1ce26b90046815a273bfe76516ba"
+canonical = "sha256:55e18d3035a4b944589941fce31bd25bae68aa1d02954ec691bcd505c50dc462"
+model-visible = "sha256:6e155136a3475888b49ff9ca7f31a3ff43750efe0a365f642924b70d98248d53"
+resource-manifest = "sha256:15154d61f645de6365f0f6d20f37d204f271a28c47376e994c926bfe530b8d34"
+
+[[trait]]
+id = "refactor"
 variant = "default"
 requested-version = "0.11.0"
 resolved-version = "0.11.0"
@@ -67,14 +79,26 @@ digest = "sha256:f475494b19ed36ef5d4d2334071481a61833d41d51ed908fd9409b2b93c3012
 
 [[trait]]
 id = "refactor"
+variant = "guided"
+requested-version = "0.11.0"
+resolved-version = "0.11.0"
+
+[trait.digests]
+source = "sha256:706537aa54065b9bfd242b36551af89684c3643d90031222540542ac55b2dcf3"
+canonical = "sha256:c466a30f4a1cca5f522317631f2b66805ecfb66176296a98bfd8c68143756cb7"
+model-visible = "sha256:83ea4f8f8b0e1787c878085e27cfcf113a817b604b136294e2be3c4ff6f289d5"
+resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
+
+[[trait]]
+id = "refactor"
 variant = "quick"
 requested-version = "0.11.0"
 resolved-version = "0.11.0"
 
 [trait.digests]
-source = "sha256:904b97a8adac658f8cff455cfcbecbc687fcda0c50cbf72e8770ba594a98d825"
-canonical = "sha256:4792df19990f7decb97596afd2edd20e709dd01edd40bb1ef2cc24304584912c"
-model-visible = "sha256:c4c30fd9179cf67b8afd40a00bc9c360c6d05521a1a16bd92404a089119c7aad"
+source = "sha256:c3f90569deb9f0d26dbe9ba9a219957f220e10fdea5eecc3e688442b19aacd2c"
+canonical = "sha256:ab2b0d5e5faded0f256bb080b922efe857cec1f0442865241a4164de04012b9f"
+model-visible = "sha256:608360a020ff5c207a89e2d325c29150b1f6efdcbb030316de4819d3049a4086"
 resource-manifest = "sha256:c956ac15dfaccccebb42afd76233cb86089e9744a5ad02f11187ddae754f475d"
 
 [[trait.export]]

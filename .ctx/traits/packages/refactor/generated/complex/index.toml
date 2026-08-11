@@ -1,9 +1,9 @@
 id = "refactor"
 schema-version = "0.3"
 version = "0.11.0"
-name = "Quick"
-summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
-variant = "quick"
+name = "Complex"
+summary = "Refactor procedure: survey, frame, design, implement, refine, and commit."
+variant = "complex"
 
 [metadata]
 tag = [
@@ -14,16 +14,28 @@ tag = [
 ]
 
 [[intent.require]]
+id = "behavior-preserving-default"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.require]]
+id = "gates-green-before-commit"
+
+[[intent.require]]
 id = "review-before-final"
 
 [[intent.require]]
-id = "behavior-preserving-default"
+id = "verbatim-execution"
+
+[[intent.avoid]]
+id = "interface-widening"
 
 [[intent.avoid]]
 id = "rubber-stamp-review"
 
 [[intent.avoid]]
-id = "interface-widening"
+id = "silent-deviation"
 
 [[port]]
 id = "commit-report"
@@ -66,6 +78,11 @@ schema = "schema:text"
 description = "The plan the implementation executes — the agreed design or the actionable checklist, complete enough to implement from."
 
 [[slot]]
+id = "refactor-frame"
+schema = "schema:text"
+description = "The selected candidate set plus problem framing: constraints any new boundary must satisfy, dependencies, an illustrative (non-binding) sketch."
+
+[[slot]]
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "smart-1's refinement verdict for the current refactored state."
@@ -81,6 +98,12 @@ schema = "schema:text"
 description = "Output evidence from the git staging command step."
 
 [[slot]]
+id = "survey"
+schema = "schema:text"
+description = "Numbered refactoring candidates for the target: cluster, why coupled, smell ids, test impact. No interface proposals."
+hint = "The friction encountered while reading IS the signal. Deferred candidates stay listed here."
+
+[[slot]]
 id = "work-summary"
 schema = "schema:text"
 description = "Worker's report of the refactored state; revised in place after each refinement pass."
@@ -90,6 +113,12 @@ hint = "What changed (files), how behavior was preserved, gate results, open con
 id = "architecture-dialect"
 path = "resources/architecture-dialect.md"
 hint = "The house architecture dialect: Interface/Service boundaries, typed Event/Command flow, entity containment — deep modules throughout."
+trigger = "on-activation"
+
+[[resource]]
+id = "smell-catalog"
+path = "resources/smell-catalog.md"
+hint = "Eight detectable refactoring smells with detection patterns, before/after shapes, and when-not-to-apply guards."
 trigger = "on-activation"
 
 [[schema]]
@@ -222,25 +251,67 @@ description = "Surveys, frames, designs, and reviews."
 summary = "Review role."
 
 [[agent]]
+id = "smart-2"
+description = "Independent reviewer."
+summary = "Review role."
+
+[[agent]]
 id = "worker"
 description = "Implements the agreed refactor design and applies reviewer fixes."
 summary = "Implementation role."
 
-[prompt.checklist-the-target]
+[prompt.cross-review-refactor]
+text = """
+Review the refactored state of {port:target} against the agreed design {slot:plan}, independently of the other reviewer.
+    Current work summary: {slot:work-summary}.
+    Cite the smell id or the deep-module violation for every blocker. Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
+                    Consult the phase contract {slot:plan} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
+                    Before citing any house rule in a blocker, verify it against the phase's declared rule-authority: open that resource yourself with your tools, confirm the rule's source path/section and quoted line(s) in {resource:architecture-dialect} match the authority exactly, and drop the blocker rather than raise it if you cannot verify both — an unsourced or misquoted rule is not a rule. When a blocker does cite a house rule, set its rule-source and rule-quote fields to the verified citation; leave both unset for blockers that are not rule-based (correctness bugs, duplication, and the like).
+                    A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
+                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
+                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
+input = [
+    "port:target",
+    "slot:plan",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-2"]
+
+[prompt.design-the-boundary]
 text = """
 
-    Turn {port:target} into an actionable refactoring checklist.
-    Read the target with your tools; list concrete steps only — no framing prose, no illustrative design.
-    Keep it to what honestly fits one quick run.
+    Design the refactor for the framed problem {slot:refactor-frame} on {port:target}.
+    Stay within the framing's constraints.
 
 
 
-    Return the checklist (slot:plan).
+    Return the complete agreed design ready to implement from (slot:plan).
+    Do not leave fidelity to be inferred from prose elsewhere in the design.
 """
-input = ["port:target"]
+input = [
+    "slot:refactor-frame",
+    "port:target",
+]
 output = ["slot:plan"]
 
-[prompt.implement-the-checklist]
+[prompt.frame-the-problem]
+text = """
+
+    From the survey {slot:survey} of {port:target}.
+    Verify the selection against the actual code with your tools.
+
+
+
+    Return the problem framing (slot:refactor-frame).
+"""
+input = [
+    "slot:survey",
+    "port:target",
+]
+output = ["slot:refactor-frame"]
+
+[prompt.implement-the-design-specification]
 text = """
 
     Implement the plan {slot:plan}.
@@ -260,9 +331,9 @@ output = [
     "slot:deviation-report",
 ]
 
-[prompt.review-the-implementation]
+[prompt.review-refactor]
 text = """
-Review the implemented state of the working tree against the plan {slot:plan}.
+Review the refactored state of {port:target} against the agreed design {slot:plan}, independently of the other reviewer.
     Current work summary: {slot:work-summary}.
     Cite the smell id or the deep-module violation for every blocker. Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
                     Consult the phase contract {slot:plan} and house rules {resource:architecture-dialect}, and inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
@@ -271,19 +342,38 @@ Review the implemented state of the working tree against the plan {slot:plan}.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
 input = [
+    "port:target",
     "slot:plan",
     "slot:work-summary",
     "resource:architecture-dialect",
 ]
 output = ["slot:review-verdict-1"]
 
+[prompt.survey-the-target]
+text = """
+
+    Survey {port:target} for refactoring opportunities.
+    Read the target and its callers/callees with your tools — explore organically.
+
+
+
+    Return a numbered candidate list — for each:
+        - the cluster of code involved (paths),
+        - why it is coupled,
+        - which smell ids or dialect pillar it violates,
+        - how the boundary would change what tests can prove.
+    List every real candidate even if it cannot fit one run in slot:survey.
+"""
+input = ["port:target"]
+output = ["slot:survey"]
+
 [prompt.write-the-commit-message]
 text = """
 
-    The review for the refactor of {port:target} has ended and the work is being
-    committed. The final reviewer verdict is {slot:review-verdict-1}.
-    Write the commit message from the checklist {slot:plan}.
-
+        The refinement loop for the refactor of {port:target} has ended and the work is being committed.
+        The final reviewer verdicts are {slot:review-verdict-1} and {slot:review-verdict-2}.
+        Write the commit message from the agreed design {slot:plan}.
+    
 
 
     Return exactly the finished commit message — the runtime injects it into
@@ -292,6 +382,7 @@ text = """
 input = [
     "port:target",
     "slot:review-verdict-1",
+    "slot:review-verdict-2",
     "slot:plan",
 ]
 output = ["slot:commit-message"]
@@ -304,6 +395,7 @@ prompt = "prompt:write-the-commit-message"
 input = [
     "port:target",
     "slot:review-verdict-1",
+    "slot:review-verdict-2",
     "slot:plan",
 ]
 output = ["slot:commit-message"]
@@ -334,11 +426,11 @@ argv = [
     "{slot:commit-message}",
 ]
 
-[[sequence.reviewed-refinement-body.sequence]]
-id = "implement-the-checklist"
-title = "Implement the checklist"
+[[sequence.doubly-reviewed-verbatim-refinement-body.sequence]]
+id = "implement-the-design-specification"
+title = "Implement the design specification"
 agent = "agent:worker"
-prompt = "prompt:implement-the-checklist"
+prompt = "prompt:implement-the-design-specification"
 input = [
     "slot:plan",
     { slot = "slot:review-verdict-1", optional = true },
@@ -349,41 +441,82 @@ output = [
     "slot:deviation-report",
 ]
 
-[[sequence.reviewed-refinement-body.sequence]]
-id = "review-the-implementation"
-title = "Review the implementation"
+[[sequence.doubly-reviewed-verbatim-refinement-body.sequence]]
+id = "review-refactor"
+title = "Review refactor"
 agent = "agent:smart-1"
-prompt = "prompt:review-the-implementation"
+prompt = "prompt:review-refactor"
 input = [
+    "port:target",
     "slot:plan",
     "slot:work-summary",
     "resource:architecture-dialect",
 ]
 output = ["slot:review-verdict-1"]
 
+[[sequence.doubly-reviewed-verbatim-refinement-body.sequence]]
+id = "cross-review-refactor"
+title = "Cross-review refactor"
+agent = "agent:smart-2"
+prompt = "prompt:cross-review-refactor"
+input = [
+    "port:target",
+    "slot:plan",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
+output = ["slot:review-verdict-2"]
+
 [procedure]
-description = "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit."
+description = "Refactor procedure: survey, frame, design, implement, refine, and commit."
 input = ["port:target"]
 output = ["port:commit-report"]
 
 [[procedure.sequence]]
-id = "checklist-the-target"
-title = "Checklist the target"
+id = "survey-the-target"
+title = "Survey the target"
 agent = "agent:smart-1"
-prompt = "prompt:checklist-the-target"
+prompt = "prompt:survey-the-target"
 input = ["port:target"]
+output = ["slot:survey"]
+
+[[procedure.sequence]]
+id = "frame-the-problem"
+title = "Frame the problem"
+agent = "agent:smart-1"
+prompt = "prompt:frame-the-problem"
+input = [
+    "slot:survey",
+    "port:target",
+]
+output = ["slot:refactor-frame"]
+
+[[procedure.sequence]]
+id = "design-the-boundary"
+title = "Design the boundary"
+agent = "agent:smart-1"
+prompt = "prompt:design-the-boundary"
+input = [
+    "slot:refactor-frame",
+    "port:target",
+]
 output = ["slot:plan"]
 
 [[procedure.sequence]]
-id = "reviewed-refinement"
-title = "Reviewed refinement"
+id = "doubly-reviewed-verbatim-refinement"
+title = "Doubly-reviewed verbatim refinement"
 kind = "loop"
-sequence = "sequence:reviewed-refinement-body"
-max-iterations = 2
+sequence = "sequence:doubly-reviewed-verbatim-refinement-body"
+max-iterations = 6
 on-exhausted = "continue"
 
-[procedure.sequence.until]
+[[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-2"
 field = "status"
 equals = "approved"
 

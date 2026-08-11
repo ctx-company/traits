@@ -4,7 +4,7 @@ total-seconds = 10800
 max-retries = 3
 idle-seconds = 1200
 
-[variant.direct]
+[variant.guided]
 max-frames = 100
 frame-seconds = 3600
 total-seconds = 10800
