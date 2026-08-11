@@ -185,12 +185,36 @@ export const agent: AgentFunction = Object.assign(
  * const [smart1, smart2] = seats(reviewerRole, "smart", 2, "Reviews the diff.");
  * ```
  */
-export function seats<A extends unknown[], H extends AgentHandle>(
-  mint: (id: string, ...args: A) => H,
+// Overloads by forwarded-argument count rather than one variadic signature:
+// every agent mint (`agent`, the `agent.*` templates, project wrappers like
+// `reviewerRole`) declares its trailing parameters OPTIONAL, which makes TS
+// collapse a `...args: A` tuple inferred from the mint to `[]` and reject
+// the forwarded fields as an excess argument ("Expected 3 arguments, but
+// got 4"). Three arities cover every existing mint shape.
+export function seats<H extends AgentHandle>(
+  mint: (id: string) => H,
   role: string,
   count: number,
-  ...args: A
-): readonly H[] {
+): readonly H[];
+export function seats<H extends AgentHandle, F>(
+  mint: (id: string, fields: F) => H,
+  role: string,
+  count: number,
+  fields: F,
+): readonly H[];
+export function seats<H extends AgentHandle, F, S>(
+  mint: (id: string, first: F, second: S) => H,
+  role: string,
+  count: number,
+  first: F,
+  second: S,
+): readonly H[];
+export function seats(
+  mint: (id: string, ...args: unknown[]) => AgentHandle,
+  role: string,
+  count: number,
+  ...args: unknown[]
+): readonly AgentHandle[] {
   validateSlug(role, "seats.role");
   if (!Number.isInteger(count) || count < 1) {
     throw new Error(`seats.count: expected a positive integer, got ${JSON.stringify(count)}`);

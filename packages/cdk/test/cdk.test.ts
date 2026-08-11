@@ -2077,13 +2077,13 @@ describe("seats (0162)", () => {
     expect(minted.map((h) => toDraftJson(h).id)).toEqual(["smart-1", "smart-2", "smart-3"]);
   });
 
-  it("reordering the destructure reorders which id each variable holds", () => {
+  it("reordering the seats reorders which id each position holds", () => {
     const minted = seats(agent, "smart", 2, { description: "Seat." });
-    const [a, b] = minted;
-    const [b2, a2] = [minted[1], minted[0]];
+    const ids = minted.map((h) => toDraftJson(h).id);
+    const reversed = [...minted].reverse().map((h) => toDraftJson(h).id);
 
-    expect(toDraftJson(a).id).toBe(toDraftJson(a2).id);
-    expect(toDraftJson(b).id).toBe(toDraftJson(b2).id);
+    expect(ids).toEqual(["smart-1", "smart-2"]);
+    expect(reversed).toEqual(["smart-2", "smart-1"]);
   });
 
   it("rejects a non-positive-integer count", () => {

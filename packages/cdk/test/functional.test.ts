@@ -464,7 +464,12 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         return { review1, review2 };
       });
 
+    // Destructuring a `readonly H[]` under noUncheckedIndexedAccess types
+    // each element `H | undefined`; the length is proven by construction.
     const [seatSmart1, seatSmart2] = seats(agent.reviewer, "smart", 2);
+    if (seatSmart1 === undefined || seatSmart2 === undefined) {
+      throw new Error("seats(2) must mint two handles");
+    }
     const seatDraft = buildWith(seatSmart1, seatSmart2).draft;
 
     const handSmart1 = agent.reviewer("smart-1");
