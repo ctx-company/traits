@@ -1,0 +1,93 @@
+schema-version = "0.2"
+key = "0166"
+title = "prompt templates compose: .extend() chaining and nested template interpolation"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+Prompt templates are terminal values today: `input.prompt` (tagged and
+bound-text forms) returns a PromptTemplate that nothing can build on.
+The one place a variant needs to COMPOSE a prompt — layer its doctrine
+onto a family-shared base — therefore grew a bespoke builder
+(refactor's stages/review `bind({doctrine, scope, rules, bindings})`
+with its ReviewFields surface): a one-off function API for what is
+really just "base text plus appended/spliced text".
+
+Owner ruling 2026-08-11: composition becomes a first-class template
+capability, and the bespoke builder class dies. Two features:
+
+1. `.extend` on a template result — `somePrompt.extend`...`` returns a
+   NEW template with the extension appended; chainable
+   (`p.extend`a`.extend`b``).
+2. Nested template interpolation —
+   `input.prompt`something ${input.prompt`xx`} something`` splices the
+   inner template's text at the interpolation site.
+
+Motivating consumer: refactor strict's variant review override
+(variant/strict/stage/review.ts) currently exists ONLY to call bind
+with strict's doctrine strings; with composition it becomes
+`review.input.extend`...strict rules...`` (or a nested-template
+equivalent) and the shared review stage exports a plain `input` const
+like every other stage — the family's last function-shaped stage
+surface goes const-shaped.
+
+"""
+scope = """
+## Decisions
+
+- **Pure CDK, build-time only.** Composition resolves while the trait
+  function runs; the canonical still carries one final prompt text per
+  step. No Rust/runtime change, no canonical schema change — the
+  emitted shape is indistinguishable from a hand-written template.
+- **Immutability**: `.extend` returns a NEW PromptTemplate; the
+  receiver is unchanged (a shared base extended by two variants must
+  not accumulate).
+- **Meta merging** is the substance of both features: text
+  concatenation (extend joins with a newline; nesting splices in
+  place), `refs` union in first-appearance order, `optionalRefs` union
+  (a `${slot.optional()}` inside either part survives composition —
+  142eecd5), `declarations` concatenation (slots/ports declared inside
+  an inner template still declare through the composed result).
+- **Interpolation set**: `.extend` is a tagged template accepting the
+  full PromptInterpolation set (handles, `${slot.optional()}`, and —
+  per feature 2 — other templates). Nesting accepts both tagged-form
+  and bound-text-form templates (a bound template's text is already
+  `{ref}`-rendered, so splicing is textual either way).
+- **Both carriers**: `input.prompt` and `output.prompt` results gain
+  the same surface — the meta shape is shared and output templates
+  compose for the same reasons.
+- **The bespoke-builder class dies with its enabler**: ReviewFields/
+  `bind` in the refactor package is the reference consumer, but see
+  Watch — the package edit itself is the owner's, not this task's.
+
+## Watch
+
+- Do NOT touch .ctx/traits/packages/* in this task — the refactor
+  package is under active owner rework; the owner lands the consumer
+  edit (strict review override -> extend, shared review -> plain
+  `input`) by hand after the feature ships.
+- Bound-text placeholders: extending a bound-text template with a
+  tagged extension must not re-scan the base for `{placeholder}`
+  names — the base is already rendered; only the extension's own
+  interpolations lower.
+- Duplicate-ref sites across parts: text keeps every occurrence,
+  refs/optionalRefs dedupe — matches how a single template already
+  treats a slot interpolated twice.
+- A ref optional in one part and required in another: required wins
+  (the step cannot run without it anyway); assert this explicitly in a
+  test rather than leaving it to Set-union accident.
+
+"""
+validation = """
+## Done when
+
+CDK unit tests (packages/cdk/test) prove: extend chains concatenate
+text and merge refs/optionalRefs/declarations; a nested template
+splices its text at the interpolation site with the same merging; a
+`${slot.optional()}` inside an inner/extended part lowers to
+`{ slot, optional: true }` on the consuming step; required-beats-
+optional on ref collision; bound-text bases compose without re-
+scanning. `just ts-build`, `just ts-typecheck` (+ typecheck:test),
+`just ts-test`, lint and format green. No files under .ctx/ change.
+"""
