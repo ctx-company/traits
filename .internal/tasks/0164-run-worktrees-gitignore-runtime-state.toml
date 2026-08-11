@@ -1,0 +1,78 @@
+schema-version = "0.2"
+key = "0164"
+title = "run worktrees: the runtime guarantees its own state is git-ignored"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+Every trait with a commit tail carries the same two-step defensive recipe:
+`git add -A` then `git reset -q -- .agents/runs` (52695271/ef3b9718, born
+from the run-42bd7fb2 poison pill — an exclude pathspec on `git add` exits
+1 when `.agents` is gitignored). The unstage step exists solely because the
+runtime writes its own state (`.agents/runs`: ledger, activity sidecars)
+into the run worktree and cannot assume the TARGET repo's .gitignore covers
+it — a repo adopting ctx for the first time is exactly a repo without that
+rule. In repos that do ignore it, the step is a no-op; in repos that do
+not, forgetting it commits run artifacts into the work.
+
+Owner ruling 2026-08-11: this is the runtime's invariant, not every
+trait's. When the runtime creates a run worktree, it must ensure its own
+internal paths are ignored there — traits should be able to stage the
+whole tree without ever seeing runtime state.
+
+"""
+scope = """
+## Decisions
+
+- **Invariant**: inside a runtime-created run worktree, every path the
+  runtime itself writes during a run (today `.agents/runs`; inventory the
+  actual set from the code at implementation time) is invisible to
+  `git status`/`git add -A`, WITHOUT modifying any tracked file of the
+  target repo (.gitignore stays untouched — a run must never dirty the
+  tree just by starting).
+- **Mechanism is implementation's choice**; candidates, in rough order of
+  preference:
+  - `info/exclude` (local, uncommitted). Note git's path classification:
+    for linked worktrees `info/` resolves to the COMMON git dir, so an
+    entry there covers the whole repo including the user's checkout —
+    idempotent append of `.agents/` there may be acceptable, but decide
+    deliberately.
+  - per-worktree config (`extensions.worktreeConfig`) + `core.excludesFile`
+    pointing at a runtime-owned file, scoping the exclude to the run
+    worktree only.
+  - `GIT_CONFIG_COUNT/KEY/VALUE` env on run-spawned commands setting
+    `core.excludesFile` — covers git invoked by steps, but only through
+    the runtime's env propagation; a step invoking git through an
+    env-scrubbing wrapper would escape it. Weakest.
+- **Tracked-file edge**: gitignore never hides already-tracked files. If a
+  target repo has historically committed `.agents/runs` content, the
+  exclude cannot protect the commit tail; decide and document (out of
+  scope to fix history; at minimum the behavior must be understood).
+- **Traits keep the two-step recipe for now** — it is cheap, exits 0
+  everywhere, and covers the tracked-file edge. Retiring the unstage step
+  across first-party commit tails is a separate follow-up AFTER this
+  invariant has held in live runs.
+
+## Watch
+
+- The exclude must be in place BEFORE any trait step can run git — wire it
+  into worktree creation, not lazily.
+- Idempotence: re-entering / reusing a worktree must not duplicate entries.
+- Park retention and `ctx traits merge` operate on these worktrees too —
+  verify the exclude does not hide anything the merge path expects to see.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proof (2026-08-08 ruling: no committed-repo-content
+dependencies): a fake target repo WITHOUT any `.agents` ignore rule; drive
+run-worktree creation; inside the worktree the runtime writes its state,
+then `git add -A && git status --porcelain` shows no runtime-state paths
+staged, and the target repo's tracked files (including .gitignore) are
+byte-identical to before the run. A second proof shows the user's own
+checkout is not left with surprise excludes beyond what the chosen
+mechanism deliberately shares. Existing commit tails keep passing
+unchanged.
+"""
