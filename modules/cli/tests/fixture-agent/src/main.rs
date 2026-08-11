@@ -30,13 +30,15 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("--role") => match args.next().as_deref() {
-            Some("worker") => role_worker(),
+            Some("worker") => role_worker(args.next()),
             Some("reviewer") => role_reviewer(args.next(), args.next()),
             Some("planner") => role_planner(args.next()),
             Some("scribe") => role_scribe(),
             Some("generator") => role_generator(args.next()),
             Some("refiner") => role_refiner(args.next()),
             Some("explainer") => role_explainer(args.next()),
+            Some("proposer") => role_proposer(args.next()),
+            Some("smart1") => role_smart1(args.next()),
             other => {
                 eprintln!("ctx-fixture-agent: unknown --role {other:?}");
                 ExitCode::FAILURE
@@ -55,7 +57,28 @@ fn main() -> ExitCode {
 /// working tree is genuinely dirty by the time the trait's own
 /// `check-git-status` step runs. Idempotent-enough for repeat calls within
 /// one run: each call appends one more marker line.
-fn role_worker() -> ExitCode {
+///
+/// 0163's `optimize` family binds this same `worker` agent role to two
+/// distinct prompts (the readiness preflight and the per-round apply
+/// step), each with a different output slot/schema. Rather than adding a
+/// second harness role, this dispatches on the requested output field:
+/// `readiness` (a typed status/detail object, honoring
+/// `CTX_FIXTURE_READINESS_STATUS`, default `ready`) versus everything else
+/// (the marker-file touch plus a plain text receipt).
+fn role_worker(prompt: Option<String>) -> ExitCode {
+    let prompt = prompt.unwrap_or_default();
+    let field = requested_output_field(&prompt).unwrap_or_else(|| "work-summary".to_string());
+    if field == "readiness" {
+        let status =
+            env::var("CTX_FIXTURE_READINESS_STATUS").unwrap_or_else(|_| "ready".to_string());
+        let detail = if status == "ready" {
+            "fixture workbench ready"
+        } else {
+            "fixture-forced abort"
+        };
+        println!("{{\"{field}\":{{\"status\":\"{status}\",\"detail\":\"{detail}\"}}}}");
+        return ExitCode::SUCCESS;
+    }
     let marker = "fixture-work-output.txt";
     let previous = fs::read_to_string(marker).unwrap_or_default();
     let updated = format!("{previous}fixture worker touch\n");
@@ -63,7 +86,21 @@ fn role_worker() -> ExitCode {
         eprintln!("ctx-fixture-agent: cannot write {marker}: {error}");
         return ExitCode::FAILURE;
     }
-    println!("{{\"work-summary\":\"Fixture work summary.\"}}");
+    println!("{{\"{field}\":\"Fixture work summary.\"}}");
+    ExitCode::SUCCESS
+}
+
+/// 0163's `optimize:experiment` proposer seat: always returns the same
+/// fixed, valid proposal — the guard mechanism this proof suite exercises
+/// (keep/discard/aggregation/iteration-cap/baseline-immutability) never
+/// depends on proposal content, only on the trusted measurement command's
+/// output, so a static proposal is the port-faithful fixture choice.
+fn role_proposer(prompt: Option<String>) -> ExitCode {
+    let field = requested_output_field(&prompt.unwrap_or_default())
+        .unwrap_or_else(|| "proposal".to_string());
+    println!(
+        "{{\"{field}\":{{\"title\":\"fixture experiment\",\"hypothesis\":\"fixture hypothesis\",\"change\":\"fixture bounded change\"}}}}"
+    );
     ExitCode::SUCCESS
 }
 
@@ -96,7 +133,7 @@ fn role_reviewer(slot: Option<String>, prompt: Option<String>) -> ExitCode {
     let verdict = match mode.as_str() {
         "approve" => r#"{"status":"approved","blockers":[],"wall-id":""}"#.to_string(),
         "revise" => format!(
-            r#"{{"status":"revise","blockers":[{{"id":"{blocker_id}","where":"fixture-work-output.txt","what":"fixture-only defect for the P461 park-honesty proof","root-cause":"the fixture reviewer never fixes it, so the loop always revises","required-fix":"n/a — this fixture proves park-report/exhaustion behavior, not a real fix","done-when":"never — this fixture always revises"}}],"wall-id":"{wall}"}}"#
+            r#"{{"status":"revise","blockers":[{{"id":"{blocker_id}","where":"fixture-work-output.txt","what":"fixture-only defect for the P461 park-honesty proof","root-cause":"the fixture reviewer never fixes it, so the loop always revises","required-fix":"n/a — this fixture proves park-report/exhaustion behavior, not a real fix","steps":[{{"step":"n/a — this fixture always revises","status":"open"}}],"done-when":"never — this fixture always revises"}}],"wall-id":"{wall}"}}"#
         ),
         other => {
             eprintln!("ctx-fixture-agent: unknown CTX_FIXTURE_REVIEWER{slot}_MODE {other:?}");
@@ -132,6 +169,22 @@ fn role_planner(prompt: Option<String>) -> ExitCode {
         .unwrap_or_else(|| "stream-plan".to_string());
     let streams = env::var("CTX_FIXTURE_PLANNER_STREAMS").unwrap_or_else(|_| "[]".to_string());
     println!("{{\"{field}\":{streams}}}");
+    ExitCode::SUCCESS
+}
+
+/// 0163's `optimize:benchmark` single `smart-1` agent role is bound to
+/// three prompts (scope/draft: plain text; review: a typed verdict), so —
+/// same reasoning as `role_worker`'s dispatch — this reads the requested
+/// output field to decide: `review-verdict` delegates to the same verdict
+/// logic as [`role_reviewer`] (slot `"1"`), everything else is a fixed
+/// plain-text receipt.
+fn role_smart1(prompt: Option<String>) -> ExitCode {
+    let prompt = prompt.unwrap_or_default();
+    let field = requested_output_field(&prompt).unwrap_or_else(|| "text".to_string());
+    if field == "review-verdict" {
+        return role_reviewer(Some("1".to_string()), Some(prompt));
+    }
+    println!("{{\"{field}\":\"Fixture smart-1 text.\"}}");
     ExitCode::SUCCESS
 }
 

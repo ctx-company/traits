@@ -1,0 +1,998 @@
+id = "optimize"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Experiment"
+summary = "Runs bounded experiments whose keep/discard decision is a deterministic guard over typed, N-run-aggregated command output."
+variant = "experiment"
+
+[metadata]
+tag = [
+    "first-party",
+    "optimize",
+    "experiments",
+    "provenance",
+]
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.require]]
+id = "gates-green-before-commit"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[[port]]
+id = "benchmark-runs"
+direction = "input"
+schema = "schema:integer"
+description = "Number of measurement runs per baseline/candidate; the deterministic aggregate (median) feeds the keep/discard guard. Odd counts pick the middle run; even counts pick the upper-median run — always an actually-measured value."
+
+[[port]]
+id = "experiment-command"
+direction = "input"
+schema = "[schema:text]"
+description = 'No-shell argv executed for one baseline or candidate run; must emit JSON matching { status: "ok" | "error", metric: number, "delta-lines"?: number }. The optional delta-lines feeds the max-delta-lines cap; omit it if unmeasured.'
+
+[[port]]
+id = "max-delta-lines"
+direction = "input"
+schema = "schema:integer"
+optional = true
+description = "Optional maximum accepted changed lines relative to the current best Git ref; the cap is skipped when omitted, and discards a candidate that supplies no delta-lines measurement."
+
+[[port]]
+id = "metric-field"
+direction = "input"
+schema = "schema:text"
+description = "Human-readable meaning and unit normalized into the aggregate result's metric."
+
+[[port]]
+id = "objective"
+direction = "input"
+schema = "schema:text"
+description = "The bounded optimization objective for this experiment run."
+
+[[port]]
+id = "summary"
+direction = "output"
+schema = "schema:optimize-summary"
+description = "Typed baseline, aggregate measurements, kept count, and final best metric."
+title = "Optimize Summary"
+format = ["json"]
+value = "slot:summary"
+
+[[slot]]
+id = "apply-receipt"
+schema = "schema:text"
+description = "Worker receipt for the bounded candidate mutation."
+
+[[slot]]
+id = "baseline-result"
+schema = "schema:optimize-aggregate-result"
+description = "Trusted N-run aggregate measurement that seeds best state."
+
+[[slot]]
+id = "best-metric"
+schema = "schema:number"
+description = "Loop-carried lower-is-better metric projected only from trusted command output."
+
+[[slot]]
+id = "best-ref"
+schema = "schema:text"
+description = "Immutable current-best commit SHA, advanced only after a kept commit succeeds."
+
+[[slot]]
+id = "candidate-result"
+schema = "schema:optimize-aggregate-result"
+description = "Current trusted N-run aggregate measurement read by the declared keep guard."
+
+[[slot]]
+id = "captured-ref"
+schema = "schema:optimize-git-ref"
+description = "Latest immutable commit SHA captured by a trusted Git command."
+
+[[slot]]
+id = "command-receipt"
+schema = "schema:text"
+description = "Latest deterministic Git command's raw stdout."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Derived commit message citing bestMetric (before), the aggregate metric (after), and the run count; injected directly into the git commit command step."
+
+[[slot]]
+id = "decisions"
+schema = "[schema:optimize-decision-status]"
+description = "Baseline marker and runtime-owned keep/discard/review-rejected dispositions in execution order."
+
+[[slot]]
+id = "history"
+schema = "[schema:optimize-aggregate-result]"
+description = "Baseline and candidate aggregate measurements in deterministic ledger order."
+
+[[slot]]
+id = "kept-count"
+schema = "schema:integer"
+description = "Rounds selected by the declared keep guard."
+
+[[slot]]
+id = "proposal"
+schema = "schema:optimize-proposal"
+description = "Current fresh experiment proposal."
+
+[[slot]]
+id = "readiness"
+schema = "schema:optimize-readiness"
+description = "Latest typed worktree readiness result."
+
+[[slot]]
+id = "round-count"
+schema = "schema:integer"
+description = "Rounds recorded by keep/discard/review-rejected arms."
+
+[[slot]]
+id = "summary"
+schema = "schema:optimize-summary"
+description = "Terminal typed run report."
+
+[[schema]]
+id = "optimize-aggregate-result"
+description = "Deterministic N-run aggregate measurement feeding the keep/discard guard."
+
+[schema.fields.delta-lines]
+schema = "schema:integer"
+description = "Optional changed line count relative to the current best worktree commit."
+
+[schema.fields.metric]
+schema = "schema:number"
+required = true
+description = "Median lower-is-better metric across the benchmark-runs invocations — an actually-measured value, never a fabricated average."
+
+[schema.fields.runs]
+schema = "[schema:number]"
+required = true
+description = "Every run's metric, in invocation order, so a kept/discarded decision is auditable."
+
+[schema.fields.status]
+schema = "schema:optimize-result-status"
+required = true
+description = "Ok only when every one of the benchmark-runs invocations reported status ok."
+
+[[schema]]
+id = "optimize-decision-status"
+schema = "schema:text"
+allowed = [
+    "baseline",
+    "kept",
+    "discarded",
+    "review-rejected",
+]
+description = "Deterministic disposition of one round. review-rejected is benchmark-only — experiment rounds never reach it."
+
+[[schema]]
+id = "optimize-git-ref"
+description = "Typed immutable Git ref captured from the isolated worktree."
+
+[schema.fields.sha]
+schema = "schema:text"
+required = true
+description = "Immutable Git commit SHA captured by the trusted local runtime."
+
+[[schema]]
+id = "optimize-proposal"
+description = "One fresh, bounded experiment proposal."
+
+[schema.fields.change]
+schema = "schema:text"
+required = true
+description = "Exact bounded change for the worker to apply."
+
+[schema.fields.hypothesis]
+schema = "schema:text"
+required = true
+description = "Falsifiable reason this small change may improve the declared metric."
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "Short experiment label."
+
+[[schema]]
+id = "optimize-readiness"
+description = "Typed preflight result that gates every mutation."
+
+[schema.fields.detail]
+schema = "schema:text"
+required = true
+description = "Concise readiness or abort reason."
+
+[schema.fields.status]
+schema = "schema:optimize-readiness-status"
+required = true
+description = "Ready only for a clean, isolated Git worktree."
+
+[[schema]]
+id = "optimize-readiness-status"
+schema = "schema:text"
+allowed = [
+    "ready",
+    "abort",
+]
+description = "Whether the isolated workbench is safe to mutate."
+
+[[schema]]
+id = "optimize-result-status"
+schema = "schema:text"
+allowed = [
+    "ok",
+    "error",
+]
+description = "Ok only when every run in the aggregate produced a usable measurement."
+
+[[schema]]
+id = "optimize-summary"
+description = "Typed terminal summary backed by command measurements and runtime guard evidence."
+
+[schema.fields.best]
+schema = "schema:number"
+description = "Final lower-is-better best metric when a baseline was available."
+
+[schema.fields.detail]
+schema = "schema:text"
+required = true
+description = "Concise terminal explanation, including any abort reason or measurement limitations."
+
+[schema.fields.kept]
+schema = "schema:integer"
+required = true
+description = "Candidates selected by the declared keep guard."
+
+[schema.fields.reason]
+schema = "schema:optimize-summary-reason"
+required = true
+description = "Which declared stop condition ended the run."
+
+[schema.fields.rounds]
+schema = "schema:integer"
+required = true
+description = "Rounds recorded after the baseline measurement."
+
+[schema.fields.rows]
+schema = "[schema:optimize-summary-row]"
+required = true
+description = "Baseline followed by every round and its deterministic disposition."
+
+[schema.fields.status]
+schema = "schema:optimize-summary-status"
+required = true
+description = "Completed once the target is reached or the iteration cap is exhausted. aborted only from preflight/baseline gating."
+
+[[schema]]
+id = "optimize-summary-reason"
+schema = "schema:text"
+allowed = [
+    "target-reached",
+    "iteration-limit-reached",
+    "aborted",
+]
+description = "Which declared stop condition ended the run. aborted is set only alongside status aborted."
+
+[[schema]]
+id = "optimize-summary-row"
+description = "One round and its deterministic disposition."
+
+[schema.fields.decision]
+schema = "schema:optimize-decision-status"
+required = true
+description = "Baseline marker, keep/discard decision, or review-rejected disposition."
+
+[schema.fields.measurement]
+schema = "schema:optimize-aggregate-result"
+description = "The trusted N-run aggregate measurement; absent for a review-rejected round, which is never measured."
+
+[[schema]]
+id = "optimize-summary-status"
+schema = "schema:text"
+allowed = [
+    "completed",
+    "aborted",
+]
+description = "Terminal run outcome."
+
+[[agent]]
+id = "proposer"
+description = "Proposes one small, falsifiable experiment from the objective, current best metric, and typed measurement history in a fresh per-frame session. Never claims a metric result, a keep decision, or access to prior conversational context."
+summary = "Fresh bounded-experiment proposal role."
+
+[[agent]]
+id = "worker"
+description = "Prepares the isolated workbench and applies one bounded candidate change without deciding whether its measured result is kept."
+summary = "Implementation role."
+
+[prompt.apply-the-proposed-candidate]
+text = """
+
+        Apply exactly the bounded change in {slot:proposal} for {port:objective} inside the isolated worktree.
+        Inspect the current files first, preserve unrelated work, and do not run or report the experiment metric. The runtime executes the trusted measurement command next.
+        Return a concise receipt naming the files changed.
+    """
+input = [
+    "slot:proposal",
+    "port:objective",
+]
+output = ["slot:apply-receipt"]
+
+[prompt.prepare-and-verify-the-isolated-workbench]
+text = """
+
+        Prepare the workbench for {port:objective}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
+        Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
+        Do not modify files yet and do not invent metric evidence.
+    """
+input = ["port:objective"]
+output = ["slot:readiness"]
+
+[prompt.propose-one-fresh-bounded-experiment]
+text = """
+
+        Propose one small, falsifiable experiment for {port:objective}.
+        The metric being optimized is {port:metric-field}; lower is better.
+        Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
+        Use only this typed handoff. Do not infer hidden conversation, claim a result, or decide keep/discard.
+        Return a title, hypothesis, and exact bounded change.
+    """
+input = [
+    "port:objective",
+    "port:metric-field",
+    "slot:best-metric",
+    "slot:history",
+]
+output = ["slot:proposal"]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence]]
+id = "abort-summary"
+title = "Report the preflight abort"
+input = ["slot:readiness"]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [readinessText] = process.argv.slice(1);
+const readiness = JSON.parse(readinessText);
+process.stdout.write(JSON.stringify({
+    status: "aborted",
+    reason: "aborted",
+    rounds: 0,
+    kept: 0,
+    rows: [],
+    detail: readiness.detail,
+}));""",
+    "{slot:readiness}",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "capture-initial-ref"
+title = "Capture the immutable baseline commit"
+output = ["slot:captured-ref"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+});
+const sha = (result.stdout ?? "").trim();
+if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
+    process.stderr.write(result.stderr ?? "could not capture HEAD commit");
+    process.exit(1);
+}
+process.stdout.write(JSON.stringify({ sha }));""",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "capture-best-ref"
+title = "Capture the fixed reset ref"
+kind = "project"
+input = ["slot:captured-ref"]
+output = ["slot:best-ref"]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.projection]]
+source = "slot:captured-ref"
+field = "sha"
+destination = "slot:best-ref"
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "measure-the-baseline"
+title = "Measure the baseline"
+input = [
+    "port:experiment-command",
+    "port:benchmark-runs",
+]
+output = ["slot:baseline-result"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const [argvText, runsText] = process.argv.slice(1);
+const argv = JSON.parse(argvText);
+const runs = Number(runsText);
+if (!Array.isArray(argv) || argv.length === 0 || !Number.isSafeInteger(runs) || runs < 1) {
+    process.stderr.write("invalid aggregate-runner input");
+    process.exit(1);
+}
+const records = [];
+let allOk = true;
+for (let index = 0; index < runs; index += 1) {
+    const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+    let parsed;
+    try {
+        parsed = JSON.parse((result.stdout ?? "").trim());
+    } catch {
+        parsed = undefined;
+    }
+    const ok = result.status === 0 && parsed !== undefined && parsed !== null
+        && parsed.status === "ok" && Number.isFinite(parsed.metric);
+    if (!ok) {
+        allOk = false;
+        continue;
+    }
+    records.push({
+        metric: parsed.metric,
+        deltaLines: Number.isFinite(parsed["delta-lines"]) ? parsed["delta-lines"] : undefined,
+    });
+}
+const sorted = [...records].sort((a, b) => a.metric - b.metric);
+const medianIndex = Math.floor(sorted.length / 2);
+const median = sorted.length > 0 ? sorted[medianIndex] : undefined;
+const metric = median ? median.metric : Number.NaN;
+const output = {
+    status: allOk && records.length === runs ? "ok" : "error",
+    metric,
+    runs: records.map((record) => record.metric),
+};
+if (median && median.deltaLines !== undefined) {
+    output["delta-lines"] = median.deltaLines;
+}
+process.stdout.write(JSON.stringify(output));""",
+    "{port:experiment-command}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "require-a-usable-trusted-baseline"
+title = "Require a usable trusted baseline"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then"
+otherwise = "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise"
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.when]
+slot = "slot:baseline-result"
+field = "status"
+equals = "ok"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "reset-candidate"
+title = "Discard the non-improving candidate"
+input = ["slot:best-ref"]
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "--hard",
+    "{slot:best-ref}",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "clean-candidate"
+title = "Remove untracked candidate files"
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
+argv = [
+    "git",
+    "clean",
+    "-fd",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "record-discarded-candidate"
+title = "Record the discarded candidate"
+kind = "project"
+input = ["slot:candidate-result"]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+destination = "slot:round-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+source = "slot:candidate-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection.source]
+literal = "discarded"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.output]]
+slot = "slot:round-count"
+operation = "increment"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.output]]
+slot = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.output]]
+slot = "slot:decisions"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "derive-commit-message"
+title = "Derive the kept-candidate commit message"
+input = [
+    "slot:best-metric",
+    "slot:candidate-result",
+    "port:benchmark-runs",
+]
+output = ["slot:commit-message"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [beforeText, candidateText, runsText] = process.argv.slice(1);
+const before = Number(beforeText);
+const candidate = JSON.parse(candidateText);
+const runs = Number(runsText);
+process.stdout.write(
+    "optimize: keep improved candidate (" + before + " -> " + candidate.metric + ", median of " + runs + " runs)",
+);""",
+    "{slot:best-metric}",
+    "{slot:candidate-result}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "stage-candidate"
+title = "Stage the kept candidate"
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "commit-candidate"
+title = "Commit the kept candidate"
+input = ["slot:commit-message"]
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "capture-committed-ref"
+title = "Capture the kept commit SHA"
+output = ["slot:captured-ref"]
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+});
+const sha = (result.stdout ?? "").trim();
+if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
+    process.stderr.write(result.stderr ?? "could not capture HEAD commit");
+    process.exit(1);
+}
+process.stdout.write(JSON.stringify({ sha }));""",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "advance-best"
+title = "Advance trusted best state after commit"
+kind = "project"
+input = [
+    "slot:candidate-result",
+    "slot:captured-ref",
+]
+output = [
+    "slot:best-metric",
+    "slot:best-ref",
+]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:candidate-result"
+field = "metric"
+destination = "slot:best-metric"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:captured-ref"
+field = "sha"
+destination = "slot:best-ref"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "record-kept-candidate"
+title = "Record the kept candidate"
+kind = "project"
+input = ["slot:candidate-result"]
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:round-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:kept-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:candidate-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = "kept"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.output]]
+slot = "slot:round-count"
+operation = "increment"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.output]]
+slot = "slot:kept-count"
+operation = "increment"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.output]]
+slot = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.output]]
+slot = "slot:decisions"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence]]
+id = "baseline-failure-summary"
+title = "Report the unusable baseline"
+input = ["slot:baseline-result"]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [baselineText] = process.argv.slice(1);
+const baseline = JSON.parse(baselineText);
+process.stdout.write(JSON.stringify({
+    status: "aborted",
+    reason: "aborted",
+    rounds: 0,
+    kept: 0,
+    rows: [{ measurement: baseline, decision: "baseline" }],
+    detail: "trusted baseline command did not return status ok: " + JSON.stringify(baseline),
+}));""",
+    "{slot:baseline-result}",
+]
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "seed-best"
+title = "Seed trusted best state and history"
+kind = "project"
+input = ["slot:baseline-result"]
+output = [
+    "slot:best-metric",
+    { slot = "slot:history", operation = "append" },
+    "slot:round-count",
+    "slot:kept-count",
+    { slot = "slot:decisions", operation = "append" },
+]
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+source = "slot:baseline-result"
+field = "metric"
+destination = "slot:best-metric"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+source = "slot:baseline-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:round-count"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = 0
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:kept-count"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = 0
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = "baseline"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "run-the-iteration-capped-experiment-budget"
+title = "Run the iteration-capped experiment budget"
+kind = "loop"
+sequence = "sequence:run-the-iteration-capped-experiment-budget-body"
+max-iterations = 20
+on-exhausted = "continue"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "derive-summary-iteration-limit-reached"
+title = "Derive the typed experiment summary"
+input = [
+    "slot:round-count",
+    "slot:kept-count",
+    "slot:best-metric",
+    "slot:decisions",
+    "slot:history",
+]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
+const rounds = Number(roundsText);
+const kept = Number(keptText);
+const best = Number(bestText);
+const decisions = JSON.parse(decisionsText);
+const measurements = JSON.parse(measurementsText);
+const reviewList = reviewsText === undefined ? undefined : JSON.parse(reviewsText);
+if (!["target-reached", "iteration-limit-reached"].includes(reason)
+    || !Number.isSafeInteger(rounds) || rounds < 0
+    || !Number.isSafeInteger(kept) || kept < 0
+    || !Number.isFinite(best)
+    || !Array.isArray(decisions) || !Array.isArray(measurements)
+    || (reviewList !== undefined && !Array.isArray(reviewList))
+    || decisions[0] !== "baseline"
+    || decisions.filter((decision) => decision === "kept").length !== kept) {
+    process.exit(1);
+}
+let measurementIndex = 0;
+const rows = decisions.map((decision) => {
+    if (decision === "review-rejected") return { decision };
+    const measurement = measurements[measurementIndex];
+    measurementIndex += 1;
+    return { measurement, decision };
+});
+if (measurementIndex !== measurements.length) process.exit(1);
+const detail = "Decisions and counts projected from runtime-owned keep/discard"
+    + (reviewList === undefined ? "" : "/review")
+    + " branches; stop reason preserved from the guard/exhaustion branch that actually terminated the run."
+    + (reviewList === undefined ? "" : " Review verdicts: " + JSON.stringify(reviewList));
+process.stdout.write(JSON.stringify({
+    status: "completed",
+    reason,
+    rounds,
+    kept,
+    best,
+    rows,
+    detail,
+}));""",
+    "iteration-limit-reached",
+    "{slot:round-count}",
+    "{slot:kept-count}",
+    "{slot:best-metric}",
+    "{slot:decisions}",
+    "{slot:history}",
+]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
+id = "propose-one-fresh-bounded-experiment"
+title = "Propose one fresh bounded experiment"
+agent = "agent:proposer"
+prompt = "prompt:propose-one-fresh-bounded-experiment"
+input = [
+    "port:objective",
+    "port:metric-field",
+    "slot:best-metric",
+    "slot:history",
+]
+output = ["slot:proposal"]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
+id = "apply-the-proposed-candidate"
+title = "Apply the proposed candidate"
+agent = "agent:worker"
+prompt = "prompt:apply-the-proposed-candidate"
+input = [
+    "slot:proposal",
+    "port:objective",
+]
+output = ["slot:apply-receipt"]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
+id = "measure-the-candidate"
+title = "Measure the candidate"
+input = [
+    "port:experiment-command",
+    "port:benchmark-runs",
+]
+output = ["slot:candidate-result"]
+
+[sequence.run-the-iteration-capped-experiment-budget-body.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const [argvText, runsText] = process.argv.slice(1);
+const argv = JSON.parse(argvText);
+const runs = Number(runsText);
+if (!Array.isArray(argv) || argv.length === 0 || !Number.isSafeInteger(runs) || runs < 1) {
+    process.stderr.write("invalid aggregate-runner input");
+    process.exit(1);
+}
+const records = [];
+let allOk = true;
+for (let index = 0; index < runs; index += 1) {
+    const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+    let parsed;
+    try {
+        parsed = JSON.parse((result.stdout ?? "").trim());
+    } catch {
+        parsed = undefined;
+    }
+    const ok = result.status === 0 && parsed !== undefined && parsed !== null
+        && parsed.status === "ok" && Number.isFinite(parsed.metric);
+    if (!ok) {
+        allOk = false;
+        continue;
+    }
+    records.push({
+        metric: parsed.metric,
+        deltaLines: Number.isFinite(parsed["delta-lines"]) ? parsed["delta-lines"] : undefined,
+    });
+}
+const sorted = [...records].sort((a, b) => a.metric - b.metric);
+const medianIndex = Math.floor(sorted.length / 2);
+const median = sorted.length > 0 ? sorted[medianIndex] : undefined;
+const metric = median ? median.metric : Number.NaN;
+const output = {
+    status: allOk && records.length === runs ? "ok" : "error",
+    metric,
+    runs: records.map((record) => record.metric),
+};
+if (median && median.deltaLines !== undefined) {
+    output["delta-lines"] = median.deltaLines;
+}
+process.stdout.write(JSON.stringify(output));""",
+    "{port:experiment-command}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
+id = "apply-the-declared-keep-discard-decision"
+title = "Apply the declared keep/discard decision"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then"
+otherwise = "sequence:ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all]]
+slot = "slot:candidate-result"
+field = "status"
+equals = "ok"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all]]
+slot = "slot:candidate-result"
+field = "metric"
+
+[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.less-than]
+ref = "slot:best-metric"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all]]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any]]
+
+[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any.not]
+present = "port:max-delta-lines"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any]]
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any.all]]
+present = "port:max-delta-lines"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any.all]]
+field = "delta-lines"
+present = "slot:candidate-result"
+
+[[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any.all]]
+slot = "slot:candidate-result"
+field = "delta-lines"
+
+[sequence.run-the-iteration-capped-experiment-budget-body.sequence.when.all.any.all.at-most]
+ref = "port:max-delta-lines"
+
+[procedure]
+description = "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements."
+input = [
+    "port:benchmark-runs",
+    "port:experiment-command",
+    "port:max-delta-lines",
+    "port:metric-field",
+    "port:objective",
+]
+output = ["port:summary"]
+
+[[procedure.sequence]]
+id = "prepare-and-verify-the-isolated-workbench"
+title = "Prepare and verify the isolated workbench"
+agent = "agent:worker"
+prompt = "prompt:prepare-and-verify-the-isolated-workbench"
+input = ["port:objective"]
+output = ["slot:readiness"]
+
+[[procedure.sequence]]
+id = "gate-mutation-on-isolated-worktree-readiness"
+title = "Gate mutation on isolated-worktree readiness"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then"
+otherwise = "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise"
+
+[procedure.sequence.when]
+slot = "slot:readiness"
+field = "status"
+equals = "ready"

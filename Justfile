@@ -141,6 +141,12 @@ refactor target:
 refactor-guided:
 	ctx traits run refactor:guided --worktree --progress tui
 
+optimize objective:
+	ctx traits run optimize:experiment --worktree --progress tui -- --objective={{quote(objective)}}
+
+optimize-benchmark target:
+	ctx traits run optimize:benchmark --worktree --progress tui -- --target={{quote(target)}}
+
 implement tasks:
 	@{{justfile_directory()}}/.internal/scripts/implement.sh {{quote(tasks)}}
 

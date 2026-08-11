@@ -132,3 +132,8 @@ part of naming: where a thing lives says what owns it.
 5. Prefer transformations that delete. When your change supersedes code, the
    same change removes it — nothing survives beside its replacement. Every
    net addition must name what it buys (a boundary, a type, a proof).
+
+Perf-motivated work — improving a measured benchmark rather than preserving
+behavior — belongs to `optimize:benchmark`, not this trait: its doctrine is
+measurement-gated (a command-measured aggregate decides keep/discard), not
+behavior-preserving + design-reviewed.

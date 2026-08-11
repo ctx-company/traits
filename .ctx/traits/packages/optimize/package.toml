@@ -1,0 +1,22 @@
+[package]
+id = "optimize"
+version = "0.1.0"
+name = "Optimize"
+status = "ready"
+
+[family]
+default = "experiment"
+
+[family.variant]
+
+[family.variant.experiment]
+path = "generated/experiment/index.toml"
+aliases = ["optimize-experiment"]
+
+[family.variant.benchmark]
+path = "generated/benchmark/index.toml"
+aliases = ["optimize-benchmark"]
+
+[publish]
+name = "@ctx-traits/optimize"
+access = "public"

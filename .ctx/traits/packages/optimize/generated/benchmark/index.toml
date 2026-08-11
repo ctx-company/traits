@@ -1,0 +1,1482 @@
+id = "optimize"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Benchmark"
+summary = "Optimizes a lower-is-better benchmark over a caller-selected code area, keeping only command-measured improvements that clear a noise threshold. Behavior-preserving boundary work belongs to refactor, not here — this trait's doctrine is measurement-gated."
+variant = "benchmark"
+
+[metadata]
+tag = [
+    "first-party",
+    "optimize",
+    "benchmark",
+    "review",
+    "provenance",
+]
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[port]]
+id = "benchmark-command"
+direction = "input"
+schema = "[schema:text]"
+description = 'No-shell argv executed for one baseline or candidate run; must emit JSON matching { status: "ok" | "error", metric: number, "delta-lines"?: number }. The optional delta-lines feeds the max-delta-lines cap; omit it if unmeasured.'
+
+[[port]]
+id = "benchmark-runs"
+direction = "input"
+schema = "schema:integer"
+description = "Number of measurement runs per baseline/candidate; the deterministic aggregate (median) feeds the keep/discard guard. Odd counts pick the middle run; even counts pick the upper-median run — always an actually-measured value."
+
+[[port]]
+id = "improvement-target"
+direction = "input"
+schema = "schema:number"
+description = "Lower-is-better metric target; the run completes immediately once the baseline or any kept candidate reaches it."
+
+[[port]]
+id = "max-delta-lines"
+direction = "input"
+schema = "schema:integer"
+optional = true
+description = "Optional maximum accepted changed lines relative to the current best Git ref; the cap is skipped when omitted, and discards a candidate that supplies no delta-lines measurement."
+
+[[port]]
+id = "noise-threshold"
+direction = "input"
+schema = "schema:number"
+description = "Non-negative minimum improvement margin below which a lower aggregate metric is treated as noise, not a real improvement."
+
+[[port]]
+id = "summary"
+direction = "output"
+schema = "schema:optimize-summary"
+description = "Typed baseline, aggregate measurements, kept count, and final best metric."
+title = "Optimize Summary"
+format = ["json"]
+value = "slot:summary"
+
+[[port]]
+id = "target"
+direction = "input"
+schema = "schema:text"
+description = "Module, file path, or code area to optimize the benchmark over."
+
+[[slot]]
+id = "baseline-result"
+schema = "schema:optimize-aggregate-result"
+description = "Trusted N-run aggregate measurement that seeds best state."
+
+[[slot]]
+id = "best-metric"
+schema = "schema:number"
+description = "Loop-carried lower-is-better metric projected only from trusted command output."
+
+[[slot]]
+id = "best-ref"
+schema = "schema:text"
+description = "Immutable current-best commit SHA, advanced only after a kept commit succeeds."
+
+[[slot]]
+id = "candidate-result"
+schema = "schema:optimize-aggregate-result"
+description = "Current trusted N-run aggregate measurement read by the declared keep guard."
+
+[[slot]]
+id = "captured-ref"
+schema = "schema:optimize-git-ref"
+description = "Latest immutable commit SHA captured by a trusted Git command."
+
+[[slot]]
+id = "command-receipt"
+schema = "schema:text"
+description = "Latest deterministic Git command's raw stdout."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Derived commit message citing bestMetric (before), the aggregate metric (after), and the run count; injected directly into the git commit command step."
+
+[[slot]]
+id = "decisions"
+schema = "[schema:optimize-decision-status]"
+description = "Baseline marker and runtime-owned keep/discard/review-rejected dispositions in execution order."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "smart-1's concrete worker draft turning the scope into an actionable implementation brief."
+
+[[slot]]
+id = "history"
+schema = "[schema:optimize-aggregate-result]"
+description = "Baseline and candidate aggregate measurements in deterministic ledger order."
+
+[[slot]]
+id = "implement-receipt"
+schema = "schema:text"
+description = "Worker's report of the implemented candidate."
+
+[[slot]]
+id = "kept-count"
+schema = "schema:integer"
+description = "Rounds selected by the declared keep guard."
+
+[[slot]]
+id = "margin-result"
+schema = "schema:boolean"
+description = "Whether the candidate's aggregate metric improves on best by more than the noise threshold."
+
+[[slot]]
+id = "readiness"
+schema = "schema:optimize-readiness"
+description = "Latest typed worktree readiness result."
+
+[[slot]]
+id = "review-verdict"
+schema = "schema:optimize-review-verdict"
+description = "smart-1's single review verdict for the implemented candidate."
+
+[[slot]]
+id = "reviews"
+schema = "[schema:optimize-benchmark-review-status]"
+description = "Review verdict status for every round that reached review, in execution order."
+
+[[slot]]
+id = "round-complete"
+schema = "schema:optimize-benchmark-round-status"
+description = """"open" at round start, "complete" only in the final atomic record step of the round's arm — gates the loop's `until` so the runtime's after-each-step guard evaluation can never terminate mid-commit/reset."""
+
+[[slot]]
+id = "round-count"
+schema = "schema:integer"
+description = "Rounds recorded by keep/discard/review-rejected arms."
+
+[[slot]]
+id = "scope"
+schema = "schema:text"
+description = "smart-1's bounded scope for one benchmark-improvement attempt, derived from the target, current best metric, and measurement history."
+
+[[slot]]
+id = "summary"
+schema = "schema:optimize-summary"
+description = "Terminal typed run report."
+
+[[schema]]
+id = "blocker"
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+
+[schema.fields.done-when]
+schema = "schema:text"
+required = true
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline)."
+
+[schema.fields.recurrence-of]
+schema = "schema:text"
+description = "id of the prior-round blocker this restates; present when the prior fix did not clear its done-when."
+
+[schema.fields.required-fix]
+schema = "schema:text"
+required = true
+description = "One or two sentences of intent: the invariant an acceptable fix establishes and why. The operational content — what to do, in what order — lives in `steps`, which is the field the worker executes and the field you maintain across rounds."
+
+[schema.fields.root-cause]
+schema = "schema:text"
+required = true
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows — and how deep the wrong goes: a slip at the cited line, a missing invariant, or a structure the code must converge to. The depth tells the worker how big a change you expect; omitting it is how a structural demand gets answered with a point-patch."
+
+[schema.fields.rule-quote]
+schema = "schema:text"
+description = "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.rule-source]
+schema = "schema:text"
+description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.steps]
+schema = "[schema:blocker-step]"
+required = true
+description = """The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination ("replace the separate paths with one renderer") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text — flipping status to done only where you verified the evidence with your own tools, and appending genuinely new findings as new steps at the end. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end."""
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and the concrete failure it causes."
+
+[schema.fields.where]
+schema = "schema:text"
+required = true
+description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
+
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
+id = "optimize-aggregate-result"
+description = "Deterministic N-run aggregate measurement feeding the keep/discard guard."
+
+[schema.fields.delta-lines]
+schema = "schema:integer"
+description = "Optional changed line count relative to the current best worktree commit."
+
+[schema.fields.metric]
+schema = "schema:number"
+required = true
+description = "Median lower-is-better metric across the benchmark-runs invocations — an actually-measured value, never a fabricated average."
+
+[schema.fields.runs]
+schema = "[schema:number]"
+required = true
+description = "Every run's metric, in invocation order, so a kept/discarded decision is auditable."
+
+[schema.fields.status]
+schema = "schema:optimize-result-status"
+required = true
+description = "Ok only when every one of the benchmark-runs invocations reported status ok."
+
+[[schema]]
+id = "optimize-benchmark-review-status"
+schema = "schema:text"
+allowed = [
+    "approved",
+    "revise",
+]
+description = "One round's review verdict status."
+
+[[schema]]
+id = "optimize-benchmark-round-status"
+schema = "schema:text"
+allowed = [
+    "open",
+    "complete",
+]
+description = "Whether the current round's atomic record step has finished."
+
+[[schema]]
+id = "optimize-decision-status"
+schema = "schema:text"
+allowed = [
+    "baseline",
+    "kept",
+    "discarded",
+    "review-rejected",
+]
+description = "Deterministic disposition of one round. review-rejected is benchmark-only — experiment rounds never reach it."
+
+[[schema]]
+id = "optimize-git-ref"
+description = "Typed immutable Git ref captured from the isolated worktree."
+
+[schema.fields.sha]
+schema = "schema:text"
+required = true
+description = "Immutable Git commit SHA captured by the trusted local runtime."
+
+[[schema]]
+id = "optimize-readiness"
+description = "Typed preflight result that gates every mutation."
+
+[schema.fields.detail]
+schema = "schema:text"
+required = true
+description = "Concise readiness or abort reason."
+
+[schema.fields.status]
+schema = "schema:optimize-readiness-status"
+required = true
+description = "Ready only for a clean, isolated Git worktree."
+
+[[schema]]
+id = "optimize-readiness-status"
+schema = "schema:text"
+allowed = [
+    "ready",
+    "abort",
+]
+description = "Whether the isolated workbench is safe to mutate."
+
+[[schema]]
+id = "optimize-result-status"
+schema = "schema:text"
+allowed = [
+    "ok",
+    "error",
+]
+description = "Ok only when every run in the aggregate produced a usable measurement."
+
+[[schema]]
+id = "optimize-review-verdict"
+description = "Typed single-pass review verdict for one implemented candidate. Review approval only routes into measurement — keep/discard is decided strictly by the measured-aggregate condition chain."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes. Never affects status."
+
+[schema.fields.blockers]
+schema = "[schema:blocker]"
+description = "Blocking defects; present when status is revise."
+
+[schema.fields.status]
+schema = "schema:optimize-benchmark-review-status"
+required = true
+description = "approved when the candidate is behavior-preserving and introduces no new smell; revise otherwise. An unapproved candidate is reverted, never repaired."
+
+[[schema]]
+id = "optimize-summary"
+description = "Typed terminal summary backed by command measurements and runtime guard evidence."
+
+[schema.fields.best]
+schema = "schema:number"
+description = "Final lower-is-better best metric when a baseline was available."
+
+[schema.fields.detail]
+schema = "schema:text"
+required = true
+description = "Concise terminal explanation, including any abort reason or measurement limitations."
+
+[schema.fields.kept]
+schema = "schema:integer"
+required = true
+description = "Candidates selected by the declared keep guard."
+
+[schema.fields.reason]
+schema = "schema:optimize-summary-reason"
+required = true
+description = "Which declared stop condition ended the run."
+
+[schema.fields.rounds]
+schema = "schema:integer"
+required = true
+description = "Rounds recorded after the baseline measurement."
+
+[schema.fields.rows]
+schema = "[schema:optimize-summary-row]"
+required = true
+description = "Baseline followed by every round and its deterministic disposition."
+
+[schema.fields.status]
+schema = "schema:optimize-summary-status"
+required = true
+description = "Completed once the target is reached or the iteration cap is exhausted. aborted only from preflight/baseline gating."
+
+[[schema]]
+id = "optimize-summary-reason"
+schema = "schema:text"
+allowed = [
+    "target-reached",
+    "iteration-limit-reached",
+    "aborted",
+]
+description = "Which declared stop condition ended the run. aborted is set only alongside status aborted."
+
+[[schema]]
+id = "optimize-summary-row"
+description = "One round and its deterministic disposition."
+
+[schema.fields.decision]
+schema = "schema:optimize-decision-status"
+required = true
+description = "Baseline marker, keep/discard decision, or review-rejected disposition."
+
+[schema.fields.measurement]
+schema = "schema:optimize-aggregate-result"
+description = "The trusted N-run aggregate measurement; absent for a review-rejected round, which is never measured."
+
+[[schema]]
+id = "optimize-summary-status"
+schema = "schema:text"
+allowed = [
+    "completed",
+    "aborted",
+]
+description = "Terminal run outcome."
+
+[[agent]]
+id = "smart-1"
+description = "Scopes one bounded benchmark-improvement attempt, turns it into a concrete worker draft, and reviews the implemented candidate once."
+summary = "Review role."
+
+[[agent]]
+id = "worker"
+description = "Prepares the isolated workbench and applies one bounded candidate change without deciding whether its measured result is kept."
+summary = "Implementation role."
+
+[prompt.implement-the-draft-worker]
+text = """
+
+        Implement the draft {slot:draft} for {port:target} inside the isolated worktree.
+        Do not run or report the benchmark; the runtime executes the trusted benchmark command next.
+        Return a concise receipt naming the files changed.
+    """
+input = [
+    "slot:draft",
+    "port:target",
+]
+output = ["slot:implement-receipt"]
+
+[prompt.prepare-and-verify-the-isolated-workbench]
+text = """
+
+        Prepare the workbench for {port:target}. Confirm this execution is inside an isolated Git worktree and inspect the current tracked state.
+        Return status ready only when the tracked workbench is clean and destructive reset is confined to that worktree. Otherwise return abort with the concrete reason.
+        Do not modify files yet and do not invent metric evidence.
+    """
+input = ["port:target"]
+output = ["slot:readiness"]
+
+[prompt.review-the-implemented-candidate-smart-1]
+text = """
+Review the implemented candidate for {port:target} against the draft {slot:draft}. Work summary: {slot:implement-receipt}.
+        A BLOCKER always includes a behavior break, a new smell, or an interface widened to make a caller compile. PLAN-FIDELITY AUTHORITY: this fragment's rule below is authoritative over REVIEW_VERDICT_DOCTRINE's own default completion-criteria paragraph for how strictly the plan and Definition of Done must be matched — apply this fragment's rule directly, with no separate generic checklist formula layered on top. This never touches genuine-defect, house-rule, required-gate, or duplication blocking, which stay unconditional BLOCKERs exactly as REVIEW_VERDICT_DOCTRINE requires. Quick authority: forgive a plan-fidelity gap ONLY when you record the reason it was reasonable to diverge; a genuine correctness defect is never forgivable regardless of reason, and remains a BLOCKER exactly as REVIEW_VERDICT_DOCTRINE requires. Forgiveness excuses missing or altered plan steps that changed nothing an observer could break; it never excuses a bug, a house-rule violation, or un-abstracted duplication.
+        This is the ONLY review pass for this round — an unapproved candidate is reverted, never repaired.
+        Wherever the authority rule above names REVIEW_VERDICT_DOCTRINE, it means the composed baseline stated immediately below.
+        Your own verdict from the previous round is attached as input when one exists — it is your review so far, and this round's verdict EXTENDS it rather than re-deriving it. For every carried blocker: keep its id and its steps verbatim (same order, same text); verify each open step's state directly with your tools and flip its status to done only on evidence you confirmed; append genuinely new findings as new steps at the end, or as new blockers; set recurrence-of on every carried blocker. DROP a blocker entirely once every step is done — name it in the advisory so the clearing is on record. The attached work summary is the worker's cumulative account and its claims of done are input to your verification, never a substitute for it.
+                    Inspect the actual working tree with your tools — never review the summary alone; run the gates named in the phase's own Definition of Done if the summary does not prove they ran.
+                    A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
+                    Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
+                    Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
+input = [
+    "port:target",
+    "slot:draft",
+    "slot:implement-receipt",
+]
+output = ["slot:review-verdict"]
+
+[prompt.scope-one-bounded-benchmark-improvement-attempt-smart-1]
+text = """
+
+        Scope one small, falsifiable attempt to improve the lower-is-better benchmark over {port:target}.
+        Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
+        Return the exact bounded area to touch and why it should improve the benchmark, staying inside {port:target}.
+    """
+input = [
+    "port:target",
+    "slot:best-metric",
+    "slot:history",
+]
+output = ["slot:scope"]
+
+[prompt.turn-the-scope-into-a-concrete-worker-draft-smart-1]
+text = """
+
+        Turn the scope {slot:scope} for {port:target} into a concrete, actionable draft the worker can implement directly: exact files/areas and the precise change. Keep it to one bounded attempt.
+    """
+input = [
+    "slot:scope",
+    "port:target",
+]
+output = ["slot:draft"]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence]]
+id = "abort-summary"
+title = "Report the preflight abort"
+input = ["slot:readiness"]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [readinessText] = process.argv.slice(1);
+const readiness = JSON.parse(readinessText);
+process.stdout.write(JSON.stringify({
+    status: "aborted",
+    reason: "aborted",
+    rounds: 0,
+    kept: 0,
+    rows: [],
+    detail: readiness.detail,
+}));""",
+    "{slot:readiness}",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "capture-initial-ref"
+title = "Capture the immutable baseline commit"
+output = ["slot:captured-ref"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+});
+const sha = (result.stdout ?? "").trim();
+if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
+    process.stderr.write(result.stderr ?? "could not capture HEAD commit");
+    process.exit(1);
+}
+process.stdout.write(JSON.stringify({ sha }));""",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "capture-best-ref"
+title = "Capture the fixed reset ref"
+kind = "project"
+input = ["slot:captured-ref"]
+output = ["slot:best-ref"]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.projection]]
+source = "slot:captured-ref"
+field = "sha"
+destination = "slot:best-ref"
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "measure-the-baseline"
+title = "Measure the baseline"
+input = [
+    "port:benchmark-command",
+    "port:benchmark-runs",
+]
+output = ["slot:baseline-result"]
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const [argvText, runsText] = process.argv.slice(1);
+const argv = JSON.parse(argvText);
+const runs = Number(runsText);
+if (!Array.isArray(argv) || argv.length === 0 || !Number.isSafeInteger(runs) || runs < 1) {
+    process.stderr.write("invalid aggregate-runner input");
+    process.exit(1);
+}
+const records = [];
+let allOk = true;
+for (let index = 0; index < runs; index += 1) {
+    const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+    let parsed;
+    try {
+        parsed = JSON.parse((result.stdout ?? "").trim());
+    } catch {
+        parsed = undefined;
+    }
+    const ok = result.status === 0 && parsed !== undefined && parsed !== null
+        && parsed.status === "ok" && Number.isFinite(parsed.metric);
+    if (!ok) {
+        allOk = false;
+        continue;
+    }
+    records.push({
+        metric: parsed.metric,
+        deltaLines: Number.isFinite(parsed["delta-lines"]) ? parsed["delta-lines"] : undefined,
+    });
+}
+const sorted = [...records].sort((a, b) => a.metric - b.metric);
+const medianIndex = Math.floor(sorted.length / 2);
+const median = sorted.length > 0 ? sorted[medianIndex] : undefined;
+const metric = median ? median.metric : Number.NaN;
+const output = {
+    status: allOk && records.length === runs ? "ok" : "error",
+    metric,
+    runs: records.map((record) => record.metric),
+};
+if (median && median.deltaLines !== undefined) {
+    output["delta-lines"] = median.deltaLines;
+}
+process.stdout.write(JSON.stringify(output));""",
+    "{port:benchmark-command}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
+id = "require-a-usable-trusted-baseline"
+title = "Require a usable trusted baseline"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then"
+otherwise = "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise"
+
+[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.when]
+slot = "slot:baseline-result"
+field = "status"
+equals = "ok"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "reset-candidate"
+title = "Discard the non-improving candidate"
+input = ["slot:best-ref"]
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "--hard",
+    "{slot:best-ref}",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "clean-candidate"
+title = "Remove untracked candidate files"
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
+argv = [
+    "git",
+    "clean",
+    "-fd",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
+id = "record-discarded-candidate"
+title = "Record the discarded candidate"
+kind = "project"
+input = [
+    "slot:candidate-result",
+    "slot:review-verdict",
+]
+output = [
+    { slot = "slot:round-count", operation = "increment" },
+    { slot = "slot:history", operation = "append" },
+    { slot = "slot:decisions", operation = "append" },
+    { slot = "slot:reviews", operation = "append" },
+    "slot:round-complete",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+destination = "slot:round-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+source = "slot:candidate-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection.source]
+literal = "discarded"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+source = "slot:review-verdict"
+field = "status"
+destination = "slot:reviews"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
+destination = "slot:round-complete"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection.source]
+literal = "complete"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "derive-commit-message"
+title = "Derive the kept-candidate commit message"
+input = [
+    "slot:best-metric",
+    "slot:candidate-result",
+    "port:benchmark-runs",
+]
+output = ["slot:commit-message"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [beforeText, candidateText, runsText] = process.argv.slice(1);
+const before = Number(beforeText);
+const candidate = JSON.parse(candidateText);
+const runs = Number(runsText);
+process.stdout.write(
+    "optimize: keep improved candidate (" + before + " -> " + candidate.metric + ", median of " + runs + " runs)",
+);""",
+    "{slot:best-metric}",
+    "{slot:candidate-result}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "stage-candidate"
+title = "Stage the kept candidate"
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "commit-candidate"
+title = "Commit the kept candidate"
+input = ["slot:commit-message"]
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "capture-committed-ref"
+title = "Capture the kept commit SHA"
+output = ["slot:captured-ref"]
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+});
+const sha = (result.stdout ?? "").trim();
+if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
+    process.stderr.write(result.stderr ?? "could not capture HEAD commit");
+    process.exit(1);
+}
+process.stdout.write(JSON.stringify({ sha }));""",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "advance-best"
+title = "Advance trusted best state after commit"
+kind = "project"
+input = [
+    "slot:candidate-result",
+    "slot:captured-ref",
+]
+output = [
+    "slot:best-metric",
+    "slot:best-ref",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:candidate-result"
+field = "metric"
+destination = "slot:best-metric"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:captured-ref"
+field = "sha"
+destination = "slot:best-ref"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
+id = "record-kept-candidate"
+title = "Record the kept candidate"
+kind = "project"
+input = [
+    "slot:candidate-result",
+    "slot:review-verdict",
+]
+output = [
+    { slot = "slot:round-count", operation = "increment" },
+    { slot = "slot:kept-count", operation = "increment" },
+    { slot = "slot:history", operation = "append" },
+    { slot = "slot:decisions", operation = "append" },
+    { slot = "slot:reviews", operation = "append" },
+    "slot:round-complete",
+]
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:round-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:kept-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:candidate-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = "kept"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+source = "slot:review-verdict"
+field = "status"
+destination = "slot:reviews"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
+destination = "slot:round-complete"
+
+[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection.source]
+literal = "complete"
+
+[[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence]]
+id = "run-the-iteration-capped-benchmark-round-budget"
+title = "Run the iteration-capped benchmark round budget"
+kind = "loop"
+sequence = "sequence:run-the-iteration-capped-benchmark-round-budget-body"
+max-iterations = 12
+on-exhausted = "continue"
+
+[[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence.until.all]]
+slot = "slot:round-complete"
+equals = "complete"
+
+[[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence.until.all]]
+slot = "slot:best-metric"
+
+[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence.until.all.at-most]
+ref = "port:improvement-target"
+
+[[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence]]
+id = "deterministically-branch-on-the-actual-completion-cause"
+title = "Deterministically branch on the actual completion cause"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then"
+otherwise = "sequence:ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise"
+
+[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence.when]
+slot = "slot:best-metric"
+
+[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise.sequence.when.at-most]
+ref = "port:improvement-target"
+
+[[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then.sequence]]
+id = "derive-summary-target-reached"
+title = "Derive the typed benchmark summary (already met)"
+input = [
+    "slot:round-count",
+    "slot:kept-count",
+    "slot:best-metric",
+    "slot:decisions",
+    "slot:history",
+    "slot:reviews",
+]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
+const rounds = Number(roundsText);
+const kept = Number(keptText);
+const best = Number(bestText);
+const decisions = JSON.parse(decisionsText);
+const measurements = JSON.parse(measurementsText);
+const reviewList = reviewsText === undefined ? undefined : JSON.parse(reviewsText);
+if (!["target-reached", "iteration-limit-reached"].includes(reason)
+    || !Number.isSafeInteger(rounds) || rounds < 0
+    || !Number.isSafeInteger(kept) || kept < 0
+    || !Number.isFinite(best)
+    || !Array.isArray(decisions) || !Array.isArray(measurements)
+    || (reviewList !== undefined && !Array.isArray(reviewList))
+    || decisions[0] !== "baseline"
+    || decisions.filter((decision) => decision === "kept").length !== kept) {
+    process.exit(1);
+}
+let measurementIndex = 0;
+const rows = decisions.map((decision) => {
+    if (decision === "review-rejected") return { decision };
+    const measurement = measurements[measurementIndex];
+    measurementIndex += 1;
+    return { measurement, decision };
+});
+if (measurementIndex !== measurements.length) process.exit(1);
+const detail = "Decisions and counts projected from runtime-owned keep/discard"
+    + (reviewList === undefined ? "" : "/review")
+    + " branches; stop reason preserved from the guard/exhaustion branch that actually terminated the run."
+    + (reviewList === undefined ? "" : " Review verdicts: " + JSON.stringify(reviewList));
+process.stdout.write(JSON.stringify({
+    status: "completed",
+    reason,
+    rounds,
+    kept,
+    best,
+    rows,
+    detail,
+}));""",
+    "target-reached",
+    "{slot:round-count}",
+    "{slot:kept-count}",
+    "{slot:best-metric}",
+    "{slot:decisions}",
+    "{slot:history}",
+    "{slot:reviews}",
+]
+
+[[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise.sequence]]
+id = "derive-summary-iteration-limit-reached"
+title = "Derive the typed benchmark summary (iteration limit reached)"
+input = [
+    "slot:round-count",
+    "slot:kept-count",
+    "slot:best-metric",
+    "slot:decisions",
+    "slot:history",
+    "slot:reviews",
+]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
+const rounds = Number(roundsText);
+const kept = Number(keptText);
+const best = Number(bestText);
+const decisions = JSON.parse(decisionsText);
+const measurements = JSON.parse(measurementsText);
+const reviewList = reviewsText === undefined ? undefined : JSON.parse(reviewsText);
+if (!["target-reached", "iteration-limit-reached"].includes(reason)
+    || !Number.isSafeInteger(rounds) || rounds < 0
+    || !Number.isSafeInteger(kept) || kept < 0
+    || !Number.isFinite(best)
+    || !Array.isArray(decisions) || !Array.isArray(measurements)
+    || (reviewList !== undefined && !Array.isArray(reviewList))
+    || decisions[0] !== "baseline"
+    || decisions.filter((decision) => decision === "kept").length !== kept) {
+    process.exit(1);
+}
+let measurementIndex = 0;
+const rows = decisions.map((decision) => {
+    if (decision === "review-rejected") return { decision };
+    const measurement = measurements[measurementIndex];
+    measurementIndex += 1;
+    return { measurement, decision };
+});
+if (measurementIndex !== measurements.length) process.exit(1);
+const detail = "Decisions and counts projected from runtime-owned keep/discard"
+    + (reviewList === undefined ? "" : "/review")
+    + " branches; stop reason preserved from the guard/exhaustion branch that actually terminated the run."
+    + (reviewList === undefined ? "" : " Review verdicts: " + JSON.stringify(reviewList));
+process.stdout.write(JSON.stringify({
+    status: "completed",
+    reason,
+    rounds,
+    kept,
+    best,
+    rows,
+    detail,
+}));""",
+    "iteration-limit-reached",
+    "{slot:round-count}",
+    "{slot:kept-count}",
+    "{slot:best-metric}",
+    "{slot:decisions}",
+    "{slot:history}",
+    "{slot:reviews}",
+]
+
+[[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then.sequence]]
+id = "derive-summary-target-reached"
+title = "Derive the typed benchmark summary (target reached)"
+input = [
+    "slot:round-count",
+    "slot:kept-count",
+    "slot:best-metric",
+    "slot:decisions",
+    "slot:history",
+    "slot:reviews",
+]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
+const rounds = Number(roundsText);
+const kept = Number(keptText);
+const best = Number(bestText);
+const decisions = JSON.parse(decisionsText);
+const measurements = JSON.parse(measurementsText);
+const reviewList = reviewsText === undefined ? undefined : JSON.parse(reviewsText);
+if (!["target-reached", "iteration-limit-reached"].includes(reason)
+    || !Number.isSafeInteger(rounds) || rounds < 0
+    || !Number.isSafeInteger(kept) || kept < 0
+    || !Number.isFinite(best)
+    || !Array.isArray(decisions) || !Array.isArray(measurements)
+    || (reviewList !== undefined && !Array.isArray(reviewList))
+    || decisions[0] !== "baseline"
+    || decisions.filter((decision) => decision === "kept").length !== kept) {
+    process.exit(1);
+}
+let measurementIndex = 0;
+const rows = decisions.map((decision) => {
+    if (decision === "review-rejected") return { decision };
+    const measurement = measurements[measurementIndex];
+    measurementIndex += 1;
+    return { measurement, decision };
+});
+if (measurementIndex !== measurements.length) process.exit(1);
+const detail = "Decisions and counts projected from runtime-owned keep/discard"
+    + (reviewList === undefined ? "" : "/review")
+    + " branches; stop reason preserved from the guard/exhaustion branch that actually terminated the run."
+    + (reviewList === undefined ? "" : " Review verdicts: " + JSON.stringify(reviewList));
+process.stdout.write(JSON.stringify({
+    status: "completed",
+    reason,
+    rounds,
+    kept,
+    best,
+    rows,
+    detail,
+}));""",
+    "target-reached",
+    "{slot:round-count}",
+    "{slot:kept-count}",
+    "{slot:best-metric}",
+    "{slot:decisions}",
+    "{slot:history}",
+    "{slot:reviews}",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
+id = "reset-candidate"
+title = "Discard the non-improving candidate"
+input = ["slot:best-ref"]
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.command]
+argv = [
+    "git",
+    "reset",
+    "--hard",
+    "{slot:best-ref}",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
+id = "clean-candidate"
+title = "Remove untracked candidate files"
+output = ["slot:command-receipt"]
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.command]
+argv = [
+    "git",
+    "clean",
+    "-fd",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
+id = "record-review-rejected"
+title = "Record the review-rejected round"
+kind = "project"
+input = ["slot:review-verdict"]
+output = [
+    { slot = "slot:round-count", operation = "increment" },
+    { slot = "slot:reviews", operation = "append" },
+    { slot = "slot:decisions", operation = "append" },
+    "slot:round-complete",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection]]
+destination = "slot:round-count"
+operation = "increment"
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection.source]
+literal = 1
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection]]
+source = "slot:review-verdict"
+field = "status"
+destination = "slot:reviews"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection.source]
+literal = "review-rejected"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection]]
+destination = "slot:round-complete"
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection.source]
+literal = "complete"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
+id = "measure-the-candidate"
+title = "Measure the candidate"
+input = [
+    "port:benchmark-command",
+    "port:benchmark-runs",
+]
+output = ["slot:candidate-result"]
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+import { spawnSync } from "node:child_process";
+const [argvText, runsText] = process.argv.slice(1);
+const argv = JSON.parse(argvText);
+const runs = Number(runsText);
+if (!Array.isArray(argv) || argv.length === 0 || !Number.isSafeInteger(runs) || runs < 1) {
+    process.stderr.write("invalid aggregate-runner input");
+    process.exit(1);
+}
+const records = [];
+let allOk = true;
+for (let index = 0; index < runs; index += 1) {
+    const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+    let parsed;
+    try {
+        parsed = JSON.parse((result.stdout ?? "").trim());
+    } catch {
+        parsed = undefined;
+    }
+    const ok = result.status === 0 && parsed !== undefined && parsed !== null
+        && parsed.status === "ok" && Number.isFinite(parsed.metric);
+    if (!ok) {
+        allOk = false;
+        continue;
+    }
+    records.push({
+        metric: parsed.metric,
+        deltaLines: Number.isFinite(parsed["delta-lines"]) ? parsed["delta-lines"] : undefined,
+    });
+}
+const sorted = [...records].sort((a, b) => a.metric - b.metric);
+const medianIndex = Math.floor(sorted.length / 2);
+const median = sorted.length > 0 ? sorted[medianIndex] : undefined;
+const metric = median ? median.metric : Number.NaN;
+const output = {
+    status: allOk && records.length === runs ? "ok" : "error",
+    metric,
+    runs: records.map((record) => record.metric),
+};
+if (median && median.deltaLines !== undefined) {
+    output["delta-lines"] = median.deltaLines;
+}
+process.stdout.write(JSON.stringify(output));""",
+    "{port:benchmark-command}",
+    "{port:benchmark-runs}",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
+id = "derive-margin"
+title = "Derive whether the candidate clears the noise threshold"
+input = [
+    "slot:candidate-result",
+    "slot:best-metric",
+    "port:noise-threshold",
+]
+output = ["slot:margin-result"]
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [candidateText, bestText, thresholdText] = process.argv.slice(1);
+const candidate = JSON.parse(candidateText);
+const best = Number(bestText);
+const threshold = Number(thresholdText);
+const meets = Boolean(candidate) && candidate.status === "ok"
+    && Number.isFinite(candidate.metric) && Number.isFinite(best)
+    && Number.isFinite(threshold) && threshold >= 0
+    && (best - candidate.metric) > threshold;
+process.stdout.write(JSON.stringify(meets));""",
+    "{slot:candidate-result}",
+    "{slot:best-metric}",
+    "{port:noise-threshold}",
+]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
+id = "apply-the-declared-keep-discard-decision"
+title = "Apply the declared keep/discard decision"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then"
+otherwise = "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all]]
+slot = "slot:candidate-result"
+field = "status"
+equals = "ok"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all]]
+slot = "slot:candidate-result"
+field = "metric"
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.less-than]
+ref = "slot:best-metric"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all]]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any]]
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any.not]
+present = "port:max-delta-lines"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any]]
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any.all]]
+present = "port:max-delta-lines"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any.all]]
+field = "delta-lines"
+present = "slot:candidate-result"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any.all]]
+slot = "slot:candidate-result"
+field = "delta-lines"
+
+[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all.any.all.at-most]
+ref = "port:max-delta-lines"
+
+[[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.when.all]]
+slot = "slot:margin-result"
+equals = true
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence]]
+id = "baseline-failure-summary"
+title = "Report the unusable baseline"
+input = ["slot:baseline-result"]
+output = ["slot:summary"]
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence.command]
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
+const [baselineText] = process.argv.slice(1);
+const baseline = JSON.parse(baselineText);
+process.stdout.write(JSON.stringify({
+    status: "aborted",
+    reason: "aborted",
+    rounds: 0,
+    kept: 0,
+    rows: [{ measurement: baseline, decision: "baseline" }],
+    detail: "trusted baseline command did not return status ok: " + JSON.stringify(baseline),
+}));""",
+    "{slot:baseline-result}",
+]
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "seed-best"
+title = "Seed trusted best state and history"
+kind = "project"
+input = ["slot:baseline-result"]
+output = [
+    "slot:best-metric",
+    { slot = "slot:history", operation = "append" },
+    "slot:round-count",
+    "slot:kept-count",
+    { slot = "slot:decisions", operation = "append" },
+]
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+source = "slot:baseline-result"
+field = "metric"
+destination = "slot:best-metric"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+source = "slot:baseline-result"
+destination = "slot:history"
+operation = "append"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:round-count"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = 0
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:kept-count"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = 0
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:decisions"
+operation = "append"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = "baseline"
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "seed-reviews"
+title = "Seed empty review history"
+kind = "project"
+output = ["slot:reviews"]
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
+destination = "slot:reviews"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection.source]
+literal = []
+
+[[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
+id = "complete-immediately-when-the-baseline-already-meets-the-target"
+title = "Complete immediately when the baseline already meets the target"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then"
+otherwise = "sequence:ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.when]
+slot = "slot:best-metric"
+
+[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.when.at-most]
+ref = "port:improvement-target"
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "reset-round"
+title = "Mark the round open"
+kind = "project"
+output = ["slot:round-complete"]
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence.projection]]
+destination = "slot:round-complete"
+
+[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence.projection.source]
+literal = "open"
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "scope-one-bounded-benchmark-improvement-attempt-smart-1"
+title = "Scope one bounded benchmark-improvement attempt (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:scope-one-bounded-benchmark-improvement-attempt-smart-1"
+input = [
+    "port:target",
+    "slot:best-metric",
+    "slot:history",
+]
+output = ["slot:scope"]
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "turn-the-scope-into-a-concrete-worker-draft-smart-1"
+title = "Turn the scope into a concrete worker draft (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:turn-the-scope-into-a-concrete-worker-draft-smart-1"
+input = [
+    "slot:scope",
+    "port:target",
+]
+output = ["slot:draft"]
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "implement-the-draft-worker"
+title = "Implement the draft (worker)"
+agent = "agent:worker"
+prompt = "prompt:implement-the-draft-worker"
+input = [
+    "slot:draft",
+    "port:target",
+]
+output = ["slot:implement-receipt"]
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "review-the-implemented-candidate-smart-1"
+title = "Review the implemented candidate (smart-1)"
+agent = "agent:smart-1"
+prompt = "prompt:review-the-implemented-candidate-smart-1"
+input = [
+    "port:target",
+    "slot:draft",
+    "slot:implement-receipt",
+]
+output = ["slot:review-verdict"]
+
+[[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
+id = "route-on-the-review-verdict"
+title = "Route on the review verdict"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then"
+otherwise = "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise"
+
+[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence.when]
+slot = "slot:review-verdict"
+field = "status"
+equals = "approved"
+
+[procedure]
+description = "Verify an isolated worktree, seed a trusted baseline benchmark, run an iteration-capped scope/draft/implement/review round loop, and deterministically keep only benchmark-measured improvements beyond the noise threshold."
+input = [
+    "port:benchmark-command",
+    "port:benchmark-runs",
+    "port:improvement-target",
+    "port:max-delta-lines",
+    "port:noise-threshold",
+    "port:target",
+]
+output = ["port:summary"]
+
+[[procedure.sequence]]
+id = "prepare-and-verify-the-isolated-workbench"
+title = "Prepare and verify the isolated workbench"
+agent = "agent:worker"
+prompt = "prompt:prepare-and-verify-the-isolated-workbench"
+input = ["port:target"]
+output = ["slot:readiness"]
+
+[[procedure.sequence]]
+id = "gate-mutation-on-isolated-worktree-readiness"
+title = "Gate mutation on isolated-worktree readiness"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then"
+otherwise = "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise"
+
+[procedure.sequence.when]
+slot = "slot:readiness"
+field = "status"
+equals = "ready"

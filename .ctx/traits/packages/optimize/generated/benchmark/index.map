@@ -1,0 +1,437 @@
+{
+  "agent:smart-1": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:worker": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:benchmark-command": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 9,
+    "end": 9
+  },
+  "port:benchmark-runs": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 17,
+    "end": 17
+  },
+  "port:improvement-target": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 13,
+    "end": 13
+  },
+  "port:max-delta-lines": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 12,
+    "end": 12
+  },
+  "port:noise-threshold": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 17,
+    "end": 17
+  },
+  "port:summary": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 81,
+    "end": 81
+  },
+  "port:target": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 5,
+    "end": 5
+  },
+  "prompt:implement-the-draft-worker": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/implement.ts",
+    "start": 9,
+    "end": 9
+  },
+  "prompt:prepare-and-verify-the-isolated-workbench": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/setup.ts",
+    "start": 9,
+    "end": 9
+  },
+  "prompt:review-the-implemented-candidate-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/review.ts",
+    "start": 11,
+    "end": 11
+  },
+  "prompt:scope-one-bounded-benchmark-improvement-attempt-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/scope.ts",
+    "start": 9,
+    "end": 9
+  },
+  "prompt:turn-the-scope-into-a-concrete-worker-draft-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/draft.ts",
+    "start": 9,
+    "end": 9
+  },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 104,
+    "end": 104
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 84,
+    "end": 84
+  },
+  "schema:optimize-aggregate-result": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 56,
+    "end": 56
+  },
+  "schema:optimize-benchmark-review-status": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 149,
+    "end": 149
+  },
+  "schema:optimize-benchmark-round-status": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 33,
+    "end": 33
+  },
+  "schema:optimize-decision-status": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 97,
+    "end": 97
+  },
+  "schema:optimize-git-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 23,
+    "end": 23
+  },
+  "schema:optimize-readiness": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 10,
+    "end": 10
+  },
+  "schema:optimize-readiness-status": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 5,
+    "end": 5
+  },
+  "schema:optimize-result-status": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 51,
+    "end": 51
+  },
+  "schema:optimize-review-verdict": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 156,
+    "end": 156
+  },
+  "schema:optimize-summary": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 120,
+    "end": 120
+  },
+  "schema:optimize-summary-reason": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 102,
+    "end": 102
+  },
+  "schema:optimize-summary-row": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 107,
+    "end": 107
+  },
+  "schema:optimize-summary-status": {
+    "file": ".ctx/traits/packages/optimize/source/shared/schema.ts",
+    "start": 92,
+    "end": 92
+  },
+  "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise/abort-summary": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/summary.ts",
+    "start": 12,
+    "end": 12
+  },
+  "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/capture-best-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 51,
+    "end": 51
+  },
+  "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/capture-initial-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 44,
+    "end": 44
+  },
+  "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/measure-the-baseline": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/measure.ts",
+    "start": 74,
+    "end": 74
+  },
+  "sequence:ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then/require-a-usable-trusted-baseline": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 56,
+    "end": 56
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise/clean-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 97,
+    "end": 97
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise/record-discarded-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/decide.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise/reset-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 90,
+    "end": 90
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/advance-best": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 64,
+    "end": 64
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/capture-committed-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 57,
+    "end": 57
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/commit-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 83,
+    "end": 83
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/derive-commit-message": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 73,
+    "end": 73
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/record-kept-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/decide.ts",
+    "start": 47,
+    "end": 47
+  },
+  "sequence:ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then/stage-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 80,
+    "end": 80
+  },
+  "sequence:ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise/deterministically-branch-on-the-actual-completion-cause": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 32,
+    "end": 32
+  },
+  "sequence:ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise/run-the-iteration-capped-benchmark-round-budget": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 66,
+    "end": 66
+  },
+  "sequence:ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then/derive-summary-target-reached": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/summary.ts",
+    "start": 112,
+    "end": 112
+  },
+  "sequence:ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise/derive-summary-iteration-limit-reached": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/summary.ts",
+    "start": 112,
+    "end": 112
+  },
+  "sequence:ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then/derive-summary-target-reached": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/summary.ts",
+    "start": 112,
+    "end": 112
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise/clean-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 97,
+    "end": 97
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise/record-review-rejected": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/decide.ts",
+    "start": 43,
+    "end": 43
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise/reset-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/git.ts",
+    "start": 90,
+    "end": 90
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then/apply-the-declared-keep-discard-decision": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/decide.ts",
+    "start": 40,
+    "end": 40
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then/derive-margin": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/stage/decide.ts",
+    "start": 22,
+    "end": 22
+  },
+  "sequence:ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then/measure-the-candidate": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/measure.ts",
+    "start": 74,
+    "end": 74
+  },
+  "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise/baseline-failure-summary": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/summary.ts",
+    "start": 36,
+    "end": 36
+  },
+  "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then/complete-immediately-when-the-baseline-already-meets-the-target": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then/seed-best": {
+    "file": ".ctx/traits/packages/optimize/source/shared/stage/baseline.ts",
+    "start": 11,
+    "end": 11
+  },
+  "sequence:ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then/seed-reviews": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 18,
+    "end": 18
+  },
+  "sequence:procedure/gate-mutation-on-isolated-worktree-readiness": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 50,
+    "end": 50
+  },
+  "sequence:procedure/prepare-and-verify-the-isolated-workbench": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 48,
+    "end": 48
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/implement-the-draft-worker": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 71,
+    "end": 71
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/reset-round": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 23,
+    "end": 23
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/review-the-implemented-candidate-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 72,
+    "end": 72
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/route-on-the-review-verdict": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 73,
+    "end": 73
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/scope-one-bounded-benchmark-improvement-attempt-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 69,
+    "end": 69
+  },
+  "sequence:run-the-iteration-capped-benchmark-round-budget-body/turn-the-scope-into-a-concrete-worker-draft-smart-1": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/index.ts",
+    "start": 70,
+    "end": 70
+  },
+  "slot:baseline-result": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 40,
+    "end": 40
+  },
+  "slot:best-metric": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 50,
+    "end": 50
+  },
+  "slot:best-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 27,
+    "end": 27
+  },
+  "slot:candidate-result": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 45,
+    "end": 45
+  },
+  "slot:captured-ref": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 31,
+    "end": 31
+  },
+  "slot:command-receipt": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 36,
+    "end": 36
+  },
+  "slot:commit-message": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 72,
+    "end": 72
+  },
+  "slot:decisions": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 68,
+    "end": 68
+  },
+  "slot:draft": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 105,
+    "end": 105
+  },
+  "slot:history": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 54,
+    "end": 54
+  },
+  "slot:implement-receipt": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 109,
+    "end": 109
+  },
+  "slot:kept-count": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 63,
+    "end": 63
+  },
+  "slot:margin-result": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 27,
+    "end": 27
+  },
+  "slot:readiness": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 22,
+    "end": 22
+  },
+  "slot:review-verdict": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 22,
+    "end": 22
+  },
+  "slot:reviews": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 38,
+    "end": 38
+  },
+  "slot:round-complete": {
+    "file": ".ctx/traits/packages/optimize/source/variant/benchmark/data.ts",
+    "start": 31,
+    "end": 31
+  },
+  "slot:round-count": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 58,
+    "end": 58
+  },
+  "slot:scope": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 101,
+    "end": 101
+  },
+  "slot:summary": {
+    "file": ".ctx/traits/packages/optimize/source/shared/data.ts",
+    "start": 76,
+    "end": 76
+  },
+  "trait:optimize": {
+    "file": "[eval1]",
+    "start": 47,
+    "end": 47
+  }
+}
