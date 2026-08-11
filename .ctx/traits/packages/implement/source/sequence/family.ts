@@ -15,6 +15,7 @@ import {
 import { gateAndDiffEvidence } from "@ctx-traits/toolkit";
 import type {
     AgentHandle,
+    DeclaredAgentHandle,
     ResourceHandle,
     SequenceHandle,
     SlotHandle,
@@ -30,10 +31,10 @@ export const TASK_WRITE_SCOPE_RIDER =
 export const ONE_TURN_DISCIPLINE =
     `End this turn with the structured output and nothing else — no prose status line after the payload.`;
 
-export function smart1Role(description: string): AgentHandle {
+export function smart1Role(description: string): DeclaredAgentHandle {
     return reviewerRole("smart-1", description, "Drafting and first-reviewer role.");
 }
-export function smart2Role(description: string): AgentHandle {
+export function smart2Role(description: string): DeclaredAgentHandle {
     return reviewerRole("smart-2", description, "Second-reviewer role.");
 }
 export const worker = workerRole("worker", "Implements the draft and applies reviewer fixes.");
@@ -267,7 +268,7 @@ export function feasibilityStep(agentHandle: AgentHandle, contract: ResourceHand
 }
 
 /** Functional-layer form (0109 F2): `task-extraction`'s hand-chosen id never matched `idFromTitle` of its own title, so it needs the `id:` override — the same known gap as the seven baseline steps, just uncounted in the 0108 pilot since quick never called this step. */
-export function taskExtractionStep(agentHandle: AgentHandle, taskBoardHandle: ResourceHandle): void {
+export function taskExtractionStep(agentHandle: DeclaredAgentHandle, taskBoardHandle: ResourceHandle): void {
     agentHandle.prompt("Copy the task contract (clerk)", {
         id: "task-extraction",
         input: input.prompt`

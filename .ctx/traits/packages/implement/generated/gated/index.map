@@ -91,8 +91,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 132,
-    "end": 132
+    "start": 133,
+    "end": 133
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/schema.ts",
@@ -221,8 +221,8 @@
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 170,
-    "end": 170
+    "start": 171,
+    "end": 171
   },
   "slot:brief": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",
@@ -296,13 +296,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
+    "start": 129,
+    "end": 129
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 116,
-    "end": 116
+    "start": 117,
+    "end": 117
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/packages/implement/source/variants/gated/slot.ts",

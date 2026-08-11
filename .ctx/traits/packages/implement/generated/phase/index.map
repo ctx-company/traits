@@ -26,13 +26,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 176,
-    "end": 176
+    "start": 177,
+    "end": 177
   },
   "port:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 193,
-    "end": 193
+    "start": 194,
+    "end": 194
   },
   "port:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -41,8 +41,8 @@
   },
   "port:task": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 46,
-    "end": 46
+    "start": 47,
+    "end": 47
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -76,8 +76,8 @@
   },
   "prompt:task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 273,
-    "end": 273
+    "start": 274,
+    "end": 274
   },
   "resource:review-rubric": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -86,8 +86,8 @@
   },
   "resource:task-board": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 60,
-    "end": 60
+    "start": 61,
+    "end": 61
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -126,8 +126,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 132,
-    "end": 132
+    "start": 133,
+    "end": 133
   },
   "schema:review-finding": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -261,13 +261,13 @@
   },
   "sequence:procedure/task-extraction": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 271,
-    "end": 271
+    "start": 272,
+    "end": 272
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 170,
-    "end": 170
+    "start": 171,
+    "end": 171
   },
   "slot:building-sealed": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -276,18 +276,18 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 112,
-    "end": 112
+    "start": 113,
+    "end": 113
   },
   "slot:draft": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 75,
-    "end": 75
+    "start": 76,
+    "end": 76
   },
   "slot:leftovers": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 86,
-    "end": 86
+    "start": 87,
+    "end": 87
   },
   "slot:park-report": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -301,13 +301,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
+    "start": 129,
+    "end": 129
   },
   "slot:review-diff": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 116,
-    "end": 116
+    "start": 117,
+    "end": 117
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",
@@ -341,13 +341,13 @@
   },
   "slot:task-brief": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 69,
-    "end": 69
+    "start": 70,
+    "end": 70
   },
   "slot:work-summary": {
     "file": ".ctx/traits/packages/implement/source/sequence/family.ts",
-    "start": 80,
-    "end": 80
+    "start": 81,
+    "end": 81
   },
   "trait:implement": {
     "file": ".ctx/traits/packages/implement/source/variants/phase.ts",

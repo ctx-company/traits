@@ -152,6 +152,7 @@ export type {
   AgentHandle,
   Brand,
   ConditionHandle,
+  DeclaredAgentHandle,
   FieldRef,
   GuardHandle,
   Handle,
