@@ -42,7 +42,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
     poll_and_apply_keys(state);
     let progress_lines = progress_lines(&state.view);
     let (journey_lines, _active_row, journey_ladder) = journey_lines_with_active_row(&state.view);
-    let post_run_lines = post_run_lines(&state.view);
+    let landing_lines = landing_lines(&state.view);
     let history_rows = story_history_lines(&state.view);
     let mut current_rows = story_stream_lines(state);
     // P552: the trailing in-flight line is not a special overlay outside the
@@ -87,7 +87,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
                 journey_ladder: &journey_ladder,
                 history_rows: &history_rows,
                 current_rows: &current_rows,
-                post_run_lines: post_run_lines.as_deref(),
+                landing_lines: landing_lines.as_deref(),
                 scrolls,
                 progress_follow,
                 journey_follow,
@@ -217,15 +217,15 @@ pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneT
         id: ids.current,
         title: "current activity".to_string(),
     };
-    let post_run = || PaneTree::Leaf {
+    let landing = || PaneTree::Leaf {
         id: ids.current,
-        title: "post-run".to_string(),
+        title: "landing".to_string(),
     };
     let has_progress = data.progress.is_some();
     let has_journey = data.journey.is_some();
     let has_history = data.history.is_some();
     let has_current = data.current.is_some();
-    let has_post_run = data.post_run.is_some();
+    let has_landing = data.landing.is_some();
     debug_assert!(
         has_progress || has_journey,
         "pane_tree requires at least a progress or journey source"
@@ -239,12 +239,12 @@ pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneT
         if has_journey {
             children.push((Constraint::Min(3), journey()));
         }
-        if has_post_run {
-            children.push((Constraint::Min(CURRENT_MIN_OUTER_ROWS), post_run()));
+        if has_landing {
+            children.push((Constraint::Min(CURRENT_MIN_OUTER_ROWS), landing()));
         } else if has_history {
             children.push((Constraint::Min(3), history()));
         }
-        if has_current && !has_post_run {
+        if has_current && !has_landing {
             children.push((Constraint::Min(CURRENT_MIN_OUTER_ROWS), current()));
         }
         return PaneTree::Split {
@@ -278,8 +278,8 @@ pub(crate) fn pane_tree(ids: &PaneIds, area: Rect, data: &PaneData<'_>) -> PaneT
         },
     };
 
-    let right = if has_post_run {
-        Some(post_run())
+    let right = if has_landing {
+        Some(landing())
     } else if has_history
         && has_current
         && area.height >= HISTORY_MIN_OUTER_ROWS + CURRENT_MIN_OUTER_ROWS
@@ -337,7 +337,7 @@ pub(super) struct LiveFrame<'a> {
     /// `EventRow`/[`event_row_line`] contract, with no separate overlay
     /// case.
     pub(super) current_rows: &'a [EventRow],
-    pub(super) post_run_lines: Option<&'a [tui::Line]>,
+    pub(super) landing_lines: Option<&'a [tui::Line]>,
     pub(super) scrolls: &'a mut PaneScrolls,
     pub(super) progress_follow: &'a mut bool,
     pub(super) journey_follow: &'a mut bool,
@@ -407,7 +407,7 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
         journey_ladder,
         history_rows,
         current_rows,
-        post_run_lines,
+        landing_lines,
         scrolls,
         progress_follow,
         journey_follow,
@@ -431,7 +431,7 @@ pub(super) fn render_live_panes(frame: &mut ratatui::Frame<'_>, state: LiveFrame
         // merely because the live projection currently has an empty row list.
         history: (!history_rows.is_empty()).then_some(history_rows),
         current: Some(current_rows),
-        post_run: post_run_lines,
+        landing: landing_lines,
         title: PaneTitleRow::Visible(title_line),
     };
     render_pane_body(
@@ -590,19 +590,19 @@ pub(crate) fn render_pane_body(
     let progress_outer = data.progress.and(layout.rect(ids.progress));
     let journey_outer = data.journey.and(layout.rect(ids.journey));
     let history_outer = data.history.and(layout.rect(ids.history));
-    // Post-run deliberately reuses current's pane id and scroll state. Once it
+    // Landing deliberately reuses current's pane id and scroll state. Once it
     // exists, current must be absent from every renderer path, not only the tree.
     let current_outer = data
-        .post_run
+        .landing
         .is_none()
         .then(|| data.current.and(layout.rect(ids.current)))
         .flatten();
-    let post_run_outer = data.post_run.and(layout.rect(ids.current));
+    let landing_outer = data.landing.and(layout.rect(ids.current));
     let progress_inner = progress_outer.map(tui_panes::pane_inner);
     let journey_inner = journey_outer.map(tui_panes::pane_inner);
     let history_inner = history_outer.map(tui_panes::pane_inner);
     let current_inner = current_outer.map(tui_panes::pane_inner);
-    let post_run_inner = post_run_outer.map(tui_panes::pane_inner);
+    let landing_inner = landing_outer.map(tui_panes::pane_inner);
 
     let progress = data.progress.map(|lines| {
         lines
@@ -623,7 +623,7 @@ pub(crate) fn render_pane_body(
             .collect::<Vec<_>>()
     });
     let current = data
-        .post_run
+        .landing
         .is_none()
         .then_some(data.current)
         .flatten()
@@ -633,7 +633,7 @@ pub(crate) fn render_pane_body(
                 .map(tui_ratatui::render_line)
                 .collect::<Vec<_>>()
         });
-    let post_run = data.post_run.map(|lines| {
+    let landing = data.landing.map(|lines| {
         lines
             .iter()
             .map(tui_ratatui::render_line)
@@ -707,16 +707,16 @@ pub(crate) fn render_pane_body(
                 FollowTarget::Tail,
             );
         } else if id == ids.current
-            && let (Some(post_run), Some(inner)) = (&post_run, post_run_inner)
+            && let (Some(landing), Some(inner)) = (&landing, landing_inner)
         {
             let scroll = scrolls.get_mut(id);
-            scroll.set_len(post_run.len());
+            scroll.set_len(landing.len());
             apply_scroll_and_derive_follow(
                 scroll,
                 current_follow,
                 capped_repeat_delta(delta, repeats, inner.height as usize),
                 inner.height as usize,
-                post_run.len(),
+                landing.len(),
                 FollowTarget::Tail,
             );
         } else if id == ids.current
@@ -759,11 +759,11 @@ pub(crate) fn render_pane_body(
             focus.is_focused(ids.history),
         );
     }
-    if let Some(outer) = post_run_outer.or(current_outer) {
+    if let Some(outer) = landing_outer.or(current_outer) {
         tui_panes::render_pane(
             frame,
             outer,
-            tree.title(ids.current).expect("current/post-run title"),
+            tree.title(ids.current).expect("current/landing title"),
             focus.is_focused(ids.current),
         );
     }
@@ -808,15 +808,15 @@ pub(crate) fn render_pane_body(
         );
         tui_panes::render_wrapped_lines_pane(frame, inner, current, scrolls.get_mut(ids.current));
     }
-    if let (Some(post_run), Some(inner)) = (&post_run, post_run_inner) {
+    if let (Some(landing), Some(inner)) = (&landing, landing_inner) {
         follow_target(
             scrolls.get_mut(ids.current),
             *current_follow,
             FollowTarget::Tail,
-            post_run.len(),
+            landing.len(),
             inner.height as usize,
         );
-        tui_panes::render_wrapped_lines_pane(frame, inner, post_run, scrolls.get_mut(ids.current));
+        tui_panes::render_wrapped_lines_pane(frame, inner, landing, scrolls.get_mut(ids.current));
     }
 }
 
@@ -1158,7 +1158,7 @@ pub(super) fn journey_lines_with_active_row(
 /// The completed-run morph requires both a completed journey and actual,
 /// observed merge activity. `merge_rows` is retained for the panel lifetime,
 /// so terminal transitions cannot rotate the pane tree back to history/current.
-pub(super) fn post_run_lines(view: &RunView) -> Option<Vec<tui::Line>> {
+pub(super) fn landing_lines(view: &RunView) -> Option<Vec<tui::Line>> {
     (view.header.completed && !view.merge_rows.is_empty()).then(|| {
         let mut lines = Vec::new();
         for row in &view.merge_rows {
@@ -1789,7 +1789,7 @@ mod tests {
             &activity_event(
                 "merge:gates",
                 ActivityKind::Stalled,
-                Some("post-run gate failed"),
+                Some("landing gate failed"),
             ),
             now,
         );
@@ -1830,7 +1830,7 @@ mod tests {
             "merge:rebase",
             "merge:reconciliation",
             "merge:gates",
-            "merge:post-run",
+            "merge:landing",
             "merge:cleanup",
         ];
         for (index, frame_id) in stage_order.iter().enumerate() {
@@ -1960,10 +1960,10 @@ mod tests {
     }
 
     #[test]
-    fn post_run_morph_requires_completion_and_observed_merge_work() {
+    fn landing_morph_requires_completion_and_observed_merge_work() {
         let merge_row = MergeRowView {
-            frame_id: "merge:post-run".to_string(),
-            label: "post-run".to_string(),
+            frame_id: "merge:landing".to_string(),
+            label: "landing".to_string(),
             state: MergeRowState::Done,
             detail: None,
             started: Instant::now(),
@@ -1971,14 +1971,14 @@ mod tests {
         };
         let mut incomplete = view_with(Vec::new());
         incomplete.merge_rows.push(merge_row.clone());
-        assert!(post_run_lines(&incomplete).is_none());
+        assert!(landing_lines(&incomplete).is_none());
 
         let mut no_work = view_with(Vec::new());
         no_work.header.completed = true;
-        assert!(post_run_lines(&no_work).is_none());
+        assert!(landing_lines(&no_work).is_none());
 
         incomplete.header.completed = true;
-        assert!(post_run_lines(&incomplete).is_some());
+        assert!(landing_lines(&incomplete).is_some());
     }
 
     #[test]
@@ -2362,7 +2362,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::Visible(&title_row_line(None, true, "trait", None, None)),
         };
         let area = Rect::new(0, 0, 80, 24);
@@ -2388,7 +2388,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 120, 24);
@@ -2425,19 +2425,19 @@ mod tests {
     }
 
     #[test]
-    fn post_run_replaces_the_complete_right_column_after_completion() {
+    fn landing_replaces_the_complete_right_column_after_completion() {
         let progress = sample_lines(3);
         let journey = sample_journey_rows(50);
         let history = sample_event_rows(100);
         let current = sample_event_rows(100);
-        let post_run = sample_lines(20);
+        let landing = sample_lines(20);
         let area = Rect::new(0, 0, 120, 24);
         let data = PaneData {
             progress: Some(&progress),
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: Some(&post_run),
+            landing: Some(&landing),
             title: PaneTitleRow::None,
         };
         let tree = pane_tree(&LIVE_PANE_IDS, area, &data);
@@ -2446,13 +2446,13 @@ mod tests {
             tree.leaf_ids(),
             vec![PROGRESS_PANE, JOURNEY_PANE, CURRENT_PANE]
         );
-        assert_eq!(tree.title(CURRENT_PANE), Some("post-run"));
+        assert_eq!(tree.title(CURRENT_PANE), Some("landing"));
         assert!(layout.rect(HISTORY_PANE).is_none());
-        let post_run_rect = layout.rect(CURRENT_PANE).expect("post-run");
-        assert_eq!(post_run_rect.y, area.y);
-        assert_eq!(post_run_rect.height, area.height);
+        let landing_rect = layout.rect(CURRENT_PANE).expect("landing");
+        assert_eq!(landing_rect.y, area.y);
+        assert_eq!(landing_rect.height, area.height);
         assert_eq!(
-            post_run_rect.x,
+            landing_rect.x,
             layout.rect(PROGRESS_PANE).expect("progress").x + 72
         );
     }
@@ -2468,7 +2468,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 120, 24);
@@ -2491,7 +2491,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&short_current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let long_data = PaneData {
@@ -2499,7 +2499,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&long_current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
 
@@ -2519,7 +2519,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 120, HISTORY_MIN_OUTER_ROWS + CURRENT_MIN_OUTER_ROWS);
@@ -2544,7 +2544,7 @@ mod tests {
             journey: Some(&journey),
             history: None,
             current: None,
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 120, 24);
@@ -2565,7 +2565,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         for width in [108, 109] {
@@ -2598,7 +2598,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 80, 24);
@@ -2632,7 +2632,7 @@ mod tests {
             journey: Some(&journey),
             history: None,
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         let area = Rect::new(0, 0, 120, 24);
@@ -2659,7 +2659,7 @@ mod tests {
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&current),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::None,
         };
         for area in [
@@ -2714,7 +2714,7 @@ mod tests {
                         journey_ladder: &[],
                         history_rows: &[],
                         current_rows: std::slice::from_ref(&overlay),
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2767,7 +2767,7 @@ mod tests {
                         journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2812,7 +2812,7 @@ mod tests {
                         journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2865,7 +2865,7 @@ mod tests {
                         journey_ladder: &[],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2996,7 +2996,7 @@ mod tests {
                             journey_ladder: &[],
                             history_rows: &[],
                             current_rows: &[],
-                            post_run_lines: None,
+                            landing_lines: None,
                             scrolls: &mut scrolls,
                             progress_follow: &mut progress_follow,
                             journey_follow: &mut journey_follow,

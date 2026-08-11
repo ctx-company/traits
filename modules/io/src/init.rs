@@ -209,10 +209,10 @@ schema-version = "0.1.0"
 # max-retries = 3
 # inline-prompt-bytes = 300000
 
-# --- Post-run merge gate ------------------------------------------------------
+# --- Landing merge gate ------------------------------------------------------
 # [merge]
 # deep = false                    # use a judgment-capable merger
-# gate = []                       # e.g. [["just", "test"]] — runs during post-run
+# gate = []                       # e.g. [["just", "test"]] — runs during landing
 
 # --- Agents (usually machine-local — see runtime.example.toml) -----------------
 # A project MAY commit a seat decision, e.g. reviewers run at high effort:

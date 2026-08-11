@@ -648,7 +648,7 @@ fn incomplete_drive_with_merge_intent_exits_distinct_status_without_merging() {
 /// the two breaks this proof loudly instead of silently tracking whatever
 /// text the binary happens to emit.
 const EMPTY_GATE_ADVISORY: &str =
-    "no [merge] gate declared; post-run without running a repository command";
+    "no [merge] gate declared; landing without running a repository command";
 
 /// P477: a repository with no `Justfile` and no `[merge] gate` declaration —
 /// the product default — must land end to end, running no repository

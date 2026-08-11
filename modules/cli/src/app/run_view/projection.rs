@@ -501,7 +501,7 @@ fn history_presentation_key(
 pub(crate) struct LedgerPaneProjection {
     pub(crate) progress: Vec<tui::Line>,
     pub(crate) journey: Vec<JourneyRow>,
-    pub(crate) post_run: Vec<tui::Line>,
+    pub(crate) landing: Vec<tui::Line>,
     pub(crate) history: Vec<EventRow>,
     pub(crate) current: Vec<EventRow>,
     /// `true` only when `ledger_path` has an activity sidecar at all (a
@@ -692,10 +692,7 @@ pub(crate) fn render_ledger_run_view(
     LedgerPaneProjection {
         progress: progress_lines(&view),
         journey: journey_lines(&view),
-        post_run: post_run_lines_from_frames(
-            view.header.completed,
-            &session.provenance.merge_frames,
-        ),
+        landing: landing_lines_from_frames(view.header.completed, &session.provenance.merge_frames),
         history,
         current,
         activity_available: seed.activity.is_some(),
@@ -706,9 +703,9 @@ pub(crate) fn render_ledger_run_view(
 }
 
 /// Attached sessions retain merge frames rather than a live `RunPanel`'s
-/// folded events. Those frames are sufficient evidence that post-run work was
+/// folded events. Those frames are sufficient evidence that landing work was
 /// observed, and avoid inventing another persisted projection.
-pub(crate) fn post_run_lines_from_frames(
+pub(crate) fn landing_lines_from_frames(
     completed: bool,
     frames: &[ctx_traits_core::procedure::session::MergeFrame],
 ) -> Vec<tui::Line> {
@@ -1620,7 +1617,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_post_run_rows_fold_stages_and_preserve_failures() {
+    fn persisted_landing_rows_fold_stages_and_preserve_failures() {
         use ctx_traits_core::procedure::session::{MergeFrame, MergeStage, MergeStatus};
 
         let frame = |stage, status| MergeFrame {
@@ -1631,7 +1628,7 @@ mod tests {
             park_reason: None,
             deep_decisions: Vec::new(),
         };
-        let rows = post_run_lines_from_frames(
+        let rows = landing_lines_from_frames(
             true,
             &[
                 frame(MergeStage::Gates, MergeStatus::GatesPassed),
@@ -1645,7 +1642,7 @@ mod tests {
         assert!(line_text(&rows[0]).starts_with("× gates"));
         assert!(line_text(&rows[1]).starts_with("× cleanup"));
         assert!(line_text(&rows[2]).starts_with("× rebase"));
-        assert!(line_text(&rows[3]).starts_with("✓ post-run"));
+        assert!(line_text(&rows[3]).starts_with("✓ landing"));
     }
 
     #[test]

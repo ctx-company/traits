@@ -135,7 +135,7 @@ const DEFAULT_BRANCH_FALLBACK_ADVISORY: &str = "default branch assumed \"main\":
 /// into `MergeReport::warnings` so it is user-visible in both the plain and
 /// `--json` command output, not only in persisted ledger evidence.
 const EMPTY_GATE_ADVISORY: &str =
-    "no [merge] gate declared; post-run without running a repository command";
+    "no [merge] gate declared; landing without running a repository command";
 
 fn persist_terminal_frame(
     session_path: &Utf8Path,
@@ -1447,7 +1447,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                     input.run_id,
                     MergeStage::Reconciliation,
                     format!(
-                        "{} {MAX_RECONCILIATION_ITERATIONS} merger iterations without completing post-run work",
+                        "{} {MAX_RECONCILIATION_ITERATIONS} merger iterations without completing landing work",
                         reasons::RECONCILIATION_ITERATION_CAP_PREFIX
                     ),
                     merger_evidence,
@@ -4936,7 +4936,7 @@ mod tests {
             &path,
             "run-live-park",
             MergeStage::Gates,
-            "post-run gate just-test failed: exit=Some(1)".to_string(),
+            "landing gate just-test failed: exit=Some(1)".to_string(),
             Vec::new(),
             &ctx_traits_io::worktree::RetryWarnings::new(),
             Some(&live),

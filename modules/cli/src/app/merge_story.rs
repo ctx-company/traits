@@ -204,13 +204,13 @@ pub(crate) mod reasons {
     pub(crate) const GENERATED_ARTIFACT_REBUILD_FAILED_PREFIX: &str =
         "generated-artifact rebuild command failed";
 
-    pub(crate) const GATE_FAILED_PREFIX: &str = "post-run gate ";
+    pub(crate) const GATE_FAILED_PREFIX: &str = "landing gate ";
     pub(crate) const GATE_LEFT_DIRTY: &str =
-        "post-run gate left the worktree tracked-tree dirty; refusing to land";
+        "landing gate left the worktree tracked-tree dirty; refusing to land";
     /// P462: the worktree's volume fell below `[merge] disk-floor-mb` before
     /// any declared gate command ran — parked so no evidence of a build was
     /// ever produced, since one couldn't safely be attempted.
-    pub(crate) const GATE_DISK_FLOOR_PREFIX: &str = "insufficient disk space for post-run gate:";
+    pub(crate) const GATE_DISK_FLOOR_PREFIX: &str = "insufficient disk space for landing gate:";
 
     pub(crate) const FAST_FORWARD_FAILED: &str = "fast-forward failed";
     /// 0078.4 Phase A: split out of [`FAST_FORWARD_FAILED`] so the two
@@ -418,9 +418,9 @@ pub(crate) fn stage_sentence(stage: MergeStage) -> &'static str {
         MergeStage::Preflight => "before anything was touched, during preflight checks",
         MergeStage::Rebase => "while rebasing the run branch onto the target",
         MergeStage::Reconciliation => "while reconciling conflicts with the merger",
-        MergeStage::Gates => "after reconciliation, while running the post-run gate",
+        MergeStage::Gates => "after reconciliation, while running the landing gate",
         MergeStage::Landing => "while fast-forwarding the target branch",
-        MergeStage::Cleanup => "after fast-forwarding the target branch, during post-run cleanup",
+        MergeStage::Cleanup => "after fast-forwarding the target branch, during landing cleanup",
     }
 }
 
@@ -637,7 +637,7 @@ pub(crate) fn stage_text(stage: MergeStage) -> &'static str {
         MergeStage::Rebase => "rebase",
         MergeStage::Reconciliation => "reconciliation",
         MergeStage::Gates => "gates",
-        MergeStage::Landing => "post-run",
+        MergeStage::Landing => "landing",
         MergeStage::Cleanup => "cleanup",
     }
 }
@@ -995,7 +995,7 @@ mod tests {
             (
                 MergeStage::Reconciliation,
                 format!(
-                    "{RECONCILIATION_ITERATION_CAP_PREFIX} 8 merger iterations without completing post-run work"
+                    "{RECONCILIATION_ITERATION_CAP_PREFIX} 8 merger iterations without completing landing work"
                 ),
             ),
             (
@@ -1385,7 +1385,7 @@ mod tests {
     fn parked_frame_live_text_equals_explain_frame_sentence() {
         let parked = frame(
             MergeStage::Gates,
-            "post-run gate just-test failed: exit=Some(1)",
+            "landing gate just-test failed: exit=Some(1)",
         );
         let draft = activity_event(&MergeProgress::FrameRecorded(&parked));
         assert_eq!(

@@ -34,8 +34,8 @@ use guide::apply_guide_key;
 
 #[allow(unused_imports)]
 pub(crate) use projection::{
-    LedgerPaneProjection, SidecarActivitySummary, load_sidecar_activity_summary,
-    post_run_lines_from_frames, render_ledger_run_view,
+    LedgerPaneProjection, SidecarActivitySummary, landing_lines_from_frames,
+    load_sidecar_activity_summary, render_ledger_run_view,
 };
 use projection::{apply_ledger_seed, run_view};
 
@@ -2142,7 +2142,7 @@ description = "A test trait."
                         journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2172,7 +2172,7 @@ description = "A test trait."
                         journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2224,7 +2224,7 @@ description = "A test trait."
                         journey_ladder: &[0],
                         history_rows: &[],
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2246,7 +2246,7 @@ description = "A test trait."
             journey: Some(&journey),
             history: Some(&[]),
             current: Some(&[]),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::Visible(&title_line),
         };
         let body = pane_body_area(area, &data.title);
@@ -2309,7 +2309,7 @@ description = "A test trait."
             journey: Some(&journey),
             history: Some(&history),
             current: Some(&[]),
-            post_run: None,
+            landing: None,
             title: PaneTitleRow::Visible(&title_line),
         };
         let body = pane_body_area(regions[0], &data.title);
@@ -2329,7 +2329,7 @@ description = "A test trait."
                         journey_ladder: &[0],
                         history_rows: &history,
                         current_rows: &[],
-                        post_run_lines: None,
+                        landing_lines: None,
                         scrolls: &mut scrolls,
                         progress_follow: &mut progress_follow,
                         journey_follow: &mut journey_follow,
@@ -2377,7 +2377,7 @@ description = "A test trait."
     }
 
     #[test]
-    fn post_run_exclusively_paints_and_jumps_its_rendered_rows() {
+    fn landing_exclusively_paints_and_jumps_its_rendered_rows() {
         use crossterm::event::KeyModifiers;
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -2389,7 +2389,7 @@ description = "A test trait."
             tail: "suppressed current activity".to_string(),
             tone: tui::Tone::Default,
         }];
-        let post_run = (0..30)
+        let landing = (0..30)
             .map(|index| {
                 let mut line = tui::Line::blank();
                 line.push(format!("post-row-{index:02}"), tui::Tone::Default);
@@ -2416,7 +2416,7 @@ description = "A test trait."
                             journey_ladder: &[],
                             history_rows: &[],
                             current_rows: &current,
-                            post_run_lines: Some(&post_run),
+                            landing_lines: Some(&landing),
                             scrolls: &mut scrolls,
                             progress_follow: &mut progress_follow,
                             journey_follow: &mut journey_follow,
@@ -2441,7 +2441,7 @@ description = "A test trait."
 
         let mut keys = vec![KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)];
         let rendered = draw(&mut keys);
-        assert!(rendered.contains("post-run"));
+        assert!(rendered.contains("landing"));
         assert!(rendered.contains("post-row-00"));
         assert!(!rendered.contains("suppressed current"));
 
@@ -2455,7 +2455,7 @@ description = "A test trait."
             journey: Some(&journey),
             history: Some(&[]),
             current: Some(&current),
-            post_run: Some(&post_run),
+            landing: Some(&landing),
             title: PaneTitleRow::Visible(&title),
         };
         let body = pane_body_area(area, &data.title);
@@ -2463,10 +2463,10 @@ description = "A test trait."
             pane_tree(&LIVE_PANE_IDS, body, &data)
                 .resolve(body)
                 .rect(CURRENT_PANE)
-                .expect("post-run pane"),
+                .expect("landing pane"),
         )
         .height as usize;
-        assert_eq!(scrolls.get(CURRENT_PANE).window(rows).end, post_run.len());
+        assert_eq!(scrolls.get(CURRENT_PANE).window(rows).end, landing.len());
     }
 
     // P470 blocker `down-key-forces-follow-jump`: stepping up releases

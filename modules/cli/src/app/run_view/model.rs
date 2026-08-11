@@ -57,7 +57,7 @@ pub(crate) struct PaneData<'a> {
     pub(crate) current: Option<&'a [EventRow]>,
     /// Completed runs move observed merge work into this full-height pane.
     /// It deliberately reuses `current`'s pane id and scroll state.
-    pub(crate) post_run: Option<&'a [tui::Line]>,
+    pub(crate) landing: Option<&'a [tui::Line]>,
     /// P552: the title row this pane set's own body sits under — [`PaneTitleRow::None`]
     /// for a dashboard preview, [`PaneTitleRow::Reserved`] for a live run or
     /// a dashboard attach, so [`render_pane_body`] gives every surface

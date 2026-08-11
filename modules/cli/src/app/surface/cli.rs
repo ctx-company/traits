@@ -1333,7 +1333,7 @@ pub enum TraitsCommand {
         no_worktree: bool,
 
         /// Clear a persisted P460 merge intent before resuming, so this
-        /// drive skips automatic post-run merge work even though the original
+        /// drive skips automatic landing merge work even though the original
         /// `run`/`session start` requested `--merge`.
         #[arg(long = "no-merge")]
         no_merge: bool,
@@ -2368,7 +2368,7 @@ pub struct SessionStartArgs {
     #[arg(long = "no-worktree", conflicts_with = "worktree")]
     pub no_worktree: bool,
 
-    /// Request automatic post-run merge work (`ctx traits merge`) once this run
+    /// Request automatic landing merge work (`ctx traits merge`) once this run
     /// completes, requiring an effective `--worktree`. Bare `--merge` uses
     /// `[merge].deep` (falling back to standard); `--merge=standard` or
     /// `--merge=deep` pins the rung explicitly, overriding config. `[merge]
@@ -2376,7 +2376,7 @@ pub struct SessionStartArgs {
     #[arg(long, num_args = 0..=1, require_equals = true, value_name = "RUNG", conflicts_with = "no_merge")]
     pub merge: Option<Option<MergeRung>>,
 
-    /// Override `[merge].auto` and skip automatic post-run merge work.
+    /// Override `[merge].auto` and skip automatic landing merge work.
     #[arg(long = "no-merge", conflicts_with = "merge")]
     pub no_merge: bool,
 
