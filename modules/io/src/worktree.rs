@@ -319,6 +319,10 @@ pub fn resume_or_prepare_worktree(
     let mut warnings = RetryWarnings::new();
     if let Some(existing_branch) = existing_worktree_branch(&repo_root, &path, &mut warnings)? {
         if existing_branch == branch {
+            // A worktree created by an older binary must still gain the
+            // 0164 runtime-exclude guarantee on resume; idempotent, so this
+            // is free once the entry is already present.
+            crate::gitignore::ensure_runtime_exclude(&repo_root)?;
             return Ok(PreparedWorktree {
                 path,
                 branch,
@@ -2048,6 +2052,11 @@ fn create_new_worktree(
     // ignore file committable in the checkout that will actually commit it
     // (P446).
     crate::gitignore::ensure_nested_gitignore(repo_root)?;
+    // Runtime-tier exclude (0164): appended to the COMMON git dir's
+    // `info/exclude` before `git worktree add`, so `.agents/runs/` is
+    // already invisible to `git status` / `git add -A` before any seed,
+    // setup, or trait step can run git inside the new worktree.
+    crate::gitignore::ensure_runtime_exclude(repo_root)?;
     create_worktree(repo_root, path, branch, worktree_add_timeout_ms, warnings)?;
     // Private baseline directory under this worktree's own Git administrative
     // directory (never visible as working-tree content, never serialized into
