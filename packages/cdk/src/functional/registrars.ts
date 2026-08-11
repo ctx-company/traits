@@ -9,7 +9,7 @@
 import type { BranchCheckValue, GuardValue } from "../condition.js";
 import { condition, lowerCheckGuard } from "../condition.js";
 import type { JsonValue } from "../generated.js";
-import type { FieldRef, SequenceHandle, SequenceLinearHandle, SlotHandle } from "../handles.js";
+import type { FieldRef, SequenceHandle, SequenceLinearHandle, SettingHandle, SlotHandle } from "../handles.js";
 import type {
   CheckSequenceFields,
   CommandSequenceFields,
@@ -204,7 +204,7 @@ installSlotForEachLowering((slotHandle, titleText, opts, body) => {
 
 export interface LoopParam {
   /** Required, callable once — a loop with no way out is not authorable (0102). */
-  maxIterations(n: number, opts?: { readonly onExhausted?: ExhaustionPolicy; }): void;
+  maxIterations(bound: number | SettingHandle<number>, opts?: { readonly onExhausted?: ExhaustionPolicy; }): void;
   /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
   id(overrideId: string): void;
   /** Wrapper over `flow.until` — the loop's exit guard, on the param the body already holds. */
@@ -231,7 +231,7 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
   const frame = captureAuthorFrame();
   const label = `flow.loop(${JSON.stringify(title)})`;
   const loopParam: LoopParam = {
-    maxIterations(n, opts) {
+    maxIterations(bound, opts) {
       const scope = nearestScope("loop");
       if (scope?.loop === undefined) {
         throw buildError(title, "loop.maxIterations(...) called outside its own flow.loop body", frame);
@@ -240,7 +240,7 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
         throw buildError(title, "loop.maxIterations(...) called more than once", frame);
       }
       scope.loop.maxIterationsCalled = true;
-      scope.loop.maxIterationsValue = n;
+      scope.loop.maxIterationsValue = bound;
       if (opts?.onExhausted !== undefined) scope.loop.onExhausted = opts.onExhausted;
     },
     id(overrideId) {

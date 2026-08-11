@@ -173,6 +173,7 @@ export type TraitFamilyHandle = CdkHandle<"trait-family">;
 export type PromptInterpolation<Value = unknown> =
   | PortHandle<Value>
   | SlotHandle<Value>
+  | SettingHandle<Value>
   | ResourceHandle<Value>
   | InstructionOutputHandle<Value>
   | OptionalSlotRead<Value>

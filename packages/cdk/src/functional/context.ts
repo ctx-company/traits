@@ -12,7 +12,7 @@
  */
 
 import type { BranchCheckValue } from "../condition.js";
-import type { Handle, ResourceHandle, SequenceHandle, SlotHandle } from "../handles.js";
+import type { Handle, ResourceHandle, SequenceHandle, SettingHandle, SlotHandle } from "../handles.js";
 import type { MetaDeclaration } from "../meta.js";
 import type {
   ExhaustionSignalValue,
@@ -69,7 +69,7 @@ export interface LoopScopeState {
   untilCondition?: BranchCheckValue;
   readonly abortIfArms: { readonly title: string; readonly condition: BranchCheckValue; }[];
   maxIterationsCalled: boolean;
-  maxIterationsValue?: number;
+  maxIterationsValue?: number | SettingHandle<number>;
   onExhausted?: LoopExitPolicy;
   readonly onComplete: SignalOutputValue[];
   readonly onAbort: ExhaustionSignalValue[];

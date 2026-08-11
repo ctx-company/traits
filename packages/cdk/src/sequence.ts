@@ -29,6 +29,7 @@ import type {
   SchemaHandle,
   SequenceHandle,
   SequenceLinearHandle,
+  SettingHandle,
   SlotHandle,
 } from "./handles.js";
 import { input } from "./input.js";
@@ -82,6 +83,7 @@ export type ConditionalResourceInputValue<Value = unknown> = {
 export type SequenceInputValue<Value = unknown> =
   | PortHandle<Value>
   | SlotHandle<Value>
+  | SettingHandle<Value>
   | ResourceHandle<Value>
   | ConditionalResourceInputValue<Value>
   | OptionalSlotInputValue<Value>;
@@ -93,7 +95,7 @@ export type SequenceOutputValue<Value = unknown> =
   | InstructionOutputHandle<Value>
   | OptionalSlotRead<Value>
   | OutputTemplateHandle;
-export type ArgvItem = string | SlotHandle | PortHandle | ResourceHandle;
+export type ArgvItem = string | SlotHandle | PortHandle | SettingHandle | ResourceHandle;
 export type SignalOutputValue = string | RefHandle<"signal"> | {
   readonly signal: string | RefHandle<"signal">;
   readonly when: GuardValue;
@@ -355,8 +357,8 @@ export type LoopSequenceFields = SequenceCommonFields & {
    * unbounded loop — one that never exhausts and exits only via `until`/
    * `abortIf`, which is then required. A large number picked to approximate
    * "never" is refused authoring, not honored: say unbounded, don't fake it. */
-  readonly iterations?: number | PortHandle<number>;
-  readonly maxIterations?: number;
+  readonly iterations?: number | PortHandle<number> | SettingHandle<number>;
+  readonly maxIterations?: number | SettingHandle<number>;
   readonly until?: BranchCheckValue;
   readonly abortIf?: BranchCheckValue;
   /** Exhaustion policy. Omitted (the default) or `"continue"`: spending the
@@ -1968,7 +1970,9 @@ function commandInput(
   const inferred = (argv ?? []).flatMap((item) =>
     typeof item === "string" ? scanInterpolationRefs(item) : [metaOf(item)?.ref ?? ""]
   ).filter(
-    (ref) => ref.startsWith("slot:") || ref.startsWith("port:") || ref.startsWith("resource:"),
+    (ref) =>
+      ref.startsWith("slot:") || ref.startsWith("port:") || ref.startsWith("setting:")
+      || ref.startsWith("resource:"),
   );
   if (argvFrom !== undefined) inferred.push(refText(argvFrom, "sequence.command.argvFrom"));
   if (executableDigestFrom !== undefined) {
@@ -1981,7 +1985,7 @@ function commandInput(
 }
 function loopInput(
   value: SequenceFields["input"],
-  iterations: number | PortHandle<number> | undefined,
+  iterations: number | PortHandle<number> | SettingHandle<number> | undefined,
 ): NormalizedInputItem[] | undefined {
   const explicit = normalizeSequenceInputList(value);
   if (iterations === undefined || typeof iterations === "number") {

@@ -7,6 +7,7 @@ import type {
   PromptTemplate,
   RefHandle,
   ResourceHandle,
+  SettingHandle,
   SlotHandle,
 } from "./handles.js";
 import type { DeclKind } from "./meta.js";
@@ -25,7 +26,12 @@ export interface PromptFields {
   readonly id: string;
   readonly description?: string;
   readonly text?: string | PromptTemplate;
-  readonly input?: PortHandle | SlotHandle | ResourceHandle | readonly (PortHandle | SlotHandle | ResourceHandle)[];
+  readonly input?:
+    | PortHandle
+    | SlotHandle
+    | SettingHandle
+    | ResourceHandle
+    | readonly (PortHandle | SlotHandle | SettingHandle | ResourceHandle)[];
   readonly output?: SlotHandle | readonly SlotHandle[];
   readonly source?: string | ResourceHandle | RefHandle | PromptTemplate;
 }

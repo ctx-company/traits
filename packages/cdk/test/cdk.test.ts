@@ -119,6 +119,51 @@ describe("draft synthesis", () => {
     }));
   });
 
+  it("lowers loop.maxIterations(settingHandle) to max-iterations-from = setting:<id>", () => {
+    const rounds = setting.number({
+      id: "loop-bound-setting",
+      description: "Loop bound sourced from a setting.",
+      default: 3,
+      min: 1,
+      max: 10,
+    });
+    const body = sequence.linear("setting-loop-body", [
+      sequence.prompt("setting-loop-step", { text: input.prompt`Do work.` }),
+    ]);
+    const draft = toDraftJson(
+      trait({
+        id: "setting-loop-bound",
+        name: "Setting Loop Bound",
+        description: "loop.maxIterations(SettingHandle) fixture.",
+        setting: rounds,
+        procedure: procedure({
+          description: "Exercise a setting-sourced loop bound.",
+          sequence: [sequence.loop("setting-loop", { sequence: body, iterations: rounds })],
+        }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]).toMatchObject({
+      kind: "loop",
+      "max-iterations-from": "setting:loop-bound-setting",
+    });
+  });
+
+  it("rejects a text setting in a numeric loop-bound position", () => {
+    const label = setting.text({
+      id: "loop-bound-text-setting",
+      description: "A text setting, not accepted as a loop bound.",
+      default: "three",
+    });
+    sequence.loop("bad-setting-loop", {
+      sequence: sequence.linear("bad-setting-loop-body", [
+        sequence.prompt("bad-setting-loop-step", { text: input.prompt`Do work.` }),
+      ]),
+      // @ts-expect-error a text SettingHandle is not assignable to the numeric loop iterations position.
+      iterations: label,
+    });
+  });
+
   it("resolves native family leaves without changing ordinary trait emission", async () => {
     const ordinary = trait("ordinary", { name: "Ordinary", summary: "Unchanged." });
     expect(toDraftJson(ordinary).id).toBe("ordinary");

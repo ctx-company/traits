@@ -1,4 +1,4 @@
-import type { PortHandle, PromptTemplate, ResourceHandle, SlotHandle } from "./handles.js";
+import type { PortHandle, PromptTemplate, ResourceHandle, SettingHandle, SlotHandle } from "./handles.js";
 import { tokenizeShellLiteral } from "./normalize.js";
 import type { PromptInterpolation } from "./prompt.js";
 import { promptBoundText, promptTemplate } from "./prompt.js";
@@ -17,7 +17,7 @@ export type OptionalSlotInputValue<Value = unknown> = {
 };
 
 /** A value accepted as one `input.command` tagged-template interpolation. */
-export type CommandInterpolation = SlotHandle | PortHandle | ResourceHandle;
+export type CommandInterpolation = SlotHandle | PortHandle | SettingHandle | ResourceHandle;
 
 /**
  * A hermetically tokenized command template, consumed by `sequence.command`'s

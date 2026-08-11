@@ -6,6 +6,7 @@ import type {
   PortHandle,
   RefHandle,
   SequenceHandle,
+  SettingHandle,
   SlotHandle,
 } from "./handles.js";
 import type { Meta } from "./meta.js";
@@ -36,7 +37,7 @@ export type GuardValue =
  */
 export type BranchCheckValue = GuardValue | (SequenceHandle & { readonly pass: SlotHandle<boolean>; });
 /** Literal or accepted local numeric value used as an ordered-comparison RHS. */
-export type NumericComparisonValue = number | SlotHandle<number> | PortHandle<number>;
+export type NumericComparisonValue = number | SlotHandle<number> | PortHandle<number> | SettingHandle<number>;
 
 /**
  * The chained continuation of `condition.count(slot)`: narrows which
@@ -113,7 +114,7 @@ export interface ConditionFunction {
    * static check against the slot's declared schema.
    * @example `condition.fieldEquals(verdict, "status", "approved")`
    */
-  fieldEquals(slotRef: string | SlotHandle | RefHandle, field: string, value: JsonValue): GuardHandle;
+  fieldEquals(slotRef: string | SlotHandle | SettingHandle | RefHandle, field: string, value: JsonValue): GuardHandle;
   /**
    * Negates a guard — wraps any `condition.*` result (or a nested
    * `all`/`any`) so the branch or loop reads as "until NOT this".
@@ -126,14 +127,14 @@ export interface ConditionFunction {
    * case.
    * @example `condition.empty(findings)`
    */
-  empty(slotRef: string | SlotHandle | RefHandle): GuardHandle;
+  empty(slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle;
   /**
    * Starts a count guard over a list-valued slot: chain `.where(...)` to
    * filter which elements count, then `.equals`/`.atLeast` to state the
    * threshold. See {@link ConditionCountFunction}.
    * @example `condition.count(findings).equals(0)`
    */
-  count(slotRef: string | SlotHandle | RefHandle): ConditionCountFunction;
+  count(slotRef: string | SlotHandle | SettingHandle | RefHandle): ConditionCountFunction;
   /**
    * Guards on whether an optional local input `port:*` was supplied — or,
    * with `field`, whether a declared optional field of a `port:*`/`slot:*`
@@ -144,7 +145,7 @@ export interface ConditionFunction {
    * @example `condition.present(capReport, { field: "cost-report" })`
    */
   present(
-    subjectRef: string | PortHandle | SlotHandle | RefHandle,
+    subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
     options?: { readonly field?: string; },
   ): GuardHandle;
   /**
@@ -153,15 +154,18 @@ export interface ConditionFunction {
    * form.
    * @example `condition.absent(costCap)`
    */
-  absent(subjectRef: string | PortHandle | SlotHandle | RefHandle, options?: { readonly field?: string; }): GuardHandle;
+  absent(
+    subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
+    options?: { readonly field?: string; },
+  ): GuardHandle;
   /** Guards that a slot's numeric value is less than a literal or accepted numeric slot/input-port value. @example `condition.lt(retryCount, 3)` */
-  lt(slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
+  lt(slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
   /** Guards that a slot's numeric value is at most `value`. @example `condition.lte(retryCount, 3)` */
-  lte(slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
+  lte(slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
   /** Guards that a slot's numeric value is greater than `value`. @example `condition.gt(retryCount, 7)` */
-  gt(slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
+  gt(slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
   /** Guards that a slot's numeric value is at least `value`. @example `condition.gte(retryCount, 7)` */
-  gte(slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
+  gte(slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
   /**
    * Guards that cumulative active-drive elapsed seconds — runtime-supplied
    * evidence measured by the CLI drive across resumes, never a value any
@@ -174,25 +178,25 @@ export interface ConditionFunction {
   elapsedAtLeast(value: NumericComparisonValue): GuardHandle;
   /** Ordered comparison over one top-level numeric field of an inline object-schema slot. The Rust validator checks the named field and RHS ref schemas. */
   fieldLt(
-    slotRef: string | SlotHandle | RefHandle,
+    slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
     value: NumericComparisonValue,
   ): GuardHandle;
   /** Ordered `<=` comparison over one top-level numeric object field. */
   fieldLte(
-    slotRef: string | SlotHandle | RefHandle,
+    slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
     value: NumericComparisonValue,
   ): GuardHandle;
   /** Ordered `>` comparison over one top-level numeric object field. */
   fieldGt(
-    slotRef: string | SlotHandle | RefHandle,
+    slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
     value: NumericComparisonValue,
   ): GuardHandle;
   /** Ordered `>=` comparison over one top-level numeric object field. */
   fieldGte(
-    slotRef: string | SlotHandle | RefHandle,
+    slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
     value: NumericComparisonValue,
   ): GuardHandle;
@@ -345,7 +349,11 @@ export const condition: ConditionFunction = {
       declarations: collectMany([target]),
     });
   },
-  fieldEquals: (slotRef: string | SlotHandle | RefHandle, field: string, value: JsonValue): GuardHandle =>
+  fieldEquals: (
+    slotRef: string | SlotHandle | SettingHandle | RefHandle,
+    field: string,
+    value: JsonValue,
+  ): GuardHandle =>
     guardHandle({ slot: refText(slotRef, "condition.slot"), field, equals: value }, {
       declarations: collectMany([slotRef]),
     }),
@@ -354,29 +362,29 @@ export const condition: ConditionFunction = {
       declarations: collectMany([guard]),
       defaultOutputPaths: defaultOutputPaths(guard).map((path) => ["not", ...path]),
     }),
-  empty: (slotRef: string | SlotHandle | RefHandle): GuardHandle =>
+  empty: (slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle =>
     guardHandle({ empty: refText(slotRef, "condition.empty") }, {
       declarations: collectMany([slotRef]),
     }),
-  count: (slotRef: string | SlotHandle | RefHandle): ConditionCountFunction => countFunction(slotRef),
+  count: (slotRef: string | SlotHandle | SettingHandle | RefHandle): ConditionCountFunction => countFunction(slotRef),
   present: (
-    subjectRef: string | PortHandle | SlotHandle | RefHandle,
+    subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
     options?: { readonly field?: string; },
   ): GuardHandle =>
     guardHandle({ present: refText(subjectRef, "condition.present"), field: options?.field }, {
       declarations: collectMany([subjectRef]),
     }),
   absent: (
-    subjectRef: string | PortHandle | SlotHandle | RefHandle,
+    subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
     options?: { readonly field?: string; },
   ): GuardHandle => condition.not(condition.present(subjectRef, options)),
-  lt: (slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
+  lt: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "less-than", value),
-  lte: (slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
+  lte: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "at-most", value),
-  gt: (slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
+  gt: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "greater-than", value),
-  gte: (slotRef: string | SlotHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
+  gte: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "at-least", value),
   elapsedAtLeast: (value: NumericComparisonValue): GuardHandle =>
     guardHandle({ "elapsed-seconds-at-least": comparisonValue(value) }, {
@@ -465,13 +473,13 @@ interface CountFilter {
 interface CountSpec {
   readonly count: string;
   readonly filter?: CountFilter;
-  readonly source: string | SlotHandle | RefHandle;
+  readonly source: string | SlotHandle | SettingHandle | RefHandle;
 }
 
 const countSpecs = new WeakMap<object, CountSpec>();
 
 function countFunction(
-  slotRef: string | SlotHandle | RefHandle,
+  slotRef: string | SlotHandle | SettingHandle | RefHandle,
   filter?: CountFilter,
 ): ConditionCountFunction {
   const result: ConditionCountFunction = {
@@ -489,7 +497,7 @@ function countFunction(
 }
 
 function countGuard(
-  slotRef: string | SlotHandle | RefHandle,
+  slotRef: string | SlotHandle | SettingHandle | RefHandle,
   modifier: "equals" | "at-least",
   value: CountComparisonValue,
   filter?: CountFilter,
@@ -510,7 +518,7 @@ function countGuard(
 }
 
 function slotComparison(
-  slotRef: string | SlotHandle | RefHandle,
+  slotRef: string | SlotHandle | SettingHandle | RefHandle,
   modifier: ComparisonField,
   value: NumericComparisonValue,
   field?: string,
