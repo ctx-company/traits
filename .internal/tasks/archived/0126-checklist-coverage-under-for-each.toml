@@ -66,4 +66,13 @@ was built — it would add `ControlFrame` state and a new rejection path in
 Out of scope, explicitly not built: `control_flow.rs` for-each runtime path
 (untouched), loop-close coverage accumulation, the model-produced-checklist
 generalization (filed separately as task 0167).
+
+Update 2026-08-11 (task 0167): the produced case landed and shares this
+engine rather than building a second coverage path. `checklist_verdict_slot_schema`
+now returns a `ChecklistScalarKind::{Declared,Produced}` enum instead of a bare
+resource id, and `validate_for_each_no_scalar_checklist_verdict`'s walker refuses
+a scalar `schema:checklist-item` write under `for-each` the same way it refuses
+a scalar declared verdict — same static-refusal shape, one shared code path.
+Coverage itself shares `checklist::coverage_check`, the extracted pure
+missing/duplicated-id core, between the declared and produced arms.
 """

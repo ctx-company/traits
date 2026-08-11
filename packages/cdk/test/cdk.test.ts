@@ -333,6 +333,22 @@ describe("schema adapters", () => {
 });
 
 describe("schema authoring sugar", () => {
+  it("schema.checklist() declares a produced-checklist list slot", () => {
+    const draft = toDraftJson(
+      trait({
+        id: "sugar-checklist",
+        name: "Sugar Checklist",
+        description: "Produced-checklist slot fixture.",
+        "schema-version": "0.3",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        slot: slot({ id: "sugar-checklist-plan", schema: schema.checklist() }),
+      }),
+    ) as { readonly slot?: readonly { readonly id: string; readonly schema?: string; }[]; };
+
+    const declared = draft.slot?.find((entry) => entry.id === "sugar-checklist-plan");
+    expect(declared?.schema).toBe("[schema:checklist-item]");
+  });
+
   it("exposes an object schema handle's own enumerable keys as exactly its field ids", () => {
     const finding = schema.object("sugar-finding", {
       file: schema.text(),

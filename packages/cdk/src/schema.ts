@@ -8,6 +8,24 @@ import { collectMany, compact, stableObject, validateSlug } from "./normalize.js
 import { ref, refText } from "./ref.js";
 
 export type { SchemaValue } from "./authoring-types.js";
+
+/**
+ * One item of a model-produced checklist (`schema.checklist()`). The shape
+ * is closed and validated in Rust (`modules/core/src/trait/checklist.rs`),
+ * not here — this type documents that shape, it does not enforce it.
+ */
+export type ChecklistItem = {
+  /** Stable id, minted by the model at production time. */
+  readonly id: string;
+  /** The item's criterion or task text. */
+  readonly text: string;
+  /** Optional supporting detail. */
+  readonly detail?: string;
+  /** One of `"todo" | "done" | "waived"`. */
+  readonly status: "todo" | "done" | "waived";
+  /** Optional supporting evidence. */
+  readonly evidence?: string;
+};
 export type SchemaUnionHandle<Value = unknown> = Pick<string, keyof string> & SchemaHandle<Value>;
 type EnumLiteral = string | number | boolean;
 export type SchemaEnumSpec<T extends readonly EnumLiteral[] = readonly EnumLiteral[]> = CdkObject & {
@@ -212,6 +230,13 @@ export interface SchemaFunction {
   integer(): "schema:integer" & SchemaRef<number>;
   /** Inline schema ref that accepts any JSON value — the escape hatch for output shapes not worth declaring precisely. @example `port.output.of(schema.any(), { id: "raw" })` */
   any(): "schema:any" & SchemaRef<JsonValue>;
+  /**
+   * A model-produced checklist: a list of {@link ChecklistItem}, coverage-
+   * checked in Rust against the latest accepted replace write to the same
+   * slot. Use `condition.count(slot).where("status", "done")` for a loop
+   * exit guard. @example `slot("plan", schema.checklist())`
+   */
+  checklist(): SchemaRef<ChecklistItem[]>;
   /**
    * Wraps `inner` as a list/array schema ref, alias of `schema.array`.
    * @example `schema.list(schema.text())`
@@ -422,6 +447,7 @@ const schemaBuiltins = {
   number: "schema:number",
   integer: "schema:integer",
   any: "schema:any",
+  checklistItem: "schema:checklist-item",
 } as const satisfies Record<string, SchemaBuiltin>;
 
 /**
@@ -436,6 +462,10 @@ export const schema: SchemaFunction = {
   number: () => schemaBuiltins.number,
   integer: () => schemaBuiltins.integer,
   any: () => schemaBuiltins.any,
+  checklist: () =>
+    schemaArray(
+      schemaBuiltins.checklistItem as unknown as SchemaValue<ChecklistItem>,
+    ),
   list: schemaArray,
   array: schemaArray,
   union: schemaUnion,

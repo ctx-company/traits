@@ -43,6 +43,9 @@ pub enum Builtin {
     Number,
     Integer,
     Any,
+    #[serde(rename = "checklist-item")]
+    #[strum(serialize = "checklist-item")]
+    ChecklistItem,
 }
 
 impl Builtin {

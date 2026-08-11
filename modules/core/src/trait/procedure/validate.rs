@@ -2,6 +2,7 @@
 // Procedure validation.
 
 pub fn validate(t: &Trait) -> crate::Result<()> {
+    validate_checklist_item_schema_version(t)?;
     let input_port_ids: BTreeSet<&str> = t
         .ports
         .iter()
@@ -2161,25 +2162,39 @@ fn validate_for_each_no_scalar_checklist_verdict(
         return Ok(());
     };
     let mut stack = BTreeSet::new();
-    let Some((output_path, checklist_id)) =
+    let Some((output_path, kind)) =
         find_checklist_verdict_output_in_sequence(trait_ref, &sequence_id, &mut stack)
     else {
         return Ok(());
     };
-    Err(crate::manifest::Error::InvalidField {
-        field_path: output_path.clone(),
-        message: format!(
+    let message = match kind {
+        ChecklistScalarKind::Declared(checklist_id) => format!(
             "for-each {base} body writes a scalar checklist verdict for resource:{checklist_id} at {output_path}; one-verdict-per-iteration accumulation across for-each iterations has no coverage proof. Emit every verdict in one whole-list replace write to a [schema:{checklist_id}-verdict] slot instead."
         ),
+        ChecklistScalarKind::Produced => format!(
+            "for-each {base} body writes a scalar produced-checklist item at {output_path}; one-item-per-iteration accumulation across for-each iterations has no coverage proof. Emit every item in one whole-list replace write to a [schema:checklist-item] slot instead."
+        ),
+    };
+    Err(crate::manifest::Error::InvalidField {
+        field_path: output_path.clone(),
+        message,
     }
     .into())
+}
+
+/// The two shapes a scalar checklist write can take.
+enum ChecklistScalarKind {
+    /// A scalar `schema:<resource_id>-verdict` write for a declared checklist.
+    Declared(String),
+    /// A scalar `schema:checklist-item` write for a produced checklist.
+    Produced,
 }
 
 fn find_checklist_verdict_output_in_sequence(
     trait_ref: &Trait,
     sequence_id: &str,
     stack: &mut BTreeSet<String>,
-) -> Option<(String, String)> {
+) -> Option<(String, ChecklistScalarKind)> {
     if !stack.insert(sequence_id.to_string()) {
         return None;
     }
@@ -2195,14 +2210,13 @@ fn find_checklist_verdict_output_in_items(
     items: &[SequenceItem],
     sequence_id: &str,
     stack: &mut BTreeSet<String>,
-) -> Option<(String, String)> {
+) -> Option<(String, ChecklistScalarKind)> {
     for (index, item) in items.iter().enumerate() {
         for (output_index, output) in item.output.iter().enumerate() {
-            if let Some(checklist_id) = checklist_verdict_slot_schema(trait_ref, output.ref_text())
-            {
+            if let Some(kind) = checklist_verdict_slot_schema(trait_ref, output.ref_text()) {
                 return Some((
                     format!("sequence.{sequence_id}.sequence[{index}].output[{output_index}]"),
-                    checklist_id,
+                    kind,
                 ));
             }
         }
@@ -2233,7 +2247,10 @@ fn find_checklist_verdict_output_in_items(
 /// The checklist resource id when `ref_text` is a local slot or output port
 /// declaring a scalar `schema:<id>-verdict` schema. `None` for whole-list
 /// `[schema:...]` sinks (the supported shape) and every non-checklist schema.
-fn checklist_verdict_slot_schema(trait_ref: &Trait, ref_text: &str) -> Option<String> {
+fn checklist_verdict_slot_schema(
+    trait_ref: &Trait,
+    ref_text: &str,
+) -> Option<ChecklistScalarKind> {
     let parsed = Reference::parse(ref_text).ok()?;
     if parsed.is_qualified() {
         return None;
@@ -2254,8 +2271,11 @@ fn checklist_verdict_slot_schema(trait_ref: &Trait, ref_text: &str) -> Option<St
         return None;
     }
     let schema_id = schema_ref.trim().strip_prefix("schema:")?;
+    if schema_id == "checklist-item" {
+        return Some(ChecklistScalarKind::Produced);
+    }
     crate::r#trait::checklist::checklist_for_verdict_schema(&trait_ref.resources, schema_id)
-        .map(|checklist| checklist.id.clone())
+        .map(|checklist| ChecklistScalarKind::Declared(checklist.id.clone()))
 }
 
 fn validate_sequence_ref(
@@ -2317,6 +2337,39 @@ fn validate_schema_output_ref(
     Ok(())
 }
 
+/// The produced-checklist builtin is a schema-version-gated form: it must
+/// not silently change how a schema-version "0.2" trait resolves, so a slot
+/// or port declaring it requires a trait declaring "0.3" or "0.4" — the
+/// same precedent as count-to-count comparisons (`condition.rs`).
+fn validate_checklist_item_schema_version(t: &Trait) -> crate::Result<()> {
+    let slot_schemas = t.slots.iter().filter_map(|slot| {
+        slot.schema
+            .as_ref()
+            .map(|schema| ("slot", slot.id.as_str(), schema.as_str().into_owned()))
+    });
+    let port_schemas = t
+        .ports
+        .iter()
+        .map(|port| ("port", port.id.as_str(), port.schema.clone()));
+    let uses_checklist_item = slot_schemas
+        .chain(port_schemas)
+        .find(|(_, _, schema)| schema.trim_matches(['[', ']']) == "schema:checklist-item");
+    let Some((kind, id, _)) = uses_checklist_item else {
+        return Ok(());
+    };
+    if matches!(t.schema_version.as_str(), "0.3" | "0.4") {
+        return Ok(());
+    }
+    Err(crate::manifest::Error::InvalidField {
+        field_path: format!("{kind}.{id}.schema"),
+        message: format!(
+            "{kind}:{id} declares schema:checklist-item, which requires a trait declaring schema-version \"0.3\" or \"0.4\", got {:?}",
+            t.schema_version.as_str()
+        ),
+    }
+    .into())
+}
+
 fn validate_output_sink_operation(
     trait_ref: &Trait,
     sink: &OutputSink,
@@ -2357,6 +2410,13 @@ fn validate_output_sink_operation(
                         "append is not supported for checklist verdicts: coverage of resource:{} is checked against a whole verdict list, which only a replace write supplies. Emit every verdict in one write instead.",
                         checklist.id
                     ),
+                }
+                .into());
+            }
+            if element_id == "checklist-item" {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: field_path.to_string(),
+                    message: "append is not supported for produced checklists: coverage is checked against a whole item list, which only a replace write supplies. Emit every item in one write instead.".to_string(),
                 }
                 .into());
             }
@@ -4302,6 +4362,107 @@ sequence = [
         .expect_err(
             "an output port typed with a scalar checklist-verdict schema is the same \
              one-verdict-per-iteration hole as a scalar slot and must be refused too",
+        );
+        assert!(
+            format!("{error}").contains("whole-list replace write"),
+            "error must point at the replace shape: {error}"
+        );
+    }
+
+    fn produced_checklist_fixture_trait(schema_version: &str) -> Trait {
+        let toml_src = format!(
+            r#"
+id = "produced-checklist-validate-fixture"
+schema-version = "{schema_version}"
+version = "0.1.0"
+name = "Produced checklist validate fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "plan"
+schema = "[schema:checklist-item]"
+
+[[slot]]
+id = "plan-item"
+schema = "schema:checklist-item"
+"#
+        );
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect("fixture trait must decode: it is not itself the shape under test")
+    }
+
+    #[test]
+    fn produced_checklist_requires_schema_version_0_3_or_0_4() {
+        let trait_ref = produced_checklist_fixture_trait("0.3");
+        validate(&trait_ref)
+            .expect("schema-version 0.3 must be accepted for schema:checklist-item");
+    }
+
+    #[test]
+    fn produced_checklist_on_schema_version_0_2_is_rejected() {
+        let toml_src = r#"
+id = "produced-checklist-old-version-fixture"
+schema-version = "0.2"
+version = "0.1.0"
+name = "Produced checklist old version fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "plan"
+schema = "[schema:checklist-item]"
+"#;
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, toml_src)
+            .expect_err("schema:checklist-item requires schema-version 0.3 or 0.4");
+        assert!(
+            format!("{error}").contains("schema:checklist-item"),
+            "error must name the gated builtin: {error}"
+        );
+    }
+
+    #[test]
+    fn produced_checklist_append_is_statically_refused() {
+        let trait_ref = produced_checklist_fixture_trait("0.3");
+        let parsed = Reference::parse("slot:plan").expect("valid ref");
+        let sink = OutputSink::SlotOperation {
+            slot: "slot:plan".to_string(),
+            operation: WriteOperation::Append,
+            optional: false,
+        };
+        let error = validate_output_sink_operation(&trait_ref, &sink, &parsed, "field")
+            .expect_err("append to a produced checklist has no coverage proof and must be refused");
+        assert!(
+            format!("{error}").contains("one write instead"),
+            "error must point at the replace shape: {error}"
+        );
+    }
+
+    #[test]
+    fn produced_checklist_for_each_scalar_write_is_statically_refused() {
+        let toml_src = r#"
+id = "produced-checklist-for-each-fixture"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Produced checklist for-each fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "item"
+schema = "schema:checklist-item"
+
+[sequence.body]
+sequence = [
+    { id = "answer", title = "Answer", kind = "prompt", prompt = "Answer.", output = ["slot:item"] },
+]
+"#;
+        let trait_ref = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, toml_src)
+            .expect("fixture trait must decode: it is not itself the shape under test");
+        let error = validate_for_each_no_scalar_checklist_verdict(
+            &trait_ref,
+            &for_each_over_body_item(),
+            "procedure.sequence[0]",
+        )
+        .expect_err(
+            "a scalar produced-checklist-item write under for-each has no coverage proof and must be refused",
         );
         assert!(
             format!("{error}").contains("whole-list replace write"),

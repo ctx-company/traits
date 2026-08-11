@@ -974,6 +974,9 @@ fn inline_value(value: &Value, schema_ref: Option<&str>) -> crate::Result<Result
             text.clone()
         }
         Value::Bool(_) | Value::Number(_) | Value::Null => value.to_string(),
+        Value::Array(items) if schema_ref == "[schema:checklist-item]" => {
+            ctx_traits_core::r#trait::checklist::render_produced_items(items)
+        }
         _ => serde_json::to_string_pretty(value).map_err(|err| crate::Error::Command {
             message: format!("failed to serialize runtime value for drive prompt: {err}"),
         })?,
@@ -1555,4 +1558,45 @@ fn is_schema_property_name(value: &str) -> bool {
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
+}
+
+#[cfg(test)]
+mod inline_value_tests {
+    use super::inline_value;
+    use serde_json::json;
+
+    #[test]
+    fn produced_checklist_renders_readable_not_json() {
+        let value = json!([
+            {"id": "a", "text": "Do the thing", "status": "todo"},
+            {"id": "b", "text": "Do the other thing", "status": "done", "evidence": "ran it"},
+        ]);
+        let rendered = inline_value(&value, Some("[schema:checklist-item]"))
+            .expect("inline_value should not error")
+            .expect("value should be within the inline size limit");
+        assert!(
+            rendered.contains("- [a] Do the thing — todo"),
+            "expected readable checklist line, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("- [b] Do the other thing — done (ran it)"),
+            "expected readable checklist line, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("\"id\""),
+            "checklist render must not fall back to raw JSON, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn other_array_schemas_still_render_as_json() {
+        let value = json!(["x", "y"]);
+        let rendered = inline_value(&value, Some("[schema:text]"))
+            .expect("inline_value should not error")
+            .expect("value should be within the inline size limit");
+        assert!(
+            rendered.contains('['),
+            "expected JSON array rendering, got: {rendered}"
+        );
+    }
 }

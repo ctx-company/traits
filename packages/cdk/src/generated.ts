@@ -5,7 +5,7 @@ export type JsonValue = null | boolean | number | string | readonly JsonValue[] 
 export type JsonObject = { readonly [key: string]: JsonValue | undefined };
 
 export type RefKind = "agent" | "condition" | "port" | "prompt" | "resource" | "rule" | "schema" | "sequence" | "session" | "signal" | "slot" | "trait";
-export type SchemaBuiltin = "schema:text" | "schema:boolean" | "schema:number" | "schema:integer" | "schema:any";
+export type SchemaBuiltin = "schema:text" | "schema:boolean" | "schema:number" | "schema:integer" | "schema:any" | "schema:checklist-item";
 export type SchemaForm = SchemaBuiltin | `[${string}]` | `(${string})`;
 export const schemaForms = {
   list: { prefix: "[", separator: "", suffix: "]" },

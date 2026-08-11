@@ -13,7 +13,7 @@
 //! stale build, or a reworded item fail loudly instead of quietly reviewing
 //! the wrong criteria.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
@@ -29,6 +29,156 @@ pub const VERDICT_ITEM_FIELD: &str = "item";
 pub const VERDICT_STATUS_FIELD: &str = "status";
 /// The field carrying supporting evidence.
 pub const VERDICT_EVIDENCE_FIELD: &str = "evidence";
+
+/// The statuses a produced checklist item may carry, in canonical order.
+///
+/// Reuses the declared mechanism's `waived` rather than inventing a second
+/// vocabulary for "this item does not apply."
+pub const ITEM_STATUSES: [&str; 3] = ["todo", "done", "waived"];
+
+/// The field carrying a produced item's stable id, minted at production time.
+pub const ITEM_ID_FIELD: &str = "id";
+/// The field carrying a produced item's text.
+pub const ITEM_TEXT_FIELD: &str = "text";
+/// The field carrying a produced item's optional detail.
+pub const ITEM_DETAIL_FIELD: &str = "detail";
+/// The field carrying a produced item's status.
+pub const ITEM_STATUS_FIELD: &str = "status";
+/// The field carrying a produced item's optional evidence.
+pub const ITEM_EVIDENCE_FIELD: &str = "evidence";
+
+const ITEM_FIELDS: [&str; 5] = [
+    ITEM_ID_FIELD,
+    ITEM_TEXT_FIELD,
+    ITEM_DETAIL_FIELD,
+    ITEM_STATUS_FIELD,
+    ITEM_EVIDENCE_FIELD,
+];
+
+/// Structural check for one `schema:checklist-item` value.
+///
+/// The shape is closed: `id` (non-empty string), `text` (non-empty string),
+/// optional `detail` (string), `status` (one of [`ITEM_STATUSES`]), optional
+/// `evidence` (string). Unknown fields are rejected — the canonical item
+/// shape lives in Rust, not in whatever a model happens to emit.
+pub fn validate_checklist_item_value(value: &Value) -> Result<(), String> {
+    let Some(object) = value.as_object() else {
+        return Err("expected a JSON object for schema:checklist-item".to_string());
+    };
+    for key in object.keys() {
+        if !ITEM_FIELDS.contains(&key.as_str()) {
+            return Err(format!(
+                "schema:checklist-item does not declare field {key:?}"
+            ));
+        }
+    }
+    let non_empty_string = |field: &str| -> Result<(), String> {
+        match object.get(field).and_then(Value::as_str) {
+            Some(text) if !text.trim().is_empty() => Ok(()),
+            _ => Err(format!(
+                "schema:checklist-item.{field} must be a non-empty string"
+            )),
+        }
+    };
+    non_empty_string(ITEM_ID_FIELD)?;
+    non_empty_string(ITEM_TEXT_FIELD)?;
+    if let Some(detail) = object.get(ITEM_DETAIL_FIELD)
+        && !detail.is_string()
+    {
+        return Err(format!(
+            "schema:checklist-item.{ITEM_DETAIL_FIELD} must be a string"
+        ));
+    }
+    match object.get(ITEM_STATUS_FIELD).and_then(Value::as_str) {
+        Some(status) if ITEM_STATUSES.contains(&status) => {}
+        _ => {
+            return Err(format!(
+                "schema:checklist-item.{ITEM_STATUS_FIELD} must be one of {ITEM_STATUSES:?}"
+            ));
+        }
+    }
+    if let Some(evidence) = object.get(ITEM_EVIDENCE_FIELD)
+        && !evidence.is_string()
+    {
+        return Err(format!(
+            "schema:checklist-item.{ITEM_EVIDENCE_FIELD} must be a string"
+        ));
+    }
+    Ok(())
+}
+
+/// The outcome of checking a set of submitted item ids against a universe.
+pub struct CoverageCheck<'a> {
+    /// Universe ids absent from the write.
+    pub missing: Vec<&'a str>,
+    /// Ids answered more than once in the write.
+    pub duplicated: Vec<&'a str>,
+}
+
+/// Shared coverage core for both declared verdict lists and produced
+/// checklists: every id in `universe` must appear in `counts` exactly once.
+///
+/// `check_duplicates_beyond_universe` extends the duplicate check to ids that
+/// are not (yet) in `universe` — the produced-checklist case, where a
+/// replace write may mint new ids that join the universe, but still may not
+/// answer any one id twice within the same write. The declared-checklist
+/// case sets this `false` to keep its landed behavior byte-identical: a
+/// closed item set never has ids outside its universe to begin with.
+pub fn coverage_check<'a>(
+    universe: &[&'a str],
+    counts: &BTreeMap<&'a str, usize>,
+    check_duplicates_beyond_universe: bool,
+) -> CoverageCheck<'a> {
+    let universe_set: BTreeSet<&str> = universe.iter().copied().collect();
+    let missing: Vec<&str> = universe
+        .iter()
+        .copied()
+        .filter(|id| !counts.contains_key(id))
+        .collect();
+    let mut duplicated: Vec<&str> = universe
+        .iter()
+        .copied()
+        .filter(|id| counts.get(id).is_some_and(|count| *count > 1))
+        .collect();
+    if check_duplicates_beyond_universe {
+        duplicated.extend(
+            counts
+                .iter()
+                .filter(|(id, count)| **count > 1 && !universe_set.contains(*id))
+                .map(|(id, _)| *id),
+        );
+    }
+    CoverageCheck {
+        missing,
+        duplicated,
+    }
+}
+
+/// Render a produced checklist's accepted items as the text presented to a
+/// model or a static frame — never raw JSON.
+pub fn render_produced_items(items: &[Value]) -> String {
+    let mut out = format!("Produced checklist — {} item(s).\n", items.len());
+    for item in items {
+        let id = item
+            .get(ITEM_ID_FIELD)
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        let text = item
+            .get(ITEM_TEXT_FIELD)
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let status = item
+            .get(ITEM_STATUS_FIELD)
+            .and_then(Value::as_str)
+            .unwrap_or("todo");
+        out.push_str(&format!("\n- [{id}] {text} — {status}"));
+        if let Some(evidence) = item.get(ITEM_EVIDENCE_FIELD).and_then(Value::as_str) {
+            out.push_str(&format!(" ({evidence})"));
+        }
+    }
+    out.push('\n');
+    out
+}
 
 /// The schema id that carries verdicts for the checklist resource `id`.
 pub fn verdict_schema_id(resource_id: &str) -> String {
@@ -211,4 +361,87 @@ fn invalid(field_path: &str, message: String) -> crate::Error {
         message,
     }
     .into()
+}
+
+#[cfg(test)]
+mod produced_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn item(id: &str, status: &str) -> Value {
+        json!({"id": id, "text": "do the thing", "status": status})
+    }
+
+    #[test]
+    fn well_formed_item_is_accepted() {
+        assert!(validate_checklist_item_value(&item("a", "todo")).is_ok());
+    }
+
+    #[test]
+    fn missing_text_is_rejected() {
+        let value = json!({"id": "a", "status": "todo"});
+        assert!(validate_checklist_item_value(&value).is_err());
+    }
+
+    #[test]
+    fn unknown_field_is_rejected() {
+        let value = json!({"id": "a", "text": "x", "status": "todo", "surprise": 1});
+        assert!(validate_checklist_item_value(&value).is_err());
+    }
+
+    #[test]
+    fn unknown_status_is_rejected() {
+        let value = json!({"id": "a", "text": "x", "status": "in-progress"});
+        assert!(validate_checklist_item_value(&value).is_err());
+    }
+
+    #[test]
+    fn coverage_accepts_matching_ids_with_status_updates() {
+        let universe = ["a", "b"];
+        let counts: BTreeMap<&str, usize> = [("a", 1), ("b", 1)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, true);
+        assert!(outcome.missing.is_empty());
+        assert!(outcome.duplicated.is_empty());
+    }
+
+    #[test]
+    fn coverage_rejects_dropped_id() {
+        let universe = ["a", "b"];
+        let counts: BTreeMap<&str, usize> = [("a", 1)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, true);
+        assert_eq!(outcome.missing, vec!["b"]);
+    }
+
+    #[test]
+    fn coverage_rejects_duplicated_id() {
+        let universe = ["a"];
+        let counts: BTreeMap<&str, usize> = [("a", 2)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, true);
+        assert_eq!(outcome.duplicated, vec!["a"]);
+    }
+
+    #[test]
+    fn coverage_allows_new_ids_joining_the_universe() {
+        let universe = ["a"];
+        let counts: BTreeMap<&str, usize> = [("a", 1), ("b", 1)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, true);
+        assert!(outcome.missing.is_empty());
+        assert!(outcome.duplicated.is_empty());
+    }
+
+    #[test]
+    fn coverage_rejects_duplicated_new_id_when_allowed_beyond_universe() {
+        let universe = ["a"];
+        let counts: BTreeMap<&str, usize> = [("a", 1), ("b", 2)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, true);
+        assert_eq!(outcome.duplicated, vec!["b"]);
+    }
+
+    #[test]
+    fn declared_mode_ignores_duplicates_outside_universe() {
+        let universe = ["a"];
+        let counts: BTreeMap<&str, usize> = [("a", 1), ("b", 2)].into_iter().collect();
+        let outcome = coverage_check(&universe, &counts, false);
+        assert!(outcome.duplicated.is_empty());
+    }
 }

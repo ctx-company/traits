@@ -3744,6 +3744,254 @@ equals = "approved"
 }
 
 #[cfg(test)]
+mod produced_checklist_loop_tests {
+    use super::*;
+
+    /// (0167) A produce step fills a `[schema:checklist-item]` slot; a
+    /// bounded loop's body replace-writes the same slot each round; the
+    /// loop's `until` guard is `count(slot:plan).where(status == "done") >=
+    /// 2` — the runtime path a unit-level `checklist_coverage_validation`
+    /// call can never exercise, since it never drives the prior-accepted
+    /// plumbing (`transitions.rs` / `control_flow.rs`) or guard evaluation.
+    const FIXTURE: &str = r#"
+id = "produced-checklist-loop-fixture"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Produced Checklist Loop Fixture"
+description = "Regression fixture: a count guard exits a loop once every produced item is done."
+
+[[agent]]
+id = "worker"
+description = "Fills and updates the checklist."
+summary = "Worker role."
+
+[[slot]]
+id = "plan"
+schema = "[schema:checklist-item]"
+description = "Produced checklist of work items."
+
+[prompt.produce]
+text = "Produce the checklist."
+
+[prompt.update]
+text = "Update checklist statuses."
+
+[[sequence.loop-body.sequence]]
+id = "update-plan"
+title = "Update plan"
+agent = "agent:worker"
+prompt = "prompt:update"
+output = ["slot:plan"]
+
+[procedure]
+description = "Produce a checklist, then loop updating it until every item is done."
+
+[[procedure.sequence]]
+id = "produce-plan"
+title = "Produce plan"
+agent = "agent:worker"
+prompt = "prompt:produce"
+output = ["slot:plan"]
+
+[[procedure.sequence]]
+id = "update-loop"
+title = "Update loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+max-iterations = 3
+on-exhausted = "continue"
+
+[procedure.sequence.until]
+count = "slot:plan"
+field = "status"
+field-equals = "done"
+at-least = 2
+"#;
+
+    fn fixture_trait() -> crate::r#trait::Trait {
+        toml::from_str(FIXTURE).expect("fixture trait parses")
+    }
+
+    fn item(id: &str, status: &str) -> serde_json::Value {
+        serde_json::json!({"id": id, "text": "do the thing", "status": status})
+    }
+
+    fn submission_from_template(
+        template: &SequenceCallTemplate,
+        plan: serde_json::Value,
+    ) -> CallSubmission {
+        CallSubmission {
+            session_id: SessionId::new(template.session_id.clone()).expect("session id"),
+            run_id: Some(Id::new(template.run_id.clone()).expect("run id")),
+            state_digest: Some(template.state_digest.clone()),
+            expected_sequence_item_id: template.expected_sequence_item_id.clone(),
+            expected_run_index: Some(template.expected_run_index),
+            expected_source_index: template.expected_source_index,
+            expected_position_path: template.expected_position_path.clone(),
+            produced_slots: [("slot:plan".to_string(), plan)].into_iter().collect(),
+            signals: Default::default(),
+            warnings: Vec::new(),
+            command_execution: None,
+            caller: Some(CallerProvenance {
+                surface: "test".to_string(),
+                caller: "produced-checklist-loop-regression".to_string(),
+                agent: Some("worker".to_string()),
+                harness: None,
+            }),
+        }
+    }
+
+    fn start_fixture_session(trait_ref: &crate::r#trait::Trait) -> Session {
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "session-id": "session-produced-checklist-loop-test",
+            "run-id": "run-produced-checklist-loop-test",
+            "provenance": {
+                "started-by": {
+                    "surface": "test",
+                    "caller": "produced-checklist-loop-regression",
+                },
+                "state-source": "test",
+            },
+        }))
+        .expect("start request");
+        start_run_session(
+            trait_ref,
+            &crate::manifest::PackageStatus::Ready,
+            &crate::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts")
+    }
+
+    #[test]
+    fn count_guard_exits_the_loop_once_every_item_is_done() {
+        let trait_ref = fixture_trait();
+        let session = start_fixture_session(&trait_ref);
+
+        // 1. Produce step: mint the universe, all todo.
+        let template = session
+            .next_frame
+            .as_ref()
+            .expect("produce frame is current")
+            .call_template
+            .clone()
+            .expect("call template attached");
+        let produced = submit_run_call(
+            &trait_ref,
+            session,
+            submission_from_template(
+                &template,
+                serde_json::json!([item("a", "todo"), item("b", "todo")]),
+            ),
+        )
+        .expect("produce call lands");
+        assert_eq!(
+            produced.response_kind,
+            CallResponseKind::AcceptedNextFrame,
+            "produce step must hand off to the loop, not complete the run"
+        );
+
+        // 2. Loop round one: flip only one item to done — the guard must NOT
+        //    exit yet.
+        let loop_template = produced
+            .session
+            .next_frame
+            .as_ref()
+            .expect("loop frame is current")
+            .call_template
+            .clone()
+            .expect("call template attached");
+        let partial = submit_run_call(
+            &trait_ref,
+            produced.session,
+            submission_from_template(
+                &loop_template,
+                serde_json::json!([item("a", "done"), item("b", "todo")]),
+            ),
+        )
+        .expect("partial-round call lands");
+        assert_eq!(
+            partial.response_kind,
+            CallResponseKind::AcceptedNextFrame,
+            "the count guard must not exit before every item is done"
+        );
+
+        // 3. Loop round two: flip the remaining item to done — the guard
+        //    must exit and complete the run.
+        let next_loop_template = partial
+            .session
+            .next_frame
+            .as_ref()
+            .expect("loop frame still current after partial round")
+            .call_template
+            .clone()
+            .expect("call template attached");
+        let complete = submit_run_call(
+            &trait_ref,
+            partial.session,
+            submission_from_template(
+                &next_loop_template,
+                serde_json::json!([item("a", "done"), item("b", "done")]),
+            ),
+        )
+        .expect("completing call lands");
+        assert_eq!(
+            complete.response_kind,
+            CallResponseKind::AcceptedCompleted,
+            "the count guard must exit the loop once every item is done"
+        );
+    }
+
+    #[test]
+    fn loop_body_replace_write_dropping_a_prior_id_is_rejected_by_the_runtime() {
+        let trait_ref = fixture_trait();
+        let session = start_fixture_session(&trait_ref);
+
+        let template = session
+            .next_frame
+            .as_ref()
+            .expect("produce frame is current")
+            .call_template
+            .clone()
+            .expect("call template attached");
+        let produced = submit_run_call(
+            &trait_ref,
+            session,
+            submission_from_template(
+                &template,
+                serde_json::json!([item("a", "todo"), item("b", "todo")]),
+            ),
+        )
+        .expect("produce call lands");
+
+        let loop_template = produced
+            .session
+            .next_frame
+            .as_ref()
+            .expect("loop frame is current")
+            .call_template
+            .clone()
+            .expect("call template attached");
+
+        // Drops id "b" from the prior accepted revision — must be rejected
+        // by the real runtime path (transitions.rs / control_flow.rs prior-
+        // accepted plumbing), not merely by a direct
+        // `checklist_coverage_validation` call.
+        let dropped = submit_run_call(
+            &trait_ref,
+            produced.session,
+            submission_from_template(&loop_template, serde_json::json!([item("a", "done")])),
+        )
+        .expect("dropped-id call lands");
+        assert_eq!(
+            dropped.response_kind,
+            CallResponseKind::RejectedCorrectionRequired,
+            "dropping a prior item id must be rejected by the runtime, not silently accepted"
+        );
+    }
+}
+
+#[cfg(test)]
 mod correction_retry_tests {
     use super::*;
 

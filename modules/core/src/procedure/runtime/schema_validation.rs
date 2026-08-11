@@ -96,14 +96,12 @@ fn checklist_coverage_validation(
     schema_ref: &str,
     schema_reference: Option<Reference>,
     value: &JsonValue,
+    prior_accepted: Option<&JsonValue>,
 ) -> Option<SchemaValidation> {
     let inner = schema_ref
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))?
         .trim();
-    let schema_id = inner.strip_prefix("schema:")?;
-    let checklist =
-        crate::r#trait::checklist::checklist_for_verdict_schema(&trait_ref.resources, schema_id)?;
 
     let reject = |reason: String| {
         Some(SchemaValidation {
@@ -113,6 +111,52 @@ fn checklist_coverage_validation(
             reason,
         })
     };
+
+    if inner == "schema:checklist-item" {
+        let Some(entries) = value.as_array() else {
+            return reject("checklist coverage: expected an array of items".to_string());
+        };
+        let mut counts: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for entry in entries {
+            if let Some(id) = entry
+                .get(crate::r#trait::checklist::ITEM_ID_FIELD)
+                .and_then(JsonValue::as_str)
+            {
+                *counts.entry(id).or_default() += 1;
+            }
+        }
+        let prior_ids: Vec<&str> = prior_accepted
+            .and_then(JsonValue::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                entry
+                    .get(crate::r#trait::checklist::ITEM_ID_FIELD)
+                    .and_then(JsonValue::as_str)
+            })
+            .collect();
+        let outcome = crate::r#trait::checklist::coverage_check(&prior_ids, &counts, true);
+        if outcome.missing.is_empty() && outcome.duplicated.is_empty() {
+            return None;
+        }
+        let mut reasons = Vec::new();
+        if !outcome.missing.is_empty() {
+            reasons.push(format!("missing {:?}", outcome.missing));
+        }
+        if !outcome.duplicated.is_empty() {
+            reasons.push(format!("answered more than once {:?}", outcome.duplicated));
+        }
+        return reject(format!(
+            "checklist coverage: produced checklist carries {} prior item(s); {}",
+            prior_ids.iter().collect::<BTreeSet<_>>().len(),
+            reasons.join("; ")
+        ));
+    }
+
+    let schema_id = inner.strip_prefix("schema:")?;
+    let checklist =
+        crate::r#trait::checklist::checklist_for_verdict_schema(&trait_ref.resources, schema_id)?;
 
     let Some(entries) = value.as_array() else {
         return reject(format!(
@@ -131,33 +175,24 @@ fn checklist_coverage_validation(
         }
     }
 
-    let declared = checklist.checklist_item_ids();
-    let missing: Vec<&str> = declared
-        .iter()
-        .copied()
-        .filter(|id| !counts.contains_key(id))
-        .collect();
-    let duplicated: Vec<&str> = declared
-        .iter()
-        .copied()
-        .filter(|id| counts.get(id).is_some_and(|count| *count > 1))
-        .collect();
+    let declared_ids = checklist.checklist_item_ids();
+    let outcome = crate::r#trait::checklist::coverage_check(&declared_ids, &counts, false);
 
-    if missing.is_empty() && duplicated.is_empty() {
+    if outcome.missing.is_empty() && outcome.duplicated.is_empty() {
         return None;
     }
 
     let mut reasons = Vec::new();
-    if !missing.is_empty() {
-        reasons.push(format!("missing {missing:?}"));
+    if !outcome.missing.is_empty() {
+        reasons.push(format!("missing {:?}", outcome.missing));
     }
-    if !duplicated.is_empty() {
-        reasons.push(format!("answered more than once {duplicated:?}"));
+    if !outcome.duplicated.is_empty() {
+        reasons.push(format!("answered more than once {:?}", outcome.duplicated));
     }
     reject(format!(
         "checklist coverage: resource:{} declares {} item(s); {}",
         checklist.id,
-        declared.len(),
+        declared_ids.len(),
         reasons.join("; ")
     ))
 }
@@ -168,6 +203,7 @@ fn runtime_value_for_output_sink(
     sink: &OutputSink,
     output: StepSlotOutput,
     is_check: bool,
+    prior_accepted: Option<&JsonValue>,
 ) -> crate::Result<Value> {
     let parsed = Reference::parse(&output.ref_text).map_err(|_| {
         crate::procedure::invalid_field(
@@ -210,6 +246,7 @@ fn runtime_value_for_output_sink(
                 schema_ref,
                 validation.schema_ref.clone(),
                 &output.value,
+                prior_accepted,
             )
         })
     } else {
@@ -541,6 +578,24 @@ pub(crate) fn validate_value_schema(
                 reason: "schema:any accepts any JSON value".to_string(),
             });
         }
+        "schema:checklist-item" => {
+            return Ok(
+                match crate::r#trait::checklist::validate_checklist_item_value(value) {
+                    Ok(()) => SchemaValidation {
+                        ref_text: ref_text.to_string(),
+                        schema_ref: Some(Reference::parse(schema_ref)?),
+                        status: SchemaStatus::Accepted,
+                        reason: "schema:checklist-item accepted".to_string(),
+                    },
+                    Err(reason) => SchemaValidation {
+                        ref_text: ref_text.to_string(),
+                        schema_ref: Some(Reference::parse(schema_ref)?),
+                        status: SchemaStatus::Rejected,
+                        reason,
+                    },
+                },
+            );
+        }
         _ => {}
     }
 
@@ -731,4 +786,132 @@ fn primitive_schema(
             format!("expected {expected}; submit a JSON value for non-text schemas")
         },
     })
+}
+
+#[cfg(test)]
+mod produced_checklist_coverage_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn fixture_trait() -> Trait {
+        let toml_src = r#"
+id = "produced-checklist-fixture"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Produced checklist fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "plan"
+schema = "[schema:checklist-item]"
+"#;
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, toml_src)
+            .expect("fixture trait must decode: it is not itself the shape under test")
+    }
+
+    fn item(id: &str, status: &str) -> JsonValue {
+        json!({"id": id, "text": "do the thing", "status": status})
+    }
+
+    #[test]
+    fn first_write_mints_the_universe_with_no_prior() {
+        let trait_ref = fixture_trait();
+        let value = json!([item("a", "todo"), item("b", "todo")]);
+        let outcome = checklist_coverage_validation(
+            &trait_ref,
+            "slot:plan",
+            "[schema:checklist-item]",
+            None,
+            &value,
+            None,
+        );
+        assert!(outcome.is_none(), "first write has no prior universe to violate");
+    }
+
+    #[test]
+    fn replace_dropping_a_prior_id_is_rejected() {
+        let trait_ref = fixture_trait();
+        let prior = json!([item("a", "todo"), item("b", "todo")]);
+        let value = json!([item("a", "done")]);
+        let outcome = checklist_coverage_validation(
+            &trait_ref,
+            "slot:plan",
+            "[schema:checklist-item]",
+            None,
+            &value,
+            Some(&prior),
+        )
+        .expect("dropped id must be rejected");
+        assert_eq!(outcome.status, SchemaStatus::Rejected);
+        assert!(outcome.reason.contains("missing"));
+    }
+
+    #[test]
+    fn replace_duplicating_a_prior_id_is_rejected() {
+        let trait_ref = fixture_trait();
+        let prior = json!([item("a", "todo")]);
+        let value = json!([item("a", "done"), item("a", "done")]);
+        let outcome = checklist_coverage_validation(
+            &trait_ref,
+            "slot:plan",
+            "[schema:checklist-item]",
+            None,
+            &value,
+            Some(&prior),
+        )
+        .expect("duplicated id must be rejected");
+        assert!(outcome.reason.contains("more than once"));
+    }
+
+    #[test]
+    fn replace_carrying_every_prior_id_with_updated_status_is_accepted() {
+        let trait_ref = fixture_trait();
+        let prior = json!([item("a", "todo"), item("b", "todo")]);
+        let value = json!([item("a", "done"), item("b", "done")]);
+        let outcome = checklist_coverage_validation(
+            &trait_ref,
+            "slot:plan",
+            "[schema:checklist-item]",
+            None,
+            &value,
+            Some(&prior),
+        );
+        assert!(outcome.is_none(), "complete round must be accepted");
+    }
+
+    #[test]
+    fn replace_adding_a_new_id_joins_the_universe() {
+        let trait_ref = fixture_trait();
+        let prior = json!([item("a", "todo")]);
+        let value = json!([item("a", "done"), item("b", "todo")]);
+        let outcome = checklist_coverage_validation(
+            &trait_ref,
+            "slot:plan",
+            "[schema:checklist-item]",
+            None,
+            &value,
+            Some(&prior),
+        );
+        assert!(outcome.is_none(), "a new id may join the universe on a replace write");
+    }
+
+    #[test]
+    fn malformed_item_is_rejected_by_value_schema_before_coverage_runs() {
+        let trait_ref = fixture_trait();
+        let value = json!([{"id": "a", "status": "todo"}]);
+        let validation =
+            validate_value_schema(&trait_ref, "slot:plan", "[schema:checklist-item]", &value)
+                .expect("validation must not error");
+        assert_eq!(validation.status, SchemaStatus::Rejected);
+    }
+
+    #[test]
+    fn well_formed_item_passes_value_schema() {
+        let trait_ref = fixture_trait();
+        let value = json!([item("a", "todo")]);
+        let validation =
+            validate_value_schema(&trait_ref, "slot:plan", "[schema:checklist-item]", &value)
+                .expect("validation must not error");
+        assert_eq!(validation.status, SchemaStatus::Accepted);
+    }
 }

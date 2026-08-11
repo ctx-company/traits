@@ -561,6 +561,7 @@ pub fn apply_step_output(
             sink,
             output,
             is_check_item,
+            prior_value.as_ref().map(|value| &value.value),
         )?;
         if runtime_value.acceptance == AcceptanceStatus::Accepted {
             runtime_value = apply_runtime_write(

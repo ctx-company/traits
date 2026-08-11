@@ -977,6 +977,7 @@ fn execute_project_item(
             }
         };
         let prior = accepted_value(state, &projection.destination).cloned();
+        let prior_accepted_value = prior.as_ref().map(|value| &value.value);
         let mut runtime_value = runtime_value_for_output_sink(
             trait_ref,
             sequence_index,
@@ -993,6 +994,7 @@ fn execute_project_item(
                 producer_harness: source_attribution.as_ref().and_then(|(_, _, _, _, harness)| harness.clone()),
             },
             false,
+            prior_accepted_value,
         )?;
         if runtime_value.acceptance == AcceptanceStatus::Accepted {
             runtime_value = apply_runtime_write(
@@ -1958,6 +1960,7 @@ pub(crate) fn bind_current_for_each_item(trait_ref: &Trait, state: &mut State) -
             producer_harness: None,
         },
         false,
+        None,
     )?;
     if runtime_value.acceptance != AcceptanceStatus::Accepted {
         let rejection_path = for_each_binding_path(trait_ref, state)
