@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0094"
 title = """"Started at" is shown in the reader's local time"""
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-11"
+origin = "run run-1f0b566e0d94f84e68293e62020727c9e2edb801fbf35fb4fbecf1e9ad961d2d merged as adf7b2a4f4aca65bd51b623e54dd445eb8624f52"
 content = """
 
 

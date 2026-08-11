@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0157"
 title = "packages/cdk: finish the unknown purge (204 src + 81 test mentions), deps, lean README kept"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-6a9b259437b0604381901144ddf059ad4eb1bc677d9955af59763bd5e8169c9c merged as ed07d0cc86e3acff7f6e14bd3ceaafaf88f8ff7d"
 content = """
 
 

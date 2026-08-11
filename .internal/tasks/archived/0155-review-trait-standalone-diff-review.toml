@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0155"
 title = "review: standalone diff/PR review outside the implement loop (future)"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-8eae68d4252afb9b27f01ec8b2739181e0c85c9820a336590be8dcdf88ad76a1 merged as b1a2a4cb6cfb0288e3ee8d56c917e08d26545c79"
 content = """
 
 

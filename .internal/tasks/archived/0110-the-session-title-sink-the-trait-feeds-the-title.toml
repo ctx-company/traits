@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0110"
 title = "the session-title sink: the trait feeds the title"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-11"
+origin = "run run-c6933c56e019e06159f96eba36137bd64cd20620d6c6a049ca32ba7c0139c00a merged as 89518aa27d006b486148da50952fa49371c40ae6"
 content = """
 
 

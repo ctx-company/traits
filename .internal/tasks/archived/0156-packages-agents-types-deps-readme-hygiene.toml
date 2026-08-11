@@ -1,8 +1,10 @@
 schema-version = "0.2"
-key = "0158"
-title = "packages/config: src clean; purge 4 test-side unknown mentions, deps, README trim"
-status = "ready"
+key = "0156"
+title = "packages/agents: already unknown/any-clean — deps, gates, and a lean README"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-1da991df2433c79d0deb555819f33f9d6d774eace6b0ed1982aea8fb7d188991 merged as c7083fbc0489f365425c5340ef7923a8e1be7d82"
 content = """
 
 
@@ -11,7 +13,7 @@ package under packages/): eliminate `unknown`/`any`, update dependencies to
 newest versions, keep every gate green, and trim READMEs to the lean CDK
 model.
 
-Package state, measured at filing: src measured clean; test/config.test.ts carries 4 `unknown` mentions to replace with precise types.
+Package state, measured at filing: src and test measured clean of `unknown` and `any` (grep 2026-08-10). The work is the shared hygiene pass only.
 
 """
 scope = """
@@ -29,7 +31,7 @@ scope = """
 - **Gates**: `just ts-typecheck`, `just ts-lint`, `just ts-test`,
   `just ts-format-check` all green — plus the full `just test-full` before
   merge (the landing gate runs it anyway).
-- **README**: README.md is 39 lines — trim toward the CDK model. Model: packages/cdk/README.md — one-paragraph purpose,
+- **README**: README.md is 138 lines — trim to the CDK model (~15 lines: one-paragraph purpose, install, source link). Model: packages/cdk/README.md — one-paragraph purpose,
   Install, Source; no architecture essays (those live in code comments and
   the docs tree).
 
@@ -47,7 +49,7 @@ validation = """
 
 ## Done when
 
-`grep -rn "\bunknown\b" packages/config/src packages/config/test` (excluding
+`grep -rn "\bunknown\b" packages/agents/src packages/agents/test` (excluding
 audited-cast lines and comment prose) reports zero type-position hits and the
 summary proves it; `any` likewise; deps are current with the lockfile
 updated; all four TS gates and `just test-full` green; README matches the

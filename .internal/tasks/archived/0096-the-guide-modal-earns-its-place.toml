@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0096"
 title = "The guide modal earns its place: bigger, dimmed behind, and actually informed"
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-11"
+origin = "run run-a7deacd1932c668f1d71c7ff12654d69148325d31eb81f638c4b437d8509abde merged as c0903a940f956dc433bdd80361030e04ddf999c6"
 content = """
 
 

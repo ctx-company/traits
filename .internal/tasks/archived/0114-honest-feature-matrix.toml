@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0114"
 title = "Public, honest feature matrix + per-competitor rebuttals"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-11"
+origin = "run run-4e85dde2286f66dfc3a833e535fc4f254b9653232ed963b5d28de60d35004899 merged as 5b19b23a63d14cd55b9d3ef88f9251b417aa4f84"
 content = """
 
 

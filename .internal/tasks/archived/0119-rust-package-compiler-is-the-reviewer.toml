@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0119"
 title = "`@ctx-traits/rust`: the compiler is the reviewer"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-11"
+origin = "run run-53fb8f01e1547abe3e9b11e0538d2bcc11735a4a4592a994bead61f59bc74eda merged as be3153e47de24a0d3d139de5ba5971768af34070"
 content = """
 
 

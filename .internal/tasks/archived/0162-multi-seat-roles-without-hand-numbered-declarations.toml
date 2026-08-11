@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0162"
 title = "Multi-seat roles without hand-numbered declarations — seat sugar now, position-keyed rotation if wanted"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-3ff630d3b991b18d9d9a7a8bd5b680c15783b43d3c850d05c1e5aa751e9e9364 merged as ce781ea1e02f37c28c460b6119eb856a2d5c16b6"
 content = """
 
 

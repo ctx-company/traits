@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0095"
 title = "One space around the bullet in history and current activity"
-status = "ready"
+status = "done"
 raised = "2026-08-04"
+closed = "2026-08-11"
+origin = "run run-66050dd85d03a4339fd1b7324bb6ec841562e1b743f713f825fb98bf8e1d9178 merged as b9e5400417f205dee1e034f3c2455d41361f2c33"
 content = """
 
 

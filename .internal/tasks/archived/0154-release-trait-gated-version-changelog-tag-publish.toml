@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0154"
 title = "release: a gated version-bump/changelog/tag/publish trait"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-c2c432e7b3fe08bf9a6860f1fe6c9b124a8a317daebd9cb6c7246e7b610ba2df merged as 322cc382bfca2f562f05c8059dbe400762e82486"
 content = """
 
 

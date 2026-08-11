@@ -1,8 +1,10 @@
 schema-version = "0.2"
-key = "0159"
-title = "packages/harness-client: purge 14 src unknown mentions, deps, README already lean"
-status = "ready"
+key = "0158"
+title = "packages/config: src clean; purge 4 test-side unknown mentions, deps, README trim"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-2e83ff58d64d0b352754cd07ed3b2ea0ef98864121bb4f5e479be8cba4febad2 merged as 9cc6fc1b2c445cae43655897cbb684321119b563"
 content = """
 
 
@@ -11,7 +13,7 @@ package under packages/): eliminate `unknown`/`any`, update dependencies to
 newest versions, keep every gate green, and trim READMEs to the lean CDK
 model.
 
-Package state, measured at filing: src carries 14 `unknown` mentions (grep 2026-08-10) to replace with precise types; tests measured clean.
+Package state, measured at filing: src measured clean; test/config.test.ts carries 4 `unknown` mentions to replace with precise types.
 
 """
 scope = """
@@ -29,7 +31,7 @@ scope = """
 - **Gates**: `just ts-typecheck`, `just ts-lint`, `just ts-test`,
   `just ts-format-check` all green — plus the full `just test-full` before
   merge (the landing gate runs it anyway).
-- **README**: README.md is 22 lines — already near the model; only touch if trimming further. Model: packages/cdk/README.md — one-paragraph purpose,
+- **README**: README.md is 39 lines — trim toward the CDK model. Model: packages/cdk/README.md — one-paragraph purpose,
   Install, Source; no architecture essays (those live in code comments and
   the docs tree).
 
@@ -47,7 +49,7 @@ validation = """
 
 ## Done when
 
-`grep -rn "\bunknown\b" packages/harness-client/src packages/harness-client/test` (excluding
+`grep -rn "\bunknown\b" packages/config/src packages/config/test` (excluding
 audited-cast lines and comment prose) reports zero type-position hits and the
 summary proves it; `any` likewise; deps are current with the lockfile
 updated; all four TS gates and `just test-full` green; README matches the

@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0130"
 title = "Cost/token budgets per run: per-model split + subscription-aware estimation"
-status = "ready"
+status = "done"
 raised = "2026-08-05"
+closed = "2026-08-11"
+origin = "run run-dabfe9a9e3f83bac25b2bdbd0237e6086c742a5485b7537d7db46bee053a618e merged as c1667423468e356eef95c0cf09203f05d8f14e0d"
 content = """
 
 

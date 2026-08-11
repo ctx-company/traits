@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0153"
 title = "research: a family package where the variant is the guarantee — replaces deep-research"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-7b08543d333f6e3f3a59ec1d591d52b2faa7fe1fc365178e32aea2e7174226a5 merged as 7862bfe6b1dfdde86b944f2aec462aab34b298a6"
 content = """
 
 

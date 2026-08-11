@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0161"
 title = "packages/toolkit: purge 5 src unknown mentions, deps, README trim"
-status = "ready"
+status = "done"
 raised = "2026-08-10"
+closed = "2026-08-11"
+origin = "run run-cd9e3936933e6e8e65b1346dce5ee662fb4c8e9a972d3bbfc427c445341069e5 merged as 916eb0adf9299bd56c55a320858c863647244c1a"
 content = """
 
 
