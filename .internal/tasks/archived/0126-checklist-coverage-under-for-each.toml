@@ -1,0 +1,69 @@
+schema-version = "0.2"
+key = "0126"
+title = "Checklist coverage under `for-each`, or a stated refusal"
+status = "done"
+raised = "2026-08-05"
+closed = "2026-08-11"
+content = """
+
+
+Typed checklists check coverage — every declared item answered exactly once — only
+for a whole-list `replace` write, and REFUSE `append` for checklist verdicts (a
+single appended element cannot be judged against the whole list). A `for-each`
+driven over checklist items has no coverage story at all: it is neither the
+replace shape coverage validates nor the append shape that is refused. Fine while
+nothing uses that shape; a silent hole the moment something does.
+
+Where: `modules/core/src/procedure/runtime/schema_validation.rs`
+(`checklist_coverage_validation`) + the for-each control path in
+`control_flow.rs`. Decide whether a for-each accumulating verdicts gets coverage
+checked at loop close, or whether that wiring is statically refused like `append`.
+
+"""
+validation = """
+## Done when
+
+A for-each over a checklist either has its coverage verified when the loop
+completes, or fails validation at authoring time with a message pointing at the
+replace shape — no third silent option.
+
+Full original contract: `archived/board/execution-plan.md` (Group 101, P404).
+
+## Resolution
+
+The second arm (authoring-time refusal) is what ships; no loop-close coverage
+was built — it would add `ControlFrame` state and a new rejection path in
+`control_flow.rs` for a shape nothing in this codebase uses.
+
+- `modules/core/src/trait/procedure/validate.rs:2147` —
+  `validate_for_each_no_scalar_checklist_verdict` (`validate.rs:2155-2176`),
+  called from `for-each` shape validation, statically refuses a scalar
+  checklist-verdict write anywhere reachable in a `for-each` body (nested
+  `sequence`/`otherwise`/`branches`, cycle-guarded via
+  `find_checklist_verdict_output_in_sequence`/`_in_items`,
+  `validate.rs:2178-2231`), naming the replace shape in the error.
+- `modules/core/src/trait/procedure/validate.rs:2317-2352` — `append` to a
+  checklist-verdict list slot is refused everywhere (not just under
+  `for-each`), the deliberate precedent this arm follows.
+- `modules/core/src/procedure/runtime/schema_validation.rs:93-163`
+  (`checklist_coverage_validation`), gated to `WriteOperation::Replace`
+  (`schema_validation.rs:203-217`) — the runtime coverage check the static
+  refusal protects: a `for-each` body that legally replace-writes the whole
+  verdict list gets checked on every write.
+- **This run's addition**: `checklist_verdict_slot_schema`
+  (`validate.rs:2236-2260`) matched only `Kind::Slot`; an output *port*
+  declared with a scalar `schema:<id>-verdict` schema slipped past the
+  walker — same one-verdict-per-iteration hole, different ref kind (ports
+  declare schemas the same way slots do, see
+  `frame_builders.rs:936-940`/`output_schema_ref`). Extended the walker to
+  also match `Kind::Port` against output-direction ports.
+- Proof: three scratch-fixture tests in `validate.rs`'s `mod tests`
+  (`for_each_body_writing_scalar_checklist_verdict_via_nested_sequence_is_refused`,
+  `..._via_output_port_is_refused`, `for_each_body_replace_writing_whole_verdict_list_is_allowed`),
+  each decoding a bespoke in-test trait fixture through the real
+  `decode_trait` pipeline and calling the walker directly.
+
+Out of scope, explicitly not built: `control_flow.rs` for-each runtime path
+(untouched), loop-close coverage accumulation, the model-produced-checklist
+generalization (filed separately as task 0167).
+"""

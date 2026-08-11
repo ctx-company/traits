@@ -2230,15 +2230,26 @@ fn find_checklist_verdict_output_in_items(
     None
 }
 
-/// The checklist resource id when `ref_text` is a local slot declaring a
-/// scalar `schema:<id>-verdict` schema. `None` for whole-list `[schema:...]`
-/// slots (the supported shape) and every non-checklist schema.
+/// The checklist resource id when `ref_text` is a local slot or output port
+/// declaring a scalar `schema:<id>-verdict` schema. `None` for whole-list
+/// `[schema:...]` sinks (the supported shape) and every non-checklist schema.
 fn checklist_verdict_slot_schema(trait_ref: &Trait, ref_text: &str) -> Option<String> {
     let parsed = Reference::parse(ref_text).ok()?;
-    if parsed.kind() != Kind::Slot || parsed.is_qualified() {
+    if parsed.is_qualified() {
         return None;
     }
-    let schema_ref = local_slot_schema(trait_ref, parsed.id())?;
+    let schema_ref = match parsed.kind() {
+        Kind::Slot => local_slot_schema(trait_ref, parsed.id())?,
+        Kind::Port => trait_ref
+            .ports
+            .iter()
+            .find(|port| {
+                port.id == parsed.id()
+                    && matches!(port.direction, crate::r#trait::PortDirection::Output)
+            })
+            .map(|port| port.schema.clone())?,
+        _ => return None,
+    };
     if list_element_schema(&schema_ref).is_some() {
         return None;
     }
@@ -4171,6 +4182,130 @@ equals = "approved"
         assert!(
             format!("{error}").contains("duplicate"),
             "error must call out the duplication: {error}"
+        );
+    }
+
+    /// A base trait carrying a `review` checklist, its companion verdict
+    /// schema, a scalar `verdict` slot, a whole-list `verdicts` slot, and a
+    /// scalar-verdict-typed output port — one named sequence (`sequence:body`)
+    /// whose single item nests `sequence:branch`, whose own prompt step
+    /// writes `output` (patched in by each test) to one of those sinks. The
+    /// `for-each` in these tests points its `.sequence` ref at `body`, so the
+    /// write is reachable one level of nesting deep.
+    fn checklist_for_each_fixture_trait(body_output: &str) -> Trait {
+        let toml_src = format!(
+            r#"
+id = "checklist-for-each-fixture"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Checklist for-each fixture"
+description = "Test fixture."
+
+[[resource]]
+id = "review"
+variant = "checklist"
+
+[[resource.item]]
+id = "thoroughness"
+text = "Is it thorough?"
+
+[[schema]]
+id = "review-verdict"
+
+[schema.fields.item]
+schema = "schema:text"
+required = true
+allowed = ["thoroughness"]
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+allowed = ["pass", "fail", "waived"]
+
+[[slot]]
+id = "verdict"
+schema = "schema:review-verdict"
+
+[[slot]]
+id = "verdicts"
+schema = "[schema:review-verdict]"
+
+[[port]]
+id = "verdict-port"
+direction = "output"
+schema = "schema:review-verdict"
+description = "Terminal verdict port."
+
+[sequence.branch]
+sequence = [
+    {{ id = "nested-answer", title = "Nested answer", kind = "prompt", prompt = "Answer the checklist.", output = ["{body_output}"] }},
+]
+
+[sequence.body]
+sequence = [
+    {{ id = "answer", title = "Answer", kind = "sequence", sequence = "sequence:branch" }},
+]
+"#
+        );
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect("fixture trait must decode: it is not itself the shape under test")
+    }
+
+    fn for_each_over_body_item() -> SequenceItem {
+        item_from_toml(
+            "id = \"per-item\"\ntitle = \"Per item\"\nkind = \"for-each\"\nsequence = \"sequence:body\"\n",
+        )
+    }
+
+    #[test]
+    fn for_each_body_writing_scalar_checklist_verdict_via_nested_sequence_is_refused() {
+        let trait_ref = checklist_for_each_fixture_trait("slot:verdict");
+        let error = validate_for_each_no_scalar_checklist_verdict(
+            &trait_ref,
+            &for_each_over_body_item(),
+            "procedure.sequence[0]",
+        )
+        .expect_err(
+            "a scalar verdict write reachable through the nested sequence one level under the \
+             for-each body has no coverage proof and must be refused",
+        );
+        let message = format!("{error}");
+        assert!(
+            message.contains("whole-list replace write"),
+            "error must point at the replace shape: {message}"
+        );
+        assert!(
+            message.contains("resource:review"),
+            "error must name the checklist resource: {message}"
+        );
+    }
+
+    #[test]
+    fn for_each_body_replace_writing_whole_verdict_list_is_allowed() {
+        let trait_ref = checklist_for_each_fixture_trait("slot:verdicts");
+        validate_for_each_no_scalar_checklist_verdict(
+            &trait_ref,
+            &for_each_over_body_item(),
+            "procedure.sequence[0]",
+        )
+        .expect("a whole-list replace write is the coverage-checked shape and must pass");
+    }
+
+    #[test]
+    fn for_each_body_writing_scalar_checklist_verdict_via_output_port_is_refused() {
+        let trait_ref = checklist_for_each_fixture_trait("port:verdict-port");
+        let error = validate_for_each_no_scalar_checklist_verdict(
+            &trait_ref,
+            &for_each_over_body_item(),
+            "procedure.sequence[0]",
+        )
+        .expect_err(
+            "an output port typed with a scalar checklist-verdict schema is the same \
+             one-verdict-per-iteration hole as a scalar slot and must be refused too",
+        );
+        assert!(
+            format!("{error}").contains("whole-list replace write"),
+            "error must point at the replace shape: {error}"
         );
     }
 }
