@@ -1,0 +1,103 @@
+schema-version = "0.2"
+key = "0171"
+title = "hook-style config.ts: define* registrars replace the object-literal defineConfig"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+config.ts today is the object-literal form — one defineConfig({...})
+taking the whole CtxConfig document. The trait surface has since moved
+to hook authoring (default-export function, registrars, callables);
+config follows. Owner rulings 2026-08-11, including the naming
+walk-through so it is not relitigated:
+
+- Prefix is `define*` — unifies with defineTrait/defineVariant (the
+  existing identity-declaration vocabulary), no domain echo.
+  REJECTED: `use*` (React connotation; trait-side use* gates take
+  prebuilt values while these take (key, fields)); `configure*`
+  (nine-letter echo of the domain in a file already named config.ts —
+  the annotateStage word-duplication class); bare nouns (considered,
+  reads like the emitted TOML, but define* wins on declaration
+  signaling and house unification).
+- `defineConfig()` itself is DROPPED — empty ceremony. The contract is
+  "the default export is a function of define* calls"; the compiler
+  owns schemaVersion and anything identity-shaped.
+- Multi-seat roles are an ARRAY argument, not repeated calls:
+  `defineRole("smart", [seatA, seatB])` mirrors the already-typed
+  `RoleAssignmentValue = ProfileAssignment | ProfileAssignment[]`.
+
+Target shape:
+
+    // .ctx/config.ts — evaluated only by `ctx traits config build`
+    import { definePricing, defineRole, defineRun, defineTrait, defineWorktree } from "@ctx-traits/config";
+
+    export default function () {
+        defineRole("master", {
+            harness: "claude",
+            model: "claude-opus-5",
+            budget: { frameSeconds: 1200, maxRetries: 3 },
+        });
+        defineRole("smart", [
+            { harness: "claude", model: "claude-opus-5" },
+            { harness: "codex", model: "gpt-5.2" },
+        ]);
+        defineRun({ frameSeconds: 1200, maxFrames: 1000, maxCostUsd: 25 });
+        defineWorktree({ env: { CARGO_TARGET_DIR: "{cache-slot}" } });
+        definePricing("claude-opus-5", { inputPerMTok: 15, outputPerMTok: 75 });
+        defineTrait("refactor", { /* per-trait defaults */ });
+    }
+
+"""
+scope = """
+## Decisions
+
+- **Registrar set**, one per config table:
+  - singleton (callable once, second call errors — the defineTrait-once
+    rule): defineRun, defineWorktree, defineMerge, defineGit,
+    defineTasks, defineAgentDefaults if any non-role agent table
+    survives review;
+  - keyed (once per key, duplicate key errors): defineRole(key,
+    object|array), definePricing, defineHarness, defineHost,
+    defineRepo, defineTrait(traitId, fields) — sharing the name with the
+    CDK's defineTrait is deliberate (owner ruling: different package,
+    different context; config.ts never imports the CDK).
+- **Evaluation model unchanged**: default-export function evaluated by
+  `ctx traits config build` into the same config.toml with the same
+  `# ctx:generated` marker and transitive-import digest header; load
+  guards untouched. Both authoring forms compile to identical TOML —
+  prove byte-identity with a fixture written both ways.
+- **The object-literal defineConfig({...}) form**: keep working through
+  a deprecation window as legacy (it has zero users in the wild to
+  break, but the docs/README show it) — the README flips to hook-style
+  and defineConfig gains a doc note; removal decision left to a later
+  pass.
+- **Layer validation at authoring time**: defineRepo errors during
+  config build when the target is not the user-global layer (the
+  loader already rejects it at read time; the hook surfaces it where
+  the author is).
+- **Cleanups in passing**: prune the retired modelTier field from the
+  generated CtxConfig surface so completion stops offering it (the
+  loader already warns it is retired); regenerate types.
+
+## Watch
+
+- Registrars collect into an ambient frame like the trait build —
+  reuse the frame discipline (no registrar outside the build, no
+  nested builds) rather than a second mechanism.
+- Do not evaluate config.ts at load time under any path — the
+  compile-once model is the product guarantee.
+- Both forms present in one file (defineConfig plus define* calls) is
+  an error, not a merge.
+
+"""
+validation = """
+## Done when
+
+A fixture config.ts in hook form compiles to TOML byte-identical to its
+object-literal twin; singleton double-call, keyed duplicate-key, mixed
+defineConfig+define*, and repo-table-in-repo-layer each fail with named
+errors; the packages/config gates (build, typecheck incl. tests, lint,
+format, vitest) are green; README shows hook-style; modelTier is gone
+from the generated surface; `just test` green.
+"""
