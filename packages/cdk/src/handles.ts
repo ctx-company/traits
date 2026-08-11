@@ -174,16 +174,23 @@ export type PromptInterpolation<Value = unknown> =
 /** One `output.prompt` interpolation site: a slot or an optional slot read. Lives here for the same anti-cycle reason; output.ts re-exports. */
 export type OutputPromptInterpolation<Value = unknown> = SlotHandle<Value> | OptionalSlotRead<Value>;
 
+/**
+ * `.extend`'s callable shape — an INTERFACE so the mutual
+ * PromptInterpolation/PromptTemplate reference resolves lazily instead of
+ * tripping TS2456 alias-cycle detection in consumers that check the dist
+ * declarations (trait-source tsc without skipLibCheck, tsserver).
+ */
+export interface PromptTemplateExtend<Input = unknown> {
+  (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate<Input>;
+}
+
 export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input> & {
   /**
    * Returns a NEW template with the extension's text appended (newline
    * join); the receiver is unchanged, so a shared base extended by two
    * variants never accumulates. Chainable: `p.extend`a`.extend`b``.
    */
-  readonly extend: (
-    strings: TemplateStringsArray,
-    ...values: readonly PromptInterpolation[]
-  ) => PromptTemplate<Input>;
+  readonly extend: PromptTemplateExtend<Input>;
 };
 export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"output-sink", Value>;
 /**
