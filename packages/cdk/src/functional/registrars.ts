@@ -467,10 +467,22 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   return item;
 }
 
+/** Sugar over `flow.until(condition.all([...]))` — the loop exits once EVERY guard holds. */
+function flowUntilAll(guards: readonly GuardValue[]): void {
+  flowUntil(condition.all(guards));
+}
+
+/** Sugar over `flow.until(condition.any([...]))` — the loop exits once ANY guard holds. */
+function flowUntilAny(guards: readonly GuardValue[]): void {
+  flowUntil(condition.any(guards));
+}
+
 export const flow = {
   loop: flowLoop,
   when: flowWhen,
   until: flowUntil,
+  untilAll: flowUntilAll,
+  untilAny: flowUntilAny,
   match: flowMatch,
   parallel: flowParallel,
   True: FLOW_TRUE,
