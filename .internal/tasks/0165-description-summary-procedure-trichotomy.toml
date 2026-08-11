@@ -1,0 +1,95 @@
+schema-version = "0.2"
+key = "0165"
+title = "one prose per audience: description (agents+users), summary (users), procedure text dies"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+Traits and variants today carry two required agent-visible prose fields
+that overlap almost completely, and neither is what its name says:
+
+- `summary` renders as the model view's FIRST section ("Summary",
+  model_view/compile.rs:36) AND is injected into every frame prompt as the
+  `<description>` tag (frame_prompt.rs:1459) — it is the most
+  agent-visible prose in the system, not a user gloss.
+- `procedure` (the defineTrait/defineVariant string) becomes canonical
+  `[procedure] description`, rendered as a "Description:" line inside the
+  model view's Procedure section (compile_sections.rs:894) — directly
+  above the step list, which since the title-derived-ids sweep is
+  self-describing (titles ARE the names). In practice authors write the
+  same sentence into both fields.
+
+Owner ruling 2026-08-11: one prose per audience. `description` is the
+single text shown to both agents and users; `summary` is for users only;
+the `procedure` text field is ceremony and dies.
+
+"""
+scope = """
+## Contract
+
+| field         | authoring                              | who sees it |
+|---------------|----------------------------------------|-------------|
+| `description` | required on defineTrait/defineVariant  | agents + users: model view's opening section, the frame `<description>`, listings |
+| `summary`     | optional; defaults to `description`    | users only: `ctx traits list`, TUI, skill gallery; never model-rendered |
+| `procedure`   | REMOVED as an authoring key            | — |
+
+Two design decisions folded in (raised by the implementer, accepted):
+
+1. **The model view gets exactly ONE prose slot.** The opening section
+   reads `description`; the Procedure section drops its "Description:"
+   line entirely and keeps only the step list — rendering `description`
+   twice would recreate the duplication this ruling kills.
+2. **`summary` defaults to `description`** so nobody authors two
+   sentences unless the user-facing gloss genuinely differs.
+
+## Surfaces, in dependency order
+
+1. **Canonical schema**: new header field `description` on trait/variant;
+   `summary` stays (user-only semantics); `procedure.description` becomes
+   optional or is removed from the procedure table. Schema-version bump +
+   `ctx traits sdk-generate` regeneration.
+2. **Rust model view + frame prompt**: opening section renders
+   `description` (sanitized, same hostile-content path as today);
+   `format_procedure` loses its Description line; frame_prompt's
+   `<description>` tag reads `description`; `summary` is removed from
+   every model-visible surface. User surfaces (list/TUI/skill export)
+   read `summary` (which equals description unless overridden).
+3. **CDK**: defineTrait/defineVariant accept
+   { name, description, summary?, metadata }; `procedure` key becomes a
+   hard error naming the replacement; the procedural-variant
+   requires-procedure check retargets to `description` (a procedural
+   variant without description is still an error — agents must get SOME
+   prose).
+4. **First-party sweep**: re-author every package off `procedure:` and
+   onto `description` (mostly: today's summary text becomes description;
+   delete procedure lines; write a distinct summary only where the user
+   gloss differs). Full canonical/digest churn — every package needs
+   rebuild, lock update, and owner trust re-approval.
+
+## Watch
+
+- The frame `<description>` and model-view opening must provably show the
+  SAME text after the change — one source, two render sites.
+- Old canonicals (schema-version N-1) in the wild: decide read-side
+  compatibility (map old summary -> description on load) or hard-require
+  rebuild; do not silently render old summaries to agents under the new
+  semantics without deciding.
+- Skill projection/export reads summary today — verify which audience
+  each export surface serves and point it at the right field.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs (2026-08-08 ruling): a fixture trait authored with
+description-only builds, and its model view contains the description
+exactly once (opening section), its Procedure section has no
+"Description:" line, and the compiled frame prompt's `<description>` tag
+carries the same text; a fixture with a distinct summary shows summary on
+the list/user surface and NEVER in the model view or frame prompt; a
+fixture still using `procedure:` fails the CDK build with an error naming
+`description`. sdk-check green after regeneration; all first-party
+packages build with the new fields; `just test` and `just test-full`
+green. Owner trust re-approvals are the owner's step after the sweep.
+"""
