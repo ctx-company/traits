@@ -672,7 +672,12 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
       "useVariant: no variant marked default — chain .default() onto exactly one useVariant(...) call",
     );
   }
-  const name = familyFrame.fields?.name as string | undefined;
+  const rawName = familyFrame.fields?.name as string | undefined;
+  // A family shell's display name lives in package.toml and trait() rejects
+  // `name` on families. The name defineTrait derived the family id from
+  // (it kebab-cases back to the slug) has served its purpose — drop it; a
+  // genuinely different explicit name still reaches trait() and errors.
+  const name = rawName !== undefined && idFromTitle(rawName) === familyFrame.slug ? undefined : rawName;
   const version = familyFrame.fields?.version as SemVer | undefined;
   const summary = familyFrame.fields?.summary as string | undefined;
   const metadata = familyFrame.fields?.metadata as TraitMetadata | undefined;
