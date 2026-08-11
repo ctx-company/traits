@@ -1,0 +1,101 @@
+schema-version = "0.2"
+key = "0163"
+title = "optimize: measurement-gated experiment family — resurrects auto-research under its true name"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+0153 retired auto-research alongside deep-research with the rationale "the
+board + implement loop owns post-research follow-through" — written against
+the package's NAME, not its content. Post-mortem 2026-08-11 (source recovered
+from 8c3873c8~1): auto-research was never research. It was a Karpathy-style
+measurement-gated experiment loop — verify an isolated workbench, capture and
+measure an immutable baseline, then propose-one-experiment -> apply ->
+measure via a caller-supplied command -> DETERMINISTIC keep/discard (typed
+command output beating the threshold decides; discard is a git reset+clean),
+under experiment/wall-time/token/cost/delta caps. Two shapes: a generic
+objective/command/metric loop, and a benchmark optimizer over a code area
+with a reviewer and a noise threshold.
+
+The keep/discard guard is the crown jewel and the most ctx-native idea in the
+old skill: the model never gets to claim an improvement — the measured
+command output decides.
+
+Owner rulings 2026-08-11: resurrect as a NEW family named `optimize` (the
+name should say what it is — the misnomer is what got it deleted); both
+variants day one; caps modernized (see scope). Deliberately NOT folded into
+refactor despite the benchmark variant's kinship: refactor's doctrine is
+behavior-preserving + design-reviewed, optimize's is measurement-gated —
+merging them would force every prompt to caveat which doctrine applies.
+
+"""
+scope = """
+## Decisions
+
+- **New family `optimize`**, hook-style from birth (defineVariant/useVariant,
+  registrar bodies), family layout with responsibility-split declaration
+  modules. Resurrect from the git-preserved source (8c3873c8~1:
+  .ctx/traits/packages/auto-research/*) — port, don't reinvent; the
+  keep/discard guard logic and the immutable-baseline/reset machinery carry
+  over EXACTLY (they are already the right design).
+- **Variants**:
+  - `optimize:experiment` — the generic loop: ports objective,
+    experiment-command, metric-field; propose -> apply -> measure ->
+    deterministic keep/discard -> summary.
+  - `optimize:benchmark` — the code-area optimizer: ports target,
+    benchmark-command, improvement-target; reviewer in the round (typed
+    `reviewVerdict` from @ctx-traits/agents, verbatim-carry rules).
+- **Caps and noise control, modernized (owner ruling)**:
+  - Iteration cap: `max-iterations` per variant loop (the runtime's native
+    bound, parks on exhaustion with a typed park report) — replacing the old
+    hand-rolled max-experiments/max-rounds counters.
+  - **Repeated-measurement noise guard**: a `benchmark-runs` port (N runs
+    per measurement, default e.g. 3) with a deterministic aggregation rule
+    (median; document why) feeding the keep/discard threshold — false
+    positives from run-to-run variance must not produce kept commits. Applies
+    to both variants' measure steps; the old single-run + noise-threshold
+    approach becomes N-run aggregate + threshold.
+  - Wall-time/token/cost caps migrate OFF ports and into the runtime budget
+    machinery (`[variant.X]` runtime.toml + the 0130 per-run budgets) — the
+    old ports predate it. `max-delta` (lines-changed bound) stays a port:
+    it is procedure semantics, not runtime budget.
+- **Commit discipline**: kept candidates commit with the two-step stage
+  recipe; every kept commit's message cites the measured before/after values
+  and run count — the provenance IS the point.
+- **Justfile**: `optimize objective ...` and `optimize-benchmark target ...`
+  recipes, worktree + no --merge (0151 posture), landing via
+  `ctx traits merge`.
+- **Cross-reference, not fold**: refactor's docs point perf-motivated work at
+  optimize:benchmark; optimize's docs point behavior-preserving boundary work
+  at refactor.
+
+"""
+validation = """
+## Watch
+
+- The deterministic guard must stay a COMMAND/project step chain deciding
+  keep vs discard from typed measured output — never a model-claimed
+  improvement. Any port of the old logic that lets a prompt step make the
+  keep decision is a defect.
+- Baseline immutability: the captured baseline ref must be provably
+  unchanged across the whole run (the old capture-initial-ref /
+  fixed-reset-ref machinery); a drifted baseline invalidates every
+  comparison.
+- Scratch-fixture proofs only (2026-08-08 ruling): a fake project with a
+  deterministic fake benchmark script proves keep-on-improvement,
+  discard-on-regression, discard-on-noise (N runs straddling the
+  threshold), iteration-cap park, and baseline immutability.
+- Multiple benchmark runs multiply wall time — the aggregation step must
+  surface per-run values in evidence so a parked/kept decision is auditable.
+
+## Done when
+
+`ctx traits run optimize:experiment` and `optimize:benchmark` drive the loop
+end to end in a worktree against scratch fixtures: improvements are kept and
+committed with measured provenance, regressions and noise-straddling
+candidates are discarded via reset, exhaustion parks with a typed report;
+benchmark-runs > 1 provably aggregates before the threshold; caps live in
+runtime budgets (not ports) except max-delta; both Justfile recipes exist;
+deep-research/auto-research remain deleted.
+"""
