@@ -1,9 +1,9 @@
 import { DEFAULT_VARIANT_DOCTRINE, INTEGRITY_DOCTRINE } from "@ctx-traits/agents";
 import { condition, defineVariant, flow, input, intent, step, useIntent, useResource } from "@ctx-traits/cdk";
-import { agreedDesign, commitMessage, commitOutput, commitReport, gitStatus, refactorFrame, stageOutput, survey, target, unstageOutput, workSummary } from "../data.ts";
-import { smart1Role, smart2Role, scribe, worker } from "../agent.ts";
-import { reviewVerdictSchema, verdictSlot } from "../schema.ts";
-import { architectureDialect, smellCatalog } from "../resource.ts";
+import { agreedDesign, commitMessage, commitOutput, commitReport, gitStatus, refactorFrame, stageOutput, survey, target, unstageOutput, workSummary } from "../../data.ts";
+import { smart1Role, smart2Role, scribe, worker } from "../../agent.ts";
+import { reviewVerdictSchema, verdictSlot } from "../../schema.ts";
+import { architectureDialect, smellCatalog } from "../../resource.ts";
 
 const smart1 = smart1Role("Strong analysis model: surveys the target against the standards, designs the boundary, and reviews in the refinement loop.");
 const smart2 = smart2Role("Strong review model: independently reviews the refactored state in the refinement loop.");

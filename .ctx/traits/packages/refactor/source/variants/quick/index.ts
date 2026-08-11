@@ -1,8 +1,8 @@
 import { INTEGRITY_DOCTRINE, QUICK_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import { condition, defineVariant, flow, input, intent, step, useIntent, useResource } from "@ctx-traits/cdk";
 
-import { architectureDialect } from "../resource.ts";
-import { scribe, smart1, worker } from "./quick/agent.ts";
+import { architectureDialect } from "../../resource.ts";
+import { scribe, smart1, worker } from "./agent.ts";
 import {
     checklist,
     commitMessage,
@@ -13,8 +13,8 @@ import {
     target,
     unstageOutput,
     workSummary,
-} from "./quick/data.ts";
-import { verdict } from "./quick/schema.ts";
+} from "./data.ts";
+import { verdict } from "./schema.ts";
 
 const checklistText = input.prompt`
                     Turn ${target} into an actionable refactoring checklist.
@@ -86,3 +86,4 @@ export default function () {
 
     return { commitReport };
 }
+

@@ -1,4 +1,5 @@
-import { port, slot } from "@ctx-traits/cdk";
+import { deviationReportSchema } from "@ctx-traits/agents";
+import { port, slot, schema } from "@ctx-traits/cdk";
 
 export const target = port.input.text({
     id: "target",
@@ -21,11 +22,19 @@ export const agreedDesign = slot.text({
     id: "agreed-design",
     description: "The design, complete enough to implement from: boundaries, types, migration steps, validation plan.",
 });
+
 export const workSummary = slot.text({
     id: "work-summary",
     description: "Worker's report of the refactored state; revised in place after each refinement pass.",
     hint: "What changed (files), how behavior was preserved, gate results, open concerns.",
 });
+
+export const workDeviationReport = slot({
+    id: "deviation-report",
+    schema: schema.list(deviationReportSchema),
+    description: "Every proposed departure from the verbatim agreed design, including a rejected improvement the worker considered but did not make.",
+});
+
 export const commitMessage = slot.text({
     id: "commit-message",
     description: "Refactor commit message; injected directly into the git commit command step.",

@@ -1,16 +1,12 @@
 import { defineTrait, useVariant } from "@ctx-traits/cdk";
-
-import defaultVariant from "./variants/default.ts";
-import direct from "./variants/direct/index.ts";
-import quick from "./variants/quick.ts";
-import smart from "./variants/smart.ts";
-import strict from "./variants/strict.ts";
+import { default as variants } from "./variants/index.ts";
 
 export default function () {
-    defineTrait("refactor", { version: "0.10.0" });
-    useVariant(direct);
-    useVariant(defaultVariant).default();
-    useVariant(quick);
-    useVariant(smart);
-    useVariant(strict);
+    defineTrait("refactor", { version: "0.11.0" });
+
+    useVariant(variants.base).default();
+    useVariant(variants.direct);
+    useVariant(variants.quick);
+    useVariant(variants.smart);
+    useVariant(variants.strict);
 }

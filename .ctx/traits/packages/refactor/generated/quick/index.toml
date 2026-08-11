@@ -1,6 +1,6 @@
 id = "refactor"
 schema-version = "0.3"
-version = "0.10.0"
+version = "0.11.0"
 name = "Refactor (Quick)"
 summary = "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit."
 variant = "quick"

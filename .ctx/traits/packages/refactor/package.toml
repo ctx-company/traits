@@ -1,6 +1,6 @@
 [package]
 id = "refactor"
-version = "0.10.0"
+version = "0.11.0"
 name = "Refactor"
 status = "ready"
 
@@ -9,13 +9,13 @@ default = "default"
 
 [family.variant]
 
-[family.variant.direct]
-path = "generated/direct/index.toml"
-aliases = ["refactor-direct"]
-
 [family.variant.default]
 path = "generated/default/index.toml"
 aliases = ["refactor-default"]
+
+[family.variant.direct]
+path = "generated/direct/index.toml"
+aliases = ["refactor-direct"]
 
 [family.variant.quick]
 path = "generated/quick/index.toml"

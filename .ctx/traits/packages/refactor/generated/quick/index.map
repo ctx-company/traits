@@ -25,27 +25,27 @@
     "end": 3
   },
   "prompt:apply-fixes": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 35,
     "end": 35
   },
   "prompt:checklist": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 19,
     "end": 19
   },
   "prompt:implement": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 23,
     "end": 23
   },
   "prompt:review": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 27,
     "end": 27
   },
   "prompt:summarization": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 39,
     "end": 39
   },
@@ -70,52 +70,52 @@
     "end": 4
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-commit": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 84,
     "end": 84
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-stage": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 82,
     "end": 82
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/git-unstage-runtime": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 83,
     "end": 83
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/summarization": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 79,
     "end": 79
   },
   "sequence:procedure/apply-fixes": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 75,
     "end": 75
   },
   "sequence:procedure/check-git-status": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 77,
     "end": 77
   },
   "sequence:procedure/checklist": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 67,
     "end": 67
   },
   "sequence:procedure/implement": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 68,
     "end": 68
   },
   "sequence:procedure/maybe-commit": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 78,
     "end": 78
   },
   "sequence:procedure/review": {
-    "file": ".ctx/traits/packages/refactor/source/variants/quick.ts",
+    "file": ".ctx/traits/packages/refactor/source/variants/quick/index.ts",
     "start": 69,
     "end": 69
   },
