@@ -4,9 +4,10 @@ import {
   instructionOutputContent,
   isInstructionOutputHandle,
   metaOf,
+  withHiddenField,
   withMeta,
 } from "./meta.js";
-import { collectMany, mergeDeclarationSets } from "./normalize.js";
+import { collectMany, mergeDeclarationSets, uniqueInOrder } from "./normalize.js";
 import type { PromptInterpolation } from "./prompt.js";
 import { promptTemplate } from "./prompt.js";
 import { refText } from "./ref.js";
@@ -121,10 +122,18 @@ function resolveOutputPromptRef(
   return { ref, optional: false, slotValue: value as SlotHandle };
 }
 
-function buildOutputTemplate(
+interface OutputTemplateParts {
+  readonly text: string;
+  readonly refs: readonly string[];
+  readonly optionalRefs: readonly string[];
+  readonly slotByRef: ReadonlyMap<string, SlotHandle>;
+  readonly declarations: ReturnType<typeof collectMany>;
+}
+
+function outputTemplateParts(
   strings: TemplateStringsArray,
   values: readonly OutputPromptInterpolation[],
-): OutputTemplateHandle {
+): OutputTemplateParts {
   let text = strings[0] ?? "";
   const refs: string[] = [];
   const optionalRefs: string[] = [];
@@ -143,21 +152,60 @@ function buildOutputTemplate(
     // the step read its own not-yet-produced output.
     text += `${ref}${strings[index + 1] ?? ""}`;
   }
-  if (refs.length === 0) {
+  return { text, refs, optionalRefs, slotByRef, declarations: collectMany(values) };
+}
+
+/** Merges a base output-template's parts with an extension's, per the same required-beats-optional rule `prompt.ts`'s `composeTemplateMeta` applies. */
+function composeOutputTemplateParts(base: OutputTemplateParts, extension: OutputTemplateParts): OutputTemplateParts {
+  const refs = uniqueInOrder([...base.refs, ...extension.refs]);
+  const requiredRefs = new Set([
+    ...base.refs.filter((ref) => !base.optionalRefs.includes(ref)),
+    ...extension.refs.filter((ref) => !extension.optionalRefs.includes(ref)),
+  ]);
+  const optionalRefs = uniqueInOrder([...base.optionalRefs, ...extension.optionalRefs])
+    .filter((ref) => !requiredRefs.has(ref));
+  const slotByRef = new Map([...base.slotByRef, ...extension.slotByRef]);
+  return {
+    text: `${base.text}\n${extension.text}`,
+    refs,
+    optionalRefs,
+    slotByRef,
+    declarations: mergeDeclarationSets(base.declarations, extension.declarations),
+  };
+}
+
+function finishOutputTemplate(parts: OutputTemplateParts): OutputTemplateHandle {
+  if (parts.refs.length === 0) {
     throw new Error(
       "output.prompt: expected at least one interpolated slot — a template with zero interpolations has no output contract",
     );
   }
-  return withMeta({}, {
+  const template = withMeta({}, {
     kind: "output-template",
     outputTemplate: {
-      text,
-      refs,
-      ...(optionalRefs.length === 0 ? {} : { optionalRefs }),
-      slots: refs.map((ref) => slotByRef.get(ref)),
+      text: parts.text,
+      refs: parts.refs,
+      ...(parts.optionalRefs.length === 0 ? {} : { optionalRefs: parts.optionalRefs }),
+      slots: parts.refs.map((ref) => parts.slotByRef.get(ref)),
     },
-    declarations: collectMany(values),
+    declarations: parts.declarations,
   }) as OutputTemplateHandle;
+  const extend = (
+    strings: TemplateStringsArray,
+    ...values: readonly OutputPromptInterpolation[]
+  ): OutputTemplateHandle =>
+    // The zero-interpolation throw applies to the FULL composed contract,
+    // not the extension part in isolation — a prose-only doctrine
+    // extension is legal because the base already carries the contract.
+    finishOutputTemplate(composeOutputTemplateParts(parts, outputTemplateParts(strings, values)));
+  return withHiddenField(template, "extend", extend);
+}
+
+function buildOutputTemplate(
+  strings: TemplateStringsArray,
+  values: readonly OutputPromptInterpolation[],
+): OutputTemplateHandle {
+  return finishOutputTemplate(outputTemplateParts(strings, values));
 }
 
 /** Sequence-step output authoring markers. @see {@link OutputFunction} */

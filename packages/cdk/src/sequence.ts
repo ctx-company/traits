@@ -1886,7 +1886,7 @@ function mergePromptInstructionOutputs(
     optionalRefs: uniqueInOrder([...(meta.optionalRefs ?? []), ...render.optionalRefs]),
     declaration: { text },
     ...(meta.declarations === undefined ? {} : { declarations: meta.declarations }),
-  }) as PromptTemplate;
+  }) as unknown as PromptTemplate;
 }
 /**
  * Merges every `output.prompt` output-template in a step's `output:` list

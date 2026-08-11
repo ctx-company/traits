@@ -13,6 +13,7 @@ import {
   planner,
   port,
   procedure,
+  prompt,
   resolveTraitFamily,
   resource,
   reviewer,
@@ -988,6 +989,205 @@ describe("input.prompt / output.text / output.of (0045)", () => {
     expect(warnings).toContainEqual(
       expect.objectContaining({ code: "cdk-duplicate-input", fieldPath: "sequence.input" }),
     );
+  });
+});
+
+describe("prompt template composition (0166)", () => {
+  it("chains .extend, newline-joining text in order and merging refs/declarations", () => {
+    const doctrine = slot.text("compose-doctrine");
+    const rules = slot.text("compose-rules");
+    const base = input.prompt`Base prose.`;
+    const chained = base.extend`Doctrine: ${doctrine}.`.extend`Rules: ${rules}.`;
+    const step = sequence.prompt("compose-chain", { input: chained, output: slot.text("compose-chain-out") });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-chain-fixture",
+        name: "Compose Chain Fixture",
+        description: "extend chain fixture.",
+        procedure: procedure({ description: "Chain.", sequence: [step] }),
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+
+    expect(draft.prompt?.["compose-chain"]?.text).toBe(
+      "Base prose.\nDoctrine: {slot:compose-doctrine}.\nRules: {slot:compose-rules}.",
+    );
+    expect(draft.prompt?.["compose-chain"]?.input).toEqual(["slot:compose-doctrine", "slot:compose-rules"]);
+  });
+
+  it("keeps the receiver unchanged and does not leak refs between two divergent extensions of a shared base", () => {
+    const base = input.prompt`Shared base.`;
+    const left = slot.text("compose-left");
+    const right = slot.text("compose-right");
+    const extendedLeft = base.extend`Left: ${left}.`;
+    const extendedRight = base.extend`Right: ${right}.`;
+
+    expect(base.text).toBe("Shared base.");
+    expect(extendedLeft.text).toBe("Shared base.\nLeft: {slot:compose-left}.");
+    expect(extendedRight.text).toBe("Shared base.\nRight: {slot:compose-right}.");
+  });
+
+  it("nests a tagged-form template's rendered text at the interpolation site with merged refs", () => {
+    const inner = slot.text("compose-inner");
+    const outer = slot.text("compose-outer");
+    const nested = input.prompt`Inner: ${input.prompt`ref ${inner}`} then outer ${outer}.`;
+    const step = sequence.prompt("compose-nest", { input: nested, output: slot.text("compose-nest-out") });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-nest-fixture",
+        name: "Compose Nest Fixture",
+        description: "nested template fixture.",
+        procedure: procedure({ description: "Nest.", sequence: [step] }),
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+
+    expect(draft.prompt?.["compose-nest"]?.text).toBe(
+      "Inner: ref {slot:compose-inner} then outer {slot:compose-outer}.",
+    );
+    expect(draft.prompt?.["compose-nest"]?.input).toEqual(["slot:compose-inner", "slot:compose-outer"]);
+  });
+
+  it("nests a bound-text-form template's rendered text the same way", () => {
+    const bound = slot.text("compose-bound-inner");
+    const innerTemplate = input.prompt("doctrine {name}", { name: bound });
+    const nested = input.prompt`Wrap: ${innerTemplate} done.`;
+
+    expect(nested.text).toBe("Wrap: doctrine {slot:compose-bound-inner} done.");
+  });
+
+  it("lowers ${slot.optional()} inside an inner template and inside an .extend part to an optional step input", () => {
+    const innerOptional = slot.text("compose-inner-optional");
+    const extendOptional = slot.text("compose-extend-optional");
+    const nested = input.prompt`Body ${input.prompt`ref ${innerOptional.optional()}`}.`
+      .extend`More ${extendOptional.optional()}.`;
+    const step = sequence.prompt("compose-optional", { input: nested, output: slot.text("compose-optional-out") });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-optional-fixture",
+        name: "Compose Optional Fixture",
+        description: "optional composition fixture.",
+        procedure: procedure({ description: "Optional.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual([
+      { slot: "slot:compose-inner-optional", optional: true },
+      { slot: "slot:compose-extend-optional", optional: true },
+    ]);
+  });
+
+  it("required-beats-optional: a ref required in one part and optional in another stays required after composition", () => {
+    const shared = slot.text("compose-required-wins");
+    const base = input.prompt`Required here ${shared}.`;
+    const composed = base.extend`Optional here ${shared.optional()}.`;
+    const step = sequence.prompt("compose-required-wins", {
+      input: composed,
+      output: slot.text("compose-required-out"),
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-required-wins-fixture",
+        name: "Compose Required Wins Fixture",
+        description: "required-beats-optional fixture.",
+        procedure: procedure({ description: "Wins.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:compose-required-wins"]);
+  });
+
+  it("extending a bound-text base does not re-scan its already-rendered text for stray {placeholder} names", () => {
+    const bound = slot.text("compose-stray-bound");
+    const extendRef = slot.text("compose-stray-extend");
+    const base = input.prompt("has {stray} and {bound}.", { bound });
+    const extended = base.extend`Extra ${extendRef}.`;
+
+    expect(extended.text).toBe("has {stray} and {slot:compose-stray-bound}.\nExtra {slot:compose-stray-extend}.");
+  });
+
+  it("keeps every text occurrence of a ref interpolated in two parts, deduping only the refs list", () => {
+    const dup = slot.text("compose-dup");
+    const composed = input.prompt`First ${dup}.`.extend`Second ${dup}.`;
+    const step = sequence.prompt("compose-dup-refs", { input: composed, output: slot.text("compose-dup-out") });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-dup-fixture",
+        name: "Compose Dup Fixture",
+        description: "duplicate ref fixture.",
+        procedure: procedure({ description: "Dup.", sequence: [step] }),
+      }),
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+
+    expect(draft.prompt?.["compose-dup-refs"]?.text).toBe("First {slot:compose-dup}.\nSecond {slot:compose-dup}.");
+    expect(draft.prompt?.["compose-dup-refs"]?.input).toEqual(["slot:compose-dup"]);
+  });
+
+  it("a slot declared only inside a nested template still auto-declares on the consuming trait", () => {
+    const onlyInner = slot.text("compose-only-inner");
+    const nested = input.prompt`Outer wraps ${input.prompt`inner ${onlyInner}`}.`;
+    const step = sequence.prompt("compose-declare", { input: nested, output: slot.text("compose-declare-out") });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-declare-fixture",
+        name: "Compose Declare Fixture",
+        description: "auto-declare fixture.",
+        procedure: procedure({ description: "Declare.", sequence: [step] }),
+      }),
+    ) as { readonly slot?: readonly { readonly id: string; }[]; };
+
+    expect(draft.slot?.some((entry) => entry.id === "compose-only-inner")).toBe(true);
+  });
+
+  it("a prompt.resource template throws a clear message on both .extend and nesting", () => {
+    const resourceTemplate = prompt.resource(resource.inline("compose-resource", "Resource body."));
+
+    expect(() => resourceTemplate.extend`more`).toThrow(/cannot be extended/);
+    expect(() => input.prompt`Wrap ${resourceTemplate}.`).toThrow(/rendered text/);
+  });
+
+  it("output.prompt's .extend merges the output contract, lowers an optional slot, and accepts a prose-only extension", () => {
+    const verdict = slot.text("compose-out-verdict");
+    const extra = slot.text("compose-out-extra");
+    const contract = output.prompt`State your verdict in ${verdict}.`
+      .extend`Also note ${extra.optional()} if relevant.`
+      .extend`Be concise.`;
+    const step = sequence.prompt("compose-output", {
+      input: input.prompt`Review the change.`,
+      output: contract,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "compose-output-fixture",
+        name: "Compose Output Fixture",
+        description: "output.prompt composition fixture.",
+        procedure: procedure({ description: "Output.", sequence: [step] }),
+      }),
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; };
+      readonly prompt?: Record<string, { readonly text?: string; }>;
+    };
+
+    expect(draft.procedure?.sequence?.[0]?.output).toEqual([
+      "slot:compose-out-verdict",
+      { slot: "slot:compose-out-extra", optional: true },
+    ]);
+    expect(draft.prompt?.["compose-output"]?.text).toBe(
+      "Review the change.\n\nState your verdict in slot:compose-out-verdict.\nAlso note slot:compose-out-extra "
+        + "if relevant.\nBe concise.",
+    );
+  });
+
+  it("keeps extend non-enumerable so a composed template's own surface stays { text } only", () => {
+    const base = input.prompt`Base.`;
+    const extended = base.extend`More.`;
+
+    expect(Object.keys(base)).toEqual(["text"]);
+    expect(Object.keys(extended)).toEqual(["text"]);
+  });
+
+  it("still throws at interpolation time for an unattached output.text handle used inside an .extend part", () => {
+    const summary = output.text`A one-paragraph summary.`;
+    const base = input.prompt`Base prose.`;
+    expect(() => base.extend`Given ${summary}, write a title.`).toThrow(/before the step/);
   });
 });
 

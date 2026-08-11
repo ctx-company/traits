@@ -9,8 +9,17 @@ import type {
   ResourceHandle,
   SlotHandle,
 } from "./handles.js";
-import { metaOf, withDeclaration, withMeta } from "./meta.js";
-import { collectMany, compact, normalizeRefList, unique, validateSlug } from "./normalize.js";
+import type { DeclKind } from "./meta.js";
+import { metaOf, withDeclaration, withHiddenField, withMeta } from "./meta.js";
+import {
+  collectMany,
+  compact,
+  mergeDeclarationSets,
+  normalizeRefList,
+  unique,
+  uniqueInOrder,
+  validateSlug,
+} from "./normalize.js";
 
 export interface PromptFields {
   readonly id: string;
@@ -27,7 +36,8 @@ export type PromptInterpolation<Value = unknown> =
   | SlotHandle<Value>
   | ResourceHandle<Value>
   | InstructionOutputHandle<Value>
-  | OptionalSlotRead<Value>;
+  | OptionalSlotRead<Value>
+  | PromptTemplate<Value>;
 
 /** `prompt.resource(...)`'s accepted shape: a bare resource ref, or a resource plus its own extra declared inputs. */
 export type PromptResourceValue = ResourceHandle | RefHandle | {
@@ -140,6 +150,51 @@ function promptOf(fields: PromptFields): PromptHandle {
   return withDeclaration("prompt", `prompt:${fields.id}`, declaration, {}, { declarations, refs });
 }
 
+/** One template's mergeable facets — shared shape between a literal/interpolated span and a whole template. */
+interface TemplateFacets {
+  readonly text: string;
+  readonly refs: readonly string[];
+  readonly optionalRefs: readonly string[];
+  readonly declarations: Partial<Record<DeclKind, readonly JsonObject[]>>;
+}
+
+/**
+ * Merges ordered template facets: `refs` union in first-appearance order,
+ * `optionalRefs` union with required-beats-optional on collision (a ref
+ * required in ANY part is never optional in the result), `declarations`
+ * concatenation via `mergeDeclarationSets`. Shared by `.extend`, nested
+ * template interpolation, and `output.prompt` composition — the substance
+ * of 0166.
+ */
+function composeTemplateMeta(parts: readonly TemplateFacets[], joiner: string): TemplateFacets {
+  const refs = uniqueInOrder(parts.flatMap((part) => part.refs));
+  const requiredRefs = new Set(parts.flatMap((part) => part.refs.filter((ref) => !part.optionalRefs.includes(ref))));
+  const optionalRefs = uniqueInOrder(parts.flatMap((part) => part.optionalRefs)).filter((ref) =>
+    !requiredRefs.has(ref)
+  );
+  return {
+    text: parts.map((part) => part.text).join(joiner),
+    refs,
+    optionalRefs,
+    declarations: mergeDeclarationSets(...parts.map((part) => part.declarations)),
+  };
+}
+
+/** A template's facets read off its meta — text-less (`prompt.resource`) templates throw at the call site named by `fieldPath`. */
+function templateFacets(value: PromptTemplate, fieldPath: string): TemplateFacets {
+  const meta = metaOf(value);
+  const text = (value as unknown as { readonly text?: unknown; }).text;
+  if (typeof text !== "string") {
+    throw new Error(`${fieldPath}: expected a prompt template with rendered text, got a resource-backed template`);
+  }
+  return {
+    text,
+    refs: meta?.refs ?? [],
+    optionalRefs: meta?.optionalRefs ?? [],
+    declarations: meta?.declarations ?? {},
+  };
+}
+
 /**
  * Builds a `PromptTemplate` from a tagged template literal — the shared
  * builder behind `input.prompt` (input.ts re-exports this under that name
@@ -150,31 +205,33 @@ export function promptTemplate(
   strings: TemplateStringsArray,
   values: readonly PromptInterpolation[],
 ): PromptTemplate {
-  let text = strings[0] ?? "";
-  const refs: string[] = [];
-  const optionalRefs: string[] = [];
+  const parts: TemplateFacets[] = [{ text: strings[0] ?? "", refs: [], optionalRefs: [], declarations: {} }];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (value === undefined) throw new Error(`input.prompt interpolation ${index}: expected a reference`);
+    const literal = strings[index + 1] ?? "";
+    if (metaOf(value)?.kind === "template") {
+      const inner = templateFacets(value as PromptTemplate, `input.prompt interpolation ${index}`);
+      parts.push({ ...inner, text: inner.text + literal });
+      continue;
+    }
     const { ref, optional } = resolvePromptRef(value, `input.prompt interpolation ${index}`);
-    refs.push(ref);
-    // `${slot.optional()}` lowers to an optional step input (P447), same as
-    // an optional include: the runtime renders `[ref]` against a frame with
-    // no element for it — a reference to something not present, never an
-    // unresolved token — so round-1 loop steps can reference later rounds'
-    // slots in place.
-    if (optional && !optionalRefs.includes(ref)) optionalRefs.push(ref);
-    text += `{${ref}}${strings[index + 1] ?? ""}`;
+    parts.push({
+      text: `{${ref}}${literal}`,
+      refs: [ref],
+      // `${slot.optional()}` lowers to an optional step input (P447), same
+      // as an optional include: the runtime renders `[ref]` against a frame
+      // with no element for it — a reference to something not present,
+      // never an unresolved token — so round-1 loop steps can reference
+      // later rounds' slots in place.
+      optionalRefs: optional ? [ref] : [],
+      // Unwrap `${slot.optional()}` markers so a slot whose only appearance
+      // is an optional interpolation still carries its declaration.
+      declarations: collectMany([isOptionalSlotRead(value) ? value.slot : value]),
+    });
   }
-  return withMeta({ text }, {
-    kind: "template",
-    refs: [...new Set(refs)],
-    ...(optionalRefs.length === 0 ? {} : { optionalRefs }),
-    declaration: { text },
-    // Unwrap `${slot.optional()}` markers so a slot whose only appearance
-    // is an optional interpolation still carries its declaration.
-    declarations: collectMany(values.map((value) => (isOptionalSlotRead(value) ? value.slot : value))),
-  });
+  const composed = composeTemplateMeta(parts, "");
+  return buildPromptTemplate(composed);
 }
 
 /**
@@ -196,13 +253,29 @@ export function promptBoundText(text: string, bindings: Readonly<Record<string, 
     /\{([A-Za-z][A-Za-z0-9-]*)\}/g,
     (placeholder, name: string) => refs[name] === undefined ? placeholder : `{${refs[name]}}`,
   );
-  return withMeta({ text: rendered }, {
-    kind: "template",
+  return buildPromptTemplate({
+    text: rendered,
     refs: [...new Set(Object.values(refs))],
-    ...(optionalRefs.length === 0 ? {} : { optionalRefs }),
-    declaration: { text: rendered },
+    optionalRefs,
     declarations: collectMany(values.map((value) => (isOptionalSlotRead(value) ? value.slot : value))),
   });
+}
+
+/** Attaches the hidden, non-enumerable `.extend` member every composable `PromptTemplate` carries. */
+function buildPromptTemplate(facets: TemplateFacets): PromptTemplate {
+  const template = withMeta<{ text: string; }, "template", unknown, "prompt-template">({ text: facets.text }, {
+    kind: "template",
+    refs: [...new Set(facets.refs)],
+    ...(facets.optionalRefs.length === 0 ? {} : { optionalRefs: [...new Set(facets.optionalRefs)] }),
+    declaration: { text: facets.text },
+    declarations: facets.declarations,
+  });
+  const extend = (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate => {
+    const extension = promptTemplate(strings, values);
+    const composed = composeTemplateMeta([facets, templateFacets(extension, "prompt.extend")], "\n");
+    return buildPromptTemplate(composed);
+  };
+  return withHiddenField(template, "extend", extend);
 }
 
 /**
@@ -258,12 +331,21 @@ function promptResource(value: PromptResourceValue): PromptTemplate {
     : undefined;
   const resourceRef = resourceSourceRef(resource, "prompt.resource.resource");
   const refs = input === undefined ? [resourceRef] : [resourceRef, ...(normalizeRefList(input) ?? [])];
-  return withMeta({ source: resourceRef, input: normalizeRefList(input) }, {
+  const template = withMeta<
+    { source: string; input: string[] | undefined; },
+    "template",
+    unknown,
+    "prompt-template"
+  >({ source: resourceRef, input: normalizeRefList(input) }, {
     kind: "template",
     refs: unique(refs),
     declaration: { source: resourceRef },
     declarations: collectMany([resource, input]),
   });
+  const throwUnextendable = (): never => {
+    throw new Error("prompt.resource templates cannot be extended — the body is resource content");
+  };
+  return withHiddenField(template, "extend", throwUnextendable);
 }
 
 function promptTextValue(value: PromptFields["text"]): string | undefined {

@@ -1,6 +1,8 @@
 import type { ForEachRegistrarOptions } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, RefKind } from "./generated.js";
 import type { CdkObject } from "./meta.js";
+import type { OutputPromptInterpolation } from "./output.js";
+import type { PromptInterpolation } from "./prompt.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
 
 declare const HANDLE_BRAND: unique symbol;
@@ -155,7 +157,17 @@ export type TraitHandle = Handle<"trait">;
  * `Handle` — a family is never referenced by ref the way a declared item is.
  */
 export type TraitFamilyHandle = CdkHandle<"trait-family">;
-export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input>;
+export type PromptTemplate<Input = unknown> = CdkHandle<"prompt-template", Input> & {
+  /**
+   * Returns a NEW template with the extension's text appended (newline
+   * join); the receiver is unchanged, so a shared base extended by two
+   * variants never accumulates. Chainable: `p.extend`a`.extend`b``.
+   */
+  readonly extend: (
+    strings: TemplateStringsArray,
+    ...values: readonly PromptInterpolation[]
+  ) => PromptTemplate<Input>;
+};
 export type OutputSinkHandle<Value = unknown> = SlotHandle<Value> | CdkHandle<"output-sink", Value>;
 /**
  * An `output.text`/`output.of(schema)` instruction-output: carries the
@@ -174,7 +186,13 @@ export type InstructionOutputHandle<Value = unknown> = CdkHandle<"instruction-ou
  * mirror of `input.prompt`. Accepted anywhere a step's `output:` accepts a
  * slot handle; expands into ordinary output-sink entries at lowering.
  */
-export type OutputTemplateHandle = CdkHandle<"output-template">;
+export type OutputTemplateHandle = CdkHandle<"output-template"> & {
+  /** Same composition contract as `PromptTemplate.extend`, merging the output contract (`refs`/`optionalRefs`/`slots`). */
+  readonly extend: (
+    strings: TemplateStringsArray,
+    ...values: readonly OutputPromptInterpolation[]
+  ) => OutputTemplateHandle;
+};
 /** A typed reference to a declared `[[session]]`, returned by `session(id, opts)`. */
 export type SessionHandle = Handle<"session">;
 /** A typed reference to a declared `[[signal]]`, returned by `signal(fields)`. */
