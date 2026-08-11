@@ -315,7 +315,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     ).toThrow(/defineTrait: called more than once/);
   });
 
-  it("stage(...).step registers a prompt or command step from the stage's own fields", () => {
+  it("a stage is callable: invoking it registers its prompt or command step", () => {
     const target = slot.text("stage-target");
     const notes = slot.text("stage-notes");
     const probe = slot.text("stage-probe");
@@ -328,10 +328,11 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       input: input.command`git status --porcelain`,
       output: probe,
     });
+    expect(surveyStage.output).toBe(notes);
     const envelope = evaluateTraitFunction(() => {
       defineTrait("stage-step-shape", { procedure: "One-line stage steps." });
-      surveyStage.step("Survey the target");
-      statusStage.step("Check working tree status");
+      surveyStage("Survey the target");
+      statusStage("Check working tree status");
     });
     const draft = envelope.draft as {
       readonly procedure?: {
