@@ -1,0 +1,88 @@
+schema-version = "0.2"
+key = "0167"
+title = "produced-checklist schema: a builtin for model-generated item lists with coverage semantics"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+The landed typed-checklist mechanism (CDK `checklist(...)` ->
+ChecklistHandle with a generated per-item verdict schema, pass/fail/
+waived statuses, Rust coverage validation in
+procedure/runtime/schema_validation.rs) covers only AUTHOR-DECLARED
+checklists: items fixed at build time, closed id set, reviewer answers
+them. It cannot type a MODEL-PRODUCED checklist — and the refactor
+family now visibly wants one: quick/guided generate their checklist at
+runtime into the `plan` TEXT slot, so item tracking, per-item status,
+and "was every item actually done" all live in prose that only another
+model can read.
+
+Owner direction 2026-08-11: close the gap, and put the semantics in
+RUST, not CDK-only sugar — canonical validation is exported to other
+consumers via wasm-core, and a checklist that exists only in the TS
+authoring layer is invisible exactly where enforcement matters.
+
+"""
+scope = """
+## Decisions
+
+- **Rust owns the form and the semantics; CDK owns the authoring
+  surface.** Concretely:
+  1. A checklist schema form in modules/core (either a new `Builtin`
+     alongside Text/Boolean/Number/Integer/Any, or a structured form
+     beside List/Union/Ref carrying the item shape) — the semantic
+     marker the runtime needs to know a slot carries coverage
+     semantics. Canonical schema surface + sdk-generate + wasm-core
+     export all pick it up.
+  2. Item shape: ids minted at PRODUCTION time (stable across rounds,
+     like blocker ids), text, optional detail, status from a closed
+     set (at minimum todo/done, waived if the declared mechanism's
+     vocabulary is reused), optional evidence.
+  3. Coverage semantics generalize the declared-checklist engine
+     rather than duplicating it: one Rust coverage core serves both
+     "items declared at build time" and "items produced at run time" —
+     the produced case checks that every item present in the latest
+     accepted list is answered/updated exactly once per round, replace
+     is the whole-list write shape, append refused or defined
+     explicitly. Task 0126 (for-each coverage) is the SAME engine's
+     open edge: absorb or explicitly sequence with it, do not build a
+     second coverage path.
+  4. CDK: `schema.checklist(...)` (or equivalent) producing the form;
+     slots typed with it get field-ref/count support so loop exits can
+     read `condition.count(plan).where("status", "done")`-style guards
+     instead of prose; `${slot.optional()}`/output-template
+     interpolation must work unchanged.
+- **Motivating consumer, not in this task's scope to land**: refactor's
+  `plan` slot becoming checklist-typed for quick/guided (complex's
+  design prose likely stays text) — the owner converts the package by
+  hand after the feature ships; this task does NOT touch
+  .ctx/traits/packages/*.
+
+## Watch
+
+- Do not silently change the declared-checklist verdict semantics while
+  generalizing the engine — its pass/fail/waived + closed-id contract
+  is landed behavior with consumers.
+- Model-view rendering of a checklist-typed slot must stay readable
+  (items as a list with statuses, not raw JSON soup) — check
+  compile_sections' slot rendering.
+- wasm-core surface: whatever form is added must round-trip through the
+  wasm build and its schema exports, or the exportability rationale is
+  void.
+- Schema-version implications: a new canonical schema form likely bumps
+  the canonical schema version — coordinate with anything else pending
+  a bump (0165's description field) to churn once, not twice.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a fixture trait declares a checklist-typed slot,
+a produce step fills it with items, a later step updates statuses;
+coverage validation rejects a round that drops an item or answers one
+twice, accepts a complete round, and a count-based guard exits a loop
+when all items are done. sdk-check green after regeneration; wasm-core
+builds and exposes the new form; declared-checklist proofs keep passing
+unchanged; `just test` and `just test-full` green. 0126 is either closed
+by the shared engine or its task updated to state the remaining edge.
+"""
