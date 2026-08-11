@@ -1,6 +1,6 @@
 schema-version = "0.2"
 key = "0172"
-title = "setting declarations: typed operator knobs — ports feed prompts, settings feed structure"
+title = "setting declarations: typed operator knobs — config-sourced values, usable anywhere slots are"
 status = "ready"
 raised = "2026-08-12"
 content = """
@@ -8,10 +8,11 @@ content = """
 
 Owner rulings 2026-08-12:
 
-- Not everything deserves to be a port. The boundary: if the model
-  reads it, it is a PORT (per-run data, frame-visible); if it tunes the
-  machine — loop bounds, timeouts, counts, thresholds — it is a
-  SETTING (operator knob, config-resolved, never in the frame).
+- Not everything deserves to be a port. The boundary is the SOURCE OF
+  THE VALUE: ports/slots carry RUN data (caller args, step outputs);
+  settings carry CONFIG-LAYER constants resolved at activation. Both
+  are usable in every input position — the difference is who supplies
+  the value and when, never where it may appear.
 - Naming aligned on both sides: `cdk.setting.number({...})` in trait
   source; `setting: { "review-rounds": 2 }` under defineTrait/variant
   in config.ts (singular, the house table convention).
@@ -47,22 +48,30 @@ Motivating consumer: refactor complex's review loop —
 scope = """
 ## Decisions
 
-- **CDK**: `setting.number({ id, description, default, min?, max? })` —
-  v1 numeric only; the kind is general (text/boolean/enum later if
-  wanted).
+- **CDK**: `setting.number({ id, description, default, min?, max? })`,
+  `setting.text({ id, description, default })`, `setting.boolean(...)`
+  — v1 covers the three scalars (interpolation-everywhere makes text
+  settings immediately useful).
 - **Canonical**: `[[setting]]` declarations plus `setting:` refs
   accepted where structure takes them; first consumer is the loop
   bound (`max-iterations-from` generalizes to setting refs; the
   existing integer-port support stays untouched).
 - **Hook API**: `loop.maxIterations(setting | number, opts)`.
+- **Settings are accepted EVERYWHERE a slot/port input is** (owner
+  amendment 2026-08-12): prompt interpolation (`${maxLines}`),
+  `input.command` argv tokens, condition comparisons, include lists,
+  and structural fields — type-checked exactly like slots (a string
+  setting satisfies a string position, a number setting a numeric one;
+  mismatch is a tsc/build error). The canonical carries `setting:`
+  refs in text/argv like slot refs; the frame renderer substitutes the
+  activation-resolved value. Because the ref — not the value — is in
+  the canonical, the trust ruling holds unchanged: retuning config
+  never churns a digest.
 - **Resolution at activation**: canonical default < global config <
   repo config; NO per-run CLI override — wanting per-run variance is
   the signal it was a port. An out-of-range override fails activation
   naming the bounds; a removed override falls back to the default,
   silently and by definition.
-- **Frame invisibility enforced**: a setting is never an input and
-  never model-visible; interpolating one into a prompt is a build
-  error.
 - **Config surface**: `setting?: Record<string, JsonValue>` on
   TraitDefaults AND TraitVariantDefaults; flows through 0171's
   defineTrait; generated types regenerate.
@@ -93,7 +102,9 @@ its loop bound; build green; activation uses the default; a
 repo-config override changes the round count with the canonical digest
 asserted byte-identical and trust untouched; a per-variant override
 beats the trait-level one; an out-of-range override fails activation
-naming the bounds; interpolating the setting into a prompt fails the
-build; the ledger records resolved value plus source layer. sdk-check
+naming the bounds; a prompt interpolating the setting renders the
+resolved value while the canonical digest stays byte-identical across a
+config change; a type mismatch (string setting in a numeric position)
+fails at build; the ledger records resolved value plus source layer. sdk-check
 green after regeneration; `just test` and `just test-full` green.
 """
