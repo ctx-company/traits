@@ -202,6 +202,9 @@ pub(crate) fn render() -> crate::Result<String> {
     let mut out = String::new();
     out.push_str("// GENERATED FILE — do not edit by hand.\n");
     out.push_str("// Regenerate with `ctx traits sdk-generate`.\n\n");
+    out.push_str(
+        "export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue | undefined };\n\n",
+    );
 
     out.push_str(&render_named(ROOT_TYPE_NAME, object)?);
     out.push('\n');
@@ -325,11 +328,18 @@ fn ts_type(schema: &Value) -> crate::Result<String> {
     if let Some(values) = object.get("enum").and_then(Value::as_array) {
         return Ok(string_literal_union(values));
     }
-    if let Some(additional) = object.get("additionalProperties")
-        && additional.is_object()
-    {
-        let value_ty = ts_type(additional)?;
-        return Ok(format!("Record<string, {value_ty}>"));
+    if let Some(additional) = object.get("additionalProperties") {
+        if additional.is_object() {
+            let value_ty = ts_type(additional)?;
+            return Ok(format!("Record<string, {value_ty}>"));
+        }
+        if additional == &Value::Bool(true) {
+            // An unconstrained value schema (schemars' rendering of
+            // `serde_json::Value`, e.g. `setting: BTreeMap<String, Value>`)
+            // — mirror the JsonValue alias the CDK generated file already
+            // exports, rather than falling through to a bare `object`.
+            return Ok("Record<string, JsonValue>".to_string());
+        }
     }
     if object.contains_key("properties") {
         return render_inline_object(object);

@@ -1,6 +1,8 @@
 // GENERATED FILE — do not edit by hand.
 // Regenerate with `ctx traits sdk-generate`.
 
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue | undefined };
+
 export interface CtxConfig {
   agent?: AgentDefaults;
   git?: GitTable;
@@ -228,11 +230,13 @@ export interface TasksTable {
 export interface TraitDefaults {
   agent?: AgentDefaults;
   defaults?: PortDefaults;
+  setting?: Record<string, JsonValue>;
   variant?: Record<string, TraitVariantDefaults>;
 }
 
 export interface TraitVariantDefaults {
   agent?: AgentDefaults;
+  setting?: Record<string, JsonValue>;
 }
 
 export type TripwirePolicy = "park" | "warn";

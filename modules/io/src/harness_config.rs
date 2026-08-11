@@ -793,6 +793,12 @@ pub enum PackageRunConfigTier {
 pub struct TraitDefaults {
     #[serde(default)]
     pub defaults: PortDefaults,
+    /// 0172: `[trait.<id>.setting]` — trait-scoped overrides of `setting:`
+    /// declarations, keyed by setting id. Beats the canonical declaration
+    /// default; beaten by a matching `[trait.<id>.variant.<vid>.setting]`
+    /// entry (the more specific scope) — same precedence shape as `agent`.
+    #[serde(default)]
+    pub setting: BTreeMap<String, serde_json::Value>,
     /// 0034: `[trait.<id>.agent…]` — a trait-scoped seat, same
     /// [`AgentDefaults`] shape `RepoOverride` already holds. Beats a matching
     /// `[repo.<key>]` qualifier (the more specific scope) and folds
@@ -817,6 +823,11 @@ pub struct TraitDefaults {
 pub struct TraitVariantDefaults {
     #[serde(default)]
     pub agent: AgentDefaults,
+    /// 0172: `[trait.<id>.variant.<vid>.setting]` — variant-scoped overrides
+    /// of `setting:` declarations, keyed by setting id. Beats both the
+    /// trait-level override and the canonical declaration default.
+    #[serde(default)]
+    pub setting: BTreeMap<String, serde_json::Value>,
 }
 
 /// Narrow caller-selected runtime profile for `ctx traits import
@@ -4452,6 +4463,15 @@ fn apply_environment_defaults(
                 source.clone(),
             );
         }
+        for (setting_id, value) in &defaults.setting {
+            target.setting.insert(setting_id.clone(), value.clone());
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.setting.{setting_id}"),
+                layer,
+                source.clone(),
+            );
+        }
         merge_trait_agent_defaults(
             &mut runtime.trait_defaults,
             trait_id,
@@ -5542,6 +5562,15 @@ fn merge_project_config(
                 source.clone(),
             );
         }
+        for (setting_id, value) in &defaults.setting {
+            target.setting.insert(setting_id.clone(), value.clone());
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.setting.{setting_id}"),
+                layer,
+                source.clone(),
+            );
+        }
         merge_trait_agent_defaults(
             &mut base.trait_defaults,
             trait_id,
@@ -5848,6 +5877,15 @@ fn merge_machine_config(
                 source.clone(),
             );
         }
+        for (setting_id, value) in defaults.setting.clone() {
+            target.setting.insert(setting_id.clone(), value);
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.setting.{setting_id}"),
+                layer,
+                source.clone(),
+            );
+        }
         merge_trait_agent_defaults(
             &mut base.trait_defaults,
             &trait_id,
@@ -5985,6 +6023,17 @@ fn merge_trait_agent_defaults(
             );
         }
         merge_agent_defaults(&mut variant_target.agent, value.agent.clone());
+        for (setting_id, value) in &value.setting {
+            variant_target
+                .setting
+                .insert(setting_id.clone(), value.clone());
+            record_winner(
+                winners,
+                format!("trait.{trait_id}.variant.{variant_id}.setting.{setting_id}"),
+                layer,
+                source.clone(),
+            );
+        }
     }
 }
 
@@ -9918,6 +9967,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                setting: BTreeMap::new(),
             },
         );
         let (flattened, winners) = flatten_agent_defaults(
@@ -10002,6 +10052,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                setting: BTreeMap::new(),
             },
         );
         trait_defaults.insert("implement".into(), value);
@@ -10171,6 +10222,7 @@ mod config_tests {
                     )]),
                     ..AgentDefaults::default()
                 },
+                setting: BTreeMap::new(),
             },
         );
         next.trait_defaults.insert("implement".into(), trait_value);
