@@ -539,6 +539,13 @@ pub(crate) fn handle_dependency_init(
             .entry("description")
             .or_insert_with(|| serde_json::Value::String(description.clone()));
     }
+    // `#trait/*` source-root alias (task 0168): insert when absent so a
+    // publishable package can use it. A present-but-different value is left
+    // alone — the build walk is the single enforcement point for the
+    // mapping, not this writer.
+    object
+        .entry("imports")
+        .or_insert_with(|| serde_json::json!({ "#trait/*": "./source/*" }));
     let wrapper_text = format!(
         "{}\n",
         serde_json::to_string_pretty(&wrapper).map_err(|source| crate::Error::Command {

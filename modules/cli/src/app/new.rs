@@ -127,6 +127,16 @@ pub(crate) fn handle_new(name: &str, from: &str, json: bool) -> crate::Result<Co
         )?;
     }
 
+    // `#trait/*` source-root alias (task 0168): without this a scaffolded
+    // package cannot use the alias at all. `ctx traits dependency init`
+    // later inserts name/version into this same file while preserving other
+    // fields, so the two writers compose.
+    ctx_traits_io::package_scaffold::create_new_file(
+        &package.root().join("package.json"),
+        "new trait package.json",
+        "{\n  \"imports\": {\n    \"#trait/*\": \"./source/*\"\n  }\n}\n",
+    )?;
+
     // Same internal build operation `ctx traits build` uses: produces
     // generated/index.toml + generated/index.map and enforces
     // package/source identity between trait.toml and the built trait.

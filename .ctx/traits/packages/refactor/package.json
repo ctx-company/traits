@@ -1,4 +1,7 @@
 {
   "name": "@ctx-traits/refactor",
-  "version": "0.8.0"
+  "version": "0.8.0",
+  "imports": {
+    "#trait/*": "./source/*"
+  }
 }

@@ -330,6 +330,22 @@ pub fn validate_source_imports(source_path: &Utf8Path) -> crate::Result<()> {
             }
         })?;
         for specifier in relative_specifiers(&text) {
+            if let Some(rest) = specifier.strip_prefix('#') {
+                let target = resolve_trait_alias(&source_root, &importer, rest)?;
+                if !target.is_file() {
+                    return Err(crate::environment::Error::Process {
+                        command: None,
+                        path: Some(importer.to_string()),
+                        exit_status: None,
+                        timed_out: false,
+                        message: format!(
+                            "CDK alias import {specifier:?} in {importer} resolves to missing file {target}"
+                        ),
+                    }
+                    .into());
+                }
+                continue;
+            }
             let target = normalize_path(&importer, &specifier);
             if target.strip_prefix(&source_root).is_err()
                 && !escapes_into_sibling_package_source(&source_root, &target)
@@ -348,6 +364,85 @@ pub fn validate_source_imports(source_path: &Utf8Path) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Expected `imports` mapping for the `#trait/*` source-root alias, verified
+/// exactly (no partial/prefix acceptance) so a divergent mapping fails loudly
+/// at the walk rather than silently resolving to the wrong file.
+const TRAIT_ALIAS_KEY: &str = "#trait/*";
+const TRAIT_ALIAS_VALUE: &str = "./source/*";
+
+/// Resolve a `#trait/<rest>` specifier (the leading `#` already stripped by
+/// the caller, so `alias` is `trait/<rest>`) against the package manifest's
+/// `imports` mapping and return the resolved file path — usage-gated: the
+/// manifest is only read/validated when a `#`-specifier is actually present.
+/// Any deviation from the one supported mapping (missing manifest, missing
+/// `imports` entry, a divergent value, or an alias other than `#trait/`) is a
+/// hard build error naming the expected mapping.
+fn resolve_trait_alias(
+    source_root: &Utf8Path,
+    importer: &Utf8Path,
+    alias: &str,
+) -> crate::Result<Utf8PathBuf> {
+    let Some(rest) = alias.strip_prefix("trait/") else {
+        return Err(crate::environment::Error::Process {
+            command: None,
+            path: Some(importer.to_string()),
+            exit_status: None,
+            timed_out: false,
+            message: format!(
+                "CDK alias import \"#{alias}\" in {importer} is not supported — the only \
+                 supported package-internal alias is \"{TRAIT_ALIAS_KEY}\" -> \"{TRAIT_ALIAS_VALUE}\" \
+                 (Node subpath imports, Node >=22)"
+            ),
+        }
+        .into());
+    };
+    let package_json_path = source_root
+        .parent()
+        .unwrap_or(source_root)
+        .join("package.json");
+    let manifest_text = std::fs::read_to_string(package_json_path.as_std_path()).map_err(|_| {
+        crate::environment::Error::Process {
+            command: None,
+            path: Some(importer.to_string()),
+            exit_status: None,
+            timed_out: false,
+            message: format!(
+                "CDK alias import \"#{alias}\" in {importer} requires {package_json_path} to \
+                 declare \"imports\": {{ \"{TRAIT_ALIAS_KEY}\": \"{TRAIT_ALIAS_VALUE}\" }} \
+                 (Node subpath imports, Node >=22), but the manifest could not be read"
+            ),
+        }
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_text).map_err(|source| {
+        crate::environment::Error::Process {
+            command: None,
+            path: Some(package_json_path.to_string()),
+            exit_status: None,
+            timed_out: false,
+            message: format!("{package_json_path} is not valid JSON: {source}"),
+        }
+    })?;
+    let mapped_value = manifest
+        .get("imports")
+        .and_then(|imports| imports.get(TRAIT_ALIAS_KEY))
+        .and_then(|value| value.as_str());
+    if mapped_value != Some(TRAIT_ALIAS_VALUE) {
+        return Err(crate::environment::Error::Process {
+            command: None,
+            path: Some(importer.to_string()),
+            exit_status: None,
+            timed_out: false,
+            message: format!(
+                "CDK alias import \"#{alias}\" in {importer} requires {package_json_path} to \
+                 declare \"imports\": {{ \"{TRAIT_ALIAS_KEY}\": \"{TRAIT_ALIAS_VALUE}\" }} exactly \
+                 (Node subpath imports, Node >=22), found {mapped_value:?}"
+            ),
+        }
+        .into());
+    }
+    Ok(canonicalize_path(&source_root.join(rest)))
 }
 
 /// True when `target` resolves to `<trait-family-root>/<other-package>/source/...`,
@@ -432,7 +527,11 @@ pub fn collect_structural_lints(source_path: &Utf8Path) -> crate::Result<Vec<Str
             }
         })?;
         for specifier in relative_specifiers(&text) {
-            let target = normalize_path(file, &specifier);
+            let target = if let Some(rest) = specifier.strip_prefix('#') {
+                resolve_trait_alias(&source_root, file, rest)?
+            } else {
+                normalize_path(file, &specifier)
+            };
             *import_counts.entry(target).or_insert(0) += 1;
         }
         file_texts.push((file.clone(), text));
@@ -577,9 +676,9 @@ fn relative_specifiers(source: &str) -> Vec<String> {
         } else {
             None
         };
-        if let Some(value) =
-            candidate.filter(|value| value.starts_with("./") || value.starts_with("../"))
-        {
+        if let Some(value) = candidate.filter(|value| {
+            value.starts_with("./") || value.starts_with("../") || value.starts_with('#')
+        }) {
             result.push(value);
         }
         cursor = end;
@@ -872,7 +971,7 @@ where
 const RESOLVE_TRACKER_PRELUDE: &str = r#"
 const dependencyUrls = new Set();
 function isBareSpecifier(specifier) {
-  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:');
+  return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:') && !specifier.startsWith('#');
 }
 "#;
 
@@ -1143,6 +1242,155 @@ mod structural_lint_tests {
         );
         let lints = collect_structural_lints(&source.join("index.ts")).expect("collect lints");
         assert!(lints.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod trait_alias_tests {
+    use super::*;
+
+    fn scratch_dir(name: &str) -> Utf8PathBuf {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!(
+                "ctx-trait-alias-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(dir.as_std_path());
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir
+    }
+
+    fn write(root: &Utf8Path, relative: &str, contents: &str) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap().as_std_path()).expect("create parent dir");
+        std::fs::write(path.as_std_path(), contents).expect("write fixture file");
+    }
+
+    #[test]
+    fn alias_import_to_existing_file_passes_validation() {
+        let root = scratch_dir("alias-ok");
+        write(
+            &root,
+            "package.json",
+            "{\"imports\": {\"#trait/*\": \"./source/*\"}}\n",
+        );
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#trait/shared/data.ts\";\nexport default helper;\n",
+        );
+        write(&root, "source/shared/data.ts", "export const helper = 1;\n");
+        validate_source_imports(&root.join("source/index.ts")).expect("alias import validates");
+    }
+
+    #[test]
+    fn alias_import_to_missing_file_fails_with_resolved_path() {
+        let root = scratch_dir("alias-missing");
+        write(
+            &root,
+            "package.json",
+            "{\"imports\": {\"#trait/*\": \"./source/*\"}}\n",
+        );
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#trait/missing.ts\";\nexport default helper;\n",
+        );
+        let error = validate_source_imports(&root.join("source/index.ts"))
+            .expect_err("missing alias target must fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("missing.ts"),
+            "expected resolved path in error, got: {message}"
+        );
+    }
+
+    #[test]
+    fn divergent_mapping_fails_with_expected_mapping_named() {
+        let root = scratch_dir("alias-divergent");
+        write(
+            &root,
+            "package.json",
+            "{\"imports\": {\"#trait/*\": \"./elsewhere/*\"}}\n",
+        );
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#trait/shared/data.ts\";\nexport default helper;\n",
+        );
+        write(&root, "source/shared/data.ts", "export const helper = 1;\n");
+        let error = validate_source_imports(&root.join("source/index.ts"))
+            .expect_err("divergent mapping must fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("#trait/*") && message.contains("./source/*"),
+            "expected error to name the required mapping, got: {message}"
+        );
+    }
+
+    #[test]
+    fn missing_manifest_fails() {
+        let root = scratch_dir("alias-no-manifest");
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#trait/shared/data.ts\";\nexport default helper;\n",
+        );
+        write(&root, "source/shared/data.ts", "export const helper = 1;\n");
+        validate_source_imports(&root.join("source/index.ts"))
+            .expect_err("missing package.json must fail");
+    }
+
+    #[test]
+    fn non_trait_alias_fails_naming_the_supported_mapping() {
+        let root = scratch_dir("alias-unsupported");
+        write(
+            &root,
+            "package.json",
+            "{\"imports\": {\"#trait/*\": \"./source/*\"}}\n",
+        );
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#other/x.ts\";\nexport default helper;\n",
+        );
+        let error = validate_source_imports(&root.join("source/index.ts"))
+            .expect_err("unsupported alias must fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("#trait/*"),
+            "expected error to name the one supported alias, got: {message}"
+        );
+    }
+
+    #[test]
+    fn alias_import_counts_toward_generic_module_name_lint() {
+        let root = scratch_dir("alias-lint-import-count");
+        write(
+            &root,
+            "package.json",
+            "{\"imports\": {\"#trait/*\": \"./source/*\"}}\n",
+        );
+        write(
+            &root,
+            "source/index.ts",
+            "import { helper } from \"#trait/shared.ts\";\nimport { other } from \"./other.ts\";\nexport default { helper, other };\n",
+        );
+        write(&root, "source/shared.ts", "export const helper = 1;\n");
+        write(
+            &root,
+            "source/other.ts",
+            "import { helper } from \"./shared.ts\";\nexport const other = helper;\n",
+        );
+        let lints = collect_structural_lints(&root.join("source/index.ts")).expect("collect lints");
+        assert!(
+            lints
+                .iter()
+                .all(|lint| lint.code != "cdk-generic-module-name"),
+            "shared.ts imported by two modules (one via alias) should be silent: {lints:?}"
+        );
     }
 }
 
