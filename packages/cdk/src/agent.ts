@@ -1,7 +1,7 @@
 import { dispatchAgentPrompt } from "./functional/context.js";
 import { agentTemplates } from "./generated.js";
 import type { AgentTemplateDefinition } from "./generated.js";
-import type { AgentHandle, DeclaredAgentHandle, SequenceHandle } from "./handles.js";
+import type { AgentHandle, SequenceHandle } from "./handles.js";
 import { withDeclaration, withHiddenField } from "./meta.js";
 import { collectMany, compact, validateSlug } from "./normalize.js";
 import type { PromptRegistrarOptions } from "./sequence.js";
@@ -43,14 +43,14 @@ export interface AgentTemplateFields {
   readonly session?: SessionBinding;
 }
 
-export type AgentTemplateFunction = (id: string, fields?: AgentTemplateFields) => DeclaredAgentHandle;
+export type AgentTemplateFunction = (id: string, fields?: AgentTemplateFields) => AgentHandle;
 
 export interface AgentFunction extends AgentTemplateFunctions {
-  (id: string, fields: Omit<AgentFields, "id">): DeclaredAgentHandle;
-  (fields: AgentFields): DeclaredAgentHandle;
+  (id: string, fields: Omit<AgentFields, "id">): AgentHandle;
+  (fields: AgentFields): AgentHandle;
 }
 
-function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclaration>[4] = {}): DeclaredAgentHandle {
+function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclaration>[4] = {}): AgentHandle {
   validateSlug(fields.id, "agent.id");
   const declaration = compact({
     id: fields.id,
@@ -107,9 +107,9 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
  * ```
  * @see {@link sequence}
  */
-function agentFn(id: string, fields: Omit<AgentFields, "id">): DeclaredAgentHandle;
-function agentFn(fields: AgentFields): DeclaredAgentHandle;
-function agentFn(first: string | AgentFields, second?: Omit<AgentFields, "id">): DeclaredAgentHandle {
+function agentFn(id: string, fields: Omit<AgentFields, "id">): AgentHandle;
+function agentFn(fields: AgentFields): AgentHandle;
+function agentFn(first: string | AgentFields, second?: Omit<AgentFields, "id">): AgentHandle {
   return agentOf(typeof first === "string" ? { ...second, id: first } as AgentFields : first);
 }
 
@@ -118,7 +118,7 @@ function agentTemplateOf(
   id: string,
   fields: AgentTemplateFields,
   extraMeta: Parameters<typeof withDeclaration>[4] = {},
-): DeclaredAgentHandle {
+): AgentHandle {
   return agentOf({
     id,
     description: fields.description ?? template.description,

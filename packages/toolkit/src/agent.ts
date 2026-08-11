@@ -1,4 +1,4 @@
-import type { DeclaredAgentHandle } from "@ctx-traits/cdk";
+import type { AgentHandle } from "@ctx-traits/cdk";
 import { agent } from "@ctx-traits/cdk";
 
 /**
@@ -7,7 +7,7 @@ import { agent } from "@ctx-traits/cdk";
  * @param description Trait-specific object of the work (e.g. "the draft", "the agreed refactor design").
  * @example `workerRole("worker", "Implements the draft and applies reviewer fixes.")`
  */
-export function workerRole(id: string, description: string): DeclaredAgentHandle {
+export function workerRole(id: string, description: string): AgentHandle {
   return agent.worker(id, { description, summary: "Implementation role." });
 }
 
@@ -17,7 +17,7 @@ export function workerRole(id: string, description: string): DeclaredAgentHandle
  * @param taskDescription What the scribe writes the message from, without the trailing git-tail clause.
  * @example `scribeRole("scribe", "Writes the commit message for the completed task from the task contract")`
  */
-export function scribeRole(id: string, taskDescription: string): DeclaredAgentHandle {
+export function scribeRole(id: string, taskDescription: string): AgentHandle {
   return agent.planner(id, {
     description: `${taskDescription}; git staging and committing run as command steps.`,
     summary: "Commit-message role.",
@@ -31,7 +31,7 @@ export function scribeRole(id: string, taskDescription: string): DeclaredAgentHa
  * @param summary Trait-specific model-visible role label; defaults to the generic "Review role."
  * @example `reviewerRole("smart-1", "Strong model: drafts the implementation plan, and reviews the work in the refinement loop.", "Drafting and first-reviewer role.")`
  */
-export function reviewerRole(id: string, description: string, summary?: string): DeclaredAgentHandle {
+export function reviewerRole(id: string, description: string, summary?: string): AgentHandle {
   return agent.reviewer(id, { description, summary: summary ?? "Review role." });
 }
 
@@ -41,7 +41,7 @@ export function reviewerRole(id: string, description: string, summary?: string):
  * @param description Trait-specific description of what this clerk extracts.
  * @example `clerkRole("clerk", "Fast extraction model: copies the task file out of the task board verbatim.")`
  */
-export function clerkRole(id: string, description: string): DeclaredAgentHandle {
+export function clerkRole(id: string, description: string): AgentHandle {
   return agent.searcher(id, { description, summary: "Context-extraction role." });
 }
 
@@ -54,7 +54,7 @@ export function clerkRole(id: string, description: string): DeclaredAgentHandle 
  * @param description Trait-specific object of the work (e.g. "the draft", "the agreed refactor design").
  * @example `rustWorkerRole("worker", "Implements the draft and applies reviewer fixes.")`
  */
-export function rustWorkerRole(id: string, description: string): DeclaredAgentHandle {
+export function rustWorkerRole(id: string, description: string): AgentHandle {
   return workerRole(
     id,
     `${description} Holds every change to this repo's Rust engineering-standards and gate-conventions.`,
@@ -70,7 +70,7 @@ export function rustWorkerRole(id: string, description: string): DeclaredAgentHa
  * @param summary Trait-specific model-visible role label; defaults to "Rust review role."
  * @example `rustReviewerRole("reviewer", "Reviews the implemented Rust change against the design.")`
  */
-export function rustReviewerRole(id: string, description: string, summary?: string): DeclaredAgentHandle {
+export function rustReviewerRole(id: string, description: string, summary?: string): AgentHandle {
   return reviewerRole(
     id,
     `${description} Judges the work against this repo's Rust engineering-standards and gate-conventions.`,

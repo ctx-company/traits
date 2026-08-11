@@ -1,6 +1,5 @@
 import type { RefKind } from "./generated.js";
 import type {
-  AgentHandle,
   ConditionHandle,
   Handle,
   PortHandle,
@@ -45,8 +44,6 @@ export interface RefFunction {
   rule(id: string | { readonly id: string; readonly dependency?: string; }): RuleHandle;
   /** Typed reference to a declared signal. @example `condition.signal(ref.signal("approved"))` */
   signal(id: string | { readonly id: string; readonly dependency?: string; }): RefHandle<"signal">;
-  /** Typed reference to a declared agent role. @example `ref.agent("reviewer")` */
-  agent(id: string | { readonly id: string; readonly dependency?: string; }): AgentHandle;
   /** Typed reference to a declared `dependency(...)` trait. @example `ref.trait("shared")` */
   trait(id: string | { readonly id: string; readonly dependency?: string; }): TraitHandle;
 }
@@ -123,7 +120,6 @@ export const ref = Object.assign(
     resource: refResource,
     rule: (id: RefIdArg): RuleHandle => refHandle("rule", id),
     signal: (id: RefIdArg): RefHandle<"signal"> => refHandle("signal", id),
-    agent: (id: RefIdArg): AgentHandle => refHandle("agent", id),
     trait: (id: RefIdArg): TraitHandle => refHandle("trait", id),
   },
 ) as RefFunction;

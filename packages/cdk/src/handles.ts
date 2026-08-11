@@ -113,16 +113,15 @@ export type PromptHandle<Input = unknown, Output = unknown> = Handle<
   { readonly input: Input; readonly output: Output; }
 >;
 export type ResourceHandle<Value = unknown> = Handle<"resource", Value>;
-export type AgentHandle = Handle<"agent">;
 /**
- * An agent handle from a declaration builder — `agent(...)`, every
- * `agent.*` template, and the deprecated bare templates — which additionally
- * exposes `.prompt`, attached non-enumerably at mint time (0106, `agent.ts`).
- * Kept distinct from the bare {@link AgentHandle} so a plain `ref.agent("x")`
- * reference — which declares nothing and carries no augmentation — still
- * satisfies every `AgentHandle` position (mirrors `DeclaredSlotHandle`).
+ * An agent handle from a declaration builder — `agent(...)` and every
+ * `agent.*` template — exposing `.prompt`, attached non-enumerably at mint
+ * time (0106, `agent.ts`). One type, not a declared/bare-ref split: the
+ * un-augmented `ref.agent` form was dropped with zero call sites (owner
+ * ruling 2026-08-11), so every agent handle in circulation comes from a
+ * builder and carries the registrar.
  */
-export type DeclaredAgentHandle = AgentHandle & {
+export type AgentHandle = Handle<"agent"> & {
   readonly prompt: (title: string, opts: PromptRegistrarOptions) => SequenceHandle;
 };
 export type SchemaHandle<Value = unknown> = Handle<"schema", Value>;

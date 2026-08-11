@@ -12,7 +12,7 @@
  */
 
 import type { BranchCheckValue } from "../condition.js";
-import type { AgentHandle, ResourceHandle, SequenceHandle, SlotHandle } from "../handles.js";
+import type { Handle, ResourceHandle, SequenceHandle, SlotHandle } from "../handles.js";
 import type { MetaDeclaration } from "../meta.js";
 import type {
   ExhaustionSignalValue,
@@ -225,7 +225,11 @@ export function registerItem(caller: string, item: SequenceHandle, title?: strin
  * guarantees the installation has run before authoring code can call
  * `.prompt`/`.forEach` on a handle.
  */
-type AgentPromptLowering = (agentHandle: AgentHandle, title: string, opts: PromptRegistrarOptions) => SequenceHandle;
+type AgentPromptLowering = (
+  agentHandle: Handle<"agent">,
+  title: string,
+  opts: PromptRegistrarOptions,
+) => SequenceHandle;
 type SlotForEachLowering = (
   slotHandle: SlotHandle,
   title: string,
@@ -245,7 +249,7 @@ export function installSlotForEachLowering(fn: SlotForEachLowering): void {
 }
 
 export function dispatchAgentPrompt(
-  agentHandle: AgentHandle,
+  agentHandle: Handle<"agent">,
   title: string,
   opts: PromptRegistrarOptions,
 ): SequenceHandle {
