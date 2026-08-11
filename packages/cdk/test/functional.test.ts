@@ -67,6 +67,31 @@ describe("functional layer build rules (0106)", () => {
     ).toThrow(/a functional build is already in progress/);
   });
 
+  it("loop.until/untilAll/untilAny wrap the flow registrars on the loop param", () => {
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Param Until", (loop) => {
+          loop.maxIterations(2);
+          step.command("A", { cmd: "echo a" });
+          loop.untilAll([
+            condition.empty(slot.text("param-until-a")),
+            condition.empty(slot.text("param-until-b")),
+          ]);
+        });
+      })
+    ).not.toThrow();
+    expect(() =>
+      procedure.from({ description: "d" }, () => {
+        flow.loop("Param Until Twice", (loop) => {
+          loop.maxIterations(2);
+          step.command("A", { cmd: "echo a" });
+          loop.until(condition.empty(slot.text("param-until-c")));
+          loop.untilAny([condition.empty(slot.text("param-until-d"))]);
+        });
+      })
+    ).toThrow(/at most one flow\.until/);
+  });
+
   it("a second flow.until in one loop scope throws", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {

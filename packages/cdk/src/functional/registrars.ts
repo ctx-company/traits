@@ -207,6 +207,12 @@ export interface LoopParam {
   maxIterations(n: number, opts?: { readonly onExhausted?: ExhaustionPolicy; }): void;
   /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
   id(overrideId: string): void;
+  /** Wrapper over `flow.until` — the loop's exit guard, on the param the body already holds. */
+  until(cond: BranchCheckValue): void;
+  /** Wrapper over `flow.untilAll` — exits once EVERY guard holds. */
+  untilAll(guards: readonly GuardValue[]): void;
+  /** Wrapper over `flow.untilAny` — exits once ANY guard holds. */
+  untilAny(guards: readonly GuardValue[]): void;
 }
 
 function combineAbortIfArms(
@@ -247,6 +253,9 @@ function flowLoop(title: string, body: (loop: LoopParam) => void): SequenceHandl
       }
       scope.loop.idOverride = overrideId;
     },
+    until: flowUntil,
+    untilAll: flowUntilAll,
+    untilAny: flowUntilAny,
   };
   const { scope } = runInScope("loop", label, () => body(loopParam));
   checkDuplicateTitles(scope.items, label);
