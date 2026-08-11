@@ -374,7 +374,7 @@ fn setup_fixture(
     support::require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{id}/package.toml")),
+        &repo.join(format!(".ctx/traits/packages/{id}/trait.toml")),
         &trait_manifest(id),
     );
     write_file(

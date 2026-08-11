@@ -1,7 +1,8 @@
 id = "plan"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.4.0"
 name = "Plan (Quick)"
+description = "Distill a described task directly into house-format task files and add them to .internal/tasks/ — no separate grounding pass, no review pass."
 summary = "Distill a described task directly into house-format task files and add them to .internal/tasks/ — no separate grounding pass, no review pass."
 variant = "quick"
 

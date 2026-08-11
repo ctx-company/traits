@@ -26,13 +26,13 @@
   },
   "prompt:checklist-the-target": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 16,
+    "end": 16
   },
   "prompt:implement-the-checklist": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 23,
-    "end": 23
+    "start": 20,
+    "end": 20
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/packages/refactor/source/shared/stage/review.ts",
@@ -41,8 +41,8 @@
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 30,
-    "end": 30
+    "start": 27,
+    "end": 27
   },
   "resource:architecture-dialect": {
     "file": ".ctx/traits/packages/refactor/source/shared/resource.ts",
@@ -76,48 +76,48 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 32,
-    "end": 32
+    "start": 29,
+    "end": 29
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
-    "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 31,
-    "end": 31
-  },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
-    "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 30,
-    "end": 30
-  },
-  "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
     "start": 28,
     "end": 28
   },
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
+    "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
+    "start": 27,
+    "end": 27
+  },
+  "sequence:procedure/check-working-tree-status": {
+    "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
+    "start": 25,
+    "end": 25
+  },
   "sequence:procedure/checklist-the-target": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 16,
+    "end": 16
   },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 29,
-    "end": 29
+    "start": 26,
+    "end": 26
   },
   "sequence:procedure/reviewed-refinement": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 21,
-    "end": 21
+    "start": 18,
+    "end": 18
   },
   "sequence:reviewed-refinement-body/implement-the-checklist": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 23,
-    "end": 23
+    "start": 20,
+    "end": 20
   },
   "sequence:reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/packages/refactor/source/variant/quick/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 21,
+    "end": 21
   },
   "slot:commit-message": {
     "file": ".ctx/traits/packages/refactor/source/shared/data.ts",

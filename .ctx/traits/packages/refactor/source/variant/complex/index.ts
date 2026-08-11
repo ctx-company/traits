@@ -1,4 +1,4 @@
-import { condition, defineVariant, flow, useIntent, useResource } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow } from "@ctx-traits/cdk";
 
 import * as shared from "../../shared/index.ts";
 
@@ -8,11 +8,8 @@ export default function () {
     defineVariant("Complex", {
         metadata: { tag: shared.tag },
         summary: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
-        procedure: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
+        description: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
     });
-
-    useIntent(shared.intent);
-    useResource(shared.resources);
 
     shared.stage.survey.gather("Survey the target");
     shared.stage.frame.select("Frame the problem");

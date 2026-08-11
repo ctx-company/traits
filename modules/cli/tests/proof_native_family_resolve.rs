@@ -186,7 +186,7 @@ fn legacy_leaf_table_manifest_still_resolves() {
     let proj = home.join("repo");
     build_family_fixture(&proj, &home);
 
-    let manifest_path = proj.join(".ctx/traits/packages/family-fixture/package.toml");
+    let manifest_path = proj.join(".ctx/traits/packages/family-fixture/trait.toml");
     let manifest_text = fs::read_to_string(&manifest_path).unwrap();
     let legacy_text = manifest_text
         .replace("[family.variant.", "[family.leaf.")
@@ -263,7 +263,7 @@ fn operandless_vendor_locks_every_family_variant() {
         vendor.status.success(),
         "operand-less vendor failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let lock_path = proj.join(".ctx/traits/packages/family-fixture/package.lock");
+    let lock_path = proj.join(".ctx/traits/packages/family-fixture/trait.lock");
     assert!(
         lock_path.is_file(),
         "vendor did not create {}\nstdout: {stdout}\nstderr: {stderr}",
@@ -314,7 +314,7 @@ fn operandless_vendor_locks_every_family_variant() {
         approve.status.success(),
         "bulk trust approval failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let package_manifest = proj.join(".ctx/traits/packages/family-fixture/package.toml");
+    let package_manifest = proj.join(".ctx/traits/packages/family-fixture/trait.toml");
     let package_text = fs::read_to_string(&package_manifest).unwrap();
     fs::write(
         package_manifest,

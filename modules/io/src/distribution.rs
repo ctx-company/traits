@@ -1248,6 +1248,16 @@ pub fn read_package_manifest(
 ) -> crate::Result<Option<ctx_traits_core::manifest::PackageManifest>> {
     let path = crate::layout::package_manifest_path(root);
     if !path.is_file() {
+        if root.join("package.toml").is_file() {
+            return Err(crate::environment::Error::Filesystem {
+                path: root.join("package.toml").to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "package.toml found — renamed to trait.toml in 0169",
+                ),
+            }
+            .into());
+        }
         return Ok(None);
     }
     let text = crate::read::read_text(&path)?;
@@ -3658,7 +3668,7 @@ output = ["slot:notified"]
     fn write_single_trait_package(root: &Utf8Path, id: &str, summary: &str) {
         std::fs::create_dir_all(root.join("generated").as_std_path()).unwrap();
         std::fs::write(
-            root.join("package.toml").as_std_path(),
+            root.join("trait.toml").as_std_path(),
             format!(
                 "[package]\nid = {id:?}\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n"
             ),
@@ -3669,6 +3679,24 @@ output = ["slot:notified"]
             trait_doc(id, summary),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn read_package_manifest_errors_on_a_leftover_package_toml() {
+        let root = scratch_root("leftover-package-toml");
+        std::fs::write(
+            root.join("package.toml").as_std_path(),
+            "[package]\nid = \"leftover\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n",
+        )
+        .unwrap();
+        let error =
+            read_package_manifest(&root).expect_err("leftover package.toml is a hard error");
+        assert!(
+            error
+                .to_string()
+                .contains("package.toml found — renamed to trait.toml in 0169"),
+            "unexpected error text: {error}"
+        );
     }
 
     /// A native family variant's canonical document (P535 fix): unlike
@@ -3691,7 +3719,7 @@ variant = "{variant}"
         std::fs::create_dir_all(root.join("generated/quick").as_std_path()).unwrap();
         std::fs::create_dir_all(root.join("generated/default").as_std_path()).unwrap();
         std::fs::write(
-            root.join("package.toml").as_std_path(),
+            root.join("trait.toml").as_std_path(),
             r#"[package]
 id = "family-demo"
 version = "0.1.0"

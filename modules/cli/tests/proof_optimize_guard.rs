@@ -232,7 +232,7 @@ fn setup_fixture(
     support::require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{fixture_id}/package.toml")),
+        &repo.join(format!(".ctx/traits/packages/{fixture_id}/trait.toml")),
         &package_toml(fixture_id, "Optimize Fixture"),
     );
     write_file(

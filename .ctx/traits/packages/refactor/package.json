@@ -1,7 +1,17 @@
 {
-  "name": "@ctx-traits/refactor",
-  "version": "0.8.0",
+  "dependencies": {},
+  "files": [
+    "trait.toml",
+    "trait.lock",
+    "generated",
+    "resources",
+    "runtime.toml",
+    "source"
+  ],
   "imports": {
     "#trait/*": "./source/*"
-  }
+  },
+  "name": "@ctx-traits/refactor",
+  "type": "module",
+  "version": "0.11.0"
 }

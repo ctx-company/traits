@@ -36,7 +36,7 @@ export default function () {
         name: "Review (Default)",
         summary: "Points a single reviewer at an arbitrary locally-resolvable git ref/range and returns a typed verdict plus a rendered review document, with zero mutation of the reviewed tree.",
         metadata: { tag: ["first-party", "review", "read-only"] },
-        procedure: "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion.",
+        description: "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion.",
     });
     useIntent({
         require: [intent.require.ReviewBeforeFinal, intent.require.Leanness],

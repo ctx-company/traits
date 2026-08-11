@@ -1,4 +1,4 @@
-import { condition, defineVariant, flow, useIntent, useResource } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow } from "@ctx-traits/cdk";
 
 import * as shared from "../../shared/index.ts";
 
@@ -9,12 +9,9 @@ export default function () {
         summary:
             "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit.",
         metadata: { tag: shared.tag },
-        procedure:
+        description:
             "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit.",
     });
-
-    useIntent(shared.intent);
-    useResource(shared.resources);
 
     shared.stage.checklist.compose("Checklist the target");
 

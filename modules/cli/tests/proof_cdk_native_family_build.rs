@@ -110,7 +110,7 @@ fn build_publishes_native_family_variants_and_manifest_table() {
         );
     }
 
-    let manifest_text = fs::read_to_string(package_root.join("package.toml")).unwrap();
+    let manifest_text = fs::read_to_string(package_root.join("trait.toml")).unwrap();
     let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
     let family = manifest
         .get("family")
@@ -248,7 +248,7 @@ fn build_refuses_native_family_with_no_package_manifest() {
 
     let package_root = proj.join(format!(".ctx/traits/packages/{trait_id}"));
     assert!(
-        !package_root.join("package.toml").exists(),
+        !package_root.join("trait.toml").exists(),
         "build must not create a [family]-only trait.toml on refusal"
     );
     assert!(
@@ -302,7 +302,7 @@ fn build_refuses_native_family_with_mismatched_package_identity() {
         !package_root.join("generated").exists(),
         "build must not write any variant output on an identity-mismatch refusal"
     );
-    let manifest_text = fs::read_to_string(package_root.join("package.toml")).unwrap();
+    let manifest_text = fs::read_to_string(package_root.join("trait.toml")).unwrap();
     assert!(
         !manifest_text.contains("[family]"),
         "build must not write [family] into a manifest whose identity disagrees with it: {manifest_text}"
@@ -347,7 +347,7 @@ fn default_variant_check_covers_complete_family_drift() {
     assert_family_check(&proj, &home, true, "baseline");
 
     let root = proj.join(".ctx/traits/packages/family-fixture");
-    let manifest = root.join("package.toml");
+    let manifest = root.join("trait.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
     let with_run_config = manifest_text.replace(
         "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
@@ -452,7 +452,7 @@ fn rebuild_consolidation_carries_default_variant_defaults_forward() {
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
 
     let root = proj.join(".ctx/traits/packages/family-fixture");
-    let manifest = root.join("package.toml");
+    let manifest = root.join("trait.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
     let with_run_config = manifest_text.replace(
         "[family.variant.default]\npath = \"generated/default/index.toml\"",
@@ -518,7 +518,7 @@ fn rebuild_consolidation_rejects_non_default_variant_defaults() {
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
 
     let root = proj.join(".ctx/traits/packages/family-fixture");
-    let manifest = root.join("package.toml");
+    let manifest = root.join("trait.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
     let with_run_config = manifest_text.replace(
         "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
@@ -554,4 +554,98 @@ fn rebuild_consolidation_rejects_non_default_variant_defaults() {
         !root.join("runtime.toml").exists(),
         "refused consolidation must not partially write runtime.toml"
     );
+}
+
+/// `package.json` at the package root is a build-owned artifact: `ctx
+/// traits build` generates it from `trait.toml`, a hand edit never survives
+/// a rebuild, and `ctx traits check` fails on a diverged copy rather than
+/// passing it silently (0169).
+#[test]
+fn build_generates_and_owns_package_json() {
+    let scratch = ScratchRoot::new("cdk-native-family-generated-package-json");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+    let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
+    assert!(init.status.success(), "init failed: {}", utf8(&init).1);
+    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    fs::write(&source, family_fixture_source()).unwrap();
+    let build = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(build.status.success(), "build failed: {}", utf8(&build).1);
+
+    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let manifest_text = fs::read_to_string(root.join("trait.toml")).unwrap();
+    let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
+    let manifest_version = manifest["package"]["version"].as_str().unwrap().to_string();
+
+    let package_json_path = root.join("package.json");
+    let generated_text = fs::read_to_string(&package_json_path).unwrap_or_else(|error| {
+        panic!(
+            "expected build to generate {}: {error}",
+            package_json_path.display()
+        )
+    });
+    let generated: serde_json::Value = serde_json::from_str(&generated_text).unwrap();
+    assert_eq!(
+        generated["version"].as_str(),
+        Some(manifest_version.as_str()),
+        "generated package.json version must equal the manifest's: {generated_text}"
+    );
+    assert_eq!(
+        generated["name"].as_str(),
+        Some("@ctx-traits/family-fixture"),
+        "generated package.json name should default to @ctx-traits/<id>: {generated_text}"
+    );
+    assert_eq!(
+        generated["imports"]["#trait/*"].as_str(),
+        Some("./source/*"),
+        "generated package.json must declare the #trait/* subpath import: {generated_text}"
+    );
+
+    // A hand edit never survives a rebuild.
+    fs::write(
+        &package_json_path,
+        "{\"name\": \"hand-edited\", \"version\": \"9.9.9\"}\n",
+    )
+    .unwrap();
+    let rebuild = run_ctx(
+        &[
+            "traits",
+            "build",
+            ".ctx/traits/packages/family-fixture/source/index.ts",
+        ],
+        &proj,
+        &home,
+    );
+    assert!(
+        rebuild.status.success(),
+        "rebuild failed: {}",
+        utf8(&rebuild).1
+    );
+    let post_rebuild_text = fs::read_to_string(&package_json_path).unwrap();
+    assert_eq!(
+        post_rebuild_text, generated_text,
+        "rebuild must overwrite a hand-edited package.json byte-stably"
+    );
+
+    // `check` fails on a diverged copy rather than passing it silently.
+    assert_family_check(&proj, &home, true, "generated package.json baseline");
+    fs::write(
+        &package_json_path,
+        "{\"name\": \"hand-edited\", \"version\": \"9.9.9\"}\n",
+    )
+    .unwrap();
+    assert_family_check(&proj, &home, false, "diverged package.json");
+    fs::write(&package_json_path, &generated_text).unwrap();
+    assert_family_check(&proj, &home, true, "restored package.json");
 }

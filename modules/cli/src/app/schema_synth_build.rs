@@ -181,6 +181,7 @@ fn finish_cdk_package_build(
     crate::app::cdk_build::ensure_distinct_build_paths(source_path, &target_path, &map_path)?;
     validate_package_manifest_identity(&target_path, &outcome.response.output_text, output_format)?;
     ctx_traits_io::write::write_build_output(&target_path, &outcome.response.output_text)?;
+    crate::app::cdk_build::write_generated_package_json_if_packaged(source_path)?;
     let map_json = serde_json::to_string_pretty(&outcome.source_map)
         .map(|mut text| {
             text.push('\n');

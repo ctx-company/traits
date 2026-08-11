@@ -36,6 +36,13 @@ pub struct PackageManifest {
     /// manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publish: Option<PackagePublish>,
+
+    /// npm dependencies the package's own `source/` authoring code needs at
+    /// build/type-check time — copied verbatim into the generated
+    /// `package.json`'s `dependencies`. Table shape only; pinning semantics
+    /// are task 0170's territory.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub authoring_dependencies: BTreeMap<String, String>,
 }
 
 /// Publication identity: the npm name, registry, and access this package is

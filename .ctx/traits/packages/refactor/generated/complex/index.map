@@ -36,18 +36,18 @@
   },
   "prompt:design-the-boundary": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 16,
+    "end": 16
   },
   "prompt:frame-the-problem": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 15,
+    "end": 15
   },
   "prompt:implement-the-design-specification": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 24,
-    "end": 24
+    "start": 21,
+    "end": 21
   },
   "prompt:review-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/stage/review.ts",
@@ -56,13 +56,13 @@
   },
   "prompt:survey-the-target": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 14,
+    "end": 14
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 36,
-    "end": 36
+    "start": 33,
+    "end": 33
   },
   "resource:architecture-dialect": {
     "file": ".ctx/traits/packages/refactor/source/shared/resource.ts",
@@ -96,63 +96,63 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 38,
-    "end": 38
+    "start": 35,
+    "end": 35
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
-    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 37,
-    "end": 37
-  },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
-    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 36,
-    "end": 36
-  },
-  "sequence:doubly-reviewed-verbatim-refinement-body/cross-review-refactor": {
-    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 26,
-    "end": 26
-  },
-  "sequence:doubly-reviewed-verbatim-refinement-body/implement-the-design-specification": {
-    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 24,
-    "end": 24
-  },
-  "sequence:doubly-reviewed-verbatim-refinement-body/review-refactor": {
-    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 25,
-    "end": 25
-  },
-  "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
     "start": 34,
     "end": 34
   },
-  "sequence:procedure/design-the-boundary": {
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 33,
+    "end": 33
   },
-  "sequence:procedure/doubly-reviewed-verbatim-refinement": {
+  "sequence:doubly-reviewed-verbatim-refinement-body/cross-review-refactor": {
+    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
+    "start": 23,
+    "end": 23
+  },
+  "sequence:doubly-reviewed-verbatim-refinement-body/implement-the-design-specification": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
     "start": 21,
     "end": 21
   },
-  "sequence:procedure/frame-the-problem": {
+  "sequence:doubly-reviewed-verbatim-refinement-body/review-refactor": {
+    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "sequence:procedure/check-working-tree-status": {
+    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
+    "start": 31,
+    "end": 31
+  },
+  "sequence:procedure/design-the-boundary": {
+    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
+    "start": 16,
+    "end": 16
+  },
+  "sequence:procedure/doubly-reviewed-verbatim-refinement": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
     "start": 18,
     "end": 18
   },
+  "sequence:procedure/frame-the-problem": {
+    "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
+    "start": 15,
+    "end": 15
+  },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 35,
-    "end": 35
+    "start": 32,
+    "end": 32
   },
   "sequence:procedure/survey-the-target": {
     "file": ".ctx/traits/packages/refactor/source/variant/complex/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 14,
+    "end": 14
   },
   "slot:commit-message": {
     "file": ".ctx/traits/packages/refactor/source/shared/data.ts",

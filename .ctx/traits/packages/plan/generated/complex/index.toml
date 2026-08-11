@@ -1,7 +1,8 @@
 id = "plan"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.4.0"
 name = "Plan (Complex)"
+description = "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/."
 summary = "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/."
 variant = "complex"
 

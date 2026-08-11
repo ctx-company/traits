@@ -15,7 +15,7 @@ export default function () {
     defineVariant("Experiment", {
         summary: "Runs bounded experiments whose keep/discard decision is a deterministic guard over typed, N-run-aggregated command output.",
         metadata: { tag: ["first-party", "optimize", "experiments", "provenance"] },
-        procedure: "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements.",
+        description: "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements.",
     });
     useIntent({
         require: [intent.focus.Correctness, intent.require.GatesGreenBeforeCommit],

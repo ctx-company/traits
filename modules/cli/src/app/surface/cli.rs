@@ -2826,7 +2826,7 @@ pub enum DependencyCommand {
         json: bool,
     },
     /// Prepare a trait package for publication: declare its npm name,
-    /// registry, and access, and write the npm wrapper beside `package.toml`.
+    /// registry, and access, and write the npm wrapper beside `trait.toml`.
     ///
     /// Run this once per package before the first `dependency publish`.
     /// Without it a package has no publishable identity — the npm name would

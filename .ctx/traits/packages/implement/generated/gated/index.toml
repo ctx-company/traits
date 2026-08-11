@@ -1,7 +1,8 @@
 id = "implement"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.24.0"
 name = "Implement (Gated)"
+description = "Quick's implementation loop with the owner inside it: draft the approach, have the owner annotate the plan in plannotator, then grind a single reviewer loop where every gate-green approved round summons the owner to a gated briefing — on double approval, record a tracked brief and commit."
 summary = "Quick's implementation loop with the owner inside it: draft the approach, have the owner annotate the plan in plannotator, then grind a single reviewer loop where every gate-green approved round summons the owner to a gated briefing — on double approval, record a tracked brief and commit."
 variant = "gated"
 

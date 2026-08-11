@@ -1,4 +1,4 @@
-import { condition, defineVariant, flow, useIntent, useResource } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow } from "@ctx-traits/cdk";
 
 import * as shared from "../../shared/index.ts";
 
@@ -8,12 +8,9 @@ export default function () {
     defineVariant("Guided", {
         summary: "Turns human annotations into implemented, reviewed changes.",
         metadata: { tag: [...shared.tag, "annotations"] },
-        procedure:
+        description:
             "Collect human annotations interactively, plan them as a checklist, implement every item in a reviewed loop, and commit.",
     });
-
-    useIntent(shared.intent);
-    useResource(shared.resources);
 
     stage.annotate.collect("Collect annotations (ctx-annotate)");
     stage.checklist.compose("Build the checklist");

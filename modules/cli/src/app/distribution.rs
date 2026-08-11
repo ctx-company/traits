@@ -405,12 +405,11 @@ pub(crate) fn handle_info(spec: &str, json: bool) -> crate::Result<CommandOutput
 
 /// `ctx traits dependency init`: give a trait package a publishable identity.
 ///
-/// Two artifacts, written together because publishing needs both and neither
-/// is derivable from the other: `[publish]` in `package.toml` (ctx's record of
-/// the npm name, registry, and access) and the npm wrapper `package.json`
-/// (npm's own view of the same facts). Without this a package has no name it
-/// can actually publish under — the fallback is `@ctx-traits/<id>`, a scope
-/// only this project owns.
+/// Sets `[publish]` in `trait.toml` (ctx's record of the npm name, registry,
+/// and access); the npm wrapper `package.json` is generated from it at build
+/// time, never hand-authored. Without this a package has no name it can
+/// actually publish under — the fallback is `@ctx-traits/<id>`, a scope only
+/// this project owns.
 pub(crate) fn handle_dependency_init(
     path: Option<&str>,
     name: Option<&str>,
@@ -427,7 +426,7 @@ pub(crate) fn handle_dependency_init(
     let Some(manifest) = ctx_traits_io::distribution::read_package_manifest(&package_root)? else {
         return Err(crate::Error::Command {
             message: format!(
-                "no trait package at {package_root}: expected a package.toml here (run `ctx traits new` first)"
+                "no trait package at {package_root}: expected a trait.toml here (run `ctx traits new` first)"
             ),
         });
     };
@@ -506,7 +505,7 @@ pub(crate) fn handle_dependency_init(
     ctx_traits_io::write::write_package_manifest(&manifest_path, &patched)?;
 
     // The npm wrapper. No `exports`/`main`/`module`: a trait package is read
-    // by ctx through package.toml, never imported as JavaScript. An existing
+    // by ctx through trait.toml, never imported as JavaScript. An existing
     // wrapper keeps every field it already had except name and version.
     let wrapper_path = package_root.join("package.json");
     let mut wrapper: serde_json::Value = if wrapper_path.is_file() {

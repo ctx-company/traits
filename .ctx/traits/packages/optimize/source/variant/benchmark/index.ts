@@ -38,7 +38,7 @@ export default function () {
     defineVariant("Benchmark", {
         summary: "Optimizes a lower-is-better benchmark over a caller-selected code area, keeping only command-measured improvements that clear a noise threshold. Behavior-preserving boundary work belongs to refactor, not here — this trait's doctrine is measurement-gated.",
         metadata: { tag: ["first-party", "optimize", "benchmark", "review", "provenance"] },
-        procedure: "Verify an isolated worktree, seed a trusted baseline benchmark, run an iteration-capped scope/draft/implement/review round loop, and deterministically keep only benchmark-measured improvements beyond the noise threshold.",
+        description: "Verify an isolated worktree, seed a trusted baseline benchmark, run an iteration-capped scope/draft/implement/review round loop, and deterministically keep only benchmark-measured improvements beyond the noise threshold.",
     });
     useIntent({
         require: [intent.require.ReviewBeforeFinal, intent.focus.Correctness],

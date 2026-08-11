@@ -390,6 +390,7 @@ pub(crate) fn package_manifest_text(trait_id: &str, name: &str) -> crate::Result
         },
         family: None,
         dependencies: Default::default(),
+        authoring_dependencies: Default::default(),
         // A scaffolded package does not publish yet. `ctx traits dependency
         // init` is what fills this in, so the author states their own npm
         // name rather than inheriting a scope they cannot publish to.

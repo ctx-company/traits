@@ -70,7 +70,7 @@ export default function () {
         summary:
             "Gated release procedure: preflight gates, version bump, commit-grounded changelog, commit and local tag, then owner-approved tag push and publish.",
         metadata: { tag: ["first-party", "release", "review", "gated"] },
-        procedure:
+        description:
             "Preflight (clean tree, repo-declared gate) -> version bump with review -> commit-grounded changelog with refute-mode spot-check -> commit and local tag -> ctx-gate-approved push and publish.",
     });
     useIntent({

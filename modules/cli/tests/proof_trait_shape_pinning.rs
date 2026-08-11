@@ -775,7 +775,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
     fs::create_dir_all(&nested).unwrap();
     git_init(&repo);
     fs::write(
-        selected_package.join("package.toml"),
+        selected_package.join("trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Selected Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -791,7 +791,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
     )
     .unwrap();
     fs::write(
-        collapsed_package.join("package.toml"),
+        collapsed_package.join("trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Collapsed Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();

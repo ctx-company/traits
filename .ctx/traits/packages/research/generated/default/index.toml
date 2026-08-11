@@ -1,7 +1,8 @@
 id = "research"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Research (Default)"
+description = "Surveyed dogfood research procedure: plan a cardinality-gated set of non-overlapping streams, research each serially, triangulate, then a bounded reviewer loop — then commit."
 summary = "Surveyed dogfood research procedure: plan a cardinality-gated set of non-overlapping streams, research each serially, triangulate, then a bounded reviewer loop — then commit."
 variant = "default"
 

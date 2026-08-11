@@ -25,7 +25,7 @@ Legend: **✓** shipped and evidenced · **partial** shipped with material gaps 
 tool: DY-Skill attacker model, Trust Score Algebra, and an Agent Dependency
 Graph with lockfile *semantics* are proposed and benchmarked, not distributed
 as an installable dependency manager. The gap isn't the theory — it's that
-nothing in the paper is a `package.toml` or `package.lock` you can commit and
+nothing in the paper is a `trait.toml` or `trait.lock` you can commit and
 diff today.
 
 **Skills Are Not Islands** (arXiv 2607.01136) is a measurement study of
@@ -70,14 +70,14 @@ command you can run in this repository to reproduce it.
 
 [^1]: claim-gate row `package/version`, implemented/source-approved: "canonical
     trait packages carry typed identity and version metadata." Evidence: any
-    canonical `package.toml`, e.g. `.ctx/traits/packages/research/package.toml`,
+    canonical `trait.toml`, e.g. `.ctx/traits/packages/research/trait.toml`,
     plus `ctx traits check research`.
 [^2]: same claim-gate row as [^1] (`package/version`) — version metadata is part
     of the same typed identity.
 [^3]: claim-gate row `check`, implemented/source-approved: "check combines
     validation, audit, resource, render, eval, and lock drift evidence."
     Evidence: committed lock files, e.g.
-    `.ctx/traits/packages/research/package.lock`, plus
+    `.ctx/traits/packages/research/trait.lock`, plus
     `ctx traits export --update-skill-lock`.
 [^4]: the shipped claim-gate row `audit` covers only direct hidden-content and
     advisory findings ("audit reports review findings and advisory risks; it is

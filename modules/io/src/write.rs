@@ -117,11 +117,9 @@ fn validate_generated_ignore_path(
         ));
     }
     for protected in [
-        "package.toml",
-        "package.lock",
-        "trait.toml",
+        crate::layout::PACKAGE_MANIFEST,
+        crate::layout::TRAIT_LOCKFILE,
         "index.toml",
-        "trait.lock",
     ] {
         if raw.ends_with(protected) {
             return Err(fs_err(
@@ -441,9 +439,9 @@ fn trait_id_for_tail_absolute<'a>(normals: &[&'a str], tail: &[&str]) -> Option<
 fn canonical_generated_package_id(path: &Utf8Path) -> Option<&str> {
     let normals = normal_components(path)?;
     const TAIL: [&str; 1] = ["generated"];
-    // `generated/<manifest>` accepts any of the three manifest filenames, so
-    // the tail match happens per-candidate rather than as one fixed slice.
-    for manifest in ["package.toml", "trait.toml", "index.toml"] {
+    // `generated/<manifest>` accepts either manifest filename, so the tail
+    // match happens per-candidate rather than as one fixed slice.
+    for manifest in [crate::layout::PACKAGE_MANIFEST, "index.toml"] {
         let tail = [TAIL[0], manifest];
         let found = if path.is_absolute() {
             trait_id_for_tail_absolute(&normals, &tail)
@@ -816,7 +814,13 @@ fn validate_package_manifest_shape(path: &Utf8Path) -> crate::Result<()> {
             return Err(fs_err(path, "path contains parent traversal"));
         }
     }
-    if !matches!(path.file_name(), Some("package.toml" | "trait.toml")) {
+    if path.file_name() == Some("package.toml") {
+        return Err(fs_err(
+            path,
+            "package.toml found — renamed to trait.toml in 0169",
+        ));
+    }
+    if path.file_name() != Some(crate::layout::PACKAGE_MANIFEST) {
         return Err(fs_err(
             path,
             "lifecycle edits target a package-root trait.toml only",

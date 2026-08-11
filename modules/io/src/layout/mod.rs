@@ -66,12 +66,12 @@ pub const CANONICAL_MANIFEST: &str = "index.toml";
 /// Source-map sidecar under `generated/`.
 pub const CANONICAL_SOURCE_MAP: &str = "index.map";
 /// Root package manifest (`[package]` + `[dependencies]`), Cargo-like.
-pub const PACKAGE_MANIFEST: &str = "package.toml";
-/// P569 predecessor of [`PACKAGE_MANIFEST`], still read. `trait.toml` sat one
-/// letter from the project manifest `traits.toml` while meaning something
-/// structurally different; a package holding a family of variants is a
-/// package, not a trait.
-pub const LEGACY_PACKAGE_MANIFEST: &str = "trait.toml";
+///
+/// Named `trait.toml` since 0169 (returning to the P569-predecessor name).
+/// Shares its filename with [`TRAIT_MANIFEST`], the legacy flat-vendored
+/// canonical document; the two are disambiguated structurally, not by name —
+/// see `decode_package_manifest`'s `[package]`-table check.
+pub const PACKAGE_MANIFEST: &str = "trait.toml";
 /// Legacy package-root run-config sidecar (P312), still read. Superseded by
 /// [`PACKAGE_RUNTIME_CONFIG`] (0036): budget only, never canonical trait
 /// bytes and never read from `generated/`.
@@ -88,9 +88,7 @@ pub const PACKAGE_RUNTIME_CONFIG: &str = "runtime.toml";
 pub const TRAIT_MANIFEST: &str = "trait.toml";
 /// Legacy source-map name (pre-v2 layouts).
 pub const TRAIT_SOURCE_MAP: &str = "trait.map";
-pub const TRAIT_LOCKFILE: &str = "package.lock";
-/// P569 predecessor of [`TRAIT_LOCKFILE`], still read.
-pub const LEGACY_TRAIT_LOCKFILE: &str = "trait.lock";
+pub const TRAIT_LOCKFILE: &str = "trait.lock";
 /// Legacy repo-local generated-cache root (pre-P426), retained as a
 /// one-release dual-read fallback. See [`crate::state::global_cache_root`]
 /// for the active default.
@@ -233,9 +231,7 @@ fn legacy_root_holds_a_package(legacy_root: &Utf8Path) -> bool {
             return false;
         }
         let root = legacy_root.join(&name);
-        root.join(PACKAGE_MANIFEST).is_file()
-            || root.join(LEGACY_PACKAGE_MANIFEST).is_file()
-            || root.join(GENERATED).is_dir()
+        root.join(PACKAGE_MANIFEST).is_file() || root.join(GENERATED).is_dir()
     })
 }
 
@@ -404,6 +400,9 @@ pub fn package_root_for_manifest(manifest: &Utf8Path) -> Option<&Utf8Path> {
 /// packages; on v2 packages the root `trait.toml` is the package manifest
 /// and is distinguished structurally by its `[package]` table).
 pub fn package_manifest_read_candidates(package_root: &Utf8Path) -> [Utf8PathBuf; 3] {
+    // Slots 2 and 3 share PACKAGE_MANIFEST's filename with TRAIT_MANIFEST
+    // (both "trait.toml"); the caller disambiguates structurally via the
+    // `[package]`-table check, not by filename.
     [
         package_root.join(GENERATED).join(CANONICAL_MANIFEST),
         package_root.join(GENERATED).join(TRAIT_MANIFEST),
@@ -411,39 +410,14 @@ pub fn package_manifest_read_candidates(package_root: &Utf8Path) -> [Utf8PathBuf
     ]
 }
 
-/// Root package-manifest path for a package root, following an existing
-/// pre-P569 `trait.toml` so a package is never split across both names.
+/// Root package-manifest path for a package root.
 pub fn package_manifest_path(package_root: &Utf8Path) -> Utf8PathBuf {
-    let current = package_root.join(PACKAGE_MANIFEST);
-    if current.is_file() {
-        return current;
-    }
-    let legacy = package_root.join(LEGACY_PACKAGE_MANIFEST);
-    if legacy.is_file() { legacy } else { current }
+    package_root.join(PACKAGE_MANIFEST)
 }
 
 /// Lockfile path for a package root.
-///
-/// An existing lock wins under either name. When none exists yet the lock
-/// FOLLOWS ITS MANIFEST: a package still carrying the pre-P569 `trait.toml`
-/// gets `trait.lock`, so a legacy package is never left half-renamed with a
-/// `package.lock` beside a `trait.toml`. Only a package that has moved to
-/// `package.toml` — or a brand new one — gets `package.lock`.
 pub fn package_lock_path(package_root: &Utf8Path) -> Utf8PathBuf {
-    let current = package_root.join(TRAIT_LOCKFILE);
-    if current.is_file() {
-        return current;
-    }
-    let legacy = package_root.join(LEGACY_TRAIT_LOCKFILE);
-    if legacy.is_file() {
-        return legacy;
-    }
-    if !package_root.join(PACKAGE_MANIFEST).is_file()
-        && package_root.join(LEGACY_PACKAGE_MANIFEST).is_file()
-    {
-        return legacy;
-    }
-    current
+    package_root.join(TRAIT_LOCKFILE)
 }
 
 /// Resolve an existing canonical or flat manifest under a package root.
@@ -482,7 +456,7 @@ pub fn package_runtime_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// write and import targets: a vendored tree is read-only evidence and must
 /// never become a legal place to write. This predicate answers only "does a
 /// manifest under here resolve UP to a package root", which vendored packages
-/// need for exactly the same reason authored ones do — their `package.toml`,
+/// need for exactly the same reason authored ones do — their `trait.toml`,
 /// lockfile, and `[family]` table live at the root while a family variant sits
 /// at `generated/<selector>/index.toml`.
 ///
@@ -506,7 +480,6 @@ pub fn package_runtime_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
 /// it is what makes staging, vendoring, and future locations all resolve alike.
 pub fn has_package_manifest(package_root: &Utf8Path) -> bool {
     package_root.join(PACKAGE_MANIFEST).is_file()
-        || package_root.join(LEGACY_PACKAGE_MANIFEST).is_file()
 }
 
 pub fn is_vendored_package_root(package_root: &Utf8Path) -> bool {

@@ -19,7 +19,7 @@ Three papercuts from one design pass (owner rulings 2026-08-11):
    family; the family shell cannot declare them once.
 
 """
-scope = """
+scope = '''
 ## Decisions
 
 - **Rename**: package.toml -> trait.toml, package.lock -> trait.lock.
@@ -42,7 +42,7 @@ scope = """
     runtime.toml, source/ — the publishable layout.
   Build either overwrites the file or errors on divergence — decide
   and document; hand edits must never survive silently.
-- **Family-shell use\\* distribution**: useIntent/useResource (and any
+- **Family-shell use\* distribution**: useIntent/useResource (and any
   future family-wide declaration gates) become callable ONCE in the
   family shell between defineTrait and the useVariant bindings. Family
   assembly distributes the shell frame's declarations into every
@@ -70,7 +70,7 @@ scope = """
   mechanical manifest/index edits here are in scope, but coordinate
   wording changes with nothing (do not reword prompts).
 
-"""
+'''
 validation = """
 ## Done when
 

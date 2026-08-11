@@ -101,7 +101,7 @@ fn http_response(status: u16, reason: &str, content_type: &str, body: &[u8]) -> 
 }
 
 /// Build a gzip-tar npm tarball from `(relative_path, contents)` entries —
-/// the same `package.toml` + `generated/index.toml` shape the `path:`
+/// the same `trait.toml` + `generated/index.toml` shape the `path:`
 /// transport proofs (`proof_path_distribution.rs`) use, just packed as a
 /// tarball instead of copied as a directory tree.
 fn build_tarball(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -217,7 +217,7 @@ fn single_trait_npm_package(
     );
     let doc = trait_doc(trait_id, "Demo", worktree_required);
     let tarball = build_tarball(&[
-        ("package.toml", manifest.as_bytes()),
+        ("trait.toml", manifest.as_bytes()),
         ("generated/index.toml", doc.as_bytes()),
     ]);
     let registry = npm_registry_serving(package, version, tarball);
@@ -255,7 +255,7 @@ fn family_npm_package(package: &str, trait_id: &str) -> FamilyPackage {
     let default_doc = family_variant_trait_doc(trait_id, "default", "default variant");
     let quick_doc = family_variant_trait_doc(trait_id, "quick", "quick variant");
     let tarball = build_tarball(&[
-        ("package.toml", manifest.as_bytes()),
+        ("trait.toml", manifest.as_bytes()),
         ("generated/default/index.toml", default_doc.as_bytes()),
         ("generated/quick/index.toml", quick_doc.as_bytes()),
     ]);
@@ -363,7 +363,7 @@ fn project_tier_shadows_global_tier() {
     // Project install of the *same trait id*, via `path:` (P535), in a repo.
     let producer = home.join("producer/shadow-demo");
     write_fixture_file(
-        &producer.join("package.toml"),
+        &producer.join("trait.toml"),
         "[package]\nid = \"shadow-demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n",
     );
     write_fixture_file(

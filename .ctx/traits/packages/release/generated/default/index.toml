@@ -1,7 +1,8 @@
 id = "release"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Release (Default)"
+description = "Preflight (clean tree, repo-declared gate) -> version bump with review -> commit-grounded changelog with refute-mode spot-check -> commit and local tag -> ctx-gate-approved push and publish."
 summary = "Gated release procedure: preflight gates, version bump, commit-grounded changelog, commit and local tag, then owner-approved tag push and publish."
 variant = "default"
 

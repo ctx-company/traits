@@ -634,12 +634,61 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
  * returned family handle is what the build script's `resolveTraitFamily`
  * branch consumes, exactly as for an object-style family module.
  */
+/**
+ * Merges a family shell's `useIntent`/`useResource` facets into one bound
+ * variant's own frame before `assembleVariantFields` reads it — shell
+ * entries first, variant's own entries preserved as the higher-priority
+ * addition, deduped per facet by guidance/resource ref so a variant that
+ * redeclares a shell facet does not double it. Reuses `useIntent`'s
+ * require/avoid contradiction check across the merged result, since a
+ * shell `require` and a variant `avoid` (or vice versa) is exactly as
+ * contradictory as two same-frame calls.
+ */
+function mergeShellFacetsIntoVariant(familyFrame: TraitFrame, variantFrame: TraitFrame): void {
+  if (familyFrame.resources.length > 0) {
+    const existingRefs = new Set(variantFrame.resources.map((resource) => metaOf(resource)?.ref));
+    const additions = familyFrame.resources.filter((resource) => !existingRefs.has(metaOf(resource)?.ref));
+    variantFrame.resources.unshift(...additions);
+  }
+  const shellIntent = familyFrame.intent as Record<string, unknown>;
+  const variantIntent = variantFrame.intent as Record<string, unknown>;
+  for (const key of Object.keys(shellIntent)) {
+    const shellValue = shellIntent[key];
+    const variantValue = variantIntent[key];
+    if (variantValue === undefined) {
+      variantIntent[key] = shellValue;
+      continue;
+    }
+    const shellList = Array.isArray(shellValue) ? shellValue : [shellValue];
+    const variantList = Array.isArray(variantValue) ? variantValue : [variantValue];
+    const seen = new Set(guidanceSlugs(variantList));
+    const additions = shellList.filter((item) => {
+      const slug = guidanceSlug(item);
+      return slug === undefined || !seen.has(slug);
+    });
+    variantIntent[key] = [...additions, ...variantList];
+  }
+  const requireSlugs = new Set(guidanceSlugs(variantIntent.require));
+  for (const slug of guidanceSlugs(variantIntent.avoid)) {
+    if (requireSlugs.has(slug)) {
+      throw new Error(
+        `useIntent: ${
+          JSON.stringify(slug)
+        } is declared in both require and avoid once the family shell's useIntent is merged into variant ${
+          JSON.stringify(variantFrame.slug)
+        } — contradictory intent`,
+      );
+    }
+  }
+}
+
 function assembleFamily(familyFrame: TraitFrame, familyItems: readonly RegisteredItem[]): ReturnType<typeof trait> {
   if (familyItems.length > 0) {
     throw new Error(
       "useVariant: a family shell must not register its own steps — procedures belong to the variants",
     );
   }
+  const shellHasDeclaredFacets = Object.keys(familyFrame.intent).length > 0 || familyFrame.resources.length > 0;
   const variants: Record<string, unknown> = {};
   let defaultKey: string | undefined;
   for (const binding of familyFrame.boundVariants) {
@@ -652,9 +701,15 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
           "useVariant: a bound variant function never called defineVariant(...) — every variant module declares its identity exactly once",
         );
       }
+      mergeShellFacetsIntoVariant(familyFrame, evaluated.traitFrame);
       key = evaluated.traitFrame.slug as string;
       handle = variantOf(assembleVariantFields(evaluated) as Parameters<typeof variantOf>[0]);
     } else {
+      if (shellHasDeclaredFacets) {
+        throw new Error(
+          "useVariant: the family shell declares useIntent/useResource, but this variant is bound as an object-style handle — object-style handles bypass frame evaluation, so the shell's facets cannot reach it. Bind this variant as a function instead, or move the shell's useIntent/useResource calls into each variant.",
+        );
+      }
       key = binding.key as string;
       handle = binding.value;
     }
@@ -680,7 +735,7 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
     );
   }
   const rawName = familyFrame.fields?.name as string | undefined;
-  // A family shell's display name lives in package.toml and trait() rejects
+  // A family shell's display name lives in trait.toml and trait() rejects
   // `name` on families. The name defineTrait derived the family id from
   // (it kebab-cases back to the slug) has served its purpose — drop it; a
   // genuinely different explicit name still reaches trait() and errors.

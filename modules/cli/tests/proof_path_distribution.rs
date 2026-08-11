@@ -57,7 +57,7 @@ fn canonical_digest_from_check(stdout: &str) -> &str {
 fn write_producer_package(root: &Path, id: &str, summary: &str) {
     fs::create_dir_all(root.join("generated")).unwrap();
     fs::write(
-        root.join("package.toml"),
+        root.join("trait.toml"),
         format!(
             "[package]\nid = \"{id}\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"ready\"\n"
         ),
@@ -260,7 +260,7 @@ fn path_dependency_installs_every_family_variant() {
     fs::create_dir_all(producer.join("generated/quick")).unwrap();
     fs::create_dir_all(producer.join("generated/default")).unwrap();
     fs::write(
-        producer.join("package.toml"),
+        producer.join("trait.toml"),
         "[package]\n\
          id = \"family-demo\"\n\
          version = \"0.1.0\"\n\
@@ -328,7 +328,7 @@ fn path_dependency_installs_every_family_variant() {
     );
     let vendored_root = consumer.join(".ctx/traits/vendor/family-install");
     for path in [
-        "package.toml",
+        "trait.toml",
         "generated/default/index.toml",
         "generated/quick/index.toml",
         "resources/default.txt",

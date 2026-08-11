@@ -678,6 +678,98 @@ describe("defineVariant/useVariant hook-style families", () => {
     ).toThrow(/carries its own key via defineVariant/);
   });
 
+  it("a shell's useIntent/useResource distribute into every bound variant, union-merged with the variant's own", async () => {
+    const shared = resource.inline("shared-style", "Shared style guide.");
+    const family = evaluateTraitFunction(function() {
+      defineTrait("shell-facets", { version: "0.1.0" });
+      useIntent({ require: [intent("cite-evidence")] });
+      useResource(shared);
+      useVariant((ctx: unknown) => {
+        void ctx;
+        defineVariant("quick", { description: "One step." });
+        useResource(shared);
+        useIntent({ require: [intent("be-concise")] });
+        const out = slot.text("result");
+        agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
+          input: input.prompt`Do it.`,
+          output: out,
+        });
+        return { result: out };
+      }).default();
+    });
+    if (!isTraitFamilyHandle(family)) {
+      throw new Error("expected a trait family handle");
+    }
+    const resolved = await resolveTraitFamily(family);
+    const quick = resolved.variants.find((entry) => entry.path === "quick");
+    const draft = quick?.draft as JsonObject | undefined;
+    const requireSlugs = ((draft?.["intent"] as JsonObject | undefined)?.["require"] as JsonObject[] | undefined)
+      ?.map((entry) => entry["id"]);
+    expect(requireSlugs).toContain("cite-evidence");
+    expect(requireSlugs).toContain("be-concise");
+    const resourceRefs = (draft?.["resource"] as JsonObject[] | undefined)?.map((entry) => entry["id"]);
+    expect(resourceRefs?.filter((id) => id === "shared-style")).toHaveLength(1);
+  });
+
+  it("a shell's useIntent/useResource cannot reach an object-style variant handle — build error", () => {
+    const legacy = variant({
+      summary: "Legacy object variant.",
+      procedure: procedure({ description: "No steps.", sequence: [] }),
+    });
+    expect(() =>
+      evaluateTraitFunction(function() {
+        defineTrait("mixed-shell-facets", { version: "0.1.0" });
+        useIntent({ require: [intent("cite-evidence")] });
+        useVariant(quickVariant).default();
+        useVariant(legacy, "legacy");
+      })
+    ).toThrow(/object-style handles bypass frame evaluation/);
+  });
+
+  it("a shell-declared use* twin is byte-identical to the same facets authored per-variant", async () => {
+    const buildVariant = (declareInShell: boolean) => (ctx: unknown) => {
+      void ctx;
+      defineVariant("quick", { description: "One step." });
+      if (!declareInShell) {
+        useResource(shared);
+        useIntent({ require: [intent("cite-evidence")] });
+      }
+      const out = slot.text("result");
+      agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
+        input: input.prompt`Do it.`,
+        output: out,
+      });
+      return { result: out };
+    };
+    const shared = resource.inline("shared-style", "Shared style guide.");
+    const shellOnly = evaluateTraitFunction(function() {
+      defineTrait("twin-shell-only", { version: "0.1.0" });
+      useIntent({ require: [intent("cite-evidence")] });
+      useResource(shared);
+      useVariant(buildVariant(true)).default();
+    });
+    const perVariant = evaluateTraitFunction(function() {
+      defineTrait("twin-per-variant", { version: "0.1.0" });
+      useVariant(buildVariant(false)).default();
+    });
+    if (!isTraitFamilyHandle(shellOnly) || !isTraitFamilyHandle(perVariant)) {
+      throw new Error("expected trait family handles");
+    }
+    const shellResolved = await resolveTraitFamily(shellOnly);
+    const perVariantResolved = await resolveTraitFamily(perVariant);
+    const shellDraft = shellResolved.variants.find((entry) => entry.path === "quick")?.draft as
+      | JsonObject
+      | undefined;
+    const perVariantDraft = perVariantResolved.variants.find((entry) => entry.path === "quick")?.draft as
+      | JsonObject
+      | undefined;
+    const strip = (draft: JsonObject | undefined) => {
+      const { id: _id, ...rest } = { ...draft };
+      return rest;
+    };
+    expect(JSON.stringify(strip(shellDraft))).toBe(JSON.stringify(strip(perVariantDraft)));
+  });
+
   it("a returned decorated output port passes through with its declaration intact", () => {
     const draft = evaluateTraitFunction(function() {
       defineTrait("decorated-output", { version: "0.1.0", description: "One step." });

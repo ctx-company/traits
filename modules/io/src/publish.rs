@@ -268,7 +268,7 @@ fn read_metadata(
         object.insert("name".to_string(), Value::String(package.to_string()));
         object.insert("version".to_string(), Value::String(version.to_string()));
         // No runtime-entry requirement. A trait package's entry point is its
-        // `package.toml` and `generated/` tree, which ctx reads directly — a
+        // `trait.toml` and `generated/` tree, which ctx reads directly — a
         // consumer never imports it as JavaScript. The old check demanded
         // `exports`/`main`/`module` because the first package to travel this
         // path was dual-use TypeScript (`@ctx-traits/agents`); applying it to

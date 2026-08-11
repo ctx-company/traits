@@ -85,7 +85,7 @@ fn extract_package_id_from_path(path: &camino::Utf8Path) -> Option<&str> {
 ///
 /// P569 moved packages from `.ctx/traits/<id>` to `.ctx/traits/packages/<id>`;
 /// both shapes are accepted so a checkout that predates the move can still be
-/// activated, and both manifest filenames are accepted for the same reason.
+/// activated.
 fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
     let id = match normals {
         [
@@ -94,14 +94,14 @@ fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
             "packages",
             id,
             "generated",
-            "package.toml" | "trait.toml" | "index.toml",
+            "trait.toml" | "index.toml",
         ] => id,
         [
             ".ctx",
             "traits",
             id,
             "generated",
-            "package.toml" | "trait.toml" | "index.toml",
+            "trait.toml" | "index.toml",
         ] => id,
         _ => return None,
     };

@@ -2015,6 +2015,31 @@ fn serialized_source_map(
         .map_err(|error| crate::Error::json("serialize CDK source map", error))
 }
 
+/// Divergence check for the build-owned `package.json`: `None` when the
+/// package has no manifest to generate from (nothing to check) or the file
+/// on disk byte-matches what `ctx traits build` would emit; `Some(reason)`
+/// otherwise. Same policy class as projection-lock drift — a hand edit
+/// never passes `check` silently.
+fn package_json_drift_failure(package_root: &camino::Utf8Path) -> Option<String> {
+    let manifest_path = ctx_traits_io::layout::package_manifest_path(package_root);
+    let manifest_text = ctx_traits_io::read::read_optional_text(&manifest_path).ok()??;
+    let manifest =
+        ctx_traits_core::manifest::decode_package_manifest(&manifest_text, manifest_path.as_str())
+            .ok()??;
+    let expected = ctx_traits_io::cdk_build::generated_package_json_text(&manifest);
+    let package_json_path = ctx_traits_io::cdk_build::generated_package_json_path(package_root);
+    match ctx_traits_io::read::read_optional_text(&package_json_path) {
+        Ok(Some(actual)) if actual == expected => None,
+        Ok(Some(_)) => Some(format!(
+            "{package_json_path} is stale vs {manifest_path} (re-run ctx traits build)"
+        )),
+        Ok(None) => Some(format!(
+            "{package_json_path} is missing (re-run ctx traits build)"
+        )),
+        Err(error) => Some(format!("{package_json_path} is unreadable: {error}")),
+    }
+}
+
 fn native_family_drift_check(
     trait_path: &camino::Utf8Path,
     source_path: &camino::Utf8Path,
@@ -2145,6 +2170,8 @@ fn native_family_drift_check(
         }
     }
 
+    failures.extend(package_json_drift_failure(package_root));
+
     let provenance = family
         .variants
         .first()
@@ -2244,10 +2271,7 @@ fn cdk_drift_check(
             });
         }
     };
-    let byte_stable = matches!(
-        trait_path.file_name(),
-        Some("package.toml" | "trait.toml" | "index.toml")
-    );
+    let byte_stable = matches!(trait_path.file_name(), Some("trait.toml" | "index.toml"));
     let map_drifted = byte_stable
         && match committed_source_map_drifted(trait_path, &source_map) {
             Ok(drifted) => drifted,
@@ -2262,9 +2286,12 @@ fn cdk_drift_check(
                 });
             }
         };
+    let package_json_drift = ctx_traits_io::layout::package_root_for_manifest(trait_path)
+        .and_then(package_json_drift_failure);
     let ok = expected == actual
         && (!byte_stable || response.output_text == committed_text)
-        && !map_drifted;
+        && !map_drifted
+        && package_json_drift.is_none();
     authoring_warnings.sort_by(|left, right| {
         left.code
             .cmp(&right.code)
@@ -2284,6 +2311,12 @@ fn cdk_drift_check(
             format!(
                 "source map for {trait_path} is stale vs rebuilt {source_path} (re-run ctx traits build)"
             )
+        } else if let Some(reason) = package_json_drift.filter(|_| {
+            expected == actual
+                && (!byte_stable || response.output_text == committed_text)
+                && !map_drifted
+        }) {
+            reason
         } else {
             format!(
                 "trait.toml is stale vs {} (re-run ctx traits build): rebuilt bytes or canonical digest differ (expected {}, actual {})",

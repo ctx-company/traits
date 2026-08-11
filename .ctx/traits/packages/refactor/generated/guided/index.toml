@@ -1,7 +1,8 @@
 id = "refactor"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.11.0"
 name = "Guided"
+description = "Collect human annotations interactively, plan them as a checklist, implement every item in a reviewed loop, and commit."
 summary = "Turns human annotations into implemented, reviewed changes."
 variant = "guided"
 
@@ -301,9 +302,7 @@ summary = "Implementation role."
 text = """
 Turn the captured annotations {slot:annotations} into a checklist.
 
-
-    Return the checklist (slot:plan).
-"""
+Return the checklist (slot:plan)."""
 input = ["slot:annotations"]
 output = ["slot:plan"]
 

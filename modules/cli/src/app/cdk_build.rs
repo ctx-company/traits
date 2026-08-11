@@ -88,6 +88,38 @@ pub(crate) struct CdkFamilySynthOutcome {
     pub(crate) variants: Vec<CdkFamilyVariantOutcome>,
 }
 
+/// After a single-trait build writes canonical output, regenerate the
+/// package-root `package.json` from `trait.toml` — build owns it end to
+/// end, so hand edits never survive a rebuild. A no-op for a build target
+/// that isn't a recognized package root (e.g. a bare CDK source with no
+/// package manifest yet), same shape as [`publish_cdk_family`]'s filter.
+pub(crate) fn write_generated_package_json_if_packaged(
+    source_path: &Utf8Path,
+) -> crate::Result<()> {
+    let Some(package_root) =
+        ctx_traits_io::layout::package_root_for_manifest(source_path).filter(|root| {
+            ctx_traits_io::layout::is_canonical_package_root(root)
+                || ctx_traits_io::layout::is_builtin_template_package_root(root)
+        })
+    else {
+        return Ok(());
+    };
+    let manifest_path = ctx_traits_io::layout::package_manifest_path(package_root);
+    if !manifest_path.is_file() {
+        return Ok(());
+    }
+    let manifest_text = ctx_traits_io::read::read_text(&manifest_path)?;
+    let Some(manifest) =
+        ctx_traits_core::manifest::decode_package_manifest(&manifest_text, manifest_path.as_str())?
+    else {
+        return Ok(());
+    };
+    Ok(ctx_traits_io::cdk_build::write_generated_package_json(
+        package_root,
+        &manifest,
+    )?)
+}
+
 pub(crate) fn family_variant_aliases(family_id: &str, name: &str) -> Vec<String> {
     vec![format!("{family_id}-{name}")]
 }
@@ -374,6 +406,7 @@ pub(crate) fn publish_cdk_family(
         &default_name,
         &manifest_entries,
     )?;
+    write_generated_package_json_if_packaged(source_path)?;
     Ok(CdkFamilyBuildEvidence {
         family_id: family.family_id.clone(),
         family_version: family.family_version.clone(),
