@@ -1113,6 +1113,27 @@ describe("sequence.command / sequence.check include", () => {
 });
 
 describe("optional outputs, output templates, uniform include (0105)", () => {
+  it("lowers `${slot.optional()}` interpolated in input.prompt to { slot, optional: true }", () => {
+    const verdict = slot.text("verdict-inline-optional");
+    const summary = slot.text("summary-inline");
+    const step = sequence.prompt("produce", {
+      agent: agent.worker("worker-inline"),
+      input: input.prompt`Produce the work; the prior verdict ${verdict.optional()} is attached on fix rounds.`,
+      output: summary,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "input-optional-interpolation",
+        name: "Input Optional Interpolation",
+        description: "optional-interpolation fixture.",
+        procedure: procedure({ description: "Produce.", sequence: [step] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual([{ slot: "slot:verdict-inline-optional", optional: true }]);
+    expect(JSON.stringify(draft)).toContain("{slot:verdict-inline-optional}");
+  });
+
   it("lowers `${slot.optional()}` in an output: position to { slot, optional: true }", () => {
     const verdict = slot.text("verdict-optional");
     const step = sequence.command({

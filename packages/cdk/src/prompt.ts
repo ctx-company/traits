@@ -26,7 +26,8 @@ export type PromptInterpolation<Value = unknown> =
   | PortHandle<Value>
   | SlotHandle<Value>
   | ResourceHandle<Value>
-  | InstructionOutputHandle<Value>;
+  | InstructionOutputHandle<Value>
+  | OptionalSlotRead<Value>;
 
 /** `prompt.resource(...)`'s accepted shape: a bare resource ref, or a resource plus its own extra declared inputs. */
 export type PromptResourceValue = ResourceHandle | RefHandle | {
@@ -151,18 +152,28 @@ export function promptTemplate(
 ): PromptTemplate {
   let text = strings[0] ?? "";
   const refs: string[] = [];
+  const optionalRefs: string[] = [];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (value === undefined) throw new Error(`input.prompt interpolation ${index}: expected a reference`);
-    const ref = requirePromptRef(value, `input.prompt interpolation ${index}`);
+    const { ref, optional } = resolvePromptRef(value, `input.prompt interpolation ${index}`);
     refs.push(ref);
+    // `${slot.optional()}` lowers to an optional step input (P447), same as
+    // an optional include: the runtime renders `[ref]` against a frame with
+    // no element for it — a reference to something not present, never an
+    // unresolved token — so round-1 loop steps can reference later rounds'
+    // slots in place.
+    if (optional && !optionalRefs.includes(ref)) optionalRefs.push(ref);
     text += `{${ref}}${strings[index + 1] ?? ""}`;
   }
   return withMeta({ text }, {
     kind: "template",
     refs: [...new Set(refs)],
+    ...(optionalRefs.length === 0 ? {} : { optionalRefs }),
     declaration: { text },
-    declarations: collectMany(values),
+    // Unwrap `${slot.optional()}` markers so a slot whose only appearance
+    // is an optional interpolation still carries its declaration.
+    declarations: collectMany(values.map((value) => (isOptionalSlotRead(value) ? value.slot : value))),
   });
 }
 
@@ -173,8 +184,13 @@ export function promptTemplate(
  */
 export function promptBoundText(text: string, bindings: Readonly<Record<string, PromptInterpolation>>): PromptTemplate {
   const values = Object.values(bindings);
+  const optionalRefs: string[] = [];
   const refs = Object.fromEntries(
-    Object.entries(bindings).map(([name, value]) => [name, requirePromptRef(value, `input.prompt ${name}`)]),
+    Object.entries(bindings).map(([name, value]) => {
+      const { ref, optional } = resolvePromptRef(value, `input.prompt ${name}`);
+      if (optional && !optionalRefs.includes(ref)) optionalRefs.push(ref);
+      return [name, ref];
+    }),
   );
   const rendered = text.replace(
     /\{([A-Za-z][A-Za-z0-9-]*)\}/g,
@@ -183,13 +199,10 @@ export function promptBoundText(text: string, bindings: Readonly<Record<string, 
   return withMeta({ text: rendered }, {
     kind: "template",
     refs: [...new Set(Object.values(refs))],
+    ...(optionalRefs.length === 0 ? {} : { optionalRefs }),
     declaration: { text: rendered },
-    declarations: collectMany(values),
+    declarations: collectMany(values.map((value) => (isOptionalSlotRead(value) ? value.slot : value))),
   });
-}
-
-function requirePromptRef(value: PromptInterpolation, fieldPath: string): string {
-  return resolvePromptRef(value, fieldPath).ref;
 }
 
 /**
