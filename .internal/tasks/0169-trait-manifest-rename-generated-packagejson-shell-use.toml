@@ -1,0 +1,87 @@
+schema-version = "0.2"
+key = "0169"
+title = "trait.toml/trait.lock rename, generated package.json, family-shell use* distribution"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+Three papercuts from one design pass (owner rulings 2026-08-11):
+
+1. A trait package root carries package.toml, package.lock, AND
+   package.json — three files named "package" spanning two ecosystems.
+   The confusion is nominal: ctx picked names colliding with npm's own
+   vocabulary. Observed defect from the duplication: refactor's
+   package.json said version 0.8.0 while package.toml said 0.11.0.
+2. package.json is hand-maintained but has exactly one authored fact
+   in it (none, after the rename) — everything derivable.
+3. useIntent/useResource are duplicated verbatim in every variant of a
+   family; the family shell cannot declare them once.
+
+"""
+scope = """
+## Decisions
+
+- **Rename**: package.toml -> trait.toml, package.lock -> trait.lock.
+  Pre-launch now-or-never; the dependency docs already speak of "the
+  package-local trait.lock", so this reconciles code with its own
+  vocabulary. One mechanical sweep: Rust manifest loader + every
+  first-party package + scaffolds + docs. After it, the package root
+  has exactly ONE package.* file and it is self-evidently npm's.
+- **package.json becomes a ctx-build-owned artifact** (never authored):
+  - name: `@ctx-traits/<id>`, with an optional npm-name override field
+    in trait.toml for third-party scopes;
+  - version: mirrored from trait.toml — the drift class dies;
+  - `"type": "module"` and the 0168 `imports` entry
+    (`"#trait/*": "./source/*"`) — generation SUPERSEDES 0168's
+    hand-added entries;
+  - `dependencies`: copied from a new authoring-dependencies table in
+    trait.toml (ordinary npm libs used by source/ at build evaluation —
+    see 0170 for how they are pinned);
+  - `files`: trait.toml, trait.lock, generated/, resources/,
+    runtime.toml, source/ — the publishable layout.
+  Build either overwrites the file or errors on divergence — decide
+  and document; hand edits must never survive silently.
+- **Family-shell use\\* distribution**: useIntent/useResource (and any
+  future family-wide declaration gates) become callable ONCE in the
+  family shell between defineTrait and the useVariant bindings. Family
+  assembly distributes the shell frame's declarations into every
+  variant frame before per-variant assembly. Variant-level calls MERGE
+  over the shell's (union with dedupe; the existing intent-
+  contradiction check catches conflicts) — a variant may add, never
+  silently remove. Canonical shape is UNCHANGED: still unfolded,
+  self-contained, per-variant digested.
+
+## Watch
+
+- The rename touches every path that reads the manifest/lock by name:
+  Rust loader, check/export/build surfaces, proofs, docs, scaffolds.
+  Grep-driven sweep with a compatibility error ("package.toml found —
+  renamed to trait.toml in 0169") rather than silent dual-support.
+- Generated package.json and fresh clones: the file is committed (like
+  generated/) so clone-time LSP and Node resolution work before the
+  first build.
+- Shell-distributed declarations must appear in variant canonicals
+  byte-identically to the same declarations authored per-variant —
+  prove with a fixture built both ways.
+- First-party sweep: variant indexes drop their duplicated
+  useIntent/useResource lines in favor of the shell.
+  .ctx/traits/packages/refactor is the owner's active zone — the
+  mechanical manifest/index edits here are in scope, but coordinate
+  wording changes with nothing (do not reword prompts).
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a fixture family declares intent/resources in
+the shell only and every variant canonical carries them, byte-identical
+to a per-variant-authored twin; a hand-edited generated package.json is
+overwritten or errors per the documented choice; version in the
+generated package.json always equals trait.toml's. The rename sweep
+leaves zero references to package.toml/package.lock outside history and
+this task; a leftover package.toml produces the migration error.
+First-party packages build green with shells declaring use* once;
+`just test` and `just test-full` green; trust re-approvals (digest
+churn from the sweep) are the owner's step.
+"""

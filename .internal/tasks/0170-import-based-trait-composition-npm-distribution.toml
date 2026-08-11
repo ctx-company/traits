@@ -1,0 +1,106 @@
+schema-version = "0.2"
+key = "0170"
+title = "import-based trait composition: derived [[dependency]] provenance, npm distribution, the pinning chain"
+status = "ready"
+raised = "2026-08-11"
+content = """
+
+
+How does one trait build on another? Owner rulings 2026-08-11, after
+walking the whole design:
+
+- The authoring API is PLAIN TS IMPORTS. `import { plan, reviewStage }
+  from "@acme/their-trait/shared"` and use the handles like your own —
+  interpolation, stages, useIntent(theirSpec). Declarations collect
+  into YOUR canonical on use (the same mechanism a family's shared/
+  modules use today). Composition is therefore VENDORING AT BUILD TIME:
+  the dependency's contribution is baked into the consumer's canonical,
+  byte-for-byte, covered by the consumer's digest — what you reviewed
+  is literally what runs; no late binding.
+- `useDependency` / hand-authored `dependency({...})` for the happy
+  path: CONSIDERED AND REJECTED. A hand-written declaration can lie
+  about what you imported; a derived one cannot. The qualified-ref API
+  (`ref.port({ id, dependency })`, `prompt:alias/id`) is demoted to
+  interop-legacy for canonicals that have no TS source to import —
+  kept working, never taught.
+- `[[dependency]]` in the canonical becomes EVIDENCE THE BUILD WRITES,
+  not code anyone writes: when the import-graph walk crosses into
+  node_modules/<pkg>, the build stamps { id, version, source, digest }
+  derived from the resolved package. Trust review sees exactly which
+  upstream is baked in.
+- Runtime relations between ACTIVATED traits (conflicts/requires/
+  suggests) are explicitly out of scope — if that need materializes it
+  gets its own shape, not a dependency API stretched over it.
+
+"""
+scope = """
+## Decisions
+
+- **Import-graph walk follows cross-package specifiers**: extend the
+  0168 scanner/walk so bare specifiers resolving into node_modules are
+  followed for trait packages (a package containing trait.toml) and
+  recorded for provenance; ordinary npm libs (no trait.toml) are noted
+  as authoring dependencies, not walked as trait content.
+- **Derived provenance stamping**: each variant canonical that inlined
+  anything from a dependency trait package gains
+  `[[dependency]] { id, version, source, digest }` — id/version from
+  the dependency's trait.toml, source recording the transport
+  (npm/git/local path), digest of the dependency content consumed.
+  Nothing user-authored; a fixture proves the stamp appears and
+  matches.
+- **The pinning chain** (each layer's single job):
+  1. trait.toml authoring-dependencies table — the only authored
+     version statement (exact or range; author's policy);
+  2. trait.lock — the exact resolution record: package, resolved
+     version, content digests of what was imported. Build REFUSES on
+     lock mismatch; re-locking is an explicit flag, never a side
+     effect;
+  3. the canonical digest — the actual gate: inlined bytes changed
+     means digest changed means machine-trust re-review. A sloppy
+     semver range cannot silently change run behavior. Lock =
+     reproducibility; digest+trust = security boundary.
+- **npm distribution contract**:
+  - publish: the generated package.json (0169) carries the files list
+    (trait.toml, trait.lock, generated/, resources/, runtime.toml,
+    source/) — source ships deliberately so consumers can rebuild and
+    byte-compare canonicals (the audit);
+  - consume: consumer-run `npm install`; ctx resolves through the
+    existing .ctx/node_modules -> node_modules walk and finds the full
+    ctx layout inside the npm package. No registry client in ctx v1;
+  - verification never delegates to npm: shipped trait.lock digests
+    must match shipped content; rebuild-from-shipped-source
+    byte-compare is a named check; registry-side tampering is
+    detectable;
+  - transport uniformity: local path, git, npm land the same layout
+    into one verification path — no npm-special code beyond
+    resolution.
+
+## Watch
+
+- Depends on 0169 (trait.toml rename + generated package.json + its
+  authoring-dependencies table) and on 0168's landed scanner work —
+  sequence after both.
+- Source maps: inlined declarations should keep anchors into the
+  dependency's files (node_modules paths) so provenance is inspectable
+  at the declaration level, not only the package level.
+- Determinism: the rebuild-and-compare audit requires authoring deps
+  (plain npm libs) pinned too — decide whether trait.lock records them
+  or an npm lockfile ships in the tarball; one home, stated.
+- A dependency trait package whose own trait.lock is missing or whose
+  digests do not match its content must fail the CONSUMER's build with
+  a message naming the dependency — never a silent pass.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: fixture trait B imports handles from fixture
+trait A installed under node_modules; B builds green; B's canonical
+contains A's inlined declarations plus a derived [[dependency]] stamp
+with A's id/version/digest; B's trait.lock pins the resolution and a
+swapped-out A (different content, same version) fails B's build on
+digest mismatch; the same composition via a local-path install produces
+an identical canonical modulo the source field. Rebuilding A from its
+shipped source reproduces its shipped canonicals byte-identically.
+`just test` and `just test-full` green.
+"""
