@@ -69,15 +69,13 @@ pub(crate) fn validate_sequence_item_prompt_contract(
             }
             .into());
         }
-        if item.input.is_optional_for(ref_text) {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{base}.input"),
-                message: format!(
-                    "prompt requires {ref_text:?} unconditionally, but it is declared as an optional input; an absent slot would leave the interpolation unresolved"
-                ),
-            }
-            .into());
-        }
+        // An OPTIONAL input may be interpolated (owner ruling 2026-08-11):
+        // the frame renderer substitutes accepted scalar values and passes an
+        // unmatched token through as a literal reference, and absent optional
+        // inputs simply have no frame element — a reference to something not
+        // present, never an unresolved token (see frame_prompt.rs). Only a
+        // GUARDED input stays rejected above: its false-guard absence is a
+        // wiring condition the prompt text cannot see.
         Ok(())
     };
 
