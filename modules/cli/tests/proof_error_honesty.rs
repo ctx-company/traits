@@ -207,10 +207,10 @@ fn build_seeded_park_run(repo: &Path, home: &Path) -> String {
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [procedure]
 description = "Run one deterministic command."

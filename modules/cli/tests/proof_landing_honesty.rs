@@ -37,10 +37,10 @@ fn init_commit_fixture_repo(repo: &Path, home: &Path) {
     fs::write(
         repo.join(".ctx/traits/land-demo/generated/index.toml"),
         r#"id = "land-demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Land Demo"
-summary = "A provider-free trait whose procedure writes and commits a file."
+description = "A provider-free trait whose procedure writes and commits a file."
 
 [procedure]
 description = "Write a file, stage it, commit it."
@@ -133,10 +133,10 @@ fn init_clean_tree_fixture_repo(repo: &Path, home: &Path) {
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [procedure]
 description = "Run one deterministic command."

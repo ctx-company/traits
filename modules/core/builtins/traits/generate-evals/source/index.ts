@@ -29,7 +29,7 @@ const synthesisPort = port.output.of({ id: "eval-synthesis", schema: ref.schema(
 export default trait("generate-evals", {
     version: "0.1.0",
     name: "Generate Evals",
-    summary: "Proposes source-grounded scenarios and deferred behavioral/runtime eval declarations.",
+    description: "Proposes source-grounded scenarios and deferred behavioral/runtime eval declarations.",
     metadata: { tag: ["first-party", "meta-trait", "eval-generation"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     schema: [scenario, evalProposal],

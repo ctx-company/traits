@@ -525,10 +525,10 @@ fn command_trait_fixture(label: &str) -> BuiltTraitFixture {
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         "id = \"demo\"\n\
-         schema-version = \"0.2\"\n\
+         schema-version = \"0.4\"\n\
          version = \"0.1.0\"\n\
          name = \"Demo\"\n\
-         summary = \"A provider-free command-only trait.\"\n\
+         description = \"A provider-free command-only trait.\"\n\
          \n\
          [procedure]\n\
          description = \"Run one deterministic command.\"\n\

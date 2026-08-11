@@ -9,9 +9,9 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:f1003da648c08164ad56cf7eee3515200b2c2198fa42935b55fd5fe7f6e1dee3"
-canonical = "sha256:d15e6395221f08f60419cf8dd70a7d6cf5d415d17fea93ad0a65cdf23d46766f"
-model-visible = "sha256:e4e6307891f794333728bcfcdf4b9d8ed0d250949752b04fd2e95421ff048b08"
+source = "sha256:3715a0986de02841be8c6ea86accf0590e651a9a1c363a92164d6a39abbd54e5"
+canonical = "sha256:43d194e82e9a0394da1bf6c12a8829b8ae1f46aa9146668abe66bd39cb6d1727"
+model-visible = "sha256:294a8951dcf2438bb54cd77405c1c80512ac7db2e5f9ab242c534a0879de486b"
 resource-manifest = "sha256:a9608f9a2c7a1461645f5265f86c5fa82a83876f8d65b6632e21386fcfbba138"
 
 [[trait.export]]
@@ -54,7 +54,7 @@ vendored-path = ".ctx/traits/vendor/rust"
 path = "../rust"
 
 [dependency.digests]
-source = "sha256:180d6694e703bb8b1612513b08087757328edae3e19a2c01c21db1a289c3f46b"
-canonical = "sha256:b7f0b99ed76e28b5489194a04cfacf3d3205e0b8cf5f99dd0443ca7e24dce9e5"
-model-visible = "sha256:53348f8682af03d50b504f7f36a931793bfe2b87af196b974682813d3590f09d"
+source = "sha256:4c095ad168dd7d2ac5e5357b895d705b80d7a75b70c594df2dfa834501d4db33"
+canonical = "sha256:dafe179a386f1513a85d74d867bc9f7a1f8404e8ea54550934f3092dcb12afef"
+model-visible = "sha256:7e7ea3b5d7c742f1701c218d1fdb3163701488ccebbea228b4a30f6d6f7fb1cf"
 resource-manifest = "sha256:703b121992807e1760264b2ede4507cfb29663b3ef46365d09dd4b2307304bd5"

@@ -525,11 +525,20 @@ export function canonicalTraitFields(fields: TraitFields): TraitFields {
     }),
   } as TraitFields;
 }
-export function summaryFromTraitFields(fields: TraitFields): JsonValue | undefined {
-  if (fields.summary !== undefined && fields.description !== undefined && fields.summary !== fields.description) {
-    throw new Error("trait fields summary and description both supplied with different values");
+/** The required agent+user prose. Throws when neither `description` nor a legacy `summary` was authored. */
+export function descriptionFromTraitFields(fields: TraitFields): JsonValue {
+  const description = fields.description ?? fields.summary;
+  if (description === undefined) {
+    throw new Error("trait fields require description — a required text description of the trait");
   }
-  return fields.summary ?? fields.description;
+  return description;
+}
+/** The optional user-only override. Emitted only when it differs from `description` — otherwise the Rust canonical defaults it there itself. */
+export function summaryFromTraitFields(fields: TraitFields): JsonValue | undefined {
+  if (fields.summary === undefined || fields.summary === fields.description) {
+    return undefined;
+  }
+  return fields.summary;
 }
 export function withoutKeys(value: Record<string, unknown>, keys: readonly string[]): JsonObject {
   const excluded = new Set(keys);

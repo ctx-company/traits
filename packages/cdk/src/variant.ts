@@ -223,7 +223,7 @@ export function isTraitFamilyHandle(value: unknown): value is TraitFamilyHandle 
 }
 
 /** The next canonical schema version, used for every native-variant regardless of the family's authored `schema-version`. */
-export const NATIVE_VARIANT_SCHEMA_VERSION = "0.3" as const;
+export const NATIVE_VARIANT_SCHEMA_VERSION = "0.4" as const;
 
 /**
  * Resolves every `variant.import(...)` variant (relative to the module that

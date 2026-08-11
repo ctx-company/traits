@@ -3861,10 +3861,10 @@ mod tests {
     fn loop_with_no_bound_and_no_guard_is_refused_by_name() {
         const FIXTURE: &str = r#"
 id = "unbounded-no-guard-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Unbounded No Guard Fixture"
-summary = "Regression fixture: a loop with neither a bound nor until/abort-if is refused."
+description = "Regression fixture: a loop with neither a bound nor until/abort-if is refused."
 
 [[agent]]
 id = "reviewer"
@@ -3906,10 +3906,10 @@ sequence = "sequence:loop-body"
     fn loop_with_on_exhausted_and_no_bound_is_refused_by_name() {
         const FIXTURE: &str = r#"
 id = "unbounded-on-exhausted-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Unbounded On Exhausted Fixture"
-summary = "Regression fixture: on-exhausted without a bound is refused."
+description = "Regression fixture: on-exhausted without a bound is refused."
 
 [[agent]]
 id = "reviewer"

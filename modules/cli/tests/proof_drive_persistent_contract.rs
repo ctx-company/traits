@@ -8,10 +8,10 @@ use std::path::Path;
 use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
 
 const TRAIT: &str = r#"id = "fixture-persistent-contract"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Persistent contract fixture"
-summary = "Exercises output contracts across resident turns."
+description = "Exercises output contracts across resident turns."
 
 [[agent]]
 id = "worker"
@@ -98,7 +98,7 @@ fn init_fixture_repo(repo: &Path, home: &Path, script: &Path) {
     fs::write(
         repo.join("ctx.toml"),
         format!(
-            r#"schema-version = "0.2"
+            r#"schema-version = "0.4"
 
 [harness.fixture]
 kind = "custom"

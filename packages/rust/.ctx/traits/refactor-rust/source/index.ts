@@ -30,7 +30,7 @@ const reviewNotes = slot.text({
 export default trait("refactor-rust", {
     version: "0.1.0",
     name: "Refactor (Rust)",
-    summary:
+    description:
         "Minimal Rust refactor procedure: implement the requested change and hold it to this repo's Rust engineering-standards and gate-conventions, then review once against the same doctrine — no refinement loop, no commit.",
     metadata: {
         family: "refactor",

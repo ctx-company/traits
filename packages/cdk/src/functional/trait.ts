@@ -27,17 +27,14 @@ import { isThenable } from "./internal.js";
 export interface DefineTraitFields {
   readonly name?: string;
   readonly version?: SemVer;
+  /** The required agent+user prose. Also supplies the procedure's internal description when the trait registers steps. */
+  readonly description?: string;
+  /** Optional user-only override, defaulting to `description` when absent. */
   readonly summary?: string;
   readonly metadata?: TraitMetadata;
-  /**
-   * The procedure's description text. Required exactly when the trait
-   * function registers at least one step (`step.*`/`agent.prompt`/`flow.*`)
-   * — a behavioral trait (no steps) never reads this.
-   */
-  readonly procedure?: string;
 }
 
-const DEFINE_TRAIT_KEYS: readonly string[] = ["name", "version", "summary", "metadata", "procedure"];
+const DEFINE_TRAIT_KEYS: readonly string[] = ["name", "version", "description", "summary", "metadata"];
 const BEHAVIOR_KEYS: readonly string[] = [
   "tone",
   "method",
@@ -51,6 +48,11 @@ const BEHAVIOR_KEYS: readonly string[] = [
 const INTENT_KEYS: readonly string[] = ["require", "focus", "avoid", "block"];
 
 function assertKnownKeys(fields: Record<string, unknown>, allowed: readonly string[], caller: string): void {
+  if ("procedure" in fields && !allowed.includes("procedure")) {
+    throw new Error(
+      `${caller}: "procedure" is no longer an authoring field — use "description" instead; its text also supplies the procedure's internal description when the trait registers steps`,
+    );
+  }
   const unknown = Object.keys(fields).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) {
     throw new Error(`${caller}: unknown field(s) ${unknown.join(", ")} — expected one of ${allowed.join(", ")}`);
@@ -132,13 +134,14 @@ export function defineTrait(name: string, fields: DefineTraitFields = {}): void 
 /** `defineVariant`'s own fields: metadata only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
 export interface DefineVariantFields {
   readonly name?: string;
+  /** The required agent+user prose. Also supplies the procedure's internal description when the variant registers steps. */
+  readonly description?: string;
+  /** Optional user-only override, defaulting to `description` when absent. */
   readonly summary?: string;
   readonly metadata?: TraitMetadata;
-  /** The variant procedure's description text. Required exactly when the variant function registers at least one step. */
-  readonly procedure?: string;
 }
 
-const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "summary", "metadata", "procedure"];
+const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "description", "summary", "metadata"];
 
 /**
  * Declares a hook-style variant module's identity — exactly once, inside a
@@ -500,10 +503,10 @@ function assembleSingleTrait(
 
   let procedureHandle: TraitFields["procedure"];
   if (items.length > 0) {
-    const description = traitFrame.fields?.procedure;
+    const description = traitFrame.fields?.description;
     if (typeof description !== "string" || description.trim() === "") {
       throw new Error(
-        "defineTrait: a procedural trait (one that registers steps) requires defineTrait({ procedure: \"...\" }) — a text description of the procedure",
+        "defineTrait: a procedural trait (one that registers steps) requires defineTrait({ description: \"...\" }) — a text description of the trait",
       );
     }
     procedureHandle = procedureOf({
@@ -519,11 +522,13 @@ function assembleSingleTrait(
 
   const name = traitFrame.fields?.name as string | undefined;
   const version = traitFrame.fields?.version as SemVer | undefined;
+  const description = traitFrame.fields?.description as string | undefined;
   const summary = traitFrame.fields?.summary as string | undefined;
   const metadata = traitFrame.fields?.metadata as TraitMetadata | undefined;
   const fields: TraitFields = {
     ...(name === undefined ? {} : { name }),
     ...(version === undefined ? {} : { version }),
+    ...(description === undefined ? {} : { description }),
     ...(summary === undefined ? {} : { summary }),
     ...(metadata === undefined ? {} : { metadata }),
     ...(behavior === undefined ? {} : { behavior }),
@@ -584,10 +589,10 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
 
   let procedureHandle: TraitFields["procedure"];
   if (items.length > 0) {
-    const description = traitFrame.fields?.procedure;
+    const description = traitFrame.fields?.description;
     if (typeof description !== "string" || description.trim() === "") {
       throw new Error(
-        "defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { procedure: \"...\" }) — a text description of the procedure",
+        "defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { description: \"...\" }) — a text description of the variant",
       );
     }
     procedureHandle = procedureOf({
@@ -601,10 +606,12 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
   const resource = traitFrame.resources.length > 0 ? (traitFrame.resources as ResourceHandle[]) : undefined;
   const ports = [...inputPorts, ...outputPorts] as PortHandle[];
   const name = traitFrame.fields?.name as string | undefined;
+  const description = traitFrame.fields?.description as string | undefined;
   const summary = traitFrame.fields?.summary as string | undefined;
   const metadata = traitFrame.fields?.metadata as TraitMetadata | undefined;
   return {
     ...(name === undefined ? {} : { name }),
+    ...(description === undefined ? {} : { description }),
     ...(summary === undefined ? {} : { summary }),
     ...(metadata === undefined ? {} : { metadata }),
     ...(behavior === undefined ? {} : { behavior }),
@@ -679,11 +686,13 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
   // genuinely different explicit name still reaches trait() and errors.
   const name = rawName !== undefined && idFromTitle(rawName) === familyFrame.slug ? undefined : rawName;
   const version = familyFrame.fields?.version as SemVer | undefined;
+  const description = familyFrame.fields?.description as string | undefined;
   const summary = familyFrame.fields?.summary as string | undefined;
   const metadata = familyFrame.fields?.metadata as TraitMetadata | undefined;
   return trait(familyFrame.slug as string, {
     ...(name === undefined ? {} : { name }),
     ...(version === undefined ? {} : { version }),
+    ...(description === undefined ? {} : { description }),
     ...(summary === undefined ? {} : { summary }),
     ...(metadata === undefined ? {} : { metadata }),
     variants: variants as TraitFields["variants"],

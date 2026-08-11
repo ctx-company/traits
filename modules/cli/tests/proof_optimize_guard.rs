@@ -126,7 +126,7 @@ fn write_fixture_ctx_toml(repo: &Path) {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.stub-worker]
 kind = "custom"

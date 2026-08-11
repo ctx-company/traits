@@ -26,7 +26,7 @@ const gateConventions = resource({
 export default trait("rust", {
     version: "0.1.0",
     name: "Rust",
-    summary:
+    description:
         "Shared Rust doctrine: worker/reviewer roles specialized for Rust changes, plus the engineering-standards and gate-conventions resources this repo's Rust core is held to, for dependents that declare it instead of pasting the roles or doctrine into their own trait source.",
     metadata: {
         tag: ["first-party", "knowledge", "rust"],

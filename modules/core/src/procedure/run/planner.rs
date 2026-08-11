@@ -969,10 +969,10 @@ mod session_title_sink_plan_tests {
     fn a_declared_sink_appears_in_the_plan_with_no_effect() {
         const FIXTURE: &str = r#"
 id = "plan-sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Plan Sink Fixture"
-summary = "Scratch fixture for the 0110 dry-plan sink surface."
+description = "Scratch fixture for the 0110 dry-plan sink surface."
 
 [[slot]]
 id = "done"
@@ -1002,10 +1002,10 @@ input = "Fixed session title"
     fn no_declaration_means_no_sink_in_the_plan() {
         const FIXTURE: &str = r#"
 id = "plan-no-sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Plan No Sink Fixture"
-summary = "Scratch fixture for the 0110 dry-plan sink surface."
+description = "Scratch fixture for the 0110 dry-plan sink surface."
 
 [[slot]]
 id = "done"

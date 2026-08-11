@@ -19,10 +19,10 @@ use support::{ScratchRoot, git_init, require_success, run_ctx};
 const TRAIT_ID: &str = "render-v2-fixture";
 
 const TRAIT_MANIFEST: &str = r#"id = "render-v2-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Render V2 Fixture"
-summary = "P493 render-v2 proof fixture: exercises every authoring-only section so its absence from the behavior envelope is a non-vacuous assertion."
+description = "P493 render-v2 proof fixture: exercises every authoring-only section so its absence from the behavior envelope is a non-vacuous assertion."
 
 [[intent.require]]
 id = "leanness"
@@ -130,7 +130,7 @@ fn prompt_behavior_envelope_carries_zero_authoring_plumbing() {
     let (stdout, _) = support::utf8(&output);
 
     // Rule 3's four behavior sections are present.
-    assert!(stdout.contains("<summary>"));
+    assert!(stdout.contains("<description>"));
     assert!(stdout.contains("<intent group=\"require\" id=\"leanness\">"));
     assert!(stdout.contains("<intent group=\"avoid\" id=\"accretion\">"));
     assert!(stdout.contains("<behavior axis=\"tone\" id=\"direct\">"));

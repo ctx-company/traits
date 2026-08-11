@@ -17,10 +17,10 @@ use support::{
 };
 
 const TRAIT_CANONICAL: &str = r#"id = "fixture-p451-repo-smart"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Fixture P451 repo qualifier"
-summary = "P451 repo-qualifier dispatch proof fixture."
+description = "P451 repo-qualifier dispatch proof fixture."
 
 [[agent]]
 id = "worker"
@@ -74,7 +74,7 @@ fn init_fixture_repo(repo: &Path, home: &Path, harness_script: &Path) {
     fs::write(repo.join(".gitignore"), "ctx.toml\n.ctx/runs/\n").unwrap();
     let script = harness_script.to_string_lossy().replace('\\', "\\\\");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.repo-qualifier-worker]
 kind = "custom"

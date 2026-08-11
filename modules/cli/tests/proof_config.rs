@@ -1502,10 +1502,10 @@ fn flagged_and_configured_drives_preserve_identical_ledger_bytes() {
     fs::write(
         &fixture,
         r#"id = "p418-command-only"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "P418 command-only proof"
-summary = "A provider-free pending ledger for policy equivalence."
+description = "A provider-free pending ledger for policy equivalence."
 
 [procedure]
 description = "Run one deterministic command."
@@ -1674,10 +1674,10 @@ fn seed_and_activate_fixture(repo: &std::path::Path, home: &std::path::Path, id:
         &fixture,
         format!(
             r#"id = "{id}"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "P428 fixture"
-summary = "A provider-free pending ledger for build-cache proofs."
+description = "A provider-free pending ledger for build-cache proofs."
 
 [procedure]
 description = "Run one deterministic command."

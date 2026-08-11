@@ -295,7 +295,7 @@ pub fn build_index_record(
     IndexedTrait {
         trait_id: t.id.as_str().to_string(),
         name: t.name.as_str().to_string(),
-        summary: t.summary.as_str().to_string(),
+        summary: t.effective_summary().to_string(),
         version: t.version.as_str().to_string(),
         status: status_str(status),
         trust: trust_str(trust),
@@ -457,7 +457,7 @@ fn build_activation_summary(t: &Trait) -> ActivationSummary {
 fn estimate_model_visible_text(t: &Trait) -> u64 {
     let mut text = String::new();
     text.push_str(t.name.as_str());
-    text.push_str(t.summary.as_str());
+    text.push_str(t.description.as_str());
     if let Some(intent) = &t.intent {
         for slug in intent.require.iter() {
             text.push_str(slug.as_str());

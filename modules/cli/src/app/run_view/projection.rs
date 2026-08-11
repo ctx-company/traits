@@ -2076,10 +2076,10 @@ mod tests {
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "history-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "History Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");
@@ -2194,10 +2194,10 @@ summary = "A test trait."
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "clock-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Clock Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");

@@ -3478,10 +3478,10 @@ mod publish_exclude_tests {
                 .as_std_path(),
             format!(
                 r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A publish-exclude fixture."
+description = "A publish-exclude fixture."
 
 [procedure]
 description = "Run one deterministic command."
@@ -3633,10 +3633,10 @@ mod path_distribution_tests {
     fn trait_doc(id: &str, summary: &str) -> String {
         format!(
             r#"id = "{id}"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "{summary}"
+description = "{summary}"
 
 [procedure]
 description = "Run one deterministic command."
@@ -3678,10 +3678,10 @@ output = ["slot:notified"]
     fn family_variant_trait_doc(id: &str, variant: &str, summary: &str) -> String {
         format!(
             r#"id = "{id}"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "{summary}"
+description = "{summary}"
 variant = "{variant}"
 "#
         )

@@ -57,12 +57,12 @@ pub fn context_cost_report(trait_ref: &Trait, budget: Option<u64>) -> ContextCos
     );
     push_cost(
         &mut layers,
-        "trait-summary",
+        "trait-description",
         trait_ref.id.as_str(),
         Some(true),
         true,
         None,
-        trait_ref.summary.as_str(),
+        trait_ref.description.as_str(),
     );
     if let Some(behavior) = &trait_ref.behavior {
         let behavior_text = serde_json::to_string(behavior).unwrap_or_default();

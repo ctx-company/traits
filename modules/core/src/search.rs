@@ -281,7 +281,7 @@ pub fn build_search_document_with_context(t: &Trait, ctx: BuildContext<'_>) -> D
     Document {
         trait_id: t.id.as_str().to_string(),
         name: t.name.as_str().to_string(),
-        summary: t.summary.as_str().to_string(),
+        summary: t.effective_summary().to_string(),
         keywords,
         body_text: body_parts.join(" "),
         resource_evidence,

@@ -13,10 +13,10 @@ use std::path::Path;
 use support::{ScratchRoot, assert_exit_code, git_init, require_success, run_ctx, utf8};
 
 const TRAIT_CANONICAL: &str = r#"id = "fixture-0130"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Fixture 0130"
-summary = "0130 budget-pause proof fixture."
+description = "0130 budget-pause proof fixture."
 
 [[agent]]
 id = "worker"
@@ -69,7 +69,7 @@ fn write_executable(path: &Path, contents: &str) {
 fn ctx_toml(harness_id: &str, script: &Path, max_tokens: u64) -> String {
     let script = script.to_string_lossy().replace('\\', "\\\\");
     format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [run]
 max-tokens = {max_tokens}

@@ -20,10 +20,10 @@ use std::process::Command;
 use support::{ScratchRoot, assert_exit_code, git_init, run_ctx, utf8};
 
 const TRAIT_MANIFEST: &str = r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [procedure]
 description = "Run one deterministic command."

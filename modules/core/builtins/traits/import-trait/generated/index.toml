@@ -1,8 +1,8 @@
 id = "import-trait"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Import Trait"
-summary = "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline."
+description = "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline."
 
 [[dependency]]
 alias = "trait-spec"

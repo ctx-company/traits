@@ -68,10 +68,10 @@ fn init_command_step_fixture(repo: &Path, home: &Path, cmd: &str, capture_bytes:
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
             r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [procedure]
 description = "Run one deterministic command."
@@ -108,10 +108,10 @@ fn init_default_input_fixture(repo: &Path, home: &Path, cmd: &str, capture_bytes
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
             r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [[port]]
 id = "big-input"

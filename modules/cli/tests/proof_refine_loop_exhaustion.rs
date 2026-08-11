@@ -30,7 +30,7 @@ fn write_fixture_ctx_toml(repo: &Path) {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.stub-refiner]
 kind = "custom"
@@ -52,10 +52,10 @@ session-mode = "per-frame"
 }
 
 const SOURCE_TRAIT: &str = r#"id = "refine-loop-exhaustion-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Refine Loop Exhaustion Fixture"
-summary = "0066.3 proof fixture: refine loop exhaustion target."
+description = "0066.3 proof fixture: refine loop exhaustion target."
 "#;
 
 #[test]

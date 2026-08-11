@@ -1914,10 +1914,10 @@ mod tests {
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "ask-refusal-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Ask Refusal Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");
@@ -1982,10 +1982,10 @@ summary = "A test trait."
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "request-input-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Request Input Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");
@@ -2052,10 +2052,10 @@ summary = "A test trait."
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "request-input-cancel-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Request Input Cancel Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");
@@ -2899,10 +2899,10 @@ summary = "A test trait."
         let trait_ref: ctx_traits_core::Trait = toml::from_str(
             r#"
 id = "guide-compose-on-send-test"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Guide Compose On Send Test"
-summary = "A test trait."
+description = "A test trait."
 "#,
         )
         .expect("minimal trait parses");

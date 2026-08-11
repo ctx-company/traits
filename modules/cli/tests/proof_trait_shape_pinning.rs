@@ -13,10 +13,10 @@ const FLAT_FILE: &str = ".ctx/traits/pin/trait.toml";
 fn manifest(summary: &str) -> String {
     format!(
         r#"id = "pin"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Pin"
-summary = {summary:?}
+description = {summary:?}
 
 [procedure]
 description = "provider-free pin fixture"

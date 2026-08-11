@@ -166,7 +166,7 @@ const envelopePort = port.output.of({
 export default trait("generate-trait", {
     version: "0.1.0",
     name: "Generate Trait",
-    summary: "Drives a bounded produce/evaluate loop that generates a trait candidate against the deterministic rung ladder, revising on its own typed diagnostics.",
+    description: "Drives a bounded produce/evaluate loop that generates a trait candidate against the deterministic rung ladder, revising on its own typed diagnostics.",
     metadata: { tag: ["first-party", "meta-trait", "generation"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     // `procedure(...)` has no `input`/`output` fields of its own — the

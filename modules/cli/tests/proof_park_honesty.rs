@@ -115,7 +115,7 @@ fn write_fixture_ctx_toml(repo: &Path) {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.stub-worker]
 kind = "custom"
@@ -313,10 +313,10 @@ argv = ["git", "commit", "--allow-empty", "-m", "{slot:commit-message}"]
 fn fixture_trait_toml(id: &str, max_iterations: u32, on_exhausted: &str) -> String {
     format!(
         r#"id = "{id}"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Park Honesty Fixture"
-summary = "P461 park-honesty proof fixture: a single-review loop whose on-exhausted policy is the fixture's own axis."
+description = "P461 park-honesty proof fixture: a single-review loop whose on-exhausted policy is the fixture's own axis."
 
 [[resource]]
 id = "task-board"
@@ -763,10 +763,10 @@ fn continuing_exhaustion_lands_the_commit() {
 fn dual_review_trait_toml(id: &str, max_iterations: u32) -> String {
     format!(
         r#"id = "{id}"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Park Honesty Dual-Review Fixture"
-summary = "P461 park-honesty proof fixture: two independent reviewers append/clear the same park-report slot every round."
+description = "P461 park-honesty proof fixture: two independent reviewers append/clear the same park-report slot every round."
 
 [[resource]]
 id = "task-board"

@@ -89,7 +89,7 @@ const reviewPort = port.output.of({
 export default trait("code-review", {
     version: "0.1.0",
     name: "Code Review",
-    summary: "Reviews a diff against a stated focus and returns structured, source-anchored findings with a pass/needs-changes verdict.",
+    description: "Reviews a diff against a stated focus and returns structured, source-anchored findings with a pass/needs-changes verdict.",
     metadata: { tag: ["template", "review"] },
     schema: [finding],
     procedure: procedure({

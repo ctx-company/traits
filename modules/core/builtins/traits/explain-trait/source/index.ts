@@ -44,7 +44,7 @@ const narrationPort = port.output.of({ id: "explanation", schema: ref.schema("ex
 export default trait("explain-trait", {
     version: "0.1.0",
     name: "Explain Trait",
-    summary: "Narrates a plain-language advisory explanation strictly grounded in a deterministic receipt-anchored scaffold.",
+    description: "Narrates a plain-language advisory explanation strictly grounded in a deterministic receipt-anchored scaffold.",
     metadata: { tag: ["first-party", "meta-trait", "explain"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     schema: [anchor, section],

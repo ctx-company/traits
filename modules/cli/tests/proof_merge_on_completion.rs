@@ -74,10 +74,10 @@ fn init_fixture_repo_inner(
         repo.join(".ctx/traits/demo/generated/index.toml"),
         format!(
             r#"id = "demo"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Demo"
-summary = "A provider-free command-only trait."
+description = "A provider-free command-only trait."
 
 [procedure]
 description = "Run one deterministic command."
@@ -182,7 +182,7 @@ fn install_counting_merger(repo: &Path, marker: &Path) {
     fs::write(
         repo.join("ctx.toml"),
         format!(
-            r#"schema-version = "0.2"
+            r#"schema-version = "0.4"
 
 [harness.counter]
 kind = "custom"
@@ -877,7 +877,7 @@ fn deep_prompt_references_stages_instead_of_inlining_file_bytes() {
     fs::write(
         repo.join("ctx.toml"),
         format!(
-            r#"schema-version = "0.2"
+            r#"schema-version = "0.4"
 
 [harness.capture]
 kind = "custom"

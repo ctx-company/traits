@@ -33,7 +33,7 @@ fn write_fixture_ctx_toml(repo: &Path) {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.stub-explainer]
 kind = "custom"
@@ -55,10 +55,10 @@ session-mode = "per-frame"
 }
 
 const SOURCE_TRAIT: &str = r#"id = "explain-llm-assisted-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Explain LLM Assisted Fixture"
-summary = "0124 proof fixture: explain --llm-assisted target."
+description = "0124 proof fixture: explain --llm-assisted target."
 "#;
 
 fn write_source_map(repo: &Path, source_path: &Path) -> std::path::PathBuf {

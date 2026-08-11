@@ -515,10 +515,10 @@ mod tests {
     fn decode_verbatim_string_sink_round_trips() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 
 [sink.session-title]
 mode = "verbatim"
@@ -538,10 +538,10 @@ input = "Fixed session title"
     fn decode_generated_slot_sink_round_trips() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 
 [[slot]]
 id = "draft"
@@ -562,10 +562,10 @@ input = "slot:draft"
     fn decode_rejects_undeclared_slot_ref() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 
 [sink.session-title]
 mode = "generated"
@@ -578,10 +578,10 @@ input = "slot:missing"
     fn decode_rejects_unknown_sink_key() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 
 [sink.notify]
 mode = "verbatim"
@@ -594,10 +594,10 @@ input = "hello"
     fn decode_rejects_all_optional_array_input() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 
 [[slot]]
 id = "draft"
@@ -614,10 +614,10 @@ input = [{ slot = "slot:draft", optional = true }]
     fn no_declaration_decodes_with_empty_sinks() {
         const FIXTURE: &str = r#"
 id = "sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Sink Fixture"
-summary = "Scratch fixture for the session-title sink."
+description = "Scratch fixture for the session-title sink."
 "#;
         let t = decode(FIXTURE).expect("decode");
         assert!(t.sinks.is_empty());

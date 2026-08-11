@@ -330,7 +330,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     });
     expect(surveyStage.output).toBe(notes);
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("stage-step-shape", { procedure: "One-line stage steps." });
+      defineTrait("stage-step-shape", { description: "One-line stage steps." });
       surveyStage("Survey the target");
       statusStage("Check working tree status");
     });
@@ -347,14 +347,14 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
 
   it("defineTrait derives the canonical id from a display name and keeps the name", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("Display Name");
+      defineTrait("Display Name", { description: "s" });
     });
     expect(envelope.draft).toMatchObject({ id: "display-name", name: "Display Name" });
   });
 
   it("defineTrait with a bare slug injects no name", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("bare-slug");
+      defineTrait("bare-slug", { description: "s" });
     });
     expect(envelope.draft).toMatchObject({ id: "bare-slug" });
     expect((envelope.draft as { name?: unknown; }).name).toBeUndefined();
@@ -441,7 +441,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   it("an unknown ctx.input access throws, listing the declared input port ids", () => {
     expect(() =>
       evaluateTraitFunction((ctx) => {
-        defineTrait("unknown-input", { procedure: "p" });
+        defineTrait("unknown-input", { description: "p" });
         port.input.text({ id: "diff" });
         step.command("Read Focus", { input: input.command`echo ${ctx.input.focus as never}` });
       })
@@ -451,7 +451,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   it("a declared-but-never-referenced resource is a build error", () => {
     expect(() =>
       evaluateTraitFunction(() => {
-        defineTrait("orphan-resource");
+        defineTrait("orphan-resource", { description: "s" });
         resource.inline("orphan", "Never used.");
       })
     ).toThrow(/declared but never referenced.*resource "orphan"/);
@@ -478,7 +478,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
 
   it("a procedural trait with declared input and returned output builds a valid draft", () => {
     const envelope = evaluateTraitFunction((ctx) => {
-      defineTrait("procedural-shape", { summary: "Reviews a diff.", procedure: "Review a diff." });
+      defineTrait("procedural-shape", { description: "Review a diff." });
       port.input.text({ id: "diff" });
       const review = slot.text("review");
       step.command("Review", { output: review, input: input.command`echo ${ctx.input.diff as never}` });
@@ -493,7 +493,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
   it("a seats(...)-minted agent's .prompt registrar compiles to canonical output identical to hand-numbering (0162)", () => {
     const buildWith = (smart1: ReturnType<typeof agent.reviewer>, smart2: ReturnType<typeof agent.reviewer>) =>
       evaluateTraitFunction((ctx) => {
-        defineTrait("seat-sugar-shape", { summary: "Two reviewers.", procedure: "Review a diff." });
+        defineTrait("seat-sugar-shape", { description: "Review a diff." });
         port.input.text({ id: "diff" });
         const review1 = slot.text("review-1");
         const review2 = slot.text("review-2");
@@ -523,8 +523,7 @@ describe("defineVariant/useVariant hook-style families", () => {
     void ctx;
     defineVariant("quick", {
       name: "Family (Quick)",
-      summary: "Fast pass.",
-      procedure: "One step.",
+      description: "One step.",
     });
     useBehavior({ tone: tone.Direct });
     const out = slot.text("result");
@@ -600,7 +599,7 @@ describe("defineVariant/useVariant hook-style families", () => {
     ).toThrow(/no variant marked default/);
     const other = (ctx: unknown) => {
       void ctx;
-      defineVariant("other", { procedure: "One step." });
+      defineVariant("other", { description: "One step." });
       const out = slot.text("out");
       agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
         input: input.prompt`Do it.`,
@@ -656,7 +655,7 @@ describe("defineVariant/useVariant hook-style families", () => {
 
   it("a returned decorated output port passes through with its declaration intact", () => {
     const draft = evaluateTraitFunction(function() {
-      defineTrait("decorated-output", { version: "0.1.0", procedure: "One step." });
+      defineTrait("decorated-output", { version: "0.1.0", description: "One step." });
       const out = slot.text("payload");
       agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
         input: input.prompt`Do it.`,
@@ -683,7 +682,7 @@ describe("defineVariant/useVariant hook-style families", () => {
 describe("effect.session.title (0110)", () => {
   it("a string input is a verbatim sink", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("sink-string");
+      defineTrait("sink-string", { description: "s" });
       effect.session.title("Fixed session title");
     });
     expect(envelope.draft).toMatchObject({
@@ -693,7 +692,7 @@ describe("effect.session.title (0110)", () => {
 
   it("an input.prompt template (including one wrapping a slot) is a verbatim sink", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("sink-template", { procedure: "p" });
+      defineTrait("sink-template", { description: "p" });
       const topic = slot.text("topic");
       step.command("Set Topic", { output: topic, input: input.command`echo hi` });
       effect.session.title(input.prompt`Working on ${topic}`);
@@ -705,7 +704,7 @@ describe("effect.session.title (0110)", () => {
 
   it("a bare slot input is a generated sink", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("sink-slot", { procedure: "p" });
+      defineTrait("sink-slot", { description: "p" });
       const draftSlot = slot.text("draft");
       step.command("Draft", { output: draftSlot, input: input.command`echo hi` });
       effect.session.title(draftSlot);
@@ -717,7 +716,7 @@ describe("effect.session.title (0110)", () => {
 
   it("an array of slots (with an optional part) is a generated sink", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("sink-array", { procedure: "p" });
+      defineTrait("sink-array", { description: "p" });
       const first = slot.text("first");
       const second = slot.text("second");
       step.command("Fill", { output: [first, second], input: input.command`echo hi` });
@@ -757,7 +756,7 @@ describe("effect.session.title (0110)", () => {
 
   it("no declaration means no sink in the draft", () => {
     const envelope = evaluateTraitFunction(() => {
-      defineTrait("sink-none");
+      defineTrait("sink-none", { description: "s" });
     });
     expect((envelope.draft as { readonly sink?: unknown; }).sink).toBeUndefined();
   });

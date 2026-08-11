@@ -58,7 +58,7 @@ fn write_fixture_ctx_toml(repo: &Path) {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let ctx_toml = format!(
-        r#"schema-version = "0.2"
+        r#"schema-version = "0.4"
 
 [harness.stub-planner]
 kind = "custom"
@@ -121,10 +121,10 @@ session-mode = "per-frame"
 fn fixture_trait_toml(max_iterations: u32, on_exhausted: &str) -> String {
     format!(
         r#"id = "research-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Research Family Fixture"
-summary = "0153 proof fixture: topic-slug/report-path determinism, plan cardinality gate, and commit-tail two-step staging."
+description = "0153 proof fixture: topic-slug/report-path determinism, plan cardinality gate, and commit-tail two-step staging."
 
 [[port]]
 id = "topic"

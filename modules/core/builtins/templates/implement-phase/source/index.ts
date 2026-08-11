@@ -61,7 +61,7 @@ const output = cdkPort.output.of({
 export default trait("implement-phase", {
     version: "0.1.0",
     name: "Implement Phase",
-    summary: "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict.",
+    description: "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict.",
     metadata: { tag: ["template", "implementation", "review"] },
     procedure: procedure({
         description: "Plan, implement, and review one task end to end.",

@@ -52,7 +52,7 @@ const descriptionPort = port.output.of({
 export default trait("pr-description", {
     version: "0.1.0",
     name: "PR Description",
-    summary: "Writes a structured pull-request description — title, summary, testing notes, and risk — from a diff and its context.",
+    description: "Writes a structured pull-request description — title, summary, testing notes, and risk — from a diff and its context.",
     metadata: { tag: ["template", "pull-request"] },
     procedure: procedure({
         description: "Write a structured pull-request description from a diff and its context.",

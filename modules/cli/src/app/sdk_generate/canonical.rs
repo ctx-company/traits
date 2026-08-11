@@ -346,7 +346,7 @@ fn render_named_def(
 }
 
 /// `Trait`'s own required fields (identity: `id`, `schema-version`,
-/// `version`, `name`, `summary`) are optional on `CanonicalTraitDraft` — the
+/// `version`, `name`, `description`) are optional on `CanonicalTraitDraft` — the
 /// CDK draft is a pre-synth document.
 fn render_trait_types(
     schema: &Value,
@@ -377,7 +377,7 @@ fn render_trait_types(
     ));
 
     out.push_str(
-        "/**\n * The CDK's pre-synth draft document: `Trait`'s identity fields\n * (`id`, `schema-version`, `version`, `name`, `summary`) are optional.\n */\n",
+        "/**\n * The CDK's pre-synth draft document: `Trait`'s identity fields\n * (`id`, `schema-version`, `version`, `name`, `description`) are optional.\n */\n",
     );
     let draft_body = render_object_body(obj, defs, marked, &required)?;
     out.push_str(&format!(

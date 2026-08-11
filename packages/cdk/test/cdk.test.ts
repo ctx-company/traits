@@ -673,6 +673,7 @@ describe("retired canonical fields", () => {
     const draft = toDraftJson(
       trait("schema-reachability", {
         name: "Schema Reachability",
+        description: "s",
         slot: [
           slot({ id: "reachable-schema-a", schema: reachable }),
           slot({ id: "reachable-schema-b", schema: reachable }),
@@ -685,9 +686,9 @@ describe("retired canonical fields", () => {
   it("rejects removed trait schema aliases at typecheck time", () => {
     const reachable = schema.object("retired-schema-reachable", { value: schema.text() });
     // @ts-expect-error schema declarations are inferred from reachable slots and ports.
-    trait({ id: "retired-schema", schema: [reachable] });
+    trait({ id: "retired-schema", description: "s", schema: [reachable] });
     // @ts-expect-error schemas is not a trait authoring alias.
-    trait({ id: "retired-schemas", schemas: [reachable] });
+    trait({ id: "retired-schemas", description: "s", schemas: [reachable] });
     // @ts-expect-error variant fields use the same inferred schema closure.
     variant({ schema: [reachable] });
     // @ts-expect-error schemas is not a variant authoring alias.
@@ -814,6 +815,7 @@ describe("input.command", () => {
       toDraftJson(
         trait("commit-only", {
           version: "0.1.0",
+          description: "s",
           name: "Commit Only",
           procedure: procedure({ description: "No steps.", sequence: [sequence.command({ id: "commit", ...fields })] }),
           slot: [message],
@@ -995,6 +997,7 @@ describe("sequence.command / sequence.check include", () => {
     const draft = toDraftJson(
       trait("commit-only", {
         version: "0.1.0",
+        description: "s",
         name: "Commit Only",
         procedure: procedure({
           description: "No steps.",
@@ -1015,6 +1018,7 @@ describe("sequence.command / sequence.check include", () => {
     const draft = toDraftJson(
       trait("check-only", {
         version: "0.1.0",
+        description: "s",
         name: "Check Only",
         procedure: procedure({
           description: "No steps.",
@@ -1042,6 +1046,7 @@ describe("sequence.command / sequence.check include", () => {
     const draft = toDraftJson(
       trait("legacy-input", {
         version: "0.1.0",
+        description: "s",
         name: "Legacy Input",
         procedure: procedure({
           description: "No steps.",
@@ -1067,6 +1072,7 @@ describe("sequence.command / sequence.check include", () => {
     const draft = toDraftJson(
       trait("legacy-merge", {
         version: "0.1.0",
+        description: "s",
         name: "Legacy Merge",
         procedure: procedure({
           description: "No steps.",
@@ -1094,6 +1100,7 @@ describe("sequence.command / sequence.check include", () => {
     const draft = toDraftJson(
       trait("check-optional", {
         version: "0.1.0",
+        description: "s",
         name: "Check Optional",
         procedure: procedure({
           description: "No steps.",
@@ -1489,6 +1496,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     });
     const draft = toDraftJson(trait("ask", {
       version: "0.1.0",
+      description: "s",
       name: "Ask",
       procedure: procedure({ description: "Ask a human.", sequence: [ask] }),
     })) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
@@ -1510,6 +1518,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     });
     const draft = toDraftJson(trait("approval-gate", {
       version: "0.1.0",
+      description: "s",
       name: "Approval Gate",
       procedure: procedure({
         description: "Review a proposal.",
@@ -1586,6 +1595,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("gate-branch", {
         version: "0.1.0",
+        description: "s",
         name: "Gate Branch",
         procedure: procedure({
           description: "Gate then branch.",
@@ -1615,6 +1625,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("standalone-check", {
         version: "0.1.0",
+        description: "s",
         name: "Standalone Check",
         procedure: procedure({ description: "One check step.", sequence: [gate] }),
       }),
@@ -1629,6 +1640,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("branch-arms", {
           version: "0.1.0",
+          description: "s",
           name: "Branch Arms",
           procedure: procedure({
             description: "One arm each.",
@@ -1659,6 +1671,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("when-vs-branch", {
           version: "0.1.0",
+          description: "s",
           name: "When Vs Branch",
           procedure: procedure({ description: "Route.", sequence: items as never }),
         }),
@@ -1686,6 +1699,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("idle-timeout", {
           version: "0.1.0",
+          description: "s",
           name: "Idle Timeout",
           procedure: procedure({
             description: "One command step.",
@@ -1706,6 +1720,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("inline-loop-body", {
         version: "0.1.0",
+        description: "s",
         name: "Inline Loop Body",
         procedure: procedure({
           description: "Loop with an inline body.",
@@ -1730,6 +1745,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("inline-foreach-body", {
         version: "0.1.0",
+        description: "s",
         name: "Inline ForEach Body",
         procedure: procedure({
           description: "ForEach with an inline body.",
@@ -1753,6 +1769,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("contract-inference", {
         name: "Contract Inference",
+        description: "s",
         procedure: procedure({
           description: "Traverse a named sequence inside a loop.",
           sequence: sequence.loop("contract-loop", { sequence: work, iterations: 1 }),
@@ -1775,6 +1792,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const response = port.output.of({ id: "project-response", schema: "schema:text", value: result });
     const draft = toDraftJson(trait("project-contract", {
       name: "Project Contract",
+      description: "s",
       port: response,
       procedure: procedure({
         description: "Project a result to the response boundary.",
@@ -1801,6 +1819,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       variants: {
         one: variant({
           name: "One",
+          description: "s",
           procedure: procedure({
             description: "Produce nested and direct results.",
             sequence: sequence.branch("route-contract", {
@@ -1813,6 +1832,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         }).default(),
         two: variant({
           name: "Two",
+          description: "s",
           procedure: procedure({
             description: "Do not use the sibling boundary.",
             sequence: sequence.prompt("other", { text: input.prompt`Other.` }),
@@ -1845,8 +1865,10 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const first = port.output.of({ id: "first-output", schema: "schema:text", value: result });
     const second = port.output.of({ id: "second-output", schema: "schema:text", value: result });
 
-    const a = toDraftJson(trait("first-contract", { name: "First", procedure: shared, port: first }));
-    const b = toDraftJson(trait("second-contract", { name: "Second", procedure: shared, port: second }));
+    const a = toDraftJson(trait("first-contract", { name: "First", description: "s", procedure: shared, port: first }));
+    const b = toDraftJson(
+      trait("second-contract", { name: "Second", description: "s", procedure: shared, port: second }),
+    );
 
     expect(a.procedure?.output).toEqual(["port:first-output"]);
     expect(b.procedure?.output).toEqual(["port:second-output"]);
@@ -1878,6 +1900,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const { draft, __map } = toDraftJsonWithSourceMap(
       trait("contract-parity", {
         name: "Contract Parity",
+        description: "s",
         port: [promptOutput, unproduced, required, directOutput, optional, projectOutput, defaulted],
         procedure: procedure({
           description: "Exercise every inferred contract boundary.",
@@ -1922,6 +1945,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("duplicate-titles", {
           name: "Duplicate Titles",
+          description: "s",
           procedure: procedure({
             description: "Two steps with colliding derived ids.",
             sequence: [
@@ -1951,6 +1975,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("branch-arm-collision", {
           name: "Branch Arm Collision",
+          description: "s",
           procedure: procedure({
             description: "An authored id shadows a generated branch-arm id.",
             sequence: [
@@ -1972,6 +1997,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const draft = toDraftJson(
       trait("foreach-closure", {
         version: "0.1.0",
+        description: "s",
         name: "ForEach Closure",
         procedure: procedure({
           description: "ForEach via closure.",
@@ -1992,6 +2018,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       toDraftJson(
         trait("command-forms", {
           version: "0.1.0",
+          description: "s",
           name: "Command Forms",
           procedure: procedure({ description: "One command.", sequence: [step as never] }),
         }),
@@ -2025,6 +2052,7 @@ it("passes metadata family/variant and facets through the draft unchanged", () =
   const draft = toDraftJson(
     trait("plan-quick", {
       version: "0.1.0",
+      description: "s",
       name: "Plan (Quick)",
       metadata: { family: "plan", variant: "quick", tag: ["first-party"] },
       procedure: procedure({ description: "No steps.", sequence: [] }),
@@ -2271,6 +2299,7 @@ describe("typed rule/signal/dependency (P459)", () => {
     const draft = toDraftJson(
       trait("signal-fixture", {
         version: "0.1.0",
+        description: "s",
         name: "Signal Fixture",
         procedure: procedure({ description: "No steps.", sequence: [] }),
         signal: [signal(fields)],
@@ -2331,23 +2360,23 @@ describe("typed rule/signal/dependency (P459)", () => {
 describe("TraitFields declaration field typing (P482)", () => {
   it("rejects a raw object literal in agent: position", () => {
     // @ts-expect-error a plain object literal is not an AgentHandle; author via agent(...)/worker(...)/etc.
-    trait("bad-agent", { agent: [{ id: "not-a-handle" }] });
+    trait("bad-agent", { description: "s", agent: [{ id: "not-a-handle" }] });
   });
 
   it("rejects a wrong-kind handle in port: position", () => {
     const notAPort = slot.text("oops");
     // @ts-expect-error a SlotHandle is not a PortHandle.
-    trait("bad-port", { port: [notAPort] });
+    trait("bad-port", { description: "s", port: [notAPort] });
   });
 
   it("rejects a misspelled key inside activation", () => {
     // @ts-expect-error "minScore" misspells the canonical "min-score" key.
-    trait("bad-activation", { activation: { minScore: 1 } });
+    trait("bad-activation", { description: "s", activation: { minScore: 1 } });
   });
 
   it("rejects a raw JsonValue in relations:", () => {
     // @ts-expect-error relations must be a CanonicalRelations object, not an arbitrary JSON value.
-    trait("bad-relations", { relations: "not-an-object" });
+    trait("bad-relations", { description: "s", relations: "not-an-object" });
   });
 });
 
@@ -2481,6 +2510,7 @@ describe("markdown doc-resource helpers (P459)", () => {
     const draft = toDraftJson(
       trait("steps-fixture", {
         version: "0.1.0",
+        description: "s",
         name: "Steps Fixture",
         procedure: procedure({
           description: "No steps.",
@@ -2505,6 +2535,7 @@ describe("markdown doc-resource helpers (P459)", () => {
     const draft = toDraftJson(
       trait("table-callout-fixture", {
         version: "0.1.0",
+        description: "s",
         name: "Table Callout Fixture",
         procedure: procedure({
           description: "No steps.",

@@ -2002,7 +2002,7 @@ id = "present-validate"
 schema-version = "0.3"
 version = "0.1.0"
 name = "Present validate"
-summary = "Present validation fixture."
+description = "Present validation fixture."
 "#;
 
     const HEADER_02: &str = r#"
@@ -2010,7 +2010,7 @@ id = "present-validate"
 schema-version = "0.2"
 version = "0.1.0"
 name = "Present validate"
-summary = "Present validation fixture."
+description = "Present validation fixture."
 "#;
 
     #[test]
@@ -2123,7 +2123,7 @@ id = "nested-field-path-validate"
 schema-version = "0.3"
 version = "0.1.0"
 name = "Nested field path validate"
-summary = "Nested field path validation fixture."
+description = "Nested field path validation fixture."
 "#;
 
     const NESTED_SCHEMAS: &str = r#"

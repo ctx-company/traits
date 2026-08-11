@@ -59,7 +59,7 @@ const summaryPort = port.output.of({
 export default trait("research-summarize", {
     version: "0.1.0",
     name: "Research Summarize",
-    summary: "Summarizes a research question against supplied source material into key findings, open questions, and citations.",
+    description: "Summarizes a research question against supplied source material into key findings, open questions, and citations.",
     metadata: { tag: ["template", "research"] },
     procedure: procedure({
         description: "Answer a research question from supplied source material with a structured, cited summary.",

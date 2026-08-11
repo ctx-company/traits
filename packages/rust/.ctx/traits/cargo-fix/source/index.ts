@@ -13,7 +13,7 @@ const scope = port.input.text({
 export default trait("cargo-fix", {
     version: "0.1.0",
     name: "Cargo Fix",
-    summary:
+    description:
         "The compiler is the reviewer: capture and reduce a real cargo check + clippy run into a deduplicated, deterministically ordered diagnostic list, then drive a worker through bounded fix rounds — each followed by a fresh recapture — until the list is clean. A round that cannot clear it blocks rather than committing.",
     metadata: {
         family: "cargo-fix",

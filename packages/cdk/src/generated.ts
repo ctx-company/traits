@@ -707,6 +707,13 @@ export type CanonicalDependency = {
 };
 
 /**
+ * Required agent+user prose: the single model-visible description of what
+ * the trait/variant does. Rendered in the model view opening section, the
+ * frame `<description>` tag, and listings.
+ */
+export type CanonicalDescription = string;
+
+/**
  * A typed digest value in `sha256:<hex>` format.
  */
 export type CanonicalDigest = string;
@@ -1816,7 +1823,8 @@ export type CanonicalSuggests = {
 };
 
 /**
- * Short human-readable description.
+ * Optional user-only prose. Defaults to `description` when absent; never
+ * rendered to the model.
  */
 export type CanonicalSummary = string;
 
@@ -1854,6 +1862,7 @@ export type CanonicalTrait = {
    * `resource:aws/rubric`. Resolution is performed at the IO/check boundary.
    */
   readonly "dependency"?: readonly CanonicalDependency[] | undefined;
+  readonly "description": CanonicalDescription;
   /**
    * Product eval declarations: declared checks that can be run.
    */
@@ -1929,7 +1938,11 @@ export type CanonicalTrait = {
    * Slot definitions: procedure run ledger value contracts.
    */
   readonly "slot"?: readonly CanonicalSlot[] | undefined;
-  readonly "summary": CanonicalSummary;
+  /**
+   * User-only prose; defaults to `description` when absent. Never
+   * rendered to the model.
+   */
+  readonly "summary"?: CanonicalSummary | undefined;
   /**
    * Native family variant identity. This is deliberately absent from 0.2
    * documents, preserving their encoded bytes and digest semantics.
@@ -1940,7 +1953,7 @@ export type CanonicalTrait = {
 
 /**
  * The CDK's pre-synth draft document: `Trait`'s identity fields
- * (`id`, `schema-version`, `version`, `name`, `summary`) are optional.
+ * (`id`, `schema-version`, `version`, `name`, `description`) are optional.
  */
 export type CanonicalTraitDraft = {
   /**
@@ -1970,6 +1983,7 @@ export type CanonicalTraitDraft = {
    * `resource:aws/rubric`. Resolution is performed at the IO/check boundary.
    */
   readonly "dependency"?: readonly CanonicalDependency[] | undefined;
+  readonly "description"?: CanonicalDescription | undefined;
   /**
    * Product eval declarations: declared checks that can be run.
    */
@@ -2045,6 +2059,10 @@ export type CanonicalTraitDraft = {
    * Slot definitions: procedure run ledger value contracts.
    */
   readonly "slot"?: readonly CanonicalSlot[] | undefined;
+  /**
+   * User-only prose; defaults to `description` when absent. Never
+   * rendered to the model.
+   */
   readonly "summary"?: CanonicalSummary | undefined;
   /**
    * Native family variant identity. This is deliberately absent from 0.2

@@ -175,7 +175,7 @@ const envelopePort = port.output.of({
 export default trait("refine-trait", {
     version: "0.1.0",
     name: "Refine Trait",
-    summary: "Drives a bounded produce/evaluate loop that refines a trait candidate against the deterministic rung ladder (with an identity rung refinement must never cross), revising on its own typed diagnostics.",
+    description: "Drives a bounded produce/evaluate loop that refines a trait candidate against the deterministic rung ladder (with an identity rung refinement must never cross), revising on its own typed diagnostics.",
     metadata: { tag: ["first-party", "meta-trait", "refinement"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     port: envelopePort,

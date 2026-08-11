@@ -151,7 +151,7 @@ const envelopePort = port.output.of({
 export default trait("import-trait", {
     version: "0.1.0",
     name: "Import Trait",
-    summary: "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline.",
+    description: "Drives a bounded produce/evaluate loop that enriches a deterministic import scaffold with source-grounded trait content, converging toward the imported contract: builds and checks clean while remaining recognizably the scaffold baseline.",
     metadata: { tag: ["first-party", "meta-trait", "import"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     port: envelopePort,

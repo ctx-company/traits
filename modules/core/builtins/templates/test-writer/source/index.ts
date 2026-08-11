@@ -62,7 +62,7 @@ const planPort = port.output.of({
 export default trait("test-writer", {
     version: "0.1.0",
     name: "Test Writer",
-    summary: "Proposes a structured test plan for a piece of code against stated requirements.",
+    description: "Proposes a structured test plan for a piece of code against stated requirements.",
     metadata: { tag: ["template", "testing"] },
     schema: [testCase],
     procedure: procedure({

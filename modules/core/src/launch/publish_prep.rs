@@ -32,7 +32,10 @@ pub struct PackagingPlanEntry {
 
 pub fn publish_prep_report(trait_ref: &Trait) -> PublishPrepReport {
     let mut findings = Vec::new();
-    scan_private_text(&mut findings, "summary", trait_ref.summary.as_str());
+    scan_private_text(&mut findings, "description", trait_ref.description.as_str());
+    if let Some(summary) = trait_ref.summary.as_ref() {
+        scan_private_text(&mut findings, "summary", summary.as_str());
+    }
     for resource in &trait_ref.resources {
         if let Some(path) = resource.path.as_deref() {
             scan_private_text(&mut findings, &format!("resource.{}.path", resource.id), path);

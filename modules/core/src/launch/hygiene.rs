@@ -166,7 +166,7 @@ fn hygiene_entry(trait_ref: &Trait, status: &PackageStatus, trust: &TrustVerdict
             "no activation rule or manual invocation path is declared",
         ));
     }
-    if trait_ref.summary.as_str().chars().count() > 240 {
+    if trait_ref.effective_summary().chars().count() > 240 {
         findings.push(finding(
             "hygiene.oversized-summary",
             "advisory",
@@ -204,7 +204,7 @@ fn duplicate_summaries(traits: &[Trait]) -> BTreeSet<String> {
     let mut by_summary: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for trait_ref in traits {
         by_summary
-            .entry(trait_ref.summary.as_str().trim().to_ascii_lowercase())
+            .entry(trait_ref.effective_summary().trim().to_ascii_lowercase())
             .or_default()
             .push(trait_ref.id.as_str().to_string());
     }
@@ -340,7 +340,7 @@ fn push_behavior_axis(
 fn inventory_entry(trait_ref: &Trait, status: &PackageStatus) -> TraitInventoryEntry {
     TraitInventoryEntry {
         trait_id: trait_ref.id.as_str().to_string(),
-        why_this_exists: trait_ref.summary.as_str().to_string(),
+        why_this_exists: trait_ref.effective_summary().to_string(),
         when_it_should_trigger: activation_note(trait_ref),
         conflicts_with: trait_ref
             .relations

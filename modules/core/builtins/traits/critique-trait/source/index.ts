@@ -33,7 +33,7 @@ const reviewPort = port.output.of({ id: "review", schema: ref.schema("review-sca
 export default trait("critique-trait", {
     version: "0.1.0",
     name: "Critique Trait",
-    summary: "Produces source-backed advisory trait design critiques.",
+    description: "Produces source-backed advisory trait design critiques.",
     metadata: { tag: ["first-party", "meta-trait", "critique"] },
     dependency: dependency({ alias: "trait-spec", id: "trait-spec", version: "0.1.0", source: { path: "../trait-spec" } }),
     schema: [anchor, finding],

@@ -11,10 +11,10 @@ use support::{ScratchRoot, git_init, require_success, run_ctx};
 const TRAIT_ID: &str = "render-trust-fixture";
 
 const TRAIT_MANIFEST: &str = "id = \"render-trust-fixture\"\n\
-schema-version = \"0.2\"\n\
+schema-version = \"0.4\"\n\
 version = \"0.1.0\"\n\
 name = \"Render Trust Fixture\"\n\
-summary = \"P497 render-trust gate proof fixture.\"\n";
+description = \"P497 render-trust gate proof fixture.\"\n";
 
 /// Write `contents` to `path`, creating parent directories as needed.
 fn write_fixture_file(path: &Path, contents: &str) {

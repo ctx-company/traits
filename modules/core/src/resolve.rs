@@ -489,7 +489,7 @@ pub fn resolve(
 // ---------------------------------------------------------------------------
 
 fn fallback_cost(t: &Trait) -> u64 {
-    let text_len = t.name.as_str().len() + t.summary.as_str().len();
+    let text_len = t.name.as_str().len() + t.description.as_str().len();
     let estimated = (text_len as u64).div_ceil(4);
     estimated.max(50)
 }

@@ -24,10 +24,10 @@ const PACKAGE_MANIFEST: &str = "[package]\nid = \"schema-flatten-fixture\"\nvers
 /// (`[schema:item]`) — the two ref forms the emit-side walker must inline
 /// independently at each use site.
 const ACYCLIC_MANIFEST: &str = r#"id = "schema-flatten-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Schema Flatten Fixture"
-summary = "0020 proof fixture: shared nested schema, no refs at emit."
+description = "0020 proof fixture: shared nested schema, no refs at emit."
 
 [[schema]]
 id = "item"
@@ -74,10 +74,10 @@ output = ["slot:result"]
 /// `blocker` and `item` reference each other: `blocker.item -> item`,
 /// `item.blocker -> blocker`. Flattening this graph does not terminate.
 const CYCLIC_MANIFEST: &str = r#"id = "schema-flatten-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Schema Flatten Fixture"
-summary = "0020 proof fixture: mutually recursive schema graph."
+description = "0020 proof fixture: mutually recursive schema graph."
 
 [[schema]]
 id = "blocker"

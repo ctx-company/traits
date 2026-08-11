@@ -1,8 +1,8 @@
 id = "generate-evals"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Generate Evals"
-summary = "Proposes source-grounded scenarios and deferred behavioral/runtime eval declarations."
+description = "Proposes source-grounded scenarios and deferred behavioral/runtime eval declarations."
 
 [[dependency]]
 alias = "trait-spec"

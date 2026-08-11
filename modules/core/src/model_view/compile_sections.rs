@@ -898,15 +898,7 @@ fn format_procedure(
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
 ) -> String {
-    let mut lines = vec![format!(
-        "Description: {}",
-        sanitize_model_text(
-            &proc.description,
-            "procedure.description",
-            warnings,
-            normalizations,
-        )
-    )];
+    let mut lines: Vec<String> = Vec::new();
     if proc.worktree_required {
         lines.push("Worktree required: yes".to_string());
     }

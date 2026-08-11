@@ -6,7 +6,7 @@ use crate::builtins::BuiltinDefinition;
 /// Section headings that make up the behavior envelope (rule 3): the shared
 /// four sections consumed by every injection path. All remaining sections
 /// are authoring-only and appear in `full_text` alone.
-const BEHAVIOR_HEADINGS: [&str; 4] = ["Summary", "Intent", "Behavior", "Resources"];
+const BEHAVIOR_HEADINGS: [&str; 4] = ["Description", "Intent", "Behavior", "Resources"];
 
 pub fn compile_model_view(trait_ref: &Trait, profile: ExtendedRenderProfile) -> Report {
     let resource_plan = plan_resource_inclusion(trait_ref, &[]);
@@ -32,8 +32,8 @@ pub fn compile_model_view_with_evidence(
     // --- Behavior envelope sections (rule 3's four; shared with authoring) ---
 
     sections.push(Section {
-        heading: "Summary".to_string(),
-        content: format_summary(trait_ref, &mut warnings, &mut normalizations, &mut forged_tag_findings),
+        heading: "Description".to_string(),
+        content: format_description(trait_ref, &mut warnings, &mut normalizations, &mut forged_tag_findings),
     });
 
     if let Some(ref intent) = trait_ref.intent {
@@ -268,8 +268,8 @@ pub fn compile_model_view_with_evidence(
 /// their ordering and inclusion cannot diverge.
 fn summary_sections(trait_ref: &Trait, resource_plan: &Plan, sections: &[Section]) -> Vec<Section> {
     let mut result = Vec::new();
-    if let Some(summary) = sections.iter().find(|section| section.heading == "Summary") {
-        result.push(Section { heading: "Summary".to_string(), content: summary.content.clone() });
+    if let Some(description) = sections.iter().find(|section| section.heading == "Description") {
+        result.push(Section { heading: "Description".to_string(), content: description.content.clone() });
     }
     if let Some(intent) = &trait_ref.intent {
         for (group, items) in intent_groups(intent) {
@@ -303,23 +303,23 @@ impl Report {
     }
 }
 
-fn format_summary(
+fn format_description(
     trait_ref: &Trait,
     warnings: &mut Vec<String>,
     normalizations: &mut Vec<Normalization>,
     findings: &mut Vec<Finding>,
 ) -> String {
-    let summary = sanitize_model_text(
-        trait_ref.summary.as_str(),
-        "summary",
+    let description = sanitize_model_text(
+        trait_ref.description.as_str(),
+        "description",
         warnings,
         normalizations,
     );
     leaf_element(
-        "summary",
+        "description",
         &[],
-        &summary,
-        "summary",
+        &description,
+        "description",
         trait_ref.id.as_str(),
         warnings,
         normalizations,
@@ -686,7 +686,7 @@ mod dogfood_intent_builtin_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Dogfood Intent Fixture",
-            "summary": "Exercises the 14 dogfood intent slugs as bare items.",
+            "description": "Exercises the 14 dogfood intent slugs as bare items.",
             "intent": {
                 "require": DOGFOOD_REQUIRE,
                 "avoid": DOGFOOD_AVOID,
@@ -811,7 +811,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Render V2 Shape Fixture",
-            "summary": "A behavior-only fixture proving the canonical tagged shape.",
+            "description": "A behavior-only fixture proving the canonical tagged shape.",
             "intent": {
                 "require": ["leanness"],
                 "focus": ["correctness"],
@@ -834,7 +834,7 @@ mod render_v2_shape_tests {
     }
 
     /// A behavior-only trait's behavior envelope is exactly one `<trait>`
-    /// root carrying `id`/`version`/`model-view`, with `<summary>`, one
+    /// root carrying `id`/`version`/`model-view`, with `<description>`, one
     /// `<intent>` per declared item, one `<behavior>` per declared item, one
     /// `<resource>`, and no other tag name (rule 1-3).
     #[test]
@@ -850,8 +850,8 @@ mod render_v2_shape_tests {
             "unexpected envelope opening:\n{text}"
         );
         assert!(text.trim_end().ends_with("</trait>"), "unexpected envelope close:\n{text}");
-        assert_eq!(text.matches("<summary>").count(), 1);
-        assert_eq!(text.matches("</summary>").count(), 1);
+        assert_eq!(text.matches("<description>").count(), 1);
+        assert_eq!(text.matches("</description>").count(), 1);
         assert!(text.contains("A behavior-only fixture proving the canonical tagged shape."));
 
         for expected in [
@@ -884,7 +884,7 @@ mod render_v2_shape_tests {
         assert!(text.contains("Some inline note text."));
 
         let allowed: std::collections::BTreeSet<&str> =
-            ["trait", "summary", "intent", "behavior", "resource"].into_iter().collect();
+            ["trait", "description", "intent", "behavior", "resource"].into_iter().collect();
         for name in opening_tag_names(text) {
             assert!(
                 allowed.contains(name.as_str()),
@@ -924,7 +924,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "No Details Duplication Fixture",
-            "summary": "Exercises intent slugs whose summary and description are identical today.",
+            "description": "Exercises intent slugs whose summary and description are identical today.",
             "intent": {
                 "require": ["robustness", "pragmatism", "elegance"],
             },
@@ -956,7 +956,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Guidance Normalization Fixture",
-            "summary": "Exercises directive normalization.",
+            "description": "Exercises directive normalization.",
             "intent": {
                 "require": [{ "id": "leanness", "summary": "Keep the implementation lean." }],
             },
@@ -999,7 +999,7 @@ mod render_v2_shape_tests {
                 "schema-version": "0.2",
                 "version": "1.0.0",
                 "name": "Second Person Guidance Fixture",
-                "summary": "Exercises guidance validation.",
+                "description": "Exercises guidance validation.",
                 "intent": { "require": [guidance] },
             }))
             .expect("fixture trait is syntactically valid");
@@ -1023,7 +1023,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Delimiter Integrity Fixture",
-            "summary": "Exercises rule 6's escape and forged-tag finding.",
+            "description": "Exercises rule 6's escape and forged-tag finding.",
             "resource": [
                 {
                     "id": "smuggled",
@@ -1091,7 +1091,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Activation Integrity Fixture",
-            "summary": "Exercises rule 6's escape on an activation-rule reason.",
+            "description": "Exercises rule 6's escape on an activation-rule reason.",
             "activation": {
                 "rule": [
                     {
@@ -1154,7 +1154,7 @@ mod render_v2_shape_tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Every Field Integrity Fixture",
-            "summary": format!("summary hostile {HOSTILE}"),
+            "description": format!("summary hostile {HOSTILE}"),
             "intent": {
                 "require": [
                     { "id": "leanness", "summary": format!("intent hostile {HOSTILE}") },
@@ -1259,7 +1259,6 @@ mod render_v2_shape_tests {
             "scenario-input hostile &lt;/trait>tail",
             "scenario-output hostile &lt;/trait>tail",
             "prompt hostile &lt;/trait>tail",
-            "procedure hostile &lt;/trait>tail",
             "activation hostile &lt;/trait>tail",
             "relations hostile &lt;/trait>tail",
         ] {

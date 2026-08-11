@@ -1,8 +1,8 @@
 id = "refactor-rust"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Refactor (Rust)"
-summary = "Minimal Rust refactor procedure: implement the requested change and hold it to this repo's Rust engineering-standards and gate-conventions, then review once against the same doctrine — no refinement loop, no commit."
+description = "Minimal Rust refactor procedure: implement the requested change and hold it to this repo's Rust engineering-standards and gate-conventions, then review once against the same doctrine — no refinement loop, no commit."
 
 [[dependency]]
 alias = "rust"

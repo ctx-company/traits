@@ -17,7 +17,7 @@ const designRubric = resource({
 export default trait("trait-spec", {
     version: "0.1.0",
     name: "Trait Specification",
-    summary: "Provides the Agent Traits schema and a grounded design rubric for trait authors.",
+    description: "Provides the Agent Traits schema and a grounded design rubric for trait authors.",
     metadata: {
         tag: ["first-party", "knowledge", "meta-trait", "protocol"],
     },

@@ -83,10 +83,10 @@ mod tests {
 
     const MINIMAL_TRAIT: &str = r#"
 id = "golden-canonical"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Golden Canonical"
-summary = "A minimal deterministic trait fixture for command-output comparisons."
+description = "A minimal deterministic trait fixture for command-output comparisons."
 status = "active"
 trust = "local"
 "#;

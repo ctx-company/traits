@@ -1441,7 +1441,7 @@ fn frame_contract_section(frame: &ctx_traits_core::procedure::runtime::SequenceF
 }
 
 /// The frame-level `<information>` element: identity, title, description
-/// (the trait's own summary — `SequenceItem` has no per-step description
+/// (the trait's own description — `SequenceItem` has no per-step description
 /// field today), the resolved prompt body, and — when the trait declares
 /// them — intent/behavior guidance sourced from the same directive registry
 /// `ctx traits explain` and the static model view already use
@@ -1456,7 +1456,7 @@ fn frame_information_section(
     section.push_str(&frame_contract_section(frame));
     section.push_str(&format!(
         "  <description>{}</description>\n",
-        loaded.trait_ref.summary
+        loaded.trait_ref.description
     ));
     section.push_str("  <prompt>\n");
     section.push_str(&indent_block(prompt_section, 4));

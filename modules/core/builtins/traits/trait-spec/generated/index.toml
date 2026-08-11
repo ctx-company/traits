@@ -1,8 +1,8 @@
 id = "trait-spec"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Trait Specification"
-summary = "Provides the Agent Traits schema and a grounded design rubric for trait authors."
+description = "Provides the Agent Traits schema and a grounded design rubric for trait authors."
 
 [metadata]
 tag = [

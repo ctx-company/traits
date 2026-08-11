@@ -328,7 +328,7 @@ pub fn render_stub_export_content(
     out.push_str("\n\n");
     push_provenance_block(&mut out, trait_ref, canonical_digest);
     out.push_str(&format!("# {}\n\n", trait_ref.name.as_str()));
-    out.push_str(trait_ref.summary.as_str());
+    out.push_str(trait_ref.description.as_str());
     out.push_str("\n\n");
     out.push_str("## Behavior\n\n");
     out.push_str(&format!(
@@ -761,7 +761,7 @@ fn skill_frontmatter(trait_ref: &Trait, profile: ExtendedRenderProfile) -> Rende
         &mut normalizations,
     );
     let summary = sanitize_model_text(
-        trait_ref.summary.as_str(),
+        trait_ref.description.as_str(),
         "frontmatter.description",
         &mut sanitization_warnings,
         &mut normalizations,
@@ -969,7 +969,7 @@ mod tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Example Trait",
-            "summary": "A representative trait."
+            "description": "A representative trait."
         }))
         .expect("representative trait is valid")
     }
@@ -999,7 +999,7 @@ mod tests {
         assert!(
             plain.contains("<trait id=\"example-trait\" version=\"1.0.0\" model-view=\"sha256:")
         );
-        assert!(plain.contains("<summary>"));
+        assert!(plain.contains("<description>"));
         assert!(plain.contains("A representative trait."));
         assert!(!plain.contains("## Provenance"));
         assert!(!plain.contains("## Identity"));
@@ -1007,7 +1007,7 @@ mod tests {
         let with_frontmatter = render_export_content(&compat_with_frontmatter);
         assert!(with_frontmatter.starts_with("---\nname: \"Example Trait\""));
         assert!(with_frontmatter.contains("> Render profile: agent-skills"));
-        assert!(with_frontmatter.contains("<summary>"));
+        assert!(with_frontmatter.contains("<description>"));
     }
 
     #[test]
@@ -1038,7 +1038,7 @@ mod tests {
             "schema-version": "0.2",
             "version": "1.0.0",
             "name": "Sanitized Skill Fixture",
-            "summary": "Visible <!-- hidden --> summary."
+            "description": "Visible <!-- hidden --> summary."
         }))
         .expect("sanitized skill fixture is valid");
         let plan = plan_render(

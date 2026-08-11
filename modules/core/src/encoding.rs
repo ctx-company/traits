@@ -181,7 +181,8 @@ pub fn decode_trait_with_warnings(
 
     let mut value: serde_json::Value = decode(encoding, text)?;
     validate_preflight(&value)?;
-    let warnings = strip_deprecated_status_trust(&mut value);
+    let mut warnings = strip_deprecated_status_trust(&mut value);
+    warnings.extend(default_description_from_summary(&mut value));
     let t: Trait =
         serde_json::from_value(value).map_err(|e| crate::parse::Error::json_decode("root", e))?;
 
@@ -264,6 +265,43 @@ fn strip_deprecated_status_trust(value: &mut serde_json::Value) -> Vec<String> {
                 }
             ));
         }
+    }
+    warnings
+}
+
+/// 0165 transition tolerance: a canonical document from schema-version 0.2
+/// or 0.3 declares only `summary`, but `Trait::description` is now the
+/// required field. Rather than have every pre-0.4 document refuse to decode
+/// at all (which would also break `migrate::plan_migration`'s own
+/// decode-before-rewrite step), copy `summary` into `description` when
+/// `description` is absent — the same value the trait author already
+/// approved for model-visible prose under the old schema. `summary` itself
+/// is left in place so it still resolves as the (now-redundant) user-only
+/// override until the document is migrated to 0.4 and rewritten.
+fn default_description_from_summary(value: &mut serde_json::Value) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Some(object) = value.as_object_mut() else {
+        return warnings;
+    };
+    if object.contains_key("description") {
+        return warnings;
+    }
+    let is_pre_0_4 = matches!(
+        object
+            .get("schema-version")
+            .and_then(serde_json::Value::as_str),
+        Some("0.2") | Some("0.3")
+    );
+    if !is_pre_0_4 {
+        return warnings;
+    }
+    if let Some(summary) = object.get("summary").cloned() {
+        object.insert("description".to_string(), summary);
+        warnings.push(
+            "canonical trait document has no `description`; defaulting it from `summary` \
+             (pre-0.4 schema; migrate to 0.4 to author `description` directly)"
+                .to_string(),
+        );
     }
     warnings
 }

@@ -766,10 +766,10 @@ mod landing_honesty_tests {
 
     const FIXTURE: &str = r#"
 id = "landing-honesty-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Landing Honesty Fixture"
-summary = "0151 unit-test fixture: one command step, so a Session is cheap to build."
+description = "0151 unit-test fixture: one command step, so a Session is cheap to build."
 
 [[slot]]
 id = "commit-output"
@@ -3590,10 +3590,10 @@ mod unbounded_loop_tests {
     /// "approved" lands, never touching exhaustion at all.
     const FIXTURE: &str = r#"
 id = "unbounded-loop-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Unbounded Loop Fixture"
-summary = "Regression fixture: a loop with until and no bound stops on its own guard."
+description = "Regression fixture: a loop with until and no bound stops on its own guard."
 
 [[agent]]
 id = "reviewer"
@@ -3752,10 +3752,10 @@ mod correction_retry_tests {
     /// schema-validatable frame at a NESTED position.
     const FIXTURE: &str = r#"
 id = "retry-loop-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Retry Loop Fixture"
-summary = "Regression fixture: a typed slot produced inside a bounded loop."
+description = "Regression fixture: a typed slot produced inside a bounded loop."
 
 [[agent]]
 id = "reviewer"
@@ -3990,10 +3990,10 @@ mod owner_answer_lifecycle_tests {
 
     const FIXTURE: &str = r#"
 id = "owner-answer-lifecycle-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Owner Answer Lifecycle Fixture"
-summary = "P0047 regression fixture for one-frame owner-answer delivery."
+description = "P0047 regression fixture for one-frame owner-answer delivery."
 
 [[agent]]
 id = "reviewer"
@@ -4265,10 +4265,10 @@ mod optional_output_sink_tests {
 
     const FIXTURE: &str = r#"
 id = "optional-output-sink-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Optional Output Sink Fixture"
-summary = "P105 regression fixture for an optional output sink left unfilled."
+description = "P105 regression fixture for an optional output sink left unfilled."
 
 [[agent]]
 id = "worker"
@@ -4430,10 +4430,10 @@ mod exhaustion_disposition_tests {
         format!(
             r#"
 id = "loop-exhaustion-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Loop Exhaustion Fixture"
-summary = "P399 regression fixture: loop on-exhausted disposition and signal emission."
+description = "P399 regression fixture: loop on-exhausted disposition and signal emission."
 
 [[agent]]
 id = "worker"
@@ -4718,10 +4718,10 @@ output = ["slot:final"]
         toml::from_str(
             r#"
 id = "loop-exhaustion-nested-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Loop Exhaustion Nested Fixture"
-summary = "P399 regression fixture: a loop nested inside another loop's body, exhaustion signal read by a sibling branch."
+description = "P399 regression fixture: a loop nested inside another loop's body, exhaustion signal read by a sibling branch."
 
 [[agent]]
 id = "worker"
@@ -4908,10 +4908,10 @@ output = ["slot:final"]
         toml::from_str(
             r#"
 id = "loop-abort-if-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Loop Stop-If Fixture"
-summary = "P334 regression fixture: loop abort-if/on-abort disposition and signal emission."
+description = "P334 regression fixture: loop abort-if/on-abort disposition and signal emission."
 
 [[agent]]
 id = "worker"
@@ -5225,10 +5225,10 @@ mod nested_field_path_session_tests {
 
     const FIXTURE: &str = r#"
 id = "nested-field-path-session-fixture"
-schema-version = "0.2"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Nested Field Path Session Fixture"
-summary = "0085 regression fixture: project and guard over a three-level field path."
+description = "0085 regression fixture: project and guard over a three-level field path."
 
 [[agent]]
 id = "worker"

@@ -156,7 +156,7 @@ impl<'de> Deserialize<'de> for SchemaVersion {
 /// order. Bump when a new schema version is introduced; never remove an
 /// entry a released binary already reads. Adding a version here requires a
 /// `MIGRATION_STEPS` entry; see migrate.rs release-gate tests / task 0029.
-pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3"];
+pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["0.2", "0.3", "0.4"];
 
 /// Whether this binary supports decoding a canonical document declaring
 /// `schema_version`.
@@ -205,7 +205,27 @@ impl Name {
     }
 }
 
-/// Short human-readable description.
+/// Required agent+user prose: the single model-visible description of what
+/// the trait/variant does. Rendered in the model view opening section, the
+/// frame `<description>` tag, and listings.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct Description(String);
+
+impl Description {
+    pub fn new(description: impl Into<String>) -> crate::Result<Self> {
+        let description = description.into();
+        validate_non_empty("description", &description)?;
+        Ok(Self(description))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Optional user-only prose. Defaults to `description` when absent; never
+/// rendered to the model.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Summary(String);
@@ -310,7 +330,12 @@ pub struct Trait {
     pub schema_version: SchemaVersion,
     pub version: SemanticVersion,
     pub name: Name,
-    pub summary: Summary,
+    pub description: Description,
+
+    /// User-only prose; defaults to `description` when absent. Never
+    /// rendered to the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Summary>,
 
     /// Native family variant identity. This is deliberately absent from 0.2
     /// documents, preserving their encoded bytes and digest semantics.
@@ -430,6 +455,15 @@ pub struct Trait {
 }
 
 impl Trait {
+    /// The user-facing summary: the authored `summary`, or `description`
+    /// when no distinct summary was authored.
+    pub fn effective_summary(&self) -> &str {
+        self.summary
+            .as_ref()
+            .map(Summary::as_str)
+            .unwrap_or_else(|| self.description.as_str())
+    }
+
     /// The name this trait exports under: variant-qualified when it is a
     /// family variant, and the plain id otherwise.
     ///
@@ -457,11 +491,13 @@ impl Trait {
     /// Returns the first invalid slug's structured diagnostic, or `Ok(())`.
     pub fn validate_taxonomy(&self) -> crate::Result<()> {
         match (&self.variant, self.schema_version.as_str()) {
-            (Some(_), "0.3") => {}
+            (Some(_), "0.3" | "0.4") => {}
             (Some(_), _) => {
-                return Err(
-                    Error::invalid_field("variant", "requires schema-version \"0.3\"").into(),
-                );
+                return Err(Error::invalid_field(
+                    "variant",
+                    "requires schema-version \"0.3\" or later",
+                )
+                .into());
             }
             (None, _) => {}
         }

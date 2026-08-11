@@ -87,11 +87,18 @@ pub struct MigrationStep {
 /// adjacency — never derive it by parsing "0.2"/"0.3" as semver;
 /// `SchemaVersion` is an opaque validated string
 /// (`crate::r#trait::SchemaVersion`).
-pub const MIGRATION_STEPS: &[MigrationStep] = &[MigrationStep {
-    from: "0.2",
-    to: "0.3",
-    rewrite: bump_0_2_to_0_3,
-}];
+pub const MIGRATION_STEPS: &[MigrationStep] = &[
+    MigrationStep {
+        from: "0.2",
+        to: "0.3",
+        rewrite: bump_0_2_to_0_3,
+    },
+    MigrationStep {
+        from: "0.3",
+        to: "0.4",
+        rewrite: rename_summary_to_description_0_3_to_0_4,
+    },
+];
 
 /// The only 0.2 -> 0.3 rewrite: every 0.3-gated feature (`variant`,
 /// presence-aware conditions, count-to-count comparisons, keep-guard count
@@ -100,6 +107,36 @@ pub const MIGRATION_STEPS: &[MigrationStep] = &[MigrationStep {
 fn bump_0_2_to_0_3(doc: &mut DocumentMut) -> Result<StepOutcome, Error> {
     doc["schema-version"] = toml_edit::value("0.3");
     Ok(StepOutcome::rewrite("schema-version: \"0.2\" -> \"0.3\""))
+}
+
+/// 0.3 -> 0.4: `description` becomes the required agent+user prose (task
+/// 0165); the author's existing `summary` carries that text forward
+/// unchanged. A document that already declares a distinct `description`
+/// (authored ahead of the bump) is left alone — only `summary` is renamed
+/// when no `description` key exists yet.
+fn rename_summary_to_description_0_3_to_0_4(doc: &mut DocumentMut) -> Result<StepOutcome, Error> {
+    doc["schema-version"] = toml_edit::value("0.4");
+    if doc.contains_key("description") {
+        return Ok(StepOutcome::rewrite("schema-version: \"0.3\" -> \"0.4\""));
+    }
+    let Some(summary) = doc.remove("summary") else {
+        return Err(Error::refused(
+            "rename-summary-to-description",
+            "no summary field to rename and no description already present",
+        ));
+    };
+    doc["description"] = summary;
+    Ok(StepOutcome {
+        rewrites: vec![
+            Rewrite {
+                description: "schema-version: \"0.3\" -> \"0.4\"".to_string(),
+            },
+            Rewrite {
+                description: "summary -> description".to_string(),
+            },
+        ],
+        assisted_needed: Vec::new(),
+    })
 }
 
 /// A planned (or, once written by the caller, applied) migration.
@@ -236,6 +273,14 @@ name = "Demo"
 summary = "A demo trait."
 "#;
 
+    const V03: &str = r#"
+schema-version = "0.3"
+id = "example/demo"
+version = "1.0.0"
+name = "Demo"
+summary = "A demo trait."
+"#;
+
     #[test]
     fn plans_a_pure_version_bump() {
         let plan = plan_migration(V02, "0.3").expect("0.2 -> 0.3 migrates");
@@ -360,6 +405,7 @@ summary = "A demo trait."
         fn minimal_fixture(version: &str) -> &'static str {
             match version {
                 "0.2" => V02,
+                "0.3" => V03,
                 other => panic!("add a minimal fixture for schema {other} (task 0029)"),
             }
         }

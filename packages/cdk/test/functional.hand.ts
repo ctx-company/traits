@@ -524,8 +524,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
       const envelope = evaluateTraitFunction((ctx) => {
         defineTrait("diff-review", {
           name: "Diff Review",
-          summary: "Reviews a diff.",
-          procedure: "Review a diff for the stated focus.",
+          description: "Review a diff for the stated focus.",
         });
         port.input.text({ id: "diff" });
         useBehavior({ tone: tone.Direct });
@@ -548,7 +547,7 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
       const proc = procedure({ description: "Review a diff for the stated focus.", sequence: [reviewStep] });
       return toDraftJson(trait("diff-review", {
         name: "Diff Review",
-        summary: "Reviews a diff.",
+        description: "Review a diff for the stated focus.",
         behavior: { tone: tone.Direct },
         port: output,
         procedure: proc,
