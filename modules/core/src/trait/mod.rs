@@ -28,6 +28,7 @@ pub mod scenario;
 pub mod schema;
 pub mod sequence;
 pub mod session;
+pub mod setting;
 pub mod signal;
 pub mod sink;
 pub mod slot;
@@ -56,6 +57,7 @@ pub use scenario::{Scenario, ScenarioAuditKind, ScenarioAuditWarning, ScenarioVa
 pub use schema::{Schema, SchemaField};
 pub use sequence::{NamedSequence, NamedSequenceMap};
 pub use session::{Session, SessionBinding, parse_session_binding};
+pub use setting::{Setting, SettingSchema};
 pub use signal::{Signal, SignalTraceEvent, SignalTraceEvidence, SignalTraceScope};
 pub use sink::{
     SessionTitleSink, SinkInput, SinkMode, Sinks, assemble_generated_sink_material,
@@ -371,6 +373,12 @@ pub struct Trait {
     /// Slot definitions: procedure run ledger value contracts.
     #[serde(default, rename = "slot", skip_serializing_if = "Vec::is_empty")]
     pub slots: Vec<Slot>,
+
+    /// Setting declarations: typed operator knobs resolved at activation
+    /// from config layers. Declaration only — resolved values never enter
+    /// this model.
+    #[serde(default, rename = "setting", skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<Setting>,
 
     /// Resource declarations: opaque blob references for schema bodies and
     /// external data.

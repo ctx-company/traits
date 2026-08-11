@@ -112,6 +112,7 @@ pub enum Kind {
     Schema,
     Slot,
     Port,
+    Setting,
     Trait,
     Capability,
     Intent,
@@ -159,6 +160,7 @@ impl Kind {
             Self::Prompt
                 | Self::Port
                 | Self::Slot
+                | Self::Setting
                 | Self::Resource
                 | Self::Schema
                 | Self::Rule
@@ -201,6 +203,7 @@ impl Kind {
             | Self::Schema
             | Self::Slot
             | Self::Port
+            | Self::Setting
             | Self::Rule
             | Self::Agent
             | Self::Session

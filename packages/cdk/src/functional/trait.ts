@@ -385,7 +385,7 @@ function checkNeverReferenced(
   merged: Partial<Record<DeclKind, readonly JsonObject[]>>,
 ): void {
   const referencedIds = new Map<string, Set<string>>();
-  for (const kind of ["resource", "signal", "port", "slot"] as const) {
+  for (const kind of ["resource", "signal", "port", "slot", "setting"] as const) {
     referencedIds.set(
       kind,
       new Set((merged[kind] ?? []).flatMap((item) => (typeof item["id"] === "string" ? [item["id"]] : []))),

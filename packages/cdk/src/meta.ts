@@ -74,7 +74,7 @@ export interface SourceAnchor {
 export type SourceMap = Record<string, SourceAnchor>;
 
 // dprint-ignore: sdk-generate validates this literal union from the source text.
-export type DeclKind = "agent" | "condition" | "port" | "prompt" | "resource" | "schema" | "sequence" | "session" | "signal" | "slot";
+export type DeclKind = "agent" | "condition" | "port" | "prompt" | "resource" | "schema" | "sequence" | "session" | "setting" | "signal" | "slot";
 
 export interface Meta {
   // dprint-ignore: sdk-generate validates this literal union from the source text.

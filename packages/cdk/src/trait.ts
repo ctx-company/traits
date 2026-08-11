@@ -58,6 +58,7 @@ import type {
   SequenceHandle,
   SequenceLinearHandle,
   SessionHandle,
+  SettingHandle,
   SignalHandle,
   SlotHandle,
   TraitFamilyHandle,
@@ -181,6 +182,10 @@ export interface TraitFields {
   readonly slot?: SlotHandle | readonly SlotHandle[];
   /** Alias of {@link TraitFields.slot}. */
   readonly slots?: SlotHandle | readonly SlotHandle[];
+  /** Declared settings. @example `setting: [setting.number({...})]` @see {@link setting} */
+  readonly setting?: SettingHandle | readonly SettingHandle[];
+  /** Alias of {@link TraitFields.setting}. */
+  readonly settings?: SettingHandle | readonly SettingHandle[];
   /** Declared prompts. @see {@link prompt} */
   readonly prompt?: PromptHandle | readonly PromptHandle[];
   /** Alias of {@link TraitFields.prompt}. */
@@ -368,6 +373,7 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     fields.agent,
     fields.port,
     fields.slot,
+    fields.setting,
     fields.prompt,
     fields.resource,
     fields.signal,
@@ -449,6 +455,7 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
     procedure: procedureValue,
     port: finalizedPortDeclarations(merged.port ?? []),
     slot: mutableJsonArray(merged.slot),
+    setting: mutableJsonArray(merged.setting),
     prompt: promptMap(merged.prompt),
     sequence: sequenceLinearMap(merged.sequence),
     condition: conditionMap([fields.condition, merged.condition]),

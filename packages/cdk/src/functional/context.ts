@@ -294,7 +294,7 @@ export function dispatchSlotForEach(
  * trait builds sharing the same process, e.g. in a test suite).
  */
 export interface FrameMint {
-  readonly kind: "resource" | "signal" | "port" | "slot";
+  readonly kind: "resource" | "signal" | "port" | "slot" | "setting";
   readonly id: string;
   readonly ref: string;
   readonly declaration: MetaDeclaration;

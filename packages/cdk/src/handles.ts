@@ -108,6 +108,13 @@ export type SlotWithFields<Value = unknown> =
       : unknown
   );
 export type PortHandle<Value = unknown> = Handle<"port", Value>;
+/**
+ * A typed operator knob: declared in trait source, resolved from config
+ * layers at activation. Accepted anywhere a `SlotHandle`/`PortHandle` is —
+ * prompt interpolation, argv tokens, condition operands, structural fields
+ * (e.g. the loop bound) — type-checked the same way.
+ */
+export type SettingHandle<Value = unknown> = Handle<"setting", Value>;
 export type PromptHandle<Input = unknown, Output = unknown> = Handle<
   "prompt",
   { readonly input: Input; readonly output: Output; }

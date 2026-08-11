@@ -203,6 +203,7 @@ pub fn decode_trait_with_warnings(
 
     crate::r#trait::slot::validate_slots(&t.slots, &schema_ids)?;
     crate::r#trait::port::validate_ports(&t.ports)?;
+    crate::r#trait::setting::validate_settings(&t.settings)?;
     crate::r#trait::port::validate_port_cross_refs(
         &t.ports,
         &t.slots.iter().map(|s| s.id.as_str()).collect(),

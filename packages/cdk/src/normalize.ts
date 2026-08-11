@@ -67,6 +67,7 @@ const declKinds: readonly DeclKind[] = [
   "schema",
   "sequence",
   "session",
+  "setting",
   "signal",
   "slot",
 ];
@@ -260,6 +261,7 @@ export function collectMany(values: readonly unknown[]): Partial<Record<DeclKind
     schema: [],
     sequence: [],
     session: [],
+    setting: [],
     signal: [],
     slot: [],
   };
@@ -516,6 +518,7 @@ export function canonicalTraitFields(fields: TraitFields): TraitFields {
       agent: fields.agent ?? fields.agents,
       port: fields.port ?? fields.ports,
       slot: fields.slot ?? fields.slots,
+      setting: fields.setting ?? fields.settings,
       prompt: fields.prompt ?? fields.prompts,
       sequence: fields.sequence ?? fields.sequences,
       condition: fields.condition ?? fields.conditions,
@@ -545,7 +548,7 @@ export function withoutKeys(value: Record<string, unknown>, keys: readonly strin
   return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.has(key))) as JsonObject;
 }
 // dprint-ignore: sdk-generate validates this declaration record from the source text.
-export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session) }; }
+export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), setting: explicitDeclarationItems("setting", fields.setting), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session) }; }
 /**
  * Merges declaration sets and emits each kind's array in a stable order that
  * depends only on declared ids, never on authoring/registration order — see

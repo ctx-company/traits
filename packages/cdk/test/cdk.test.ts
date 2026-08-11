@@ -23,6 +23,7 @@ import {
   seats,
   sequence,
   session,
+  setting,
   signal,
   slot,
   snippet,
@@ -88,6 +89,33 @@ describe("draft synthesis", () => {
     expect(draft.port).toContainEqual(expect.objectContaining({
       id: "plan",
       default: { value: ".plans/EXECUTION_PLAN.md" },
+    }));
+  });
+
+  it("lowers a setting declaration into the canonical [[setting]] array", () => {
+    const rounds = setting.number({
+      id: "review-rounds",
+      description: "Number of reviewer loop iterations.",
+      default: 3,
+      min: 1,
+      max: 10,
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "setting-declaration",
+        name: "Setting Declaration",
+        description: "Setting fixture.",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        setting: rounds,
+      }),
+    ) as { readonly setting?: readonly Record<string, unknown>[]; };
+
+    expect(draft.setting).toContainEqual(expect.objectContaining({
+      id: "review-rounds",
+      schema: "number",
+      default: 3,
+      min: 1,
+      max: 10,
     }));
   });
 

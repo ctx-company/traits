@@ -4,7 +4,7 @@
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
 export type JsonObject = { readonly [key: string]: JsonValue | undefined };
 
-export type RefKind = "agent" | "condition" | "port" | "prompt" | "resource" | "rule" | "schema" | "sequence" | "session" | "signal" | "slot" | "trait";
+export type RefKind = "agent" | "condition" | "port" | "prompt" | "resource" | "rule" | "schema" | "sequence" | "session" | "setting" | "signal" | "slot" | "trait";
 export type SchemaBuiltin = "schema:text" | "schema:boolean" | "schema:number" | "schema:integer" | "schema:any" | "schema:checklist-item";
 export type SchemaForm = SchemaBuiltin | `[${string}]` | `(${string})`;
 export const schemaForms = {
@@ -1694,6 +1694,45 @@ export type CanonicalSessionTitleSink = {
 };
 
 /**
+ * A `[[setting]]` definition: a typed operator knob.
+ * 
+ * Declaration only — `default` is the fallback used when no config layer
+ * overrides the value; the resolved value at activation is computed
+ * elsewhere and never stored on this type.
+ */
+export type CanonicalSetting = {
+  /**
+   * Default value used when no config layer overrides it.
+   */
+  readonly "default": JsonValue;
+  /**
+   * Human-readable description of what this setting controls.
+   */
+  readonly "description": string;
+  /**
+   * Setting identifier (e.g. `"review-rounds"`).
+   */
+  readonly "id": string;
+  /**
+   * Inclusive upper bound. Only valid for `schema = "number"`.
+   */
+  readonly "max"?: number | undefined;
+  /**
+   * Inclusive lower bound. Only valid for `schema = "number"`.
+   */
+  readonly "min"?: number | undefined;
+  /**
+   * Declared scalar kind.
+   */
+  readonly "schema": CanonicalSettingSchema;
+};
+
+/**
+ * Declared scalar kind for a setting.
+ */
+export type CanonicalSettingSchema = "number" | "text" | "boolean";
+
+/**
  * A `[[signal]]` declaration: a named event identity.
  */
 export type CanonicalSignal = {
@@ -1926,6 +1965,12 @@ export type CanonicalTrait = {
    */
   readonly "session"?: readonly CanonicalSession[] | undefined;
   /**
+   * Setting declarations: typed operator knobs resolved at activation
+   * from config layers. Declaration only — resolved values never enter
+   * this model.
+   */
+  readonly "setting"?: readonly CanonicalSetting[] | undefined;
+  /**
    * Declared signal identities for procedure sequence emission.
    */
   readonly "signal"?: readonly CanonicalSignal[] | undefined;
@@ -2046,6 +2091,12 @@ export type CanonicalTraitDraft = {
    * `[[agent]].session` references target.
    */
   readonly "session"?: readonly CanonicalSession[] | undefined;
+  /**
+   * Setting declarations: typed operator knobs resolved at activation
+   * from config layers. Declaration only — resolved values never enter
+   * this model.
+   */
+  readonly "setting"?: readonly CanonicalSetting[] | undefined;
   /**
    * Declared signal identities for procedure sequence emission.
    */
