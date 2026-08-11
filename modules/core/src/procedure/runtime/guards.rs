@@ -613,9 +613,13 @@ fn evaluate_guard_predicate(
         let stale = accepted.is_some()
             && stale_repeated_slot(state, slot_ref, evidence.repeated_scope);
         let matched = !stale
-            && accepted
-                .and_then(|value| value.value.as_array())
-                .is_some_and(Vec::is_empty);
+            && accepted.is_some_and(|value| match &value.value {
+                // A list is empty at zero length; a text slot at the empty
+                // string — both are "nothing accumulated here yet".
+                serde_json::Value::Array(items) => items.is_empty(),
+                serde_json::Value::String(text) => text.is_empty(),
+                _ => false,
+            });
         return Ok((
             GuardOutcome::from_bool(matched),
             vec![condition_evaluation(

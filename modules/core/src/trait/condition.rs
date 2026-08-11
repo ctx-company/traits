@@ -908,6 +908,7 @@ fn validate_guard_predicate(
             field_path,
             "empty",
             validation.slot_ids,
+            true,
         )?;
         validate_no_modifiers(predicate, field_path)?;
     } else if let Some(present_ref) = predicate.present.as_deref() {
@@ -925,6 +926,7 @@ fn validate_guard_predicate(
             field_path,
             "count",
             validation.slot_ids,
+            false,
         )?;
         validate_count_modifiers(predicate, field_path)?;
         validate_count_threshold(
@@ -1477,7 +1479,7 @@ fn validate_count_threshold(
             ),
         }
     })?;
-    validate_list_slot_predicate(trait_ref, &operand.count, field_path, name, slot_ids)?;
+    validate_list_slot_predicate(trait_ref, &operand.count, field_path, name, slot_ids, false)?;
     match (&operand.field, &operand.field_equals) {
         (Some(Some(_)), Some(_)) | (None, None) => Ok(()),
         (Some(Some(_)), None) => Err(crate::manifest::Error::InvalidField {
@@ -1516,6 +1518,7 @@ fn validate_list_slot_predicate(
     field_path: &str,
     field: &str,
     slot_ids: &BTreeSet<&str>,
+    allow_text: bool,
 ) -> crate::Result<()> {
     let path = format!("{field_path}.{field}");
     let parsed = Reference::parse(slot_ref).map_err(|_| crate::manifest::Error::InvalidField {
@@ -1536,16 +1539,30 @@ fn validate_list_slot_predicate(
         }
         .into());
     }
-    let is_list = trait_ref
+    let schema = trait_ref
         .slots
         .iter()
         .find(|slot| slot.id == parsed.id())
-        .and_then(|slot| slot.schema.as_ref())
-        .is_some_and(|schema| matches!(schema, crate::schema::form::Schema::List(_)));
-    if !is_list {
+        .and_then(|slot| slot.schema.as_ref());
+    let is_list =
+        schema.is_some_and(|schema| matches!(schema, crate::schema::form::Schema::List(_)));
+    // `empty` also covers zero-length text: a schema-less slot and an
+    // explicit `schema:text` are both string-valued at runtime.
+    let is_text = schema.is_none()
+        || schema.is_some_and(|schema| {
+            matches!(
+                schema,
+                crate::schema::form::Schema::Builtin(crate::schema::form::Builtin::Text)
+            )
+        });
+    if !is_list && !(allow_text && is_text) {
         return Err(crate::manifest::Error::InvalidField {
             field_path: path,
-            message: format!("{field} predicate requires a list-schema slot"),
+            message: if allow_text {
+                format!("{field} predicate requires a list- or text-schema slot")
+            } else {
+                format!("{field} predicate requires a list-schema slot")
+            },
         }
         .into());
     }
