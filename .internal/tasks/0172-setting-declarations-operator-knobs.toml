@@ -1,0 +1,99 @@
+schema-version = "0.2"
+key = "0172"
+title = "setting declarations: typed operator knobs — ports feed prompts, settings feed structure"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+
+Owner rulings 2026-08-12:
+
+- Not everything deserves to be a port. The boundary: if the model
+  reads it, it is a PORT (per-run data, frame-visible); if it tunes the
+  machine — loop bounds, timeouts, counts, thresholds — it is a
+  SETTING (operator knob, config-resolved, never in the frame).
+- Naming aligned on both sides: `cdk.setting.number({...})` in trait
+  source; `setting: { "review-rounds": 2 }` under defineTrait/variant
+  in config.ts (singular, the house table convention).
+- TRUST RULING: the canonical digest covers the setting DECLARATION —
+  id, schema, default, min/max bounds — and nothing else. Resolved
+  values come from config layers at activation, live outside every
+  digest, and changing them never forces re-trust. The bounds are
+  where the trait author caps the blast radius: config retunes within
+  the declared range, never beyond it.
+- Authoring vocabulary is `number` (TS has no integer); integerness is
+  reference-site validation — a fractional default bound to a loop
+  bound is a build error.
+
+Motivating consumer: refactor complex's review loop —
+
+    export const reviewRounds = cdk.setting.number({
+        id: "review-rounds",
+        description: "Refinement rounds before the loop exhausts.",
+        default: 6,
+        min: 1,
+        max: 12,
+    });
+
+    loop.maxIterations(reviewRounds, { onExhausted: "continue" });
+
+    // .ctx/config.ts
+    defineTrait("refactor", {
+        setting: { "review-rounds": 2 },
+        variant: { complex: { setting: { "review-rounds": 8 } } },
+    });
+
+"""
+scope = """
+## Decisions
+
+- **CDK**: `setting.number({ id, description, default, min?, max? })` —
+  v1 numeric only; the kind is general (text/boolean/enum later if
+  wanted).
+- **Canonical**: `[[setting]]` declarations plus `setting:` refs
+  accepted where structure takes them; first consumer is the loop
+  bound (`max-iterations-from` generalizes to setting refs; the
+  existing integer-port support stays untouched).
+- **Hook API**: `loop.maxIterations(setting | number, opts)`.
+- **Resolution at activation**: canonical default < global config <
+  repo config; NO per-run CLI override — wanting per-run variance is
+  the signal it was a port. An out-of-range override fails activation
+  naming the bounds; a removed override falls back to the default,
+  silently and by definition.
+- **Frame invisibility enforced**: a setting is never an input and
+  never model-visible; interpolating one into a prompt is a build
+  error.
+- **Config surface**: `setting?: Record<string, JsonValue>` on
+  TraitDefaults AND TraitVariantDefaults; flows through 0171's
+  defineTrait; generated types regenerate.
+- **Evidence without digest coupling**: the run ledger records each
+  resolved setting value and which layer supplied it — forensics and
+  reproducibility, explicitly excluded from every digest.
+- **Schema bump batched with 0167**'s checklist form so the canonical
+  version churns once.
+
+## Watch
+
+- The digest boundary is the contract: prove it, do not assume it — a
+  config change must leave the canonical digest byte-identical and the
+  machine-trust verdict untouched.
+- Bounds enforce at ACTIVATION, not only at build (a config file is
+  not build input).
+- A `setting:` ref in a structural field that names no declared
+  setting fails the build with the resolved id in the message.
+- Do not touch .ctx/traits/packages/* — the refactor consumer edit is
+  the owner's, after the feature ships.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a fixture trait declares a setting and binds
+its loop bound; build green; activation uses the default; a
+repo-config override changes the round count with the canonical digest
+asserted byte-identical and trust untouched; a per-variant override
+beats the trait-level one; an out-of-range override fails activation
+naming the bounds; interpolating the setting into a prompt fails the
+build; the ledger records resolved value plus source layer. sdk-check
+green after regeneration; `just test` and `just test-full` green.
+"""
