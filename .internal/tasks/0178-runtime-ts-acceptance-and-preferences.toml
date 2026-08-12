@@ -1,0 +1,80 @@
+schema-version = "0.2"
+key = "0178"
+title = "runtime.ts: machine execution config — example-seeded, accepted once, digest-stamped"
+status = "ready"
+raised = "2026-08-12"
+relations.depends-on = ["0177"]
+content = """
+
+Owner rulings 2026-08-12:
+
+- runtime.ts is the EXECUTABLE half of the config split: role->model
+  bindings, harness bins, worktree seed/setup argv, merge gates,
+  machine budget overrides. MACHINE-LOCAL, never committed, both
+  tiers: .ctx/traits/runtime.ts (this machine + this repo) and the ctx
+  config-home traits/runtime.ts (this machine, everywhere).
+- ACCEPTANCE MODEL: the repo commits runtime.example.ts — complete,
+  works as-is. First invocation prompts acceptance; accepting
+  materializes the machine-local runtime document and records a
+  digest-stamped approval. When the committed example changes, the
+  stamp no longer matches and ctx refuses until re-acceptance. The
+  extra step is deliberate: it is what stands between `git clone` and
+  running someone else's commands. Same trust doctrine as canonicals,
+  extended to config.
+- Global tier gains a PREFERENCES concept — tool behavior, not
+  execution config — e.g. [preferences] config-format = "toml"|"ts",
+  consulted by init/scaffold commands. Global-only, like [repo.*].
+  For now the scaffold default is TS regardless; preferences let the
+  user flip it later.
+- The name "runtime" survives ONLY as this document's name — it is
+  genuinely runtime config, so P569's naming rationale holds. (The
+  run.* purge is 0176's.)
+
+"""
+scope = """
+## Decisions
+
+- Same generated pathway and refusals as 0177, machine-local
+  artifacts: runtime.ts -> generated/runtime.toml (stale = refusal;
+  hand runtime.toml alongside runtime.ts = refusal; TOML-only path
+  zero-Node). The P457 source constants (.ctx/config.ts, global
+  config.ts) rename to the runtime.* names — outright, no dual-read.
+- Acceptance mechanics: digest stamp recorded in the existing trust
+  store; `ctx traits config accept` (and the first-run prompt) shows
+  what is being accepted; a changed runtime.example.ts re-prompts with
+  the diff. Acceptance is the OWNER's step — never auto-approved by a
+  running loop.
+- Global tier: [preferences] and [repo.*]/defineRepo stay global-only
+  (existing ConfigLayer::UserGlobal check is the enforcement point);
+  per-repo machine overrides live there, replacing the old "gitignored
+  repo file" niche for facts the operator refuses to accept
+  repo-side.
+- Global runtime.ts needs Node + @ctx-traits/config resolvable:
+  `ctx traits config init --global` scaffolds the config-home
+  traits/ dir with a minimal package.json. Opt-in only; hand TOML
+  remains the zero-Node default at both tiers.
+- gitignore: .ctx/traits/runtime.ts, .ctx/traits/runtime.toml, and
+  generated/runtime.toml are machine-local; runtime.example.ts is
+  committed.
+
+## Watch
+
+- The acceptance stamp covers the EXAMPLE the machine copy was
+  materialized from — local operator edits to the machine copy are
+  free and never re-prompt; only upstream example changes do.
+- Budget override tables from 0176 land in this document at the
+  machine tiers — coordinate the schema, one [budget] vocabulary.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a repo with runtime.example.ts and no accepted
+stamp refuses to run and prompts; acceptance materializes the machine
+document and the run proceeds; mutating the example refuses until
+re-acceptance while local edits to the accepted copy do not re-prompt;
+runtime.ts compiles to generated/runtime.toml with the stale and
+both-present refusals; [preferences]/[repo.*] in a repo-scope document
+refuse; scaffolded global tier compiles a global runtime.ts; `just
+test` and `just test-full` green.
+"""

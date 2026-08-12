@@ -1,0 +1,66 @@
+schema-version = "0.2"
+key = "0179"
+title = "layout: authored/ + vendored/ + generated/, and init scaffolds both examples"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner rulings 2026-08-12:
+
+- Directory names state WRITE AUTHORITY. "packages" named the category
+  both dirs share (vendor/ also holds packages) instead of the
+  property that separates them.
+- packages/ -> authored/ (you write these), vendor/ -> vendored/ (the
+  fetcher writes these), plus a new .ctx/traits/generated/ catalog
+  (the compiler writes these — 0177/0178's compiled config artifacts
+  live there). worktrees/ already follows the rule (runs write
+  these).
+- Initialization creates BOTH config.example.ts and
+  runtime.example.ts by default. Examples, not live documents: a
+  fresh project needs no deps and no overrides yet; the user
+  materializes the real file when they first need it (runtime via
+  0178's acceptance, config by authoring). TS is the scaffold default
+  for now; [preferences] config-format (0178) flips it later.
+
+"""
+scope = """
+## Decisions
+
+- TRAIT_PACKAGE_ROOT -> .ctx/traits/authored, TRAIT_VENDOR_ROOT ->
+  .ctx/traits/vendored; the .ctx package.json workspace glob follows.
+  P569's collision rationale carries over untouched (ids stay
+  namespaced under the subdir).
+- Hard rename, no dual-read (owner ruling: no legacy) — existing
+  checkouts migrate by `git mv`; the release note names the two
+  commands. A repo still carrying packages/ or vendor/ gets a
+  tombstone refusal naming the rename.
+- generated/ at the traits level carries the same contract as a
+  package's generated/: machine-written only, one writer. gitignore
+  entries follow each artifact's tier (0177 committed, 0178
+  machine-local).
+- `ctx traits init` scaffolds: authored/, config.example.ts,
+  runtime.example.ts, gitignore entries. Both examples are complete
+  and commented in the 0019 discipline (a written value freezes
+  today's default forever, a commented one keeps inheriting).
+- Scaffold templates honor [preferences] config-format once 0178
+  lands; until then TS unconditionally.
+
+## Watch
+
+- The seven authored packages move in the same change as the constant
+  flip — a half-renamed tree must never exist on main.
+- The example-scaffold content is the first thing every new user
+  reads: it is a doc surface, keep it curated (no kitchen-sink dump
+  of every knob without grouping).
+
+"""
+validation = """
+## Done when
+
+A scratch `ctx traits init` produces authored/, both example files,
+and correct gitignore entries; builds and runs resolve packages under
+authored/ and vendor evidence under vendored/; a repo still on the old
+names refuses with the tombstone; this repo's tree is swept
+(packages/ -> authored/, vendor/ -> vendored/) in the landing change;
+`just test` and `just test-full` green.
+"""

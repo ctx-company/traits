@@ -1,0 +1,74 @@
+schema-version = "0.2"
+key = "0177"
+title = "config.ts: the committed project manifest — vendor.toml folds in, config.lock pins it"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner rulings 2026-08-12:
+
+- config.ts is the project's Cargo.toml: dependency vendoring plus
+  basic project settings. COMMITTED, repo-only — a machine has no
+  project. vendor.toml's content moves into it as [vendor]; the
+  standalone vendor.toml dies (no legacy read).
+- The two-document boundary IS the trust boundary: config is the
+  DECLARATIVE half — everything in it is safe to consume on clone
+  without an acceptance step, because deps verify against the lock and
+  settings are bounds-capped (0172's trust ruling). Anything that can
+  make the machine run a command belongs in the runtime document
+  (0178), never here.
+- The lock face renames vendor.lock -> config.lock (committed): it
+  pins config.ts resolution and leaves room to lock other
+  config-derived facts later.
+- TS is the default authoring format for now; the hand-TOML path stays
+  fully supported and zero-Node.
+
+"""
+scope = """
+## Decisions
+
+- Document content: [vendor] (dependency declarations, exactly what
+  vendor.toml held), committed team-level knob overrides
+  ([trait.<id>.setting]-style within 0172 bounds), project dispatch
+  defaults. [vendor] is REPO-ONLY — a global config declaring
+  dependencies is a refusal (deps are project identity).
+- Generated pathway (same contract as authored/*/source ->
+  generated/, one level up): a sibling config.ts compiles via
+  `ctx traits config build` to generated/config.toml. BOTH source and
+  artifact are committed, with a drift refusal when the artifact is
+  stale — so no-Node consumers and tools always have current TOML to
+  read. No config.ts -> hand-written config.toml is the document
+  as-is. Both config.ts and a hand config.toml present is a refusal
+  naming both (one authority per fact). The in-file `# ctx:generated`
+  marker contract (P457) dies — LOCATION states authority now.
+- Precedence: repo config sits between the author tier and the
+  machine tiers — engine < author (trait.toml budgets, canonical
+  setting defaults) < repo config < global runtime < repo runtime <
+  per-run flags. Author < committed policy < machine; specificity
+  rises left to right.
+- resolution/readers: config_source's source-manifest machinery
+  relocates to the new artifact path; the resolution engine reads only
+  TOML, ever.
+
+## Watch
+
+- Do not let executable facts creep in: worktree setup argv, gates,
+  harness bins are 0178's document. The schema here must be unable to
+  express them.
+- vendor.lock has never materialized in this repo (no external deps
+  yet) — the rename is constants + docs + proofs, not a data
+  migration.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a project with config.ts builds
+generated/config.toml and resolution reads it; a stale artifact
+refuses naming the source; config.ts + hand config.toml refuses; a
+TOML-only project resolves with no Node involved; [vendor] in a
+global-scope document refuses; a dependency declared in [vendor]
+vendors and locks into config.lock exactly as vendor.toml did
+(proof_path_distribution updated to the new paths); no code path
+reads vendor.toml; `just test` and `just test-full` green.
+"""

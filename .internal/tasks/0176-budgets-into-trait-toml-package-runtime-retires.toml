@@ -1,0 +1,102 @@
+schema-version = "0.2"
+key = "0176"
+title = "budgets and port defaults fold into trait.toml; package runtime.toml retires; run.* naming dies"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner rulings 2026-08-12 (config-architecture brainstorm, after 0172
+landed):
+
+- EPISTEMICS RULING: code states invariants, data states defaults. A
+  value that exists to be overridden must not read as a statement in
+  authored trait source — a code-declared budget resolving to a
+  different number at run time erodes trust in every number in the
+  file. Budgets are DATA, never CDK declarations. (Settings survive in
+  code because their declaration is digest-covered behavior and the
+  field is literally named `default` — 0172's trust ruling.)
+- Budgets complete 0172's source-of-value taxonomy as a third kind:
+  ports/slots carry run data; settings carry trait-invented
+  config-layer constants (schema declared by the trait, default
+  digest-covered); budgets carry the ENGINE's execution envelope
+  (schema fixed by the engine, defaults in trait.toml, outside every
+  digest — retuning never forces re-trust). Per-run variance stays
+  legitimate for budgets precisely because they are envelope, not
+  behavior — 0172's "per-run variance means it was a port" applies to
+  settings only.
+- Home is the package manifest, not a sidecar: Cargo's [profile] is
+  the precedent. The package-level runtime.toml file RETIRES.
+- NO LEGACY: hard cutover, the sidecar reader is deleted in the same
+  change; the only trace is a tombstone refusal.
+- NAMING: nothing budget-shaped may be named `run.*` — one concept,
+  one word, everywhere.
+
+"""
+scope = """
+## Decisions
+
+- trait.toml grows [budget] (family default), [variant.<vid>.budget]
+  (overlay: stated replaces, omitted inherits — semantics unchanged
+  from the sidecar), and [defaults.port]. Exactly that wide — the
+  schema-narrowing doctrine holds (harness_config.rs:692): the package
+  tier accepts budget + port defaults and nothing else; do not widen
+  for symmetry with the machine tier.
+- trait.toml stays WHOLLY author-owned: the build VERIFIES [family]
+  against generated output (refusal on mismatch), never rewrites the
+  file. A [variant.<vid>.budget] naming a variant the source does not
+  define is a build refusal with the id in the message.
+- Machine tier: the reserved slot harness_config.rs:813 kept "for
+  0037" becomes real — [trait.<id>.budget] and
+  [trait.<id>.variant.<vid>.budget] scoped override tables, the same
+  shape 0034 built for agent seats and 0172 reused for settings.
+- The machine [run] table DISSOLVES: every ceiling (total-seconds,
+  max-frames, frame-seconds, max-retries, idle-seconds,
+  command-seconds, command-idle-seconds) moves into a machine-global
+  [budget] table; `worktree` folds into the existing [worktree] table;
+  inline-prompt-bytes moves under harness/transport config. No run.*
+  config surface survives.
+- --run-profile splits: the envelope half becomes `--budget <path>`;
+  the [assign.<role>] half goes to the existing seat-assignment
+  surface.
+- Precedence, one chain, more specific wins, ties go to the operator:
+  engine defaults < machine global [budget] (FALLBACK only — must
+  never beat an authored value, or a generic machine ceiling silently
+  squashes an authored long-run budget) < trait.toml [budget]+overlay
+  < [trait.<id>.budget] < [trait.<id>.variant.<vid>.budget] <
+  --budget.
+- Evidence without digest coupling (0172's decision, verbatim): the
+  run ledger records each resolved budget field and the layer that
+  supplied it, excluded from every digest. Provenance must distinguish
+  trait.toml default from variant overlay, or forensics lie.
+- Hard cutover: the seven authored packages' runtime.toml contents
+  move into their trait.tomls and the seven files delete in the same
+  change; PackageRuntimeConfig sidecar reading is deleted; a package
+  still containing runtime.toml fails the build with a tombstone
+  refusal naming trait.toml [budget].
+
+## Watch
+
+- The digest boundary is the contract, same as 0172: a budget retune
+  in trait.toml or any override layer must leave canonical digests
+  byte-identical and machine trust untouched — prove it, don't assume.
+- 0177/0178 restructure the machine document itself (config/runtime
+  split); this task's machine-tier table names land wherever that
+  document ends up — coordinate, don't fight over the file.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a fixture package with [budget] +
+[variant.x.budget] in trait.toml resolves the overlay
+(stated-replaces-omitted-inherits); a machine [trait.<id>.budget]
+beats the author and [trait.<id>.variant.<vid>.budget] beats both; a
+global [budget] value applies only where no author/operator statement
+exists; a package still carrying runtime.toml refuses with the
+tombstone; a budget overlay for an undeclared variant refuses at
+build; canonical digest asserted byte-identical across a budget
+retune; the ledger records resolved fields with winning layers; no
+run.* named config surface remains (grep-clean); the seven-package
+sweep leaves no authored package with a runtime.toml; `just test` and
+`just test-full` green.
+"""

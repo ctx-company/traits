@@ -1,0 +1,49 @@
+schema-version = "0.2"
+key = "0181"
+title = "legacy path purge: every dual-read tail in layout dies"
+status = "ready"
+raised = "2026-08-12"
+relations.depends-on = ["0176", "0177", "0178", "0179"]
+content = """
+
+Owner ruling 2026-08-12: "no legacy stuff please, we're not out yet,
+no accumulation of garbage." The 0176-0179 cutovers land with zero new
+dual-reads; this task deletes the tail that predates them.
+
+"""
+scope = """
+## Decisions
+
+- Purge every LEGACY_* constant in layout and its read path, plus the
+  code that serves it: ctx.toml (pre-P311 repo + global), the pre-P569
+  .ctx/config.toml and global config.toml, traits.toml (project
+  manifest stem), the pre-P569 package root (packages directly under
+  .ctx/traits/), the legacy harness registry sibling, the pre-P426
+  builtin-store root dual-read, and the harness_config legacy
+  run-config forms (config.toml sidecar / family-manifest run-config
+  consolidation, already superseded by 0176).
+- Each removed path's error message on encounter is the plain
+  not-found/refusal of the CURRENT layout — no bespoke "this moved"
+  tombstones for pre-release paths nobody outside this machine ever
+  used (tombstones are reserved for the 0176/0179 cutovers, which
+  this repo itself crosses).
+- Proofs and fixtures that exercised the fallbacks are deleted with
+  the fallbacks, not kept red.
+
+## Watch
+
+- The owner's own machines are the only install base — sweep this
+  repo and the dotfiles config-home for files still at legacy paths
+  BEFORE the purge lands, or the next run refuses on a path nobody
+  reads anymore.
+
+"""
+validation = """
+## Done when
+
+grep-clean: no LEGACY_ constant, no dual-read loop over predecessor
+paths, no fixture at a legacy location; a scratch project on current
+paths resolves everything; this repo and the config-home carry no file
+that only a purged path would have read; `just test` and `just
+test-full` green.
+"""

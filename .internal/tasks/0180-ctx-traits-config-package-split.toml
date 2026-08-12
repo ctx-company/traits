@@ -1,0 +1,60 @@
+schema-version = "0.2"
+key = "0180"
+title = "@ctx-traits/config: split configuring (declare) from using (cdk)"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner rulings 2026-08-12:
+
+- Configuring a knob (what it is, range, default) and USING it (here &
+  there in behavior) are different concerns and get different
+  packages: @ctx-traits/config owns the configuration vocabulary,
+  @ctx-traits/cdk owns behavior authoring and merely ACCEPTS the
+  handles.
+- Declarations do not live at use sites: in a trait package, settings
+  are declared in their own shared module (the refactor layout's
+  shared/ discipline — next to resource.ts), variants import the
+  handles and only use them. Declare-once, use-everywhere, same as
+  resources.
+
+"""
+scope = """
+## Decisions
+
+- @ctx-traits/config exports: the setting declaration API
+  (setting.number/text/boolean — moved OUT of cdk, hard move, no
+  re-export back-compat per the no-legacy ruling), the Budget type
+  (0176's engine envelope schema, used to type runtime.ts budget
+  tables), and the runtime.ts/config.ts authoring APIs (0177/0178).
+- The config-side trait-scoping verb renames to `configureTrait`
+  (0171's config authoring currently reuses `defineTrait`, colliding
+  conceptually with cdk's) — a reader must never wonder which side of
+  the boundary a file is on.
+- cdk keeps accepting SettingHandle everywhere a slot/port input is
+  (0172's amendment) — the split moves the API's home, not the trust
+  boundary: declarations still compile into the canonical and stay
+  digest-covered.
+- Sweep: authored packages' imports move (refactor's shared modules
+  and any other setting declarations); generated types regenerate;
+  the package publishes alongside cdk with the same access.
+
+## Watch
+
+- Keep the dependency direction one-way: config must not depend on
+  cdk (cdk may depend on config for the handle types) — the
+  configuration vocabulary has to stand alone for runtime.ts authors
+  who never touch behavior.
+
+"""
+validation = """
+## Done when
+
+A trait package declaring a setting via @ctx-traits/config and using
+it via cdk builds to a byte-identical canonical vs before the split;
+importing the declaration API from cdk is a tsc error; configureTrait
+replaces the config-side defineTrait with no alias left; runtime.ts
+budget tables type-check against the exported Budget type; ts-build,
+`ctx traits build`, sdk/generated-type checks, `just test` and `just
+test-full` green.
+"""
