@@ -4,8 +4,8 @@
 // variant a run chose, never an input knob — so no quality/depth ports and
 // no numeric verdict schema live anywhere in this file.
 import { reviewVerdictSchema } from "@ctx-traits/agents";
-import type { SchemaHandle, SlotHandle } from "@ctx-traits/cdk";
-import { input, port, resource, schema, slot, step } from "@ctx-traits/cdk";
+import type { SchemaHandle } from "@ctx-traits/cdk";
+import { port, schema, slot } from "@ctx-traits/cdk";
 
 export const topic = port.input.text({
   id: "topic",
@@ -137,54 +137,3 @@ export const reportPathPort = port.output.text({
   optional: true,
   value: reportPath,
 });
-
-export const researchStandards = resource.file("research-standards", {
-  path: "resources/research-standards.md",
-  hint: "Canonical flat-layout doctrine, source-rating scale, citation policy, and Chain-of-Verification method for this family.",
-  trigger: "on-demand",
-});
-export const sourceQualityGuide = resource.file("source-quality-guide", {
-  path: "resources/source-quality-guide.md",
-  hint: "Domain examples and a decision method for applying the canonical A-E source-quality scale.",
-  trigger: "on-demand",
-});
-export const citationStyle = resource.file("citation-style", {
-  path: "resources/citation-style.md",
-  hint: "Source-type citation formats and verification rules.",
-  trigger: "on-demand",
-});
-
-/**
- * Deterministic, shell-based slugify (0153): lowercases the topic, collapses
- * everything outside [a-z0-9] to a single hyphen, and trims leading/trailing
- * hyphens. A command step, never agent prose, so every later step and every
- * proof can predict the campaign directory name from the topic alone.
- */
-export function deriveTopicSlugStep(): void {
-  step.command("Derive topic slug", {
-    id: "topic-slug",
-    input: input.command`sh -c "printf \\"%s\\" \\"\\$1\\" | tr \\"A-Z\\" \\"a-z\\" | tr -cs \\"a-z0-9\\" \\"-\\" | sed \\"s/^-*//;s/-*\\$//\\"" _ ${topic}`,
-    output: topicSlug,
-  });
-}
-
-/**
- * Deterministic delivery-path derivation: `{output-dir}/<topic-slug>/<fileName>`
- * — a command step (`printf`, no shell needed: the format string alone
- * fully determines the layout), never agent prose, so proofs can assert the
- * exact file set a variant produces.
- */
-export function deriveReportPathStep(fileName: string, target: SlotHandle<string> = reportPath): void {
-  const idSlug = fileName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/gi, "-");
-  const strings = [`printf %s/%s/${fileName} `, ` `, ``];
-  const commandInput = input.command(
-    Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray,
-    outputDir,
-    topicSlug,
-  );
-  step.command(`Derive ${fileName} path`, {
-    id: `${idSlug}-path`,
-    input: commandInput,
-    output: target,
-  });
-}

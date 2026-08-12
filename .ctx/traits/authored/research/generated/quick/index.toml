@@ -2,7 +2,7 @@ id = "research"
 schema-version = "0.4"
 version = "0.1.0"
 name = "Research (Quick)"
-description = "Quick dogfood research procedure: scope the topic, research it in one bounded worker pass, grind a single reviewer loop until approved, then commit."
+description = "Research one topic quickly: an inline scope note, one bounded worker research pass, a single bounded reviewer loop, then commit brief.md and sources.md."
 summary = "Quick dogfood research procedure: scope the topic, research it in one bounded worker pass, grind a single reviewer loop until approved, then commit."
 variant = "quick"
 
@@ -342,10 +342,10 @@ summary = "Implementation role."
 [prompt.researching-produce]
 text = """
 
-                        Research {port:topic} against the scope note {slot:scope-note} and write the deliverable under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): brief.md (findings with inline citations) and sources.md (a bibliography, canonical A-E source ratings per {resource:source-quality-guide}, formatted per {resource:citation-style}).
-                        No reviewer verdict attached means this is round 1: cover every sub-question from the scope note. On every later round a verdict IS attached — fix every blocker it names.
-                        Apply {resource:research-standards} throughout: cite every factual claim, prefer A/B-rated sources, record contradictions and gaps explicitly.
-                        Return a work summary: what was written, source counts and ratings, open concerns."""
+                    Research {port:topic} against the scope note {slot:scope-note} and write the deliverable under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): brief.md (findings with inline citations) and sources.md (a bibliography, canonical A-E source ratings per {resource:source-quality-guide}, formatted per {resource:citation-style}).
+                    No reviewer verdict attached means this is round 1: cover every sub-question from the scope note. On every later round a verdict IS attached — fix every blocker it names.
+                    Apply {resource:research-standards} throughout: cite every factual claim, prefer A/B-rated sources, record contradictions and gaps explicitly.
+                    Return a work summary: what was written, source counts and ratings, open concerns."""
 input = [
     "port:topic",
     "slot:scope-note",
@@ -360,10 +360,10 @@ output = ["slot:work-summary"]
 [prompt.researching-review]
 text = """
 
-                        Review the research delivered for {port:topic} against the scope note {slot:scope-note}. Work summary: {slot:work-summary}.
-                        A BLOCKER is an uncited factual claim, a sub-question left uncovered, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
-                        Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
-                        Set status to revise while any blocker remains, approved when none do."""
+                    Review the research delivered for {port:topic} against the scope note {slot:scope-note}. Work summary: {slot:work-summary}.
+                    A BLOCKER is an uncited factual claim, a sub-question left uncovered, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
+                    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+                    Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:scope-note",
@@ -376,8 +376,8 @@ output = ["slot:review-verdict-1"]
 [prompt.scope-the-topic]
 text = """
 
-                    Write a short scope note for researching {port:topic}: the core question, two to four sub-questions a worker should cover, and any explicit exclusions.
-                    Reference {resource:research-standards} for source-quality expectations. Do not research anything yet."""
+                Write a short scope note for researching {port:topic}: the core question, two to four sub-questions a worker should cover, and any explicit exclusions.
+                Reference {resource:research-standards} for source-quality expectations. Do not research anything yet."""
 input = [
     "port:topic",
     "resource:research-standards",
@@ -387,9 +387,9 @@ output = ["slot:scope-note"]
 [prompt.shipping-message]
 text = """
 
-                        The review for the research on {port:topic} has ended approved and the work is being committed.
-                        Write a concise commit message from the work summary {slot:work-summary} and the verdict {slot:review-verdict-1}: a short subject line naming the topic, then one paragraph on what was researched and delivered at {slot:report-path}.
-                        Return exactly that message. Do not run git commands and do not write files."""
+                The review for the research on {port:topic} has ended approved and the work is being committed.
+                Write a concise commit message from the work summary {slot:work-summary} and the verdict {slot:review-verdict-1}: a short subject line naming the topic, then one paragraph on what was researched and delivered at {slot:report-path}.
+                Return exactly that message. Do not run git commands and do not write files."""
 input = [
     "port:topic",
     "slot:work-summary",

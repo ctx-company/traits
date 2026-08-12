@@ -2,7 +2,7 @@ id = "research"
 schema-version = "0.4"
 version = "0.1.0"
 name = "Research (Deep)"
-description = "Deep dogfood research procedure: plan 4-6 streams including a mandatory counterevidence stream, research each serially, triangulate, apply Chain-of-Verification, then a dual-reviewer refinement loop — then commit."
+description = "Research one topic exhaustively: plan 4-6 streams including a mandatory counterevidence stream, research each serially, triangulate, apply Chain-of-Verification, then a bounded dual-reviewer refinement loop, then commit report.md, bibliography.md, evidence.csv, and verification.md."
 summary = "Deep dogfood research procedure: plan 4-6 streams including a mandatory counterevidence stream, research each serially, triangulate, apply Chain-of-Verification, then a dual-reviewer refinement loop — then commit."
 variant = "deep"
 
@@ -405,10 +405,10 @@ summary = "Implementation role."
 [prompt.building-produce]
 text = """
 
-                        Produce the research delivery for {port:topic} from the plan {slot:stream-plan}, findings {slot:findings}, and triangulation {slot:triangulation}. Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): report.md, bibliography.md, evidence.csv (claim, source, rating, url), and verification.md.
-                        Apply the Chain-of-Verification method from {resource:research-standards} to every critical claim before writing verification.md: generate the claim, write a verification question for it, independently answer that question against the cited sources, and revise the claim (or drop it) based on that answer. verification.md records each critical claim, its verification question, the independent answer, and the disposition.
-                        No reviewer verdict attached means this is round 1: implement the full delivery. On every later round two independent verdicts ARE attached — fix every blocker either names.
-                        Return a work summary: what was written, how citations and critical claims were verified, open concerns."""
+                    Produce the research delivery for {port:topic} from the plan {slot:stream-plan}, findings {slot:findings}, and triangulation {slot:triangulation}. Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): report.md, bibliography.md, evidence.csv (claim, source, rating, url), and verification.md.
+                    Apply the Chain-of-Verification method from {resource:research-standards} to every critical claim before writing verification.md: generate the claim, write a verification question for it, independently answer that question against the cited sources, and revise the claim (or drop it) based on that answer. verification.md records each critical claim, its verification question, the independent answer, and the disposition.
+                    No reviewer verdict attached means this is round 1: implement the full delivery. On every later round two independent verdicts ARE attached — fix every blocker either names.
+                    Return a work summary: what was written, how citations and critical claims were verified, open concerns."""
 input = [
     "port:topic",
     "slot:stream-plan",
@@ -423,10 +423,10 @@ output = ["slot:work-summary"]
 [prompt.building-review-1]
 text = """
 
-                        Review the research delivered for {port:topic} against the plan {slot:stream-plan} and triangulation {slot:triangulation}. Work summary: {slot:work-summary}.
-                        A BLOCKER is an uncited factual claim, a plan stream left uncovered, an unaddressed cross-stream contradiction, a critical claim without a recorded Chain-of-Verification pass in verification.md, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
-                        Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
-                        Set status to revise while any blocker remains, approved when none do."""
+                    Review the research delivered for {port:topic} against the plan {slot:stream-plan} and triangulation {slot:triangulation}. Work summary: {slot:work-summary}.
+                    A BLOCKER is an uncited factual claim, a plan stream left uncovered, an unaddressed cross-stream contradiction, a critical claim without a recorded Chain-of-Verification pass in verification.md, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
+                    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+                    Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:stream-plan",
@@ -440,10 +440,10 @@ output = ["slot:review-verdict-1"]
 [prompt.building-review-2]
 text = """
 
-                        Independently review the research delivered for {port:topic} against the plan {slot:stream-plan} and triangulation {slot:triangulation}. Work summary: {slot:work-summary}. Do not trust the work summary or smart-1's verdict — inspect the written deliverables and cited sources yourself.
-                        A BLOCKER is an uncited factual claim, a plan stream left uncovered, an unaddressed cross-stream contradiction, a critical claim without a recorded Chain-of-Verification pass in verification.md, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
-                        Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
-                        Set status to revise while any blocker remains, approved when none do."""
+                    Independently review the research delivered for {port:topic} against the plan {slot:stream-plan} and triangulation {slot:triangulation}. Work summary: {slot:work-summary}. Do not trust the work summary or smart-1's verdict — inspect the written deliverables and cited sources yourself.
+                    A BLOCKER is an uncited factual claim, a plan stream left uncovered, an unaddressed cross-stream contradiction, a critical claim without a recorded Chain-of-Verification pass in verification.md, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
+                    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
+                    Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:stream-plan",
@@ -457,18 +457,18 @@ output = ["slot:review-verdict-2"]
 [prompt.plan-the-streams]
 text = """
 
-                        Plan four to six non-overlapping research streams for {port:topic}. Each stream gets a stable id, a complete non-overlapping focus question, and a kind: "primary" or "counterevidence".
-                        At least one stream MUST be kind "counterevidence": its focus is deliberately searching for disconfirming evidence and competing conclusions against the other streams' emerging findings, not merely a skeptical framing of a primary question.
-                        This is the run's one and only executable stream list, consumed directly by serial per-stream research."""
+                Plan four to six non-overlapping research streams for {port:topic}. Each stream gets a stable id, a complete non-overlapping focus question, and a kind: "primary" or "counterevidence".
+                At least one stream MUST be kind "counterevidence": its focus is deliberately searching for disconfirming evidence and competing conclusions against the other streams' emerging findings, not merely a skeptical framing of a primary question.
+                This is the run's one and only executable stream list, consumed directly by serial per-stream research."""
 input = ["port:topic"]
 output = ["slot:stream-plan"]
 
 [prompt.research-the-streams]
 text = """
 
-                    Research every stream in the plan {slot:stream-plan} for the topic {port:topic}, one stream at a time and in the order planned — never merge two streams' evidence together. For the "counterevidence" stream, actively search for disconfirming evidence and competing conclusions rather than corroborating the other streams.
-                    Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
-                    Return exactly one stream-finding per planned stream (same order, same ids): the stream's id and its cited findings summary. Write nothing to disk yet — this is evidence gathering only."""
+                Research every stream in the plan {slot:stream-plan} for the topic {port:topic}, one stream at a time and in the order planned — never merge two streams' evidence together. For the "counterevidence" stream, actively search for disconfirming evidence and competing conclusions rather than corroborating the other streams.
+                Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
+                Return exactly one stream-finding per planned stream (same order, same ids): the stream's id and its cited findings summary. Write nothing to disk yet — this is evidence gathering only."""
 input = [
     "slot:stream-plan",
     "port:topic",
@@ -481,9 +481,9 @@ output = ["slot:findings"]
 [prompt.shipping-message]
 text = """
 
-                        The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
-                        Write a concise commit message from the work summary {slot:work-summary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at {slot:report-path}.
-                        Return exactly that message. Do not run git commands and do not write files."""
+                The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
+                Write a concise commit message from the work summary {slot:work-summary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at {slot:report-path}.
+                Return exactly that message. Do not run git commands and do not write files."""
 input = [
     "port:topic",
     "slot:review-verdict-1",
@@ -496,8 +496,8 @@ output = ["slot:shipping-message"]
 [prompt.triangulate-the-findings]
 text = """
 
-                    Triangulate the researched findings {slot:findings} for {port:topic}: where independent streams agree, where they conflict — including what the counterevidence stream surfaced — source-quality ratings, and remaining gaps.
-                    Return the triangulation."""
+                Triangulate the researched findings {slot:findings} for {port:topic}: where independent streams agree, where they conflict — including what the counterevidence stream surfaced — source-quality ratings, and remaining gaps.
+                Return the triangulation."""
 input = [
     "slot:findings",
     "port:topic",

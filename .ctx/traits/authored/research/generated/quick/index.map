@@ -15,69 +15,69 @@
     "end": 11
   },
   "port:commit-report": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 108,
     "end": 108
   },
   "port:output-dir": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 14,
     "end": 14
   },
   "port:park-report": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 115,
     "end": 115
   },
   "port:report-path": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 133,
     "end": 133
   },
   "port:research-report": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 124,
     "end": 124
   },
   "port:topic": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 10,
     "end": 10
   },
   "prompt:researching-produce": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 48,
+    "end": 48
+  },
+  "prompt:researching-review": {
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 58,
+    "end": 58
+  },
+  "prompt:scope-the-topic": {
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 38,
+    "end": 38
+  },
+  "prompt:shipping-message": {
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
     "start": 74,
     "end": 74
   },
-  "prompt:researching-review": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 84,
-    "end": 84
-  },
-  "prompt:scope-the-topic": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 64,
-    "end": 64
-  },
-  "prompt:shipping-message": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 102,
-    "end": 102
-  },
   "resource:citation-style": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 151,
-    "end": 151
+    "file": ".ctx/traits/authored/research/source/shared/resource.ts",
+    "start": 13,
+    "end": 13
   },
   "resource:research-standards": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 141,
-    "end": 141
+    "file": ".ctx/traits/authored/research/source/shared/resource.ts",
+    "start": 3,
+    "end": 3
   },
   "resource:source-quality-guide": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 146,
-    "end": 146
+    "file": ".ctx/traits/authored/research/source/shared/resource.ts",
+    "start": 8,
+    "end": 8
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -125,19 +125,19 @@
     "end": 48
   },
   "sequence:procedure/brief-path": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 185,
-    "end": 185
+    "file": ".ctx/traits/authored/research/source/shared/stage/derive.ts",
+    "start": 34,
+    "end": 34
   },
   "sequence:procedure/researching": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 70,
-    "end": 70
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 44,
+    "end": 44
   },
   "sequence:procedure/scope-the-topic": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 63,
-    "end": 63
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 37,
+    "end": 37
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -150,9 +150,9 @@
     "end": 57
   },
   "sequence:procedure/topic-slug": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 164,
-    "end": 164
+    "file": ".ctx/traits/authored/research/source/shared/stage/derive.ts",
+    "start": 13,
+    "end": 13
   },
   "sequence:researching-body/park-report-clear": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -165,39 +165,39 @@
     "end": 47
   },
   "sequence:researching-body/researching-produce": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 73,
-    "end": 73
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 47,
+    "end": 47
   },
   "sequence:researching-body/researching-review": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 83,
-    "end": 83
+    "file": ".ctx/traits/authored/research/source/variant/quick/index.ts",
+    "start": 57,
+    "end": 57
   },
   "slot:commit-output": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 103,
     "end": 103
   },
   "slot:park-report": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 86,
     "end": 86
   },
   "slot:report-path": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 98,
     "end": 98
   },
   "slot:review-verdict-1": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 76,
     "end": 76
   },
   "slot:scope-note": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 40,
-    "end": 40
+    "file": ".ctx/traits/authored/research/source/variant/quick/data.ts",
+    "start": 3,
+    "end": 3
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
@@ -220,18 +220,18 @@
     "end": 51
   },
   "slot:topic-slug": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 93,
     "end": 93
   },
   "slot:work-summary": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
     "start": 70,
     "end": 70
   },
   "trait:research": {
-    "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 45,
-    "end": 45
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }
