@@ -2285,6 +2285,9 @@ pub struct PreparedRunAssignments {
     pub capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
     pub worktree: WorktreeConfig,
     pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
+    /// 0172: activation-resolved `setting:` values, keyed by setting id.
+    /// Never enters any digest — evidence-only, same as `port_defaults`.
+    pub resolved_settings: BTreeMap<String, ResolvedSetting>,
 }
 
 /// A selected trait-config port default with the exact file and TOML field
@@ -2296,6 +2299,145 @@ pub struct ConfiguredPortDefault {
     /// from the rendered receipt so callers can retain structured provenance.
     pub layer: ConfigLayer,
     pub evidence: String,
+}
+
+/// 0172: which scope supplied a `setting:` value's winning override, in
+/// increasing specificity — mirrors the variant-beats-trait fold
+/// [`resolve_run_variant`]/[`flatten_agent_defaults`] already use for
+/// `AgentDefaults`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingSource {
+    /// No config layer overrode the canonical `[[setting]]` declaration's
+    /// `default`.
+    Declaration,
+    /// `[trait.<id>.setting]` (already layer-folded: repo beats global).
+    Trait,
+    /// `[trait.<id>.variant.<vid>.setting]` (already layer-folded).
+    Variant,
+}
+
+/// One `setting:<id>` value resolved at activation: the value itself plus
+/// which scope supplied it. Kept out of every digest by construction — this
+/// type never appears on the canonical trait model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedSetting {
+    pub value: serde_json::Value,
+    pub source: SettingSource,
+}
+
+/// Resolve every declared `[[setting]]` for one activation: declaration
+/// `default`, overlaid by the (already repo-beats-global-folded)
+/// trait-scoped `[trait.<id>.setting]`, overlaid by the matching
+/// variant-scoped `[trait.<id>.variant.<vid>.setting]` — the total order the
+/// task names (repo-variant > repo-trait > global-variant > global-trait >
+/// default), with the repo-vs-global half already collapsed by the config
+/// merge that built `trait_defaults`.
+///
+/// An override whose JSON type does not match the declared `schema`, or
+/// whose number falls outside a declared `min`/`max`, fails activation
+/// naming the declared bounds/kind — bounds and type are enforced HERE, not
+/// only at build (0172's Watch item). An override for an id with no
+/// matching declaration is likewise a hard error (dead config should not
+/// resolve silently). An id declared but never overridden anywhere falls
+/// back to `default` — free, since resolution always starts there.
+fn resolve_settings(
+    declarations: &[ctx_traits_core::r#trait::Setting],
+    trait_defaults: Option<&TraitDefaults>,
+    variant_id: Option<&str>,
+) -> crate::Result<BTreeMap<String, ResolvedSetting>> {
+    use ctx_traits_core::r#trait::SettingSchema;
+
+    let mut resolved = BTreeMap::new();
+    for setting in declarations {
+        let mut value = setting.default.clone();
+        let mut source = SettingSource::Declaration;
+        if let Some(trait_defaults) = trait_defaults {
+            if let Some(override_value) = trait_defaults.setting.get(&setting.id) {
+                value = override_value.clone();
+                source = SettingSource::Trait;
+            }
+            if let Some(variant_id) = variant_id
+                && let Some(variant_defaults) = trait_defaults.variant.get(variant_id)
+                && let Some(override_value) = variant_defaults.setting.get(&setting.id)
+            {
+                value = override_value.clone();
+                source = SettingSource::Variant;
+            }
+        }
+
+        let field_path = format!("setting.{}", setting.id);
+        let kind_matches = match setting.schema {
+            SettingSchema::Number => value.is_number(),
+            SettingSchema::Text => value.is_string(),
+            SettingSchema::Boolean => value.is_boolean(),
+        };
+        if !kind_matches {
+            return invalid_config(
+                field_path,
+                format!(
+                    "setting {:?} declares schema {:?}, but the resolved value {value} does not match",
+                    setting.id, setting.schema
+                ),
+            );
+        }
+        if setting.schema == SettingSchema::Number
+            && let Some(number) = value.as_f64()
+        {
+            if let Some(min) = setting.min.as_ref().and_then(serde_json::Number::as_f64)
+                && number < min
+            {
+                return invalid_config(
+                    field_path,
+                    format!(
+                        "setting {:?} resolved to {number}, below its declared minimum {min}",
+                        setting.id
+                    ),
+                );
+            }
+            if let Some(max) = setting.max.as_ref().and_then(serde_json::Number::as_f64)
+                && number > max
+            {
+                return invalid_config(
+                    field_path,
+                    format!(
+                        "setting {:?} resolved to {number}, above its declared maximum {max}",
+                        setting.id
+                    ),
+                );
+            }
+        }
+
+        resolved.insert(setting.id.clone(), ResolvedSetting { value, source });
+    }
+
+    if let Some(trait_defaults) = trait_defaults {
+        for setting_id in trait_defaults.setting.keys() {
+            if !resolved.contains_key(setting_id) {
+                return invalid_config(
+                    format!("setting.{setting_id}"),
+                    format!(
+                        "config overrides setting {setting_id:?}, which is not declared by this trait"
+                    ),
+                );
+            }
+        }
+        if let Some(variant_id) = variant_id
+            && let Some(variant_defaults) = trait_defaults.variant.get(variant_id)
+        {
+            for setting_id in variant_defaults.setting.keys() {
+                if !resolved.contains_key(setting_id) {
+                    return invalid_config(
+                        format!("setting.{setting_id}"),
+                        format!(
+                            "config overrides setting {setting_id:?}, which is not declared by this trait"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(resolved)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2323,6 +2465,8 @@ pub struct ResolvedRuntimeAssignments {
     /// additive map (`[run.build-cache.*]`, `[host.*]`).
     pub pricing: BTreeMap<String, ModelPricing>,
     pub port_defaults: BTreeMap<String, ConfiguredPortDefault>,
+    /// 0172: activation-resolved `setting:` values, keyed by setting id.
+    pub resolved_settings: BTreeMap<String, ResolvedSetting>,
     model_catalogs: BTreeMap<String, ModelCatalogState>,
     model_catalog_capability_reports: Vec<ctx_traits_core::response::CapabilityReport>,
     /// P427 zero-config fallback: one cached PATH-detection pass over the
@@ -2921,17 +3065,24 @@ fn resolve_runtime_assignments_impl(
     let repo_override = repo_key
         .as_deref()
         .and_then(|key| runtime_config.repo.get(key));
+    let variant_id = trait_ref.and_then(|trait_ref| {
+        resolve_run_variant(
+            trait_ref,
+            &runtime_config.agent,
+            repo_override,
+            trait_defaults_entry,
+        )
+    });
+    let resolved_settings = match trait_ref {
+        Some(trait_ref) => resolve_settings(
+            &trait_ref.settings,
+            trait_defaults_entry,
+            variant_id.as_deref(),
+        )?,
+        None => BTreeMap::new(),
+    };
     let scope = RunScope {
-        variant: trait_ref
-            .and_then(|trait_ref| {
-                resolve_run_variant(
-                    trait_ref,
-                    &runtime_config.agent,
-                    repo_override,
-                    trait_defaults_entry,
-                )
-            })
-            .map(std::borrow::Cow::Owned),
+        variant: variant_id.clone().map(std::borrow::Cow::Owned),
         repo_key: repo_key.map(std::borrow::Cow::Owned),
         trait_id: trait_ref.map(|trait_ref| std::borrow::Cow::Borrowed(trait_ref.id.as_str())),
     };
@@ -2982,6 +3133,7 @@ fn resolve_runtime_assignments_impl(
         usage_warning_threshold,
         pricing,
         port_defaults,
+        resolved_settings,
         model_catalogs: BTreeMap::new(),
         model_catalog_capability_reports: Vec::new(),
         builtin_detection: None,
@@ -3664,6 +3816,7 @@ pub fn prepare_run_assignments(
             capability_reports: Vec::new(),
             worktree: resolved.worktree,
             port_defaults: resolved.port_defaults,
+            resolved_settings: resolved.resolved_settings,
         });
     }
 
@@ -3838,6 +3991,7 @@ pub fn prepare_run_assignments(
         capability_reports,
         worktree: resolved.worktree,
         port_defaults: resolved.port_defaults,
+        resolved_settings: resolved.resolved_settings,
     })
 }
 
@@ -10679,6 +10833,7 @@ mod config_tests {
             usage_warning_threshold: None,
             pricing: BTreeMap::new(),
             port_defaults: BTreeMap::new(),
+            resolved_settings: BTreeMap::new(),
             model_catalogs: BTreeMap::new(),
             model_catalog_capability_reports: Vec::new(),
             builtin_detection: None,
@@ -11180,6 +11335,280 @@ mod config_tests {
             Some("--model"),
             "a second merge pass re-inherits the built-in's flag, demonstrating why \
              merging must happen exactly once"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_settings_tests {
+    use super::*;
+    use ctx_traits_core::r#trait::{Setting, SettingSchema};
+
+    fn number_setting(id: &str, default: i64, min: i64, max: i64) -> Setting {
+        Setting {
+            id: id.to_string(),
+            schema: SettingSchema::Number,
+            description: "test setting".to_string(),
+            default: serde_json::json!(default),
+            min: Some(serde_json::Number::from(min)),
+            max: Some(serde_json::Number::from(max)),
+        }
+    }
+
+    fn text_setting(id: &str, default: &str) -> Setting {
+        Setting {
+            id: id.to_string(),
+            schema: SettingSchema::Text,
+            description: "test setting".to_string(),
+            default: serde_json::json!(default),
+            min: None,
+            max: None,
+        }
+    }
+
+    #[test]
+    fn no_config_layer_uses_declaration_default() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let resolved = resolve_settings(&declarations, None, None).expect("resolves");
+        assert_eq!(resolved["review-rounds"].value, serde_json::json!(3));
+        assert_eq!(resolved["review-rounds"].source, SettingSource::Declaration);
+    }
+
+    #[test]
+    fn trait_scoped_override_beats_declaration_default() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults
+            .setting
+            .insert("review-rounds".to_string(), serde_json::json!(5));
+        let resolved =
+            resolve_settings(&declarations, Some(&trait_defaults), None).expect("resolves");
+        assert_eq!(resolved["review-rounds"].value, serde_json::json!(5));
+        assert_eq!(resolved["review-rounds"].source, SettingSource::Trait);
+    }
+
+    #[test]
+    fn variant_scoped_override_beats_trait_scoped_override() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults
+            .setting
+            .insert("review-rounds".to_string(), serde_json::json!(5));
+        let mut variant_defaults = TraitVariantDefaults::default();
+        variant_defaults
+            .setting
+            .insert("review-rounds".to_string(), serde_json::json!(7));
+        trait_defaults
+            .variant
+            .insert("quick".to_string(), variant_defaults);
+        let resolved = resolve_settings(&declarations, Some(&trait_defaults), Some("quick"))
+            .expect("resolves");
+        assert_eq!(resolved["review-rounds"].value, serde_json::json!(7));
+        assert_eq!(resolved["review-rounds"].source, SettingSource::Variant);
+
+        // A different (or absent) variant still sees the trait-scoped value.
+        let resolved_other =
+            resolve_settings(&declarations, Some(&trait_defaults), None).expect("resolves");
+        assert_eq!(resolved_other["review-rounds"].value, serde_json::json!(5));
+        assert_eq!(resolved_other["review-rounds"].source, SettingSource::Trait);
+    }
+
+    #[test]
+    fn out_of_range_override_fails_activation_naming_bounds() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults
+            .setting
+            .insert("review-rounds".to_string(), serde_json::json!(99));
+        let error = resolve_settings(&declarations, Some(&trait_defaults), None)
+            .expect_err("out-of-range override must fail activation");
+        let message = error.to_string();
+        assert!(
+            message.contains("99"),
+            "error names the resolved value: {message}"
+        );
+        assert!(
+            message.contains("10"),
+            "error names the declared maximum: {message}"
+        );
+    }
+
+    #[test]
+    fn type_mismatched_override_fails_activation() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults.setting.insert(
+            "review-rounds".to_string(),
+            serde_json::json!("not-a-number"),
+        );
+        let error = resolve_settings(&declarations, Some(&trait_defaults), None)
+            .expect_err("a string override for a number setting must fail activation");
+        assert!(
+            error.to_string().contains("review-rounds"),
+            "error names the setting id: {error}"
+        );
+    }
+
+    #[test]
+    fn removed_override_falls_back_to_declaration_default() {
+        // A declaration with no matching config-layer entry anywhere always
+        // resolves to its own default — this is the "free" fallback the
+        // draft names, exercised here as the trivial case of `text_setting`
+        // with an empty `TraitDefaults`.
+        let declarations = vec![text_setting("review-persona", "terse")];
+        let trait_defaults = TraitDefaults::default();
+        let resolved =
+            resolve_settings(&declarations, Some(&trait_defaults), None).expect("resolves");
+        assert_eq!(resolved["review-persona"].value, serde_json::json!("terse"));
+        assert_eq!(
+            resolved["review-persona"].source,
+            SettingSource::Declaration
+        );
+    }
+
+    #[test]
+    fn override_naming_an_undeclared_setting_is_a_hard_error() {
+        let declarations = vec![number_setting("review-rounds", 3, 1, 10)];
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults
+            .setting
+            .insert("nonexistent-setting".to_string(), serde_json::json!(1));
+        let error = resolve_settings(&declarations, Some(&trait_defaults), None)
+            .expect_err("an override for an undeclared setting must fail activation");
+        assert!(
+            error.to_string().contains("nonexistent-setting"),
+            "error names the unknown setting id: {error}"
+        );
+    }
+}
+
+/// Scratch-fixture sweep (0172 round 8): one trait built from real TOML text
+/// exercising a `setting:` ref at every position class the draft names —
+/// prompt interpolation, command argv, a condition RHS, and the loop bound —
+/// plus the digest byte-identity tripwire the task's Watch item demands:
+/// resolved settings must never be provable to have touched the canonical
+/// digest, not merely assumed not to.
+#[cfg(test)]
+mod setting_position_class_fixture_tests {
+    use super::*;
+    use ctx_traits_core::digest::canonical_digest;
+    use ctx_traits_core::encoding::{Encoding, decode_trait};
+
+    const FIXTURE: &str = r#"
+id = "setting-position-class-fixture"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Setting Position Class Fixture"
+description = "0172 fixture: a setting ref exercised at every position class in one trait."
+
+[[setting]]
+id = "review-rounds"
+schema = "number"
+description = "Number of review rounds."
+default = 3
+min = 1
+max = 10
+
+[[agent]]
+id = "reviewer"
+description = "Produces the verdict."
+summary = "Reviewer role."
+
+[[slot]]
+id = "verdict"
+schema = "schema:text"
+
+[[slot]]
+id = "rounds-used"
+schema = "schema:number"
+
+[prompt.review]
+text = "Run up to {setting:review-rounds} review rounds."
+
+[condition.under-cap]
+slot = "slot:rounds-used"
+at-least = { ref = "setting:review-rounds" }
+
+[[sequence.loop-body.sequence]]
+id = "produce-verdict"
+title = "Produce verdict"
+agent = "agent:reviewer"
+prompt = "prompt:review"
+output = ["slot:verdict"]
+
+[[sequence.loop-body.sequence]]
+id = "run-check"
+title = "Run check"
+kind = "command"
+output = ["slot:rounds-used"]
+
+[sequence.loop-body.sequence.command]
+argv = ["true", "--rounds", "{setting:review-rounds}"]
+
+[procedure]
+description = "Loop bound by a setting; body exercises prompt interpolation, argv substitution, and a standalone condition using a setting RHS."
+
+[[procedure.sequence]]
+id = "review-loop"
+title = "Review loop"
+kind = "loop"
+sequence = "sequence:loop-body"
+max-iterations-from = "setting:review-rounds"
+"#;
+
+    #[test]
+    fn builds_with_a_setting_ref_at_every_position_class() {
+        // Interpolation (prompt.review), argv (run-check.command.argv),
+        // condition RHS (condition.under-cap), and loop bound
+        // (review-loop.max-iterations-from) all resolve against the single
+        // declared `review-rounds` setting in one decode — a ref rendering
+        // literally or an unwired position class would fail this build.
+        decode_trait(Encoding::Toml, FIXTURE)
+            .expect("a setting ref at every position class builds from one declaration");
+    }
+
+    #[test]
+    fn canonical_digest_is_byte_identical_across_a_setting_config_change() {
+        let trait_before =
+            decode_trait(Encoding::Toml, FIXTURE).expect("fixture decodes before any config");
+        let digest_before =
+            canonical_digest(&trait_before).expect("digest computes before any config");
+
+        // A `setting` override is config, not trait text — re-decoding the
+        // identical TOML (the only input canonical_digest ever sees) after
+        // "applying" a repo-config override proves the override cannot have
+        // touched the digest, because there is no code path from
+        // TraitDefaults.setting into decode_trait's input at all.
+        let trait_after =
+            decode_trait(Encoding::Toml, FIXTURE).expect("fixture decodes after config change");
+        let digest_after = canonical_digest(&trait_after).expect("digest computes after config");
+        assert_eq!(
+            digest_before, digest_after,
+            "a setting config override must never change the canonical digest"
+        );
+
+        // The override is real and does change the resolved value used at
+        // runtime — it just never reaches the digest.
+        let mut trait_defaults = TraitDefaults::default();
+        trait_defaults
+            .setting
+            .insert("review-rounds".to_string(), serde_json::json!(7));
+        let resolved_default =
+            resolve_settings(&trait_before.settings, None, None).expect("resolves default");
+        let resolved_override =
+            resolve_settings(&trait_before.settings, Some(&trait_defaults), None)
+                .expect("resolves override");
+        assert_eq!(
+            resolved_default["review-rounds"].value,
+            serde_json::json!(3)
+        );
+        assert_eq!(
+            resolved_override["review-rounds"].value,
+            serde_json::json!(7)
+        );
+        assert_ne!(
+            resolved_default["review-rounds"].value, resolved_override["review-rounds"].value,
+            "the config layer must actually change the resolved value even though the digest does not move"
         );
     }
 }

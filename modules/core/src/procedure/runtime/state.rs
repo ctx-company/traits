@@ -797,6 +797,32 @@ pub struct OutputPortCompletion {
     pub reason: String,
 }
 
+/// 0172: which config scope supplied a resolved `setting:` value, in
+/// increasing specificity. Evidence only — never consulted by validation or
+/// substitution, and excluded from every digest by construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum SettingSourceLayer {
+    /// The canonical `[[setting]]` declaration's `default`.
+    Declaration,
+    /// `[trait.<id>.setting]`.
+    Trait,
+    /// `[trait.<id>.variant.<vid>.setting]`.
+    Variant,
+}
+
+/// One `setting:<id>` value resolved at activation, recorded as run-ledger
+/// evidence: the resolved value plus which config scope supplied it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct ResolvedSettingRecord {
+    pub id: String,
+    pub value: JsonValue,
+    pub source: SettingSourceLayer,
+}
+
 /// Final state of a procedure run ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -855,6 +881,16 @@ pub struct State {
     pub provider_capability_reports: Vec<CapabilityReport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output_ports: Vec<OutputPortCompletion>,
+    /// 0172: activation-resolved `setting:` values, one entry per declared
+    /// setting, recorded once at run start. Evidence only — excluded from
+    /// every digest by construction; never read by validation or
+    /// substitution (those consult the resolved-settings map directly).
+    #[serde(
+        default,
+        rename = "resolved-settings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub resolved_settings: Vec<ResolvedSettingRecord>,
     #[serde(default, rename = "active-path", skip_serializing_if = "Vec::is_empty")]
     pub active_path: Vec<PathSegment>,
     #[serde(

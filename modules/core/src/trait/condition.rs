@@ -1626,12 +1626,32 @@ fn validate_numeric_threshold_ref(
         field_path: format!("{base_field_path}.ref"),
         message: format!("invalid numeric comparison ref {ref_text:?}"),
     })?;
-    if parsed.is_qualified() || !matches!(parsed.kind(), Kind::Slot | Kind::Port) {
+    if parsed.is_qualified() || !matches!(parsed.kind(), Kind::Slot | Kind::Port | Kind::Setting) {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{base_field_path}.ref"),
-            message: "RHS ref must be a local slot or input port".to_string(),
+            message: "RHS ref must be a local slot, input port, or setting".to_string(),
         }
         .into());
+    }
+    // A `setting:` RHS is resolved against the shared setting lookup (unknown
+    // id names itself the same way at every reference site) and type-checked
+    // as number kind directly — settings have no `schema:*` wrapper to run
+    // through `numeric_schema`.
+    if parsed.kind() == Kind::Setting {
+        let setting = crate::r#trait::procedure::resolve_setting_ref(
+            trait_ref,
+            ref_text,
+            &format!("{base_field_path}.ref"),
+        )?;
+        if setting.schema != crate::r#trait::SettingSchema::Number {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("{base_field_path}.ref"),
+                message: "RHS setting ref must resolve to a schema = \"number\" setting"
+                    .to_string(),
+            }
+            .into());
+        }
+        return Ok(());
     }
     let rhs_schema = match parsed.kind() {
         Kind::Slot => trait_ref
@@ -1991,6 +2011,51 @@ fn try_validate_scalar_schema_literal(
         )?;
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod setting_comparison_ref_tests {
+    use crate::encoding::{Encoding, decode_trait};
+
+    const HEADER: &str = r#"
+id = "setting-comparison-validate"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Setting comparison validate"
+description = "Setting comparison RHS fixture."
+"#;
+
+    #[test]
+    fn accepts_a_setting_ref_as_the_rhs_of_a_numeric_comparison() {
+        let text = format!(
+            "{HEADER}\n[[setting]]\nid = \"review-cap\"\nschema = \"number\"\ndescription = \"Cap.\"\ndefault = 5\n\n[[slot]]\nid = \"rounds\"\nschema = \"schema:number\"\n\n[condition.over-cap]\nslot = \"slot:rounds\"\nat-least = {{ ref = \"setting:review-cap\" }}\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect("a setting ref naming a declared number setting builds as RHS");
+    }
+
+    #[test]
+    fn rejects_a_setting_ref_naming_no_declared_setting() {
+        let text = format!(
+            "{HEADER}\n[[slot]]\nid = \"rounds\"\nschema = \"schema:number\"\n\n[condition.over-cap]\nslot = \"slot:rounds\"\nat-least = {{ ref = \"setting:not-declared\" }}\n"
+        );
+        let err = decode_trait(Encoding::Toml, &text)
+            .expect_err("an undeclared setting id must fail the build");
+        assert!(
+            err.to_string().contains("setting:not-declared"),
+            "error must name the resolved id: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_text_setting_ref_as_a_numeric_rhs() {
+        let text = format!(
+            "{HEADER}\n[[setting]]\nid = \"label\"\nschema = \"text\"\ndescription = \"Label.\"\ndefault = \"x\"\n\n[[slot]]\nid = \"rounds\"\nschema = \"schema:number\"\n\n[condition.over-cap]\nslot = \"slot:rounds\"\nat-least = {{ ref = \"setting:label\" }}\n"
+        );
+        let err = decode_trait(Encoding::Toml, &text)
+            .expect_err("a text-kind setting must not satisfy a numeric RHS");
+        assert!(err.to_string().contains("number"));
+    }
 }
 
 #[cfg(test)]

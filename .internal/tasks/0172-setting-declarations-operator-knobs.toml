@@ -81,6 +81,13 @@ scope = """
 - **Schema bump batched with 0167**'s checklist form so the canonical
   version churns once.
 
+Completion note (round 8): 0167's checklist form has not landed a
+version bump as of this round. Per the batching decision above, 0172
+ships with NO independent canonical schema-version bump — the trait
+model still declares "0.3"/"0.4" fixtures unchanged by this feature.
+When 0167 lands its bump, fold the `[[setting]]` addition into that
+same version churn rather than bumping again for this task alone.
+
 ## Watch
 
 - The digest boundary is the contract: prove it, do not assume it — a

@@ -96,6 +96,7 @@ fn preview_session(
         resource_evidence: state.resource_evidence.clone(),
         provider_capability_reports: Vec::new(),
         output_ports: state.output_ports.clone(),
+        resolved_settings: state.resolved_settings.clone(),
         active_path: state.active_path.clone(),
         control_stack: state.control_stack.clone(),
         stop_reason: state.stop_reason.clone(),
@@ -139,6 +140,7 @@ fn static_preview(file: &str, step: Option<&str>) -> crate::Result<PreviewReport
         Vec::new(),
         None,
         None,
+        Vec::new(),
     )?;
     let frames = ctx_traits_core::procedure::runtime::preview_sequence_frames(
         &loaded.trait_ref,

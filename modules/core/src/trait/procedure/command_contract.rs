@@ -16,13 +16,19 @@ use crate::r#trait::Resource;
 /// Each argv item is scanned with the shared [`scan_interpolations`] scanner.
 /// For every interpolation that parses as a typed ref:
 ///
-/// - the ref kind MUST be `slot`, `port`, or `resource` — every other kind is
-///   rejected;
+/// - the ref kind MUST be `slot`, `port`, `setting`, or `resource` — every
+///   other kind is rejected;
 /// - a `slot`/`port` ref MUST be local and unqualified — dependency
 ///   slot/port values are not resolvable at pure frame-build time — and MAY
 ///   appear anywhere within the argv element; the referenced value is
 ///   rendered into that one argv token (text/number/boolean keep their
 ///   scalar form, object/list/null values use compact JSON);
+/// - a `setting` ref MUST name a declared setting (checked via the shared
+///   [`resolve_setting_ref`] lookup, so an unknown id names itself in the
+///   error the same way at every reference site) and is exempt from the
+///   sequence item `input` list requirement below: settings are resolved at
+///   activation, not accepted as step inputs, mirroring the loop-bound
+///   branch's skip of the analogous port-only rule;
 /// - a `resource` ref MUST be the entire argv element (`{resource:id}` with
 ///   nothing else in that element), local and unqualified, and MUST NOT
 ///   carry an input guard: a resource launched as a command argument is
@@ -30,8 +36,8 @@ use crate::r#trait::Resource;
 ///   interpolated here — permitting it embedded in a larger string or
 ///   behind a conditional input would blur containment and let dynamic text
 ///   be reinterpreted as a resource reference downstream;
-/// - every ref, regardless of kind, MUST appear in the sequence item `input`
-///   list — the same implicit-input rule prompt interpolation enforces.
+/// - every non-`setting` ref MUST appear in the sequence item `input` list —
+///   the same implicit-input rule prompt interpolation enforces.
 ///
 /// Interpolation braces that do **not** parse as a typed ref (for example a
 /// `jq` object filter such as `{name: .n}`) are left untouched: argv runs
@@ -51,16 +57,22 @@ pub(crate) fn validate_sequence_item_command_contract(
                 continue;
             };
             let argv_path = format!("{base}.command.argv[{index}]");
-            if !matches!(parsed.kind(), Kind::Slot | Kind::Port | Kind::Resource) {
+            if !matches!(
+                parsed.kind(),
+                Kind::Slot | Kind::Port | Kind::Resource | Kind::Setting
+            ) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: argv_path,
                     message: format!(
-                        "argv interpolation {{{}}} kind {:?} not allowed; only slot, port, or resource refs may be interpolated",
+                        "argv interpolation {{{}}} kind {:?} not allowed; only slot, port, setting, or resource refs may be interpolated",
                         interp.ref_text,
                         parsed.kind()
                     ),
                 }
                 .into());
+            }
+            if parsed.kind() == Kind::Setting {
+                resolve_setting_ref(_trait_ref, interp.ref_text.as_str(), &argv_path)?;
             }
             if parsed.is_qualified() {
                 return Err(crate::manifest::Error::InvalidField {
@@ -96,7 +108,7 @@ pub(crate) fn validate_sequence_item_command_contract(
                     .into());
                 }
             }
-            if !item_input.contains(interp.ref_text.as_str()) {
+            if parsed.kind() != Kind::Setting && !item_input.contains(interp.ref_text.as_str()) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.input"),
                     message: format!(
@@ -106,7 +118,7 @@ pub(crate) fn validate_sequence_item_command_contract(
                 }
                 .into());
             }
-            if item.input.is_optional_for(interp.ref_text.as_str()) {
+            if parsed.kind() != Kind::Setting && item.input.is_optional_for(interp.ref_text.as_str()) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{base}.input"),
                     message: format!(
@@ -126,6 +138,7 @@ fn argv_kind_label(kind: Kind) -> &'static str {
         Kind::Slot => "slot",
         Kind::Port => "port",
         Kind::Resource => "resource",
+        Kind::Setting => "setting",
         _ => "unsupported",
     }
 }
@@ -219,4 +232,65 @@ pub fn unpinned_command_resource_argv(trait_ref: &Trait) -> Vec<UnpinnedCommandR
     }
 
     found
+}
+
+#[cfg(test)]
+mod command_contract_tests {
+    use super::*;
+    use crate::r#trait::{Setting, SettingSchema};
+
+    fn minimal_trait_with_setting(setting: Setting) -> Trait {
+        let mut trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            "id = \"command-contract-setting-test\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Command contract setting test\"\nsummary = \"Minimal fixture.\"\n",
+        )
+        .expect("minimal trait decodes");
+        trait_ref.settings.push(setting);
+        trait_ref
+    }
+
+    fn number_setting(id: &str) -> Setting {
+        Setting {
+            id: id.to_string(),
+            schema: SettingSchema::Number,
+            description: "A test setting.".to_string(),
+            default: serde_json::json!(3),
+            min: None,
+            max: None,
+        }
+    }
+
+    fn command_item() -> SequenceItem {
+        toml::from_str(
+            "id = \"run\"\ntitle = \"Run\"\nkind = \"command\"\ncmd = \"true\"\n",
+        )
+        .expect("test fixture must be a valid sequence item")
+    }
+
+    #[test]
+    fn argv_setting_ref_to_a_declared_setting_builds() {
+        let trait_ref = minimal_trait_with_setting(number_setting("review-rounds"));
+        let item = command_item();
+        let argv = vec!["--rounds".to_string(), "{setting:review-rounds}".to_string()];
+        validate_sequence_item_command_contract(&trait_ref, &item, &argv, "procedure.sequence[0]")
+            .expect("a setting ref naming a declared setting builds without requiring it in `input`");
+    }
+
+    #[test]
+    fn argv_setting_ref_to_an_undeclared_setting_fails_naming_the_id() {
+        let trait_ref = minimal_trait_with_setting(number_setting("review-rounds"));
+        let item = command_item();
+        let argv = vec!["{setting:not-declared}".to_string()];
+        let error = validate_sequence_item_command_contract(
+            &trait_ref,
+            &item,
+            &argv,
+            "procedure.sequence[0]",
+        )
+        .expect_err("an undeclared setting id must fail the build");
+        assert!(
+            format!("{error}").contains("setting:not-declared"),
+            "error must name the resolved id: {error}"
+        );
+    }
 }

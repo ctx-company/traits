@@ -223,7 +223,7 @@ pub fn decode_trait_with_warnings(
     let session_ids: BTreeSet<&str> = t.sessions.iter().map(|s| s.id.as_str()).collect();
     crate::r#trait::agent::validate_agent_session_bindings(&t.agents, &session_ids)?;
     crate::r#trait::signal::validate_signals(&t.signals)?;
-    crate::r#trait::prompt::validate_prompts(&t.prompts)?;
+    crate::r#trait::prompt::validate_prompts(&t.prompts, &t.settings)?;
     crate::r#trait::prompt::validate_prompt_resource_sources(&t.prompts, &resource_ids)?;
     crate::r#trait::condition::validate_conditions(&t)?;
 

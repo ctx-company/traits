@@ -279,6 +279,7 @@ fn validate_sequence_item_declaration(
     match kind {
         SequenceKind::Prompt => {
             validate_sequence_item_prompt_contract(
+                trait_ref,
                 base,
                 item.id.as_deref(),
                 item,
@@ -315,7 +316,13 @@ fn validate_sequence_item_declaration(
                 }.into());
             }
             validate_local_slot_ref(output.ref_text(), &format!("{base}.output[0]"), sets.slot_ids)?;
-            validate_sequence_item_prompt_contract(base, item.id.as_deref(), item, &trait_ref.prompts)?;
+            validate_sequence_item_prompt_contract(
+                trait_ref,
+                base,
+                item.id.as_deref(),
+                item,
+                &trait_ref.prompts,
+            )?;
         }
         SequenceKind::Command => {
             let plan = command_plan_for_item(item, base)?;
@@ -1581,25 +1588,39 @@ fn validate_loop_item(
         .into());
     }
     if let Some(max_iterations_from) = item.max_iterations_from.as_deref() {
-        validate_integer_input_port_ref(
-            trait_ref,
-            max_iterations_from,
-            &format!("{base}.max-iterations-from"),
-        )?;
-        if !item.input.ref_texts().any(|input| input == max_iterations_from) {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{base}.input"),
-                message: "dynamic loop bound port must be declared as a loop input".to_string(),
+        let parsed_bound =
+            Reference::parse(max_iterations_from).map_err(|_| crate::manifest::Error::InvalidField {
+                field_path: format!("{base}.max-iterations-from"),
+                message: format!("invalid loop bound ref {max_iterations_from:?}"),
+            })?;
+        if parsed_bound.kind() == Kind::Setting {
+            validate_integer_setting_ref(
+                trait_ref,
+                max_iterations_from,
+                &format!("{base}.max-iterations-from"),
+            )?;
+        } else {
+            validate_integer_input_port_ref(
+                trait_ref,
+                max_iterations_from,
+                &format!("{base}.max-iterations-from"),
+            )?;
+            if !item.input.ref_texts().any(|input| input == max_iterations_from) {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{base}.input"),
+                    message: "dynamic loop bound port must be declared as a loop input"
+                        .to_string(),
+                }
+                .into());
             }
-            .into());
-        }
-        if item.input.is_optional_for(max_iterations_from) {
-            return Err(crate::manifest::Error::InvalidField {
-                field_path: format!("{base}.input"),
-                message: "dynamic loop bound port must not be declared as an optional input"
-                    .to_string(),
+            if item.input.is_optional_for(max_iterations_from) {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: format!("{base}.input"),
+                    message: "dynamic loop bound port must not be declared as an optional input"
+                        .to_string(),
+                }
+                .into());
             }
-            .into());
         }
     }
     if let Some(until) = item.until.as_ref() {
@@ -1845,6 +1866,85 @@ fn validate_integer_input_port_ref(
                 "dynamic loop bound requires a schema:integer input port, got {:?}",
                 port.schema
             ),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+/// Resolve a `setting:<id>` ref to its declaration, failing the build with
+/// the resolved id when no such setting is declared (task Watch item: every
+/// `setting:` reference site shares this lookup so an unknown id can never
+/// build in one position and fail in another).
+pub(crate) fn resolve_setting_ref<'a>(
+    trait_ref: &'a Trait,
+    ref_text: &str,
+    field_path: &str,
+) -> crate::Result<&'a crate::r#trait::Setting> {
+    let parsed = Reference::parse(ref_text).map_err(|_| crate::manifest::Error::InvalidField {
+        field_path: field_path.to_string(),
+        message: format!("invalid setting ref {ref_text:?}"),
+    })?;
+    if parsed.kind() != Kind::Setting || parsed.is_qualified() {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: "expected a local setting:* ref".to_string(),
+        }
+        .into());
+    }
+    trait_ref
+        .settings
+        .iter()
+        .find(|setting| setting.id == parsed.id())
+        .ok_or_else(|| {
+            crate::manifest::Error::InvalidField {
+                field_path: field_path.to_string(),
+                message: format!("unresolved setting ref {ref_text:?} names no declared setting"),
+            }
+            .into()
+        })
+}
+
+/// A `setting:` loop bound: must name a declared `schema = "number"` setting
+/// whose default (and bounds, when present) are whole numbers — the
+/// "integerness is reference-site validation" ruling. Unlike a port loop
+/// bound, a setting is not required to be declared as a loop input: settings
+/// are resolved at activation, not accepted at runtime.
+fn validate_integer_setting_ref(
+    trait_ref: &Trait,
+    ref_text: &str,
+    field_path: &str,
+) -> crate::Result<()> {
+    let setting = resolve_setting_ref(trait_ref, ref_text, field_path)?;
+    if setting.schema != crate::r#trait::SettingSchema::Number {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: format!(
+                "dynamic loop bound requires a schema = \"number\" setting, got {:?}",
+                setting.schema
+            ),
+        }
+        .into());
+    }
+    let is_whole = |value: &serde_json::Number| value.as_f64().is_some_and(|n| n.fract() == 0.0);
+    if !setting.default.as_f64().is_some_and(|n| n.fract() == 0.0) {
+        // Not routed through `is_whole` above: `default` is a bare
+        // `serde_json::Value`, not a `serde_json::Number`.
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: format!(
+                "dynamic loop bound setting default {:?} must be a whole number",
+                setting.default
+            ),
+        }
+        .into());
+    }
+    if setting.min.as_ref().is_some_and(|min| !is_whole(min))
+        || setting.max.as_ref().is_some_and(|max| !is_whole(max))
+    {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: "dynamic loop bound setting min/max must be whole numbers".to_string(),
         }
         .into());
     }
@@ -3831,6 +3931,69 @@ mod tests {
 
     fn item_from_toml(toml_src: &str) -> SequenceItem {
         toml::from_str(toml_src).expect("test fixture must be a valid sequence item")
+    }
+
+    fn minimal_trait_with_setting(setting: crate::r#trait::Setting) -> Trait {
+        let mut trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            "id = \"setting-loop-bound-test\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Setting loop bound test\"\nsummary = \"Minimal fixture.\"\n",
+        )
+        .expect("minimal trait decodes");
+        trait_ref.settings.push(setting);
+        trait_ref
+    }
+
+    fn number_setting(id: &str, default: serde_json::Value) -> crate::r#trait::Setting {
+        crate::r#trait::Setting {
+            id: id.to_string(),
+            schema: crate::r#trait::SettingSchema::Number,
+            description: "A test setting.".to_string(),
+            default,
+            min: None,
+            max: None,
+        }
+    }
+
+    #[test]
+    fn integer_setting_ref_accepts_a_declared_whole_number_setting() {
+        let trait_ref =
+            minimal_trait_with_setting(number_setting("review-rounds", serde_json::json!(3)));
+        validate_integer_setting_ref(&trait_ref, "setting:review-rounds", "field")
+            .expect("whole-number setting is a valid loop bound");
+    }
+
+    #[test]
+    fn integer_setting_ref_rejects_unknown_setting_id() {
+        let trait_ref =
+            minimal_trait_with_setting(number_setting("review-rounds", serde_json::json!(3)));
+        let error = validate_integer_setting_ref(&trait_ref, "setting:not-declared", "field")
+            .expect_err("unknown setting id must fail the build");
+        assert!(
+            format!("{error}").contains("setting:not-declared"),
+            "error must name the resolved id: {error}"
+        );
+    }
+
+    #[test]
+    fn integer_setting_ref_rejects_non_number_schema() {
+        let trait_ref = minimal_trait_with_setting(crate::r#trait::Setting {
+            id: "review-mode".to_string(),
+            schema: crate::r#trait::SettingSchema::Text,
+            description: "A test setting.".to_string(),
+            default: serde_json::json!("strict"),
+            min: None,
+            max: None,
+        });
+        validate_integer_setting_ref(&trait_ref, "setting:review-mode", "field")
+            .expect_err("a text setting cannot bind a loop bound");
+    }
+
+    #[test]
+    fn integer_setting_ref_rejects_fractional_default() {
+        let trait_ref =
+            minimal_trait_with_setting(number_setting("review-rounds", serde_json::json!(2.5)));
+        validate_integer_setting_ref(&trait_ref, "setting:review-rounds", "field")
+            .expect_err("a fractional default fails the integerness-at-reference-site rule");
     }
 
     fn loop_item(on_exhausted: Option<&str>) -> SequenceItem {

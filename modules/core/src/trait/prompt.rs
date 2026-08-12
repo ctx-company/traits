@@ -452,7 +452,7 @@ pub(crate) fn classify_prompt(text: &str) -> Result<PromptClassification, String
 }
 
 /// Kinds that are valid in prompt input contracts.
-const VALID_INPUT_KINDS: &[Kind] = &[Kind::Port, Kind::Slot, Kind::Resource];
+const VALID_INPUT_KINDS: &[Kind] = &[Kind::Port, Kind::Slot, Kind::Resource, Kind::Setting];
 
 /// Kinds that are valid in prompt output contracts.
 const VALID_OUTPUT_KINDS: &[Kind] = &[Kind::Slot];
@@ -478,13 +478,16 @@ pub fn is_valid_output_kind(kind: Kind) -> bool {
 /// Returns the first error found, or `Ok(())` if all prompts are valid.
 /// Diagnostics use field-specific paths such as `prompt.<id>.text` or
 /// `prompt.<id>.input[0]`.
-pub fn validate_prompts(prompts: &PromptMap) -> crate::Result<()> {
+pub fn validate_prompts(
+    prompts: &PromptMap,
+    settings: &[crate::r#trait::Setting],
+) -> crate::Result<()> {
     for (id, body) in prompts.iter() {
         let id_path = format!("prompt.{id}");
         crate::shared::validate_slug_shape(id, &id_path)?;
 
         match (&body.text, &body.source) {
-            (Some(text), None) => validate_prompt_text(text, &id_path)?,
+            (Some(text), None) => validate_prompt_text(text, &id_path, settings)?,
             (None, Some(source)) => validate_prompt_source(source, &id_path)?,
             (Some(_), Some(_)) => {
                 return Err(crate::manifest::Error::InvalidField {
@@ -513,11 +516,19 @@ pub fn validate_prompts(prompts: &PromptMap) -> crate::Result<()> {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("{id_path}.input[{j}]"),
                     message: format!(
-                        "prompt input ref kind {:?} not allowed; expected port, slot, or resource",
+                        "prompt input ref kind {:?} not allowed; expected port, slot, setting, or resource",
                         parsed.kind()
                     ),
                 }
                 .into());
+            }
+            if parsed.kind() == Kind::Setting {
+                validate_setting_ref_exists(
+                    &parsed,
+                    ref_text,
+                    settings,
+                    &format!("{id_path}.input[{j}]"),
+                )?;
             }
         }
 
@@ -583,7 +594,32 @@ pub fn validate_prompt_resource_sources(
     Ok(())
 }
 
-fn validate_prompt_text(text: &str, id_path: &str) -> crate::Result<()> {
+/// Resolve a `setting:<id>` ref against declared settings, failing with the
+/// resolved id when unnamed — mirrors `procedure::validate::resolve_setting_ref`
+/// (task Watch item: an unknown id names itself the same way at every
+/// reference site). Kept local since prompt declaration validation runs
+/// before a full `Trait` is available, only a settings slice.
+pub(crate) fn validate_setting_ref_exists(
+    parsed: &Reference,
+    ref_text: &str,
+    settings: &[crate::r#trait::Setting],
+    field_path: &str,
+) -> crate::Result<()> {
+    if parsed.is_qualified() || !settings.iter().any(|s| s.id == parsed.id()) {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: field_path.to_string(),
+            message: format!("unresolved setting ref {ref_text:?} names no declared setting"),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_prompt_text(
+    text: &str,
+    id_path: &str,
+    settings: &[crate::r#trait::Setting],
+) -> crate::Result<()> {
     if text.trim().is_empty() {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{id_path}.text"),
@@ -614,12 +650,20 @@ fn validate_prompt_text(text: &str, id_path: &str) -> crate::Result<()> {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: format!("{id_path}.text"),
                 message: format!(
-                    "interpolation {{{}}} kind {:?} not allowed; expected port, slot, or resource",
+                    "interpolation {{{}}} kind {:?} not allowed; expected port, slot, setting, or resource",
                     interp.ref_text,
                     parsed.kind()
                 ),
             }
             .into());
+        }
+        if parsed.kind() == Kind::Setting {
+            validate_setting_ref_exists(
+                &parsed,
+                &interp.ref_text,
+                settings,
+                &format!("{id_path}.text"),
+            )?;
         }
     }
     Ok(())

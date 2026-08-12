@@ -883,17 +883,25 @@ fn resolve_resource_tokens(
     Ok(resolved)
 }
 
-/// Replace `{port:<id>}`/`{slot:<id>}` tokens with the complete accepted scalar
-/// value. A prompt that explicitly references an input must receive it even
-/// when the digest-carrying input record is too large to inline separately.
-/// Runs after prompt digest verification and after resource-token resolution,
-/// so a substituted value cannot inject tokens that would then re-resolve.
+/// Replace `{port:<id>}`/`{slot:<id>}`/`{setting:<id>}` tokens with the
+/// resolved value. A prompt that explicitly references an input must receive
+/// it even when the digest-carrying input record is too large to inline
+/// separately. Runs after prompt digest verification and after
+/// resource-token resolution, so a substituted value cannot inject tokens
+/// that would then re-resolve.
+///
+/// Settings are activation-resolved, not accepted step inputs (task Watch
+/// item: settings everywhere a slot/port input is), so their values come
+/// from `session.resolved_settings` rather than `frame.available_inputs`,
+/// rendered with the same canonical single-token renderer argv substitution
+/// uses (`render_interpolation_value`), so a setting prints identically at
+/// every reference site.
 fn resolve_input_value_tokens(
     session: &ctx_traits_core::procedure::session::Session,
     frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
     text: String,
 ) -> String {
-    let mut values = BTreeMap::new();
+    let mut values: BTreeMap<String, String> = BTreeMap::new();
     for input in &frame.available_inputs {
         let Some(value) = accepted_input_value(session, input) else {
             continue;
@@ -901,7 +909,14 @@ fn resolve_input_value_tokens(
         let Some(scalar) = value.value.as_str() else {
             continue;
         };
-        values.insert(input.ref_text.as_str(), scalar);
+        values.insert(input.ref_text.clone(), scalar.to_string());
+    }
+    for record in &session.resolved_settings {
+        if let Some(rendered) =
+            ctx_traits_core::r#trait::prompt::render_interpolation_value(&record.value)
+        {
+            values.insert(format!("setting:{}", record.id), rendered);
+        }
     }
     let mut resolved = String::with_capacity(text.len());
     let mut remaining = text.as_str();
@@ -1597,6 +1612,171 @@ mod inline_value_tests {
         assert!(
             rendered.contains('['),
             "expected JSON array rendering, got: {rendered}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_input_value_tokens_setting_tests {
+    use super::resolve_input_value_tokens;
+    use ctx_traits_core::digest::Digest;
+    use ctx_traits_core::procedure::run::Id as RunId;
+    use ctx_traits_core::procedure::runtime::{
+        FinalState, ResolvedSettingRecord, SequenceFrame, SequenceFrameKind, SettingSourceLayer,
+        State,
+    };
+    use ctx_traits_core::procedure::session::{
+        CallerProvenance, Provenance, Session, SessionId, Status,
+    };
+    use serde_json::json;
+
+    fn empty_state(resolved_settings: Vec<ResolvedSettingRecord>, run_id: RunId) -> State {
+        State {
+            run_id,
+            trait_id: "test-trait".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings,
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn test_session(resolved_settings: Vec<ResolvedSettingRecord>) -> Session {
+        let run_id = RunId::new("resolve-input-value-tokens-run".to_string()).expect("run id");
+        let ledger = empty_state(resolved_settings.clone(), run_id.clone());
+        Session {
+            schema_version: "1".to_string(),
+            session_id: SessionId::new("resolve-input-value-tokens-test").expect("session id"),
+            run_id: run_id.clone(),
+            trait_id: "test-trait".to_string(),
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            current_source_index: None,
+            current_sequence_item_id: None,
+            current_sequence_title: None,
+            current_agent: None,
+            status: Status::AwaitingInput,
+            warnings: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_submissions: Vec::new(),
+            unresolved_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings,
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            stop_reason: None,
+            final_output_summary: Vec::new(),
+            next_frame: None,
+            last_validation_report: None,
+            completion: None,
+            last_drive_outcome: None,
+            provenance: Provenance {
+                started_by: CallerProvenance {
+                    surface: "test".to_string(),
+                    caller: "frame-prompt-test".to_string(),
+                    agent: None,
+                    harness: None,
+                },
+                state_source: "test".to_string(),
+                agent_assignments: None,
+                harness_probes: Vec::new(),
+                warnings: Vec::new(),
+                trait_source: None,
+                query_selection: None,
+                worktree: None,
+                merge_frames: Vec::new(),
+                merge_intent: None,
+                out_of_tree_mutations: Vec::new(),
+                started_at_epoch: None,
+                trust_approval: None,
+                session_title: None,
+                task_digest: None,
+                task_key: None,
+                dependency_override: None,
+            },
+            state_digest: Digest::source("resolve-input-value-tokens-test"),
+            ledger,
+        }
+    }
+
+    fn test_frame() -> SequenceFrame {
+        SequenceFrame {
+            kind: SequenceFrameKind::Intro,
+            run_id: "resolve-input-value-tokens-run".to_string(),
+            trait_id: "test-trait".to_string(),
+            sequence_index: None,
+            run_index: None,
+            item_id: None,
+            position_path: Vec::new(),
+            loop_context: None,
+            for_each_context: None,
+            guard_explanations: Vec::new(),
+            title: "test".to_string(),
+            frame_text: String::new(),
+            prompt: None,
+            command: None,
+            available_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            requested_outputs: Vec::new(),
+            assigned_agent: None,
+            allowed_signals: Vec::new(),
+            derived_signals: Vec::new(),
+            call_template: None,
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn prompt_rendering_substitutes_the_resolved_setting_value() {
+        let session = test_session(vec![ResolvedSettingRecord {
+            id: "review-rounds".to_string(),
+            value: json!(7),
+            source: SettingSourceLayer::Trait,
+        }]);
+        let frame = test_frame();
+
+        let rendered = resolve_input_value_tokens(
+            &session,
+            &frame,
+            "Run {setting:review-rounds} review rounds.".to_string(),
+        );
+
+        assert!(
+            rendered.contains('7'),
+            "expected the resolved setting value to be substituted, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("{setting:review-rounds}"),
+            "setting token should have been replaced, got: {rendered}"
         );
     }
 }

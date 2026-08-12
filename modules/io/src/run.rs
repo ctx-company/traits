@@ -1497,6 +1497,27 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             run_id,
             initial_port_values: initial_values,
             resource_evidence,
+            resolved_settings: prepared_assignments
+                .resolved_settings
+                .iter()
+                .map(
+                    |(id, resolved)| ctx_traits_core::procedure::runtime::ResolvedSettingRecord {
+                        id: id.clone(),
+                        value: resolved.value.clone(),
+                        source: match resolved.source {
+                            crate::harness_config::SettingSource::Declaration => {
+                                ctx_traits_core::procedure::runtime::SettingSourceLayer::Declaration
+                            }
+                            crate::harness_config::SettingSource::Trait => {
+                                ctx_traits_core::procedure::runtime::SettingSourceLayer::Trait
+                            }
+                            crate::harness_config::SettingSource::Variant => {
+                                ctx_traits_core::procedure::runtime::SettingSourceLayer::Variant
+                            }
+                        },
+                    },
+                )
+                .collect(),
             provider_capability_reports,
             source_digest: Some(
                 ctx_traits_core::digest::Digest::parse(&loaded.source_digest).inspect_err(
@@ -3097,6 +3118,7 @@ pub fn set(request: SetRequest<'_>) -> crate::Result<SetOutcome> {
                     run_id: session.run_id.clone(),
                     initial_port_values: initial_values,
                     resource_evidence: session.resource_evidence.clone(),
+                    resolved_settings: session.resolved_settings.clone(),
                     provider_capability_reports: session.provider_capability_reports.clone(),
                     source_digest: session.source_digest.clone(),
                     canonical_digest: session.canonical_digest.clone(),

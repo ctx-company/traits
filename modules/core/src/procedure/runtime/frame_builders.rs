@@ -833,15 +833,38 @@ fn resolve_command_argv_item(arg: &str, state: &State) -> (String, bool) {
     (out, substituted)
 }
 
-/// Render the accepted value for a local `slot:`/`port:` interpolation body,
-/// or `None` when the body is not such a ref or has no accepted value.
+/// Render the accepted or resolved value for a local `slot:`/`port:`/
+/// `setting:` interpolation body, or `None` when the body is not such a ref
+/// or has no value.
 fn resolve_argv_ref_value(body: &str, state: &State) -> Option<String> {
     let parsed = Reference::parse(body).ok()?;
-    if parsed.is_qualified() || !matches!(parsed.kind(), Kind::Slot | Kind::Port) {
+    if parsed.is_qualified() {
         return None;
     }
-    let value = accepted_value(state, body)?;
-    render_argv_value(&value.value)
+    match parsed.kind() {
+        Kind::Slot | Kind::Port => {
+            let value = accepted_value(state, body)?;
+            render_argv_value(&value.value)
+        }
+        Kind::Setting => {
+            let value = resolved_setting_value(state, parsed.id())?;
+            render_argv_value(value)
+        }
+        _ => None,
+    }
+}
+
+/// Look up a `setting:<id>` value resolved at activation, the single shared
+/// lookup every `setting:` reference site consults — argv/interpolation
+/// substitution and the loop bound (`control_flow.rs`) alike — so no site
+/// can drift from another (task Watch item: settings everywhere a slot/port
+/// input is).
+pub(crate) fn resolved_setting_value<'a>(state: &'a State, id: &str) -> Option<&'a JsonValue> {
+    state
+        .resolved_settings
+        .iter()
+        .find(|record| record.id == id)
+        .map(|record| &record.value)
 }
 
 /// Canonical single-token rendering: text as-is, number/boolean canonical, and

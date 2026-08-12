@@ -1414,6 +1414,12 @@ pub struct Session {
     pub provider_capability_reports: Vec<CapabilityReport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output_ports: Vec<crate::procedure::runtime::OutputPortCompletion>,
+    #[serde(
+        default,
+        rename = "resolved-settings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub resolved_settings: Vec<crate::procedure::runtime::ResolvedSettingRecord>,
     #[serde(default, rename = "active-path", skip_serializing_if = "Vec::is_empty")]
     pub active_path: Vec<PathSegment>,
     #[serde(
@@ -1578,6 +1584,12 @@ pub struct StartRequest {
     pub initial_port_values: Vec<StepSlotOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resource_evidence: Vec<ResourceEvidence>,
+    /// 0172: activation-resolved `setting:` values, recorded to the run
+    /// ledger as evidence. Empty for every caller that hasn't opted in
+    /// (adapters with no config-layer access, e.g. `preview`) — the run
+    /// still starts, just with no resolved-settings evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_settings: Vec<crate::procedure::runtime::ResolvedSettingRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_capability_reports: Vec<CapabilityReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1671,6 +1683,7 @@ pub fn start_run_session(
         request.provider_capability_reports,
         request.source_digest,
         request.canonical_digest,
+        request.resolved_settings,
     )?;
     state.strict_loops = request.strict_loops;
     build_session(trait_ref, request.session_id, state, None, provenance)
@@ -2565,6 +2578,7 @@ fn build_session(
         resource_evidence: state.resource_evidence.clone(),
         provider_capability_reports: capabilities,
         output_ports: state.output_ports.clone(),
+        resolved_settings: state.resolved_settings.clone(),
         active_path: state.active_path.clone(),
         control_stack: state.control_stack.clone(),
         stop_reason: state.stop_reason.clone(),
@@ -4751,6 +4765,7 @@ output = ["slot:final"]
             run_id: Id::new("run-p399-fixture-test".to_string()).expect("run id"),
             initial_port_values: Vec::new(),
             resource_evidence: Vec::new(),
+            resolved_settings: Vec::new(),
             provider_capability_reports: Vec::new(),
             source_digest: None,
             canonical_digest: None,
@@ -5561,6 +5576,7 @@ equals = "approve"
             run_id: Id::new("run-0085-nested-field-path".to_string()).expect("run id"),
             initial_port_values: Vec::new(),
             resource_evidence: Vec::new(),
+            resolved_settings: Vec::new(),
             provider_capability_reports: Vec::new(),
             source_digest: None,
             canonical_digest: None,

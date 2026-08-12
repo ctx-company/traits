@@ -1128,13 +1128,17 @@ fn condition_comparison_evidence(
             value: expected.clone(),
         }
     } else if let Some(expected_ref) = crate::r#trait::condition::numeric_comparison_ref(expected) {
-        comparison_ref_operand(
-            state,
-            accepted_value(state, expected_ref),
-            expected_ref,
-            None,
-            false,
-        )
+        if Reference::parse(expected_ref).is_ok_and(|reference| reference.kind() == Kind::Setting) {
+            setting_comparison_operand(state, expected_ref)
+        } else {
+            comparison_ref_operand(
+                state,
+                accepted_value(state, expected_ref),
+                expected_ref,
+                None,
+                false,
+            )
+        }
     } else {
         ComparisonOperandEvidence::Literal {
             value: expected.clone(),
@@ -1148,6 +1152,114 @@ fn condition_comparison_evidence(
         rhs,
         result,
         stale: lhs_source.stale,
+    }
+}
+
+/// Build comparison evidence for a `setting:<id>` RHS threshold ref from the
+/// activation-resolved settings map, the same lookup argv/interpolation
+/// substitution and the loop bound consult (task Watch item: settings
+/// everywhere a slot/port input is). Settings carry no accepted-value
+/// envelope (they are never step inputs), so this bypasses
+/// `comparison_ref_operand`'s `accepted_value` lookup and digests the
+/// resolved JSON value directly.
+fn setting_comparison_operand(state: &State, ref_text: &str) -> ComparisonOperandEvidence {
+    let Some(parsed) = Reference::parse(ref_text).ok() else {
+        return ComparisonOperandEvidence::MissingRef {
+            ref_text: ref_text.to_string(),
+            field: None,
+        };
+    };
+    let Some(value) = resolved_setting_value(state, parsed.id()) else {
+        return ComparisonOperandEvidence::MissingRef {
+            ref_text: ref_text.to_string(),
+            field: None,
+        };
+    };
+    ComparisonOperandEvidence::Ref {
+        ref_text: ref_text.to_string(),
+        source_value_digest: Digest::source(&value.to_string()),
+        source_value: Some(value.clone()),
+        field: None,
+        selected_value: Some(value.clone()),
+        slot_revision_acceptance_order: None,
+    }
+}
+
+#[cfg(test)]
+mod setting_comparison_operand_tests {
+    use super::*;
+
+    fn state_with_resolved_setting(id: &str, value: JsonValue) -> State {
+        State {
+            run_id: Id::new("run-setting-comparison-test").expect("id"),
+            trait_id: "setting-comparison-test".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings: vec![crate::procedure::runtime::ResolvedSettingRecord {
+                id: id.to_string(),
+                value,
+                source: crate::procedure::runtime::SettingSourceLayer::Trait,
+            }],
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    #[test]
+    fn resolves_the_resolved_setting_value_into_comparison_evidence() {
+        let state = state_with_resolved_setting("review-rounds", JsonValue::from(7));
+
+        let evidence = setting_comparison_operand(&state, "setting:review-rounds");
+
+        match evidence {
+            ComparisonOperandEvidence::Ref {
+                ref_text,
+                source_value,
+                selected_value,
+                ..
+            } => {
+                assert_eq!(ref_text, "setting:review-rounds");
+                assert_eq!(source_value, Some(JsonValue::from(7)));
+                assert_eq!(selected_value, Some(JsonValue::from(7)));
+            }
+            other => panic!("expected Ref evidence carrying the resolved value, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reports_a_missing_ref_instead_of_panicking_when_never_resolved() {
+        let state = state_with_resolved_setting("review-rounds", JsonValue::from(7));
+
+        let evidence = setting_comparison_operand(&state, "setting:not-declared");
+
+        match evidence {
+            ComparisonOperandEvidence::MissingRef { ref_text, field } => {
+                assert_eq!(ref_text, "setting:not-declared");
+                assert_eq!(field, None);
+            }
+            other => panic!("expected MissingRef evidence, got: {other:?}"),
+        }
     }
 }
 
@@ -1410,6 +1522,7 @@ mod present_tests {
             rejected_attempts: Vec::new(),
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),
@@ -1681,6 +1794,7 @@ mod p434_keep_guard_tests {
             rejected_attempts: Vec::new(),
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),
@@ -1857,6 +1971,7 @@ mod nested_field_path_tests {
             rejected_attempts: Vec::new(),
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),

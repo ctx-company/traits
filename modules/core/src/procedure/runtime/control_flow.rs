@@ -796,24 +796,29 @@ fn enter_control_frame(
             frame.iteration_index = Some(0);
             frame.max_iterations = Some(max_iterations);
         } else if let Some(max_iterations_from) = item.max_iterations_from.as_deref() {
-            if accepted_value(state, max_iterations_from).is_none() {
-                state.final_state = FinalState::Blocked;
-                state.active_path.clear();
-                set_current_outer_status(
-                    state,
-                    SequenceStatusKind::Blocked,
-                    format!("dynamic loop bound {max_iterations_from} is not accepted"),
-                );
-                state
-                    .provider_capability_reports
-                    .push(CapabilityReport::unsupported(
-                        "runtime.sequence-input",
-                        format!("missing current sequence input(s): {max_iterations_from}"),
-                    ));
-                return Ok(());
-            }
-            let max_iterations =
-                resolve_positive_usize_input(state, max_iterations_from, "max-iterations-from")?;
+            let is_setting_ref = Reference::parse(max_iterations_from)
+                .is_ok_and(|parsed| parsed.kind() == Kind::Setting);
+            let max_iterations = if is_setting_ref {
+                resolve_positive_usize_setting(state, max_iterations_from, "max-iterations-from")?
+            } else {
+                if accepted_value(state, max_iterations_from).is_none() {
+                    state.final_state = FinalState::Blocked;
+                    state.active_path.clear();
+                    set_current_outer_status(
+                        state,
+                        SequenceStatusKind::Blocked,
+                        format!("dynamic loop bound {max_iterations_from} is not accepted"),
+                    );
+                    state
+                        .provider_capability_reports
+                        .push(CapabilityReport::unsupported(
+                            "runtime.sequence-input",
+                            format!("missing current sequence input(s): {max_iterations_from}"),
+                        ));
+                    return Ok(());
+                }
+                resolve_positive_usize_input(state, max_iterations_from, "max-iterations-from")?
+            };
             frame.iteration_index = Some(0);
             frame.max_iterations = Some(max_iterations);
         } else if item.until.is_some() || item.abort_if.is_some() {
@@ -888,6 +893,131 @@ fn resolve_positive_usize_input(
         ));
     }
     Ok(resolved)
+}
+
+/// Resolve a `setting:<id>` loop bound from the activation-resolved settings
+/// map (never `accepted_value` — settings are not accepted runtime inputs).
+/// Build-time validation already guarantees a whole-number default within
+/// declared bounds, so a non-integer or non-positive resolved value here
+/// indicates a config-layer override that activation should have rejected.
+fn resolve_positive_usize_setting(
+    state: &State,
+    ref_text: &str,
+    field: &str,
+) -> crate::Result<usize> {
+    let Ok(parsed) = Reference::parse(ref_text) else {
+        return Err(crate::procedure::invalid_field(
+            format!("runtime.{field}"),
+            format!("invalid loop bound ref {ref_text:?}"),
+        ));
+    };
+    let value = resolved_setting_value(state, parsed.id()).ok_or_else(|| {
+        crate::procedure::invalid_field(
+            format!("runtime.{field}"),
+            format!("resolved setting value {ref_text:?} is missing"),
+        )
+    })?;
+    let unsigned = value.as_u64().ok_or_else(|| {
+        crate::procedure::invalid_field(
+            format!("runtime.{field}"),
+            format!("resolved setting value {ref_text:?} must be a positive integer"),
+        )
+    })?;
+    let resolved = usize::try_from(unsigned).map_err(|_| {
+        crate::procedure::invalid_field(
+            format!("runtime.{field}"),
+            format!("resolved setting value {ref_text:?} does not fit usize"),
+        )
+    })?;
+    if resolved == 0 {
+        return Err(crate::procedure::invalid_field(
+            format!("runtime.{field}"),
+            format!("resolved setting value {ref_text:?} must be greater than zero"),
+        ));
+    }
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod setting_loop_bound_tests {
+    use super::*;
+
+    fn empty_state(resolved_settings: Vec<ResolvedSettingRecord>) -> State {
+        State {
+            run_id: Id::new("run-setting-loop-bound-test").expect("id"),
+            trait_id: "setting-loop-bound-test".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: Vec::new(),
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings,
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn state_with_resolved_setting(id: &str, value: JsonValue) -> State {
+        empty_state(vec![ResolvedSettingRecord {
+            id: id.to_string(),
+            value,
+            source: SettingSourceLayer::Declaration,
+        }])
+    }
+
+    #[test]
+    fn resolved_setting_value_finds_the_matching_record() {
+        let state = state_with_resolved_setting("review-rounds", JsonValue::from(3));
+        assert_eq!(
+            resolved_setting_value(&state, "review-rounds"),
+            Some(&JsonValue::from(3))
+        );
+        assert_eq!(resolved_setting_value(&state, "not-declared"), None);
+    }
+
+    #[test]
+    fn resolve_positive_usize_setting_reads_the_resolved_map_not_accepted_values() {
+        let state = state_with_resolved_setting("review-rounds", JsonValue::from(5));
+        let resolved = resolve_positive_usize_setting(
+            &state,
+            "setting:review-rounds",
+            "max-iterations-from",
+        )
+        .expect("resolved setting is a positive integer");
+        assert_eq!(resolved, 5);
+    }
+
+    #[test]
+    fn resolve_positive_usize_setting_fails_when_the_setting_was_never_resolved() {
+        let state = empty_state(Vec::new());
+        resolve_positive_usize_setting(&state, "setting:review-rounds", "max-iterations-from")
+            .expect_err("no resolved-settings entry means activation never resolved it");
+    }
+
+    #[test]
+    fn resolve_positive_usize_setting_fails_on_a_non_positive_value() {
+        let state = state_with_resolved_setting("review-rounds", JsonValue::from(0));
+        resolve_positive_usize_setting(&state, "setting:review-rounds", "max-iterations-from")
+            .expect_err("zero is not a valid loop bound");
+    }
 }
 
 /// Execute one closed projection leaf. Every source and prior destination is

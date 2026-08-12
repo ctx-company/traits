@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 /// Start an executable procedure run from caller-supplied input values.
+#[allow(clippy::too_many_arguments)]
 pub fn start_procedure_run(
     trait_ref: &Trait,
     run_id: Id,
@@ -14,6 +15,7 @@ pub fn start_procedure_run(
     provider_capability_reports: Vec<CapabilityReport>,
     source_digest: Option<Digest>,
     canonical_digest: Option<Digest>,
+    resolved_settings: Vec<ResolvedSettingRecord>,
 ) -> crate::Result<State> {
     let proc = procedure(trait_ref)?;
     let sequence = effective_sequence_items(proc)?;
@@ -46,6 +48,7 @@ pub fn start_procedure_run(
         rejected_attempts: Vec::new(),
         provider_capability_reports,
         output_ports: Vec::new(),
+        resolved_settings,
         active_path: Vec::new(),
         control_stack: Vec::new(),
         branch_decisions: Vec::new(),
@@ -1061,4 +1064,68 @@ pub fn finalize_outputs(
     }
     completions.sort_by(|a, b| a.port_ref.cmp(&b.port_ref));
     Ok(completions)
+}
+
+#[cfg(test)]
+mod resolved_settings_ledger_tests {
+    use super::*;
+
+    fn minimal_trait() -> crate::r#trait::Trait {
+        crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            r#"
+id = "resolved-settings-ledger-test"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Resolved settings ledger test"
+summary = "Minimal fixture."
+
+[[agent]]
+id = "worker"
+description = "Runs the single step."
+summary = "Worker role."
+
+[[slot]]
+id = "note"
+schema = "schema:text"
+description = "Step output."
+
+[prompt.write-note]
+text = "Write a note."
+
+[procedure]
+description = "One step, no loop."
+
+[[procedure.sequence]]
+id = "write-note"
+title = "Write note"
+agent = "agent:worker"
+prompt = "prompt:write-note"
+output = ["slot:note"]
+"#,
+        )
+        .expect("minimal trait decodes")
+    }
+
+    #[test]
+    fn start_procedure_run_records_resolved_settings_as_ledger_evidence() {
+        let trait_ref = minimal_trait();
+        let records = vec![ResolvedSettingRecord {
+            id: "review-rounds".to_string(),
+            value: serde_json::json!(5),
+            source: SettingSourceLayer::Variant,
+        }];
+        let state = start_procedure_run(
+            &trait_ref,
+            Id::new("run-resolved-settings-test").expect("run id"),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            records.clone(),
+        )
+        .expect("run starts");
+        assert_eq!(state.resolved_settings, records);
+    }
 }

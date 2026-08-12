@@ -40,6 +40,7 @@ fn collect_prompt_required_inputs(prompt: &crate::r#trait::Prompt) -> Vec<String
 /// Dependency-qualified prompt refs (`prompt:dep/id`) remain pending —
 /// their contract cannot be checked without loaded dependency contents.
 pub(crate) fn validate_sequence_item_prompt_contract(
+    trait_ref: &Trait,
     base: &str,
     item_id: Option<&str>,
     item: &SequenceItem,
@@ -79,6 +80,25 @@ pub(crate) fn validate_sequence_item_prompt_contract(
         Ok(())
     };
 
+    // A `setting:` interpolation is resolved against declared settings (the
+    // "unknown id names itself the same way at every reference site" Watch
+    // item) but exempt from the sequence-item `input` list requirement above:
+    // settings are activation-resolved, not accepted step inputs, mirroring
+    // the loop-bound branch's skip of the analogous port-only rule.
+    let require_input_or_setting = |ref_text: &str| -> crate::Result<()> {
+        if let Ok(parsed) = Reference::parse(ref_text)
+            && parsed.kind() == Kind::Setting
+        {
+            return crate::r#trait::prompt::validate_setting_ref_exists(
+                &parsed,
+                ref_text,
+                &trait_ref.settings,
+                &format!("{base}.input"),
+            );
+        }
+        require_unconditional_input(ref_text)
+    };
+
     match classify_prompt(&item.prompt) {
         Ok(PromptClassification::DependencyPromptRef(_)) => Ok(()),
 
@@ -87,7 +107,7 @@ pub(crate) fn validate_sequence_item_prompt_contract(
             for interp in &interps {
                 if let Ok(r) = Reference::parse(&interp.ref_text)
                     && PROMPT_REQUIRED_INPUT_KINDS.contains(&r.kind()) {
-                        require_unconditional_input(&interp.ref_text)?;
+                        require_input_or_setting(&interp.ref_text)?;
                     }
             }
             Ok(())
@@ -105,7 +125,7 @@ pub(crate) fn validate_sequence_item_prompt_contract(
             };
 
             for req in collect_prompt_required_inputs(prompt) {
-                require_unconditional_input(&req)?;
+                require_input_or_setting(&req)?;
             }
 
             for output_ref in prompt.output.iter() {
@@ -129,5 +149,46 @@ pub(crate) fn validate_sequence_item_prompt_contract(
             message: msg,
         }
         .into()),
+    }
+}
+
+#[cfg(test)]
+mod prompt_contract_setting_tests {
+    use crate::encoding::{Encoding, decode_trait};
+
+    const HEADER: &str = r#"
+id = "prompt-contract-setting-test"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Prompt contract setting test"
+summary = "Minimal fixture."
+
+[[setting]]
+id = "review-rounds"
+schema = "number"
+description = "Rounds."
+default = 3
+"#;
+
+    #[test]
+    fn inline_prompt_interpolating_a_declared_setting_builds_without_requiring_input() {
+        let text = format!(
+            "{HEADER}\n[procedure]\ndescription = \"Go.\"\n\n[[procedure.sequence]]\nid = \"go\"\ntitle = \"Go\"\nkind = \"prompt\"\nprompt = \"Do {{setting:review-rounds}} rounds.\"\n"
+        );
+        decode_trait(Encoding::Toml, &text)
+            .expect("a setting interpolation builds without being listed in `input`");
+    }
+
+    #[test]
+    fn inline_prompt_interpolating_an_undeclared_setting_fails_naming_the_id() {
+        let text = format!(
+            "{HEADER}\n[procedure]\ndescription = \"Go.\"\n\n[[procedure.sequence]]\nid = \"go\"\ntitle = \"Go\"\nkind = \"prompt\"\nprompt = \"Do {{setting:not-declared}} rounds.\"\n"
+        );
+        let err = decode_trait(Encoding::Toml, &text)
+            .expect_err("an undeclared setting id must fail the build");
+        assert!(
+            err.to_string().contains("setting:not-declared"),
+            "error must name the resolved id: {err}"
+        );
     }
 }

@@ -29,7 +29,8 @@ pub const MAX_SEQUENCE_NESTING_DEPTH: usize = 16;
 
 /// Kinds that prompt-required interpolation/contract refs must satisfy
 /// through exact presence in the sequence item input.
-const PROMPT_REQUIRED_INPUT_KINDS: &[Kind] = &[Kind::Port, Kind::Slot, Kind::Resource];
+const PROMPT_REQUIRED_INPUT_KINDS: &[Kind] =
+    &[Kind::Port, Kind::Slot, Kind::Resource, Kind::Setting];
 
 // ---------------------------------------------------------------------------
 // RefList — scalar-or-array normalized ref list

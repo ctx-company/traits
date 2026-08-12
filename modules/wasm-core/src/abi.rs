@@ -574,6 +574,9 @@ pub fn run_start_json(input: &str) -> String {
                 run_id,
                 initial_port_values: initial_values,
                 resource_evidence: request.resource_evidence,
+                // wasm has no config-layer access; settings resolve to their
+                // canonical declaration defaults only, with no evidence.
+                resolved_settings: Vec::new(),
                 provider_capability_reports: Vec::new(),
                 source_digest: Some(ctx_traits_core::digest::Digest::parse(&source_digest)?),
                 canonical_digest: Some(canonical_digest.clone()),
