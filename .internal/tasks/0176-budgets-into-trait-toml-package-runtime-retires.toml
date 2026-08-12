@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0176"
 title = "budgets and port defaults fold into trait.toml; package runtime.toml retires; run.* naming dies"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

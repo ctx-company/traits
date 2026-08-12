@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0172"
 title = "setting declarations: typed operator knobs — config-sourced values, usable anywhere slots are"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

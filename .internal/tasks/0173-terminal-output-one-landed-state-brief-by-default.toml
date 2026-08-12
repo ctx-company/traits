@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0173"
 title = "terminal output: one landed state, brief by default, folded teardown"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0174"
 title = "command steps: tick their own clock, record their own durations"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0179"
 title = "layout: authored/ + vendored/ + generated/, and init scaffolds both examples"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

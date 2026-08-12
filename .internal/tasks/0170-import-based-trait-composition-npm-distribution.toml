@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0170"
 title = "import-based trait composition: derived [[dependency]] provenance, npm distribution, the pinning chain"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
 content = """
 

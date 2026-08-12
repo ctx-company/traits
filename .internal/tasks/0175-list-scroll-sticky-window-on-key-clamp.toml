@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0175"
 title = "list scrolling: selection moves inside the window without dragging it"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 

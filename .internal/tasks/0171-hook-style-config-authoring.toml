@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0171"
 title = "hook-style config.ts: define* registrars replace the object-literal defineConfig"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
 content = """
 
