@@ -2,26 +2,36 @@
   "name": "@ctx-traits/cdk",
   "version": "0.1.0",
   "description": "Authoring SDK for ctx.traits: build typed, digest-locked agent procedures in TypeScript and compile them with `ctx traits build`.",
-  "license": "Apache-2.0",
-  "author": "Oskar Cieslik",
-  "homepage": "https://github.com/ctx-company/traits/tree/main/packages/cdk",
   "keywords": [
+    "agents",
+    "cdk",
     "ctx",
     "ctx-traits",
-    "cdk",
-    "agents",
     "llm"
   ],
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "homepage": "https://github.com/ctx-company/traits/tree/main/packages/cdk",
+  "license": "Apache-2.0",
+  "author": "Oskar Cieslik",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ctx-company/traits.git",
     "directory": "packages/cdk"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "publishConfig": {
-    "access": "restricted",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "exports": {
@@ -29,19 +39,9 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
       }
-    }
+    },
+    "access": "restricted"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",

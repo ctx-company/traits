@@ -1,14 +1,14 @@
 {
   "name": "ctx-trait-workspace",
   "private": true,
-  "type": "module",
   "description": "Private workspace metadata; ctx traits build resolves @ctx-traits/cdk, @ctx-traits/agents, @ctx-traits/rust, @ctx-traits/toolkit, and @ctx-traits/config through ordinary node_modules, linked here as pnpm workspace dependencies. Their dist/ trees are built by `just ts-build`, not by an install lifecycle hook.",
-  "packageManager": "pnpm@9.15.1",
+  "type": "module",
   "devDependencies": {
     "@ctx-traits/agents": "workspace:*",
     "@ctx-traits/cdk": "workspace:*",
     "@ctx-traits/config": "workspace:*",
     "@ctx-traits/rust": "workspace:*",
     "@ctx-traits/toolkit": "workspace:*"
-  }
+  },
+  "packageManager": "pnpm@9.15.1"
 }

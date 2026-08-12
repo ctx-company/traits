@@ -5,12 +5,7 @@ name = "Trait Specification"
 description = "Provides the Agent Traits schema and a grounded design rubric for trait authors."
 
 [metadata]
-tag = [
-    "first-party",
-    "knowledge",
-    "meta-trait",
-    "protocol",
-]
+tag = ["first-party", "knowledge", "meta-trait", "protocol"]
 
 [[resource]]
 id = "agent-traits-schema"

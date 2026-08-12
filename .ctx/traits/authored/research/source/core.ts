@@ -8,37 +8,29 @@ import { intent, method, tone, verbosity } from "@ctx-traits/cdk";
 
 /** Identical across all three variants. */
 export const FAMILY_BEHAVIOR: Behavior = {
-    tone: [tone.Direct, tone.Technical],
-    method: method.EvidenceFirst,
-    verbosity: verbosity.Brief,
+  tone: [tone.Direct, tone.Technical],
+  method: method.EvidenceFirst,
+  verbosity: verbosity.Brief,
 };
 
 /** quick's lean intent set (variants/quick.ts). */
 export const QUICK_INTENT: Intent = {
-    require: [
-        intent.focus.Correctness,
-        intent.require.Leanness,
-        intent.require.ReviewBeforeFinal,
-    ],
-    avoid: [
-        intent.avoid.OverEngineering,
-        intent.avoid.ScopeCreep,
-        intent.avoid.RubberStampReview,
-    ],
+  require: [intent.focus.Correctness, intent.require.Leanness, intent.require.ReviewBeforeFinal],
+  avoid: [intent.avoid.OverEngineering, intent.avoid.ScopeCreep, intent.avoid.RubberStampReview],
 };
 
 /** default/deep's superset intent (variants/default.ts, variants/deep.ts). */
 export const FAMILY_INTENT: Intent = {
-    require: [
-        intent.focus.Correctness,
-        intent.require.Robustness,
-        intent.require.Leanness,
-        intent.require.ReviewBeforeFinal,
-    ],
-    avoid: [
-        intent.avoid.OverEngineering,
-        intent.avoid.ScopeCreep,
-        intent.avoid.UnboundedLoop,
-        intent.avoid.RubberStampReview,
-    ],
+  require: [
+    intent.focus.Correctness,
+    intent.require.Robustness,
+    intent.require.Leanness,
+    intent.require.ReviewBeforeFinal,
+  ],
+  avoid: [
+    intent.avoid.OverEngineering,
+    intent.avoid.ScopeCreep,
+    intent.avoid.UnboundedLoop,
+    intent.avoid.RubberStampReview,
+  ],
 };

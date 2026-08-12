@@ -48,7 +48,7 @@ workspace, independent of the specific crate or phase.
 ## Testing
 
 - New behavior gets a unit test colocated in the same module (`#[cfg(test)]
-  mod tests`) unless the repo's own test-authoring rules say otherwise for
+mod tests`) unless the repo's own test-authoring rules say otherwise for
   that crate — check the crate's existing test layout before adding a new
   pattern.
 - Tests assert observable behavior (return values, resulting state) rather

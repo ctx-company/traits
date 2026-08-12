@@ -136,7 +136,4 @@ visibly; and the `local` peer proves the whole path with no network.
 """
 
 [relations]
-depends-on = [
-    "0069",
-    "0084",
-]
+depends-on = ["0069", "0084"]

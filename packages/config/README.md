@@ -34,7 +34,7 @@ export default function () {
   defineRun({ frameSeconds: 1200, maxFrames: 1000, maxCostUsd: 25 });
   defineWorktree({ env: { CARGO_TARGET_DIR: "{cache-slot}" } });
   definePricing("claude-opus-5", { usdPerMtok: 15 });
-  defineTrait("refactor", { /* per-trait defaults */ });
+  defineTrait("refactor", {/* per-trait defaults */});
 }
 ```
 

@@ -9,7 +9,7 @@ The first landable slice of task 0065 (`.internal/tasks/0065-authoring-assist-wr
 
 ## Why
 
-Today every assist path (`generate`, `refine --apply`, `import --llm-assisted`) writes the build output `generated/index.toml` directly, so the next `ctx traits build` clobbers assist edits and "build is the only writer of canonical" cannot hold. The safe writer hard-required the generated shape, so no assist path *could* target source — this slice gives the writer that capability, unblocking the handler rewrites (slices 4–6) without changing any current behavior.
+Today every assist path (`generate`, `refine --apply`, `import --llm-assisted`) writes the build output `generated/index.toml` directly, so the next `ctx traits build` clobbers assist edits and "build is the only writer of canonical" cannot hold. The safe writer hard-required the generated shape, so no assist path _could_ target source — this slice gives the writer that capability, unblocking the handler rewrites (slices 4–6) without changing any current behavior.
 
 ## What was not done, and why
 

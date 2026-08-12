@@ -43,7 +43,7 @@ The step declares its own `timeout-ms` (8h — see `.ctx/traits/packages/impleme
 `shipping-commit` step) so the command itself is never killed mid-decision. The live silence
 bound is this machine's `command-idle-seconds` runtime override (600s / 10 minutes, per owner
 config) — ctx-gate prints its checkpoint card once and then polls silently with no give-up of its
-own, so ten minutes of *no output* after the card is what the idle bound is actually watching,
+own, so ten minutes of _no output_ after the card is what the idle bound is actually watching,
 not ten minutes to decide.
 
 ## Approve / deny

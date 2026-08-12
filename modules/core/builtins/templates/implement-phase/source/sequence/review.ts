@@ -9,11 +9,13 @@ import { implementationVerdict } from "../schema.ts";
 // the compiled prompt — `index.ts` binds the trait's output port straight to
 // this handle, so the schema, the slot, and the port all trace to one
 // declaration.
-export const verdict = output.of(implementationVerdict)`Return a verdict of approved or revise, with notes explaining the verdict.`;
+export const verdict = output.of(
+  implementationVerdict,
+)`Return a verdict of approved or revise, with notes explaining the verdict.`;
 
 export default sequence.prompt("review", {
-    title: "Review the result",
-    agent: agent.reviewer,
-    input: input.text`Review the implemented work for ${port.task} against the draft ${slot.draft}. The reported work summary is ${slot.workSummary}.`,
-    output: verdict,
+  title: "Review the result",
+  agent: agent.reviewer,
+  input: input.text`Review the implemented work for ${port.task} against the draft ${slot.draft}. The reported work summary is ${slot.workSummary}.`,
+  output: verdict,
 });

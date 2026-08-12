@@ -43,6 +43,7 @@ Why this shape is load-bearing:
   An HTTP handler, a lambda wrapper, and a CLI are then thin adapters that
   normalize into `api::Request` and render `api::Response`. The core never
   learns which surface called it.
+
 - **Small packages of responsibility.** Split contracts by what they are
   allowed to do: `control::Interface` performs mutations, `view::Interface`
   only reads, `trace::Interface` only traces. A holder of `view::Interface`
@@ -114,6 +115,7 @@ part of naming: where a thing lives says what owns it.
 
   A domain contract declared inside a consumer's namespace has leaked —
   move it home and import it.
+
 - **Every nesting level must add a distinct concept.** A child module that
   is a synonym or rephrasing of its parent collapses into it:
   `parent::synonym::Interface` becomes `parent::Interface`. Depth is

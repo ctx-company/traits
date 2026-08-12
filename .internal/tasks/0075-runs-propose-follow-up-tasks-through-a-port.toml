@@ -60,8 +60,4 @@ read-write provider; and no run can create a task.
 """
 
 [relations]
-depends-on = [
-    "0060",
-    "0064",
-    "0069",
-]
+depends-on = ["0060", "0064", "0069"]

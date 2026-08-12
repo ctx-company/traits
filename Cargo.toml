@@ -1,16 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
-    "modules/core",
-    "modules/io",
-    "modules/cli",
-    "modules/wasm-core",
-    "modules/wasm-plugin",
-    "modules/cli/tests/fixture-agent",
+  "modules/core",
+  "modules/io",
+  "modules/cli",
+  "modules/wasm-core",
+  "modules/wasm-plugin",
+  "modules/cli/tests/fixture-agent",
 ]
-exclude = [
-    "packages/cdk",
-]
+exclude = ["packages/cdk"]
 
 [workspace.package]
 version = "0.1.0-alpha.1"

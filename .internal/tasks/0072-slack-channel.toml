@@ -76,7 +76,4 @@ and a failed send is recorded with its reason while the run is unaffected.
 """
 
 [relations]
-depends-on = [
-    "0069",
-    "0070",
-]
+depends-on = ["0069", "0070"]

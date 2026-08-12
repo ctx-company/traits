@@ -61,7 +61,4 @@ a default branch.
 """
 
 [relations]
-depends-on = [
-    "0069",
-    "0070",
-]
+depends-on = ["0069", "0070"]

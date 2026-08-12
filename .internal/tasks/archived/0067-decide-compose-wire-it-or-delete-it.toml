@@ -67,7 +67,4 @@ ABI, and no help text anywhere still promises LLM-assisted composition.
 """
 
 [relations]
-depends-on = [
-    "0065",
-    "0066",
-]
+depends-on = ["0065", "0066"]

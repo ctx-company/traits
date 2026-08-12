@@ -62,7 +62,4 @@ recorded; and `--dry-run` prints the full invocation for both verbs while execut
 """
 
 [relations]
-depends-on = [
-    "0087",
-    "0073",
-]
+depends-on = ["0087", "0073"]

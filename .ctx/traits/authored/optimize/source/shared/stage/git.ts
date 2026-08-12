@@ -1,6 +1,14 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { benchmarkRuns, bestMetric, bestRef, candidateResult, capturedRef, commandReceipt, commitMessage } from "../data.ts";
+import {
+  benchmarkRuns,
+  bestMetric,
+  bestRef,
+  candidateResult,
+  capturedRef,
+  commandReceipt,
+  commitMessage,
+} from "../data.ts";
 
 // Kept inline (not extracted to a resource) matching the recovered
 // auto-research port shape: this is a fresh package, so a resource file
@@ -41,58 +49,66 @@ process.stdout.write(
 // `step.command(...)` at module scope would register outside any active
 // procedure/loop/branch scope.
 export function captureInitialRef(title: string) {
-    return cdk.step.command(title, {
-        id: "capture-initial-ref",
-        argv: ["node", "--input-type=module", "--eval", gitRefCapture],
-        output: capturedRef,
-    });
+  return cdk.step.command(title, {
+    id: "capture-initial-ref",
+    argv: ["node", "--input-type=module", "--eval", gitRefCapture],
+    output: capturedRef,
+  });
 }
 export function captureBestRef(title: string) {
-    return cdk.step.project(title, {
-        id: "capture-best-ref",
-        projections: [{ source: capturedRef, field: "sha", destination: bestRef }],
-    });
+  return cdk.step.project(title, {
+    id: "capture-best-ref",
+    projections: [{ source: capturedRef, field: "sha", destination: bestRef }],
+  });
 }
 export function captureCommittedRef(title: string) {
-    return cdk.step.command(title, {
-        id: "capture-committed-ref",
-        argv: ["node", "--input-type=module", "--eval", gitRefCapture],
-        output: capturedRef,
-    });
+  return cdk.step.command(title, {
+    id: "capture-committed-ref",
+    argv: ["node", "--input-type=module", "--eval", gitRefCapture],
+    output: capturedRef,
+  });
 }
 export function advanceBest(title: string) {
-    return cdk.step.project(title, {
-        id: "advance-best",
-        projections: [
-            { source: candidateResult, field: "metric", destination: bestMetric },
-            { source: capturedRef, field: "sha", destination: bestRef },
-        ],
-    });
+  return cdk.step.project(title, {
+    id: "advance-best",
+    projections: [
+      { source: candidateResult, field: "metric", destination: bestMetric },
+      { source: capturedRef, field: "sha", destination: bestRef },
+    ],
+  });
 }
 export function deriveCommitMessage(title: string) {
-    return cdk.step.command(title, {
-        id: "derive-commit-message",
-        argv: ["node", "--input-type=module", "--eval", deriveCommitMessageScript, bestMetric, candidateResult, benchmarkRuns],
-        output: commitMessage,
-    });
+  return cdk.step.command(title, {
+    id: "derive-commit-message",
+    argv: [
+      "node",
+      "--input-type=module",
+      "--eval",
+      deriveCommitMessageScript,
+      bestMetric,
+      candidateResult,
+      benchmarkRuns,
+    ],
+    output: commitMessage,
+  });
 }
 export function stageCandidate(title: string) {
-    return cdk.step.command(title, { id: "stage-candidate", argv: ["git", "add", "-A"], output: commandReceipt });
+  return cdk.step.command(title, { id: "stage-candidate", argv: ["git", "add", "-A"], output: commandReceipt });
 }
 export function commitCandidate(title: string) {
-    return cdk.step.command(title, {
-        id: "commit-candidate",
-        argv: ["git", "commit", "-m", commitMessage],
-        output: commandReceipt,
-    });
+  return cdk.step.command(title, {
+    id: "commit-candidate",
+    argv: ["git", "commit", "-m", commitMessage],
+    output: commandReceipt,
+  });
 }
 export function resetCandidate(title: string) {
-    return cdk.step.command(title, {
-        id: "reset-candidate",
-        argv: ["git", "reset", "--hard", bestRef],
-        output: commandReceipt,
-    });
+  return cdk.step.command(title, {
+    id: "reset-candidate",
+    argv: ["git", "reset", "--hard", bestRef],
+    output: commandReceipt,
+  });
 }
 export function cleanCandidate(title: string) {
-    return cdk.step.command(title, { id: "clean-candidate", argv: ["git", "clean", "-fd"], output: commandReceipt });
+  return cdk.step.command(title, { id: "clean-candidate", argv: ["git", "clean", "-fd"], output: commandReceipt });
 }

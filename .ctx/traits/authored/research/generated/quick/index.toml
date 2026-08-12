@@ -7,12 +7,7 @@ summary = "Quick dogfood research procedure: scope the topic, research it in one
 variant = "quick"
 
 [metadata]
-tag = [
-    "dogfood",
-    "research",
-    "review",
-    "lean",
-]
+tag = ["dogfood", "research", "review", "lean"]
 
 [[intent.require]]
 id = "correctness"
@@ -66,10 +61,7 @@ schema = "[schema:review-verdict]"
 optional = true
 description = "Typed park record for an unapproved run: one entry per reviewed verdict still revise in the final round. Present only when the build loop exhausted without approval — the run parks and no commit is created."
 title = "Park Report"
-format = [
-    "structured",
-    "table",
-]
+format = ["structured", "table"]
 value = "slot:park-report"
 
 [[port]]
@@ -248,12 +240,7 @@ description = "A checklist item outside in-run capability or authority, with ver
 schema = "schema:text"
 required = true
 description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
-allowed = [
-    "gui-or-visual",
-    "paid-or-live-execution",
-    "owner-decision",
-    "contract-conflict",
-]
+allowed = ["gui-or-visual", "paid-or-live-execution", "owner-decision", "contract-conflict"]
 
 [schema.fields.close-out]
 schema = "schema:text"
@@ -292,10 +279,7 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
-allowed = [
-    "none",
-    "needs-owner",
-]
+allowed = ["none", "needs-owner"]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -314,10 +298,7 @@ description = "Cross-task seam citations ONLY: counterpart work belonging to a D
 schema = "schema:text"
 required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -347,13 +328,13 @@ text = """
                         Apply {resource:research-standards} throughout: cite every factual claim, prefer A/B-rated sources, record contradictions and gaps explicitly.
                         Return a work summary: what was written, source counts and ratings, open concerns."""
 input = [
-    "port:topic",
-    "slot:scope-note",
-    "port:output-dir",
-    "slot:topic-slug",
-    "resource:source-quality-guide",
-    "resource:citation-style",
-    "resource:research-standards",
+  "port:topic",
+  "slot:scope-note",
+  "port:output-dir",
+  "slot:topic-slug",
+  "resource:source-quality-guide",
+  "resource:citation-style",
+  "resource:research-standards",
 ]
 output = ["slot:work-summary"]
 
@@ -364,13 +345,7 @@ text = """
                         A BLOCKER is an uncited factual claim, a sub-question left uncovered, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
                         Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
                         Set status to revise while any blocker remains, approved when none do."""
-input = [
-    "port:topic",
-    "slot:scope-note",
-    "slot:work-summary",
-    "port:output-dir",
-    "slot:topic-slug",
-]
+input = ["port:topic", "slot:scope-note", "slot:work-summary", "port:output-dir", "slot:topic-slug"]
 output = ["slot:review-verdict-1"]
 
 [prompt.scope-the-topic]
@@ -378,10 +353,7 @@ text = """
 
                     Write a short scope note for researching {port:topic}: the core question, two to four sub-questions a worker should cover, and any explicit exclusions.
                     Reference {resource:research-standards} for source-quality expectations. Do not research anything yet."""
-input = [
-    "port:topic",
-    "resource:research-standards",
-]
+input = ["port:topic", "resource:research-standards"]
 output = ["slot:scope-note"]
 
 [prompt.shipping-message]
@@ -390,12 +362,7 @@ text = """
                         The review for the research on {port:topic} has ended approved and the work is being committed.
                         Write a concise commit message from the work summary {slot:work-summary} and the verdict {slot:review-verdict-1}: a short subject line naming the topic, then one paragraph on what was researched and delivered at {slot:report-path}.
                         Return exactly that message. Do not run git commands and do not write files."""
-input = [
-    "port:topic",
-    "slot:work-summary",
-    "slot:review-verdict-1",
-    "slot:report-path",
-]
+input = ["port:topic", "slot:work-summary", "slot:review-verdict-1", "slot:report-path"]
 output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -403,12 +370,7 @@ id = "shipping-message"
 title = "Write the commit message (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:shipping-message"
-input = [
-    "port:topic",
-    "slot:work-summary",
-    "slot:review-verdict-1",
-    "slot:report-path",
-]
+input = ["port:topic", "slot:work-summary", "slot:review-verdict-1", "slot:report-path"]
 output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -417,11 +379,7 @@ title = "Stage all changes"
 output = ["slot:shipping-stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
+argv = ["git", "add", "-A"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-unstage-runtime"
@@ -429,13 +387,7 @@ title = "Unstage runtime state"
 output = ["slot:shipping-unstage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "-q",
-    "--",
-    ".agents/runs",
-]
+argv = ["git", "reset", "-q", "--", ".agents/runs"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-commit"
@@ -444,12 +396,7 @@ input = ["slot:shipping-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "commit",
-    "-m",
-    "{slot:shipping-message}",
-]
+argv = ["git", "commit", "-m", "{slot:shipping-message}"]
 
 [[sequence.ctx-branch-arm-s-16-researching-body-18-park-report-record-then.sequence]]
 id = "park-report-append"
@@ -472,15 +419,15 @@ title = "Researching Produce"
 agent = "agent:worker"
 prompt = "prompt:researching-produce"
 input = [
-    "port:topic",
-    "slot:scope-note",
-    "port:output-dir",
-    "slot:topic-slug",
-    "resource:source-quality-guide",
-    "resource:citation-style",
-    "resource:research-standards",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:work-summary", optional = true },
+  "port:topic",
+  "slot:scope-note",
+  "port:output-dir",
+  "slot:topic-slug",
+  "resource:source-quality-guide",
+  "resource:citation-style",
+  "resource:research-standards",
+  { slot = "slot:review-verdict-1", optional = true },
+  { slot = "slot:work-summary", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -490,12 +437,12 @@ title = "Researching Review"
 agent = "agent:smart-1"
 prompt = "prompt:researching-review"
 input = [
-    "port:topic",
-    "slot:scope-note",
-    "slot:work-summary",
-    "port:output-dir",
-    "slot:topic-slug",
-    { slot = "slot:review-verdict-1", optional = true },
+  "port:topic",
+  "slot:scope-note",
+  "slot:work-summary",
+  "port:output-dir",
+  "slot:topic-slug",
+  { slot = "slot:review-verdict-1", optional = true },
 ]
 output = ["slot:review-verdict-1"]
 
@@ -524,16 +471,8 @@ equals = "revise"
 
 [procedure]
 description = "Research one topic quickly: an inline scope note, one bounded worker research pass, a single bounded reviewer loop, then commit brief.md and sources.md."
-input = [
-    "port:output-dir",
-    "port:topic",
-]
-output = [
-    "port:commit-report",
-    "port:park-report",
-    "port:report-path",
-    "port:research-report",
-]
+input = ["port:output-dir", "port:topic"]
+output = ["port:commit-report", "port:park-report", "port:report-path", "port:research-report"]
 
 [[procedure.sequence]]
 id = "topic-slug"
@@ -543,39 +482,28 @@ output = ["slot:topic-slug"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    'printf "%s" "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
-    "_",
-    "{port:topic}",
+  "sh",
+  "-c",
+  'printf "%s" "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
+  "_",
+  "{port:topic}",
 ]
 
 [[procedure.sequence]]
 id = "brief-path"
 title = "Derive brief.md path"
-input = [
-    "port:output-dir",
-    "slot:topic-slug",
-]
+input = ["port:output-dir", "slot:topic-slug"]
 output = ["slot:report-path"]
 
 [procedure.sequence.command]
-argv = [
-    "printf",
-    "%s/%s/brief.md",
-    "{port:output-dir}",
-    "{slot:topic-slug}",
-]
+argv = ["printf", "%s/%s/brief.md", "{port:output-dir}", "{slot:topic-slug}"]
 
 [[procedure.sequence]]
 id = "scope-the-topic"
 title = "Scope the topic"
 agent = "agent:smart-1"
 prompt = "prompt:scope-the-topic"
-input = [
-    "port:topic",
-    "resource:research-standards",
-]
+input = ["port:topic", "resource:research-standards"]
 output = ["slot:scope-note"]
 
 [[procedure.sequence]]
@@ -597,11 +525,7 @@ title = "Check working tree status"
 output = ["slot:shipping-status"]
 
 [procedure.sequence.command]
-argv = [
-    "git",
-    "status",
-    "--porcelain",
-]
+argv = ["git", "status", "--porcelain"]
 
 [[procedure.sequence]]
 id = "shipping-maybe-commit"

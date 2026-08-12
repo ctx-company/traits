@@ -2,20 +2,24 @@ import { agent, input, port, procedure, schema, sequence, slot, trait } from "@c
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-const result = schema.zod("result", z.object({
-  name: z.string(),
-  enabled: z.boolean(),
-  count: z.number().optional(),
-}), {
-  // `zod-to-json-schema` emits a top-level `$schema` key by default, which
-  // is outside the documented/enforced `schema.zod` subset (type,
-  // properties, required, items, enum, description,
-  // additionalProperties === false only); a real adapter callback strips it.
-  toJsonSchema: (value) => {
-    const { $schema: _schema, ...rest } = zodToJsonSchema(value);
-    return rest;
+const result = schema.zod(
+  "result",
+  z.object({
+    name: z.string(),
+    enabled: z.boolean(),
+    count: z.number().optional(),
+  }),
+  {
+    // `zod-to-json-schema` emits a top-level `$schema` key by default, which
+    // is outside the documented/enforced `schema.zod` subset (type,
+    // properties, required, items, enum, description,
+    // additionalProperties === false only); a real adapter callback strips it.
+    toJsonSchema: (value) => {
+      const { $schema: _schema, ...rest } = zodToJsonSchema(value);
+      return rest;
+    },
   },
-});
+);
 const worker = agent("worker", { description: "Produces the adapter result." });
 const output = slot.of({ id: "result", schema: result });
 const resultPort = port.output.of({ id: "result", schema: result, value: output });

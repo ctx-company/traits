@@ -13,11 +13,7 @@ version = "0.1.0"
 path = "../trait-spec"
 
 [metadata]
-tag = [
-    "first-party",
-    "meta-trait",
-    "eval-generation",
-]
+tag = ["first-party", "meta-trait", "eval-generation"]
 
 [[port]]
 id = "source"
@@ -129,23 +125,18 @@ Return exactly one eval-synthesis scaffold for {port:source-trait-id} using {por
 
 Return JSON matching schema:eval-synthesis-scaffold, with no surrounding commentary."""
 input = [
-    "port:source",
-    "port:io-contract",
-    "port:source-trait-id",
-    "port:source-digest",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:source",
+  "port:io-contract",
+  "port:source-trait-id",
+  "port:source-digest",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:generate-evals"]
 
 [procedure]
 description = "Generate untrusted declarations; the CLI merges and checks the complete candidate trait."
-input = [
-    "port:source",
-    "port:source-trait-id",
-    "port:source-digest",
-    "port:io-contract",
-]
+input = ["port:source", "port:source-trait-id", "port:source-digest", "port:io-contract"]
 output = ["port:eval-synthesis"]
 
 [[procedure.sequence]]
@@ -154,11 +145,11 @@ title = "Generate eval declarations"
 agent = "agent:generator"
 prompt = "prompt:generate-evals"
 input = [
-    "port:source",
-    "port:io-contract",
-    "port:source-trait-id",
-    "port:source-digest",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:source",
+  "port:io-contract",
+  "port:source-trait-id",
+  "port:source-digest",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:generate-evals"]

@@ -5,10 +5,7 @@ name = "PR Description"
 description = "Writes a structured pull-request description — title, summary, testing notes, and risk — from a diff and its context."
 
 [metadata]
-tag = [
-    "template",
-    "pull-request",
-]
+tag = ["template", "pull-request"]
 
 [[port]]
 id = "diff"
@@ -37,11 +34,7 @@ description = "Runtime slot write-description."
 [[schema]]
 id = "pr-risk"
 schema = "schema:text"
-allowed = [
-    "low",
-    "medium",
-    "high",
-]
+allowed = ["low", "medium", "high"]
 
 [[schema]]
 id = "pr-description"
@@ -75,18 +68,12 @@ Write a pull-request description for {port:diff}, given the context {port:contex
 Return exactly one structured description: a short title, a summary of what changed and why, testing notes describing how the change was or should be validated, and a risk level of low, medium, or high.
 
 Return JSON matching schema:pr-description, with no surrounding commentary."""
-input = [
-    "port:diff",
-    "port:context",
-]
+input = ["port:diff", "port:context"]
 output = ["slot:write-description"]
 
 [procedure]
 description = "Write a structured pull-request description from a diff and its context."
-input = [
-    "port:diff",
-    "port:context",
-]
+input = ["port:diff", "port:context"]
 output = ["port:description"]
 
 [[procedure.sequence]]
@@ -94,8 +81,5 @@ id = "write-description"
 title = "Write the description"
 agent = "agent:writer"
 prompt = "prompt:write-description"
-input = [
-    "port:diff",
-    "port:context",
-]
+input = ["port:diff", "port:context"]
 output = ["slot:write-description"]

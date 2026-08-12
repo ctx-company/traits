@@ -1,6 +1,15 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { baselineResult, bestMetric, decisions, history, keptCount, readinessSlot, roundCount, summary } from "../data.ts";
+import {
+  baselineResult,
+  bestMetric,
+  decisions,
+  history,
+  keptCount,
+  readinessSlot,
+  roundCount,
+  summary,
+} from "../data.ts";
 
 // Neither preflight nor baseline gating has a "rounds"/"kept" story yet
 // (seed-best has not run), so these are typed deterministic command steps —
@@ -9,13 +18,13 @@ import { baselineResult, bestMetric, decisions, history, keptCount, readinessSlo
 // rows (baseline-failure keeps the one failing measurement as an honest
 // baseline row).
 export function abortSummaryStage(title: string) {
-    return cdk.step.command(title, {
-        id: "abort-summary",
-        argv: [
-            "node",
-            "--input-type=module",
-            "--eval",
-            `
+  return cdk.step.command(title, {
+    id: "abort-summary",
+    argv: [
+      "node",
+      "--input-type=module",
+      "--eval",
+      `
 const [readinessText] = process.argv.slice(1);
 const readiness = JSON.parse(readinessText);
 process.stdout.write(JSON.stringify({
@@ -27,19 +36,19 @@ process.stdout.write(JSON.stringify({
     detail: readiness.detail,
 }));
             `.trim(),
-            readinessSlot,
-        ],
-        output: summary,
-    });
+      readinessSlot,
+    ],
+    output: summary,
+  });
 }
 export function baselineFailureSummaryStage(title: string) {
-    return cdk.step.command(title, {
-        id: "baseline-failure-summary",
-        argv: [
-            "node",
-            "--input-type=module",
-            "--eval",
-            `
+  return cdk.step.command(title, {
+    id: "baseline-failure-summary",
+    argv: [
+      "node",
+      "--input-type=module",
+      "--eval",
+      `
 const [baselineText] = process.argv.slice(1);
 const baseline = JSON.parse(baselineText);
 process.stdout.write(JSON.stringify({
@@ -51,10 +60,10 @@ process.stdout.write(JSON.stringify({
     detail: "trusted baseline command did not return status ok: " + JSON.stringify(baseline),
 }));
             `.trim(),
-            baselineResult,
-        ],
-        output: summary,
-    });
+      baselineResult,
+    ],
+    output: summary,
+  });
 }
 
 // Never reconstructed from correlated counters: each stop reason is a
@@ -103,15 +112,26 @@ process.stdout.write(JSON.stringify({
 `.trim();
 
 export function deriveSummaryStage(
-    title: string,
-    reason: "target-reached" | "iteration-limit-reached",
-    reviewsSlot?: cdk.SlotHandle,
+  title: string,
+  reason: "target-reached" | "iteration-limit-reached",
+  reviewsSlot?: cdk.SlotHandle,
 ) {
-    const argv = ["node", "--input-type=module", "--eval", deriveSummaryScript, reason, roundCount, keptCount, bestMetric, decisions, history];
-    if (reviewsSlot !== undefined) argv.push(reviewsSlot);
-    return cdk.step.command(title, {
-        id: `derive-summary-${reason}`,
-        argv,
-        output: summary,
-    });
+  const argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    deriveSummaryScript,
+    reason,
+    roundCount,
+    keptCount,
+    bestMetric,
+    decisions,
+    history,
+  ];
+  if (reviewsSlot !== undefined) argv.push(reviewsSlot);
+  return cdk.step.command(title, {
+    id: `derive-summary-${reason}`,
+    argv,
+    output: summary,
+  });
 }

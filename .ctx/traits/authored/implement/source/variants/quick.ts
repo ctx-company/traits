@@ -23,13 +23,13 @@ import { condition, effect, flow, input, procedure, step, variant } from "@ctx-t
 
 import { FAMILY_BEHAVIOR, QUICK_INTENT } from "../core.ts";
 import {
-    deriveParkReportStep,
-    familyCommitTail,
-    gateAndDiffEvidence,
-    gateTimedOut,
-    gateTimedOutAbortIf,
-    repoGatesPassed,
-    reviewDiff,
+  deriveParkReportStep,
+  familyCommitTail,
+  gateAndDiffEvidence,
+  gateTimedOut,
+  gateTimedOutAbortIf,
+  repoGatesPassed,
+  reviewDiff,
 } from "../sequence/family.ts";
 import { agent } from "./quick/agent.ts";
 import * as port from "./quick/port.ts";
@@ -57,67 +57,69 @@ const quickScribeText = input.prompt`The review has ended approved and the work 
 
 /** 0098: the loop body, parameterized by an optional commit gate — extracted so `guarded` reuses it instead of copying the loop. */
 export function quickProcedure(gate?: { prefix: string; title?: string; timeoutMs?: number }) {
-    return procedure.from(
+  return procedure.from(
     {
-        description:
-            "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
+      description:
+        "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit.",
     },
     () => {
-        agent.smart.prompt("Draft the work", {
-            input: input.prompt`
+      agent.smart.prompt("Draft the work", {
+        input: input.prompt`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Reference files by path. Do not implement anything.`,
-            output: slot.draft,
+        output: slot.draft,
+      });
+
+      flow.loop("Building", (loop) => {
+        loop.maxIterations(10, { onExhausted: "abort" });
+
+        agent.worker.prompt("Building Produce", {
+          input: quickProduceText,
+          output: slot.workSummary,
+          include: [slot.verdict.optional(), slot.workSummary.optional(), repoGatesPassed.optional()],
         });
 
-        flow.loop("Building", (loop) => {
-            loop.maxIterations(10, { onExhausted: "abort" });
+        gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
-            agent.worker.prompt("Building Produce", {
-                input: quickProduceText,
-                output: slot.workSummary,
-                include: [slot.verdict.optional(), slot.workSummary.optional(), repoGatesPassed.optional()],
-            });
-
-            gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
-
-            agent.smart.prompt("Building Review", {
-                input: quickReviewText,
-                output: slot.verdict,
-                include: [slot.verdict.optional()],
-            });
-
-            deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport });
-
-            flow.when("Gate Timed Out", gateTimedOutAbortIf, flow.Abort);
-            effect.onAbort(gateTimedOut);
-
-            flow.until(condition.all([
-                condition.equals(slot.verdict.status, "approved"),
-                condition.equals(repoGatesPassed.ok, true),
-            ]));
+        agent.smart.prompt("Building Review", {
+          input: quickReviewText,
+          output: slot.verdict,
+          include: [slot.verdict.optional()],
         });
 
-        familyCommitTail({
-            id: "shipping",
-            scribe: { agent: agent.scribe, text: quickScribeText },
-            receipt: slot.commitOutput,
-            gate,
-        });
+        deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport });
+
+        flow.when("Gate Timed Out", gateTimedOutAbortIf, flow.Abort);
+        effect.onAbort(gateTimedOut);
+
+        flow.until(
+          condition.all([
+            condition.equals(slot.verdict.status, "approved"),
+            condition.equals(repoGatesPassed.ok, true),
+          ]),
+        );
+      });
+
+      familyCommitTail({
+        id: "shipping",
+        scribe: { agent: agent.scribe, text: quickScribeText },
+        receipt: slot.commitOutput,
+        gate,
+      });
     },
-    );
+  );
 }
 
 export default variant({
-    name: "Implement (Quick)",
-    summary:
-        "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit.",
-    metadata: { tag: ["dogfood", "implementation", "review", "lean"] },
-    behavior: FAMILY_BEHAVIOR,
-    intent: QUICK_INTENT,
-    resource: [resource.taskBoard],
-    signal: [gateTimedOut],
-    port: [port.commitReport, port.parkReportPort],
-    procedure: quickProcedure(),
+  name: "Implement (Quick)",
+  summary:
+    "Quick dogfood implementation procedure: draft the approach from the plan, implement it, and grind a single reviewer loop until the work is approved — then commit.",
+  metadata: { tag: ["dogfood", "implementation", "review", "lean"] },
+  behavior: FAMILY_BEHAVIOR,
+  intent: QUICK_INTENT,
+  resource: [resource.taskBoard],
+  signal: [gateTimedOut],
+  port: [port.commitReport, port.parkReportPort],
+  procedure: quickProcedure(),
 });

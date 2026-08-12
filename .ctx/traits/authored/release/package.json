@@ -1,5 +1,6 @@
 {
-  "dependencies": {},
+  "name": "@ctx-traits/release",
+  "version": "0.1.0",
   "files": [
     "trait.toml",
     "trait.lock",
@@ -7,10 +8,9 @@
     "resources",
     "source"
   ],
+  "type": "module",
   "imports": {
     "#trait/*": "./source/*"
   },
-  "name": "@ctx-traits/release",
-  "type": "module",
-  "version": "0.1.0"
+  "dependencies": {}
 }

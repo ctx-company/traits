@@ -39,13 +39,13 @@ any research runs. Use forward slashes and kebab-case names throughout.
 
 ## Canonical Source Quality Ratings
 
-| Rating | Use |
-|---|---|
-| A | Systematic reviews, strong RCTs, top peer-reviewed work, primary regulatory records, official standards, and transparent authoritative datasets. |
-| B | Credible guidelines, cohort or case-control studies, established technical white papers, official reports, and reputable expert analysis with disclosed methods. |
-| C | Reputable journalism, substantive company engineering material, analyst reports, expert talks, and other contextual sources requiring corroboration. |
-| D | Preprints without validation, preliminary results, weak methodology, opinion, and promotional material; use only as a lead with strong caveats. |
-| E | Anonymous, fabricated, unverifiable, deceptive, or materially conflicted sources; do not use for claims. |
+| Rating | Use                                                                                                                                                              |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A      | Systematic reviews, strong RCTs, top peer-reviewed work, primary regulatory records, official standards, and transparent authoritative datasets.                 |
+| B      | Credible guidelines, cohort or case-control studies, established technical white papers, official reports, and reputable expert analysis with disclosed methods. |
+| C      | Reputable journalism, substantive company engineering material, analyst reports, expert talks, and other contextual sources requiring corroboration.             |
+| D      | Preprints without validation, preliminary results, weak methodology, opinion, and promotional material; use only as a lead with strong caveats.                  |
+| E      | Anonymous, fabricated, unverifiable, deceptive, or materially conflicted sources; do not use for claims.                                                         |
 
 Clinical practice guidelines are B-rated by default. Upgrade only the
 underlying primary evidence, not the guideline label itself. See

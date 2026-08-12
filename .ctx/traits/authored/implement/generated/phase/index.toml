@@ -7,12 +7,7 @@ summary = "Dogfood implementation procedure: extract the task contract from the 
 variant = "phase"
 
 [metadata]
-tag = [
-    "dogfood",
-    "implementation",
-    "review",
-    "multi-agent",
-]
+tag = ["dogfood", "implementation", "review", "multi-agent"]
 
 [[intent.require]]
 id = "correctness"
@@ -86,10 +81,7 @@ schema = "[schema:leftover]"
 optional = true
 description = "Adjudicated leftovers: legitimate follow-on work the shipped result does not require, surviving the reviewer's two-question test. Omitted from the run's structured final outputs when empty; slot:leftovers always carries the signed evidence either way."
 title = "Leftovers"
-format = [
-    "structured",
-    "table",
-]
+format = ["structured", "table"]
 value = "slot:leftovers"
 
 [[port]]
@@ -99,10 +91,7 @@ schema = "[schema:review-verdict-default]"
 optional = true
 description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling task that explicitly cites the same wall-id while this stands unforced."
 title = "Park Report"
-format = [
-    "structured",
-    "table",
-]
+format = ["structured", "table"]
 value = "slot:park-report"
 
 [[port]]
@@ -295,10 +284,7 @@ description = "Any further correctness findings beyond the mandatory first one."
 [[schema]]
 id = "decision"
 schema = "schema:text"
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [[schema]]
 id = "gates-ran-findings"
@@ -337,10 +323,7 @@ description = "What must happen before this item can be done; may be empty."
 schema = "schema:text"
 required = true
 description = "Why this follow-on work is outside the run: needs-unlanded (depends on work not yet landed) or needs-human (requires an owner or authority action this run cannot take)."
-allowed = [
-    "needs-unlanded",
-    "needs-human",
-]
+allowed = ["needs-unlanded", "needs-human"]
 
 [schema.fields.what]
 schema = "schema:text"
@@ -355,12 +338,7 @@ description = "A checklist item outside in-run capability or authority, with ver
 schema = "schema:text"
 required = true
 description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
-allowed = [
-    "gui-or-visual",
-    "paid-or-live-execution",
-    "owner-decision",
-    "contract-conflict",
-]
+allowed = ["gui-or-visual", "paid-or-live-execution", "owner-decision", "contract-conflict"]
 
 [schema.fields.close-out]
 schema = "schema:text"
@@ -447,10 +425,7 @@ description = "Correctness-dimension findings: is the implemented behavior actua
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
-allowed = [
-    "none",
-    "needs-owner",
-]
+allowed = ["none", "needs-owner"]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -484,10 +459,7 @@ description = "Scope-dimension findings: does the diff implement exactly what th
 schema = "schema:text"
 required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -564,11 +536,7 @@ Produce the work for {port:task} against the draft {slot:draft}.
             Propose leftovers explicitly: end the work summary with a "Leftovers proposed:" section listing any legitimate follow-on work (what — one sentence —, reason — needs-unlanded or needs-human —, needs, evidence it does not block this result standing alone, done-when), or state explicitly that none exist. Reviewers adjudicate these, not you.
             Return the full updated work summary: what changed (files), what was reused or abstracted, how it was validated, substitute evidence per owner-only item, open concerns, a "Leftovers proposed" section, and — once a verdict has ever been attached — a "Blocker dispositions" section listing every blocker id from that verdict with its done-when quoted verbatim, what changed, where, and how it was verified (or the out-of-scope justification); for a blocker with recurrence-of set, open its disposition with one paragraph stating the structural design you implemented.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
-input = [
-    "port:task",
-    "slot:draft",
-    "slot:task-brief",
-]
+input = ["port:task", "slot:draft", "slot:task-brief"]
 output = ["slot:work-summary"]
 
 [prompt.building-review-1]
@@ -590,18 +558,15 @@ Review the produced work for {port:task} against the draft {slot:draft}. Current
                                 The worker proposes leftovers explicitly in its work summary — including an explicit empty list when none exist; a leftover is never something you invent on the worker's behalf. Each proposal's "what" is exactly one sentence. Adjudicate every proposal with two questions, in order: first, could a competent engineer have done this work inside THIS task? If yes, it is not a leftover — it is unfinished scope, and you raise it as a BLOCKER instead. Second, does the shipped result stand alone without it? If the result does not stand alone — a caller is left broken, a contract is left half-honored, a claim is left unverified — approval is withheld until the gap closes. Only a proposal that survives both questions enters slot:leftovers, reproduced with its full typed fields (what, reason, needs, evidence, done-when). Leftovers do not change the approval verdict or become blockers. Exit is separate: an empty carried list may exit immediately; a non-empty carried list cannot exit before the configured minimum round; and every carried entry must name a prerequisite in needs, so an entry with empty needs prevents exit. Return the leftovers list as a required typed output alongside your verdict; an empty list is a valid, signed claim that none exist — never omit the field.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-    "slot:review-diff",
-    "slot:repo-gates-passed",
-    "resource:review-rubric",
-    "slot:task-brief",
+  "port:task",
+  "slot:draft",
+  "slot:work-summary",
+  "slot:review-diff",
+  "slot:repo-gates-passed",
+  "resource:review-rubric",
+  "slot:task-brief",
 ]
-output = [
-    "slot:review-verdict-1",
-    "slot:leftovers",
-]
+output = ["slot:review-verdict-1", "slot:leftovers"]
 
 [prompt.building-review-2]
 text = """
@@ -623,19 +588,16 @@ Independently review the produced work for {port:task} against the draft {slot:d
                                 The worker proposes leftovers explicitly in its work summary — including an explicit empty list when none exist; a leftover is never something you invent on the worker's behalf. Each proposal's "what" is exactly one sentence. Adjudicate every proposal with two questions, in order: first, could a competent engineer have done this work inside THIS task? If yes, it is not a leftover — it is unfinished scope, and you raise it as a BLOCKER instead. Second, does the shipped result stand alone without it? If the result does not stand alone — a caller is left broken, a contract is left half-honored, a claim is left unverified — approval is withheld until the gap closes. Only a proposal that survives both questions enters slot:leftovers, reproduced with its full typed fields (what, reason, needs, evidence, done-when). Leftovers do not change the approval verdict or become blockers. Exit is separate: an empty carried list may exit immediately; a non-empty carried list cannot exit before the configured minimum round; and every carried entry must name a prerequisite in needs, so an entry with empty needs prevents exit. Return the leftovers list as a required typed output alongside your verdict; an empty list is a valid, signed claim that none exist — never omit the field.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
 input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-    "slot:review-diff",
-    "slot:repo-gates-passed",
-    "resource:review-rubric",
-    "slot:task-brief",
-    "slot:leftovers",
+  "port:task",
+  "slot:draft",
+  "slot:work-summary",
+  "slot:review-diff",
+  "slot:repo-gates-passed",
+  "resource:review-rubric",
+  "slot:task-brief",
+  "slot:leftovers",
 ]
-output = [
-    "slot:review-verdict-2",
-    "slot:leftovers",
-]
+output = ["slot:review-verdict-2", "slot:leftovers"]
 
 [prompt.copy-the-task-contract]
 text = """
@@ -643,10 +605,7 @@ text = """
             Copy the task file for {port:task} EXACTLY as written.
             Open the task-board directory named in {resource:task-board} with your tools. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — list the directory and match it (a bare number matches its NNNN- prefix). Files under archived/ are not live tasks; match one only when the request names it explicitly.
             Return the file's entire contents, byte-for-byte — no paraphrasing, no summaries, no commentary, no added headers. Every later step works from this copy instead of the board, so anything you drop is lost."""
-input = [
-    "port:task",
-    "resource:task-board",
-]
+input = ["port:task", "resource:task-board"]
 output = ["slot:task-brief"]
 
 [prompt.planning-produce]
@@ -658,10 +617,7 @@ Create an implementation draft for {port:task}.
             After the SCOPE SPLIT, the draft must cover: scope (exactly what the task asks, nothing more), files to touch, approach, validation plan (the repo's standard gates), and risks.
             Explicitly call out where existing code should be REUSED or a shared abstraction EXTRACTED rather than re-implemented or copied beside. Reference repo files by path; do not inline documents. Do not implement anything.
             End this turn with the structured output and nothing else — no prose status line after the payload."""
-input = [
-    "port:task",
-    "slot:task-brief",
-]
+input = ["port:task", "slot:task-brief"]
 output = ["slot:draft"]
 
 [prompt.planning-review]
@@ -670,11 +626,7 @@ Review the implementation draft {slot:draft} for {port:task} against the task co
             A BLOCKER is a draft that: omits an agent-doable checklist item or Done-when of the task, proposes an approach that cannot satisfy the task contract, is missing a required SCOPE SPLIT classification, or scopes in work the task does not ask for. Everything else — style, phrasing, alternate valid approaches — is advisory.
             Return the typed verdict (status: approved when no blocker remains, revise otherwise; blockers: the list that justifies revise).
             End this turn with the structured output and nothing else — no prose status line after the payload."""
-input = [
-    "slot:draft",
-    "port:task",
-    "slot:task-brief",
-]
+input = ["slot:draft", "port:task", "slot:task-brief"]
 output = ["slot:planning-verdict"]
 
 [prompt.shipping-message]
@@ -685,12 +637,7 @@ The build loop for {port:task} has ended in dual approval and the work is being 
             Do not run any git commands and do not write any files for the message; staging and committing happen in later runtime steps.
             Do NOT record task status anywhere. Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.
             Compose the tail of the commit message from the verdicts, including only the sections the verdicts actually support — never write a "none" placeholder for a section with no entries. If a verdict carries owner-items, add "Owner items:" quoting each entry (item, reason class, close-out command or decision). If a verdict carries remaining (cross-task seam citations only), add "Cross-task seams:" quoting it verbatim. The final adjudicated leftovers are attached as context: when non-empty, add a "Leftovers:" section reproducing every entry's typed fields (what, reason, needs, evidence, done-when) verbatim — never paraphrased, never invented; omit the section entirely when the list is empty. A non-empty leftovers list never affects approval or is written as if it were a blocker."""
-input = [
-    "port:task",
-    "slot:review-verdict-1",
-    "slot:review-verdict-2",
-    "slot:task-brief",
-]
+input = ["port:task", "slot:review-verdict-1", "slot:review-verdict-2", "slot:task-brief"]
 output = ["slot:shipping-message"]
 
 [[sequence.building-body.sequence]]
@@ -711,14 +658,14 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-    "port:task",
-    "slot:draft",
-    "slot:task-brief",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:review-verdict-2", optional = true },
-    { slot = "slot:work-summary", optional = true },
-    { slot = "slot:leftovers", optional = true },
-    { slot = "slot:repo-gates-passed", optional = true },
+  "port:task",
+  "slot:draft",
+  "slot:task-brief",
+  { slot = "slot:review-verdict-1", optional = true },
+  { slot = "slot:review-verdict-2", optional = true },
+  { slot = "slot:work-summary", optional = true },
+  { slot = "slot:leftovers", optional = true },
+  { slot = "slot:repo-gates-passed", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -729,10 +676,7 @@ kind = "check"
 output = ["slot:repo-gates-passed"]
 
 [sequence.building-body.sequence.command]
-argv = [
-    "just",
-    "test",
-]
+argv = ["just", "test"]
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"
@@ -740,14 +684,7 @@ title = "Capture the changed-file inventory"
 output = ["slot:review-diff"]
 
 [sequence.building-body.sequence.command]
-argv = [
-    "git",
-    "diff",
-    "--stat",
-    "--",
-    ".",
-    ":(exclude).agents/runs",
-]
+argv = ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"]
 
 [[sequence.building-body.sequence]]
 id = "building-review-1"
@@ -755,19 +692,16 @@ title = "Building Review 1"
 agent = "agent:smart-1"
 prompt = "prompt:building-review-1"
 input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-    "slot:review-diff",
-    "slot:repo-gates-passed",
-    "resource:review-rubric",
-    "slot:task-brief",
-    { slot = "slot:review-verdict-1", optional = true },
+  "port:task",
+  "slot:draft",
+  "slot:work-summary",
+  "slot:review-diff",
+  "slot:repo-gates-passed",
+  "resource:review-rubric",
+  "slot:task-brief",
+  { slot = "slot:review-verdict-1", optional = true },
 ]
-output = [
-    "slot:review-verdict-1",
-    "slot:leftovers",
-]
+output = ["slot:review-verdict-1", "slot:leftovers"]
 
 [[sequence.building-body.sequence]]
 id = "building-review-2"
@@ -775,20 +709,17 @@ title = "Building Review 2"
 agent = "agent:smart-2"
 prompt = "prompt:building-review-2"
 input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-    "slot:review-diff",
-    "slot:repo-gates-passed",
-    "resource:review-rubric",
-    "slot:task-brief",
-    "slot:leftovers",
-    { slot = "slot:review-verdict-2", optional = true },
+  "port:task",
+  "slot:draft",
+  "slot:work-summary",
+  "slot:review-diff",
+  "slot:repo-gates-passed",
+  "resource:review-rubric",
+  "slot:task-brief",
+  "slot:leftovers",
+  { slot = "slot:review-verdict-2", optional = true },
 ]
-output = [
-    "slot:review-verdict-2",
-    "slot:leftovers",
-]
+output = ["slot:review-verdict-2", "slot:leftovers"]
 
 [[sequence.building-body.sequence]]
 id = "park-report-clear"
@@ -841,12 +772,7 @@ id = "shipping-message"
 title = "Write the commit message (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:shipping-message"
-input = [
-    "port:task",
-    "slot:review-verdict-1",
-    "slot:review-verdict-2",
-    "slot:task-brief",
-]
+input = ["port:task", "slot:review-verdict-1", "slot:review-verdict-2", "slot:task-brief"]
 output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -855,11 +781,7 @@ title = "Stage all changes"
 output = ["slot:shipping-stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
+argv = ["git", "add", "-A"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-unstage-runtime"
@@ -867,13 +789,7 @@ title = "Unstage runtime state"
 output = ["slot:shipping-unstage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "-q",
-    "--",
-    ".agents/runs",
-]
+argv = ["git", "reset", "-q", "--", ".agents/runs"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-commit"
@@ -882,12 +798,7 @@ input = ["slot:shipping-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "commit",
-    "-m",
-    "{slot:shipping-message}",
-]
+argv = ["git", "commit", "-m", "{slot:shipping-message}"]
 
 [[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-1-then.sequence]]
 id = "park-report-append-1"
@@ -925,10 +836,10 @@ title = "Planning Produce"
 agent = "agent:smart-1"
 prompt = "prompt:planning-produce"
 input = [
-    "port:task",
-    "slot:task-brief",
-    { slot = "slot:planning-verdict", optional = true },
-    { slot = "slot:draft", optional = true },
+  "port:task",
+  "slot:task-brief",
+  { slot = "slot:planning-verdict", optional = true },
+  { slot = "slot:draft", optional = true },
 ]
 output = ["slot:draft"]
 
@@ -937,32 +848,20 @@ id = "planning-review"
 title = "Planning Review"
 agent = "agent:smart-2"
 prompt = "prompt:planning-review"
-input = [
-    "slot:draft",
-    "port:task",
-    "slot:task-brief",
-    { slot = "slot:planning-verdict", optional = true },
-]
+input = ["slot:draft", "port:task", "slot:task-brief", { slot = "slot:planning-verdict", optional = true }]
 output = ["slot:planning-verdict"]
 
 [procedure]
 description = "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation."
 input = ["port:task"]
-output = [
-    "port:commit-report",
-    "port:leftovers",
-    "port:park-report",
-]
+output = ["port:commit-report", "port:leftovers", "port:park-report"]
 
 [[procedure.sequence]]
 id = "copy-the-task-contract"
 title = "Copy the task contract"
 agent = "agent:clerk"
 prompt = "prompt:copy-the-task-contract"
-input = [
-    "port:task",
-    "resource:task-board",
-]
+input = ["port:task", "resource:task-board"]
 output = ["slot:task-brief"]
 
 [[procedure.sequence]]
@@ -1034,11 +933,7 @@ title = "Check working tree status"
 output = ["slot:shipping-status"]
 
 [procedure.sequence.command]
-argv = [
-    "git",
-    "status",
-    "--porcelain",
-]
+argv = ["git", "status", "--porcelain"]
 
 [[procedure.sequence]]
 id = "shipping-maybe-commit"

@@ -69,9 +69,4 @@ recorded against 0087 rather than patched around.
 '''
 
 [relations]
-depends-on = [
-    "0086",
-    "0087",
-    "0088",
-    "0089",
-]
+depends-on = ["0086", "0087", "0088", "0089"]

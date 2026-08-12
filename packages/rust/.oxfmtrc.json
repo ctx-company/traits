@@ -3,7 +3,5 @@
   "tabWidth": 2,
   "semi": true,
   "singleQuote": false,
-  "ignorePatterns": [
-    "dist/**"
-  ]
+  "ignorePatterns": ["dist/**"]
 }

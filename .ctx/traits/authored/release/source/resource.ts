@@ -7,10 +7,9 @@ import { resource } from "@ctx-traits/cdk";
  * knowledge of where versions live or what the branch is named.
  */
 export const releaseManifest = resource({
-    id: "release-manifest",
-    path: ".internal/release.toml",
-    root: "repo",
-    hint:
-        "Repo-declared release contract: the version-file locations to bump, the changelog file path, and the release branch name. Agents read it with their own tools; the trait never hardcodes any of it.",
-    trigger: "on-activation",
+  id: "release-manifest",
+  path: ".internal/release.toml",
+  root: "repo",
+  hint: "Repo-declared release contract: the version-file locations to bump, the changelog file path, and the release branch name. Agents read it with their own tools; the trait never hardcodes any of it.",
+  trigger: "on-activation",
 });

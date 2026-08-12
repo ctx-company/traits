@@ -3,8 +3,5 @@
   "tabWidth": 2,
   "semi": true,
   "singleQuote": false,
-  "ignorePatterns": [
-    "dist/**",
-    "src/generated.ts"
-  ]
+  "ignorePatterns": ["dist/**", "src/generated.ts"]
 }

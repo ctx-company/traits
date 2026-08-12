@@ -4,12 +4,12 @@ import { smart1 } from "../agent.ts";
 import { survey, target } from "../data.ts";
 
 export const gather = cdk.stage({
-    agent: smart1,
-    input: cdk.input.prompt`
+  agent: smart1,
+  input: cdk.input.prompt`
     Survey ${target} for refactoring opportunities.
     Read the target and its callers/callees with your tools — explore organically.
 `,
-    output: cdk.output.prompt`
+  output: cdk.output.prompt`
     Return a numbered candidate list — for each:
         - the cluster of code involved (paths),
         - why it is coupled,

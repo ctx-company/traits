@@ -6,25 +6,25 @@ import { plan, reviewVerdict1, reviewVerdict2, target, workSummary } from "#trai
 import { architectureDialect } from "#trait/shared/resource.ts";
 
 const input = cdk.input.prompt(
-    `Review the refactored state of {target} against the agreed design {agreedDesign}, independently of the other reviewer.
+  `Review the refactored state of {target} against the agreed design {agreedDesign}, independently of the other reviewer.
     Current work summary: {workSummary}.
     Cite the smell id or the deep-module violation for every blocker. ${INTEGRITY_DOCTRINE}`,
-    {
-        target,
-        agreedDesign: plan,
-        workSummary,
-        phaseBrief: plan,
-        productBrief: architectureDialect,
-    },
+  {
+    target,
+    agreedDesign: plan,
+    workSummary,
+    phaseBrief: plan,
+    productBrief: architectureDialect,
+  },
 );
 
 export const first = cdk.stage({
-    agent: smart1,
-    input,
-    output: reviewVerdict1,
+  agent: smart1,
+  input,
+  output: reviewVerdict1,
 });
 export const second = cdk.stage({
-    agent: smart2,
-    input,
-    output: reviewVerdict2,
+  agent: smart2,
+  input,
+  output: reviewVerdict2,
 });

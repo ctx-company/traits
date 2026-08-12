@@ -14,30 +14,18 @@
         },
         "session": {
           "description": "Optional session binding for this agent's frames: `session:<id>`\n(shared with every other agent bound to the same declared session),\nor a bare `per-frame`/`persistent` lifecycle value, which is always\nagent-local and never implies sharing. Omitted preserves legacy\nconfiguration-driven behavior during migration; absent both canonical\nand configured values remains `per-frame`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "summary": {
           "description": "Optional short role summary.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "system": {
           "description": "Optional standing instructions for this role, delivered through the\nharness's system-prompt channel once per session rather than repeated\nin every frame's user message. Holds doctrine the role always obeys —\nnot per-step work, which belongs in the step's own prompt. Model-visible\nlike any other instruction text: compiled into the model view, audited\nfor hidden content, and covered by the canonical digest.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "id",
-        "description"
-      ],
+      "required": ["id", "description"],
       "type": "object"
     },
     "Behavior": {
@@ -124,10 +112,7 @@
           "$ref": "#/$defs/BranchFailurePolicy"
         }
       },
-      "required": [
-        "branch",
-        "on-failure"
-      ],
+      "required": ["branch", "on-failure"],
       "type": "object"
     },
     "BranchFailurePolicy": {
@@ -156,10 +141,7 @@
       "properties": {
         "detail": {
           "description": "Elaboration presented alongside `text`. Detail is never separately\nverdict-bearing: one item is one verdict.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "description": "Item identifier, unique within its checklist.",
@@ -167,20 +149,14 @@
         },
         "requires-evidence": {
           "description": "Whether a verdict for this item must carry evidence. When any item in\na checklist requires it, the synthesized verdict schema makes the\n`evidence` field required.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": ["boolean", "null"]
         },
         "text": {
           "description": "The criterion as the reviewer reads it.",
           "type": "string"
         }
       },
-      "required": [
-        "id",
-        "text"
-      ],
+      "required": ["id", "text"],
       "type": "object"
     },
     "CommandDeclaration": {
@@ -196,32 +172,20 @@
         },
         "argv-from": {
           "description": "Local `[schema:text]` input port resolved once into concrete argv when\nthe command frame is built. Slots are deliberately unsupported so an\nagent-produced value cannot select the executable.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "capture-bytes": {
           "description": "See [`CommandPlan::capture_bytes`].",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "cwd": {
           "description": "Optional working directory policy.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "executable-digest-from": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "success-exit-code": {
           "description": "Exit codes treated as success. Defaults to `[0]` semantically.",
@@ -235,10 +199,7 @@
           "description": "Runtime timeout in milliseconds.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
       "type": "object"
@@ -270,54 +231,33 @@
         "at-least": true,
         "at-most": true,
         "condition": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "count": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "description": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "elapsed-seconds-at-least": true,
         "empty": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "equals": true,
         "field": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "field-equals": true,
         "greater-than": true,
         "iteration": {
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "iteration-at-least": {
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "less-than": true,
         "not": {
@@ -331,28 +271,16 @@
           ]
         },
         "output": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "present": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "slot": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -375,9 +303,7 @@
           "$ref": "#/$defs/RelationsRefList"
         }
       },
-      "required": [
-        "reason"
-      ],
+      "required": ["reason"],
       "type": "object"
     },
     "Contract": {
@@ -390,17 +316,11 @@
         },
         "conflict-policy": {
           "description": "What to do when conflicts are found: `require-decision`,\n`warn-and-isolate`, `fail-plan`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "merge-strategy": {
           "description": "How to combine with other traits: `structured`, `isolated`, `render-only`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -440,17 +360,11 @@
         },
         "min-score": {
           "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "priority": {
           "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "rule": {
           "description": "Ordered rules. Rules compose as OR during scoring.",
@@ -481,11 +395,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "alias",
-        "id",
-        "version"
-      ],
+      "required": ["alias", "id", "version"],
       "type": "object"
     },
     "Digest": {
@@ -502,17 +412,11 @@
         },
         "input": {
           "description": "What the eval consumes (e.g. `render:agent-skills`, `trait:self`,\n`fixture:fixtures/example.md`).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "output": {
           "description": "Expected fixture, report, or comparison output (e.g.\n`fixture:fixtures/example.md`, `report:scenario-shape`).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "scenario": {
           "description": "Scenario IDs this eval covers (references to `[[scenario]]` IDs).\n\nCanonical authoring uses singular `scenario` (scalar-or-array):\n`scenario = \"happy-path\"` or\n`scenario = [\"happy-path\", \"edge-case\"]`.",
@@ -526,10 +430,7 @@
           "description": "Eval/check type."
         }
       },
-      "required": [
-        "id",
-        "variant"
-      ],
+      "required": ["id", "variant"],
       "type": "object"
     },
     "EvalVariant": {
@@ -598,18 +499,13 @@
       "description": "Closed recovery-route declaration.",
       "properties": {
         "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "step": {
           "type": "string"
         }
       },
-      "required": [
-        "step"
-      ],
+      "required": ["step"],
       "type": "object"
     },
     "FailureTarget": {
@@ -659,32 +555,20 @@
         "at-least": true,
         "at-most": true,
         "condition": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "count": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "elapsed-seconds-at-least": {
           "description": "Cumulative active-drive elapsed seconds (runtime-supplied evidence,\nnever a core wall clock) at least this threshold. Threshold is a JSON\nnumber or a `{ ref = \"slot:...\"/\"port:...\" }` numeric reference."
         },
         "empty": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "equals": true,
         "field": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "field-equals": {
           "description": "Filters `count` to elements whose `field` equals this value. Paired\nwith `field`; meaningless alone. Kept distinct from `equals`, which is\nalready the count's threshold — one predicate needs both a \"which\nelements\" and a \"how many\", and they cannot share a spelling."
@@ -693,18 +577,12 @@
         "iteration": {
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "iteration-at-least": {
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "less-than": true,
         "not": {
@@ -718,29 +596,17 @@
           ]
         },
         "output": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "present": {
           "description": "Presence-aware leaf (schema-version `\"0.3\"` only). Bare form is a local\noptional input `port:*`; with `field`, a declared optional field of a\nlocal `port:*`/`slot:*` object container. Yields `Matched`/`NotMatched`/`Unmeasurable`\ntri-state internally; only `Matched` routes `true`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "slot": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -749,24 +615,16 @@
       "description": "A slug-identified guidance item with optional local render text.",
       "properties": {
         "description": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "$ref": "#/$defs/Slug"
         },
         "summary": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "type": "object"
     },
     "GuidanceItemList": {
@@ -815,9 +673,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "policy"
-          ],
+          "required": ["policy"],
           "type": "object"
         },
         {
@@ -838,12 +694,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "policy",
-            "destination",
-            "source",
-            "operation"
-          ],
+          "required": ["policy", "destination", "source", "operation"],
           "type": "object"
         },
         {
@@ -864,12 +715,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "policy",
-            "destination",
-            "source",
-            "guard"
-          ],
+          "required": ["policy", "destination", "source", "guard"],
           "type": "object"
         }
       ]
@@ -930,10 +776,7 @@
       "properties": {
         "description": {
           "description": "Human-readable description of the sequence block.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "sequence": {
           "description": "Ordered items in this sequence block.",
@@ -966,9 +809,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "slot"
-          ],
+          "required": ["slot"],
           "type": "object"
         }
       ],
@@ -1023,25 +864,14 @@
         },
         "title": {
           "description": "Optional display title.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "value": {
           "description": "For output ports: the slot ref that exposes the value (`\"slot:<id>\"`).\nInput ports must not declare `value`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "id",
-        "direction",
-        "schema",
-        "description"
-      ],
+      "required": ["id", "direction", "schema", "description"],
       "type": "object"
     },
     "PortDefault": {
@@ -1059,10 +889,7 @@
           ]
         },
         "value": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -1078,50 +905,32 @@
           "type": "array"
         },
         "capture": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "capture-bytes": {
           "description": "Runtime stdout capture ceiling in bytes. Absent uses the IO host's\ndocumented default-input capture ceiling. A capture that exceeds this\nfails the run rather than landing a truncated value in the port.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "cmd": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "timeout-ms": {
           "description": "Runtime timeout in milliseconds. Absent uses the IO host's documented\ndefault-input timeout.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
       "type": "object"
     },
     "PortDirection": {
       "description": "Port direction: input or output.",
-      "enum": [
-        "input",
-        "output"
-      ],
+      "enum": ["input", "output"],
       "type": "string"
     },
     "PredicateList": {
@@ -1159,19 +968,14 @@
           "items": {
             "type": "string"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": ["array", "null"]
         },
         "worktree-required": {
           "description": "Require prepared worktree provenance before the procedure can expose\nits first prompt or command frame.",
           "type": "boolean"
         }
       },
-      "required": [
-        "description"
-      ],
+      "required": ["description"],
       "type": "object"
     },
     "ProcedureRefList": {
@@ -1190,10 +994,7 @@
           "type": "string"
         },
         "field": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "operation": {
           "$ref": "#/$defs/WriteOperation"
@@ -1202,10 +1003,7 @@
           "$ref": "#/$defs/ProjectionSource"
         }
       },
-      "required": [
-        "source",
-        "destination"
-      ],
+      "required": ["source", "destination"],
       "type": "object"
     },
     "ProjectionSource": {
@@ -1217,9 +1015,7 @@
           "properties": {
             "literal": true
           },
-          "required": [
-            "literal"
-          ],
+          "required": ["literal"],
           "type": "object"
         }
       ],
@@ -1230,10 +1026,7 @@
       "properties": {
         "description": {
           "description": "Human-readable description.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "input": {
           "$ref": "#/$defs/ContractRefList",
@@ -1245,17 +1038,11 @@
         },
         "source": {
           "description": "Resource-backed prompt body source (`resource:<id>`).",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "text": {
           "description": "The prompt body text. May contain typed ref interpolations like\n`{port:user-prompt}` or `{slot:scope}`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -1321,10 +1108,7 @@
           "description": "Conditions that enable this relation: `rule:*` or `signal:*` refs.\nEntries in one `when` list are AND; multiple entries model OR."
         }
       },
-      "required": [
-        "target",
-        "reason"
-      ],
+      "required": ["target", "reason"],
       "type": "object"
     },
     "Resource": {
@@ -1333,10 +1117,7 @@
       "properties": {
         "content": {
           "description": "Inline resource body. Inline resources require no host IO.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "digest": {
           "anyOf": [
@@ -1351,10 +1132,7 @@
         },
         "hint": {
           "description": "Advisory hint about the resource contents or usage.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "description": "Resource identifier (e.g. `\"scope-schema\"`).",
@@ -1373,10 +1151,7 @@
         },
         "path": {
           "description": "Path to the resource blob, relative to `root`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "render": {
           "anyOf": [
@@ -1406,15 +1181,10 @@
         },
         "variant": {
           "description": "Optional resource kind. `template` resources may declare typed inputs.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "type": "object"
     },
     "ResourceInputList": {
@@ -1495,10 +1265,7 @@
         },
         "load-level": {
           "description": "Preferred initial load level: `discovery`, `summary`, or `full`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "mode": {
           "$ref": "#/$defs/PredicateList"
@@ -1515,10 +1282,7 @@
         },
         "weight": {
           "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
       "type": "object"
@@ -1533,17 +1297,11 @@
         },
         "input": {
           "description": "Example task or prompt input.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "output": {
           "description": "Expected result, refusal, warning, or behavior description.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "tag": {
           "$ref": "#/$defs/SlugList",
@@ -1554,10 +1312,7 @@
           "description": "Behavior variant: positive, negative, or edge."
         }
       },
-      "required": [
-        "id",
-        "variant"
-      ],
+      "required": ["id", "variant"],
       "type": "object"
     },
     "ScenarioVariant": {
@@ -1587,27 +1342,18 @@
         "allowed": {
           "description": "Closed set of allowed scalar values for scalar enum schemas.",
           "items": true,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": ["array", "null"]
         },
         "description": {
           "description": "Human-readable description of the schema.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "fields": {
           "additionalProperties": {
             "$ref": "#/$defs/SchemaField"
           },
           "description": "Inline field declarations for duck-typed compatibility.\nMutually exclusive with `resource`.",
-          "type": [
-            "object",
-            "null"
-          ]
+          "type": ["object", "null"]
         },
         "id": {
           "description": "Schema identifier (e.g. `\"scope\"`).",
@@ -1615,22 +1361,14 @@
         },
         "resource": {
           "description": "Resource ref: `resource:<id>` pointing to an opaque blob.\nMutually exclusive with `fields`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "schema": {
           "description": "Scalar schema ref for closed-value enum schemas.\nMutually exclusive with `resource` and `fields`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "type": "object"
     },
     "SchemaField": {
@@ -1640,24 +1378,15 @@
         "allowed": {
           "description": "Optional closed set of allowed scalar values for this field.",
           "items": true,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": ["array", "null"]
         },
         "description": {
           "description": "Human-readable description.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "hint": {
           "description": "Advisory hint.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "required": {
           "description": "Whether this field is required.",
@@ -1668,9 +1397,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "schema"
-      ],
+      "required": ["schema"],
       "type": "object"
     },
     "SchemaForm": {
@@ -1698,10 +1425,7 @@
               "$ref": "#/$defs/GuardExpr"
             }
           },
-          "required": [
-            "ref",
-            "when"
-          ],
+          "required": ["ref", "when"],
           "type": "object"
         },
         {
@@ -1714,10 +1438,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "slot",
-            "optional"
-          ],
+          "required": ["slot", "optional"],
           "type": "object"
         }
       ],
@@ -1748,10 +1469,7 @@
         },
         "agent": {
           "description": "Optional abstract agent role that should serve this executable item.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "branch-failure": {
           "description": "`parallel` ordered per-branch terminal failure policy. A branch with\nno entry defaults to `panel-fail`.",
@@ -1768,17 +1486,11 @@
           "description": "See [`CommandPlan::capture_bytes`], for simple `cmd` shorthand.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "cmd": {
           "description": "Simple no-shell command shorthand for a command-backed sequence item.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "command": {
           "anyOf": [
@@ -1808,10 +1520,7 @@
         },
         "id": {
           "description": "Optional stable identifier for sequence-order references.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "input": {
           "$ref": "#/$defs/SequenceInputList",
@@ -1819,10 +1528,7 @@
         },
         "item": {
           "description": "`for-each` per-item slot ref.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "join": {
           "anyOf": [
@@ -1850,35 +1556,23 @@
           "description": "Required positive upper bound on `branches` length for a `parallel`\nitem. `branches.len()` must not exceed this bound.",
           "format": "uint",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "max-items": {
           "description": "Required `for-each` bound.",
           "format": "uint",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "max-iterations": {
           "description": "Required loop bound.",
           "format": "uint",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "max-iterations-from": {
           "description": "Local `schema:integer` input port resolved once at loop entry and frozen\ninto the runtime control frame. Mutually exclusive with\n`max-iterations`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "on-abort": {
           "anyOf": [
@@ -1922,10 +1616,7 @@
         },
         "otherwise": {
           "description": "Optional named sequence ref selected when a branch guard is false.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "output": {
           "$ref": "#/$defs/OutputSinkList",
@@ -1933,10 +1624,7 @@
         },
         "over": {
           "description": "`for-each` list slot ref.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "projection": {
           "description": "Ordered deterministic writes for `kind = \"project\"`. All source values\nare read before any destination is committed.",
@@ -1951,10 +1639,7 @@
         },
         "sequence": {
           "description": "Named sequence ref (`sequence:<id>`) for sequence/loop/for-each items.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "success-exit-code": {
           "description": "Exit codes treated as success for simple `cmd` shorthand.",
@@ -1968,10 +1653,7 @@
           "description": "Runtime timeout in milliseconds for simple `cmd` shorthand.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "title": {
           "description": "Human-readable title for this sequence step.",
@@ -2006,16 +1688,7 @@
       "description": "Sequence item kind. Omitted kind infers prompt or command from authored fields.",
       "oneOf": [
         {
-          "enum": [
-            "prompt",
-            "command",
-            "check",
-            "sequence",
-            "branch",
-            "loop",
-            "for-each",
-            "parallel"
-          ],
+          "enum": ["prompt", "command", "check", "sequence", "branch", "loop", "for-each", "parallel"],
           "type": "string"
         },
         {
@@ -2036,19 +1709,14 @@
       "properties": {
         "description": {
           "description": "Optional human-readable description of what this session is for.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "description": "Session identifier, referenced by agents as `session:<id>`.",
           "type": "string"
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "type": "object"
     },
     "Signal": {
@@ -2064,10 +1732,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "id",
-        "description"
-      ],
+      "required": ["id", "description"],
       "type": "object"
     },
     "SignalEmissionRule": {
@@ -2084,10 +1749,7 @@
               "$ref": "#/$defs/GuardExpr"
             }
           },
-          "required": [
-            "signal",
-            "when"
-          ],
+          "required": ["signal", "when"],
           "type": "object"
         }
       ],
@@ -2098,17 +1760,11 @@
       "properties": {
         "description": {
           "description": "Human-readable description of what this slot represents.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "hint": {
           "description": "Advisory hint for the expected slot value, examples, or constraints\nuseful to a step prompt. Metadata only — schema remains the validation\ncontract.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "description": "Slot identifier (e.g. `\"finding\"`, `\"scope\"`, `\"note-risk\"`).",
@@ -2126,9 +1782,7 @@
           "description": "Schema ref (e.g. `\"schema:text\"`, `\"schema:scope\"`,\n`\"[schema:scope]\"`) or omitted."
         }
       },
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "type": "object"
     },
     "Slug": {
@@ -2184,10 +1838,7 @@
           "type": "array"
         },
         "load-level": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "required-inherited-trait": {
           "items": {
@@ -2196,16 +1847,10 @@
           "type": "array"
         },
         "role": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "task-boundary": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -2225,10 +1870,7 @@
           "$ref": "#/$defs/RelationsRefList"
         }
       },
-      "required": [
-        "target",
-        "reason"
-      ],
+      "required": ["target", "reason"],
       "type": "object"
     },
     "Summary": {
@@ -2261,9 +1903,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "set-field"
-          ],
+          "required": ["set-field"],
           "type": "object"
         },
         {
@@ -2462,22 +2102,13 @@
     },
     "variant": {
       "description": "Native family leaf identity. This is deliberately absent from 0.2\ndocuments, preserving their encoded bytes and digest semantics.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "version": {
       "$ref": "#/$defs/SemanticVersion"
     }
   },
-  "required": [
-    "id",
-    "schema-version",
-    "version",
-    "name",
-    "summary"
-  ],
+  "required": ["id", "schema-version", "version", "name", "summary"],
   "title": "Trait",
   "type": "object"
 }

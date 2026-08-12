@@ -1,4 +1,4 @@
-__Agent Traits & Workflows · typed, versioned & in-sync.__
+**Agent Traits & Workflows · typed, versioned & in-sync.**
 
 _Turn your skills into shareable modules, that are easily maintained and orchestrated by you and your team._
 
@@ -11,11 +11,13 @@ How ctx compares → [docs/comparison.md](docs/comparison.md)
 ## Installation
 
 ### Homebrew (macOS and Linux)
+
 ```sh
 brew install ctx-company/tap/ctx
 ```
 
 ### Direct download
+
 Every release publishes a `ctx` binary for macOS and Linux, on both Intel and ARM.
 Set `VERSION` to the [latest release](https://github.com/ctx-company/traits/releases/latest)
 and `TARGET` to one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -28,6 +30,7 @@ VERSION=0.1.0-alpha.1 TARGET=aarch64-apple-darwin \
 ```
 
 ### From source
+
 ```sh
 git clone https://github.com/ctx-company/traits \
     && cd traits \
@@ -36,7 +39,7 @@ git clone https://github.com/ctx-company/traits \
 
 `ctx` is a single static binary. Running a trait needs only `git` and whichever
 coding agent you point it at — no Node, no Python, no runtime to install.
-Node is needed only to *author* your own traits in TypeScript.
+Node is needed only to _author_ your own traits in TypeScript.
 
 ## Quick start
 

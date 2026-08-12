@@ -65,7 +65,4 @@ is observable from the dashboard rather than being a silent process.
 """
 
 [relations]
-depends-on = [
-    "0087",
-    "0088",
-]
+depends-on = ["0087", "0088"]

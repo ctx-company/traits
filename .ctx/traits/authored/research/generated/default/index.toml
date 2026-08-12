@@ -7,12 +7,7 @@ summary = "Surveyed dogfood research procedure: plan a cardinality-gated set of 
 variant = "default"
 
 [metadata]
-tag = [
-    "dogfood",
-    "research",
-    "review",
-    "multi-agent",
-]
+tag = ["dogfood", "research", "review", "multi-agent"]
 
 [[intent.require]]
 id = "correctness"
@@ -72,10 +67,7 @@ schema = "[schema:review-verdict]"
 optional = true
 description = "Typed park record for an unapproved run: one entry per reviewed verdict still revise in the final round. Present only when the build loop exhausted without approval — the run parks and no commit is created."
 title = "Park Report"
-format = [
-    "structured",
-    "table",
-]
+format = ["structured", "table"]
 value = "slot:park-report"
 
 [[port]]
@@ -264,12 +256,7 @@ description = "A checklist item outside in-run capability or authority, with ver
 schema = "schema:text"
 required = true
 description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
-allowed = [
-    "gui-or-visual",
-    "paid-or-live-execution",
-    "owner-decision",
-    "contract-conflict",
-]
+allowed = ["gui-or-visual", "paid-or-live-execution", "owner-decision", "contract-conflict"]
 
 [schema.fields.close-out]
 schema = "schema:text"
@@ -309,10 +296,7 @@ description = "Stable kebab-case slug for this stream, unique within the plan."
 schema = "schema:text"
 required = true
 description = "primary investigates the topic directly; counterevidence deliberately searches for disconfirming evidence and competing conclusions against the other streams' emerging findings."
-allowed = [
-    "primary",
-    "counterevidence",
-]
+allowed = ["primary", "counterevidence"]
 
 [[schema]]
 id = "review-verdict"
@@ -331,10 +315,7 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
-allowed = [
-    "none",
-    "needs-owner",
-]
+allowed = ["none", "needs-owner"]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -353,10 +334,7 @@ description = "Cross-task seam citations ONLY: counterpart work belonging to a D
 schema = "schema:text"
 required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -398,14 +376,7 @@ text = """
                         Produce the research delivery for {port:topic} from the plan {slot:stream-plan}, findings {slot:findings}, and triangulation {slot:triangulation}. Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): report.md, bibliography.md, and evidence.csv (claim, source, rating, url).
                         No reviewer verdict attached means this is round 1: implement the full delivery. On every later round a verdict IS attached — fix every blocker it names.
                         Return a work summary: what was written, how citations were verified, open concerns."""
-input = [
-    "port:topic",
-    "slot:stream-plan",
-    "slot:findings",
-    "slot:triangulation",
-    "port:output-dir",
-    "slot:topic-slug",
-]
+input = ["port:topic", "slot:stream-plan", "slot:findings", "slot:triangulation", "port:output-dir", "slot:topic-slug"]
 output = ["slot:work-summary"]
 
 [prompt.building-review]
@@ -416,12 +387,12 @@ text = """
                         Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
                         Set status to revise while any blocker remains, approved when none do."""
 input = [
-    "port:topic",
-    "slot:stream-plan",
-    "slot:triangulation",
-    "slot:work-summary",
-    "port:output-dir",
-    "slot:topic-slug",
+  "port:topic",
+  "slot:stream-plan",
+  "slot:triangulation",
+  "slot:work-summary",
+  "port:output-dir",
+  "slot:topic-slug",
 ]
 output = ["slot:review-verdict-1"]
 
@@ -440,11 +411,11 @@ text = """
                     Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
                     Return exactly one stream-finding per planned stream (same order, same ids): the stream's id and its cited findings summary. Write nothing to disk yet — this is evidence gathering only."""
 input = [
-    "slot:stream-plan",
-    "port:topic",
-    "resource:research-standards",
-    "resource:source-quality-guide",
-    "resource:citation-style",
+  "slot:stream-plan",
+  "port:topic",
+  "resource:research-standards",
+  "resource:source-quality-guide",
+  "resource:citation-style",
 ]
 output = ["slot:findings"]
 
@@ -454,12 +425,7 @@ text = """
                         The review for the research on {port:topic} has ended approved and the work is being committed.
                         Write a concise commit message from the work summary {slot:work-summary} and the verdict {slot:review-verdict-1}: a short subject line naming the topic, then one paragraph on what was researched and delivered at {slot:report-path}.
                         Return exactly that message. Do not run git commands and do not write files."""
-input = [
-    "port:topic",
-    "slot:work-summary",
-    "slot:review-verdict-1",
-    "slot:report-path",
-]
+input = ["port:topic", "slot:work-summary", "slot:review-verdict-1", "slot:report-path"]
 output = ["slot:shipping-message"]
 
 [prompt.triangulate-the-findings]
@@ -467,10 +433,7 @@ text = """
 
                     Triangulate the researched findings {slot:findings} for {port:topic}: where independent streams agree, where they conflict, source-quality ratings, and remaining gaps.
                     Return the triangulation."""
-input = [
-    "slot:findings",
-    "port:topic",
-]
+input = ["slot:findings", "port:topic"]
 output = ["slot:triangulation"]
 
 [[sequence.building-body.sequence]]
@@ -479,14 +442,14 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-    "port:topic",
-    "slot:stream-plan",
-    "slot:findings",
-    "slot:triangulation",
-    "port:output-dir",
-    "slot:topic-slug",
-    { slot = "slot:review-verdict-1", optional = true },
-    { slot = "slot:work-summary", optional = true },
+  "port:topic",
+  "slot:stream-plan",
+  "slot:findings",
+  "slot:triangulation",
+  "port:output-dir",
+  "slot:topic-slug",
+  { slot = "slot:review-verdict-1", optional = true },
+  { slot = "slot:work-summary", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -496,13 +459,13 @@ title = "Building Review"
 agent = "agent:smart-1"
 prompt = "prompt:building-review"
 input = [
-    "port:topic",
-    "slot:stream-plan",
-    "slot:triangulation",
-    "slot:work-summary",
-    "port:output-dir",
-    "slot:topic-slug",
-    { slot = "slot:review-verdict-1", optional = true },
+  "port:topic",
+  "slot:stream-plan",
+  "slot:triangulation",
+  "slot:work-summary",
+  "port:output-dir",
+  "slot:topic-slug",
+  { slot = "slot:review-verdict-1", optional = true },
 ]
 output = ["slot:review-verdict-1"]
 
@@ -534,12 +497,7 @@ id = "shipping-message"
 title = "Write the commit message (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:shipping-message"
-input = [
-    "port:topic",
-    "slot:work-summary",
-    "slot:review-verdict-1",
-    "slot:report-path",
-]
+input = ["port:topic", "slot:work-summary", "slot:review-verdict-1", "slot:report-path"]
 output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -548,11 +506,7 @@ title = "Stage all changes"
 output = ["slot:shipping-stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
+argv = ["git", "add", "-A"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-unstage-runtime"
@@ -560,13 +514,7 @@ title = "Unstage runtime state"
 output = ["slot:shipping-unstage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "-q",
-    "--",
-    ".agents/runs",
-]
+argv = ["git", "reset", "-q", "--", ".agents/runs"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-commit"
@@ -575,12 +523,7 @@ input = ["slot:shipping-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "commit",
-    "-m",
-    "{slot:shipping-message}",
-]
+argv = ["git", "commit", "-m", "{slot:shipping-message}"]
 
 [[sequence.ctx-branch-arm-s-13-building-body-18-park-report-record-then.sequence]]
 id = "park-report-append"
@@ -602,24 +545,13 @@ id = "plan-the-streams"
 title = "Plan the streams"
 agent = "agent:smart-1"
 prompt = "prompt:plan-the-streams"
-input = [
-    "port:topic",
-    { slot = "slot:stream-plan", optional = true },
-]
+input = ["port:topic", { slot = "slot:stream-plan", optional = true }]
 output = ["slot:stream-plan"]
 
 [procedure]
 description = "Research one topic end to end: plan 2-4 non-overlapping streams, research each serially, triangulate the findings, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv."
-input = [
-    "port:output-dir",
-    "port:topic",
-]
-output = [
-    "port:commit-report",
-    "port:park-report",
-    "port:report-path",
-    "port:research-report",
-]
+input = ["port:output-dir", "port:topic"]
+output = ["port:commit-report", "port:park-report", "port:report-path", "port:research-report"]
 
 [[procedure.sequence]]
 id = "topic-slug"
@@ -629,29 +561,21 @@ output = ["slot:topic-slug"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    'printf "%s" "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
-    "_",
-    "{port:topic}",
+  "sh",
+  "-c",
+  'printf "%s" "$1" | tr "A-Z" "a-z" | tr -cs "a-z0-9" "-" | sed "s/^-*//;s/-*$//"',
+  "_",
+  "{port:topic}",
 ]
 
 [[procedure.sequence]]
 id = "report-path"
 title = "Derive report.md path"
-input = [
-    "port:output-dir",
-    "slot:topic-slug",
-]
+input = ["port:output-dir", "slot:topic-slug"]
 output = ["slot:report-path"]
 
 [procedure.sequence.command]
-argv = [
-    "printf",
-    "%s/%s/report.md",
-    "{port:output-dir}",
-    "{slot:topic-slug}",
-]
+argv = ["printf", "%s/%s/report.md", "{port:output-dir}", "{slot:topic-slug}"]
 
 [[procedure.sequence]]
 id = "planning"
@@ -679,11 +603,11 @@ title = "Research the streams"
 agent = "agent:worker"
 prompt = "prompt:research-the-streams"
 input = [
-    "slot:stream-plan",
-    "port:topic",
-    "resource:research-standards",
-    "resource:source-quality-guide",
-    "resource:citation-style",
+  "slot:stream-plan",
+  "port:topic",
+  "resource:research-standards",
+  "resource:source-quality-guide",
+  "resource:citation-style",
 ]
 output = ["slot:findings"]
 
@@ -692,10 +616,7 @@ id = "triangulate-the-findings"
 title = "Triangulate the findings"
 agent = "agent:worker"
 prompt = "prompt:triangulate-the-findings"
-input = [
-    "slot:findings",
-    "port:topic",
-]
+input = ["slot:findings", "port:topic"]
 output = ["slot:triangulation"]
 
 [[procedure.sequence]]
@@ -717,11 +638,7 @@ title = "Check working tree status"
 output = ["slot:shipping-status"]
 
 [procedure.sequence.command]
-argv = [
-    "git",
-    "status",
-    "--porcelain",
-]
+argv = ["git", "status", "--porcelain"]
 
 [[procedure.sequence]]
 id = "shipping-maybe-commit"

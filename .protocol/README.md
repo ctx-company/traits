@@ -1,3 +1,3 @@
 # Agent Traits — protocol
 
-__Work In Progress__ — still not sure about this.
+**Work In Progress** — still not sure about this.

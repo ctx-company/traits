@@ -7,11 +7,7 @@ summary = "Points a single reviewer at an arbitrary locally-resolvable git ref/r
 variant = "default"
 
 [metadata]
-tag = [
-    "first-party",
-    "review",
-    "read-only",
-]
+tag = ["first-party", "review", "read-only"]
 
 [[intent.require]]
 id = "review-before-final"
@@ -163,12 +159,7 @@ description = "A checklist item outside in-run capability or authority, with ver
 schema = "schema:text"
 required = true
 description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
-allowed = [
-    "gui-or-visual",
-    "paid-or-live-execution",
-    "owner-decision",
-    "contract-conflict",
-]
+allowed = ["gui-or-visual", "paid-or-live-execution", "owner-decision", "contract-conflict"]
 
 [schema.fields.close-out]
 schema = "schema:text"
@@ -220,10 +211,7 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
-allowed = [
-    "none",
-    "needs-owner",
-]
+allowed = ["none", "needs-owner"]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -242,10 +230,7 @@ description = "Cross-task seam citations ONLY: counterpart work belonging to a D
 schema = "schema:text"
 required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -269,16 +254,8 @@ Review the range {slot:range-resolved} (from the range/ref you were given: {port
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.
     Write both the typed verdict and a rendered human review document: what the range does, the blockers you found (if any) and why each is one, and anything advisory."""
-input = [
-    "port:range",
-    "slot:range-resolved",
-    "slot:commit-log",
-    "slot:diff-stat",
-]
-output = [
-    "slot:review-verdict",
-    "slot:review-document",
-]
+input = ["port:range", "slot:range-resolved", "slot:commit-log", "slot:diff-stat"]
+output = ["slot:review-verdict", "slot:review-document"]
 
 [[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
 id = "capture-the-diff-inventory"
@@ -287,13 +264,7 @@ input = ["slot:range-resolved"]
 output = ["slot:diff-stat"]
 
 [sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'git diff --stat "$1"',
-    "_",
-    "{slot:range-resolved}",
-]
+argv = ["sh", "-c", 'git diff --stat "$1"', "_", "{slot:range-resolved}"]
 
 [[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
 id = "capture-the-commit-log"
@@ -302,13 +273,7 @@ input = ["slot:range-resolved"]
 output = ["slot:commit-log"]
 
 [sequence.ctx-branch-arm-p-14-range-resolved-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'git log --oneline "$1"',
-    "_",
-    "{slot:range-resolved}",
-]
+argv = ["sh", "-c", 'git log --oneline "$1"', "_", "{slot:range-resolved}"]
 
 [[sequence.ctx-branch-arm-p-14-range-resolved-then.sequence]]
 id = "diff-non-empty"
@@ -325,16 +290,8 @@ id = "review-the-range"
 title = "Review the range"
 agent = "agent:reviewer"
 prompt = "prompt:review-the-range"
-input = [
-    "port:range",
-    "slot:range-resolved",
-    "slot:commit-log",
-    "slot:diff-stat",
-]
-output = [
-    "slot:review-verdict",
-    "slot:review-document",
-]
+input = ["port:range", "slot:range-resolved", "slot:commit-log", "slot:diff-stat"]
+output = ["slot:review-verdict", "slot:review-document"]
 
 [[sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence]]
 id = "assert-the-reviewed-tree-stayed-clean"
@@ -343,20 +300,12 @@ kind = "check"
 output = ["slot:tree-status"]
 
 [sequence.ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then.sequence.command]
-argv = [
-    "sh",
-    "-c",
-    'test -z "$(git status --porcelain)"',
-]
+argv = ["sh", "-c", 'test -z "$(git status --porcelain)"']
 
 [procedure]
 description = "Preflight range resolution -> deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
 input = ["port:range"]
-output = [
-    "port:review-document-report",
-    "port:review-verdict-report",
-    "port:tree-status-report",
-]
+output = ["port:review-document-report", "port:review-verdict-report", "port:tree-status-report"]
 
 [[procedure.sequence]]
 id = "resolve-the-range"
@@ -366,11 +315,11 @@ output = ["slot:range-resolved"]
 
 [procedure.sequence.command]
 argv = [
-    "sh",
-    "-c",
-    'r="$1"; case "$r" in *...*|*..*) resolved="$r" ;; *) git rev-parse --verify "$r" >/dev/null 2>&1 || exit 0; base=$(git merge-base HEAD "$r" 2>/dev/null) || exit 0; resolved="$base..$r" ;; esac; git rev-list "$resolved" >/dev/null 2>&1 && echo "$resolved"; exit 0',
-    "_",
-    "{port:range}",
+  "sh",
+  "-c",
+  'r="$1"; case "$r" in *...*|*..*) resolved="$r" ;; *) git rev-parse --verify "$r" >/dev/null 2>&1 || exit 0; base=$(git merge-base HEAD "$r" 2>/dev/null) || exit 0; resolved="$base..$r" ;; esac; git rev-list "$resolved" >/dev/null 2>&1 && echo "$resolved"; exit 0',
+  "_",
+  "{port:range}",
 ]
 
 [[procedure.sequence]]

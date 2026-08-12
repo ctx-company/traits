@@ -52,24 +52,25 @@ import review, { verdict } from "./sequence/review.ts";
 // all trace back to that one declaration instead of a separately
 // hand-declared slot.
 const output = cdkPort.output.of({
-    id: "verdict",
-    schema: ref.schema("implementation-verdict"),
-    description: "The reviewer's final verdict on the implemented work.",
-    value: verdict,
+  id: "verdict",
+  schema: ref.schema("implementation-verdict"),
+  description: "The reviewer's final verdict on the implemented work.",
+  value: verdict,
 });
 
 export default trait("implement-phase", {
-    version: "0.1.0",
-    name: "Implement Phase",
-    description: "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict.",
-    metadata: { tag: ["template", "implementation", "review"] },
-    procedure: procedure({
-        description: "Plan, implement, and review one task end to end.",
-        input: port.task,
-        output,
-        // Three chained prompt steps. Each step's `output` slot becomes the
-        // next step's `input`, so the model sees exactly the prior step's
-        // structured/text result, never the whole conversation.
-        sequence: [draft, implement, review],
-    }),
+  version: "0.1.0",
+  name: "Implement Phase",
+  description:
+    "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict.",
+  metadata: { tag: ["template", "implementation", "review"] },
+  procedure: procedure({
+    description: "Plan, implement, and review one task end to end.",
+    input: port.task,
+    output,
+    // Three chained prompt steps. Each step's `output` slot becomes the
+    // next step's `input`, so the model sees exactly the prior step's
+    // structured/text result, never the whole conversation.
+    sequence: [draft, implement, review],
+  }),
 });

@@ -66,13 +66,9 @@ if (median && median.deltaLines !== undefined) {
 process.stdout.write(JSON.stringify(output));
 `.trim();
 
-export function measureAggregateStage(
-    title: string,
-    commandPort: cdk.PortHandle<string[]>,
-    output: cdk.SlotHandle,
-) {
-    return cdk.step.command(title, {
-        argv: ["node", "--input-type=module", "--eval", aggregateRunnerScript, commandPort, benchmarkRuns],
-        output,
-    });
+export function measureAggregateStage(title: string, commandPort: cdk.PortHandle<string[]>, output: cdk.SlotHandle) {
+  return cdk.step.command(title, {
+    argv: ["node", "--input-type=module", "--eval", aggregateRunnerScript, commandPort, benchmarkRuns],
+    output,
+  });
 }

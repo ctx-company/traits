@@ -7,12 +7,7 @@ summary = "Turn a described task into codebase-grounded, house-format task files
 variant = "default"
 
 [metadata]
-tag = [
-    "task",
-    "plan",
-    "bootstrap",
-    "planning",
-]
+tag = ["task", "plan", "bootstrap", "planning"]
 
 [[intent.focus]]
 id = "specific"
@@ -112,10 +107,7 @@ Task format doctrine: Format each task as one standalone Markdown file for .inte
             Break the refined work into small, ordered task files.
             Fold the grounding each task needs — its files, gates, invariants, constraints — into that task's own body and Watch section, so every file stands alone.
             Do not implement anything."""
-input = [
-    "port:task",
-    "slot:grounding",
-]
+input = ["port:task", "slot:grounding"]
 output = ["slot:task-files"]
 
 [prompt.write]
@@ -147,10 +139,7 @@ id = "split"
 title = "Split the work into task files"
 agent = "agent:smart-1"
 prompt = "prompt:split"
-input = [
-    "port:task",
-    "slot:grounding",
-]
+input = ["port:task", "slot:grounding"]
 output = ["slot:task-files"]
 
 [[procedure.sequence]]

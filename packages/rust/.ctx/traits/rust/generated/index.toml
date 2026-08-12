@@ -5,11 +5,7 @@ name = "Rust"
 description = "Shared Rust doctrine: worker/reviewer roles specialized for Rust changes, plus the engineering-standards and gate-conventions resources this repo's Rust core is held to, for dependents that declare it instead of pasting the roles or doctrine into their own trait source."
 
 [metadata]
-tag = [
-    "first-party",
-    "knowledge",
-    "rust",
-]
+tag = ["first-party", "knowledge", "rust"]
 
 [[resource]]
 id = "engineering-standards"

@@ -15,11 +15,7 @@ path = "../rust"
 [metadata]
 family = "refactor"
 variant = "rust"
-tag = [
-    "first-party",
-    "refactoring",
-    "rust",
-]
+tag = ["first-party", "refactoring", "rust"]
 
 [[port]]
 id = "target"
@@ -55,11 +51,7 @@ text = """
                     Implement the requested refactor for {port:target}.
                     Hold the change to the engineering-standards {resource:rust/engineering-standards} and run the gates named in {resource:rust/gate-conventions} (fmt --check, check, clippy -D warnings) before reporting.
                     Return a work summary: what changed (files), the exact gate commands you ran, and their result."""
-input = [
-    "port:target",
-    "resource:rust/engineering-standards",
-    "resource:rust/gate-conventions",
-]
+input = ["port:target", "resource:rust/engineering-standards", "resource:rust/gate-conventions"]
 output = ["slot:work-summary"]
 
 [prompt.review]
@@ -68,12 +60,7 @@ text = """
                     Review the refactored state of {port:target} against the work summary {slot:work-summary}.
                     Consult the engineering-standards {resource:rust/engineering-standards} and gate-conventions {resource:rust/gate-conventions}, and inspect the actual working tree and gate output with your tools — never review the summary alone.
                     Return your judgment: whether the gates genuinely pass and the standards are held, naming any blocking defect found."""
-input = [
-    "port:target",
-    "slot:work-summary",
-    "resource:rust/engineering-standards",
-    "resource:rust/gate-conventions",
-]
+input = ["port:target", "slot:work-summary", "resource:rust/engineering-standards", "resource:rust/gate-conventions"]
 output = ["slot:review-notes"]
 
 [procedure]
@@ -85,11 +72,7 @@ id = "implement"
 title = "Implement the refactor (worker)"
 agent = "agent:worker"
 prompt = "prompt:implement"
-input = [
-    "port:target",
-    "resource:rust/engineering-standards",
-    "resource:rust/gate-conventions",
-]
+input = ["port:target", "resource:rust/engineering-standards", "resource:rust/gate-conventions"]
 output = ["slot:work-summary"]
 
 [[procedure.sequence]]
@@ -97,10 +80,5 @@ id = "review"
 title = "Review the refactor (reviewer)"
 agent = "agent:reviewer"
 prompt = "prompt:review"
-input = [
-    "port:target",
-    "slot:work-summary",
-    "resource:rust/engineering-standards",
-    "resource:rust/gate-conventions",
-]
+input = ["port:target", "slot:work-summary", "resource:rust/engineering-standards", "resource:rust/gate-conventions"]
 output = ["slot:review-notes"]

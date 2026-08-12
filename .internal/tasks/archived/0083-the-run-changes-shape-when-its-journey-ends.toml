@@ -127,7 +127,4 @@ and a run that ends with nothing after it simply stays as it was.
 """
 
 [relations]
-depends-on = [
-    "0080",
-    "0082",
-]
+depends-on = ["0080", "0082"]

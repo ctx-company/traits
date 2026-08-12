@@ -99,8 +99,4 @@ unedited take.
 '''
 
 [relations]
-depends-on = [
-    "0093",
-    "0084",
-    "0085",
-]
+depends-on = ["0093", "0084", "0085"]

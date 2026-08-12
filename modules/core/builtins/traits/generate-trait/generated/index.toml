@@ -13,11 +13,7 @@ version = "0.1.0"
 path = "../trait-spec"
 
 [metadata]
-tag = [
-    "first-party",
-    "meta-trait",
-    "generation",
-]
+tag = ["first-party", "meta-trait", "generation"]
 
 [[port]]
 id = "brief"
@@ -125,11 +121,11 @@ text = """
         Create exactly one complete trait authoring source in TypeScript, using the @ctx-traits/cdk builder, for {port:name} from {port:brief}. It must declare trait("{port:trait-id}", ...) with a non-empty procedure sequence — a candidate that compiles but declares no procedure never converges.
         Ground it in {resource:trait-spec/agent-traits-schema} and {resource:trait-spec/design-rubric}. Return the complete TypeScript source text only, nothing else."""
 input = [
-    "port:name",
-    "port:brief",
-    "port:trait-id",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:name",
+  "port:brief",
+  "port:trait-id",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:candidate-source"]
 
@@ -138,12 +134,7 @@ text = """
 
         Round evaluation of trait {port:trait-id} for {port:brief} failed at rung {slot:round-report}. Current candidate source: {slot:candidate-source}.
         Fix exactly what the diagnostics in {slot:round-report} name; keep everything else. Return the complete corrected TypeScript source text only, nothing else."""
-input = [
-    "port:trait-id",
-    "port:brief",
-    "slot:round-report",
-    "slot:candidate-source",
-]
+input = ["port:trait-id", "port:brief", "slot:round-report", "slot:candidate-source"]
 output = ["slot:candidate-source"]
 
 [[sequence.ctx-branch-arm-s-5-round-23-revise-if-not-converged-then.sequence]]
@@ -151,31 +142,17 @@ id = "revise"
 title = "Revise the candidate against its round diagnostics (generator)"
 agent = "agent:generator"
 prompt = "prompt:revise"
-input = [
-    "port:trait-id",
-    "port:brief",
-    "slot:round-report",
-    "slot:candidate-source",
-]
+input = ["port:trait-id", "port:brief", "slot:round-report", "slot:candidate-source"]
 output = ["slot:candidate-source"]
 
 [[sequence.round.sequence]]
 id = "evaluate-round"
 title = "Evaluate the candidate through the rung ladder"
-input = [
-    "port:trait-id",
-    "slot:candidate-source",
-]
+input = ["port:trait-id", "slot:candidate-source"]
 output = ["slot:round-report"]
 
 [sequence.round.sequence.command]
-argv = [
-    "ctx",
-    "traits",
-    "generate-round",
-    "{port:trait-id}",
-    "{slot:candidate-source}",
-]
+argv = ["ctx", "traits", "generate-round", "{port:trait-id}", "{slot:candidate-source}"]
 timeout-ms = 180000
 
 [[sequence.round.sequence]]
@@ -207,11 +184,7 @@ equals = true
 
 [procedure]
 description = "Produce a trait candidate, evaluate it through the deterministic rung ladder, and revise within a declared round bound; the handler writes only a converged result."
-input = [
-    "port:brief",
-    "port:name",
-    "port:trait-id",
-]
+input = ["port:brief", "port:name", "port:trait-id"]
 output = ["port:result"]
 
 [[procedure.sequence]]
@@ -220,11 +193,11 @@ title = "Draft the trait candidate (generator)"
 agent = "agent:generator"
 prompt = "prompt:produce-first"
 input = [
-    "port:name",
-    "port:brief",
-    "port:trait-id",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:name",
+  "port:brief",
+  "port:trait-id",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:candidate-source"]
 
@@ -256,19 +229,11 @@ equals = true
 [[procedure.sequence]]
 id = "derive-envelope"
 title = "Assemble the terminal round-evidence envelope"
-input = [
-    "slot:round-report",
-    "slot:candidate-source",
-    "slot:rounds-spent",
-]
+input = ["slot:round-report", "slot:candidate-source", "slot:rounds-spent"]
 output = ["slot:envelope"]
 
 [procedure.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 const [roundReportText, candidateSourceText, roundsSpentText, roundsBoundText] = process.argv.slice(1);
 const report = JSON.parse(roundReportText);
 process.stdout.write(JSON.stringify({
@@ -278,9 +243,4 @@ process.stdout.write(JSON.stringify({
     "failing-rung": report.converged ? undefined : report.rung,
     diagnostics: report.diagnostics ?? [],
     "candidate-source": candidateSourceText,
-}));""",
-    "{slot:round-report}",
-    "{slot:candidate-source}",
-    "{slot:rounds-spent}",
-    "3",
-]
+}));""", "{slot:round-report}", "{slot:candidate-source}", "{slot:rounds-spent}", "3"]

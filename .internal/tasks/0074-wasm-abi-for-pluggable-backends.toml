@@ -73,8 +73,4 @@ reading its source.
 """
 
 [relations]
-depends-on = [
-    "0060",
-    "0069",
-    "0073",
-]
+depends-on = ["0060", "0069", "0073"]

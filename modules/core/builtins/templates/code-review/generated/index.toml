@@ -5,10 +5,7 @@ name = "Code Review"
 description = "Reviews a diff against a stated focus and returns structured, source-anchored findings with a pass/needs-changes verdict."
 
 [metadata]
-tag = [
-    "template",
-    "review",
-]
+tag = ["template", "review"]
 
 [[port]]
 id = "diff"
@@ -37,10 +34,7 @@ description = "Runtime slot review."
 [[schema]]
 id = "severity"
 schema = "schema:text"
-allowed = [
-    "blocker",
-    "advisory",
-]
+allowed = ["blocker", "advisory"]
 
 [[schema]]
 id = "code-review-finding"
@@ -62,11 +56,7 @@ required = true
 [[schema]]
 id = "verdict"
 schema = "schema:text"
-allowed = [
-    "pass",
-    "fail",
-    "needs-changes",
-]
+allowed = ["pass", "fail", "needs-changes"]
 
 [[schema]]
 id = "code-review-scaffold"
@@ -92,18 +82,12 @@ Review {port:diff} with a focus on {port:focus}.
 Return exactly one structured review: a verdict of pass, needs-changes, or fail, and one finding per issue you find, each naming its file, a severity of blocker or advisory, and a concise summary. Do not rewrite the diff; report only.
 
 Return JSON matching schema:code-review-scaffold, with no surrounding commentary."""
-input = [
-    "port:diff",
-    "port:focus",
-]
+input = ["port:diff", "port:focus"]
 output = ["slot:review"]
 
 [procedure]
 description = "Review a diff for the stated focus and return one structured verdict with findings."
-input = [
-    "port:diff",
-    "port:focus",
-]
+input = ["port:diff", "port:focus"]
 output = ["port:review"]
 
 [[procedure.sequence]]
@@ -111,8 +95,5 @@ id = "review"
 title = "Review the diff"
 agent = "agent:reviewer"
 prompt = "prompt:review"
-input = [
-    "port:diff",
-    "port:focus",
-]
+input = ["port:diff", "port:focus"]
 output = ["slot:review"]

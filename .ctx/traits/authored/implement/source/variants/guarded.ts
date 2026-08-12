@@ -13,18 +13,18 @@ import * as resource from "./quick/resource.ts";
 import { quickProcedure } from "./quick.ts";
 
 export default variant({
-    name: "Implement (Guarded)",
-    summary:
-        "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands.",
-    metadata: { tag: ["dogfood", "implementation", "review", "lean", "gated"] },
-    behavior: FAMILY_BEHAVIOR,
-    intent: QUICK_INTENT,
-    resource: [resource.taskBoard],
-    signal: [gateTimedOut],
-    port: [port.commitReport, port.parkReportPort],
-    procedure: quickProcedure({
-        prefix: "ctx-gate run --",
-        title: "Commit the work (awaiting ctx-gate approval)",
-        timeoutMs: 28_800_000,
-    }),
+  name: "Implement (Guarded)",
+  summary:
+    "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands.",
+  metadata: { tag: ["dogfood", "implementation", "review", "lean", "gated"] },
+  behavior: FAMILY_BEHAVIOR,
+  intent: QUICK_INTENT,
+  resource: [resource.taskBoard],
+  signal: [gateTimedOut],
+  port: [port.commitReport, port.parkReportPort],
+  procedure: quickProcedure({
+    prefix: "ctx-gate run --",
+    title: "Commit the work (awaiting ctx-gate approval)",
+    timeoutMs: 28_800_000,
+  }),
 });

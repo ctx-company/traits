@@ -67,7 +67,4 @@ digests relocked and re-approved.
 """
 
 [relations]
-depends-on = [
-    "0060",
-    "0056",
-]
+depends-on = ["0060", "0056"]

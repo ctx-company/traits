@@ -6,13 +6,7 @@ summary = "Optimizes a lower-is-better benchmark over a caller-selected code are
 variant = "benchmark"
 
 [metadata]
-tag = [
-    "first-party",
-    "optimize",
-    "benchmark",
-    "review",
-    "provenance",
-]
+tag = ["first-party", "optimize", "benchmark", "review", "provenance"]
 
 [[intent.require]]
 id = "review-before-final"
@@ -264,30 +258,19 @@ description = "Ok only when every one of the benchmark-runs invocations reported
 [[schema]]
 id = "optimize-benchmark-review-status"
 schema = "schema:text"
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 description = "One round's review verdict status."
 
 [[schema]]
 id = "optimize-benchmark-round-status"
 schema = "schema:text"
-allowed = [
-    "open",
-    "complete",
-]
+allowed = ["open", "complete"]
 description = "Whether the current round's atomic record step has finished."
 
 [[schema]]
 id = "optimize-decision-status"
 schema = "schema:text"
-allowed = [
-    "baseline",
-    "kept",
-    "discarded",
-    "review-rejected",
-]
+allowed = ["baseline", "kept", "discarded", "review-rejected"]
 description = "Deterministic disposition of one round. review-rejected is benchmark-only — experiment rounds never reach it."
 
 [[schema]]
@@ -316,19 +299,13 @@ description = "Ready only for a clean, isolated Git worktree."
 [[schema]]
 id = "optimize-readiness-status"
 schema = "schema:text"
-allowed = [
-    "ready",
-    "abort",
-]
+allowed = ["ready", "abort"]
 description = "Whether the isolated workbench is safe to mutate."
 
 [[schema]]
 id = "optimize-result-status"
 schema = "schema:text"
-allowed = [
-    "ok",
-    "error",
-]
+allowed = ["ok", "error"]
 description = "Ok only when every run in the aggregate produced a usable measurement."
 
 [[schema]]
@@ -389,11 +366,7 @@ description = "Completed once the target is reached or the iteration cap is exha
 [[schema]]
 id = "optimize-summary-reason"
 schema = "schema:text"
-allowed = [
-    "target-reached",
-    "iteration-limit-reached",
-    "aborted",
-]
+allowed = ["target-reached", "iteration-limit-reached", "aborted"]
 description = "Which declared stop condition ended the run. aborted is set only alongside status aborted."
 
 [[schema]]
@@ -412,10 +385,7 @@ description = "The trusted N-run aggregate measurement; absent for a review-reje
 [[schema]]
 id = "optimize-summary-status"
 schema = "schema:text"
-allowed = [
-    "completed",
-    "aborted",
-]
+allowed = ["completed", "aborted"]
 description = "Terminal run outcome."
 
 [[agent]]
@@ -435,10 +405,7 @@ text = """
         Do not run or report the benchmark; the runtime executes the trusted benchmark command next.
         Return a concise receipt naming the files changed.
     """
-input = [
-    "slot:draft",
-    "port:target",
-]
+input = ["slot:draft", "port:target"]
 output = ["slot:implement-receipt"]
 
 [prompt.prepare-and-verify-the-isolated-workbench]
@@ -462,11 +429,7 @@ Review the implemented candidate for {port:target} against the draft {slot:draft
                     A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
-input = [
-    "port:target",
-    "slot:draft",
-    "slot:implement-receipt",
-]
+input = ["port:target", "slot:draft", "slot:implement-receipt"]
 output = ["slot:review-verdict"]
 
 [prompt.scope-one-bounded-benchmark-improvement-attempt-smart-1]
@@ -476,11 +439,7 @@ text = """
         Current best metric is {slot:best-metric}; trusted prior measurements are {slot:history}.
         Return the exact bounded area to touch and why it should improve the benchmark, staying inside {port:target}.
     """
-input = [
-    "port:target",
-    "slot:best-metric",
-    "slot:history",
-]
+input = ["port:target", "slot:best-metric", "slot:history"]
 output = ["slot:scope"]
 
 [prompt.turn-the-scope-into-a-concrete-worker-draft-smart-1]
@@ -488,10 +447,7 @@ text = """
 
         Turn the scope {slot:scope} for {port:target} into a concrete, actionable draft the worker can implement directly: exact files/areas and the precise change. Keep it to one bounded attempt.
     """
-input = [
-    "slot:scope",
-    "port:target",
-]
+input = ["slot:scope", "port:target"]
 output = ["slot:draft"]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence]]
@@ -501,11 +457,7 @@ input = ["slot:readiness"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 const [readinessText] = process.argv.slice(1);
 const readiness = JSON.parse(readinessText);
 process.stdout.write(JSON.stringify({
@@ -515,9 +467,7 @@ process.stdout.write(JSON.stringify({
     kept: 0,
     rows: [],
     detail: readiness.detail,
-}));""",
-    "{slot:readiness}",
-]
+}));""", "{slot:readiness}"]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "capture-initial-ref"
@@ -525,11 +475,7 @@ title = "Capture the immutable baseline commit"
 output = ["slot:captured-ref"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 import { spawnSync } from "node:child_process";
 const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
     cwd: process.cwd(),
@@ -540,8 +486,7 @@ if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
     process.stderr.write(result.stderr ?? "could not capture HEAD commit");
     process.exit(1);
 }
-process.stdout.write(JSON.stringify({ sha }));""",
-]
+process.stdout.write(JSON.stringify({ sha }));"""]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "capture-best-ref"
@@ -558,18 +503,11 @@ destination = "slot:best-ref"
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "measure-the-baseline"
 title = "Measure the baseline"
-input = [
-    "port:benchmark-command",
-    "port:benchmark-runs",
-]
+input = ["port:benchmark-command", "port:benchmark-runs"]
 output = ["slot:baseline-result"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 import { spawnSync } from "node:child_process";
 const [argvText, runsText] = process.argv.slice(1);
 const argv = JSON.parse(argvText);
@@ -611,10 +549,7 @@ const output = {
 if (median && median.deltaLines !== undefined) {
     output["delta-lines"] = median.deltaLines;
 }
-process.stdout.write(JSON.stringify(output));""",
-    "{port:benchmark-command}",
-    "{port:benchmark-runs}",
-]
+process.stdout.write(JSON.stringify(output));""", "{port:benchmark-command}", "{port:benchmark-runs}"]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "require-a-usable-trusted-baseline"
@@ -635,12 +570,7 @@ input = ["slot:best-ref"]
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "--hard",
-    "{slot:best-ref}",
-]
+argv = ["git", "reset", "--hard", "{slot:best-ref}"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
 id = "clean-candidate"
@@ -648,26 +578,19 @@ title = "Remove untracked candidate files"
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
-argv = [
-    "git",
-    "clean",
-    "-fd",
-]
+argv = ["git", "clean", "-fd"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
 id = "record-discarded-candidate"
 title = "Record the discarded candidate"
 kind = "project"
-input = [
-    "slot:candidate-result",
-    "slot:review-verdict",
-]
+input = ["slot:candidate-result", "slot:review-verdict"]
 output = [
-    { slot = "slot:round-count", operation = "increment" },
-    { slot = "slot:history", operation = "append" },
-    { slot = "slot:decisions", operation = "append" },
-    { slot = "slot:reviews", operation = "append" },
-    "slot:round-complete",
+  { slot = "slot:round-count", operation = "increment" },
+  { slot = "slot:history", operation = "append" },
+  { slot = "slot:decisions", operation = "append" },
+  { slot = "slot:reviews", operation = "append" },
+  "slot:round-complete",
 ]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-otherwise.sequence.projection]]
@@ -704,30 +627,18 @@ literal = "complete"
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "derive-commit-message"
 title = "Derive the kept-candidate commit message"
-input = [
-    "slot:best-metric",
-    "slot:candidate-result",
-    "port:benchmark-runs",
-]
+input = ["slot:best-metric", "slot:candidate-result", "port:benchmark-runs"]
 output = ["slot:commit-message"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 const [beforeText, candidateText, runsText] = process.argv.slice(1);
 const before = Number(beforeText);
 const candidate = JSON.parse(candidateText);
 const runs = Number(runsText);
 process.stdout.write(
     "optimize: keep improved candidate (" + before + " -> " + candidate.metric + ", median of " + runs + " runs)",
-);""",
-    "{slot:best-metric}",
-    "{slot:candidate-result}",
-    "{port:benchmark-runs}",
-]
+);""", "{slot:best-metric}", "{slot:candidate-result}", "{port:benchmark-runs}"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "stage-candidate"
@@ -735,11 +646,7 @@ title = "Stage the kept candidate"
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
+argv = ["git", "add", "-A"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "commit-candidate"
@@ -748,12 +655,7 @@ input = ["slot:commit-message"]
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = [
-    "git",
-    "commit",
-    "-m",
-    "{slot:commit-message}",
-]
+argv = ["git", "commit", "-m", "{slot:commit-message}"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "capture-committed-ref"
@@ -761,11 +663,7 @@ title = "Capture the kept commit SHA"
 output = ["slot:captured-ref"]
 
 [sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 import { spawnSync } from "node:child_process";
 const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
     cwd: process.cwd(),
@@ -776,21 +674,14 @@ if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
     process.stderr.write(result.stderr ?? "could not capture HEAD commit");
     process.exit(1);
 }
-process.stdout.write(JSON.stringify({ sha }));""",
-]
+process.stdout.write(JSON.stringify({ sha }));"""]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "advance-best"
 title = "Advance trusted best state after commit"
 kind = "project"
-input = [
-    "slot:candidate-result",
-    "slot:captured-ref",
-]
-output = [
-    "slot:best-metric",
-    "slot:best-ref",
-]
+input = ["slot:candidate-result", "slot:captured-ref"]
+output = ["slot:best-metric", "slot:best-ref"]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
 source = "slot:candidate-result"
@@ -806,17 +697,14 @@ destination = "slot:best-ref"
 id = "record-kept-candidate"
 title = "Record the kept candidate"
 kind = "project"
-input = [
-    "slot:candidate-result",
-    "slot:review-verdict",
-]
+input = ["slot:candidate-result", "slot:review-verdict"]
 output = [
-    { slot = "slot:round-count", operation = "increment" },
-    { slot = "slot:kept-count", operation = "increment" },
-    { slot = "slot:history", operation = "append" },
-    { slot = "slot:decisions", operation = "append" },
-    { slot = "slot:reviews", operation = "append" },
-    "slot:round-complete",
+  { slot = "slot:round-count", operation = "increment" },
+  { slot = "slot:kept-count", operation = "increment" },
+  { slot = "slot:history", operation = "append" },
+  { slot = "slot:decisions", operation = "append" },
+  { slot = "slot:reviews", operation = "append" },
+  "slot:round-complete",
 ]
 
 [[sequence.ctx-branch-arm-s-108-ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
@@ -891,22 +779,15 @@ ref = "port:improvement-target"
 [[sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then.sequence]]
 id = "derive-summary-target-reached"
 title = "Derive the typed benchmark summary (already met)"
-input = [
-    "slot:round-count",
-    "slot:kept-count",
-    "slot:best-metric",
-    "slot:decisions",
-    "slot:history",
-    "slot:reviews",
-]
+input = ["slot:round-count", "slot:kept-count", "slot:best-metric", "slot:decisions", "slot:history", "slot:reviews"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-then.sequence.command]
 argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+  "node",
+  "--input-type=module",
+  "--eval",
+  """
 const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
 const rounds = Number(roundsText);
 const kept = Number(keptText);
@@ -945,34 +826,27 @@ process.stdout.write(JSON.stringify({
     rows,
     detail,
 }));""",
-    "target-reached",
-    "{slot:round-count}",
-    "{slot:kept-count}",
-    "{slot:best-metric}",
-    "{slot:decisions}",
-    "{slot:history}",
-    "{slot:reviews}",
+  "target-reached",
+  "{slot:round-count}",
+  "{slot:kept-count}",
+  "{slot:best-metric}",
+  "{slot:decisions}",
+  "{slot:history}",
+  "{slot:reviews}",
 ]
 
 [[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise.sequence]]
 id = "derive-summary-iteration-limit-reached"
 title = "Derive the typed benchmark summary (iteration limit reached)"
-input = [
-    "slot:round-count",
-    "slot:kept-count",
-    "slot:best-metric",
-    "slot:decisions",
-    "slot:history",
-    "slot:reviews",
-]
+input = ["slot:round-count", "slot:kept-count", "slot:best-metric", "slot:decisions", "slot:history", "slot:reviews"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-otherwise.sequence.command]
 argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+  "node",
+  "--input-type=module",
+  "--eval",
+  """
 const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
 const rounds = Number(roundsText);
 const kept = Number(keptText);
@@ -1011,34 +885,27 @@ process.stdout.write(JSON.stringify({
     rows,
     detail,
 }));""",
-    "iteration-limit-reached",
-    "{slot:round-count}",
-    "{slot:kept-count}",
-    "{slot:best-metric}",
-    "{slot:decisions}",
-    "{slot:history}",
-    "{slot:reviews}",
+  "iteration-limit-reached",
+  "{slot:round-count}",
+  "{slot:kept-count}",
+  "{slot:best-metric}",
+  "{slot:decisions}",
+  "{slot:history}",
+  "{slot:reviews}",
 ]
 
 [[sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then.sequence]]
 id = "derive-summary-target-reached"
 title = "Derive the typed benchmark summary (target reached)"
-input = [
-    "slot:round-count",
-    "slot:kept-count",
-    "slot:best-metric",
-    "slot:decisions",
-    "slot:history",
-    "slot:reviews",
-]
+input = ["slot:round-count", "slot:kept-count", "slot:best-metric", "slot:decisions", "slot:history", "slot:reviews"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-229-ctx-branch-arm-s-131-ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then-63-complete-immediately-when-the-baseline-already-meets-the-target-otherwise-55-deterministically-branch-on-the-actual-completion-cause-then.sequence.command]
 argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+  "node",
+  "--input-type=module",
+  "--eval",
+  """
 const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
 const rounds = Number(roundsText);
 const kept = Number(keptText);
@@ -1077,13 +944,13 @@ process.stdout.write(JSON.stringify({
     rows,
     detail,
 }));""",
-    "target-reached",
-    "{slot:round-count}",
-    "{slot:kept-count}",
-    "{slot:best-metric}",
-    "{slot:decisions}",
-    "{slot:history}",
-    "{slot:reviews}",
+  "target-reached",
+  "{slot:round-count}",
+  "{slot:kept-count}",
+  "{slot:best-metric}",
+  "{slot:decisions}",
+  "{slot:history}",
+  "{slot:reviews}",
 ]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
@@ -1093,12 +960,7 @@ input = ["slot:best-ref"]
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "--hard",
-    "{slot:best-ref}",
-]
+argv = ["git", "reset", "--hard", "{slot:best-ref}"]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
 id = "clean-candidate"
@@ -1106,11 +968,7 @@ title = "Remove untracked candidate files"
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.command]
-argv = [
-    "git",
-    "clean",
-    "-fd",
-]
+argv = ["git", "clean", "-fd"]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence]]
 id = "record-review-rejected"
@@ -1118,10 +976,10 @@ title = "Record the review-rejected round"
 kind = "project"
 input = ["slot:review-verdict"]
 output = [
-    { slot = "slot:round-count", operation = "increment" },
-    { slot = "slot:reviews", operation = "append" },
-    { slot = "slot:decisions", operation = "append" },
-    "slot:round-complete",
+  { slot = "slot:round-count", operation = "increment" },
+  { slot = "slot:reviews", operation = "append" },
+  { slot = "slot:decisions", operation = "append" },
+  "slot:round-complete",
 ]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-otherwise.sequence.projection]]
@@ -1153,18 +1011,11 @@ literal = "complete"
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
 id = "measure-the-candidate"
 title = "Measure the candidate"
-input = [
-    "port:benchmark-command",
-    "port:benchmark-runs",
-]
+input = ["port:benchmark-command", "port:benchmark-runs"]
 output = ["slot:candidate-result"]
 
 [sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 import { spawnSync } from "node:child_process";
 const [argvText, runsText] = process.argv.slice(1);
 const argv = JSON.parse(argvText);
@@ -1206,27 +1057,20 @@ const output = {
 if (median && median.deltaLines !== undefined) {
     output["delta-lines"] = median.deltaLines;
 }
-process.stdout.write(JSON.stringify(output));""",
-    "{port:benchmark-command}",
-    "{port:benchmark-runs}",
-]
+process.stdout.write(JSON.stringify(output));""", "{port:benchmark-command}", "{port:benchmark-runs}"]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
 id = "derive-margin"
 title = "Derive whether the candidate clears the noise threshold"
-input = [
-    "slot:candidate-result",
-    "slot:best-metric",
-    "port:noise-threshold",
-]
+input = ["slot:candidate-result", "slot:best-metric", "port:noise-threshold"]
 output = ["slot:margin-result"]
 
 [sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence.command]
 argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+  "node",
+  "--input-type=module",
+  "--eval",
+  """
 const [candidateText, bestText, thresholdText] = process.argv.slice(1);
 const candidate = JSON.parse(candidateText);
 const best = Number(bestText);
@@ -1236,9 +1080,9 @@ const meets = Boolean(candidate) && candidate.status === "ok"
     && Number.isFinite(threshold) && threshold >= 0
     && (best - candidate.metric) > threshold;
 process.stdout.write(JSON.stringify(meets));""",
-    "{slot:candidate-result}",
-    "{slot:best-metric}",
-    "{port:noise-threshold}",
+  "{slot:candidate-result}",
+  "{slot:best-metric}",
+  "{port:noise-threshold}",
 ]
 
 [[sequence.ctx-branch-arm-s-52-run-the-iteration-capped-benchmark-round-budget-body-27-route-on-the-review-verdict-then.sequence]]
@@ -1294,11 +1138,7 @@ input = ["slot:baseline-result"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence.command]
-argv = [
-    "node",
-    "--input-type=module",
-    "--eval",
-    """
+argv = ["node", "--input-type=module", "--eval", """
 const [baselineText] = process.argv.slice(1);
 const baseline = JSON.parse(baselineText);
 process.stdout.write(JSON.stringify({
@@ -1308,9 +1148,7 @@ process.stdout.write(JSON.stringify({
     kept: 0,
     rows: [{ measurement: baseline, decision: "baseline" }],
     detail: "trusted baseline command did not return status ok: " + JSON.stringify(baseline),
-}));""",
-    "{slot:baseline-result}",
-]
+}));""", "{slot:baseline-result}"]
 
 [[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
 id = "seed-best"
@@ -1318,11 +1156,11 @@ title = "Seed trusted best state and history"
 kind = "project"
 input = ["slot:baseline-result"]
 output = [
-    "slot:best-metric",
-    { slot = "slot:history", operation = "append" },
-    "slot:round-count",
-    "slot:kept-count",
-    { slot = "slot:decisions", operation = "append" },
+  "slot:best-metric",
+  { slot = "slot:history", operation = "append" },
+  "slot:round-count",
+  "slot:kept-count",
+  { slot = "slot:decisions", operation = "append" },
 ]
 
 [[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
@@ -1396,11 +1234,7 @@ id = "scope-one-bounded-benchmark-improvement-attempt-smart-1"
 title = "Scope one bounded benchmark-improvement attempt (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:scope-one-bounded-benchmark-improvement-attempt-smart-1"
-input = [
-    "port:target",
-    "slot:best-metric",
-    "slot:history",
-]
+input = ["port:target", "slot:best-metric", "slot:history"]
 output = ["slot:scope"]
 
 [[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
@@ -1408,10 +1242,7 @@ id = "turn-the-scope-into-a-concrete-worker-draft-smart-1"
 title = "Turn the scope into a concrete worker draft (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:turn-the-scope-into-a-concrete-worker-draft-smart-1"
-input = [
-    "slot:scope",
-    "port:target",
-]
+input = ["slot:scope", "port:target"]
 output = ["slot:draft"]
 
 [[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
@@ -1419,10 +1250,7 @@ id = "implement-the-draft-worker"
 title = "Implement the draft (worker)"
 agent = "agent:worker"
 prompt = "prompt:implement-the-draft-worker"
-input = [
-    "slot:draft",
-    "port:target",
-]
+input = ["slot:draft", "port:target"]
 output = ["slot:implement-receipt"]
 
 [[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
@@ -1430,11 +1258,7 @@ id = "review-the-implemented-candidate-smart-1"
 title = "Review the implemented candidate (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:review-the-implemented-candidate-smart-1"
-input = [
-    "port:target",
-    "slot:draft",
-    "slot:implement-receipt",
-]
+input = ["port:target", "slot:draft", "slot:implement-receipt"]
 output = ["slot:review-verdict"]
 
 [[sequence.run-the-iteration-capped-benchmark-round-budget-body.sequence]]
@@ -1452,12 +1276,12 @@ equals = "approved"
 [procedure]
 description = "Verify an isolated worktree, seed a trusted baseline benchmark, run an iteration-capped scope/draft/implement/review round loop, and deterministically keep only benchmark-measured improvements beyond the noise threshold."
 input = [
-    "port:benchmark-command",
-    "port:benchmark-runs",
-    "port:improvement-target",
-    "port:max-delta-lines",
-    "port:noise-threshold",
-    "port:target",
+  "port:benchmark-command",
+  "port:benchmark-runs",
+  "port:improvement-target",
+  "port:max-delta-lines",
+  "port:noise-threshold",
+  "port:target",
 ]
 output = ["port:summary"]
 

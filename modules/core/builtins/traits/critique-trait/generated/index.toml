@@ -13,11 +13,7 @@ version = "0.1.0"
 path = "../trait-spec"
 
 [metadata]
-tag = [
-    "first-party",
-    "meta-trait",
-    "critique",
-]
+tag = ["first-party", "meta-trait", "critique"]
 
 [[port]]
 id = "source"
@@ -120,23 +116,18 @@ Return exactly one structured review scaffold using {port:source-digest}. Findin
 
 Return JSON matching schema:review-scaffold, with no surrounding commentary."""
 input = [
-    "port:source",
-    "port:source-path",
-    "port:source-digest",
-    "port:source-map",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:source",
+  "port:source-path",
+  "port:source-digest",
+  "port:source-map",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:critique"]
 
 [procedure]
 description = "Report advisory design findings without modifying the reviewed trait."
-input = [
-    "port:source",
-    "port:source-digest",
-    "port:source-path",
-    "port:source-map",
-]
+input = ["port:source", "port:source-digest", "port:source-path", "port:source-map"]
 output = ["port:review"]
 
 [[procedure.sequence]]
@@ -145,11 +136,11 @@ title = "Critique trait"
 agent = "agent:critic"
 prompt = "prompt:critique"
 input = [
-    "port:source",
-    "port:source-path",
-    "port:source-digest",
-    "port:source-map",
-    "resource:trait-spec/agent-traits-schema",
-    "resource:trait-spec/design-rubric",
+  "port:source",
+  "port:source-path",
+  "port:source-digest",
+  "port:source-map",
+  "resource:trait-spec/agent-traits-schema",
+  "resource:trait-spec/design-rubric",
 ]
 output = ["slot:critique"]

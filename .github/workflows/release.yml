@@ -1,9 +1,9 @@
 name: Release
 
-'on':
+"on":
   push:
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
   workflow_dispatch:
 

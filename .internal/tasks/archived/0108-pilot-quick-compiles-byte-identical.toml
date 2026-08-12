@@ -43,7 +43,4 @@ validation = """
 """
 
 [relations]
-depends-on = [
-    "0107",
-    "0104",
-]
+depends-on = ["0107", "0104"]

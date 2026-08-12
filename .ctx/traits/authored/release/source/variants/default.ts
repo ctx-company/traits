@@ -8,28 +8,28 @@
 import { condition, defineVariant, flow, input, intent, step, useIntent, useResource } from "@ctx-traits/cdk";
 import { reviewer, scribe, worker } from "../agent.ts";
 import {
-    changelogEntry,
-    changelogVerdict,
-    changelogWriteOutput,
-    commitMessage,
-    commitOutput,
-    commitReport,
-    currentBranch,
-    gatePassed,
-    gitStatus,
-    lastTag,
-    commitLog,
-    newVersion,
-    publishOutput,
-    publishReport,
-    pushOutput,
-    stageOutput,
-    tagOutput,
-    unstageOutput,
-    version,
-    versionDiff,
-    versionSummary,
-    versionVerdict,
+  changelogEntry,
+  changelogVerdict,
+  changelogWriteOutput,
+  commitMessage,
+  commitOutput,
+  commitReport,
+  currentBranch,
+  gatePassed,
+  gitStatus,
+  lastTag,
+  commitLog,
+  newVersion,
+  publishOutput,
+  publishReport,
+  pushOutput,
+  stageOutput,
+  tagOutput,
+  unstageOutput,
+  version,
+  versionDiff,
+  versionSummary,
+  versionVerdict,
 } from "../data.ts";
 import { releaseManifest } from "../resource.ts";
 
@@ -65,119 +65,119 @@ const commitMessageText = input.prompt`
     Return exactly that message. Do not run git commands and do not write files.`;
 
 export default function () {
-    defineVariant("default", {
-        name: "Release (Default)",
-        summary:
-            "Gated release procedure: preflight gates, version bump, commit-grounded changelog, commit and local tag, then owner-approved tag push and publish.",
-        metadata: { tag: ["first-party", "release", "review", "gated"] },
-        description:
-            "Preflight (clean tree, repo-declared gate) -> version bump with review -> commit-grounded changelog with refute-mode spot-check -> commit and local tag -> ctx-gate-approved push and publish.",
-    });
-    useIntent({
-        require: [intent.require.ReviewBeforeFinal, intent.require.Leanness],
-        avoid: [intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
-    });
-    useResource([releaseManifest]);
+  defineVariant("default", {
+    name: "Release (Default)",
+    summary:
+      "Gated release procedure: preflight gates, version bump, commit-grounded changelog, commit and local tag, then owner-approved tag push and publish.",
+    metadata: { tag: ["first-party", "release", "review", "gated"] },
+    description:
+      "Preflight (clean tree, repo-declared gate) -> version bump with review -> commit-grounded changelog with refute-mode spot-check -> commit and local tag -> ctx-gate-approved push and publish.",
+  });
+  useIntent({
+    require: [intent.require.ReviewBeforeFinal, intent.require.Leanness],
+    avoid: [intent.avoid.RubberStampReview, intent.avoid.ScopeCreep],
+  });
+  useResource([releaseManifest]);
 
-    step.command("Check working tree status", {
-        argv: ["git", "status", "--porcelain"],
-        output: gitStatus,
-    });
-    step.command("Capture the current branch", {
-        argv: ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        output: currentBranch,
+  step.command("Check working tree status", {
+    argv: ["git", "status", "--porcelain"],
+    output: gitStatus,
+  });
+  step.command("Capture the current branch", {
+    argv: ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+    output: currentBranch,
+  });
+
+  flow.when("Preflight Clean Tree", condition.equals(gitStatus, ""), () => {
+    // Fixed argv, mirroring `[merge] gate = [["just", "test"]]`: the
+    // trait never composes a gate command from model output.
+    step.check("Run the repository gate chain", {
+      argv: ["just", "test"],
+      output: gatePassed,
+      timeoutMs: 600_000,
     });
 
-    flow.when("Preflight Clean Tree", condition.equals(gitStatus, ""), () => {
-        // Fixed argv, mirroring `[merge] gate = [["just", "test"]]`: the
-        // trait never composes a gate command from model output.
-        step.check("Run the repository gate chain", {
-            argv: ["just", "test"],
-            output: gatePassed,
-            timeoutMs: 600_000,
+    flow.when("Preflight Gate Green", condition.fieldEquals(gatePassed, "ok", true), () => {
+      step.command("Find the last tag", {
+        input: input.command`sh -c "git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0"`,
+        output: lastTag,
+      });
+      step.command("Capture the commit log since the last tag", {
+        // First release: `lastTag` is the v0.0.0 sentinel, not a
+        // resolvable ref, so `lastTag..HEAD` is fatal — fall back to
+        // the full history, the correct grounding set for a first
+        // release.
+        input: input.command`sh -c 'git log "$1..HEAD" --oneline 2>/dev/null || git log --oneline' _ ${lastTag}`,
+        output: commitLog,
+      });
+
+      worker.prompt("Bump the declared version files", {
+        input: versionBumpText,
+        output: [newVersion, versionSummary],
+      });
+      step.command("Capture the version-file diff", {
+        argv: ["git", "diff", "--stat"],
+        output: versionDiff,
+      });
+      reviewer.prompt("Review the version bump", {
+        input: versionReviewText,
+        output: versionVerdict,
+      });
+
+      flow.when("Version Bump Approved", condition.fieldEquals(versionVerdict, "status", "approved"), () => {
+        scribe.prompt("Draft the changelog entry", {
+          input: changelogDraftText,
+          output: changelogEntry,
+        });
+        reviewer.prompt("Spot-check the changelog", {
+          input: changelogReviewText,
+          output: changelogVerdict,
         });
 
-        flow.when("Preflight Gate Green", condition.fieldEquals(gatePassed, "ok", true), () => {
-            step.command("Find the last tag", {
-                input: input.command`sh -c "git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0"`,
-                output: lastTag,
-            });
-            step.command("Capture the commit log since the last tag", {
-                // First release: `lastTag` is the v0.0.0 sentinel, not a
-                // resolvable ref, so `lastTag..HEAD` is fatal — fall back to
-                // the full history, the correct grounding set for a first
-                // release.
-                input: input.command`sh -c 'git log "$1..HEAD" --oneline 2>/dev/null || git log --oneline' _ ${lastTag}`,
-                output: commitLog,
-            });
+        flow.when("Changelog Approved", condition.fieldEquals(changelogVerdict, "status", "approved"), () => {
+          worker.prompt("Insert the changelog entry into the changelog file", {
+            input: changelogWriteText,
+            output: changelogWriteOutput,
+          });
+          scribe.prompt("Write the release commit message", {
+            input: commitMessageText,
+            output: commitMessage,
+          });
+          // Two steps, not one excluding pathspec — a pathspec that
+          // mentions a gitignored `.agents` exits 1 (run-42bd7fb2).
+          step.command("Stage all changes", { argv: ["git", "add", "-A"], output: stageOutput });
+          step.command("Unstage runtime state", {
+            argv: ["git", "reset", "-q", "--", ".agents/runs"],
+            output: unstageOutput,
+          });
+          step.command("Commit the release", {
+            argv: ["git", "commit", "-m", commitMessage],
+            output: commitOutput,
+          });
+          // Local annotated tag only — still reversible, not gated.
+          step.command("Tag the release (local)", {
+            input: input.command`sh -c 'git tag -a "v$1" -m "$2"' _ ${newVersion} ${commitMessage}`,
+            output: tagOutput,
+          });
 
-            worker.prompt("Bump the declared version files", {
-                input: versionBumpText,
-                output: [newVersion, versionSummary],
+          flow.when("Tagged", condition.not(condition.equals(commitOutput, "")), () => {
+            // Irreversible edge, owner-gated (0098): fixed argv,
+            // the trait never composes shell from model output.
+            step.command("Push the tag (awaiting ctx-gate approval)", {
+              argv: ["ctx-gate", "run", "--", "git", "push", "--follow-tags"],
+              output: pushOutput,
+              timeoutMs: 28_800_000,
             });
-            step.command("Capture the version-file diff", {
-                argv: ["git", "diff", "--stat"],
-                output: versionDiff,
+            step.command("Publish the release (awaiting ctx-gate approval)", {
+              argv: ["ctx-gate", "run", "--", "just", "release-publish"],
+              output: publishOutput,
+              timeoutMs: 28_800_000,
             });
-            reviewer.prompt("Review the version bump", {
-                input: versionReviewText,
-                output: versionVerdict,
-            });
-
-            flow.when("Version Bump Approved", condition.fieldEquals(versionVerdict, "status", "approved"), () => {
-                scribe.prompt("Draft the changelog entry", {
-                    input: changelogDraftText,
-                    output: changelogEntry,
-                });
-                reviewer.prompt("Spot-check the changelog", {
-                    input: changelogReviewText,
-                    output: changelogVerdict,
-                });
-
-                flow.when("Changelog Approved", condition.fieldEquals(changelogVerdict, "status", "approved"), () => {
-                    worker.prompt("Insert the changelog entry into the changelog file", {
-                        input: changelogWriteText,
-                        output: changelogWriteOutput,
-                    });
-                    scribe.prompt("Write the release commit message", {
-                        input: commitMessageText,
-                        output: commitMessage,
-                    });
-                    // Two steps, not one excluding pathspec — a pathspec that
-                    // mentions a gitignored `.agents` exits 1 (run-42bd7fb2).
-                    step.command("Stage all changes", { argv: ["git", "add", "-A"], output: stageOutput });
-                    step.command("Unstage runtime state", {
-                        argv: ["git", "reset", "-q", "--", ".agents/runs"],
-                        output: unstageOutput,
-                    });
-                    step.command("Commit the release", {
-                        argv: ["git", "commit", "-m", commitMessage],
-                        output: commitOutput,
-                    });
-                    // Local annotated tag only — still reversible, not gated.
-                    step.command("Tag the release (local)", {
-                        input: input.command`sh -c 'git tag -a "v$1" -m "$2"' _ ${newVersion} ${commitMessage}`,
-                        output: tagOutput,
-                    });
-
-                    flow.when("Tagged", condition.not(condition.equals(commitOutput, "")), () => {
-                        // Irreversible edge, owner-gated (0098): fixed argv,
-                        // the trait never composes shell from model output.
-                        step.command("Push the tag (awaiting ctx-gate approval)", {
-                            argv: ["ctx-gate", "run", "--", "git", "push", "--follow-tags"],
-                            output: pushOutput,
-                            timeoutMs: 28_800_000,
-                        });
-                        step.command("Publish the release (awaiting ctx-gate approval)", {
-                            argv: ["ctx-gate", "run", "--", "just", "release-publish"],
-                            output: publishOutput,
-                            timeoutMs: 28_800_000,
-                        });
-                    });
-                });
-            });
+          });
         });
+      });
     });
+  });
 
-    return { commitReport, publishReport };
+  return { commitReport, publishReport };
 }

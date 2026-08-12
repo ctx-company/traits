@@ -5,10 +5,7 @@ name = "Test Writer"
 description = "Proposes a structured test plan for a piece of code against stated requirements."
 
 [metadata]
-tag = [
-    "template",
-    "testing",
-]
+tag = ["template", "testing"]
 
 [[port]]
 id = "target-code"
@@ -74,18 +71,12 @@ Propose a test plan for {port:target-code} against the requirements {port:requir
 Return exactly one structured plan: one case per behavior worth testing (name, setup, and the assertion it makes), plus a list of any requirements the proposed cases don't cover. Do not write the actual test code — describe the cases.
 
 Return JSON matching schema:test-plan, with no surrounding commentary."""
-input = [
-    "port:target-code",
-    "port:requirements",
-]
+input = ["port:target-code", "port:requirements"]
 output = ["slot:write-plan"]
 
 [procedure]
 description = "Propose a test plan for the target code against the stated requirements."
-input = [
-    "port:target-code",
-    "port:requirements",
-]
+input = ["port:target-code", "port:requirements"]
 output = ["port:plan"]
 
 [[procedure.sequence]]
@@ -93,8 +84,5 @@ id = "write-plan"
 title = "Write the test plan"
 agent = "agent:test-writer"
 prompt = "prompt:write-plan"
-input = [
-    "port:target-code",
-    "port:requirements",
-]
+input = ["port:target-code", "port:requirements"]
 output = ["slot:write-plan"]

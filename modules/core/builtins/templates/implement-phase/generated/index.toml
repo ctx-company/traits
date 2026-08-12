@@ -5,11 +5,7 @@ name = "Implement Phase"
 description = "Drafts an implementation approach for a stated task, implements it, then reviews the result and reports a verdict."
 
 [metadata]
-tag = [
-    "template",
-    "implementation",
-    "review",
-]
+tag = ["template", "implementation", "review"]
 
 [[port]]
 id = "task"
@@ -42,10 +38,7 @@ description = "Runtime slot review."
 [[schema]]
 id = "decision"
 schema = "schema:text"
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [[schema]]
 id = "implementation-verdict"
@@ -81,10 +74,7 @@ output = ["slot:draft"]
 
 [prompt.implement]
 text = "Implement {port:task} following the draft {slot:draft}. Prefer the minimal, correct change the draft calls for. Report what changed and how you validated it."
-input = [
-    "port:task",
-    "slot:draft",
-]
+input = ["port:task", "slot:draft"]
 output = ["slot:work-summary"]
 
 [prompt.review]
@@ -94,11 +84,7 @@ Review the implemented work for {port:task} against the draft {slot:draft}. The 
 Return a verdict of approved or revise, with notes explaining the verdict.
 
 Return JSON matching schema:implementation-verdict, with no surrounding commentary."""
-input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-]
+input = ["port:task", "slot:draft", "slot:work-summary"]
 output = ["slot:review"]
 
 [procedure]
@@ -119,10 +105,7 @@ id = "implement"
 title = "Implement the draft"
 agent = "agent:worker"
 prompt = "prompt:implement"
-input = [
-    "port:task",
-    "slot:draft",
-]
+input = ["port:task", "slot:draft"]
 output = ["slot:work-summary"]
 
 [[procedure.sequence]]
@@ -130,9 +113,5 @@ id = "review"
 title = "Review the result"
 agent = "agent:reviewer"
 prompt = "prompt:review"
-input = [
-    "port:task",
-    "slot:draft",
-    "slot:work-summary",
-]
+input = ["port:task", "slot:draft", "slot:work-summary"]
 output = ["slot:review"]

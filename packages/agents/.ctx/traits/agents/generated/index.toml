@@ -5,11 +5,7 @@ name = "Agents"
 summary = "Shared reviewed-multi-agent doctrine: the role declarations, review/escalation prompt doctrine, and typed review-verdict schema a bounded refinement loop reports findings against, for dependents that declare it instead of pasting the roles, doctrine, or schema into their own trait source."
 
 [metadata]
-tag = [
-    "first-party",
-    "knowledge",
-    "agents",
-]
+tag = ["first-party", "knowledge", "agents"]
 
 [[slot]]
 id = "phase-brief"
@@ -75,12 +71,7 @@ description = "A checklist item outside in-run capability or authority, with ver
 schema = "schema:text"
 required = true
 description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
-allowed = [
-    "gui-or-visual",
-    "paid-or-live-execution",
-    "owner-decision",
-    "contract-conflict",
-]
+allowed = ["gui-or-visual", "paid-or-live-execution", "owner-decision", "contract-conflict"]
 
 [schema.fields.close-out]
 schema = "schema:text"
@@ -125,11 +116,7 @@ description = "What must happen before this item can be done; may be empty."
 schema = "schema:text"
 required = true
 description = "Why this is a leftover rather than in-scope now: needs-unlanded (depends on work not yet landed), needs-human (requires an owner/authority action this run cannot take), or out-of-budget (explicitly outside this phase or task's stated scope boundary — never work merely left undone because an execution or refinement round ran out; a competent engineer's in-task-doable work is always a blocker, not a leftover)."
-allowed = [
-    "needs-unlanded",
-    "needs-human",
-    "out-of-budget",
-]
+allowed = ["needs-unlanded", "needs-human", "out-of-budget"]
 
 [schema.fields.what]
 schema = "schema:text"
@@ -152,10 +139,7 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the phase contract is a placeholder or lacks a falsifiable Done-when; a prerequisite phase named in Deps has not landed in this tree; the group is marked SUPERSEDED or CANCELLED; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the phase's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
-allowed = [
-    "none",
-    "needs-owner",
-]
+allowed = ["none", "needs-owner"]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -173,10 +157,7 @@ description = "Cross-phase seam citations ONLY: counterpart work the execution p
 schema = "schema:text"
 required = true
 description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = [
-    "approved",
-    "revise",
-]
+allowed = ["approved", "revise"]
 
 [[agent]]
 id = "worker"
@@ -214,8 +195,5 @@ If the work summary ends with a Blocker dispositions section, those ids are the 
                     The loop is bounded and ADVISORY, so spend your rounds where they change the outcome. The refinement loop exits early the moment every reviewer approves; if it uses its full budget with blockers still open, the run does NOT fail — it proceeds to commit with your final verdict attached as the record of what is still wrong. That makes your verdict a durable report, not a gate: rank blockers by real consequence, state each one once and precisely, and never repeat a blocker the worker cannot act on merely to withhold approval — a blocker whose only possible resolution is an owner decision belongs in owner-items or escalation-reason, and repeating it costs a round and changes nothing. Approve when the phase's own DoD holds; withhold approval when it does not, knowing the work still lands and your objections travel with it.
                     Escalation: set escalation to needs-owner if and only if the RUN AS A WHOLE cannot reach an approvable state — the phase contract is a placeholder or lacks a falsifiable Done-when (or the draft opens with CONTRACT PROBLEM and you confirm it), a prerequisite phase named in Deps has not landed in this tree, the group is marked SUPERSEDED or CANCELLED, or a contradiction poisons the entire phase leaving no separable agent-doable work. A single item outside in-run capability or authority is NOT escalation — it is an owner-item with substitute evidence, and the run still completes. Escalation is ADVISORY: it never stops the loop, and your flag plus escalation-reason (one sentence naming the owner action that would clear it) are recorded for owner triage. Never escalate merely because the work is large or incomplete; judge only what is in front of you. Otherwise set escalation to none and omit escalation-reason.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
-input = [
-    "slot:phase-brief",
-    "slot:product-brief",
-]
+input = ["slot:phase-brief", "slot:product-brief"]
 description = "Shared blocker-reporting and escalation doctrine for a typed multi-reviewer refinement loop: how to judge severity, report a blocker, and record owner-triage escalation."

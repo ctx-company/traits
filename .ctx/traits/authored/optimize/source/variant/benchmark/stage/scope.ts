@@ -5,11 +5,11 @@ import { bestMetric, history, scopeSlot } from "../../../shared/data.ts";
 import { target } from "../data.ts";
 
 export const scopeStage = cdk.stage({
-    agent: smart1,
-    input: cdk.input.prompt`
+  agent: smart1,
+  input: cdk.input.prompt`
         Scope one small, falsifiable attempt to improve the lower-is-better benchmark over ${target}.
         Current best metric is ${bestMetric}; trusted prior measurements are ${history}.
         Return the exact bounded area to touch and why it should improve the benchmark, staying inside ${target}.
     `,
-    output: scopeSlot,
+  output: scopeSlot,
 });

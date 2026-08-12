@@ -27,12 +27,12 @@ import { condition, effect, flow, input, procedure, step, variant } from "@ctx-t
 
 import { FAMILY_BEHAVIOR, GATED_INTENT } from "../core.ts";
 import {
-    deriveParkReportStep,
-    gateAndDiffEvidence,
-    gateTimedOut,
-    gateTimedOutAbortIf,
-    repoGatesPassed,
-    reviewDiff,
+  deriveParkReportStep,
+  gateAndDiffEvidence,
+  gateTimedOut,
+  gateTimedOutAbortIf,
+  repoGatesPassed,
+  reviewDiff,
 } from "../sequence/family.ts";
 import { agent } from "./gated/agent.ts";
 import * as port from "./gated/port.ts";
@@ -83,204 +83,203 @@ const gatedBriefText = input.prompt`
     Return the slug, the markdown, and the commit message as the typed output. Do not write any file and do not run git commands; later runtime steps save and commit.`;
 
 const procedureBody = procedure.from(
-    {
-        description:
-            "Implement one task from the task board with the owner in the loop: confirm plannotator is installed, draft the work and put the owner inside plannotator to annotate the draft, refine it into the plan, then repeat worker-then-review — summoning the owner on every gate-green approved round — until the reviewer and the owner both approve; then record a tracked brief and commit.",
-    },
-    () => {
-        // First step, before any prompt frame: a missing binary fails here,
-        // not after a model call has already been spent.
-        step.command("Confirm plannotator is installed", {
-            argv: ["sh", "-c", "command -v plannotator"],
-            output: slot.preflightOutput,
-        });
+  {
+    description:
+      "Implement one task from the task board with the owner in the loop: confirm plannotator is installed, draft the work and put the owner inside plannotator to annotate the draft, refine it into the plan, then repeat worker-then-review — summoning the owner on every gate-green approved round — until the reviewer and the owner both approve; then record a tracked brief and commit.",
+  },
+  () => {
+    // First step, before any prompt frame: a missing binary fails here,
+    // not after a model call has already been spent.
+    step.command("Confirm plannotator is installed", {
+      argv: ["sh", "-c", "command -v plannotator"],
+      output: slot.preflightOutput,
+    });
 
-        agent.smart.prompt("Draft the work", {
-            input: input.prompt`
+    agent.smart.prompt("Draft the work", {
+      input: input.prompt`
         Create an implementation draft for ${port.task} from its file on the task board ${resource.taskBoard}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Reference files by path. Do not implement anything. The owner will annotate this draft next — write it to be read cold.`,
-            output: slot.draft,
-        });
+      output: slot.draft,
+    });
 
-        // A command step has no stdin channel, so piping the hook envelope
-        // into plannotator rides `sh -c`; the draft reaches the shell as a
-        // positional `$1` argument, never spliced into the script string.
-        // Closing the plan UI without deciding cannot halt here: plannotator's
-        // plan-mode hook collapses a UI exit into a plain deny ("Plan changes
-        // requested"), indistinguishable from a real annotation — so a closed
-        // plan window flows into plan-refine as a deny, and only the gated
-        // briefing steps below carry the distinguishable "dismissed" verdict.
-        step.command("Annotate the plan (plannotator, plan mode)", {
-            argv: [
-                "sh",
-                "-c",
-                `printf %s "$1" | jq -n --arg plan "$(cat)" '{hook_event_name: "PreToolUse", tool_name: "ExitPlanMode", tool_input: {plan: $plan}}' | PLANNOTATOR_ORIGIN=implement-gated ${PORT_SELECTION} plannotator`,
-                "sh",
-                "{slot:draft}",
-            ],
-            idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
-            output: slot.planDecision,
-        });
+    // A command step has no stdin channel, so piping the hook envelope
+    // into plannotator rides `sh -c`; the draft reaches the shell as a
+    // positional `$1` argument, never spliced into the script string.
+    // Closing the plan UI without deciding cannot halt here: plannotator's
+    // plan-mode hook collapses a UI exit into a plain deny ("Plan changes
+    // requested"), indistinguishable from a real annotation — so a closed
+    // plan window flows into plan-refine as a deny, and only the gated
+    // briefing steps below carry the distinguishable "dismissed" verdict.
+    step.command("Annotate the plan (plannotator, plan mode)", {
+      argv: [
+        "sh",
+        "-c",
+        `printf %s "$1" | jq -n --arg plan "$(cat)" '{hook_event_name: "PreToolUse", tool_name: "ExitPlanMode", tool_input: {plan: $plan}}' | PLANNOTATOR_ORIGIN=implement-gated ${PORT_SELECTION} plannotator`,
+        "sh",
+        "{slot:draft}",
+      ],
+      idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
+      output: slot.planDecision,
+    });
 
-        agent.smart.prompt("Refine the plan against the owner's annotations", {
-            input: input.prompt`
+    agent.smart.prompt("Refine the plan against the owner's annotations", {
+      input: input.prompt`
         Refine the draft ${slot.draft} into the final plan, using plannotator's plan-mode verdict ${slot.planDecision}.
         If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.
         If it is "deny", hookSpecificOutput.decision.message is the owner's annotation — every point it raises must be visibly and provably addressed in the refined plan (not merely acknowledged): change the affected section, or state explicitly why the draft already covers it.
         Reference files by path; do not inline documents. Do not implement anything yet.`,
-            output: slot.plan,
-        });
+      output: slot.plan,
+    });
 
-        flow.loop("Building", (loop) => {
-            loop.maxIterations(10, { onExhausted: "abort" });
+    flow.loop("Building", (loop) => {
+      loop.maxIterations(10, { onExhausted: "abort" });
 
-            agent.worker.prompt("Building Produce", {
-                input: gatedProduceText,
-                output: slot.workSummary,
-                include: [
-                    slot.verdict.optional(),
-                    slot.workSummary.optional(),
-                    repoGatesPassed.optional(),
-                    slot.ownerDecision.optional(),
-                ],
-            });
+      agent.worker.prompt("Building Produce", {
+        input: gatedProduceText,
+        output: slot.workSummary,
+        include: [
+          slot.verdict.optional(),
+          slot.workSummary.optional(),
+          repoGatesPassed.optional(),
+          slot.ownerDecision.optional(),
+        ],
+      });
 
-            gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
+      gateAndDiffEvidence({ gatePassed: repoGatesPassed, diff: reviewDiff });
 
-            agent.smart.prompt("Building Review", {
-                input: gatedReviewText,
-                output: slot.verdict,
-                include: [slot.verdict.optional(), slot.ownerDecision.optional()],
-            });
+      agent.smart.prompt("Building Review", {
+        input: gatedReviewText,
+        output: slot.verdict,
+        include: [slot.verdict.optional(), slot.ownerDecision.optional()],
+      });
 
-            deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport });
+      deriveParkReportStep(slot.verdict, { parkReportSlot: slot.parkReport });
 
-            flow.when("Gate Timed Out", gateTimedOutAbortIf, flow.Abort);
-            effect.onAbort(gateTimedOut);
+      flow.when("Gate Timed Out", gateTimedOutAbortIf, flow.Abort);
+      effect.onAbort(gateTimedOut);
 
-            // The owner is summoned only on a round the reviewer already
-            // approved WITH the repository gate green — a summon on a red
-            // gate would ask the owner to confirm a round the loop cannot
-            // exit anyway (extends plannotate's reviewer-approved-only rule).
-            flow.when(
-                "Owner Gate",
-                condition.all([
-                    condition.equals(slot.verdict.status, "approved"),
-                    condition.equals(repoGatesPassed.ok, true),
-                ]),
-                () => {
-                    agent.smart.prompt("Write the round briefing", {
-                        input: gatedBriefingText,
-                        output: slot.ownerBriefing,
-                    });
-                    // plannotator's `annotate` requires a real `.md` file path
-                    // (no stdin form), so the briefing goes through a transient
-                    // temp file created and removed inside this one step;
-                    // plannotator's stdout is the only stdout, so the gate JSON
-                    // lands in the output slot clean. A "dismissed" verdict —
-                    // the owner closed the briefing via Exit without deciding —
-                    // exits 65: the step fails and the run halts instead of
-                    // spinning another worker round nobody asked for; the
-                    // decision JSON is echoed first so the failure evidence
-                    // carries the verdict.
-                    step.command("Summon the owner (plannotator, gated)", {
-                        argv: [
-                            "sh",
-                            "-c",
-                            `d=$(mktemp -d) && printf %s "$1" > "$d/briefing.md" && ${PORT_SELECTION} plannotator annotate "$d/briefing.md" --gate --json > "$d/decision.json"; s=$?; [ -s "$d/decision.json" ] && cat "$d/decision.json"; if [ $s -eq 0 ] && grep -q '"decision":"dismissed"' "$d/decision.json"; then echo "owner closed the briefing without a decision — halting the run" >&2; s=65; fi; rm -rf "$d"; exit $s`,
-                            "sh",
-                            "{slot:owner-briefing}",
-                        ],
-                        idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
-                        output: slot.ownerDecision,
-                    });
-                },
-            );
+      // The owner is summoned only on a round the reviewer already
+      // approved WITH the repository gate green — a summon on a red
+      // gate would ask the owner to confirm a round the loop cannot
+      // exit anyway (extends plannotate's reviewer-approved-only rule).
+      flow.when(
+        "Owner Gate",
+        condition.all([condition.equals(slot.verdict.status, "approved"), condition.equals(repoGatesPassed.ok, true)]),
+        () => {
+          agent.smart.prompt("Write the round briefing", {
+            input: gatedBriefingText,
+            output: slot.ownerBriefing,
+          });
+          // plannotator's `annotate` requires a real `.md` file path
+          // (no stdin form), so the briefing goes through a transient
+          // temp file created and removed inside this one step;
+          // plannotator's stdout is the only stdout, so the gate JSON
+          // lands in the output slot clean. A "dismissed" verdict —
+          // the owner closed the briefing via Exit without deciding —
+          // exits 65: the step fails and the run halts instead of
+          // spinning another worker round nobody asked for; the
+          // decision JSON is echoed first so the failure evidence
+          // carries the verdict.
+          step.command("Summon the owner (plannotator, gated)", {
+            argv: [
+              "sh",
+              "-c",
+              `d=$(mktemp -d) && printf %s "$1" > "$d/briefing.md" && ${PORT_SELECTION} plannotator annotate "$d/briefing.md" --gate --json > "$d/decision.json"; s=$?; [ -s "$d/decision.json" ] && cat "$d/decision.json"; if [ $s -eq 0 ] && grep -q '"decision":"dismissed"' "$d/decision.json"; then echo "owner closed the briefing without a decision — halting the run" >&2; s=65; fi; rm -rf "$d"; exit $s`,
+              "sh",
+              "{slot:owner-briefing}",
+            ],
+            idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
+            output: slot.ownerDecision,
+          });
+        },
+      );
 
-            flow.until(condition.all([
-                condition.equals(slot.verdict.status, "approved"),
-                condition.equals(repoGatesPassed.ok, true),
-                condition.equals(slot.ownerDecision.decision, "approved"),
-            ]));
-        });
+      flow.until(
+        condition.all([
+          condition.equals(slot.verdict.status, "approved"),
+          condition.equals(repoGatesPassed.ok, true),
+          condition.equals(slot.ownerDecision.decision, "approved"),
+        ]),
+      );
+    });
 
-        // The commit tail, clean-tree-guarded like quick's, with plannotate's
-        // brief grafts inside the guard: the brief is written and displayed
-        // only when there is something to commit, and ships in the same
-        // commit as the work it describes.
-        step.command("Check working tree status", {
-            argv: ["git", "status", "--porcelain"],
-            output: slot.shippingStatus,
-        });
+    // The commit tail, clean-tree-guarded like quick's, with plannotate's
+    // brief grafts inside the guard: the brief is written and displayed
+    // only when there is something to commit, and ships in the same
+    // commit as the work it describes.
+    step.command("Check working tree status", {
+      argv: ["git", "status", "--porcelain"],
+      output: slot.shippingStatus,
+    });
 
-        flow.when("Shipping Maybe Commit", condition.not(condition.equals(slot.shippingStatus, "")), () => {
-            agent.smart.prompt("Write the brief and commit message", {
-                input: gatedBriefText,
-                output: slot.brief,
-            });
-            step.project("Lift Brief", {
-                projections: [
-                    { source: slot.brief, field: "slug", destination: slot.briefSlug },
-                    { source: slot.brief, field: "markdown", destination: slot.briefMarkdown },
-                    { source: slot.brief, field: "commit-message", destination: slot.commitMessage },
-                ],
-            });
-            step.command("Save the brief to .internal/briefs/", {
-                argv: [
-                    "sh",
-                    "-c",
-                    'mkdir -p .internal/briefs && printf %s "$1" > ".internal/briefs/$2.md"',
-                    "sh",
-                    "{slot:brief-markdown}",
-                    "{slot:brief-slug}",
-                ],
-                output: slot.briefWriteOutput,
-            });
-            // No `--gate`: the brief is a record, not a decision — closing it
-            // is the step's normal end, never a halt.
-            step.command("Show the brief to the owner (plannotator, display only)", {
-                argv: [
-                    "sh",
-                    "-c",
-                    `${PORT_SELECTION} plannotator annotate "$1"`,
-                    "sh",
-                    ".internal/briefs/{slot:brief-slug}.md",
-                ],
-                include: [slot.briefWriteOutput],
-                idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
-                output: slot.briefDisplayOutput,
-            });
-            // Two steps, not one excluding add — a pathspec that mentions a
-            // gitignored `.agents` exits 1 (see familyCommitTail, run-42bd7fb2).
-            // The brief under .internal/briefs/ is inside this stage — it
-            // ships in the same commit as the work it describes.
-            step.command("Stage all changes", {
-                argv: ["git", "add", "-A"],
-                output: slot.stageOutput,
-            });
-            step.command("Unstage runtime state", {
-                argv: ["git", "reset", "-q", "--", ".agents/runs"],
-                output: slot.unstageOutput,
-            });
-            step.command("Commit the work", {
-                argv: ["git", "commit", "-m", "{slot:commit-message}"],
-                input: [slot.commitMessage],
-                output: slot.commitOutput,
-            });
-        });
-    },
+    flow.when("Shipping Maybe Commit", condition.not(condition.equals(slot.shippingStatus, "")), () => {
+      agent.smart.prompt("Write the brief and commit message", {
+        input: gatedBriefText,
+        output: slot.brief,
+      });
+      step.project("Lift Brief", {
+        projections: [
+          { source: slot.brief, field: "slug", destination: slot.briefSlug },
+          { source: slot.brief, field: "markdown", destination: slot.briefMarkdown },
+          { source: slot.brief, field: "commit-message", destination: slot.commitMessage },
+        ],
+      });
+      step.command("Save the brief to .internal/briefs/", {
+        argv: [
+          "sh",
+          "-c",
+          'mkdir -p .internal/briefs && printf %s "$1" > ".internal/briefs/$2.md"',
+          "sh",
+          "{slot:brief-markdown}",
+          "{slot:brief-slug}",
+        ],
+        output: slot.briefWriteOutput,
+      });
+      // No `--gate`: the brief is a record, not a decision — closing it
+      // is the step's normal end, never a halt.
+      step.command("Show the brief to the owner (plannotator, display only)", {
+        argv: [
+          "sh",
+          "-c",
+          `${PORT_SELECTION} plannotator annotate "$1"`,
+          "sh",
+          ".internal/briefs/{slot:brief-slug}.md",
+        ],
+        include: [slot.briefWriteOutput],
+        idleTimeoutMs: HUMAN_IDLE_CEILING_MS,
+        output: slot.briefDisplayOutput,
+      });
+      // Two steps, not one excluding add — a pathspec that mentions a
+      // gitignored `.agents` exits 1 (see familyCommitTail, run-42bd7fb2).
+      // The brief under .internal/briefs/ is inside this stage — it
+      // ships in the same commit as the work it describes.
+      step.command("Stage all changes", {
+        argv: ["git", "add", "-A"],
+        output: slot.stageOutput,
+      });
+      step.command("Unstage runtime state", {
+        argv: ["git", "reset", "-q", "--", ".agents/runs"],
+        output: slot.unstageOutput,
+      });
+      step.command("Commit the work", {
+        argv: ["git", "commit", "-m", "{slot:commit-message}"],
+        input: [slot.commitMessage],
+        output: slot.commitOutput,
+      });
+    });
+  },
 );
 
 export default variant({
-    name: "Implement (Gated)",
-    summary:
-        "Quick's implementation loop with the owner inside it: draft the approach, have the owner annotate the plan in plannotator, then grind a single reviewer loop where every gate-green approved round summons the owner to a gated briefing — on double approval, record a tracked brief and commit.",
-    metadata: { tag: ["dogfood", "implementation", "review", "lean", "human-in-the-loop", "plannotator"] },
-    behavior: FAMILY_BEHAVIOR,
-    intent: GATED_INTENT,
-    resource: [resource.taskBoard],
-    signal: [gateTimedOut],
-    port: [port.commitReport, port.parkReportPort, port.briefReport],
-    procedure: procedureBody,
+  name: "Implement (Gated)",
+  summary:
+    "Quick's implementation loop with the owner inside it: draft the approach, have the owner annotate the plan in plannotator, then grind a single reviewer loop where every gate-green approved round summons the owner to a gated briefing — on double approval, record a tracked brief and commit.",
+  metadata: { tag: ["dogfood", "implementation", "review", "lean", "human-in-the-loop", "plannotator"] },
+  behavior: FAMILY_BEHAVIOR,
+  intent: GATED_INTENT,
+  resource: [resource.taskBoard],
+  signal: [gateTimedOut],
+  port: [port.commitReport, port.parkReportPort, port.briefReport],
+  procedure: procedureBody,
 });

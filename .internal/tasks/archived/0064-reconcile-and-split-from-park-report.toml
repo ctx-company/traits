@@ -75,9 +75,4 @@ with no stored marker; and neither mechanic is reachable from inside a run.
 """
 
 [relations]
-depends-on = [
-    "0060",
-    "0061",
-    "0063",
-    "0062",
-]
+depends-on = ["0060", "0061", "0063", "0062"]

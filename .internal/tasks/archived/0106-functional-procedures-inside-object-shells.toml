@@ -53,7 +53,4 @@ fails loudly with an actionable message; drift/embed + builds + cargo test green
 """
 
 [relations]
-depends-on = [
-    "0103",
-    "0104",
-]
+depends-on = ["0103", "0104"]

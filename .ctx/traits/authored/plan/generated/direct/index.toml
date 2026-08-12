@@ -7,12 +7,7 @@ summary = "Format a described task into one well-formed house-format task file w
 variant = "direct"
 
 [metadata]
-tag = [
-    "task",
-    "plan",
-    "bootstrap",
-    "planning",
-]
+tag = ["task", "plan", "bootstrap", "planning"]
 
 [[intent.focus]]
 id = "specific"
