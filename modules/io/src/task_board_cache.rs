@@ -18,7 +18,7 @@ use crate::task_files::BoardFingerprint;
 
 /// Bumped only when the record shape changes; a stored record at any other
 /// version is discarded rather than partially trusted.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 const SNAPSHOT_FILENAME: &str = "task-board-snapshot.json";
 

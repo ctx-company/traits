@@ -1240,7 +1240,7 @@ impl State {
             tasks_refresh_error: None,
             tasks_cache_root: None,
             tasks_visible: Vec::new(),
-            collapsed_task_groups: HashSet::new(),
+            collapsed_task_groups: HashSet::from([TaskGroup::Done]),
             task_preview: None,
             task_proposals: HashMap::new(),
             reconcile_queue: Vec::new(),
@@ -5866,7 +5866,9 @@ fn wall_clock_now_secs() -> u64 {
 /// happens — shared by startup, the `s` keypress, and the 2s tick sweep.
 fn read_board_snapshot(dir: &camino::Utf8Path) -> Result<TasksBoardSnapshot, String> {
     let provider = FilesTaskBoard::open_read(dir.to_owned());
-    let summaries = provider.list(false).map_err(|error| error.to_string())?;
+    // One loader contract: this is the sole live-read fn (startup, `s`, tick sweep),
+    // so it must include archived done tasks like the reconcile path already does.
+    let summaries = provider.list(true).map_err(|error| error.to_string())?;
     let mut resolved = BTreeMap::new();
     for summary in &summaries {
         if let Ok(Some(task)) = provider.get(&summary.key) {
@@ -11327,8 +11329,12 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        // Five groups always render a header, including empty ones; nothing
-        // starts collapsed.
+        // Five groups always render a header, including empty ones; Done
+        // starts collapsed (0182), the other four start expanded.
+        assert_eq!(
+            state.collapsed_task_groups,
+            HashSet::from([TaskGroup::Done])
+        );
         assert_eq!(state.tasks_visible.len(), 5 + 2);
         for group in TaskGroup::order() {
             let index = state
@@ -11341,11 +11347,22 @@ mod tests {
             state.list_tasks.set_selected(index);
             toggle_selected_task_group(&mut state);
         }
-        assert_eq!(state.collapsed_task_groups.len(), 5);
+        // Toggling every group once flips Done to expanded and the other
+        // four to collapsed.
+        assert_eq!(
+            state.collapsed_task_groups,
+            HashSet::from([
+                TaskGroup::InFlight,
+                TaskGroup::Parked,
+                TaskGroup::Blocked,
+                TaskGroup::Ready
+            ])
+        );
         assert_eq!(state.tasks_visible.len(), 5);
 
-        // A resync (new summaries, same collapse set) keeps every group
-        // collapsed rather than resetting it.
+        // A resync (new summaries, same collapse set) keeps every group's
+        // collapse state rather than resetting it: the four toggled groups
+        // stay collapsed, and Done (toggled to expanded) shows its new row.
         state.tasks_board = Some(board_with(
             vec![
                 task_summary("0001", DerivedStatus::Ready),
@@ -11355,14 +11372,15 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        assert_eq!(state.tasks_visible.len(), 5);
-        assert!(state.tasks_visible.iter().all(|row| matches!(
-            row,
-            TaskVisibleRow::GroupHeader {
-                collapsed: true,
-                ..
+        assert_eq!(state.tasks_visible.len(), 5 + 1);
+        for row in &state.tasks_visible {
+            if let TaskVisibleRow::GroupHeader {
+                group, collapsed, ..
+            } = row
+            {
+                assert_eq!(*collapsed, *group != TaskGroup::Done);
             }
-        )));
+        }
     }
 
     /// 0063.8: a task-bound run whose last terminal merge frame landed
@@ -12268,6 +12286,110 @@ mod tests {
             Some(TaskVisibleRow::GroupHeader { .. }) => panic!("selection landed on a header"),
             None => panic!("selection landed out of bounds"),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // 0182: done tasks (live and archived) must be visible, and Done
+    // starts collapsed.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn read_board_snapshot_includes_archived_done_tasks_and_done_starts_collapsed() {
+        let dir = tasks_board_tempdir();
+        // ready
+        write_task_toml(&dir, "0001-ready.toml", "0001");
+        // blocked: depends on an open task
+        std::fs::write(
+            dir.join("0002-blocked.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0002\"\ntitle = \"title 0002\"\nstatus = \"ready\"\n\n[relations]\ndepends-on = [\"0001\"]\n",
+        )
+        .unwrap();
+        // done, live dir
+        std::fs::write(
+            dir.join("0003-done-live.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0003\"\ntitle = \"title 0003\"\nstatus = \"done\"\n",
+        )
+        .unwrap();
+        // done, archived
+        let archived = dir.join("archived");
+        std::fs::create_dir_all(archived.as_std_path()).unwrap();
+        std::fs::write(
+            archived.join("0004-done-archived.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0004\"\ntitle = \"title 0004\"\nstatus = \"done\"\n",
+        )
+        .unwrap();
+        // cancelled
+        std::fs::write(
+            dir.join("0005-cancelled.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0005\"\ntitle = \"title 0005\"\nstatus = \"cancelled\"\n",
+        )
+        .unwrap();
+
+        let snapshot = read_board_snapshot(&dir).expect("board reads");
+        assert_eq!(
+            snapshot.summaries.len(),
+            5,
+            "all five tasks, live and archived"
+        );
+
+        let mut state = state_with_scratch_cache();
+        state.tasks_board = Some(snapshot);
+        rebuild_visible_tasks(&mut state);
+
+        let done_index = state
+            .tasks_visible
+            .iter()
+            .position(
+                |row| matches!(row, TaskVisibleRow::GroupHeader { group, .. } if *group == TaskGroup::Done),
+            )
+            .expect("done header present");
+        match &state.tasks_visible[done_index] {
+            TaskVisibleRow::GroupHeader {
+                collapsed, count, ..
+            } => {
+                assert!(*collapsed, "done group starts collapsed");
+                assert_eq!(*count, 3, "0003 (live), 0004 (archived), 0005 (cancelled)");
+            }
+            TaskVisibleRow::Task(_) => panic!("expected a header"),
+        }
+
+        state.list_tasks.set_selected(done_index);
+        toggle_selected_task_group(&mut state);
+        let done_keys: Vec<&str> = state
+            .tasks_visible
+            .iter()
+            .filter_map(|row| match row {
+                TaskVisibleRow::Task(key) => Some(key.as_str()),
+                TaskVisibleRow::GroupHeader { .. } => None,
+            })
+            .filter(|key| matches!(*key, "0003" | "0004" | "0005"))
+            .collect();
+        assert_eq!(done_keys, vec!["0003", "0004", "0005"]);
+    }
+
+    #[test]
+    fn a_status_flip_to_done_on_disk_is_picked_up_without_restart() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        sync_tasks_board_in(&mut state, &dir);
+        assert_eq!(
+            task_group(
+                state.tasks_board.as_ref().unwrap().summaries[0].derived_status,
+                &[]
+            ),
+            TaskGroup::Ready
+        );
+
+        std::fs::write(
+            dir.join("0001-first.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title 0001\"\nstatus = \"done\"\n",
+        )
+        .unwrap();
+        refresh_tasks_board_if_stale_in(&mut state, &dir);
+
+        let summary = &state.tasks_board.as_ref().unwrap().summaries[0];
+        assert_eq!(summary.derived_status, DerivedStatus::Done);
     }
 
     // --- 0064 split-from-park-report mapping ---------------------------
