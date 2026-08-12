@@ -1,0 +1,72 @@
+schema-version = "0.2"
+key = "0182"
+title = "dashboard: done tasks are invisible — the done group renders empty"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Observed 2026-08-12: tasks 0170-0176 and 0179 were set status = "done"
+(files edited in place in .internal/tasks/, still in the live board
+dir — not moved to archived/, since the in-place edit bypassed the
+update flow's archive-on-close). The dashboard tasks pane does not
+show them anywhere.
+
+That contradicts the pane's own design: TaskGroup::order()
+(dashboard.rs:581) includes a Done group, task_group maps
+DerivedStatus::Done | Cancelled into it (dashboard.rs:5718), and
+rebuild_visible_tasks (dashboard.rs:5743) buckets every summary it is
+given — so done tasks are starved UPSTREAM of the grouping, or hidden
+by presentation, not filtered by it.
+
+"""
+scope = """
+## Where to look (mechanisms mapped, root cause to be pinned)
+
+- The summaries feed: state.tasks_board.summaries comes from the board
+  snapshot (task_board_cache.rs BoardSnapshotRecord) / the live sync.
+  One dashboard path deliberately reads `list(true)` "so archived
+  tasks are considered" (dashboard.rs:6569) — check whether the
+  STARTUP load (load_tasks_board_at_startup, dashboard.rs:6047), the
+  cached snapshot, and the `s` sync path agree on including (a) done
+  tasks still in the live dir and (b) tasks under archived/.
+- Presentation: collapsed_task_groups — if Done starts collapsed, the
+  header should still render with its count; verify the header
+  actually appears when the group is non-empty and that an empty-count
+  header is not being dropped wholesale.
+- Both placements are legitimate and must show: a done task in the
+  live dir (in-place status edit, this incident) and one under
+  archived/ (the update flow's archive-on-close).
+
+## Decisions
+
+- Done tasks are HISTORY, not noise: they render under the existing
+  `done` group header, collapsed by default with the count visible in
+  the header, expandable like every other group. No new toggle, no new
+  screen.
+- The summaries feed includes done tasks from BOTH the live board dir
+  and archived/, on every load path (startup, cached snapshot, sync) —
+  one loader contract, not three.
+- Selection preservation across rebuilds (0063.7) applies to rows
+  inside the done group like any other.
+
+## Watch
+
+- The task-proposals join (auto-close derivation) currently sees the
+  summaries too — including archived tasks must not resurrect closed
+  proposals or re-trigger auto-close sweeps.
+- Board fingerprint/cache invalidation: an in-place status edit must
+  refresh the cached snapshot (BoardFingerprint should already cover
+  file content — verify, don't assume).
+
+"""
+validation = """
+## Done when
+
+Scratch-board fixture with one task per state (ready, blocked, done in
+live dir, done under archived/, cancelled): the dashboard's visible
+rows show all five under their groups, with the done group header
+carrying count 3 collapsed and listing all three expanded; a status
+flip from ready to done moves the row between groups on the next sync
+without restart; `cargo test -p ctx-traits-cli --lib` green; `just
+test` green.
+"""
