@@ -668,13 +668,21 @@ mod tests {
     fn tempdir() -> Utf8PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "cli-tasks-test-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Utf8PathBuf::from_path_buf(dir).unwrap()
+        // Pid recycling can hand this process a name a dead test run already
+        // used and left behind; only exclusive creation guarantees the dir is
+        // empty, so retry past leftovers instead of adopting them.
+        loop {
+            let dir = std::env::temp_dir().join(format!(
+                "cli-tasks-test-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Utf8PathBuf::from_path_buf(dir).unwrap(),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("creating scratch dir {}: {err}", dir.display()),
+            }
+        }
     }
 
     fn write_task(dir: &Utf8PathBuf, file_name: &str, toml: &str) {
