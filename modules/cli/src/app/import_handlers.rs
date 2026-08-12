@@ -596,7 +596,7 @@ pub(crate) struct ImportInputs<'a> {
     /// `source_profile`, which selects the source-format parser. Has no
     /// effect when `llm_assisted` is false or `candidate_path` is set, since
     /// neither path dispatches a harness.
-    pub(crate) run_profile: Option<&'a str>,
+    pub(crate) budget_document: Option<&'a str>,
     pub(crate) json: bool,
     pub(crate) verbose: bool,
 }
@@ -611,7 +611,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
         model,
         assignments,
         candidate_path,
-        run_profile,
+        budget_document,
         json,
         verbose,
     } = input;
@@ -764,9 +764,9 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
             }
             None => (
                 {
-                    let run_profile_document = run_profile
+                    let budget_document_document = budget_document
                         .map(camino::Utf8Path::new)
-                        .map(ctx_traits_io::harness_config::load_run_profile_document)
+                        .map(ctx_traits_io::harness_config::load_budget_document)
                         .transpose()?;
                     // The loop's `import-round` rung converges toward the
                     // deterministic scaffold baseline, not the CLI's
@@ -793,7 +793,7 @@ pub(crate) fn handle_import(input: ImportInputs<'_>) -> crate::Result<CommandOut
                         ],
                         assignments,
                         model,
-                        run_profile_document.as_ref(),
+                        budget_document_document.as_ref(),
                         Some(observer),
                     ) {
                         Ok(crate::app::generate::BuiltinTraitRun::Completed(outcome)) => outcome,

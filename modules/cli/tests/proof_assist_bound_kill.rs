@@ -74,7 +74,7 @@ fn path_with_ctx_bin() -> String {
 /// through the CDK build rung. A candidate whose module hangs at top level
 /// (`while (true) {}`) makes that subprocess produce zero output for as long
 /// as it spins — well within the CDK build's own 30s wall — so the
-/// repository's `[run] command-idle-seconds` policy (reaching this step
+/// repository's `[budget] command-idle-seconds` policy (reaching this step
 /// exactly as an ordinary command step's would, proving inheritance) fires
 /// first and kills it.
 fn write_command_bound_ctx_toml(repo: &Path) {
@@ -85,7 +85,7 @@ fn write_command_bound_ctx_toml(repo: &Path) {
     let ctx_toml = format!(
         r#"schema-version = "0.4"
 
-[run]
+[budget]
 command-idle-seconds = 2
 
 [harness.stub-generator]
@@ -215,7 +215,7 @@ fn write_frame_bound_ctx_toml(repo: &Path) {
     let ctx_toml = format!(
         r#"schema-version = "0.4"
 
-[run]
+[budget]
 max-retries = 0
 
 [harness.stub-generator]

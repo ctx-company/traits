@@ -823,6 +823,37 @@ pub struct ResolvedSettingRecord {
     pub source: SettingSourceLayer,
 }
 
+/// 0176: which chain tier supplied a resolved budget field, in increasing
+/// specificity. Evidence only — never consulted by the driver's own budget
+/// enforcement, and excluded from every digest by construction (the same
+/// contract as [`SettingSourceLayer`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum BudgetSourceLayer {
+    /// Machine-global `[budget]` fallback.
+    MachineFallback,
+    /// The author's trait.toml `[budget]` (variant overlay included).
+    Author,
+    /// Operator `[trait.<id>.budget]`.
+    TraitScoped,
+    /// Operator `[trait.<id>.variant.<vid>.budget]`.
+    VariantScoped,
+}
+
+/// One budget field resolved at activation, recorded as run-ledger evidence:
+/// the kebab-case field name, the resolved value, and which chain tier
+/// supplied it. Fields no tier states resolve to engine defaults downstream
+/// and record nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub struct ResolvedBudgetRecord {
+    pub field: String,
+    pub value: JsonValue,
+    pub source: BudgetSourceLayer,
+}
+
 /// Final state of a procedure run ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -891,6 +922,16 @@ pub struct State {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub resolved_settings: Vec<ResolvedSettingRecord>,
+
+    /// 0176: budget fields resolved at activation with their winning chain
+    /// tier. Evidence only, mirroring `resolved-settings` — excluded from
+    /// every digest, never read back by budget enforcement.
+    #[serde(
+        rename = "resolved-budgets",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub resolved_budgets: Vec<ResolvedBudgetRecord>,
     #[serde(default, rename = "active-path", skip_serializing_if = "Vec::is_empty")]
     pub active_path: Vec<PathSegment>,
     #[serde(

@@ -1,6 +1,8 @@
-import type { AgentDefaults, GitTable, HarnessDefinition, HostOverride, MergeTable, ModelPricing, PublishTable, RegistryTable, RepoOverride, RoleAssignmentValue, RunTable, TasksTable, TraitDefaults, WorktreeConfig } from "./generated.js";
-/** `[run]` — one per config build, second call is a named error. */
-export declare function defineRun(fields: RunTable): void;
+import type { AgentDefaults, DriveTable, GitTable, HarnessDefinition, HostOverride, MergeTable, ModelPricing, PublishTable, RegistryTable, RepoOverride, RoleAssignmentValue, RunProfileBudget, TasksTable, TraitDefaults, WorktreeConfig } from "./generated.js";
+/** `[budget]` — one per config build, second call is a named error. */
+export declare function defineBudget(fields: RunProfileBudget): void;
+/** `[drive]` — one per config build, second call is a named error. */
+export declare function defineDrive(fields: DriveTable): void;
 /** `[worktree]` — one per config build, second call is a named error. */
 export declare function defineWorktree(fields: WorktreeConfig): void;
 /** `[merge]` — one per config build, second call is a named error. */

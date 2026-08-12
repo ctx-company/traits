@@ -55,7 +55,7 @@ pub const GLOSS_CHAR_BOUND: usize = 160;
 
 /// The requested depth of a rendered story (P550/P521). Threaded through
 /// every story-consuming surface (`ctx traits story --level`, `--story` on a
-/// driven run, `[run] story` config, the dashboard's `S` key). `Default`
+/// driven run, `[drive] story` config, the dashboard's `S` key). `Default`
 /// renders per-step summaries and derived bullets from the ledger and,
 /// where available, the persisted activity sidecar — always free. `Detailed`
 /// adds the full persisted activity timeline. `Assisted` additionally spends

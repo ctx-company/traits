@@ -23,15 +23,15 @@ use serde_json::Value;
 /// two documents were never told about.
 ///
 /// One value can never exceed the whole body's own configurable ceiling
-/// anyway (`[run] inline-prompt-bytes`, default 128 KiB) — that check, plus
+/// anyway (`[drive] inline-prompt-bytes`, default 128 KiB) — that check, plus
 /// the model's context, is the real budget authority. A tighter per-value
 /// constant adds only the failure mode above.
 const MAX_INLINE_VALUE_BYTES: usize = 128 * 1024;
-/// Inherited by every resolved-frame-prompt caller when `[run]
+/// Inherited by every resolved-frame-prompt caller when `[drive]
 /// inline-prompt-bytes` is absent (P489).
 pub(crate) const DEFAULT_MAX_INLINE_PROMPT_BYTES: u64 = 128 * 1024;
 
-/// Resolve the effective inline-prompt-body ceiling: the `[run]
+/// Resolve the effective inline-prompt-body ceiling: the `[drive]
 /// inline-prompt-bytes` override when configured, otherwise
 /// [`DEFAULT_MAX_INLINE_PROMPT_BYTES`]. Reads config fresh (mirrors the
 /// ad hoc `resolve_runtime_config(Utf8Path::new("."))` pattern used at other
@@ -40,8 +40,8 @@ pub(crate) const DEFAULT_MAX_INLINE_PROMPT_BYTES: u64 = 128 * 1024;
 fn effective_max_inline_prompt_bytes() -> usize {
     ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
         .ok()
-        .and_then(|runtime| runtime.run)
-        .and_then(|run| run.inline_prompt_bytes)
+        .and_then(|runtime| runtime.drive)
+        .and_then(|drive| drive.inline_prompt_bytes)
         .unwrap_or(DEFAULT_MAX_INLINE_PROMPT_BYTES) as usize
 }
 
@@ -1649,6 +1649,7 @@ mod resolve_input_value_tokens_setting_tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings,
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),
@@ -1691,6 +1692,7 @@ mod resolve_input_value_tokens_setting_tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings,
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             stop_reason: None,

@@ -154,56 +154,56 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     add(
         &mut knobs,
         &report.winners,
-        "run.worktree".into(),
+        "worktree.enabled".into(),
         policy.worktree.to_string(),
     );
     let total_seconds = policy.total_seconds.unwrap_or(1800);
     for (name, value) in [
         (
-            "run.max-frames",
+            "budget.max-frames",
             policy.max_frames.unwrap_or(100).to_string(),
         ),
         (
-            "run.frame-seconds",
+            "budget.frame-seconds",
             policy.frame_seconds.unwrap_or(300).to_string(),
         ),
-        ("run.total-seconds", total_seconds.to_string()),
+        ("budget.total-seconds", total_seconds.to_string()),
         (
-            "run.max-retries",
+            "budget.max-retries",
             policy.max_retries.unwrap_or(1).to_string(),
         ),
         (
-            "run.attach-wait-seconds",
+            "budget.attach-wait-seconds",
             policy
                 .attach_wait_seconds
                 .unwrap_or(total_seconds)
                 .to_string(),
         ),
         (
-            "run.idle-seconds",
+            "budget.idle-seconds",
             policy
                 .idle_seconds
                 .map_or_else(|| "absent".into(), |v| v.to_string()),
         ),
-        ("run.max-in-flight", policy.max_in_flight.to_string()),
-        ("run.wait", policy.wait.to_string()),
-        ("run.strict-loops", policy.strict_loops.to_string()),
+        ("drive.max-in-flight", policy.max_in_flight.to_string()),
+        ("drive.wait", policy.wait.to_string()),
+        ("drive.strict-loops", policy.strict_loops.to_string()),
         (
-            "run.inline-prompt-bytes",
+            "drive.inline-prompt-bytes",
             policy
                 .inline_prompt_bytes
                 .unwrap_or(crate::app::frame_prompt::DEFAULT_MAX_INLINE_PROMPT_BYTES)
                 .to_string(),
         ),
         (
-            "run.command-seconds",
+            "budget.command-seconds",
             format!(
                 "{} (authored step timeout-ms wins over this)",
                 policy.command_seconds.unwrap_or(14_400)
             ),
         ),
         (
-            "run.command-idle-seconds",
+            "budget.command-idle-seconds",
             format!(
                 "{} (authored step idle-timeout-ms wins over this)",
                 policy.command_idle_seconds.unwrap_or(600)
@@ -215,7 +215,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     add(
         &mut knobs,
         &report.winners,
-        "run.story".into(),
+        "drive.story".into(),
         match policy.story {
             Some(level) if level.spends_model_call() => {
                 format!("{level} (spends narrator model calls)")
@@ -227,7 +227,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
     add(
         &mut knobs,
         &report.winners,
-        "run.usage-warning-threshold".into(),
+        "drive.usage-warning-threshold".into(),
         match policy.usage_warning_threshold {
             Some(threshold) => threshold.to_string(),
             None => "absent (off)".to_string(),
@@ -424,32 +424,32 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         },
         "worktree.confinement.allow",
     );
-    if let Some(run) = &report.runtime.run {
+    if !report.runtime.worktree.build_cache.is_empty() {
         // Use the owning checkout for linked worktrees, matching build-cache
         // exports and `cache prune --build` exactly.
         let build_cache_repo_root = match ctx_traits_io::repository::discover_repo_root() {
             Ok(root) => ctx_traits_io::repository::discover_main_repo_root(&root),
             Err(error) => Err(error),
         };
-        for (name, cache) in &run.build_cache {
+        for (name, cache) in &report.runtime.worktree.build_cache {
             add_as(
                 &mut knobs,
                 &report.winners,
-                format!("run.build-cache.{name}.env"),
+                format!("worktree.build-cache.{name}.env"),
                 cache.env.clone(),
-                &format!("run.build-cache.{name}"),
+                &format!("worktree.build-cache.{name}"),
             );
             add_as(
                 &mut knobs,
                 &report.winners,
-                format!("run.build-cache.{name}.dir"),
+                format!("worktree.build-cache.{name}.dir"),
                 match &build_cache_repo_root {
                     Ok(repo_root) => {
                         ctx_traits_io::layout::build_cache_root_path(repo_root, name)?.to_string()
                     }
                     Err(_) => "unresolved (not a git repository)".to_string(),
                 },
-                &format!("run.build-cache.{name}"),
+                &format!("worktree.build-cache.{name}"),
             );
         }
     }
@@ -826,7 +826,7 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             };
             // P475 D3/D4: `narrator`/`merger`/`merger-deep` are one-shot
             // calls outside the drive frame loop, resolved against their OWN
-            // seat default (never the `[run]`/CLI-flag chain frame seats
+            // seat default (never the `[budget]`/CLI-flag chain frame seats
             // use), and never take an idle timeout or a retry loop at all —
             // `validate_role_budget` rejects declaring either. Each row
             // below shows the value a frame/call would actually resolve,

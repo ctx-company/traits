@@ -21,7 +21,7 @@ pub(crate) struct ExplainInputs<'a> {
     pub(crate) llm_assisted: bool,
     pub(crate) candidate_path: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
-    pub(crate) run_profile: Option<&'a str>,
+    pub(crate) budget_document: Option<&'a str>,
     pub(crate) assignments: &'a [String],
 }
 
@@ -350,10 +350,10 @@ fn handle_explain_llm_assisted(
     let raw = match input.candidate_path {
         Some(path) => ctx_traits_io::read::read_text(camino::Utf8Path::new(path))?,
         None => {
-            let run_profile_document = input
-                .run_profile
+            let budget_document_document = input
+                .budget_document
                 .map(camino::Utf8Path::new)
-                .map(ctx_traits_io::harness_config::load_run_profile_document)
+                .map(ctx_traits_io::harness_config::load_budget_document)
                 .transpose()?;
             let scaffold_text = serde_json::to_string(scaffold)
                 .map_err(|error| crate::Error::json("serialize explain scaffold input", error))?;
@@ -369,7 +369,7 @@ fn handle_explain_llm_assisted(
                 ],
                 input.assignments,
                 input.model,
-                run_profile_document.as_ref(),
+                budget_document_document.as_ref(),
             ) {
                 Ok(outcome) => outcome.output,
                 Err(error) => {

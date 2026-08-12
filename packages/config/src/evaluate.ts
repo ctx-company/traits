@@ -6,7 +6,17 @@ export interface EvaluateConfigFunctionOptions {
   layer?: "user-global" | "repo";
 }
 
-const SINGLETON_TABLES = ["run", "worktree", "merge", "git", "tasks", "agent", "publish", "registry"] as const;
+const SINGLETON_TABLES = [
+  "budget",
+  "drive",
+  "worktree",
+  "merge",
+  "git",
+  "tasks",
+  "agent",
+  "publish",
+  "registry",
+] as const;
 
 const KEYED_TABLES = ["pricing", "harness", "host", "repo", "trait"] as const;
 

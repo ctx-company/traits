@@ -1420,6 +1420,13 @@ pub struct Session {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub resolved_settings: Vec<crate::procedure::runtime::ResolvedSettingRecord>,
+    /// 0176: budget evidence mirror of `resolved-settings`.
+    #[serde(
+        default,
+        rename = "resolved-budgets",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub resolved_budgets: Vec<crate::procedure::runtime::ResolvedBudgetRecord>,
     #[serde(default, rename = "active-path", skip_serializing_if = "Vec::is_empty")]
     pub active_path: Vec<PathSegment>,
     #[serde(
@@ -1590,6 +1597,11 @@ pub struct StartRequest {
     /// still starts, just with no resolved-settings evidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resolved_settings: Vec<crate::procedure::runtime::ResolvedSettingRecord>,
+    /// 0176: activation-resolved budget fields with their winning chain
+    /// tier, recorded to the run ledger as evidence. Same opt-in contract
+    /// as `resolved_settings`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_budgets: Vec<crate::procedure::runtime::ResolvedBudgetRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_capability_reports: Vec<CapabilityReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1684,6 +1696,7 @@ pub fn start_run_session(
         request.source_digest,
         request.canonical_digest,
         request.resolved_settings,
+        request.resolved_budgets,
     )?;
     state.strict_loops = request.strict_loops;
     build_session(trait_ref, request.session_id, state, None, provenance)
@@ -2579,6 +2592,7 @@ fn build_session(
         provider_capability_reports: capabilities,
         output_ports: state.output_ports.clone(),
         resolved_settings: state.resolved_settings.clone(),
+        resolved_budgets: state.resolved_budgets.clone(),
         active_path: state.active_path.clone(),
         control_stack: state.control_stack.clone(),
         stop_reason: state.stop_reason.clone(),
@@ -4766,6 +4780,7 @@ output = ["slot:final"]
             initial_port_values: Vec::new(),
             resource_evidence: Vec::new(),
             resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
             provider_capability_reports: Vec::new(),
             source_digest: None,
             canonical_digest: None,
@@ -5577,6 +5592,7 @@ equals = "approve"
             initial_port_values: Vec::new(),
             resource_evidence: Vec::new(),
             resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
             provider_capability_reports: Vec::new(),
             source_digest: None,
             canonical_digest: None,

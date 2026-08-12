@@ -1,5 +1,15 @@
 import { closeConfigFrame, openConfigFrame } from "./frame.js";
-const SINGLETON_TABLES = ["run", "worktree", "merge", "git", "tasks", "agent", "publish", "registry"];
+const SINGLETON_TABLES = [
+    "budget",
+    "drive",
+    "worktree",
+    "merge",
+    "git",
+    "tasks",
+    "agent",
+    "publish",
+    "registry",
+];
 const KEYED_TABLES = ["pricing", "harness", "host", "repo", "trait"];
 function assembleKeyed(frame, table) {
     const byKey = frame.keyed.get(table);

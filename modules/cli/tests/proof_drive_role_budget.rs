@@ -149,7 +149,7 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
 }
 
 /// A declared `[agent.role.worker.budget] frame-seconds = 1, max-retries = 0`
-/// (well below the 300s/1-retry built-in defaults, and with no `[run]`/CLI
+/// (well below the 300s/1-retry built-in defaults, and with no `[budget]`/CLI
 /// flag declared to compete with it — the precedence this asserts is role
 /// budget vs. built-in default, not role budget vs. a nearer layer) governs
 /// the ACTUAL dispatch timeout, not merely `doctor --config`'s display: the

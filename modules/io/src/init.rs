@@ -201,12 +201,15 @@ schema-version = "0.1.0"
 # [worktree.tripwire]
 # policy = "park"                 # park | warn — out-of-tree mutation findings
 
-# --- Run budgets --------------------------------------------------------------
-# [run]
+# --- Budgets (execution ceilings; fallback under authored trait.toml budgets) --
+# [budget]
 # total-seconds = 3600            # the ONLY whole-run clock
 # max-frames = 200
 # frame-seconds = 1800            # floor for roles declaring no budget
 # max-retries = 3
+
+# --- Drive policy (how frames dispatch and present) ---------------------------
+# [drive]
 # inline-prompt-bytes = 300000
 
 # --- Landing merge gate ------------------------------------------------------
@@ -258,12 +261,21 @@ schema-version = "0.1.0"
 # session-mode = "per-frame"      # per-frame | persistent; persistent restates each turn's output contract inline and cannot use per-frame json-schema-flag enforcement
 # budget = { frame-seconds = 1800 }
 
-# --- Run budgets (machine overrides) -------------------------------------------
-# [run]
+# --- Budgets (machine fallback; never beats an authored trait.toml budget) -----
+# [budget]
 # total-seconds = 3600            # the ONLY whole-run clock
 # max-frames = 200
 # frame-seconds = 1800            # floor for roles declaring no budget
 # max-retries = 3
+#
+# Scoped operator overrides beat the author, most specific wins:
+# [trait.implement.budget]
+# total-seconds = 43200
+# [trait.implement.variant.gated.budget]
+# idle-seconds = 28800
+
+# --- Drive policy (how frames dispatch and present) ---------------------------
+# [drive]
 # inline-prompt-bytes = 300000
 
 # --- Worktree environment (machine paths) --------------------------------------

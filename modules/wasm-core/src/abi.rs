@@ -577,6 +577,7 @@ pub fn run_start_json(input: &str) -> String {
                 // wasm has no config-layer access; settings resolve to their
                 // canonical declaration defaults only, with no evidence.
                 resolved_settings: Vec::new(),
+                resolved_budgets: Vec::new(),
                 provider_capability_reports: Vec::new(),
                 source_digest: Some(ctx_traits_core::digest::Digest::parse(&source_digest)?),
                 canonical_digest: Some(canonical_digest.clone()),

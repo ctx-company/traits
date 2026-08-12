@@ -84,7 +84,7 @@ pub(crate) struct SessionStartInputs<'a> {
     /// provenance before driving; `None` means this run never lands
     /// automatically.
     pub(crate) merge_rung: Option<ctx_traits_core::procedure::session::MergeRung>,
-    /// P550 resolved `--story`/`[run] story` level. `None` means the
+    /// P550 resolved `--story`/`[drive] story` level. `None` means the
     /// termination story hook is off. `Some` opens the pane on a fully
     /// interactive TTY (never under `--json`) and prints the plain story
     /// otherwise.
@@ -554,7 +554,7 @@ pub(crate) fn handle_session_start(
 /// today, the story is already available separately via `ctx traits story
 /// --json`. `stdio` uses the same three-way TTY rule the drive TUI default
 /// applies (`dashboard::interactive_available` plus a stdout check), so
-/// `[run] story = "default"` stays inert in CI/scripts beyond this plain
+/// `[drive] story = "default"` stays inert in CI/scripts beyond this plain
 /// text block.
 fn print_story_at_termination(
     session: &ctx_traits_core::procedure::session::Session,

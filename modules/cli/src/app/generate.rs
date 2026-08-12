@@ -599,14 +599,14 @@ pub(crate) fn run_builtin_trait(
     input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
     assignments: &[String],
     model: Option<&str>,
-    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
+    budget_document: Option<&ctx_traits_io::harness_config::BudgetDocument>,
 ) -> crate::Result<BuiltinTraitOutcome> {
     match run_builtin_trait_observed(
         trait_id,
         input_values,
         assignments,
         model,
-        run_profile,
+        budget_document,
         None,
     )? {
         BuiltinTraitRun::Completed(outcome) => Ok(outcome),
@@ -624,7 +624,7 @@ pub(crate) fn run_builtin_trait_observed(
     input_values: Vec<ctx_traits_core::procedure::runtime::StepSlotOutput>,
     assignments: &[String],
     model: Option<&str>,
-    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
+    budget_document: Option<&ctx_traits_io::harness_config::BudgetDocument>,
     frame_observer: Option<crate::app::drive::FrameObserver<'_>>,
 ) -> crate::Result<BuiltinTraitRun> {
     let agent_role = match trait_id {
@@ -645,16 +645,7 @@ pub(crate) fn run_builtin_trait_observed(
     // embedded package is materialized to a real store path (P337).
     let (trait_file, _source_kind) =
         ctx_traits_io::run::resolve_trait_path(None, Some(trait_id), "run-builtin")?;
-    if let Some(profile) = run_profile {
-        let (declared_trait, ..) = ctx_traits_io::run::load_trait(trait_file.as_str())?;
-        let declared_roles: std::collections::BTreeSet<String> = declared_trait
-            .agents
-            .iter()
-            .map(|agent| agent.id.clone())
-            .collect();
-        ctx_traits_io::harness_config::validate_run_profile_roles(profile, &declared_roles)?;
-    }
-    let assignments = builtin_assignments(agent_role, assignments, model, run_profile)?;
+    let assignments = builtin_assignments(agent_role, assignments, model)?;
     let outcome = ctx_traits_io::run::start(ctx_traits_io::run::StartRequest {
         // Internal driving traits keep the declared loop policy.
         strict_loops: false,
@@ -692,12 +683,10 @@ pub(crate) fn run_builtin_trait_observed(
         .ok_or_else(|| crate::Error::Command {
             message: "built-in trait runner did not persist a driveable session".to_string(),
         })?;
-    // A selected run profile's `[budget]` ranks above the package
-    // `config.toml` sidecar `drive` resolves internally: there is no other
-    // "explicit drive value" tier at this built-in call site, so injecting
-    // the profile's budget fields here (rather than leaving them `None`)
-    // achieves that precedence via `drive`'s own `budget_from` overlay.
-    let profile_budget = run_profile.map(|profile| &profile.budget);
+    // A `--budget` document ranks above every config tier at this built-in
+    // call site: injecting its fields here (rather than leaving them `None`)
+    // occupies the CLI-flag slot in `budget_from`'s overlay.
+    let profile_budget = budget_document.map(|document| &document.budget);
     let report = crate::app::drive::drive(crate::app::drive::DriveInputs {
         file: Some(trait_file.as_str()),
         session: session.as_str(),
@@ -784,26 +773,11 @@ fn builtin_assignments(
     role: &str,
     assignments: &[String],
     model: Option<&str>,
-    run_profile: Option<&ctx_traits_io::harness_config::RunProfileDocument>,
 ) -> crate::Result<Vec<String>> {
-    if model.is_none() && run_profile.is_none() {
+    if model.is_none() {
         return Ok(assignments.to_vec());
     }
-    let mut resolved = ctx_traits_io::harness_config::resolve_runtime_assignments(assignments)?;
-    // A selected run profile's `[assign.<role>]` becomes the "explicit"
-    // layer `resolved_assignment_for_role` merges over `.ctx/config.toml`
-    // role defaults, but only when `--assign` did not already supply this
-    // role: `resolve_runtime_assignments` above already inserted any
-    // `--assign` override into `resolved.assignments`, so `--assign` still
-    // wins over the profile.
-    if let Some(profile) = run_profile
-        && let Some(profile_assignment) = profile.assign.get(role)
-    {
-        resolved
-            .assignments
-            .entry(role.to_string())
-            .or_insert_with(|| profile_assignment.clone().into_profile_assignment());
-    }
+    let resolved = ctx_traits_io::harness_config::resolve_runtime_assignments(assignments)?;
     // Layer every configured seat of the role (role/tier defaults <
     // `.ctx/config.toml` role table/list < profile < `--assign`) without
     // resolving models against a harness catalog yet: `--model` still needs

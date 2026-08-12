@@ -18,7 +18,7 @@ const CONFIG_TS: &str = "import { defineConfig } from \"@ctx-traits/config\";\n\
 import { maxRetries } from \"./pools.ts\";\n\
 \n\
 export default defineConfig({\n\
-  run: { maxRetries },\n\
+  budget: { maxRetries },\n\
 });\n";
 
 /// A `config.ts` with no local import at all — just the bare
@@ -27,7 +27,7 @@ export default defineConfig({\n\
 const CONFIG_TS_NO_LOCAL_IMPORT: &str = "import { defineConfig } from \"@ctx-traits/config\";\n\
 \n\
 export default defineConfig({\n\
-  run: { maxRetries: 3 },\n\
+  budget: { maxRetries: 3 },\n\
 });\n";
 
 fn pools_ts(max_retries: u32) -> String {
@@ -55,7 +55,11 @@ fn toml_only_repo_never_shells_out_to_node() {
     let proj = scratch.home().join("repo");
     fs::create_dir_all(proj.join(".ctx")).unwrap();
     git_init(&proj);
-    fs::write(proj.join(".ctx/config.toml"), "[run]\nmax-in-flight = 2\n").unwrap();
+    fs::write(
+        proj.join(".ctx/config.toml"),
+        "[drive]\nmax-in-flight = 2\n",
+    )
+    .unwrap();
 
     let mut command = controlled_command(
         &support::ctx_bin(),
@@ -71,7 +75,7 @@ fn toml_only_repo_never_shells_out_to_node() {
         Some(0),
         "stdout={stdout} stderr={stderr}"
     );
-    assert!(stdout.contains("run.max-in-flight: 2"), "{stdout}");
+    assert!(stdout.contains("drive.max-in-flight: 2"), "{stdout}");
 }
 
 /// `config build` on a `config.ts` importing a local `pools.ts` produces a
@@ -156,7 +160,7 @@ fn hand_edited_generated_file_is_rejected() {
     let scratch = ScratchRoot::new("p457-hand-edited");
     let proj = scaffold_repo(&scratch, "repo");
     fs::write(proj.join(".ctx/config.ts"), CONFIG_TS).unwrap();
-    fs::write(proj.join(".ctx/config.toml"), "[run]\nmax-retries = 9\n").unwrap();
+    fs::write(proj.join(".ctx/config.toml"), "[budget]\nmax-retries = 9\n").unwrap();
 
     let output = run_ctx(&["traits", "doctor", "--config"], &proj, &scratch.home());
     let (_, stderr) = utf8(&output);
@@ -201,7 +205,7 @@ fn seeded_worktree_without_source_loads_normally() {
         Some(0),
         "stdout={stdout} stderr={stderr}"
     );
-    assert!(stdout.contains("run.max-retries: 3"), "{stdout}");
+    assert!(stdout.contains("budget.max-retries: 3"), "{stdout}");
 }
 
 /// `config build` twice on unchanged input produces byte-identical output
@@ -234,7 +238,7 @@ fn invalid_config_is_caught_at_build() {
     let proj = scaffold_repo(&scratch, "repo");
     fs::write(
         proj.join(".ctx/config.ts"),
-        "export default { run: { notARealField: 1 } };\n",
+        "export default { drive: { notARealField: 1 } };\n",
     )
     .unwrap();
 
@@ -282,7 +286,11 @@ fn build_recovers_a_drifted_config_without_deadlocking() {
 fn global_layer_drift_is_guarded_independently_of_the_repo_layer() {
     let scratch = ScratchRoot::new("p457-global-layer");
     let proj = scaffold_repo(&scratch, "repo");
-    fs::write(proj.join(".ctx/config.toml"), "[run]\nmax-in-flight = 1\n").unwrap();
+    fs::write(
+        proj.join(".ctx/config.toml"),
+        "[drive]\nmax-in-flight = 1\n",
+    )
+    .unwrap();
 
     let global_dir = scratch.home().join("ctx");
     fs::create_dir_all(&global_dir).unwrap();
@@ -341,7 +349,7 @@ fn escaping_repo_import_is_manifested_and_guarded() {
 import { maxRetries } from \"../../outside/ext.ts\";\n\
 \n\
 export default defineConfig({\n\
-  run: { maxRetries },\n\
+  budget: { maxRetries },\n\
 });\n",
     )
     .unwrap();
@@ -382,7 +390,11 @@ export default defineConfig({\n\
 fn escaping_global_import_is_manifested_and_guarded() {
     let scratch = ScratchRoot::new("p457-escaping-global-import");
     let proj = scaffold_repo(&scratch, "repo");
-    fs::write(proj.join(".ctx/config.toml"), "[run]\nmax-in-flight = 1\n").unwrap();
+    fs::write(
+        proj.join(".ctx/config.toml"),
+        "[drive]\nmax-in-flight = 1\n",
+    )
+    .unwrap();
 
     let global_dir = scratch.home().join("ctx");
     fs::create_dir_all(&global_dir).unwrap();
@@ -398,7 +410,7 @@ fn escaping_global_import_is_manifested_and_guarded() {
 import { maxRetries } from \"../pools/p.ts\";\n\
 \n\
 export default defineConfig({\n\
-  run: { maxRetries },\n\
+  budget: { maxRetries },\n\
 });\n",
     )
     .unwrap();
@@ -462,8 +474,8 @@ export default defineConfig({
       },
       harness: { custom: { kind: "custom", bin: "tool", transports: ["cli"], cli: { argv: [] } } },
       host: { codex: { profile: "personal", projectPath: ".codex" } },
-      worktree: { seed: ["seed"], warm: ["warm"], env: { TOKEN: "value" }, tripwire: { sentinel: [".git"] } },
-      run: { wait: true, story: "default", buildCache: { target: { env: "TARGET_DIR" } } },
+      worktree: { seed: ["seed"], warm: ["warm"], env: { TOKEN: "value" }, buildCache: { target: { env: "TARGET_DIR" } }, tripwire: { sentinel: [".git"] } },
+      drive: { wait: true, story: "default" },
       merge: { wait: true, auto: true, deep: false },
       git: { longSeconds: 9 },
       registry: { base: "https://example.invalid/" },
@@ -502,7 +514,7 @@ export default defineConfig({
         "{generated}"
     );
     assert!(
-        generated.contains("[repo.complete.run.build-cache.target]"),
+        generated.contains("[repo.complete.worktree.build-cache.target]"),
         "{generated}"
     );
 
@@ -604,10 +616,10 @@ fn linked_dependency_files_never_enter_the_manifest_or_trip_drift() {
 
 /// The hook fixture and its object-literal twin, exercising a multi-seat
 /// `defineRole("smart", [a, b])` array assignment to pin that shape.
-const CONFIG_TS_HOOK: &str = "import { defineRole, defineRun, definePricing } from \"@ctx-traits/config\";\n\
+const CONFIG_TS_HOOK: &str = "import { defineRole, defineBudget, definePricing } from \"@ctx-traits/config\";\n\
 \n\
 export default function () {\n\
-  defineRun({ maxRetries: 3 });\n\
+  defineBudget({ maxRetries: 3 });\n\
   defineRole(\"master\", { harness: \"claude\", model: \"claude-opus-5\" });\n\
   defineRole(\"smart\", [\n\
     { harness: \"claude\", model: \"claude-opus-5\" },\n\
@@ -619,7 +631,7 @@ export default function () {\n\
 const CONFIG_TS_OBJECT_TWIN: &str = "import { defineConfig } from \"@ctx-traits/config\";\n\
 \n\
 export default defineConfig({\n\
-  run: { maxRetries: 3 },\n\
+  budget: { maxRetries: 3 },\n\
   agent: {\n\
     role: {\n\
       master: { harness: \"claude\", model: \"claude-opus-5\" },\n\
@@ -694,7 +706,7 @@ fn hook_form_and_object_form_compile_byte_identical() {
     );
 }
 
-/// A second `defineRun` call in one hook build fails with a named error,
+/// A second `defineBudget` call in one hook build fails with a named error,
 /// surfaced through the emit script's try/catch as clean stderr rather than
 /// a raw Node stack.
 #[test]
@@ -703,11 +715,11 @@ fn singleton_registrar_double_call_fails_named() {
     let proj = scaffold_repo(&scratch, "repo");
     fs::write(
         proj.join(".ctx/config.ts"),
-        "import { defineRun } from \"@ctx-traits/config\";\n\
+        "import { defineBudget } from \"@ctx-traits/config\";\n\
 \n\
 export default function () {\n\
-  defineRun({ maxRetries: 1 });\n\
-  defineRun({ maxRetries: 2 });\n\
+  defineBudget({ maxRetries: 1 });\n\
+  defineBudget({ maxRetries: 2 });\n\
 }\n",
     )
     .unwrap();
@@ -719,7 +731,10 @@ export default function () {\n\
         Some(0),
         "stdout={stdout} stderr={stderr}"
     );
-    assert!(stderr.contains("defineRun was already called"), "{stderr}");
+    assert!(
+        stderr.contains("defineBudget was already called"),
+        "{stderr}"
+    );
 }
 
 /// A duplicate key in one hook build's keyed registrar fails with a named
@@ -760,10 +775,10 @@ fn mixed_authoring_forms_fail_named() {
     let proj = scaffold_repo(&scratch, "repo");
     fs::write(
         proj.join(".ctx/config.ts"),
-        "import { defineConfig, defineRun } from \"@ctx-traits/config\";\n\
+        "import { defineConfig, defineBudget } from \"@ctx-traits/config\";\n\
 \n\
 export default function () {\n\
-  defineRun({ maxRetries: 1 });\n\
+  defineBudget({ maxRetries: 1 });\n\
   defineConfig({});\n\
 }\n",
     )

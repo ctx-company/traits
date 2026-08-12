@@ -1,7 +1,11 @@
 import { registerKeyed, registerSingleton } from "./frame.js";
-/** `[run]` — one per config build, second call is a named error. */
-export function defineRun(fields) {
-    registerSingleton("defineRun", "run", fields);
+/** `[budget]` — one per config build, second call is a named error. */
+export function defineBudget(fields) {
+    registerSingleton("defineBudget", "budget", fields);
+}
+/** `[drive]` — one per config build, second call is a named error. */
+export function defineDrive(fields) {
+    registerSingleton("defineDrive", "drive", fields);
 }
 /** `[worktree]` — one per config build, second call is a named error. */
 export function defineWorktree(fields) {

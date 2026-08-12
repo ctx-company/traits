@@ -72,7 +72,7 @@ const DEFAULT_INPUT_CAPTURE_LIMIT: usize = 262_144;
 /// Raised 262_144 -> 327_680 on 2026-07-28 (owner: "roughly 100k tokens").
 /// At ~3.5 chars/token that is ~94k tokens of captured stdout — a ceiling on
 /// what a single command may forward into a slot, and therefore into a frame.
-/// Note this is NOT the binding limit for a frame: `[run] inline-prompt-bytes`
+/// Note this is NOT the binding limit for a frame: `[drive] inline-prompt-bytes`
 /// caps the assembled prompt, and a capture that fits here can still overflow
 /// there. Truncation on a slot-feeding command is a typed failure, never a
 /// silent trim (see `stdout_truncated` handling below).
@@ -1518,6 +1518,10 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
                     },
                 )
                 .collect(),
+            resolved_budgets: resolved_budget_records(
+                &prepared_assignments.budget,
+                &prepared_assignments.budget_provenance,
+            ),
             provider_capability_reports,
             source_digest: Some(
                 ctx_traits_core::digest::Digest::parse(&loaded.source_digest).inspect_err(
@@ -3119,6 +3123,7 @@ pub fn set(request: SetRequest<'_>) -> crate::Result<SetOutcome> {
                     initial_port_values: initial_values,
                     resource_evidence: session.resource_evidence.clone(),
                     resolved_settings: session.resolved_settings.clone(),
+                    resolved_budgets: session.resolved_budgets.clone(),
                     provider_capability_reports: session.provider_capability_reports.clone(),
                     source_digest: session.source_digest.clone(),
                     canonical_digest: session.canonical_digest.clone(),
@@ -4095,6 +4100,55 @@ fn write_output_path(out: Option<&str>, fallback: &Utf8Path) -> crate::Result<Ut
         return Ok(Utf8PathBuf::from(out));
     }
     Ok(fallback.to_path_buf())
+}
+
+/// 0176: fold the resolved budget chain into run-ledger evidence records —
+/// one row per field a tier actually stated, carrying the winning tier.
+/// Mirrors the resolved-settings records above: evidence only, outside every
+/// digest.
+fn resolved_budget_records(
+    budget: &crate::harness_config::RunProfileBudget,
+    provenance: &std::collections::BTreeMap<String, crate::harness_config::BudgetSource>,
+) -> Vec<ctx_traits_core::procedure::runtime::ResolvedBudgetRecord> {
+    use ctx_traits_core::procedure::runtime::BudgetSourceLayer;
+    let value_of = |field: &str| -> Option<serde_json::Value> {
+        match field {
+            "max-frames" => budget.max_frames.map(Into::into),
+            "frame-seconds" => budget.frame_seconds.map(Into::into),
+            "total-seconds" => budget.total_seconds.map(Into::into),
+            "max-retries" => budget.max_retries.map(Into::into),
+            "attach-wait-seconds" => budget.attach_wait_seconds.map(Into::into),
+            "idle-seconds" => budget.idle_seconds.map(Into::into),
+            "command-seconds" => budget.command_seconds.map(Into::into),
+            "command-idle-seconds" => budget.command_idle_seconds.map(Into::into),
+            "max-tokens" => budget.max_tokens.map(Into::into),
+            "max-cost-usd" => budget.max_cost_usd.and_then(|value| {
+                serde_json::Number::from_f64(value).map(serde_json::Value::Number)
+            }),
+            _ => None,
+        }
+    };
+    provenance
+        .iter()
+        .filter_map(|(field, source)| {
+            Some(ctx_traits_core::procedure::runtime::ResolvedBudgetRecord {
+                field: field.clone(),
+                value: value_of(field)?,
+                source: match source {
+                    crate::harness_config::BudgetSource::MachineFallback => {
+                        BudgetSourceLayer::MachineFallback
+                    }
+                    crate::harness_config::BudgetSource::Author => BudgetSourceLayer::Author,
+                    crate::harness_config::BudgetSource::TraitScoped => {
+                        BudgetSourceLayer::TraitScoped
+                    }
+                    crate::harness_config::BudgetSource::VariantScoped => {
+                        BudgetSourceLayer::VariantScoped
+                    }
+                },
+            })
+        })
+        .collect()
 }
 
 fn apply_default_inputs(

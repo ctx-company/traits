@@ -16,6 +16,7 @@ pub fn start_procedure_run(
     source_digest: Option<Digest>,
     canonical_digest: Option<Digest>,
     resolved_settings: Vec<ResolvedSettingRecord>,
+    resolved_budgets: Vec<ResolvedBudgetRecord>,
 ) -> crate::Result<State> {
     let proc = procedure(trait_ref)?;
     let sequence = effective_sequence_items(proc)?;
@@ -49,6 +50,7 @@ pub fn start_procedure_run(
         provider_capability_reports,
         output_ports: Vec::new(),
         resolved_settings,
+        resolved_budgets,
         active_path: Vec::new(),
         control_stack: Vec::new(),
         branch_decisions: Vec::new(),
@@ -1124,6 +1126,7 @@ output = ["slot:note"]
             None,
             None,
             records.clone(),
+            Vec::new(),
         )
         .expect("run starts");
         assert_eq!(state.resolved_settings, records);

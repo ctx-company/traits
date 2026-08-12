@@ -3003,6 +3003,7 @@ mod present_replay_boundary_tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),

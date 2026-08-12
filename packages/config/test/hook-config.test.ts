@@ -1,10 +1,10 @@
 import {
+  defineBudget,
   defineConfig,
   defineHarness,
   definePricing,
   defineRepo,
   defineRole,
-  defineRun,
   defineTrait,
   evaluateConfigFunction,
 } from "@ctx-traits/config";
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 describe("evaluateConfigFunction", () => {
   it("assembles singleton and keyed tables from define* calls", () => {
     const config = evaluateConfigFunction(() => {
-      defineRun({ frameSeconds: 1200, maxFrames: 1000 });
+      defineBudget({ frameSeconds: 1200, maxFrames: 1000 });
       defineRole("master", { harness: "claude", model: "claude-opus-5" });
       defineRole("smart", [
         { harness: "claude", model: "claude-opus-5" },
@@ -24,7 +24,7 @@ describe("evaluateConfigFunction", () => {
     });
 
     expect(config).toEqual({
-      run: { frameSeconds: 1200, maxFrames: 1000 },
+      budget: { frameSeconds: 1200, maxFrames: 1000 },
       agent: {
         role: {
           master: { harness: "claude", model: "claude-opus-5" },
@@ -42,10 +42,10 @@ describe("evaluateConfigFunction", () => {
   it("rejects a second call to a singleton registrar", () => {
     expect(() =>
       evaluateConfigFunction(() => {
-        defineRun({ frameSeconds: 1 });
-        defineRun({ frameSeconds: 2 });
+        defineBudget({ frameSeconds: 1 });
+        defineBudget({ frameSeconds: 2 });
       }),
-    ).toThrow(/defineRun was already called/);
+    ).toThrow(/defineBudget was already called/);
   });
 
   it("rejects a duplicate key for a keyed registrar", () => {
@@ -58,13 +58,13 @@ describe("evaluateConfigFunction", () => {
   });
 
   it("rejects a registrar called outside the config build", () => {
-    expect(() => defineRun({ frameSeconds: 1 })).toThrow(/called outside the config build/);
+    expect(() => defineBudget({ frameSeconds: 1 })).toThrow(/called outside the config build/);
   });
 
   it("rejects an async default export", async () => {
     expect(() =>
       evaluateConfigFunction((async () => {
-        defineRun({ frameSeconds: 1 });
+        defineBudget({ frameSeconds: 1 });
       }) as unknown as () => unknown),
     ).toThrow(/must be synchronous/);
   });
@@ -72,7 +72,7 @@ describe("evaluateConfigFunction", () => {
   it("rejects mixing defineConfig with define* calls inside the frame", () => {
     expect(() =>
       evaluateConfigFunction(() => {
-        defineRun({ frameSeconds: 1 });
+        defineBudget({ frameSeconds: 1 });
         defineConfig({});
       }),
     ).toThrow(/mixes defineConfig/);
@@ -82,7 +82,7 @@ describe("evaluateConfigFunction", () => {
     defineConfig({});
     expect(() =>
       evaluateConfigFunction(() => {
-        defineRun({ frameSeconds: 1 });
+        defineBudget({ frameSeconds: 1 });
       }),
     ).toThrow(/mixes defineConfig/);
   });

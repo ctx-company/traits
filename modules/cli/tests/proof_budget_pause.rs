@@ -1,4 +1,4 @@
-//! 0130 provider-free public-path proof: a run with a declared `[run]
+//! 0130 provider-free public-path proof: a run with a declared `[budget]
 //! max-tokens` ceiling pauses typed as `paused-budget-exhausted` at the
 //! frame-dispatch boundary — after the frame that pushed observed tokens
 //! over the ceiling has already completed, never mid-frame — carrying
@@ -71,7 +71,7 @@ fn ctx_toml(harness_id: &str, script: &Path, max_tokens: u64) -> String {
     format!(
         r#"schema-version = "0.4"
 
-[run]
+[budget]
 max-tokens = {max_tokens}
 
 [harness.{harness_id}]

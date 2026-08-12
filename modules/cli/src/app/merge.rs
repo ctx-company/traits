@@ -161,9 +161,9 @@ pub(crate) const DEFAULT_MERGER_TIMEOUT_MS: u64 = 900_000;
 
 /// The merger seat's resolved one-shot call budget (P475, D3): its own
 /// `budget.frame-seconds` if declared, else [`DEFAULT_MERGER_TIMEOUT_MS`].
-/// Never joined to the run-level `[run]`/CLI-flag chain drive frames use —
+/// Never joined to the run-level `[budget]`/CLI-flag chain drive frames use —
 /// the merger call is a one-shot dispatch outside the drive frame loop, so a
-/// `[run] frame-seconds` declared for drive frames must never silently cut
+/// `[budget] frame-seconds` declared for drive frames must never silently cut
 /// merger calls too (the 2026-07-25 masked-timeout incident this phase
 /// closes).
 fn merger_timeout_ms(assignment: &ctx_traits_io::harness_config::ProfileAssignment) -> u64 {
@@ -4841,6 +4841,7 @@ mod tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             stop_reason: None,
@@ -4892,6 +4893,7 @@ mod tests {
                 provider_capability_reports: Vec::new(),
                 output_ports: Vec::new(),
                 resolved_settings: Vec::new(),
+                resolved_budgets: Vec::new(),
                 active_path: Vec::new(),
                 control_stack: Vec::new(),
                 branch_decisions: Vec::new(),

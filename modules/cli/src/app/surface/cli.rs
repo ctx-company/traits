@@ -742,12 +742,11 @@ pub enum TraitsCommand {
         #[arg(long)]
         model: Option<String>,
 
-        /// Path to a narrow runtime profile (`[assign.<role>]` plus
-        /// `[budget]`) selecting the harness/model/budget routing for the
-        /// --llm-assisted explain-trait runner. No effect without
-        /// --llm-assisted or with --candidate.
+        /// Path to a `[budget]` document (0176) capping the --llm-assisted
+        /// explain-trait runner. Routing goes through --assign. No effect
+        /// without --llm-assisted or with --candidate.
         #[arg(long, value_name = "PATH")]
-        profile: Option<String>,
+        budget: Option<String>,
 
         /// Override the explain-trait generator agent assignment. No effect
         /// without --llm-assisted.
@@ -1113,18 +1112,17 @@ pub enum TraitsCommand {
 
         /// Source format hint for the deterministic import parser: what kind
         /// of document `--source` is. P59.1 supports agent-skills. Unrelated
-        /// to `--run-profile`, which selects the LLM runtime for
-        /// `--llm-assisted` instead of the source format.
+        /// to `--budget`, which caps the `--llm-assisted` runner instead of
+        /// selecting the source format.
         #[arg(long)]
         profile: Option<String>,
 
-        /// Path to a narrow runtime profile (`[assign.<role>]` plus
-        /// `[budget]`) selecting the harness/model/budget routing for the
-        /// `--llm-assisted` import-trait runner. Has no effect on
-        /// deterministic import or an offline `--candidate` import, since
-        /// neither dispatches a harness.
+        /// Path to a `[budget]` document (0176) capping the `--llm-assisted`
+        /// import-trait runner. Routing goes through `--assign`. Has no
+        /// effect on deterministic import or an offline `--candidate`
+        /// import, since neither dispatches a harness.
         #[arg(long, value_name = "PATH")]
-        run_profile: Option<String>,
+        budget: Option<String>,
 
         /// Package directory or canonical-file path to write. Defaults to
         /// .ctx/traits/<id>/ (generated/index.toml) when omitted.
@@ -1330,11 +1328,11 @@ pub enum TraitsCommand {
         #[arg(long, conflicts_with = "no_wait")]
         wait: bool,
 
-        /// Override `[run].wait` and fail fast for a busy conductor lease.
+        /// Override `[drive].wait` and fail fast for a busy conductor lease.
         #[arg(long = "no-wait", conflicts_with = "wait")]
         no_wait: bool,
 
-        /// Override `[run].worktree` and run in the invocation checkout.
+        /// Override `[worktree].enabled` and run in the invocation checkout.
         #[arg(long = "no-worktree", conflicts_with = "worktree")]
         no_worktree: bool,
 
@@ -2346,7 +2344,7 @@ pub struct SessionStartArgs {
     #[arg(long, conflicts_with = "no_wait")]
     pub wait: bool,
 
-    /// Override `[run].wait` and fail fast for a busy conductor lease.
+    /// Override `[drive].wait` and fail fast for a busy conductor lease.
     #[arg(long = "no-wait", conflicts_with = "wait")]
     pub no_wait: bool,
 
@@ -2370,7 +2368,7 @@ pub struct SessionStartArgs {
     #[arg(long, num_args = 0..=1, require_equals = true, value_name = "NAME", conflicts_with = "no_worktree")]
     pub worktree: Option<Option<String>>,
 
-    /// Override `[run].worktree` and run in the invocation checkout.
+    /// Override `[worktree].enabled` and run in the invocation checkout.
     #[arg(long = "no-worktree", conflicts_with = "worktree")]
     pub no_worktree: bool,
 
@@ -2396,7 +2394,7 @@ pub struct SessionStartArgs {
     #[arg(long, conflicts_with = "no_strict_loops")]
     pub strict_loops: bool,
 
-    /// Override `[run].strict-loops` and allow normal loop exhaustion.
+    /// Override `[drive].strict-loops` and allow normal loop exhaustion.
     #[arg(long = "no-strict-loops", conflicts_with = "strict_loops")]
     pub no_strict_loops: bool,
 
@@ -2421,12 +2419,12 @@ pub struct SessionStartArgs {
     /// level that does (degrades to `default` with a stated notice when no
     /// activity was recorded for this run, or no narrator seat resolves).
     /// Interactive-TTY only: no-op under `--json` or off a full TTY (the
-    /// story still prints as plain text there). `[run] story` supplies this
+    /// story still prints as plain text there). `[drive] story` supplies this
     /// by default when neither flag is given.
     #[arg(long, num_args = 0..=1, require_equals = true, value_name = "LEVEL", conflicts_with = "no_story")]
     pub story: Option<Option<String>>,
 
-    /// Override `[run].story` and never open the termination pane.
+    /// Override `[drive].story` and never open the termination pane.
     #[arg(long = "no-story", conflicts_with = "story")]
     pub no_story: bool,
 

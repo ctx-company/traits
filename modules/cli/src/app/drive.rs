@@ -24,7 +24,7 @@ use ctx_traits_io::debug_trace::{
 
 const DEFAULT_MAX_FRAMES: u64 = 100;
 /// Built-in default per-frame wall-clock budget when nothing in the P475 D2
-/// chain (CLI flag > `[run]` > package sidecar > role budget) declares one.
+/// chain (CLI flag > `[budget]` chain > role budget) declares one.
 /// `pub(crate)` so `doctor --config` (P475 D7) can display it as the
 /// resolved value for a role with no declared `budget.frame-seconds`.
 pub(crate) const DEFAULT_FRAME_SECONDS: u64 = 300;
@@ -50,9 +50,9 @@ const NARRATOR_SETTLE_GRACE_MS: u64 = 1_000;
 /// The `narrator` seat's resolved one-shot call budget (P475, D3): its own
 /// `[agent.role.narrator].budget.frame-seconds` if declared, else
 /// [`DEFAULT_NARRATOR_TIMEOUT_MS`]. Deliberately resolved from the seat's
-/// own budget alone — never joined to the run-level `[run]`/CLI-flag chain
+/// own budget alone — never joined to the run-level `[budget]`/CLI-flag chain
 /// [`frame_budget`] uses for frame dispatch — since the narrator call is a
-/// one-shot dispatch outside the drive frame loop, and a `[run]
+/// one-shot dispatch outside the drive frame loop, and a `[budget]
 /// frame-seconds` declared for the drive's own frames must never silently
 /// cut narration too.
 fn one_shot_timeout_ms(
@@ -4472,7 +4472,7 @@ fn budget_from(
 }
 
 /// Resolve `base` down to the dispatched role's own effective per-frame
-/// budget (P475). Precedence: CLI flags > `.ctx/config.toml [run]` > package
+/// budget (P475). Precedence: CLI flags > the resolved `[budget]` chain > package
 /// `config.toml [budget]` sidecar (both folded into `sidecar_budget`,
 /// `profile.budget`, which stays un-defaulted so a role budget is never
 /// masked by [`DEFAULT_FRAME_SECONDS`]/[`DEFAULT_MAX_RETRIES`] themselves) >
@@ -9679,7 +9679,7 @@ fn submit_harness_output(
     })?)
 }
 
-/// `[run] usage-warning-threshold` surfacing (P556/0117): named the type,
+/// `[drive] usage-warning-threshold` surfacing (P556/0117): named the type,
 /// utilization, and absolute reset instant when any latest observation from
 /// this attempt is at or above the configured threshold. Surface only — a
 /// `rejected` observation is handled separately by the pause path above,
@@ -10420,6 +10420,7 @@ mod session_title_flush_tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             stop_reason: None,
@@ -10470,6 +10471,7 @@ mod session_title_flush_tests {
                 provider_capability_reports: Vec::new(),
                 output_ports: Vec::new(),
                 resolved_settings: Vec::new(),
+                resolved_budgets: Vec::new(),
                 active_path: Vec::new(),
                 control_stack: Vec::new(),
                 branch_decisions: Vec::new(),

@@ -1,6 +1,7 @@
 import { registerKeyed, registerSingleton } from "./frame.js";
 import type {
   AgentDefaults,
+  DriveTable,
   GitTable,
   HarnessDefinition,
   HostOverride,
@@ -10,15 +11,20 @@ import type {
   RegistryTable,
   RepoOverride,
   RoleAssignmentValue,
-  RunTable,
+  RunProfileBudget,
   TasksTable,
   TraitDefaults,
   WorktreeConfig,
 } from "./generated.js";
 
-/** `[run]` — one per config build, second call is a named error. */
-export function defineRun(fields: RunTable): void {
-  registerSingleton("defineRun", "run", fields);
+/** `[budget]` — one per config build, second call is a named error. */
+export function defineBudget(fields: RunProfileBudget): void {
+  registerSingleton("defineBudget", "budget", fields);
+}
+
+/** `[drive]` — one per config build, second call is a named error. */
+export function defineDrive(fields: DriveTable): void {
+  registerSingleton("defineDrive", "drive", fields);
 }
 
 /** `[worktree]` — one per config build, second call is a named error. */

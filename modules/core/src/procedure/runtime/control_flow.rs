@@ -961,6 +961,7 @@ mod setting_loop_bound_tests {
             provider_capability_reports: Vec::new(),
             output_ports: Vec::new(),
             resolved_settings,
+            resolved_budgets: Vec::new(),
             active_path: Vec::new(),
             control_stack: Vec::new(),
             branch_decisions: Vec::new(),

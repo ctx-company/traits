@@ -228,7 +228,7 @@ fn config_build_default_output_matches_the_panel_registry_shape() {
     fs::write(
         repo.join(".ctx/config.ts"),
         "import { defineConfig } from \"@ctx-traits/config\";\n\n\
-         export default defineConfig({\n  run: { maxRetries: 3 },\n});\n",
+         export default defineConfig({\n  budget: { maxRetries: 3 },\n});\n",
     )
     .unwrap();
 

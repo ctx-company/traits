@@ -9,8 +9,10 @@ describe("defineConfig", () => {
           default: assignment({ harness: "claude", model: "sonnet" }),
         },
       },
-      run: {
-        worktree: true,
+      worktree: {
+        enabled: true,
+      },
+      budget: {
         maxRetries: 2,
       },
     });
@@ -21,8 +23,10 @@ describe("defineConfig", () => {
           default: { harness: "claude", model: "sonnet" },
         },
       },
-      run: {
-        worktree: true,
+      worktree: {
+        enabled: true,
+      },
+      budget: {
         maxRetries: 2,
       },
     });
@@ -46,9 +50,10 @@ describe("defineConfig", () => {
             seed: [".cache"],
             warm: ["warm"],
             env: { CACHE_DIR: ".cache" },
+            buildCache: { cargo: { env: "CARGO_HOME" } },
             tripwire: { sentinel: [".sentinel"] },
           },
-          run: { wait: true, story: "detailed", buildCache: { cargo: { env: "CARGO_HOME" } } },
+          drive: { wait: true, story: "detailed" },
           merge: { wait: true, auto: false, deep: true },
           git: { longSeconds: 60 },
           registry: { base: "https://registry.example" },
@@ -71,8 +76,8 @@ describe("closed shapes reject typos and bad enum values at compile time", () =>
 
   it("rejects an unrecognized key inside a nested table", () => {
     defineConfig({
-      run: {
-        // @ts-expect-error unrecognized key is not part of RunTable
+      drive: {
+        // @ts-expect-error unrecognized key is not part of DriveTable
         notARealField: 1,
       },
     });

@@ -998,11 +998,7 @@ fn declared_build_cache_names(
     root_path: &camino::Utf8Path,
 ) -> crate::Result<std::collections::BTreeSet<String>> {
     let report = ctx_traits_io::harness_config::resolve_config_report(root_path)?;
-    Ok(report
-        .runtime
-        .run
-        .map(|run| run.build_cache.into_keys().collect())
-        .unwrap_or_default())
+    Ok(report.runtime.worktree.build_cache.into_keys().collect())
 }
 
 fn emit_cache_plan(

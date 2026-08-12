@@ -3,6 +3,8 @@ export type JsonValue = null | boolean | number | string | readonly JsonValue[] 
 };
 export interface CtxConfig {
     agent?: AgentDefaults;
+    budget?: RunProfileBudget;
+    drive?: DriveTable;
     git?: GitTable;
     harness?: Record<string, HarnessDefinition>;
     host?: Record<string, HostOverride>;
@@ -11,7 +13,6 @@ export interface CtxConfig {
     publish?: PublishTable;
     registry?: RegistryTable;
     repo?: Record<string, RepoOverride>;
-    run?: RunTable;
     schemaVersion?: string;
     tasks?: TasksTable;
     trait?: Record<string, TraitDefaults>;
@@ -25,6 +26,14 @@ export type AutoClosePolicy = "confirm" | "checked" | "merge";
 export type BillingMode = "subscription" | "api";
 export interface BuildCacheConfig {
     env: string;
+}
+export interface DriveTable {
+    inlinePromptBytes?: number;
+    maxInFlight?: number;
+    story?: StoryLevel;
+    strictLoops?: boolean;
+    usageWarningThreshold?: number;
+    wait?: boolean;
 }
 export interface GeneratedArtifact {
     paths: string[];
@@ -116,6 +125,10 @@ export interface PublishTable {
 export interface RegistryTable {
     base?: string;
 }
+export interface RepoDriveOverride {
+    story?: StoryLevel;
+    wait?: boolean;
+}
 export interface RepoGitOverride {
     longSeconds?: number;
 }
@@ -126,13 +139,13 @@ export interface RepoMergeOverride {
 }
 export interface RepoOverride {
     agent?: AgentDefaults;
+    drive?: RepoDriveOverride;
     git?: RepoGitOverride;
     harness?: Record<string, HarnessDefinition>;
     host?: Record<string, HostOverride>;
     merge?: RepoMergeOverride;
     publish?: RepoPublishOverride;
     registry?: RepoRegistryOverride;
-    run?: RepoRunOverride;
     worktree?: RepoWorktreeOverride;
 }
 export interface RepoPublishOverride {
@@ -141,15 +154,11 @@ export interface RepoPublishOverride {
 export interface RepoRegistryOverride {
     base?: string;
 }
-export interface RepoRunOverride {
-    buildCache?: Record<string, BuildCacheConfig>;
-    story?: StoryLevel;
-    wait?: boolean;
-}
 export interface RepoTripwireOverride {
     sentinel?: string[];
 }
 export interface RepoWorktreeOverride {
+    buildCache?: Record<string, BuildCacheConfig>;
     env?: Record<string, string>;
     seed?: string[];
     tripwire?: RepoTripwireOverride;
@@ -163,27 +172,19 @@ export interface RoleBudget {
     maxTokens?: number;
 }
 export type RunAssignmentMode = "harness" | "attach";
-export type RunSessionMode = "per-frame" | "persistent";
-export interface RunTable {
+export interface RunProfileBudget {
     attachWaitSeconds?: number;
-    buildCache?: Record<string, BuildCacheConfig>;
     commandIdleSeconds?: number;
     commandSeconds?: number;
     frameSeconds?: number;
     idleSeconds?: number;
-    inlinePromptBytes?: number;
     maxCostUsd?: number;
     maxFrames?: number;
-    maxInFlight?: number;
     maxRetries?: number;
     maxTokens?: number;
-    story?: StoryLevel;
-    strictLoops?: boolean;
     totalSeconds?: number;
-    usageWarningThreshold?: number;
-    wait?: boolean;
-    worktree?: boolean;
 }
+export type RunSessionMode = "per-frame" | "persistent";
 export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
 export interface TasksTable {
@@ -192,12 +193,14 @@ export interface TasksTable {
 }
 export interface TraitDefaults {
     agent?: AgentDefaults;
+    budget?: RunProfileBudget;
     defaults?: PortDefaults;
     setting?: Record<string, JsonValue>;
     variant?: Record<string, TraitVariantDefaults>;
 }
 export interface TraitVariantDefaults {
     agent?: AgentDefaults;
+    budget?: RunProfileBudget;
     setting?: Record<string, JsonValue>;
 }
 export type TripwirePolicy = "park" | "warn";
@@ -205,7 +208,9 @@ export interface VariantOverride {
     role?: Record<string, RoleAssignmentValue>;
 }
 export interface WorktreeConfig {
+    buildCache?: Record<string, BuildCacheConfig>;
     confinement?: WorktreeConfinementConfig;
+    enabled?: boolean;
     env?: Record<string, string>;
     retention?: WorktreeRetentionConfig;
     seed?: string[];

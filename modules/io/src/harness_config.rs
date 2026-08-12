@@ -366,6 +366,12 @@ impl RunSessionMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorktreeConfig {
+    /// `[worktree] enabled` (0176): whether a driven run creates a worktree
+    /// when the CLI supplies neither `--worktree` nor `--no-worktree`.
+    /// Successor to the dissolved `[run] worktree` bool — the fact is about
+    /// worktrees, so it lives in the worktree table.
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default)]
     pub seed: Vec<String>,
     #[serde(default)]
@@ -385,15 +391,13 @@ pub struct WorktreeConfig {
     /// byte-identical to a run with no overlay.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-    /// Effective `[run.build-cache.<name>]` declarations (P428), folded in
-    /// by `resolve_runtime_assignments_impl` so every consumer that already
-    /// threads `WorktreeConfig` (run, drive/resume, merge dispatch) picks up
-    /// named build-cache exports for free. Never itself an authored
-    /// `[worktree]` TOML field -- `deny_unknown_fields` on this struct still
-    /// rejects a stray `[worktree] build-cache` table, since declarations
-    /// only belong under `[run.build-cache.<name>]`.
-    #[serde(skip)]
-    #[schemars(skip)]
+    /// Named build-artifact cache declarations (P428, authored here since
+    /// 0176 as `[worktree.build-cache.<name>]` — they describe worktree
+    /// content, so they live in the worktree table). A `BTreeMap` so merge
+    /// order and doctor reporting stay deterministic; each layer's table
+    /// replaces the same name wholesale rather than merging its single
+    /// `env` field.
+    #[serde(default)]
     pub build_cache: BTreeMap<String, BuildCacheConfig>,
     /// P478 harness-native write confinement, generated and injected per
     /// spawn for every process launched inside a run worktree. Defaults to
@@ -710,11 +714,18 @@ pub enum PackageRunConfigTier {
     LegacySidecar,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TraitDefaults {
     #[serde(default)]
     pub defaults: PortDefaults,
+    /// 0176: `[trait.<id>.budget]` — the operator's trait-scoped budget
+    /// override. Beats the author's trait.toml `[budget]` (ties go to the
+    /// operator); beaten by a matching
+    /// `[trait.<id>.variant.<vid>.budget]` (the more specific scope). Same
+    /// precedence shape as `setting` and `agent`.
+    #[serde(default)]
+    pub budget: RunProfileBudget,
     /// 0172: `[trait.<id>.setting]` — trait-scoped overrides of `setting:`
     /// declarations, keyed by setting id. Beats the canonical declaration
     /// default; beaten by a matching `[trait.<id>.variant.<vid>.setting]`
@@ -740,11 +751,17 @@ pub struct TraitDefaults {
 /// One `[trait.<id>.variant.<vid>]` block (0034): a trait-and-variant-scoped
 /// `AgentDefaults`. A non-empty `agent.variant` here is likewise a hard
 /// config error — see [`TraitDefaults::agent`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TraitVariantDefaults {
     #[serde(default)]
     pub agent: AgentDefaults,
+    /// 0176: `[trait.<id>.variant.<vid>.budget]` — the operator's
+    /// variant-scoped budget override, the most specific statement in the
+    /// chain short of a per-run flag. The slot 0034 reserved for 0037,
+    /// cashed.
+    #[serde(default)]
+    pub budget: RunProfileBudget,
     /// 0172: `[trait.<id>.variant.<vid>.setting]` — variant-scoped overrides
     /// of `setting:` declarations, keyed by setting id. Beats both the
     /// trait-level override and the canonical declaration default.
@@ -752,68 +769,19 @@ pub struct TraitVariantDefaults {
     pub setting: BTreeMap<String, serde_json::Value>,
 }
 
-/// Narrow caller-selected runtime profile for `ctx traits import
-/// --run-profile <PATH>` (P403): scoped to `[assign.<role>]` and `[budget]`
-/// only. `deny_unknown_fields` makes a `[worktree]` (or any other) table a
-/// hard decode error naming the field, so this file can never revive
-/// caller-selected worktree authority or other profile infrastructure P314
-/// retired. This affects only the harness-backed `--llm-assisted` path of
-/// import; it is unrelated to the `--profile` source-format selector.
+/// Caller-selected per-invocation budget document for `--budget <PATH>`
+/// (0176, successor to P403's `--run-profile` after its `[assign.<role>]`
+/// half moved to the `--assign` surface): a `[budget]` table and nothing
+/// else. `deny_unknown_fields` makes an `[assign]`, `[worktree]`, or any
+/// other table a hard decode error naming the field, so this file can never
+/// revive caller-selected routing or worktree authority.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct RunProfileDocument {
+pub struct BudgetDocument {
     #[serde(default)]
     pub schema_version: Option<String>,
     #[serde(default)]
-    pub assign: BTreeMap<String, RunProfileAssignment>,
-    #[serde(default)]
     pub budget: RunProfileBudget,
-}
-
-/// One role's routing entry inside a `--run-profile` document: harness,
-/// transport, session-mode, and model-tier routing only. `deny_unknown_fields`
-/// makes a concrete `model`, `system-prompt`, `extra-args`, `reasoning-effort`,
-/// or `mode` (attach) a hard decode error, so a profile can never carry a
-/// field the narrower Family Axis profile boundary excludes — those stay
-/// machine-local in `.ctx/config.toml [agent.role.<role>]`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct RunProfileAssignment {
-    #[serde(default)]
-    pub harness: Option<String>,
-    #[serde(default)]
-    pub transport: Option<RunTransport>,
-    #[serde(default)]
-    pub session_mode: Option<RunSessionMode>,
-    #[serde(default)]
-    pub model_tier: Option<ctx_traits_core::r#trait::AgentModelTier>,
-}
-
-impl RunProfileAssignment {
-    /// Convert into the generic assignment representation the shared
-    /// merge/model-resolution path consumes, always in harness mode (a
-    /// run profile has no attach-mode concept) with no concrete model,
-    /// system-prompt, reasoning-effort, or extra-args of its own.
-    pub fn into_profile_assignment(self) -> ProfileAssignment {
-        ProfileAssignment {
-            replace_inherited: false,
-            model_selector: None,
-            model_resolution_reason: None,
-            mode: RunAssignmentMode::Harness,
-            mode_authored: true,
-            harness: self.harness,
-            transport: self.transport,
-            session_mode: self.session_mode,
-            model: None,
-            model_tier: self.model_tier,
-            reasoning_effort: None,
-            system_prompt: None,
-            extra_args: Vec::new(),
-            budget: Box::default(),
-            api: Box::default(),
-            count: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -840,10 +808,18 @@ pub struct RuntimeConfig {
     /// and an entry present in only one scope survives untouched.
     #[serde(default)]
     pub host: BTreeMap<String, HostOverride>,
-    /// Project-fact execution policy. Values remain optional while config
-    /// layers are merged so an absent table preserves the historical default.
+    /// `[budget]` (0176): the machine-global execution-envelope FALLBACK.
+    /// Applies only where neither the author (trait.toml) nor a scoped
+    /// operator table states a value — it must never beat an authored
+    /// budget, or a generic machine ceiling silently squashes an authored
+    /// long-run envelope. Layered global < repo like every other table.
     #[serde(default)]
-    pub run: Option<RunTable>,
+    pub budget: Option<RunProfileBudget>,
+    /// `[drive]` (0176): run-driver policy. Values remain optional while
+    /// config layers are merged so an absent table preserves the historical
+    /// default.
+    #[serde(default)]
+    pub drive: Option<DriveTable>,
     /// Project-fact landing policy.
     #[serde(default)]
     pub merge: Option<MergeTable>,
@@ -935,28 +911,28 @@ enum ConfigLeaf {
     WorktreeRetentionCheap,
     WorktreeRetentionExpensive,
     WorktreeRetentionExpensiveGraceDays,
-    RunWorktree,
-    RunMaxFrames,
-    RunFrameSeconds,
-    RunTotalSeconds,
-    RunMaxRetries,
-    RunAttachWaitSeconds,
-    RunIdleSeconds,
-    /// 0058 `[run] command-seconds`: absolute backstop for command steps.
-    RunCommandSeconds,
-    /// 0058 `[run] command-idle-seconds`: silence window for command steps.
-    RunCommandIdleSeconds,
-    RunMaxInFlight,
-    RunWait,
-    RunStrictLoops,
-    RunBuildCache,
-    RunInlinePromptBytes,
-    RunStory,
-    RunUsageWarningThreshold,
-    /// 0130 `[run] max-tokens`: the run-cumulative token ceiling.
-    RunMaxTokens,
-    /// 0130 `[run] max-cost-usd`: the run-cumulative estimated-cost ceiling.
-    RunMaxCostUsd,
+    WorktreeEnabled,
+    BudgetMaxFrames,
+    BudgetFrameSeconds,
+    BudgetTotalSeconds,
+    BudgetMaxRetries,
+    BudgetAttachWaitSeconds,
+    BudgetIdleSeconds,
+    /// 0058 `[budget] command-seconds`: absolute backstop for command steps.
+    BudgetCommandSeconds,
+    /// 0058 `[budget] command-idle-seconds`: silence window for command steps.
+    BudgetCommandIdleSeconds,
+    DriveMaxInFlight,
+    DriveWait,
+    DriveStrictLoops,
+    WorktreeBuildCache,
+    DriveInlinePromptBytes,
+    DriveStory,
+    DriveUsageWarningThreshold,
+    /// 0130 `[budget] max-tokens`: the run-cumulative token ceiling.
+    BudgetMaxTokens,
+    /// 0130 `[budget] max-cost-usd`: the run-cumulative estimated-cost ceiling.
+    BudgetMaxCostUsd,
     MergeWait,
     MergeOverlap,
     MergeAuto,
@@ -1000,24 +976,24 @@ impl ConfigLeaf {
         Self::WorktreeRetentionCheap,
         Self::WorktreeRetentionExpensive,
         Self::WorktreeRetentionExpensiveGraceDays,
-        Self::RunWorktree,
-        Self::RunMaxFrames,
-        Self::RunFrameSeconds,
-        Self::RunTotalSeconds,
-        Self::RunMaxRetries,
-        Self::RunAttachWaitSeconds,
-        Self::RunIdleSeconds,
-        Self::RunCommandSeconds,
-        Self::RunCommandIdleSeconds,
-        Self::RunMaxInFlight,
-        Self::RunWait,
-        Self::RunStrictLoops,
-        Self::RunBuildCache,
-        Self::RunInlinePromptBytes,
-        Self::RunStory,
-        Self::RunUsageWarningThreshold,
-        Self::RunMaxTokens,
-        Self::RunMaxCostUsd,
+        Self::WorktreeEnabled,
+        Self::BudgetMaxFrames,
+        Self::BudgetFrameSeconds,
+        Self::BudgetTotalSeconds,
+        Self::BudgetMaxRetries,
+        Self::BudgetAttachWaitSeconds,
+        Self::BudgetIdleSeconds,
+        Self::BudgetCommandSeconds,
+        Self::BudgetCommandIdleSeconds,
+        Self::DriveMaxInFlight,
+        Self::DriveWait,
+        Self::DriveStrictLoops,
+        Self::WorktreeBuildCache,
+        Self::DriveInlinePromptBytes,
+        Self::DriveStory,
+        Self::DriveUsageWarningThreshold,
+        Self::BudgetMaxTokens,
+        Self::BudgetMaxCostUsd,
         Self::MergeWait,
         Self::MergeOverlap,
         Self::MergeAuto,
@@ -1059,24 +1035,24 @@ impl ConfigLeaf {
             Self::WorktreeRetentionCheap => "worktree.retention.cheap",
             Self::WorktreeRetentionExpensive => "worktree.retention.expensive",
             Self::WorktreeRetentionExpensiveGraceDays => "worktree.retention.expensive-grace-days",
-            Self::RunWorktree => "run.worktree",
-            Self::RunMaxFrames => "run.max-frames",
-            Self::RunFrameSeconds => "run.frame-seconds",
-            Self::RunTotalSeconds => "run.total-seconds",
-            Self::RunMaxRetries => "run.max-retries",
-            Self::RunAttachWaitSeconds => "run.attach-wait-seconds",
-            Self::RunIdleSeconds => "run.idle-seconds",
-            Self::RunCommandSeconds => "run.command-seconds",
-            Self::RunCommandIdleSeconds => "run.command-idle-seconds",
-            Self::RunMaxInFlight => "run.max-in-flight",
-            Self::RunWait => "run.wait",
-            Self::RunStrictLoops => "run.strict-loops",
-            Self::RunBuildCache => "run.build-cache",
-            Self::RunInlinePromptBytes => "run.inline-prompt-bytes",
-            Self::RunStory => "run.story",
-            Self::RunUsageWarningThreshold => "run.usage-warning-threshold",
-            Self::RunMaxTokens => "run.max-tokens",
-            Self::RunMaxCostUsd => "run.max-cost-usd",
+            Self::WorktreeEnabled => "worktree.enabled",
+            Self::BudgetMaxFrames => "budget.max-frames",
+            Self::BudgetFrameSeconds => "budget.frame-seconds",
+            Self::BudgetTotalSeconds => "budget.total-seconds",
+            Self::BudgetMaxRetries => "budget.max-retries",
+            Self::BudgetAttachWaitSeconds => "budget.attach-wait-seconds",
+            Self::BudgetIdleSeconds => "budget.idle-seconds",
+            Self::BudgetCommandSeconds => "budget.command-seconds",
+            Self::BudgetCommandIdleSeconds => "budget.command-idle-seconds",
+            Self::DriveMaxInFlight => "drive.max-in-flight",
+            Self::DriveWait => "drive.wait",
+            Self::DriveStrictLoops => "drive.strict-loops",
+            Self::WorktreeBuildCache => "worktree.build-cache",
+            Self::DriveInlinePromptBytes => "drive.inline-prompt-bytes",
+            Self::DriveStory => "drive.story",
+            Self::DriveUsageWarningThreshold => "drive.usage-warning-threshold",
+            Self::BudgetMaxTokens => "budget.max-tokens",
+            Self::BudgetMaxCostUsd => "budget.max-cost-usd",
             Self::MergeWait => "merge.wait",
             Self::MergeOverlap => "merge.overlap",
             Self::MergeAuto => "merge.auto",
@@ -1107,11 +1083,11 @@ impl ConfigLeaf {
             | Self::WorktreeWarm
             | Self::WorktreeEnv
             | Self::WorktreeTripwireSentinel
-            | Self::RunBuildCache
+            | Self::WorktreeBuildCache
             | Self::PublishExclude => ConfigSemantic::Additive,
-            Self::RunWait
-            | Self::RunStory
-            | Self::RunUsageWarningThreshold
+            Self::DriveWait
+            | Self::DriveStory
+            | Self::DriveUsageWarningThreshold
             | Self::MergeWait
             | Self::MergeAuto
             | Self::MergeDeep
@@ -1138,20 +1114,20 @@ impl ConfigLeaf {
             | Self::WorktreeRetentionCheap
             | Self::WorktreeRetentionExpensive
             | Self::WorktreeRetentionExpensiveGraceDays
-            | Self::RunWorktree
-            | Self::RunMaxFrames
-            | Self::RunFrameSeconds
-            | Self::RunTotalSeconds
-            | Self::RunMaxRetries
-            | Self::RunAttachWaitSeconds
-            | Self::RunIdleSeconds
-            | Self::RunCommandSeconds
-            | Self::RunCommandIdleSeconds
-            | Self::RunMaxInFlight
-            | Self::RunStrictLoops
-            | Self::RunInlinePromptBytes
-            | Self::RunMaxTokens
-            | Self::RunMaxCostUsd
+            | Self::WorktreeEnabled
+            | Self::BudgetMaxFrames
+            | Self::BudgetFrameSeconds
+            | Self::BudgetTotalSeconds
+            | Self::BudgetMaxRetries
+            | Self::BudgetAttachWaitSeconds
+            | Self::BudgetIdleSeconds
+            | Self::BudgetCommandSeconds
+            | Self::BudgetCommandIdleSeconds
+            | Self::DriveMaxInFlight
+            | Self::DriveStrictLoops
+            | Self::DriveInlinePromptBytes
+            | Self::BudgetMaxTokens
+            | Self::BudgetMaxCostUsd
             | Self::MergeOverlap
             | Self::MergeBranch
             | Self::MergeGate
@@ -1223,26 +1199,20 @@ pub struct TasksTable {
     pub auto_close: Option<ctx_traits_core::task::AutoClosePolicy>,
 }
 
+/// `[drive]` (0176): the run driver's policy knobs — how frames dispatch and
+/// how a driven run presents — with every ceiling moved out to the `[budget]`
+/// vocabulary. Successor to the dissolved `[run]` table: one concept, one
+/// word — ceilings are budget, driving policy is drive, worktree facts live
+/// under `[worktree]`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct RunTable {
-    #[serde(default)]
-    pub worktree: Option<bool>,
-    #[serde(flatten)]
-    pub budget: RunProfileBudget,
+pub struct DriveTable {
     #[serde(default)]
     pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub wait: Option<bool>,
     #[serde(default)]
     pub strict_loops: Option<bool>,
-    /// Named build-artifact cache declarations (P428), keyed by cache name.
-    /// A `BTreeMap` so merge order and doctor reporting stay deterministic;
-    /// each layer's `[run.build-cache.<name>]` table replaces the same name
-    /// wholesale rather than merging its single `env` field (see
-    /// `overlay_run_table`).
-    #[serde(default)]
-    pub build_cache: BTreeMap<String, BuildCacheConfig>,
     /// P489: inline-body ceiling, in bytes, for a resolved frame prompt
     /// (`ctx_traits_cli::app::frame_prompt`). `None` resolves to
     /// `frame_prompt::DEFAULT_MAX_INLINE_PROMPT_BYTES` (128 KiB).
@@ -1257,7 +1227,7 @@ pub struct RunTable {
     /// whenever this resolves to `assisted`.
     #[serde(default)]
     pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
-    /// `[run] usage-warning-threshold` (P556/0117): a utilization fraction
+    /// `[drive] usage-warning-threshold` (P556/0117): a utilization fraction
     /// (e.g. `0.9`) at or above which a claude-code subscription limit's
     /// latest observation is surfaced live as a warning — never a pause.
     /// `None` (the default) turns the warning off entirely; a `rejected`
@@ -1469,15 +1439,15 @@ pub struct EffectiveRunPolicy {
     pub max_in_flight: usize,
     pub wait: bool,
     pub strict_loops: bool,
-    /// P489 `[run] inline-prompt-bytes` override for the resolved-prompt
+    /// P489 `[drive] inline-prompt-bytes` override for the resolved-prompt
     /// inline ceiling. `None` means the caller's own documented default
     /// applies (`frame_prompt::DEFAULT_MAX_INLINE_PROMPT_BYTES`).
     pub inline_prompt_bytes: Option<u64>,
-    /// P550 `[run] story`: the story level a driven run opens at termination
+    /// P550 `[drive] story`: the story level a driven run opens at termination
     /// when the CLI supplies neither `--story` nor `--no-story`. `None`
     /// means the pane is off by default.
     pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
-    /// P556/0117 `[run] usage-warning-threshold`. `None` (off) unless a
+    /// P556/0117 `[drive] usage-warning-threshold`. `None` (off) unless a
     /// config layer sets one.
     pub usage_warning_threshold: Option<f64>,
 }
@@ -1514,10 +1484,10 @@ pub struct EffectiveMergePolicy {
 
 impl RuntimeConfig {
     pub fn effective_run_policy(&self) -> EffectiveRunPolicy {
-        let run = self.run.as_ref();
-        let budget = run.map(|value| &value.budget);
+        let drive = self.drive.as_ref();
+        let budget = self.budget.as_ref();
         EffectiveRunPolicy {
-            worktree: run.and_then(|value| value.worktree).unwrap_or(false),
+            worktree: self.worktree.enabled.unwrap_or(false),
             max_frames: budget.and_then(|value| value.max_frames),
             frame_seconds: budget.and_then(|value| value.frame_seconds),
             total_seconds: budget.and_then(|value| value.total_seconds),
@@ -1526,12 +1496,12 @@ impl RuntimeConfig {
             idle_seconds: budget.and_then(|value| value.idle_seconds),
             command_seconds: budget.and_then(|value| value.command_seconds),
             command_idle_seconds: budget.and_then(|value| value.command_idle_seconds),
-            max_in_flight: run.and_then(|value| value.max_in_flight).unwrap_or(1),
-            wait: run.and_then(|value| value.wait).unwrap_or(false),
-            strict_loops: run.and_then(|value| value.strict_loops).unwrap_or(false),
-            inline_prompt_bytes: run.and_then(|value| value.inline_prompt_bytes),
-            story: run.and_then(|value| value.story),
-            usage_warning_threshold: run.and_then(|value| value.usage_warning_threshold),
+            max_in_flight: drive.and_then(|value| value.max_in_flight).unwrap_or(1),
+            wait: drive.and_then(|value| value.wait).unwrap_or(false),
+            strict_loops: drive.and_then(|value| value.strict_loops).unwrap_or(false),
+            inline_prompt_bytes: drive.and_then(|value| value.inline_prompt_bytes),
+            story: drive.and_then(|value| value.story),
+            usage_warning_threshold: drive.and_then(|value| value.usage_warning_threshold),
         }
     }
 
@@ -1738,7 +1708,7 @@ pub struct RepoOverride {
     #[serde(default)]
     pub worktree: RepoWorktreeOverride,
     #[serde(default)]
-    pub run: RepoRunOverride,
+    pub drive: RepoDriveOverride,
     #[serde(default)]
     pub merge: RepoMergeOverride,
     #[serde(default)]
@@ -1759,6 +1729,8 @@ pub struct RepoWorktreeOverride {
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     #[serde(default)]
+    pub build_cache: BTreeMap<String, BuildCacheConfig>,
+    #[serde(default)]
     pub tripwire: RepoTripwireOverride,
 }
 
@@ -1771,13 +1743,11 @@ pub struct RepoTripwireOverride {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct RepoRunOverride {
+pub struct RepoDriveOverride {
     #[serde(default)]
     pub wait: Option<bool>,
     #[serde(default)]
     pub story: Option<ctx_traits_core::procedure::story::StoryLevel>,
-    #[serde(default)]
-    pub build_cache: BTreeMap<String, BuildCacheConfig>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -1834,7 +1804,7 @@ struct StandingSeat {
     /// `merger-deep`. `default` is NOT one-shot: it IS the drive frame loop.
     /// A one-shot seat has no idle timeout and no retry loop, so its budget
     /// resolves from its own `budget.frame-seconds` alone (never the
-    /// `[run]`/CLI-flag chain frame seats use), and a declared
+    /// `[budget]`/CLI-flag chain frame seats use), and a declared
     /// `budget.idle-seconds`/`budget.max-retries` on it is a decode error
     /// (`validate_role_budget`) rather than an accepted-and-ignored no-op.
     one_shot: bool,
@@ -2171,13 +2141,13 @@ pub struct RunProfileBudget {
     pub attach_wait_seconds: Option<u64>,
     #[serde(default)]
     pub idle_seconds: Option<u64>,
-    /// 0058 `[run] command-seconds`: absolute wall-clock backstop for a
+    /// 0058 `[budget] command-seconds`: absolute wall-clock backstop for a
     /// command/check step (the repo gate), in seconds. A backstop, not an
     /// estimate — `command-idle-seconds` is what decides hung-ness. `None`
     /// resolves to `crate::command::DEFAULT_COMMAND_WALL_MS`.
     #[serde(default)]
     pub command_seconds: Option<u64>,
-    /// 0058 `[run] command-idle-seconds`: how long a command/check step may
+    /// 0058 `[budget] command-idle-seconds`: how long a command/check step may
     /// produce NO output before the runtime treats it as hung, in seconds.
     /// Liveness generalises across ecosystems where a fixed duration cannot:
     /// a command still printing is working however long it takes. `None`
@@ -2199,7 +2169,7 @@ pub struct RunProfileBudget {
     pub max_cost_usd: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PreparedRunAssignments {
     pub assignments: Option<Vec<ctx_traits_core::procedure::session::AgentAssignment>>,
     pub harness_probes: Vec<ctx_traits_core::procedure::session::HarnessProbeEvidence>,
@@ -2210,6 +2180,10 @@ pub struct PreparedRunAssignments {
     /// 0172: activation-resolved `setting:` values, keyed by setting id.
     /// Never enters any digest — evidence-only, same as `port_defaults`.
     pub resolved_settings: BTreeMap<String, ResolvedSetting>,
+    /// 0176: the resolved budget chain and per-field winning tiers, for the
+    /// run-ledger evidence records. Never enters any digest.
+    pub budget: RunProfileBudget,
+    pub budget_provenance: BTreeMap<String, BudgetSource>,
 }
 
 /// A selected trait-config port default with the exact file and TOML field
@@ -2221,6 +2195,43 @@ pub struct ConfiguredPortDefault {
     /// from the rendered receipt so callers can retain structured provenance.
     pub layer: ConfigLayer,
     pub evidence: String,
+}
+
+/// 0176: which chain tier supplied a resolved budget field, in increasing
+/// specificity. Recorded per stated field in the run ledger — evidence
+/// without digest coupling, the same contract as [`SettingSource`]. Fields
+/// no tier states resolve to engine defaults downstream and record nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetSource {
+    /// Machine-global `[budget]` fallback.
+    MachineFallback,
+    /// The author's trait.toml `[budget]` (variant overlay included).
+    Author,
+    /// Operator `[trait.<id>.budget]`.
+    TraitScoped,
+    /// Operator `[trait.<id>.variant.<vid>.budget]`.
+    VariantScoped,
+}
+
+/// The ten budget fields as `(kebab-name, stated?)` pairs, for per-field
+/// provenance recording. Must stay in lockstep with [`RunProfileBudget`] and
+/// [`overlay_budget`].
+fn stated_budget_fields(budget: &RunProfileBudget) -> [(&'static str, bool); 10] {
+    [
+        ("max-frames", budget.max_frames.is_some()),
+        ("frame-seconds", budget.frame_seconds.is_some()),
+        ("total-seconds", budget.total_seconds.is_some()),
+        ("max-retries", budget.max_retries.is_some()),
+        ("attach-wait-seconds", budget.attach_wait_seconds.is_some()),
+        ("idle-seconds", budget.idle_seconds.is_some()),
+        ("command-seconds", budget.command_seconds.is_some()),
+        (
+            "command-idle-seconds",
+            budget.command_idle_seconds.is_some(),
+        ),
+        ("max-tokens", budget.max_tokens.is_some()),
+        ("max-cost-usd", budget.max_cost_usd.is_some()),
+    ]
 }
 
 /// 0172: which scope supplied a `setting:` value's winning override, in
@@ -2378,9 +2389,12 @@ pub struct ResolvedRuntimeAssignments {
     /// unqualified config, so evidence bytes stay identical.
     pub qualifier_by_role: BTreeMap<String, String>,
     pub budget: RunProfileBudget,
+    /// 0176: per stated budget field, the chain tier that supplied it —
+    /// threaded into the run ledger as evidence, never into any digest.
+    pub budget_provenance: BTreeMap<String, BudgetSource>,
     pub worktree: WorktreeConfig,
-    /// `[run] usage-warning-threshold` (P556/0117), resolved through the
-    /// same config-layer overlay as every other `[run]` knob. `None` (off)
+    /// `[drive] usage-warning-threshold` (P556/0117), resolved through the
+    /// same config-layer overlay as every other `[drive]` knob. `None` (off)
     /// unless a layer sets one.
     pub usage_warning_threshold: Option<f64>,
     /// 0130 `[pricing]`, resolved through the same overlay as every other
@@ -2902,15 +2916,14 @@ fn resolve_runtime_assignments_impl(
     validate_agent_defaults(&runtime_config.agent)?;
     validate_repo_overrides(&runtime_config.repo)?;
     validate_trait_overrides(&runtime_config.trait_defaults)?;
-    let mut budget = runtime_config
-        .run
-        .as_ref()
-        .map(|run| run.budget.clone())
-        .unwrap_or_default();
+    // 0176: the machine-global `[budget]` table is the FALLBACK tier — it
+    // fills gaps under the author and the scoped operator tables, assembled
+    // into the full chain once the run's variant is known (below).
+    let machine_fallback_budget = runtime_config.budget.clone().unwrap_or_default();
     let usage_warning_threshold = runtime_config
-        .run
+        .drive
         .as_ref()
-        .and_then(|run| run.usage_warning_threshold);
+        .and_then(|drive| drive.usage_warning_threshold);
     let pricing = runtime_config.pricing.clone();
     // `resolve_runtime_config` (via `resolve_config_report`) already folded
     // declared named build caches into `worktree.build_cache` (P428).
@@ -2944,28 +2957,27 @@ fn resolve_runtime_assignments_impl(
         }
     }
 
-    if let Some(trait_root) = trait_root
-        && let Some((sidecar, sidecar_path, _tier)) =
+    // The author tier: trait.toml `[budget]` with the canonical variant's
+    // own `[variant.<vid>.budget]` overlay already applied (0176).
+    let author_budget = if let Some(trait_root) = trait_root
+        && let Some((package_config, package_path, _tier)) =
             load_selected_trait_run_config(trait_ref, trait_root)?
     {
-        // The package sidecar remains a compatibility fallback. Project
-        // `[run]` values are nearer and therefore win over it.
-        let configured = budget.clone();
-        let mut sidecar_budget = sidecar.budget;
-        overlay_budget(&mut sidecar_budget, &configured);
-        budget = sidecar_budget;
-        // Package sidecars are the lowest config layer. Runtime trait-scoped
+        // Author port defaults are the lowest layer; operator trait-scoped
         // values above remain authoritative.
-        for (port, value) in sidecar.defaults.port {
+        for (port, value) in package_config.defaults.port {
             port_defaults
                 .entry(port.clone())
                 .or_insert(ConfiguredPortDefault {
                     value,
                     layer: ConfigLayer::BuiltIn,
-                    evidence: format!("{}:defaults.port.{port}", sidecar_path),
+                    evidence: format!("{package_path}:defaults.port.{port}"),
                 });
         }
-    }
+        Some(package_config.budget)
+    } else {
+        None
+    };
     if let Some(trait_ref) = trait_ref {
         validate_port_defaults(trait_ref, &port_defaults)?;
     }
@@ -3003,6 +3015,43 @@ fn resolve_runtime_assignments_impl(
         )?,
         None => BTreeMap::new(),
     };
+    // 0176: assemble the budget chain, least to most specific — machine
+    // `[budget]` fallback < author (trait.toml) < `[trait.<id>.budget]` <
+    // `[trait.<id>.variant.<vid>.budget]`. Every tier only overlays what it
+    // states, so the fallback can never beat an authored value and ties go
+    // to the operator; each stated field records its winning tier for the
+    // run ledger (evidence, never digest input).
+    let mut budget = RunProfileBudget::default();
+    let mut budget_provenance: BTreeMap<String, BudgetSource> = BTreeMap::new();
+    for (tier_budget, source) in [
+        (
+            Some(&machine_fallback_budget),
+            BudgetSource::MachineFallback,
+        ),
+        (author_budget.as_ref(), BudgetSource::Author),
+        (
+            trait_defaults_entry.map(|defaults| &defaults.budget),
+            BudgetSource::TraitScoped,
+        ),
+        (
+            trait_defaults_entry
+                .zip(variant_id.as_deref())
+                .and_then(|(defaults, variant)| defaults.variant.get(variant))
+                .map(|entry| &entry.budget),
+            BudgetSource::VariantScoped,
+        ),
+    ] {
+        let Some(tier_budget) = tier_budget else {
+            continue;
+        };
+        overlay_budget(&mut budget, tier_budget);
+        for (field, stated) in stated_budget_fields(tier_budget) {
+            if stated {
+                budget_provenance.insert(field.to_string(), source);
+            }
+        }
+    }
+
     let scope = RunScope {
         variant: variant_id.clone().map(std::borrow::Cow::Owned),
         repo_key: repo_key.map(std::borrow::Cow::Owned),
@@ -3051,6 +3100,7 @@ fn resolve_runtime_assignments_impl(
         agent_defaults,
         qualifier_by_role,
         budget,
+        budget_provenance,
         worktree,
         usage_warning_threshold,
         pricing,
@@ -3420,7 +3470,7 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
         base.idle_seconds = next.idle_seconds;
     }
     // 0066.4: these two were added to `RunProfileBudget` by 0058 but never
-    // wired into this overlay — a repo's declared `[run] command-seconds`/
+    // wired into this overlay — a repo's declared `[budget] command-seconds`/
     // `command-idle-seconds` decoded into `next` and then silently vanished
     // on every merge, so `resolve_command_bounds` never saw anything but the
     // built-in default regardless of what a repo configured.
@@ -3569,48 +3619,18 @@ pub fn decode_trait_run_config_at(path: &Utf8Path) -> crate::Result<TraitRunConf
     Ok(config)
 }
 
-/// Load and validate a caller-selected narrow runtime profile from an
-/// explicit file path (P403's `--run-profile`). A missing or malformed file,
-/// or one declaring assignments the same `validate_assignments` contract
-/// used for `--assign` rejects, fails here with a field/path-specific error
-/// before any harness dispatch.
-pub fn load_run_profile_document(path: &Utf8Path) -> crate::Result<RunProfileDocument> {
+/// Load a caller-selected `--budget` document from an explicit file path
+/// (0176). A missing or malformed file, or one carrying anything beyond
+/// `[budget]`, fails here with a field/path-specific error before any
+/// harness dispatch.
+pub fn load_budget_document(path: &Utf8Path) -> crate::Result<BudgetDocument> {
     let text = crate::read::read_text(path)?;
-    let document: RunProfileDocument =
+    let document: BudgetDocument =
         toml::from_str(&text).map_err(|source| crate::parse::Error::TomlDecode {
             context: path.to_string(),
             source,
         })?;
-    for (role, assignment) in &document.assign {
-        let field_path = format!("run-profile.assign.{role}");
-        normalize_role(role, &field_path)?;
-        if let Some(harness) = assignment.harness.as_deref() {
-            validate_bare_id(harness, &format!("{field_path}.harness"))?;
-        }
-    }
     Ok(document)
-}
-
-/// Reject a run profile that assigns a role the resolved trait it will route
-/// into does not declare as `[[agent]]`, before any harness dispatch: a
-/// `--run-profile` covers only the harness-backed built-in runner it is
-/// passed to, so a stray or misspelled role must fail loudly rather than be
-/// silently ignored.
-pub fn validate_run_profile_roles(
-    document: &RunProfileDocument,
-    declared_roles: &BTreeSet<String>,
-) -> crate::Result<()> {
-    for role in document.assign.keys() {
-        if !declared_roles.contains(role) {
-            return invalid_config(
-                format!("run-profile.assign.{role}"),
-                format!(
-                    "assignment role {role:?} is not declared as [[agent]] by the resolved trait"
-                ),
-            );
-        }
-    }
-    Ok(())
 }
 
 /// The corrective action for an unassigned agent role, shared by every
@@ -3709,6 +3729,8 @@ pub fn prepare_run_assignments(
             worktree: resolved.worktree,
             port_defaults: resolved.port_defaults,
             resolved_settings: resolved.resolved_settings,
+            budget: resolved.budget,
+            budget_provenance: resolved.budget_provenance,
         });
     }
 
@@ -3884,6 +3906,8 @@ pub fn prepare_run_assignments(
         worktree: resolved.worktree,
         port_defaults: resolved.port_defaults,
         resolved_settings: resolved.resolved_settings,
+        budget: resolved.budget,
+        budget_provenance: resolved.budget_provenance,
     })
 }
 
@@ -4054,36 +4078,30 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     merge_built_in_harness_overrides(&mut runtime.harness);
     let foreign_config =
         foreign_config_path()?.filter(|path| !documents.iter().any(|(_, p, _)| p == path));
-    if let Some(max_in_flight) = runtime.run.as_ref().and_then(|run| run.max_in_flight)
+    if let Some(max_in_flight) = runtime.drive.as_ref().and_then(|drive| drive.max_in_flight)
         && max_in_flight == 0
     {
-        return Err(config_error("run.max-in-flight", "must be at least 1"));
+        return Err(config_error("drive.max-in-flight", "must be at least 1"));
     }
-    if let Some(run) = runtime.run.as_ref() {
-        validate_build_cache(&run.build_cache)?;
-        // P428: fold declared named build caches into the one
-        // `WorktreeConfig` every consumer of the effective overlay already
-        // threads (run, drive/resume, merge dispatch — see
-        // `resolve_effective_worktree_env`), so every entry point that
-        // resolves `RuntimeConfig` (not only trait-run assignment
-        // resolution) sees the same overlay.
-        runtime.worktree.build_cache = run.build_cache.clone();
-    }
+    // P428/0176: `[worktree.build-cache.<name>]` is authored in place, so
+    // every consumer that threads `WorktreeConfig` (run, drive/resume,
+    // merge dispatch) sees the declarations with no extra fold.
+    validate_build_cache(&runtime.worktree.build_cache)?;
     validate_merge_gate(&runtime.effective_merge_policy())?;
     validate_merge_retries(&runtime.effective_merge_policy())?;
     validate_merge_generated(&runtime.effective_merge_policy())?;
     for key in [
-        "run.worktree",
-        "run.max-frames",
-        "run.frame-seconds",
-        "run.total-seconds",
-        "run.max-retries",
-        "run.attach-wait-seconds",
-        "run.idle-seconds",
-        "run.max-in-flight",
-        "run.wait",
-        "run.strict-loops",
-        "run.inline-prompt-bytes",
+        "worktree.enabled",
+        "budget.max-frames",
+        "budget.frame-seconds",
+        "budget.total-seconds",
+        "budget.max-retries",
+        "budget.attach-wait-seconds",
+        "budget.idle-seconds",
+        "drive.max-in-flight",
+        "drive.wait",
+        "drive.strict-loops",
+        "drive.inline-prompt-bytes",
     ] {
         winners
             .entry(key.to_string())
@@ -4188,106 +4206,108 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
             target.worktree.retention.expensive_grace_days =
                 source.worktree.retention.expensive_grace_days
         }
-        ConfigLeaf::RunWorktree => {
-            target.run.get_or_insert_with(RunTable::default).worktree =
-                source.run.as_ref().and_then(|run| run.worktree)
-        }
-        ConfigLeaf::RunMaxFrames => {
+        ConfigLeaf::WorktreeEnabled => target.worktree.enabled = source.worktree.enabled,
+        ConfigLeaf::BudgetMaxFrames => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .max_frames = source.run.as_ref().and_then(|run| run.budget.max_frames)
+                .get_or_insert_with(RunProfileBudget::default)
+                .max_frames = source.budget.as_ref().and_then(|budget| budget.max_frames)
         }
-        ConfigLeaf::RunFrameSeconds => {
+        ConfigLeaf::BudgetFrameSeconds => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .frame_seconds = source.run.as_ref().and_then(|run| run.budget.frame_seconds)
+                .get_or_insert_with(RunProfileBudget::default)
+                .frame_seconds = source
+                .budget
+                .as_ref()
+                .and_then(|budget| budget.frame_seconds)
         }
-        ConfigLeaf::RunTotalSeconds => {
+        ConfigLeaf::BudgetTotalSeconds => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .total_seconds = source.run.as_ref().and_then(|run| run.budget.total_seconds)
+                .get_or_insert_with(RunProfileBudget::default)
+                .total_seconds = source
+                .budget
+                .as_ref()
+                .and_then(|budget| budget.total_seconds)
         }
-        ConfigLeaf::RunMaxRetries => {
+        ConfigLeaf::BudgetMaxRetries => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .max_retries = source.run.as_ref().and_then(|run| run.budget.max_retries)
+                .get_or_insert_with(RunProfileBudget::default)
+                .max_retries = source.budget.as_ref().and_then(|budget| budget.max_retries)
         }
-        ConfigLeaf::RunAttachWaitSeconds => {
+        ConfigLeaf::BudgetAttachWaitSeconds => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
+                .get_or_insert_with(RunProfileBudget::default)
                 .attach_wait_seconds = source
-                .run
+                .budget
                 .as_ref()
-                .and_then(|run| run.budget.attach_wait_seconds)
+                .and_then(|budget| budget.attach_wait_seconds)
         }
-        ConfigLeaf::RunIdleSeconds => {
+        ConfigLeaf::BudgetIdleSeconds => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .idle_seconds = source.run.as_ref().and_then(|run| run.budget.idle_seconds)
-        }
-        ConfigLeaf::RunMaxInFlight => {
-            target
-                .run
-                .get_or_insert_with(RunTable::default)
-                .max_in_flight = source.run.as_ref().and_then(|run| run.max_in_flight)
-        }
-        ConfigLeaf::RunStrictLoops => {
-            target
-                .run
-                .get_or_insert_with(RunTable::default)
-                .strict_loops = source.run.as_ref().and_then(|run| run.strict_loops)
-        }
-        ConfigLeaf::RunInlinePromptBytes => {
-            target
-                .run
-                .get_or_insert_with(RunTable::default)
-                .inline_prompt_bytes = source.run.as_ref().and_then(|run| run.inline_prompt_bytes)
-        }
-        ConfigLeaf::RunCommandSeconds => {
-            target
-                .run
-                .get_or_insert_with(RunTable::default)
+                .get_or_insert_with(RunProfileBudget::default)
+                .idle_seconds = source
                 .budget
+                .as_ref()
+                .and_then(|budget| budget.idle_seconds)
+        }
+        ConfigLeaf::DriveMaxInFlight => {
+            target
+                .drive
+                .get_or_insert_with(DriveTable::default)
+                .max_in_flight = source.drive.as_ref().and_then(|drive| drive.max_in_flight)
+        }
+        ConfigLeaf::DriveStrictLoops => {
+            target
+                .drive
+                .get_or_insert_with(DriveTable::default)
+                .strict_loops = source.drive.as_ref().and_then(|drive| drive.strict_loops)
+        }
+        ConfigLeaf::DriveInlinePromptBytes => {
+            target
+                .drive
+                .get_or_insert_with(DriveTable::default)
+                .inline_prompt_bytes = source
+                .drive
+                .as_ref()
+                .and_then(|drive| drive.inline_prompt_bytes)
+        }
+        ConfigLeaf::BudgetCommandSeconds => {
+            target
+                .budget
+                .get_or_insert_with(RunProfileBudget::default)
                 .command_seconds = source
-                .run
-                .as_ref()
-                .and_then(|run| run.budget.command_seconds)
-        }
-        ConfigLeaf::RunCommandIdleSeconds => {
-            target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
+                .as_ref()
+                .and_then(|budget| budget.command_seconds)
+        }
+        ConfigLeaf::BudgetCommandIdleSeconds => {
+            target
+                .budget
+                .get_or_insert_with(RunProfileBudget::default)
                 .command_idle_seconds = source
-                .run
+                .budget
                 .as_ref()
-                .and_then(|run| run.budget.command_idle_seconds)
+                .and_then(|budget| budget.command_idle_seconds)
         }
-        ConfigLeaf::RunMaxTokens => {
+        ConfigLeaf::BudgetMaxTokens => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .max_tokens = source.run.as_ref().and_then(|run| run.budget.max_tokens)
+                .get_or_insert_with(RunProfileBudget::default)
+                .max_tokens = source.budget.as_ref().and_then(|budget| budget.max_tokens)
         }
-        ConfigLeaf::RunMaxCostUsd => {
+        ConfigLeaf::BudgetMaxCostUsd => {
             target
-                .run
-                .get_or_insert_with(RunTable::default)
                 .budget
-                .max_cost_usd = source.run.as_ref().and_then(|run| run.budget.max_cost_usd)
+                .get_or_insert_with(RunProfileBudget::default)
+                .max_cost_usd = source
+                .budget
+                .as_ref()
+                .and_then(|budget| budget.max_cost_usd)
         }
         ConfigLeaf::MergeOverlap => {
             target.merge.get_or_insert_with(MergeTable::default).overlap =
@@ -4341,10 +4361,10 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::WorktreeWarm
         | ConfigLeaf::WorktreeEnv
         | ConfigLeaf::WorktreeTripwireSentinel
-        | ConfigLeaf::RunWait
-        | ConfigLeaf::RunBuildCache
-        | ConfigLeaf::RunStory
-        | ConfigLeaf::RunUsageWarningThreshold
+        | ConfigLeaf::DriveWait
+        | ConfigLeaf::WorktreeBuildCache
+        | ConfigLeaf::DriveStory
+        | ConfigLeaf::DriveUsageWarningThreshold
         | ConfigLeaf::MergeWait
         | ConfigLeaf::MergeAuto
         | ConfigLeaf::MergeDeep
@@ -4453,14 +4473,14 @@ fn apply_repo_defaults(
             layer == ConfigLayer::UserGlobal,
         );
     }
-    let run = runtime.run.get_or_insert_with(RunTable::default);
-    if qualifier.run.wait.is_some() {
-        run.wait = qualifier.run.wait;
-        record_personal_winner(winners, "run.wait", source.clone());
+    let drive = runtime.drive.get_or_insert_with(DriveTable::default);
+    if qualifier.drive.wait.is_some() {
+        drive.wait = qualifier.drive.wait;
+        record_personal_winner(winners, "drive.wait", source.clone());
     }
-    if qualifier.run.story.is_some() {
-        run.story = qualifier.run.story;
-        record_personal_winner(winners, "run.story", source.clone());
+    if qualifier.drive.story.is_some() {
+        drive.story = qualifier.drive.story;
+        record_personal_winner(winners, "drive.story", source.clone());
     }
     let merge = runtime.merge.get_or_insert_with(MergeTable::default);
     if qualifier.merge.wait.is_some() {
@@ -4571,15 +4591,15 @@ fn apply_environment_defaults(
             .merge(host.clone());
         record_host_winners(winners, name, host, layer, source.clone(), false);
     }
-    if let Some(next) = &document.run {
-        let run = runtime.run.get_or_insert_with(RunTable::default);
+    if let Some(next) = &document.drive {
+        let drive = runtime.drive.get_or_insert_with(DriveTable::default);
         if next.wait.is_some() {
-            run.wait = next.wait;
-            record_winner(winners, "run.wait", layer, source.clone());
+            drive.wait = next.wait;
+            record_winner(winners, "drive.wait", layer, source.clone());
         }
         if next.story.is_some() {
-            run.story = next.story;
-            record_winner(winners, "run.story", layer, source.clone());
+            drive.story = next.story;
+            record_winner(winners, "drive.story", layer, source.clone());
         }
     }
     if let Some(next) = &document.merge {
@@ -4646,9 +4666,7 @@ fn apply_additive_values(
     runtime.worktree.env.clear();
     runtime.worktree.tripwire.sentinel.clear();
     runtime.pricing.clear();
-    if let Some(run) = runtime.run.as_mut() {
-        run.build_cache.clear();
-    }
+    runtime.worktree.build_cache.clear();
     if let Some(publish) = runtime.publish.as_mut() {
         publish.exclude = None;
     }
@@ -4693,21 +4711,22 @@ fn apply_additive_values(
                 effective.insert(format!("worktree.env.{key}"), contributor);
             }
         }
-        if let Some(run) = &document.run {
-            let target = runtime.run.get_or_insert_with(RunTable::default);
-            for (name, cache) in &run.build_cache {
+        {
+            let document_caches = &document.worktree.build_cache;
+            let target = &mut runtime.worktree;
+            for (name, cache) in document_caches {
                 let contributor = ConfigContributor {
                     layer: *layer,
                     source: Some(path.to_string()),
                 };
                 record_additive_contributor(
                     &mut contributors,
-                    format!("run.build-cache.{name}"),
+                    format!("worktree.build-cache.{name}"),
                     contributor.clone(),
                 );
                 if *layer == ConfigLayer::Repo || !target.build_cache.contains_key(name) {
                     target.build_cache.insert(name.clone(), cache.clone());
-                    effective.insert(format!("run.build-cache.{name}"), contributor);
+                    effective.insert(format!("worktree.build-cache.{name}"), contributor);
                 }
             }
         }
@@ -4785,23 +4804,24 @@ fn apply_additive_values(
                 effective.insert(format!("worktree.env.{key}"), contributor);
             }
         }
-        let run = runtime.run.get_or_insert_with(RunTable::default);
-        for (name, cache) in &override_.run.build_cache {
+        let target = &mut runtime.worktree;
+        for (name, cache) in &override_.worktree.build_cache {
             let contributor = ConfigContributor {
                 layer: ConfigLayer::UserGlobal,
                 source: Some(path.to_string()),
             };
             record_additive_contributor(
                 &mut contributors,
-                format!("run.build-cache.{name}"),
+                format!("worktree.build-cache.{name}"),
                 contributor.clone(),
             );
-            let inserted = !run.build_cache.contains_key(name);
-            run.build_cache
+            let inserted = !target.build_cache.contains_key(name);
+            target
+                .build_cache
                 .entry(name.clone())
                 .or_insert_with(|| cache.clone());
             if inserted {
-                effective.insert(format!("run.build-cache.{name}"), contributor);
+                effective.insert(format!("worktree.build-cache.{name}"), contributor);
             }
         }
         if !override_.publish.exclude.is_empty() {
@@ -4904,10 +4924,8 @@ fn requirement_conflicts_for_effective(
         for (key, value) in &document.worktree.env {
             repo_env.insert(key.as_str(), (path, value));
         }
-        if let Some(run) = &document.run {
-            for (key, value) in &run.build_cache {
-                repo_caches.insert(key.as_str(), (path, value));
-            }
+        for (key, value) in &document.worktree.build_cache {
+            repo_caches.insert(key.as_str(), (path, value));
         }
     }
     let mut check_maps = |path: &Utf8Path,
@@ -4929,7 +4947,7 @@ fn requirement_conflicts_for_effective(
                 && *required != value
             {
                 output.push(ConfigRequirementConflict {
-                    field: format!("run.build-cache.{key}"),
+                    field: format!("worktree.build-cache.{key}"),
                     rejected_source: path.to_string(),
                     repo_source: repo_path.to_string(),
                 });
@@ -4938,11 +4956,7 @@ fn requirement_conflicts_for_effective(
     };
     for (layer, path, document) in documents {
         if *layer == ConfigLayer::Environment {
-            if let Some(run) = &document.run {
-                check_maps(path, &document.worktree.env, &run.build_cache);
-            } else {
-                check_maps(path, &document.worktree.env, &BTreeMap::new());
-            }
+            check_maps(path, &document.worktree.env, &document.worktree.build_cache);
         }
     }
     if let Some(key) = active_repo_qualifier_key() {
@@ -4950,7 +4964,7 @@ fn requirement_conflicts_for_effective(
             if *layer == ConfigLayer::UserGlobal
                 && let Some(personal) = document.repo.get(&key)
             {
-                check_maps(path, &personal.worktree.env, &personal.run.build_cache);
+                check_maps(path, &personal.worktree.env, &personal.worktree.build_cache);
             }
         }
     }
@@ -5062,7 +5076,7 @@ fn config_semantic(field: &str) -> ConfigSemantic {
         .iter()
         .find_map(|leaf| (leaf.path() == field).then_some(leaf.semantic()))
         .or_else(|| {
-            ["worktree.env.", "run.build-cache."]
+            ["worktree.env.", "worktree.build-cache."]
                 .iter()
                 .any(|prefix| field.starts_with(prefix))
                 .then_some(ConfigSemantic::Additive)
@@ -5617,6 +5631,14 @@ fn merge_project_config(
                 source.clone(),
             );
         }
+        overlay_budget_table(
+            &mut target.budget,
+            &defaults.budget,
+            &format!("trait.{trait_id}.budget"),
+            layer,
+            source.clone(),
+            winners,
+        );
         merge_trait_agent_defaults(
             &mut base.trait_defaults,
             trait_id,
@@ -5741,9 +5763,26 @@ fn merge_project_config(
             }
         }
     }
-    if let Some(run) = next.run {
-        let target = base.run.get_or_insert_with(RunTable::default);
-        overlay_run_table(target, run, layer, source.clone(), winners);
+    if next.worktree.enabled.is_some() {
+        base.worktree.enabled = next.worktree.enabled;
+        record_winner(winners, "worktree.enabled", layer, source.clone());
+    }
+    for (name, cache) in next.worktree.build_cache {
+        base.worktree.build_cache.insert(name.clone(), cache);
+        record_winner(
+            winners,
+            format!("worktree.build-cache.{name}"),
+            layer,
+            source.clone(),
+        );
+    }
+    if let Some(budget) = next.budget {
+        let target = base.budget.get_or_insert_with(RunProfileBudget::default);
+        overlay_budget_table(target, &budget, "budget", layer, source.clone(), winners);
+    }
+    if let Some(drive) = next.drive {
+        let target = base.drive.get_or_insert_with(DriveTable::default);
+        overlay_drive_table(target, drive, layer, source.clone(), winners);
     }
     if let Some(merge) = next.merge {
         let target = base.merge.get_or_insert_with(MergeTable::default);
@@ -5836,72 +5875,55 @@ fn merge_project_config(
     }
 }
 
-fn overlay_run_table(
-    base: &mut RunTable,
-    next: RunTable,
+/// Layered overlay for a `[budget]` table under a winner-key prefix
+/// (`budget` for the machine-global fallback, `trait.<id>.budget` /
+/// `trait.<id>.variant.<vid>.budget` for the scoped operator tables).
+fn overlay_budget_table(
+    base: &mut RunProfileBudget,
+    next: &RunProfileBudget,
+    prefix: &str,
     layer: ConfigLayer,
     source: Option<String>,
     winners: &mut BTreeMap<String, ConfigWinner>,
 ) {
-    if next.worktree.is_some() {
-        base.worktree = next.worktree;
-        record_winner(winners, "run.worktree", layer, source.clone());
-    }
-    overlay_budget(&mut base.budget, &next.budget);
-    for (key, present) in [
-        ("max-frames", next.budget.max_frames.is_some()),
-        ("frame-seconds", next.budget.frame_seconds.is_some()),
-        ("total-seconds", next.budget.total_seconds.is_some()),
-        ("max-retries", next.budget.max_retries.is_some()),
-        (
-            "attach-wait-seconds",
-            next.budget.attach_wait_seconds.is_some(),
-        ),
-        ("idle-seconds", next.budget.idle_seconds.is_some()),
-        ("command-seconds", next.budget.command_seconds.is_some()),
-        (
-            "command-idle-seconds",
-            next.budget.command_idle_seconds.is_some(),
-        ),
-        ("max-tokens", next.budget.max_tokens.is_some()),
-        ("max-cost-usd", next.budget.max_cost_usd.is_some()),
-    ] {
+    overlay_budget(base, next);
+    for (key, present) in stated_budget_fields(next) {
         if present {
-            record_winner(winners, format!("run.{key}"), layer, source.clone());
+            record_winner(winners, format!("{prefix}.{key}"), layer, source.clone());
         }
     }
+}
+
+fn overlay_drive_table(
+    base: &mut DriveTable,
+    next: DriveTable,
+    layer: ConfigLayer,
+    source: Option<String>,
+    winners: &mut BTreeMap<String, ConfigWinner>,
+) {
     if next.max_in_flight.is_some() {
         base.max_in_flight = next.max_in_flight;
-        record_winner(winners, "run.max-in-flight", layer, source.clone());
+        record_winner(winners, "drive.max-in-flight", layer, source.clone());
     }
     if next.wait.is_some() {
         base.wait = next.wait;
-        record_winner(winners, "run.wait", layer, source.clone());
-    }
-    for (name, cache) in next.build_cache {
-        base.build_cache.insert(name.clone(), cache);
-        record_winner(
-            winners,
-            format!("run.build-cache.{name}"),
-            layer,
-            source.clone(),
-        );
+        record_winner(winners, "drive.wait", layer, source.clone());
     }
     if next.strict_loops.is_some() {
         base.strict_loops = next.strict_loops;
-        record_winner(winners, "run.strict-loops", layer, source.clone());
+        record_winner(winners, "drive.strict-loops", layer, source.clone());
     }
     if next.inline_prompt_bytes.is_some() {
         base.inline_prompt_bytes = next.inline_prompt_bytes;
-        record_winner(winners, "run.inline-prompt-bytes", layer, source.clone());
+        record_winner(winners, "drive.inline-prompt-bytes", layer, source.clone());
     }
     if next.story.is_some() {
         base.story = next.story;
-        record_winner(winners, "run.story", layer, source.clone());
+        record_winner(winners, "drive.story", layer, source.clone());
     }
     if next.usage_warning_threshold.is_some() {
         base.usage_warning_threshold = next.usage_warning_threshold;
-        record_winner(winners, "run.usage-warning-threshold", layer, source);
+        record_winner(winners, "drive.usage-warning-threshold", layer, source);
     }
 }
 
@@ -5932,6 +5954,14 @@ fn merge_machine_config(
                 source.clone(),
             );
         }
+        overlay_budget_table(
+            &mut target.budget,
+            &defaults.budget,
+            &format!("trait.{trait_id}.budget"),
+            layer,
+            source.clone(),
+            winners,
+        );
         merge_trait_agent_defaults(
             &mut base.trait_defaults,
             &trait_id,
@@ -6080,6 +6110,14 @@ fn merge_trait_agent_defaults(
                 source.clone(),
             );
         }
+        overlay_budget_table(
+            &mut variant_target.budget,
+            &value.budget,
+            &format!("trait.{trait_id}.variant.{variant_id}.budget"),
+            layer,
+            source.clone(),
+            winners,
+        );
     }
 }
 
@@ -6727,16 +6765,16 @@ fn overlay_role_budget(base: &mut RoleBudget, next: &RoleBudget) {
 fn validate_build_cache(build_cache: &BTreeMap<String, BuildCacheConfig>) -> crate::Result<()> {
     let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
     for (name, cache) in build_cache {
-        validate_bare_id(name, &format!("run.build-cache.{name}"))?;
+        validate_bare_id(name, &format!("worktree.build-cache.{name}"))?;
         if cache.env.trim().is_empty() {
             return invalid_config(
-                format!("run.build-cache.{name}.env"),
+                format!("worktree.build-cache.{name}.env"),
                 "env must not be empty",
             );
         }
         if let Some(previous) = seen.insert(cache.env.as_str(), name.as_str()) {
             return invalid_config(
-                format!("run.build-cache.{name}.env"),
+                format!("worktree.build-cache.{name}.env"),
                 format!(
                     "environment variable {:?} is already declared by build cache {previous:?}; each declared cache must export a distinct environment variable",
                     cache.env
@@ -8364,47 +8402,29 @@ mod config_tests {
     }
 
     #[test]
-    fn overlay_run_table_merges_named_build_caches_by_name() {
-        let mut base = RunTable::default();
+    fn worktree_build_caches_merge_by_name_across_layers() {
+        let mut base = RuntimeConfig::default();
         let mut winners = BTreeMap::new();
-        let mut repo_layer = RunTable::default();
-        repo_layer.build_cache.insert(
-            "cargo".to_string(),
-            BuildCacheConfig {
-                env: "CARGO_TARGET_DIR".to_string(),
-            },
-        );
-        overlay_run_table(
-            &mut base,
-            repo_layer,
-            ConfigLayer::Repo,
-            Some("repo".into()),
-            &mut winners,
-        );
-        let mut global_layer = RunTable::default();
-        global_layer.build_cache.insert(
-            "pnpm".to_string(),
-            BuildCacheConfig {
-                env: "PNPM_HOME".to_string(),
-            },
-        );
-        overlay_run_table(
-            &mut base,
-            global_layer,
-            ConfigLayer::UserGlobal,
-            Some("global".into()),
-            &mut winners,
-        );
+        for (name, env, layer, source) in [
+            ("cargo", "CARGO_TARGET_DIR", ConfigLayer::Repo, "repo"),
+            ("pnpm", "PNPM_HOME", ConfigLayer::UserGlobal, "global"),
+        ] {
+            let mut next = RuntimeConfig::default();
+            next.worktree
+                .build_cache
+                .insert(name.to_string(), BuildCacheConfig { env: env.into() });
+            merge_project_config(&mut base, next, layer, Some(source.into()), &mut winners);
+        }
 
-        assert_eq!(base.build_cache.len(), 2);
-        assert_eq!(base.build_cache["cargo"].env, "CARGO_TARGET_DIR");
-        assert_eq!(base.build_cache["pnpm"].env, "PNPM_HOME");
+        assert_eq!(base.worktree.build_cache.len(), 2);
+        assert_eq!(base.worktree.build_cache["cargo"].env, "CARGO_TARGET_DIR");
+        assert_eq!(base.worktree.build_cache["pnpm"].env, "PNPM_HOME");
         assert_eq!(
-            winners["run.build-cache.cargo"].source.as_deref(),
+            winners["worktree.build-cache.cargo"].source.as_deref(),
             Some("repo")
         );
         assert_eq!(
-            winners["run.build-cache.pnpm"].source.as_deref(),
+            winners["worktree.build-cache.pnpm"].source.as_deref(),
             Some("global")
         );
     }
@@ -8624,16 +8644,16 @@ mod config_tests {
     }
 
     #[test]
-    fn project_run_values_replace_global_values() {
+    fn project_drive_values_replace_global_values() {
         let mut effective = RuntimeConfig::default();
         let mut winners = BTreeMap::new();
         for (layer, value) in [(ConfigLayer::UserGlobal, 2), (ConfigLayer::Repo, 4)] {
             merge_project_config(
                 &mut effective,
                 RuntimeConfig {
-                    run: Some(RunTable {
+                    drive: Some(DriveTable {
                         max_in_flight: Some(value),
-                        ..RunTable::default()
+                        ..DriveTable::default()
                     }),
                     ..RuntimeConfig::default()
                 },
@@ -8642,8 +8662,8 @@ mod config_tests {
                 &mut winners,
             );
         }
-        assert_eq!(effective.run.unwrap().max_in_flight, Some(4));
-        assert_eq!(winners["run.max-in-flight"].layer, ConfigLayer::Repo);
+        assert_eq!(effective.drive.unwrap().max_in_flight, Some(4));
+        assert_eq!(winners["drive.max-in-flight"].layer, ConfigLayer::Repo);
     }
 
     #[test]
@@ -8770,7 +8790,7 @@ mod config_tests {
         let repo = RuntimeConfig {
             authored_requirements: BTreeMap::from([
                 (
-                    "run.strict-loops".into(),
+                    "drive.strict-loops".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
                         value: toml::Value::Boolean(false),
@@ -8789,7 +8809,7 @@ mod config_tests {
         let environment = RuntimeConfig {
             authored_requirements: BTreeMap::from([
                 (
-                    "run.strict-loops".into(),
+                    "drive.strict-loops".into(),
                     AuthoredConfigLeaf {
                         semantic: ConfigSemantic::Requirement,
                         value: toml::Value::Boolean(true),
@@ -8814,7 +8834,7 @@ mod config_tests {
             ),
         ]);
         assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0].field, "run.strict-loops");
+        assert_eq!(conflicts[0].field, "drive.strict-loops");
     }
 
     #[test]
@@ -8867,26 +8887,20 @@ mod config_tests {
                     ("CONFLICT".into(), "personal".into()),
                     ("PERSONAL_ONLY".into(), "personal".into()),
                 ]),
-                ..RepoWorktreeOverride::default()
-            },
-            run: RepoRunOverride {
                 build_cache: BTreeMap::from([
                     ("shared".into(), cache("PERSONAL_CACHE")),
                     ("personal-only".into(), cache("PERSONAL_ONLY_CACHE")),
                 ]),
-                ..RepoRunOverride::default()
+                ..RepoWorktreeOverride::default()
             },
             ..RepoOverride::default()
         };
         let global = RuntimeConfig {
             worktree: WorktreeConfig {
                 env: BTreeMap::from([("GLOBAL_ONLY".into(), "global".into())]),
+                build_cache: BTreeMap::from([("global-only".into(), cache("GLOBAL_ONLY_CACHE"))]),
                 ..WorktreeConfig::default()
             },
-            run: Some(RunTable {
-                build_cache: BTreeMap::from([("global-only".into(), cache("GLOBAL_ONLY_CACHE"))]),
-                ..RunTable::default()
-            }),
             repo: BTreeMap::from([(active_key, personal)]),
             ..RuntimeConfig::default()
         };
@@ -8896,15 +8910,12 @@ mod config_tests {
                     ("CONFLICT".into(), "repo".into()),
                     ("REPO_ONLY".into(), "repo".into()),
                 ]),
-                ..WorktreeConfig::default()
-            },
-            run: Some(RunTable {
                 build_cache: BTreeMap::from([
                     ("shared".into(), cache("REPO_CACHE")),
                     ("repo-only".into(), cache("REPO_ONLY_CACHE")),
                 ]),
-                ..RunTable::default()
-            }),
+                ..WorktreeConfig::default()
+            },
             ..RuntimeConfig::default()
         };
         let environment = RuntimeConfig {
@@ -8913,15 +8924,12 @@ mod config_tests {
                     ("CONFLICT".into(), "environment".into()),
                     ("ENV_ONLY".into(), "environment".into()),
                 ]),
-                ..WorktreeConfig::default()
-            },
-            run: Some(RunTable {
                 build_cache: BTreeMap::from([
                     ("shared".into(), cache("ENV_CACHE")),
                     ("environment-only".into(), cache("ENV_ONLY_CACHE")),
                 ]),
-                ..RunTable::default()
-            }),
+                ..WorktreeConfig::default()
+            },
             ..RuntimeConfig::default()
         };
         let documents = vec![
@@ -8954,7 +8962,7 @@ mod config_tests {
             ])
         );
         assert_eq!(
-            runtime.run.unwrap().build_cache,
+            runtime.worktree.build_cache,
             BTreeMap::from([
                 ("environment-only".into(), cache("ENV_ONLY_CACHE")),
                 ("global-only".into(), cache("GLOBAL_ONLY_CACHE")),
@@ -8968,7 +8976,7 @@ mod config_tests {
             Some("repo.toml")
         );
         assert_eq!(
-            winners["run.build-cache.shared"].source.as_deref(),
+            winners["worktree.build-cache.shared"].source.as_deref(),
             Some("repo.toml")
         );
 
@@ -8988,8 +8996,12 @@ mod config_tests {
             BTreeSet::from([
                 ("worktree.env.CONFLICT", "global.toml", "repo.toml"),
                 ("worktree.env.CONFLICT", "environment.toml", "repo.toml"),
-                ("run.build-cache.shared", "global.toml", "repo.toml"),
-                ("run.build-cache.shared", "environment.toml", "repo.toml"),
+                ("worktree.build-cache.shared", "global.toml", "repo.toml"),
+                (
+                    "worktree.build-cache.shared",
+                    "environment.toml",
+                    "repo.toml"
+                ),
             ])
         );
     }
@@ -9016,7 +9028,7 @@ mod config_tests {
             ConfigSemantic::Additive
         );
         assert_eq!(
-            config_semantic("run.build-cache.target"),
+            config_semantic("worktree.build-cache.target"),
             ConfigSemantic::Additive
         );
     }
@@ -9169,20 +9181,20 @@ mod config_tests {
                 "[\"environment\"]",
             ),
             (ConfigLeaf::WorktreeRetentionExpensiveGraceDays, "1", "2"),
-            (ConfigLeaf::RunWorktree, "false", "true"),
-            (ConfigLeaf::RunMaxFrames, "1", "2"),
-            (ConfigLeaf::RunFrameSeconds, "1", "2"),
-            (ConfigLeaf::RunTotalSeconds, "1", "2"),
-            (ConfigLeaf::RunMaxRetries, "1", "2"),
-            (ConfigLeaf::RunAttachWaitSeconds, "1", "2"),
-            (ConfigLeaf::RunIdleSeconds, "1", "2"),
-            (ConfigLeaf::RunCommandSeconds, "1", "2"),
-            (ConfigLeaf::RunCommandIdleSeconds, "1", "2"),
-            (ConfigLeaf::RunMaxInFlight, "1", "2"),
-            (ConfigLeaf::RunStrictLoops, "false", "true"),
-            (ConfigLeaf::RunInlinePromptBytes, "1", "2"),
-            (ConfigLeaf::RunMaxTokens, "1", "2"),
-            (ConfigLeaf::RunMaxCostUsd, "1.0", "2.0"),
+            (ConfigLeaf::WorktreeEnabled, "false", "true"),
+            (ConfigLeaf::BudgetMaxFrames, "1", "2"),
+            (ConfigLeaf::BudgetFrameSeconds, "1", "2"),
+            (ConfigLeaf::BudgetTotalSeconds, "1", "2"),
+            (ConfigLeaf::BudgetMaxRetries, "1", "2"),
+            (ConfigLeaf::BudgetAttachWaitSeconds, "1", "2"),
+            (ConfigLeaf::BudgetIdleSeconds, "1", "2"),
+            (ConfigLeaf::BudgetCommandSeconds, "1", "2"),
+            (ConfigLeaf::BudgetCommandIdleSeconds, "1", "2"),
+            (ConfigLeaf::DriveMaxInFlight, "1", "2"),
+            (ConfigLeaf::DriveStrictLoops, "false", "true"),
+            (ConfigLeaf::DriveInlinePromptBytes, "1", "2"),
+            (ConfigLeaf::BudgetMaxTokens, "1", "2"),
+            (ConfigLeaf::BudgetMaxCostUsd, "1.0", "2.0"),
             (ConfigLeaf::MergeOverlap, "\"land\"", "\"park\""),
             (ConfigLeaf::MergeBranch, "\"repo\"", "\"environment\""),
             (ConfigLeaf::MergeGate, "[[\"repo\"]]", "[[\"environment\"]]"),
@@ -10014,6 +10026,7 @@ mod config_tests {
                     ..AgentDefaults::default()
                 },
                 setting: BTreeMap::new(),
+                budget: RunProfileBudget::default(),
             },
         );
         let (flattened, winners) = flatten_agent_defaults(
@@ -10099,6 +10112,7 @@ mod config_tests {
                     ..AgentDefaults::default()
                 },
                 setting: BTreeMap::new(),
+                budget: RunProfileBudget::default(),
             },
         );
         trait_defaults.insert("implement".into(), value);
@@ -10288,6 +10302,7 @@ mod config_tests {
                     ..AgentDefaults::default()
                 },
                 setting: BTreeMap::new(),
+                budget: RunProfileBudget::default(),
             },
         );
         next.trait_defaults.insert("implement".into(), trait_value);
@@ -10558,9 +10573,9 @@ mod config_tests {
             toml::from_str("[budget]\nmax-frames = 3\nframe-seconds = 60\n")
                 .expect("sidecar budget decodes");
         let runtime: RuntimeConfig =
-            toml::from_str("[run]\nframe-seconds = 15\n").expect("runtime budget decodes");
+            toml::from_str("[budget]\nframe-seconds = 15\n").expect("runtime budget decodes");
         let mut effective = sidecar.budget;
-        overlay_budget(&mut effective, &runtime.run.expect("run table").budget);
+        overlay_budget(&mut effective, &runtime.budget.expect("budget table"));
 
         assert_eq!(effective.max_frames, Some(3));
         assert_eq!(effective.frame_seconds, Some(15));
@@ -10569,11 +10584,11 @@ mod config_tests {
     #[test]
     fn usage_warning_threshold_parses_and_is_off_by_default() {
         let with_threshold: RuntimeConfig =
-            toml::from_str("[run]\nusage-warning-threshold = 0.9\n").expect("threshold decodes");
+            toml::from_str("[drive]\nusage-warning-threshold = 0.9\n").expect("threshold decodes");
         assert_eq!(
             with_threshold
-                .run
-                .expect("run table")
+                .drive
+                .expect("drive table")
                 .usage_warning_threshold,
             Some(0.9)
         );
@@ -10583,22 +10598,25 @@ mod config_tests {
                 .usage_warning_threshold,
             None
         );
-        let unset: RuntimeConfig = toml::from_str("[run]\nworktree = true\n")
-            .expect("run table without threshold decodes");
-        assert_eq!(unset.run.expect("run table").usage_warning_threshold, None);
+        let unset: RuntimeConfig = toml::from_str("[worktree]\nenabled = true\n")
+            .expect("worktree table without threshold decodes");
+        assert_eq!(
+            unset.drive.and_then(|drive| drive.usage_warning_threshold),
+            None
+        );
     }
 
     #[test]
     fn budget_max_tokens_and_max_cost_usd_decode_and_overlay() {
         let base: RuntimeConfig =
-            toml::from_str("[run]\nmax-tokens = 1000\n").expect("run.max-tokens decodes");
-        let mut budget = base.run.expect("run table").budget;
+            toml::from_str("[budget]\nmax-tokens = 1000\n").expect("budget.max-tokens decodes");
+        let mut budget = base.budget.expect("budget table");
         assert_eq!(budget.max_tokens, Some(1000));
         assert_eq!(budget.max_cost_usd, None);
 
         let next: RuntimeConfig =
-            toml::from_str("[run]\nmax-cost-usd = 2.5\n").expect("run.max-cost-usd decodes");
-        overlay_budget(&mut budget, &next.run.expect("run table").budget);
+            toml::from_str("[budget]\nmax-cost-usd = 2.5\n").expect("budget.max-cost-usd decodes");
+        overlay_budget(&mut budget, &next.budget.expect("budget table"));
         assert_eq!(
             budget.max_tokens,
             Some(1000),
@@ -10721,6 +10739,7 @@ mod config_tests {
     #[test]
     fn guide_requires_its_own_config_table_before_an_override_can_apply() {
         let mut profile = ResolvedRuntimeAssignments {
+            budget_provenance: BTreeMap::new(),
             registry: HarnessRegistry::default(),
             assignments: BTreeMap::from([("guide".to_string(), single("override-harness"))]),
             seat_assignments: BTreeMap::new(),

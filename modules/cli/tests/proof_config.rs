@@ -26,8 +26,11 @@ fn doctor_reports_effective_defaults_and_rejects_conflicting_path() {
         &repo,
         &scratch.home(),
     );
-    assert!(stdout.contains("run.attach-wait-seconds: 1800"), "{stdout}");
-    assert!(stdout.contains("run.max-in-flight: 1"), "{stdout}");
+    assert!(
+        stdout.contains("budget.attach-wait-seconds: 1800"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("drive.max-in-flight: 1"), "{stdout}");
 
     let output = run_ctx(
         &["traits", "doctor", ".", "--config"],
@@ -49,8 +52,9 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     fs::write(
         repo.join(".ctx/config.toml"),
         "schema-version = 'repo-schema'\n\
-[worktree]\nsetup = []\n\
-[run]\nworktree = false\nmax-frames = 7\nstrict-loops = false\n\
+[worktree]\nsetup = []\nenabled = false\n\n\
+[budget]\nmax-frames = 7\n\n\
+[drive]\nstrict-loops = false\n\
 [merge]\noverlap = 'park'\ngate = []\n",
     )
     .unwrap();
@@ -58,8 +62,9 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     fs::write(
         &environment,
         "schema-version = 'environment-schema'\n\
-[worktree]\nsetup = [['environment-setup']]\n\
-[run]\nworktree = true\nmax-frames = 9\nstrict-loops = true\n\
+[worktree]\nsetup = [['environment-setup']]\nenabled = true\n\n\
+[budget]\nmax-frames = 9\n\n\
+[drive]\nstrict-loops = true\n\
 [merge]\noverlap = 'land'\ngate = [['environment-gate']]\n",
     )
     .unwrap();
@@ -75,9 +80,9 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     let (stdout, _) = utf8(&output);
     for expected in [
         "worktree.setup: 0 [repo:",
-        "run.worktree: false [repo:",
-        "run.max-frames: 7 [repo:",
-        "run.strict-loops: false [repo:",
+        "worktree.enabled: false [repo:",
+        "budget.max-frames: 7 [repo:",
+        "drive.strict-loops: false [repo:",
         "merge.overlap: park [repo:",
         "merge.gate: absent (empty) [repo:",
     ] {
@@ -121,28 +126,28 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [[agent.role.worker]]\nharness = 'global-second-worker'\n\
 [publish]\nexclude = ['global-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nGLOBAL_ONLY = 'global'\nCONFLICT = 'global'\n\
-[run.build-cache.shared]\nenv = 'GLOBAL_CACHE'\n\
+[worktree.build-cache.shared]\nenv = 'GLOBAL_CACHE'\n\
 [trait.layered-trait.agent.role.worker]\nmodel = 'trait-model'\n\
 [repo.\"{active_key}\".host.layered]\nprofile = 'personal-profile'\n\
 [repo.\"{active_key}\".agent.role.worker]\nmodel = 'personal-model'\n\
 [repo.\"{active_key}\".publish]\nexclude = ['personal-exclude', 'duplicate-exclude']\n\
 [repo.\"{active_key}\".worktree.env]\nCONFLICT = 'personal'\nPERSONAL_ONLY = 'personal'\n\
-[repo.\"{active_key}\".run.build-cache.shared]\nenv = 'PERSONAL_CACHE'\n\
-[repo.\"{active_key}\".run.build-cache.personal-only]\nenv = 'PERSONAL_ONLY_CACHE'\n"
+[repo.\"{active_key}\".worktree.build-cache.shared]\nenv = 'PERSONAL_CACHE'\n\
+[repo.\"{active_key}\".worktree.build-cache.personal-only]\nenv = 'PERSONAL_ONLY_CACHE'\n"
         ),
     )
     .unwrap();
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run]\nmax-frames = 7\n\
+        "[budget]\nmax-frames = 7\n\
 [host.layered]\nformat = 'repo-format'\n\
 [harness.layered]\nbin = 'repo-bin'\n\
 [harness.layered.mcp]\nmcp-config-flag = '--repo-mcp'\n\
 [[agent.role.worker]]\nharness = 'repo-worker'\n\
 [publish]\nexclude = ['repo-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nREPO_ONLY = 'repo'\nCONFLICT = 'repo'\n\
-[run.build-cache.repo-only]\nenv = 'REPO_ONLY_CACHE'\n\
-[run.build-cache.shared]\nenv = 'REPO_CACHE'\n",
+[worktree.build-cache.repo-only]\nenv = 'REPO_ONLY_CACHE'\n\
+[worktree.build-cache.shared]\nenv = 'REPO_CACHE'\n",
     )
     .unwrap();
     let environment = scratch.home().join("environment.toml");
@@ -152,8 +157,8 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 [[agent.role.worker]]\nharness = 'environment-worker'\n\
 [publish]\nexclude = ['environment-exclude', 'duplicate-exclude']\n\
 [worktree.env]\nENV_ONLY = 'environment'\nCONFLICT = 'environment'\n\
-[run.build-cache.environment-only]\nenv = 'ENV_ONLY_CACHE'\n\
-[run.build-cache.shared]\nenv = 'ENV_CACHE'\n",
+[worktree.build-cache.environment-only]\nenv = 'ENV_ONLY_CACHE'\n\
+[worktree.build-cache.shared]\nenv = 'ENV_CACHE'\n",
     )
     .unwrap();
     let global_source = fs::canonicalize(&global).unwrap().display().to_string();
@@ -183,21 +188,21 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         format!("harness.layered.bin: repo-bin [repo: {repo_source}] [repo default]"),
         format!("harness.layered.mcp.mcp-config-flag: --repo-mcp [repo: {repo_source}] [repo default]"),
         format!("agent.role.worker.1.harness: environment-worker [environment: {environment_source}] [environment override]"),
-        format!("run.max-frames: 7 [repo: {repo_source}] [repo requirement]"),
+        format!("budget.max-frames: 7 [repo: {repo_source}] [repo requirement]"),
         "publish.exclude: [\".git\",\"node_modules\",\"target\",\".turbo\",\"global-exclude\",\"duplicate-exclude\",\"repo-exclude\",\"environment-exclude\",\"personal-exclude\"]".to_string(),
         format!("worktree.env.GLOBAL_ONLY: global [user-global: {global_source}] [additive]"),
         format!("worktree.env.PERSONAL_ONLY: personal [user-global: {global_source}] [additive]"),
         format!("worktree.env.REPO_ONLY: repo [repo: {repo_source}] [additive]"),
         format!("worktree.env.ENV_ONLY: environment [environment: {environment_source}] [additive]"),
         format!("worktree.env.CONFLICT: repo [repo: {repo_source}] [additive]"),
-        format!("run.build-cache.shared.env: REPO_CACHE [repo: {repo_source}] [additive]"),
-        format!("run.build-cache.personal-only.env: PERSONAL_ONLY_CACHE [user-global: {global_source}] [additive]"),
-        format!("run.build-cache.repo-only.env: REPO_ONLY_CACHE [repo: {repo_source}] [additive]"),
-        format!("run.build-cache.environment-only.env: ENV_ONLY_CACHE [environment: {environment_source}] [additive]"),
+        format!("worktree.build-cache.shared.env: REPO_CACHE [repo: {repo_source}] [additive]"),
+        format!("worktree.build-cache.personal-only.env: PERSONAL_ONLY_CACHE [user-global: {global_source}] [additive]"),
+        format!("worktree.build-cache.repo-only.env: REPO_ONLY_CACHE [repo: {repo_source}] [additive]"),
+        format!("worktree.build-cache.environment-only.env: ENV_ONLY_CACHE [environment: {environment_source}] [additive]"),
         format!("warning: worktree.env.CONFLICT rejected from {global_source}; repository requirement from {repo_source} remains effective"),
         format!("warning: worktree.env.CONFLICT rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
-        format!("warning: run.build-cache.shared rejected from {global_source}; repository requirement from {repo_source} remains effective"),
-        format!("warning: run.build-cache.shared rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
+        format!("warning: worktree.build-cache.shared rejected from {global_source}; repository requirement from {repo_source} remains effective"),
+        format!("warning: worktree.build-cache.shared rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
     ] {
         assert!(text.contains(&expected), "missing {expected:?}: {text}");
     }
@@ -258,7 +263,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
             "repo default",
         ),
         (
-            "run.max-frames",
+            "budget.max-frames",
             "7",
             "repo",
             &repo_source,
@@ -320,17 +325,20 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         knobs["trait.layered-trait.agent.role.worker.model"]["winner"]["source"],
         global_source
     );
-    assert_eq!(knobs["run.build-cache.shared.env"]["value"], "REPO_CACHE");
     assert_eq!(
-        knobs["run.build-cache.shared.env"]["winner"]["layer"],
+        knobs["worktree.build-cache.shared.env"]["value"],
+        "REPO_CACHE"
+    );
+    assert_eq!(
+        knobs["worktree.build-cache.shared.env"]["winner"]["layer"],
         "repo"
     );
     assert_eq!(
-        knobs["run.build-cache.shared.env"]["winner"]["source"],
+        knobs["worktree.build-cache.shared.env"]["winner"]["source"],
         repo_source
     );
     assert_eq!(
-        knobs["run.build-cache.shared.env"]["winner"]["reason"],
+        knobs["worktree.build-cache.shared.env"]["winner"]["reason"],
         "additive"
     );
     for (key, value) in [
@@ -338,9 +346,15 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         ("worktree.env.PERSONAL_ONLY", "personal"),
         ("worktree.env.REPO_ONLY", "repo"),
         ("worktree.env.ENV_ONLY", "environment"),
-        ("run.build-cache.personal-only.env", "PERSONAL_ONLY_CACHE"),
-        ("run.build-cache.repo-only.env", "REPO_ONLY_CACHE"),
-        ("run.build-cache.environment-only.env", "ENV_ONLY_CACHE"),
+        (
+            "worktree.build-cache.personal-only.env",
+            "PERSONAL_ONLY_CACHE",
+        ),
+        ("worktree.build-cache.repo-only.env", "REPO_ONLY_CACHE"),
+        (
+            "worktree.build-cache.environment-only.env",
+            "ENV_ONLY_CACHE",
+        ),
     ] {
         assert_eq!(knobs[key]["value"], value, "{key}: {report}");
     }
@@ -350,8 +364,12 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     let expected_conflicts = [
         ("worktree.env.CONFLICT", &global_source, &repo_source),
         ("worktree.env.CONFLICT", &environment_source, &repo_source),
-        ("run.build-cache.shared", &global_source, &repo_source),
-        ("run.build-cache.shared", &environment_source, &repo_source),
+        ("worktree.build-cache.shared", &global_source, &repo_source),
+        (
+            "worktree.build-cache.shared",
+            &environment_source,
+            &repo_source,
+        ),
     ];
     assert_eq!(conflicts.len(), expected_conflicts.len(), "{report}");
     for (field, rejected_source, repo_source) in expected_conflicts {
@@ -386,7 +404,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
         "the global root and personal block must share one contributor"
     );
     assert_eq!(
-        knobs["run.build-cache.shared.env"]["winner"]["contributors"],
+        knobs["worktree.build-cache.shared.env"]["winner"]["contributors"],
         serde_json::json!([
             { "layer": "user-global", "source": global_source },
             { "layer": "repo", "source": repo_source },
@@ -844,7 +862,7 @@ fn doctor_config_renders_every_seat_through_one_uniform_listing() {
 fn config_max_in_flight_is_validated_on_public_path() {
     let scratch = ScratchRoot::new("p418-validation");
     let config = scratch.home().join("repo.toml");
-    fs::write(&config, "[run]\nmax-in-flight = 0\n").unwrap();
+    fs::write(&config, "[drive]\nmax-in-flight = 0\n").unwrap();
     let mut command = support::controlled_command(
         &support::ctx_bin(),
         &["traits", "doctor", "--config"],
@@ -855,7 +873,7 @@ fn config_max_in_flight_is_validated_on_public_path() {
     let output = command.output().unwrap();
     assert_ne!(output.status.code(), Some(0));
     let (_, stderr) = utf8(&output);
-    assert!(stderr.contains("run.max-in-flight"), "{stderr}");
+    assert!(stderr.contains("drive.max-in-flight"), "{stderr}");
 }
 
 #[test]
@@ -868,7 +886,7 @@ fn doctor_uses_repo_defaults_after_global_defaults() {
     git_init(&repo);
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run]\nmax-in-flight = 2\n[agent.role.worker]\nharness = 'repo-worker'\n",
+        "[drive]\nmax-in-flight = 2\n[agent.role.worker]\nharness = 'repo-worker'\n",
     )
     .unwrap();
     fs::write(
@@ -886,7 +904,7 @@ fn doctor_uses_repo_defaults_after_global_defaults() {
     .unwrap();
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
-    assert!(stdout.contains("run.max-in-flight: 2 [repo:"), "{stdout}");
+    assert!(stdout.contains("drive.max-in-flight: 2 [repo:"), "{stdout}");
     assert!(
         stdout.contains("agent.role.worker.harness: repo-worker"),
         "{stdout}"
@@ -1095,7 +1113,7 @@ fn merge_gate_repo_declaration_replaces_global_wholesale() {
 }
 
 /// P477: an invalid `[merge] gate-seconds` (zero) must fail validation on
-/// the public path, exactly like `run.max-in-flight`'s existing validation.
+/// the public path, exactly like `drive.max-in-flight`'s existing validation.
 /// Runs against a SCRATCH repo, never `repo_root()` — same reason as the
 /// P476 note above: this repository now declares its own `[merge] gate`
 /// (0056's landing gate), and a repo-owned requirement leaf legitimately
@@ -1334,12 +1352,12 @@ fn list_backed_role_budget_rows_pair_the_correct_seat() {
     );
 }
 
-/// P475 §3 D2: a run-level `[run] frame-seconds` masks a declared role
-/// budget for drive frames — the documented precedence (CLI > `[run]` >
+/// P475 §3 D2: a run-level `[budget] frame-seconds` masks a declared role
+/// budget for drive frames — the documented precedence (CLI > `[budget]` >
 /// sidecar > role budget > built-in), proved rather than only asserted in a
 /// comment. `doctor --config` shows the seat's OWN budget (frame-dispatch
 /// precedence only applies inside the drive loop, not to this listing),
-/// while `run.frame-seconds` shows the masking value.
+/// while `budget.frame-seconds` shows the masking value.
 #[test]
 fn run_level_frame_seconds_is_visible_alongside_a_masked_role_budget() {
     let scratch = ScratchRoot::new("p475-run-level-masks-role-budget");
@@ -1348,7 +1366,7 @@ fn run_level_frame_seconds_is_visible_alongside_a_masked_role_budget() {
     git_init(&repo);
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run]\nframe-seconds = 42\n\n\
+        "[budget]\nframe-seconds = 42\n\n\
 [agent.role.worker]\nharness = 'claude'\n\n\
 [agent.role.worker.budget]\nframe-seconds = 777\n",
     )
@@ -1359,10 +1377,13 @@ fn run_level_frame_seconds_is_visible_alongside_a_masked_role_budget() {
         &repo,
         &scratch.home(),
     );
-    assert!(stdout.contains("run.frame-seconds: 42 [repo:"), "{stdout}");
+    assert!(
+        stdout.contains("budget.frame-seconds: 42 [repo:"),
+        "{stdout}"
+    );
     assert!(
         stdout.contains("agent.role.worker.budget.frame-seconds: 777 [repo:"),
-        "a role budget must still be visible in doctor's per-seat listing even though `[run]` would mask it for drive frames: {stdout}"
+        "a role budget must still be visible in doctor's per-seat listing even though `[budget]` would mask it for drive frames: {stdout}"
     );
 }
 
@@ -1571,7 +1592,7 @@ output = ["slot:notified"]
 
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run]\nworktree = false\nmax-frames = 10\nframe-seconds = 20\ntotal-seconds = 30\nmax-retries = 2\nattach-wait-seconds = 4\nidle-seconds = 5\nmax-in-flight = 1\nwait = false\nstrict-loops = false\n",
+        "[worktree]\nenabled = false\n\n[budget]\nmax-frames = 10\nframe-seconds = 20\ntotal-seconds = 30\nmax-retries = 2\nattach-wait-seconds = 4\nidle-seconds = 5\n\n[drive]\nmax-in-flight = 1\nwait = false\nstrict-loops = false\n",
     )
     .unwrap();
 
@@ -1747,8 +1768,8 @@ fn named_build_caches_export_concurrently_through_the_public_worktree_path() {
     fs::write(
         repo.join(".ctx/config.toml"),
         "[worktree]\nsetup = [[\"/bin/sh\", \"-c\", \"printf '%s|%s' \\\"$CARGO_TARGET_DIR\\\" \\\"$PNPM_STORE\\\" > env-capture.txt\"]]\n\n\
-[run.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n\
-[run.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
+[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n\
+[worktree.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
     )
     .unwrap();
 
@@ -1814,7 +1835,7 @@ fn build_cache_prune_selects_one_or_all_declared_caches_and_never_touches_undecl
         .unwrap();
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n[run.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
+        "[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n[worktree.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
     )
     .unwrap();
 
@@ -1957,7 +1978,7 @@ fn linked_worktree_build_cache_export_doctor_and_prune_use_the_main_checkout_key
     git_init(&repo);
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[run.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
+        "[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
     )
     .unwrap();
     fs::write(repo.join("seed"), "seed").unwrap();
@@ -2037,7 +2058,7 @@ fn linked_worktree_cache_export_uses_main_key_without_rebasing_relative_overlays
     seed_and_activate_fixture(&repo, &scratch.home(), "p512-linked-cache-env");
     fs::write(
         repo.join(".ctx/config.toml"),
-        "[worktree]\nsetup = [[\"/bin/sh\", \"-c\", \"printf '%s|%s' \\\"$CARGO_TARGET_DIR\\\" \\\"$RELATIVE_OVERLAY\\\" > env-capture.txt\"]]\n\n[worktree.env]\nRELATIVE_OVERLAY = \"./linked-local\"\n\n[run.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
+        "[worktree]\nsetup = [[\"/bin/sh\", \"-c\", \"printf '%s|%s' \\\"$CARGO_TARGET_DIR\\\" \\\"$RELATIVE_OVERLAY\\\" > env-capture.txt\"]]\n\n[worktree.env]\nRELATIVE_OVERLAY = \"./linked-local\"\n\n[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
     )
     .unwrap();
     assert!(
@@ -2120,12 +2141,12 @@ fn build_cache_prune_authority_is_rooted_at_selected_repo_not_undeclared_names()
     }
     fs::write(
         repo_a.join(".ctx/config.toml"),
-        "[run.build-cache.repo-a-only]\nenv = \"REPO_A_ONLY\"\n",
+        "[worktree.build-cache.repo-a-only]\nenv = \"REPO_A_ONLY\"\n",
     )
     .unwrap();
     fs::write(
         repo_b.join(".ctx/config.toml"),
-        "[run.build-cache.repo-b-only]\nenv = \"REPO_B_ONLY\"\n",
+        "[worktree.build-cache.repo-b-only]\nenv = \"REPO_B_ONLY\"\n",
     )
     .unwrap();
 

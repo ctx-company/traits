@@ -55,10 +55,10 @@ fn resolved_strict_loops(configured: bool, strict_loops: bool, no_strict_loops: 
     }
 }
 
-/// P550 `--story`/`--no-story`/`[run] story` precedence: `--no-story` wins;
+/// P550 `--story`/`--no-story`/`[drive] story` precedence: `--no-story` wins;
 /// an explicit `--story[=<level>]` overrides config, defaulting the bare
 /// flag's missing level to `StoryLevel::Default`; with no flag at all,
-/// `[run] story` supplies the default (absent = off, matching `--no-merge`'s
+/// `[drive] story` supplies the default (absent = off, matching `--no-merge`'s
 /// shape rather than `--wait`'s plain bool — the pane is opt-in, not
 /// opt-out).
 fn resolved_story_level(
@@ -132,39 +132,16 @@ struct RunBudgetInputs {
 
 fn resolve_run_budget(
     policy: ctx_traits_io::harness_config::EffectiveRunPolicy,
-    run: Option<&ctx_traits_io::harness_config::RunTable>,
     input: RunBudgetInputs,
 ) -> ResolvedRunBudget {
-    let budget = run.map(|value| &value.budget);
     ResolvedRunBudget {
-        max_frames: input
-            .max_frames
-            .or_else(|| budget.and_then(|value| value.max_frames))
-            .or(policy.max_frames),
-        frame_seconds: input
-            .frame_seconds
-            .or_else(|| budget.and_then(|value| value.frame_seconds))
-            .or(policy.frame_seconds),
-        total_seconds: input
-            .total_seconds
-            .or_else(|| budget.and_then(|value| value.total_seconds))
-            .or(policy.total_seconds),
-        max_retries: input
-            .max_retries
-            .or_else(|| budget.and_then(|value| value.max_retries))
-            .or(policy.max_retries),
-        attach_wait_seconds: input
-            .attach_wait_seconds
-            .or_else(|| budget.and_then(|value| value.attach_wait_seconds))
-            .or(policy.attach_wait_seconds),
-        idle_seconds: input
-            .idle_seconds
-            .or_else(|| budget.and_then(|value| value.idle_seconds))
-            .or(policy.idle_seconds),
-        max_in_flight: input
-            .max_in_flight
-            .or_else(|| run.and_then(|value| value.max_in_flight))
-            .unwrap_or(policy.max_in_flight),
+        max_frames: input.max_frames.or(policy.max_frames),
+        frame_seconds: input.frame_seconds.or(policy.frame_seconds),
+        total_seconds: input.total_seconds.or(policy.total_seconds),
+        max_retries: input.max_retries.or(policy.max_retries),
+        attach_wait_seconds: input.attach_wait_seconds.or(policy.attach_wait_seconds),
+        idle_seconds: input.idle_seconds.or(policy.idle_seconds),
+        max_in_flight: input.max_in_flight.unwrap_or(policy.max_in_flight),
     }
 }
 
@@ -508,7 +485,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 llm_assisted,
                 candidate,
                 model,
-                profile,
+                budget,
                 assignments,
             }) => {
                 if let Some(file) = resolve_optional_trait_target(trait_arg.as_deref(), None)? {
@@ -531,7 +508,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     llm_assisted,
                     candidate_path: candidate.as_deref(),
                     model: model.as_deref(),
-                    run_profile: profile.as_deref(),
+                    budget_document: budget.as_deref(),
                     assignments: &assignments,
                 })
             }
@@ -682,7 +659,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
             Some(cli::TraitsCommand::Import {
                 source,
                 profile,
-                run_profile,
+                budget,
                 out,
                 check,
                 llm_assisted,
@@ -701,7 +678,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     model: model.as_deref(),
                     assignments: &assignments,
                     candidate_path: candidate.as_deref(),
-                    run_profile: run_profile.as_deref(),
+                    budget_document: budget.as_deref(),
                     json,
                     verbose,
                 },
@@ -848,11 +825,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         message: "run startup interrupted".to_string(),
                     });
                 }
-                let run_config = runtime.run.as_ref();
                 let policy = runtime.effective_run_policy();
                 let budget = resolve_run_budget(
                     policy,
-                    run_config,
                     RunBudgetInputs {
                         max_frames: args.max_frames,
                         frame_seconds: args.frame_seconds,
@@ -918,10 +893,10 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
                     if merge_rung.is_some() && worktree.is_none() {
                         if let Some(view) = startup.as_ref() {
-                            view.fail("an effective merge request requires an effective worktree (add --worktree, or configure [run] worktree = true)");
+                            view.fail("an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)");
                         }
                         return Err(crate::Error::Command {
-                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [run] worktree = true)".to_string(),
+                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
                         });
                     }
                     let story = resolved_story_level(
@@ -977,11 +952,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
                         camino::Utf8Path::new("."),
                     )?;
-                    let run_config = runtime.run.as_ref();
                     let policy = runtime.effective_run_policy();
                     let budget = resolve_run_budget(
                         policy,
-                        run_config,
                         RunBudgetInputs {
                             max_frames: args.max_frames,
                             frame_seconds: args.frame_seconds,
@@ -1003,7 +976,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
                     if merge_rung.is_some() && worktree.is_none() {
                         return Err(crate::Error::Command {
-                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [run] worktree = true)".to_string(),
+                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
                         });
                     }
                     crate::app::run::handle_session_start(SessionStartInputs {
@@ -1120,11 +1093,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 let runtime = ctx_traits_io::harness_config::resolve_runtime_config(
                     camino::Utf8Path::new("."),
                 )?;
-                let run_config = runtime.run.as_ref();
                 let policy = runtime.effective_run_policy();
                 let budget = resolve_run_budget(
                     policy,
-                    run_config,
                     RunBudgetInputs {
                         max_frames,
                         frame_seconds,
