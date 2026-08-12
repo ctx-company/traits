@@ -1,6 +1,6 @@
-import type { AgentDefaults, DriveTable, GitTable, HarnessDefinition, HostOverride, MergeTable, ModelPricing, PublishTable, RegistryTable, RepoOverride, RoleAssignmentValue, RunProfileBudget, TasksTable, TraitDefaults, WorktreeConfig } from "./generated.js";
+import type { AgentDefaults, Budget, DriveTable, GitTable, HarnessDefinition, HostOverride, MergeTable, ModelPricing, PreferencesTable, PublishTable, RegistryTable, RepoOverride, RoleAssignmentValue, TasksTable, TraitDefaults, WorktreeConfig } from "./generated.js";
 /** `[budget]` — one per config build, second call is a named error. */
-export declare function defineBudget(fields: RunProfileBudget): void;
+export declare function defineBudget(fields: Budget): void;
 /** `[drive]` — one per config build, second call is a named error. */
 export declare function defineDrive(fields: DriveTable): void;
 /** `[worktree]` — one per config build, second call is a named error. */
@@ -41,9 +41,17 @@ export declare function defineHost(id: string, fields: HostOverride): void;
  */
 export declare function defineRepo(key: string, fields: RepoOverride): void;
 /**
- * `[trait.<traitId>]` — duplicate `traitId` in one build is a named error.
- * Shares its name with the CDK's `defineTrait` deliberately (owner ruling:
- * different package, different context; config.ts never imports the CDK).
+ * `[preferences]` — one per config build, second call is a named error.
+ * Only legal in a user-global config build, exactly like {@link defineRepo};
+ * `evaluateConfigFunction` rejects a registered preferences table when the
+ * build's layer is not `"user-global"`.
  */
-export declare function defineTrait(traitId: string, fields: TraitDefaults): void;
+export declare function definePreferences(fields: PreferencesTable): void;
+/**
+ * `[trait.<traitId>]` — duplicate `traitId` in one build is a named error.
+ * Named `configureTrait`, distinct from the CDK's `defineTrait`, so a
+ * reader never has to wonder which side of the config/cdk boundary a file
+ * is on (0180).
+ */
+export declare function configureTrait(traitId: string, fields: TraitDefaults): void;
 //# sourceMappingURL=registrars.d.ts.map

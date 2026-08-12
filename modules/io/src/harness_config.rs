@@ -2164,6 +2164,7 @@ pub struct ModelPricing {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename = "Budget")]
 pub struct RunProfileBudget {
     #[serde(default)]
     pub max_frames: Option<u64>,

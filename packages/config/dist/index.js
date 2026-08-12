@@ -2,6 +2,7 @@ import { isConfigFrameActive, markLegacyDefineConfigTopLevel } from "./frame.js"
 export * from "./evaluate.js";
 export * from "./generated.js";
 export * from "./registrars.js";
+export { onSettingMint, setting, settingMetaOf } from "./setting.js";
 /**
  * The object-literal authoring form — kept working through a deprecation
  * window. Prefer the hook form: a default-export function of `define*`

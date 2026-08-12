@@ -5,7 +5,7 @@ import {
   definePricing,
   defineRepo,
   defineRole,
-  defineTrait,
+  configureTrait,
   evaluateConfigFunction,
 } from "@ctx-traits/config";
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ describe("evaluateConfigFunction", () => {
         { harness: "codex", model: "gpt-5.2" },
       ]);
       definePricing("claude-opus-5", { usdPerMtok: 15 });
-      defineTrait("refactor", {});
+      configureTrait("refactor", {});
     });
 
     expect(config).toEqual({

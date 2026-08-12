@@ -23,7 +23,6 @@ import {
   seats,
   sequence,
   session,
-  setting,
   signal,
   slot,
   snippet,
@@ -37,6 +36,7 @@ import {
   worker,
 } from "@ctx-traits/cdk";
 import * as publicCdk from "@ctx-traits/cdk";
+import { setting } from "@ctx-traits/config";
 import type {
   AgentHandle,
   ArgvItem,

@@ -9,6 +9,7 @@ export type {
   SynthFormat,
   SynthPlan,
 } from "./generated.js";
+import { settingMetaOf } from "@ctx-traits/config";
 import type { FlattenedVariant, SchemaValue, VariantTopologyNode } from "./authoring-types.js";
 import type {
   CanonicalAgent,
@@ -229,8 +230,25 @@ export function withMeta<
   return value as WithHandleValue<T & Brand<HandleKind>, Value>;
 }
 
+/**
+ * A `setting.*` handle (minted by `@ctx-traits/config`, 0180) carries no
+ * CDK `META` symbol — it synthesizes a `Meta` from the handle's config-side
+ * interop meta instead. `metaOf` is the single choke point behind
+ * `explicitDeclarationItems` (normalize.ts), the `merged.setting` merge
+ * (trait.ts), and every `setting:` ref-prefix check (sequence.ts), so this
+ * one fallback covers prompt interpolation, argv tokens, condition
+ * operands, and structural fields like `loop.maxIterations` alike.
+ */
 export function metaOf(value: unknown): Meta | undefined {
-  return typeof value === "object" && value !== null ? (value as { readonly [META]?: Meta })[META] : undefined;
+  const meta = typeof value === "object" && value !== null ? (value as { readonly [META]?: Meta })[META] : undefined;
+  if (meta !== undefined) return meta;
+  const settingMeta = settingMetaOf(value);
+  if (settingMeta === undefined) return undefined;
+  return {
+    kind: "setting",
+    ref: settingMeta.ref,
+    declaration: settingMeta.declaration as unknown as MetaDeclaration, // audited-unknown-cast: config's SettingDeclaration mirrors CanonicalSetting field-for-field
+  };
 }
 
 /** `value`'s `output-sink` declaration, narrowed by `Meta<K>`'s kind check — shared by every output-ref reader (sequence.ts, condition.ts). */

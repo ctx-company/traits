@@ -52,6 +52,9 @@
     "test": "vitest run",
     "prepublishOnly": "pnpm run build"
   },
+  "dependencies": {
+    "@ctx-traits/config": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "26.2.0",
     "oxfmt": "0.63.0",

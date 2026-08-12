@@ -19,7 +19,7 @@ Default-export a function of `define*` registrar calls — one registrar per
 
 ```ts
 // .ctx/config.ts — evaluated only by `ctx traits config build`
-import { definePricing, defineRole, defineRun, defineTrait, defineWorktree } from "@ctx-traits/config";
+import { definePricing, defineRole, defineRun, configureTrait, defineWorktree } from "@ctx-traits/config";
 
 export default function () {
   defineRole("master", {
@@ -34,7 +34,7 @@ export default function () {
   defineRun({ frameSeconds: 1200, maxFrames: 1000, maxCostUsd: 25 });
   defineWorktree({ env: { CARGO_TARGET_DIR: "{cache-slot}" } });
   definePricing("claude-opus-5", { usdPerMtok: 15 });
-  defineTrait("refactor", {/* per-trait defaults */});
+  configureTrait("refactor", {/* per-trait defaults */});
 }
 ```
 

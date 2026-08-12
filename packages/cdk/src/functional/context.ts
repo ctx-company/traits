@@ -11,6 +11,7 @@
  * init.
  */
 
+import { onSettingMint } from "@ctx-traits/config";
 import type { BranchCheckValue } from "../condition.js";
 import type { Handle, ResourceHandle, SequenceHandle, SettingHandle, SlotHandle } from "../handles.js";
 import type { MetaDeclaration } from "../meta.js";
@@ -387,3 +388,13 @@ export function recordTraitMint(kind: FrameMint["kind"], id: string, ref: string
   if (activeTraitFrame === undefined) return;
   activeTraitFrame.mints.push({ kind, id, ref, declaration, file: captureAuthorFrame()?.file });
 }
+
+/**
+ * `setting.*` now mints in `@ctx-traits/config` (0180) — this forwards its
+ * mint notification into `recordTraitMint`, preserving the never-referenced
+ * check (`functional/trait.ts`) and hook-style frame accounting exactly as
+ * when the mint happened locally.
+ */
+onSettingMint((id, ref, declaration) => {
+  recordTraitMint("setting", id, ref, declaration as unknown as MetaDeclaration); // audited-unknown-cast: config's SettingDeclaration mirrors CanonicalSetting field-for-field
+});

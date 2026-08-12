@@ -1,6 +1,7 @@
 import { registerKeyed, registerSingleton } from "./frame.js";
 import type {
   AgentDefaults,
+  Budget,
   DriveTable,
   GitTable,
   HarnessDefinition,
@@ -12,14 +13,13 @@ import type {
   RegistryTable,
   RepoOverride,
   RoleAssignmentValue,
-  RunProfileBudget,
   TasksTable,
   TraitDefaults,
   WorktreeConfig,
 } from "./generated.js";
 
 /** `[budget]` — one per config build, second call is a named error. */
-export function defineBudget(fields: RunProfileBudget): void {
+export function defineBudget(fields: Budget): void {
   registerSingleton("defineBudget", "budget", fields);
 }
 
@@ -113,9 +113,10 @@ export function definePreferences(fields: PreferencesTable): void {
 
 /**
  * `[trait.<traitId>]` — duplicate `traitId` in one build is a named error.
- * Shares its name with the CDK's `defineTrait` deliberately (owner ruling:
- * different package, different context; config.ts never imports the CDK).
+ * Named `configureTrait`, distinct from the CDK's `defineTrait`, so a
+ * reader never has to wonder which side of the config/cdk boundary a file
+ * is on (0180).
  */
-export function defineTrait(traitId: string, fields: TraitDefaults): void {
-  registerKeyed("defineTrait", "trait", traitId, fields);
+export function configureTrait(traitId: string, fields: TraitDefaults): void {
+  registerKeyed("configureTrait", "trait", traitId, fields);
 }

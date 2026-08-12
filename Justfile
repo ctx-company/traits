@@ -25,11 +25,11 @@ sdk-check:
 	cargo run -p ctx-traits-cli -- traits sdk-generate --check
 
 ts-build:
+	pnpm --dir packages/config run build
 	pnpm --dir packages/cdk run build
 	pnpm --dir packages/toolkit run build
 	pnpm --dir packages/agents run build
 	pnpm --dir packages/rust run build
-	pnpm --dir packages/config run build
 
 ts-typecheck:
 	pnpm --dir packages/cdk run typecheck && pnpm --dir packages/cdk run typecheck:test

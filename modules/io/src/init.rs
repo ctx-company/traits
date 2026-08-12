@@ -99,7 +99,8 @@ fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
   "description": "Authoring-time dependencies for this project's ctx.traits packages. Created by `ctx traits init`; not published, and not needed to RUN a trait.",
   "type": "module",
   "dependencies": {{
-    "@ctx-traits/cdk": "{AUTHORING_PACKAGE_VERSION}"
+    "@ctx-traits/cdk": "{AUTHORING_PACKAGE_VERSION}",
+    "@ctx-traits/config": "{AUTHORING_PACKAGE_VERSION}"
   }}
 }}
 "#

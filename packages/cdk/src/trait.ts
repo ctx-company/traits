@@ -182,7 +182,7 @@ export interface TraitFields {
   readonly slot?: SlotHandle | readonly SlotHandle[];
   /** Alias of {@link TraitFields.slot}. */
   readonly slots?: SlotHandle | readonly SlotHandle[];
-  /** Declared settings. @example `setting: [setting.number({...})]` @see {@link setting} */
+  /** Declared settings. @example `setting: [setting.number({...})]` @see `setting` in `@ctx-traits/config` */
   readonly setting?: SettingHandle | readonly SettingHandle[];
   /** Alias of {@link TraitFields.setting}. */
   readonly settings?: SettingHandle | readonly SettingHandle[];

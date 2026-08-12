@@ -215,8 +215,6 @@ export type {
   RuleFields,
   SignalFields,
 } from "./procedure.js";
-export { setting } from "./setting.js";
-export type { SettingFunction } from "./setting.js";
 /** The object-layer `procedure(...)` builder, augmented with `procedure.from(fields, body)` (0106) — one exported symbol, both call shapes. */
 export const procedure = attachProcedureFrom(procedureBase);
 export { prompt } from "./prompt.js";

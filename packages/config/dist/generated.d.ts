@@ -3,12 +3,13 @@ export type JsonValue = null | boolean | number | string | readonly JsonValue[] 
 };
 export interface CtxConfig {
     agent?: AgentDefaults;
-    budget?: RunProfileBudget;
+    budget?: Budget;
     drive?: DriveTable;
     git?: GitTable;
     harness?: Record<string, HarnessDefinition>;
     host?: Record<string, HostOverride>;
     merge?: MergeTable;
+    preferences?: PreferencesTable;
     pricing?: Record<string, ModelPricing>;
     publish?: PublishTable;
     registry?: RegistryTable;
@@ -24,9 +25,22 @@ export interface AgentDefaults {
 }
 export type AutoClosePolicy = "confirm" | "checked" | "merge";
 export type BillingMode = "subscription" | "api";
+export interface Budget {
+    attachWaitSeconds?: number;
+    commandIdleSeconds?: number;
+    commandSeconds?: number;
+    frameSeconds?: number;
+    idleSeconds?: number;
+    maxCostUsd?: number;
+    maxFrames?: number;
+    maxRetries?: number;
+    maxTokens?: number;
+    totalSeconds?: number;
+}
 export interface BuildCacheConfig {
     env: string;
 }
+export type ConfigFormatPreference = "toml" | "ts";
 export interface DriveTable {
     inlinePromptBytes?: number;
     maxInFlight?: number;
@@ -100,6 +114,9 @@ export interface ModelPricing {
 export interface PortDefaults {
     port?: Record<string, string>;
 }
+export interface PreferencesTable {
+    configFormat?: ConfigFormatPreference;
+}
 export interface ProfileAssignment {
     apiKeyEnv?: string;
     baseUrl?: string;
@@ -172,18 +189,6 @@ export interface RoleBudget {
     maxTokens?: number;
 }
 export type RunAssignmentMode = "harness" | "attach";
-export interface RunProfileBudget {
-    attachWaitSeconds?: number;
-    commandIdleSeconds?: number;
-    commandSeconds?: number;
-    frameSeconds?: number;
-    idleSeconds?: number;
-    maxCostUsd?: number;
-    maxFrames?: number;
-    maxRetries?: number;
-    maxTokens?: number;
-    totalSeconds?: number;
-}
 export type RunSessionMode = "per-frame" | "persistent";
 export type RunTransport = "cli" | "mcp" | "api";
 export type StoryLevel = "default" | "detailed" | "assisted";
@@ -193,14 +198,14 @@ export interface TasksTable {
 }
 export interface TraitDefaults {
     agent?: AgentDefaults;
-    budget?: RunProfileBudget;
+    budget?: Budget;
     defaults?: PortDefaults;
     setting?: Record<string, JsonValue>;
     variant?: Record<string, TraitVariantDefaults>;
 }
 export interface TraitVariantDefaults {
     agent?: AgentDefaults;
-    budget?: RunProfileBudget;
+    budget?: Budget;
     setting?: Record<string, JsonValue>;
 }
 export type TripwirePolicy = "park" | "warn";

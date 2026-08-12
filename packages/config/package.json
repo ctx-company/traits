@@ -1,6 +1,16 @@
 {
   "name": "@ctx-traits/config",
   "version": "0.1.0-alpha.0",
+  "description": "Configuration vocabulary for ctx.traits: declare operator knobs and config.ts authoring tables, resolved from config layers at activation — never at build time.",
+  "keywords": [
+    "config",
+    "ctx",
+    "ctx-traits",
+    "llm"
+  ],
+  "homepage": "https://github.com/ctx-company/traits/tree/main/packages/config",
+  "license": "Apache-2.0",
+  "author": "Oskar Cieslik",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ctx-company/traits.git",

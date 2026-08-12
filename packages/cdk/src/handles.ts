@@ -1,3 +1,4 @@
+import type { SettingHandle as ConfigSettingHandle } from "@ctx-traits/config";
 import type { ForEachRegistrarOptions } from "./functional/registrars.js";
 import type { CanonicalGuardPredicate, RefKind } from "./generated.js";
 import type { CdkObject } from "./meta.js";
@@ -96,12 +97,14 @@ export type SlotWithFields<Value = unknown> = SlotHandle<Value> &
   (Value extends readonly unknown[] ? unknown : Value extends object ? ObjectFieldRefs<Value> : unknown);
 export type PortHandle<Value = unknown> = Handle<"port", Value>;
 /**
- * A typed operator knob: declared in trait source, resolved from config
- * layers at activation. Accepted anywhere a `SlotHandle`/`PortHandle` is —
- * prompt interpolation, argv tokens, condition operands, structural fields
- * (e.g. the loop bound) — type-checked the same way.
+ * A typed operator knob: declared via `@ctx-traits/config`'s `setting.*`
+ * (0180 moved the declaration API there), resolved from config layers at
+ * activation. Accepted anywhere a `SlotHandle`/`PortHandle` is — prompt
+ * interpolation, argv tokens, condition operands, structural fields (e.g.
+ * the loop bound) — type-checked the same way. Re-exported (not rebuilt on
+ * `Handle`/`Brand`): a config-minted handle carries no CDK brand.
  */
-export type SettingHandle<Value = unknown> = Handle<"setting", Value>;
+export type SettingHandle<Value = unknown> = ConfigSettingHandle<Value>;
 export type PromptHandle<Input = unknown, Output = unknown> = Handle<
   "prompt",
   { readonly input: Input; readonly output: Output }

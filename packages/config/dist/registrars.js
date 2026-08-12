@@ -69,10 +69,20 @@ export function defineRepo(key, fields) {
     registerKeyed("defineRepo", "repo", key, fields);
 }
 /**
- * `[trait.<traitId>]` — duplicate `traitId` in one build is a named error.
- * Shares its name with the CDK's `defineTrait` deliberately (owner ruling:
- * different package, different context; config.ts never imports the CDK).
+ * `[preferences]` — one per config build, second call is a named error.
+ * Only legal in a user-global config build, exactly like {@link defineRepo};
+ * `evaluateConfigFunction` rejects a registered preferences table when the
+ * build's layer is not `"user-global"`.
  */
-export function defineTrait(traitId, fields) {
-    registerKeyed("defineTrait", "trait", traitId, fields);
+export function definePreferences(fields) {
+    registerSingleton("definePreferences", "preferences", fields);
+}
+/**
+ * `[trait.<traitId>]` — duplicate `traitId` in one build is a named error.
+ * Named `configureTrait`, distinct from the CDK's `defineTrait`, so a
+ * reader never has to wonder which side of the config/cdk boundary a file
+ * is on (0180).
+ */
+export function configureTrait(traitId, fields) {
+    registerKeyed("configureTrait", "trait", traitId, fields);
 }

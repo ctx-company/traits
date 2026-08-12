@@ -47,6 +47,10 @@ importers:
         version: 7.0.2
 
   packages/cdk:
+    dependencies:
+      '@ctx-traits/config':
+        specifier: workspace:*
+        version: link:../config
     devDependencies:
       '@types/node':
         specifier: 26.2.0
