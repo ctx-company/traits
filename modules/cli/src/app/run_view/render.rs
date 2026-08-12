@@ -913,6 +913,10 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
             if !ok && let Some(code) = exit_code {
                 tail.push_str(&format!(" (exit {code})"));
             }
+            if let Some(elapsed) = step.elapsed {
+                tail.push_str(" \u{b7} ");
+                tail.push_str(&tui::elapsed_text(elapsed));
+            }
             (
                 tail,
                 if ok {
@@ -938,6 +942,10 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
             if !succeeded && let Some(code) = exit_code {
                 tail.push_str(&format!(" (exit {code})"));
             }
+            if let Some(elapsed) = step.elapsed {
+                tail.push_str(" \u{b7} ");
+                tail.push_str(&tui::elapsed_text(elapsed));
+            }
             (
                 tail,
                 if succeeded {
@@ -948,7 +956,12 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
             )
         }
         (_, Some(ctx_traits_core::procedure::run::PlannedSequenceKind::Command), None) => {
-            (step.label.clone(), tui::Tone::Muted)
+            let mut tail = step.label.clone();
+            if let Some(elapsed) = step.elapsed {
+                tail.push_str(" \u{b7} ");
+                tail.push_str(&tui::elapsed_text(elapsed));
+            }
+            (tail, tui::Tone::Muted)
         }
         (Some(summary), _, _) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
         (None, _, _) => {
@@ -1879,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn story_row_line_keeps_typed_verdicts_and_omits_unknown_command_facts() {
+    fn story_row_line_keeps_typed_verdicts_and_command_rows_carry_elapsed() {
         use ctx_traits_core::procedure::run::PlannedSequenceKind;
 
         let check = HistoryStep {
@@ -1909,8 +1922,7 @@ mod tests {
             summary_at: None,
         };
         let rendered = story_row_line(&command);
-        assert_eq!(rendered.tail, "command");
-        assert!(!rendered.tail.contains("00:00:05"));
+        assert_eq!(rendered.tail, "command \u{b7} 00:00:05");
 
         let check = |ok, exit_code, summary: Option<&str>| {
             story_row_line(&HistoryStep {

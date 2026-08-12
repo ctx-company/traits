@@ -218,6 +218,13 @@ struct RunPanelState {
     session: ctx_traits_core::procedure::session::Session,
     active_key: Option<String>,
     active_started: Option<(String, Instant)>,
+    /// Completed-step contexts awaiting narrator pickup, in completion
+    /// order. Filled by [`transition_active_step`] — invoked by both
+    /// [`RunPanel::refresh`] and the tick observer's ledger reload — and
+    /// drained one per `refresh` return, so a transition detected while the
+    /// drive thread is blocked inside a command frame still gets its
+    /// step-summary narration on the next drive boundary.
+    pending_completed: Vec<CompletedStepContext>,
     finished_durations: BTreeMap<String, Duration>,
     output_tokens: BTreeMap<String, u64>,
     /// Presentation-only aggregates for loop/for-each containers, keyed by
@@ -449,6 +456,7 @@ impl RunPanel {
             session,
             active_key,
             active_started,
+            pending_completed: Vec::new(),
             finished_durations: BTreeMap::new(),
             output_tokens: BTreeMap::new(),
             loop_elapsed: BTreeMap::new(),
@@ -690,54 +698,7 @@ impl RunPanel {
         let Ok(mut state) = self.state.lock() else {
             return None;
         };
-        let active_key = active_key(session);
-        let active_changed = state.active_key != active_key;
-        let mut completed = None;
-        if active_changed {
-            if let Some((key, started)) = state.active_started.take() {
-                let elapsed = started.elapsed();
-                // Credit every loop this key's item was running inside, using
-                // the pre-transition session so a rollover still attributes
-                // the interval to the loop it belongs to.
-                for loop_key in active_loop_container_keys(&state.session) {
-                    *state.loop_elapsed.entry(loop_key).or_default() += elapsed;
-                }
-                // Captured from the last-rendered view (still the pre-
-                // transition step) before `rebuild_view` below replaces it.
-                let completed_step = state
-                    .view
-                    .steps
-                    .iter()
-                    .find(|step| step.active)
-                    .map(|step| (step.key.clone(), step.label.clone(), step.role.clone()));
-                let work_tokens = state.output_tokens.get(&key).copied();
-                completed = completed_step.map(|(key, label, role)| CompletedStepContext {
-                    key,
-                    label,
-                    role,
-                    elapsed,
-                    work_tokens,
-                });
-                state.finished_durations.insert(key, elapsed);
-                // P470: the CURRENT step's verbatim stream is exactly that —
-                // the step now ending is done, its story row is the P455
-                // summary or the facts fallback, never its raw thinking ticks.
-                state.current_stream.clear();
-                state.scrolls.reset(CURRENT_PANE);
-                state.current_follow = true;
-            }
-            // The accepted final step clears the active key. Keep its finished
-            // narration through the terminal repaint instead of replacing it
-            // with the initial live line.
-            if session.status != ctx_traits_core::procedure::session::Status::Completed {
-                state.live = tui::LiveLine::default();
-            }
-            state.active_key = active_key;
-            state.active_started = state
-                .active_key
-                .as_ref()
-                .map(|key| (key.clone(), Instant::now()));
-        }
+        let active_changed = transition_active_step(&mut state, session);
         state.session = session.clone();
         // Frame refreshes read the authoritative ledger lifecycle. This also
         // replaces an abandoned final in-flight claim with its terminal state.
@@ -764,7 +725,11 @@ impl RunPanel {
         }
         render_locked(&mut state);
         mark_timer_painted(&mut state);
-        completed
+        if state.pending_completed.is_empty() {
+            None
+        } else {
+            Some(state.pending_completed.remove(0))
+        }
     }
 
     pub(crate) fn push_bytes(&self, chunk: &[u8]) {
@@ -1034,6 +999,73 @@ impl RunPanel {
 /// dashboard observer's reload interval.
 const LIVE_LEDGER_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 
+/// The single active-step transition detector: freezes the outgoing step's
+/// clock into `finished_durations` (crediting its enclosing loops from the
+/// pre-transition session), queues its [`CompletedStepContext`] for narrator
+/// pickup on the next [`RunPanel::refresh`] return, clears the current-step
+/// stream, and re-arms `active_started` on the incoming key. Returns whether
+/// a transition happened. Invoked from both `refresh` (drive boundaries) and
+/// [`maybe_reload_from_ledger`] (the tick observer, the only signal while
+/// the drive thread is blocked inside a command frame) — so a command step
+/// ticks its own clock instead of letting the already-finished prompt step
+/// keep incrementing, and its wall time lands under its own key rather than
+/// being folded into the preceding prompt's.
+fn transition_active_step(
+    state: &mut RunPanelState,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> bool {
+    let active_key = active_key(session);
+    if state.active_key == active_key {
+        return false;
+    }
+    if let Some((key, started)) = state.active_started.take() {
+        let elapsed = started.elapsed();
+        // Credit every loop this key's item was running inside, using
+        // the pre-transition session so a rollover still attributes
+        // the interval to the loop it belongs to.
+        for loop_key in active_loop_container_keys(&state.session) {
+            *state.loop_elapsed.entry(loop_key).or_default() += elapsed;
+        }
+        // Captured from the last-rendered view (still the pre-
+        // transition step) before the caller's `rebuild_view` replaces it.
+        let completed_step = state
+            .view
+            .steps
+            .iter()
+            .find(|step| step.active)
+            .map(|step| (step.key.clone(), step.label.clone(), step.role.clone()));
+        let work_tokens = state.output_tokens.get(&key).copied();
+        if let Some((key, label, role)) = completed_step {
+            state.pending_completed.push(CompletedStepContext {
+                key,
+                label,
+                role,
+                elapsed,
+                work_tokens,
+            });
+        }
+        state.finished_durations.insert(key, elapsed);
+        // P470: the CURRENT step's verbatim stream is exactly that —
+        // the step now ending is done, its story row is the P455
+        // summary or the facts fallback, never its raw thinking ticks.
+        state.current_stream.clear();
+        state.scrolls.reset(CURRENT_PANE);
+        state.current_follow = true;
+    }
+    // The accepted final step clears the active key. Keep its finished
+    // narration through the terminal repaint instead of replacing it
+    // with the initial live line.
+    if session.status != ctx_traits_core::procedure::session::Status::Completed {
+        state.live = tui::LiveLine::default();
+    }
+    state.active_key = active_key;
+    state.active_started = state
+        .active_key
+        .as_ref()
+        .map(|key| (key.clone(), Instant::now()));
+    true
+}
+
 /// While the drive thread is blocked inside a command frame, no
 /// [`RunPanel::refresh`] can arrive: `run::call` drains every consecutive
 /// command frame (branch resolution, project steps, the commands themselves)
@@ -1044,10 +1076,11 @@ const LIVE_LEDGER_RELOAD_INTERVAL: Duration = Duration::from_secs(2);
 /// the acceptance, so a throttled re-read moves the journey onto the command
 /// row and materializes any branch-arm rows the decision created.
 ///
-/// Deliberately leaves `active_key`/`active_started` untouched:
-/// [`RunPanel::refresh`] stays the sole transition detector (P455), so
-/// step-summary narration and duration crediting behave exactly as before.
-/// A transient read/parse error (including a torn mid-write read) skips the
+/// Runs the same [`transition_active_step`] bookkeeping as `refresh`, so the
+/// prompt step's clock freezes at the acceptance and the command row ticks
+/// under its own key; the completed context is queued and surfaces from the
+/// next `refresh` return, keeping step-summary narration lossless. A
+/// transient read/parse error (including a torn mid-write read) skips the
 /// cycle and keeps the last frame, mirroring the dashboard's degrade
 /// discipline.
 fn maybe_reload_from_ledger(state: &mut RunPanelState) {
@@ -1067,6 +1100,7 @@ fn maybe_reload_from_ledger(state: &mut RunPanelState) {
     if session.state_digest.as_str() == state.session.state_digest.as_str() {
         return;
     }
+    transition_active_step(state, &session);
     state.session = session;
     let narration = state.view.narration.clone();
     rebuild_view(state, narration);
