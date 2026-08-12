@@ -65,10 +65,16 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
   // lets `collectMany` (walking `fields.agent` at the trait root) still find
   // and emit the shared `[[session]]` declaration exactly once, without
   // requiring the author to also list the handle at the trait root.
-  const handle = withDeclaration("agent", `agent:${fields.id}`, declaration, {}, {
-    ...extraMeta,
-    declarations: collectMany([fields.session]),
-  });
+  const handle = withDeclaration(
+    "agent",
+    `agent:${fields.id}`,
+    declaration,
+    {},
+    {
+      ...extraMeta,
+      declarations: collectMany([fields.session]),
+    },
+  );
   // Non-enumerable so it never serializes into the canonical declaration
   // (same `withHiddenField` pattern as `ChecklistHandle`'s `verdict`/
   // `itemIds`) — the functional layer's `agent.prompt(title, opts)`
@@ -110,7 +116,7 @@ function agentOf(fields: AgentFields, extraMeta: Parameters<typeof withDeclarati
 function agentFn(id: string, fields: Omit<AgentFields, "id">): AgentHandle;
 function agentFn(fields: AgentFields): AgentHandle;
 function agentFn(first: string | AgentFields, second?: Omit<AgentFields, "id">): AgentHandle {
-  return agentOf(typeof first === "string" ? { ...second, id: first } as AgentFields : first);
+  return agentOf(typeof first === "string" ? ({ ...second, id: first } as AgentFields) : first);
 }
 
 function agentTemplateOf(
@@ -119,16 +125,19 @@ function agentTemplateOf(
   fields: AgentTemplateFields,
   extraMeta: Parameters<typeof withDeclaration>[4] = {},
 ): AgentHandle {
-  return agentOf({
-    id,
-    description: fields.description ?? template.description,
-    summary: fields.summary ?? template.summary,
-    // exactOptionalPropertyTypes: an explicit `system: undefined` (or
-    // `session: undefined`) is a type error, so omit the key entirely when
-    // the caller supplied none.
-    ...(fields.system === undefined ? {} : { system: fields.system }),
-    ...(fields.session === undefined ? {} : { session: fields.session }),
-  }, extraMeta);
+  return agentOf(
+    {
+      id,
+      description: fields.description ?? template.description,
+      summary: fields.summary ?? template.summary,
+      // exactOptionalPropertyTypes: an explicit `system: undefined` (or
+      // `session: undefined`) is a type error, so omit the key entirely when
+      // the caller supplied none.
+      ...(fields.system === undefined ? {} : { system: fields.system }),
+      ...(fields.session === undefined ? {} : { session: fields.session }),
+    },
+    extraMeta,
+  );
 }
 
 function agentTemplate(template: AgentTemplateDefinition): AgentTemplateFunction {
@@ -139,12 +148,14 @@ function agentTemplate(template: AgentTemplateDefinition): AgentTemplateFunction
 function deprecatedBareAgentTemplate(name: string, template: AgentTemplateDefinition): AgentTemplateFunction {
   return (id, fields = {}) =>
     agentTemplateOf(template, id, fields, {
-      diagnostics: [{
-        severity: "warning",
-        code: "cdk.agent-template.bare-export-deprecated",
-        fieldPath: `agent.${id}`,
-        message: `Bare \`${name}(...)\` is deprecated; use \`agent.${name}(...)\` instead.`,
-      }],
+      diagnostics: [
+        {
+          severity: "warning",
+          code: "cdk.agent-template.bare-export-deprecated",
+          fieldPath: `agent.${id}`,
+          message: `Bare \`${name}(...)\` is deprecated; use \`agent.${name}(...)\` instead.`,
+        },
+      ],
     });
 }
 
@@ -154,16 +165,13 @@ function deprecatedBareAgentTemplate(name: string, template: AgentTemplateDefini
 // `Object.assign`'s overloaded return type to the true intersection of
 // `agentFn` and the template map, and only *that* structurally satisfies
 // `AgentFunction`'s `AgentTemplateFunctions` surface.
-export const agent: AgentFunction = Object.assign(
-  agentFn,
-  {
-    worker: agentTemplate(agentTemplates.worker),
-    reviewer: agentTemplate(agentTemplates.reviewer),
-    planner: agentTemplate(agentTemplates.planner),
-    oracle: agentTemplate(agentTemplates.oracle),
-    searcher: agentTemplate(agentTemplates.searcher),
-  } satisfies AgentTemplateFunctions,
-);
+export const agent: AgentFunction = Object.assign(agentFn, {
+  worker: agentTemplate(agentTemplates.worker),
+  reviewer: agentTemplate(agentTemplates.reviewer),
+  planner: agentTemplate(agentTemplates.planner),
+  oracle: agentTemplate(agentTemplates.oracle),
+  searcher: agentTemplate(agentTemplates.searcher),
+} satisfies AgentTemplateFunctions);
 
 /**
  * Mints `count` explicitly ordered `<role>-1..<role>-N` agent handles from a
@@ -191,11 +199,7 @@ export const agent: AgentFunction = Object.assign(
 // collapse a `...args: A` tuple inferred from the mint to `[]` and reject
 // the forwarded fields as an excess argument ("Expected 3 arguments, but
 // got 4"). Three arities cover every existing mint shape.
-export function seats<H extends AgentHandle>(
-  mint: (id: string) => H,
-  role: string,
-  count: number,
-): readonly H[];
+export function seats<H extends AgentHandle>(mint: (id: string) => H, role: string, count: number): readonly H[];
 export function seats<H extends AgentHandle, F>(
   mint: (id: string, fields: F) => H,
   role: string,

@@ -58,10 +58,7 @@ export interface InputFunction {
    * separately through `include:`, not by interpolating them here.
    * @example `sequence.command({ id: "commit", input: input.command`git commit -m ${message}`, include: input.optional(scope) })`
    */
-  command(
-    strings: TemplateStringsArray,
-    ...values: readonly CommandInterpolation[]
-  ): CommandTemplateValue;
+  command(strings: TemplateStringsArray, ...values: readonly CommandInterpolation[]): CommandTemplateValue;
 
   /**
    * Builds a prompt-step `input:` body from a tagged template literal — the
@@ -102,17 +99,13 @@ function commandTemplate(
     // non-whitespace character means that interpolated value has no
     // whitespace *after* it in the source.
     if (!isFirst && segment.length > 0 && /^\S/.test(segment)) {
-      throw new Error(
-        "input.command: interpolated value must be a standalone argv token; add whitespace after it",
-      );
+      throw new Error("input.command: interpolated value must be a standalone argv token; add whitespace after it");
     }
     // A segment right before an interpolation (not last) ending with a
     // non-whitespace character means that interpolated value has no
     // whitespace *before* it in the source.
     if (!isLast && segment.length > 0 && /\S$/.test(segment)) {
-      throw new Error(
-        "input.command: interpolated value must be a standalone argv token; add whitespace before it",
-      );
+      throw new Error("input.command: interpolated value must be a standalone argv token; add whitespace before it");
     }
     items.push(...tokenizeShellLiteral(segment, "input.command"));
     if (!isLast) {

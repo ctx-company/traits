@@ -60,7 +60,10 @@ describe("functional layer emits byte-identical canonical to the object layer (0
         input: input.prompt`Do it.`,
         output: draft,
       });
-      const status = sequence.command("status", { title: "Status", input: input.command`git status --porcelain` });
+      const status = sequence.command("status", {
+        title: "Status",
+        input: input.command`git status --porcelain`,
+      });
       const proc = procedure({ description: "d", sequence: [implement, status] });
       return toDraftJson(trait("straight-line", { name: "Straight Line", summary: "s", procedure: proc }));
     }
@@ -352,7 +355,12 @@ describe("functional layer emits byte-identical canonical to the object layer (0
       const files = slot.texts("files");
       const forEachItem = sequence.forEach("review-each", files, (currentFile) => ({
         title: "Review Each",
-        body: [sequence.command("review-file", { title: "Review File", input: input.command`review ${currentFile}` })],
+        body: [
+          sequence.command("review-file", {
+            title: "Review File",
+            input: input.command`review ${currentFile}`,
+          }),
+        ],
       }));
       const proc = procedure({ description: "d", sequence: [forEachItem] });
       return toDraftJson(trait("review-each", { name: "Review Each", summary: "s", procedure: proc }));
@@ -424,7 +432,12 @@ describe("functional layer emits byte-identical canonical to the object layer (0
       const first = sequence.command("first", { title: "First", cmd: "echo first" });
       const forEachItem = sequence.forEach("review-each", files, (currentFile) => ({
         title: "Review Each",
-        body: [sequence.command("review-file", { title: "Review File", input: input.command`review ${currentFile}` })],
+        body: [
+          sequence.command("review-file", {
+            title: "Review File",
+            input: input.command`review ${currentFile}`,
+          }),
+        ],
         when: condition.not(condition.equals(done, true)),
       }));
       const loopItem = sequence.loop("outer", {
@@ -545,13 +558,15 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
       });
       const output = port.output.of({ id: "review", schema: "schema:text", value: review });
       const proc = procedure({ description: "Review a diff for the stated focus.", sequence: [reviewStep] });
-      return toDraftJson(trait("diff-review", {
-        name: "Diff Review",
-        description: "Review a diff for the stated focus.",
-        behavior: { tone: tone.Direct },
-        port: output,
-        procedure: proc,
-      }));
+      return toDraftJson(
+        trait("diff-review", {
+          name: "Diff Review",
+          description: "Review a diff for the stated focus.",
+          behavior: { tone: tone.Direct },
+          port: output,
+          procedure: proc,
+        }),
+      );
     }
 
     expectByteIdentical(viaFunctional(), viaObject());
@@ -568,12 +583,14 @@ describe("evaluateTraitFunction emits byte-identical canonical to the object lay
     }
 
     function viaObject() {
-      return toDraftJson(trait("guidance-only", {
-        name: "Guidance Only",
-        summary: "Behavioral guidance.",
-        behavior: { tone: tone.Direct },
-        intent: { require: [intent("cite-evidence")] },
-      }));
+      return toDraftJson(
+        trait("guidance-only", {
+          name: "Guidance Only",
+          summary: "Behavioral guidance.",
+          behavior: { tone: tone.Direct },
+          intent: { require: [intent("cite-evidence")] },
+        }),
+      );
     }
 
     expectByteIdentical(viaFunctional(), viaObject());

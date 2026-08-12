@@ -55,9 +55,7 @@ export function forEachJoined<Item = JsonValue>(options: ForEachJoinedOptions<It
   // arm, `SequenceRef`, is itself a plain-object handle type TS cannot
   // statically prove disjoint from `readonly SequenceHandle[]`) — the cast
   // below is a runtime-true, type-only assertion, not a behavior change.
-  const bodyRef: SequenceRef = Array.isArray(body)
-    ? sequence.linear(`${id}-body`, body)
-    : (body as SequenceRef);
+  const bodyRef: SequenceRef = Array.isArray(body) ? sequence.linear(`${id}-body`, body) : (body as SequenceRef);
   return sequence.forEach(id, {
     ...(title === undefined ? {} : { title }),
     over,

@@ -41,9 +41,7 @@ describe("functional layer build rules (0106)", () => {
 
   it("agent.prompt called outside procedure.from throws", () => {
     const worker = agent.worker("outside-worker");
-    expect(() => worker.prompt("Outside Prompt", { input: input.prompt`Do it.` })).toThrow(
-      /outside procedure\.from/,
-    );
+    expect(() => worker.prompt("Outside Prompt", { input: input.prompt`Do it.` })).toThrow(/outside procedure\.from/);
   });
 
   it("a flow.* block callback that returns a thenable is a build error", () => {
@@ -52,7 +50,7 @@ describe("functional layer build rules (0106)", () => {
         flow.loop("Async Loop", async (loop) => {
           loop.maxIterations(1);
         });
-      })
+      }),
     ).toThrow(/async callbacks are not supported/);
   });
 
@@ -63,7 +61,7 @@ describe("functional layer build rules (0106)", () => {
         procedure.from({ description: "d2" }, () => {
           step.command("B", { cmd: "echo b" });
         });
-      })
+      }),
     ).toThrow(/a functional build is already in progress/);
   });
 
@@ -73,12 +71,9 @@ describe("functional layer build rules (0106)", () => {
         flow.loop("Param Until", (loop) => {
           loop.maxIterations(2);
           step.command("A", { cmd: "echo a" });
-          loop.untilAll([
-            condition.empty(slot.text("param-until-a")),
-            condition.empty(slot.text("param-until-b")),
-          ]);
+          loop.untilAll([condition.empty(slot.text("param-until-a")), condition.empty(slot.text("param-until-b"))]);
         });
-      })
+      }),
     ).not.toThrow();
     expect(() =>
       procedure.from({ description: "d" }, () => {
@@ -88,7 +83,7 @@ describe("functional layer build rules (0106)", () => {
           loop.until(condition.empty(slot.text("param-until-c")));
           loop.untilAny([condition.empty(slot.text("param-until-d"))]);
         });
-      })
+      }),
     ).toThrow(/at most one flow\.until/);
   });
 
@@ -101,7 +96,7 @@ describe("functional layer build rules (0106)", () => {
           flow.until(condition.empty(slot.text("first-cond-slot")));
           flow.until(condition.empty(slot.text("second-cond-slot")));
         });
-      })
+      }),
     ).toThrow(/at most one flow\.until/);
   });
 
@@ -111,7 +106,7 @@ describe("functional layer build rules (0106)", () => {
         flow.loop("No Budget", () => {
           step.command("A", { cmd: "echo a" });
         });
-      })
+      }),
     ).toThrow(/loop\.maxIterations.*is required/);
   });
 
@@ -122,7 +117,7 @@ describe("functional layer build rules (0106)", () => {
           loop.maxIterations(1);
           loop.maxIterations(2);
         });
-      })
+      }),
     ).toThrow(/loop\.maxIterations.*called more than once/);
   });
 
@@ -131,7 +126,7 @@ describe("functional layer build rules (0106)", () => {
       procedure.from({ description: "d" }, () => {
         step.command("Same Title", { cmd: "echo a" });
         step.command("Same Title", { cmd: "echo b" });
-      })
+      }),
     ).toThrow(/steps titled "Same Title" and "Same Title"/);
   });
 
@@ -146,7 +141,7 @@ describe("functional layer build rules (0106)", () => {
           // oxlint-disable-next-line -- intentionally not a callback, exercising the build rule.
           foo: "not-a-function" as never,
         });
-      })
+      }),
     ).toThrow(/arm "foo" must be a callback/);
   });
 
@@ -157,7 +152,7 @@ describe("functional layer build rules (0106)", () => {
           par.maxAtOnce(2);
           step.command("A", { cmd: "echo a" });
         });
-      })
+      }),
     ).toThrow(/par\.maxAtOnce is parked/);
   });
 
@@ -166,7 +161,7 @@ describe("functional layer build rules (0106)", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.when("Give up", condition.gte(cap, 3), flow.Abort);
-      })
+      }),
     ).toThrow(/requires an enclosing flow\.loop/);
   });
 
@@ -174,12 +169,12 @@ describe("functional layer build rules (0106)", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         effect.onComplete("some-signal" as never);
-      })
+      }),
     ).toThrow(/requires an enclosing flow\.loop/);
     expect(() =>
       procedure.from({ description: "d" }, () => {
         effect.onAbort("some-signal" as never);
-      })
+      }),
     ).toThrow(/requires an enclosing flow\.loop/);
   });
 
@@ -190,7 +185,7 @@ describe("functional layer build rules (0106)", () => {
           loop.maxIterations(1);
           effect.onFailure();
         });
-      })
+      }),
     ).toThrow(/no target here/);
   });
 
@@ -202,7 +197,7 @@ describe("functional layer build rules (0106)", () => {
     expect(() =>
       procedure.from({ description: "d" }, () => {
         flow.match("Empty Match", subject.kind, {});
-      })
+      }),
     ).toThrow(/requires at least one value arm/);
   });
 
@@ -224,7 +219,7 @@ describe("functional layer build rules (0106)", () => {
             },
           });
         });
-      })
+      }),
     ).toThrow(/"Trailing Match".*registered after flow\.until.*cannot be guarded/);
   });
 
@@ -240,7 +235,7 @@ describe("functional layer build rules (0106)", () => {
             step.command("A", { cmd: "echo a" });
           });
         });
-      })
+      }),
     ).toThrow(/"Trailing Parallel".*registered after flow\.until.*cannot be guarded/);
   });
 
@@ -249,13 +244,13 @@ describe("functional layer build rules (0106)", () => {
       procedure.from({ description: "d" }, () => {
         step.command("Same Title", { cmd: "echo a" });
         step.command("Same Title", { cmd: "echo b" });
-      })
+      }),
     ).toThrow();
 
     expect(() =>
       procedure.from({ description: "d" }, () => {
         step.command("Fine", { cmd: "echo fine" });
-      })
+      }),
     ).not.toThrow();
   });
 
@@ -275,8 +270,16 @@ describe("functional layer build rules (0106)", () => {
     const flagSlot = slot.text("id-override-flag");
     const proc = procedure.from({ description: "d" }, () => {
       step.command("Capture the changed-file inventory", { id: "capture-diff", cmd: "echo hi", output: out });
-      step.check("Run the repository gate chain", { id: "repo-gates", cmd: "echo ok", output: flagSlot as never });
-      worker.prompt("Draft the work (smart-1)", { id: "draft-writing", input: input.prompt`Draft.`, output: out });
+      step.check("Run the repository gate chain", {
+        id: "repo-gates",
+        cmd: "echo ok",
+        output: flagSlot as never,
+      });
+      worker.prompt("Draft the work (smart-1)", {
+        id: "draft-writing",
+        input: input.prompt`Draft.`,
+        output: out,
+      });
       flow.when(
         "Check working tree status",
         condition.not(condition.empty(out)),
@@ -294,7 +297,7 @@ describe("functional layer build rules (0106)", () => {
     });
     const built = toDraftJson(
       trait("id-override-smoke", { name: "Id Override Smoke", summary: "s", procedure: proc }),
-    ) as { procedure: { sequence: readonly { id: string; }[]; }; };
+    ) as { procedure: { sequence: readonly { id: string }[] } };
     const ids = built.procedure.sequence.map((item) => item.id);
     expect(ids).toEqual(["capture-diff", "repo-gates", "draft-writing", "shipping-maybe-commit", "building"]);
   });
@@ -307,7 +310,7 @@ describe("functional layer build rules (0106)", () => {
     });
     const built = toDraftJson(
       trait("step-project-smoke", { name: "Step Project Smoke", summary: "s", procedure: proc }),
-    ) as { procedure: { sequence: readonly { id: string; kind: string; }[]; }; };
+    ) as { procedure: { sequence: readonly { id: string; kind: string }[] } };
     expect(built.procedure.sequence).toMatchObject([{ id: "park-report-clear", kind: "project" }]);
   });
 
@@ -321,7 +324,7 @@ describe("functional layer build rules (0106)", () => {
           flow.until(condition.not(condition.empty(gate)));
           step.project("Late Project", { projections: [{ source: gate, destination: target }] });
         });
-      })
+      }),
     ).toThrow(/step\.project registered after flow\.until/);
   });
 });
@@ -336,7 +339,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         defineTrait("first-call");
         defineTrait("second-call");
-      })
+      }),
     ).toThrow(/defineTrait: called more than once/);
   });
 
@@ -361,7 +364,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
     });
     const draft = envelope.draft as {
       readonly procedure?: {
-        readonly sequence?: readonly { readonly id?: string; readonly output?: unknown; }[];
+        readonly sequence?: readonly { readonly id?: string; readonly output?: unknown }[];
       };
     };
     expect(draft.procedure?.sequence?.[0]?.id).toBe("survey-the-target");
@@ -382,7 +385,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       defineTrait("bare-slug", { description: "s" });
     });
     expect(envelope.draft).toMatchObject({ id: "bare-slug" });
-    expect((envelope.draft as { name?: unknown; }).name).toBeUndefined();
+    expect((envelope.draft as { name?: unknown }).name).toBeUndefined();
   });
 
   it("defineTrait with a computed (non-literal) field is a build error", () => {
@@ -390,7 +393,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         // oxlint-disable-next-line -- intentionally not JSON-safe, exercising the build rule.
         defineTrait("computed-field", { summary: (() => "nope") as never });
-      })
+      }),
     ).toThrow(/must be plain literal data/);
   });
 
@@ -399,7 +402,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         // oxlint-disable-next-line -- intentionally an unknown field, exercising the build rule.
         defineTrait("unknown-field", { title: "nope" } as never);
-      })
+      }),
     ).toThrow(/unknown field\(s\) title/);
   });
 
@@ -409,7 +412,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("behavior-overlap");
         useBehavior({ tone: tone.Direct });
         useBehavior({ tone: tone.Warm });
-      })
+      }),
     ).toThrow(/"tone" was already set/);
   });
 
@@ -419,7 +422,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("behavior-unknown-key");
         // oxlint-disable-next-line -- intentionally an unknown field, exercising the build rule.
         useBehavior({ mood: "chipper" } as never);
-      })
+      }),
     ).toThrow(/unknown field\(s\) mood/);
   });
 
@@ -429,7 +432,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("behavior-undefined-entry");
         // oxlint-disable-next-line -- intentionally undefined, exercising the enum-typo catch.
         useBehavior({ format: [tone.Direct, undefined] as never });
-      })
+      }),
     ).toThrow(/format\[1\] is undefined/);
   });
 
@@ -439,7 +442,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("intent-contradiction");
         useIntent({ require: [intent("cite-evidence")] });
         useIntent({ avoid: [intent("cite-evidence")] });
-      })
+      }),
     ).toThrow(/"cite-evidence".*declared in both require and avoid/);
   });
 
@@ -449,7 +452,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("intent-overlap");
         useIntent({ require: [intent("a")] });
         useIntent({ require: [intent("b")] });
-      })
+      }),
     ).toThrow(/"require" was already set/);
   });
 
@@ -459,7 +462,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("resource-not-a-handle");
         // oxlint-disable-next-line -- intentionally not a resource handle, exercising the build rule.
         useResource(slot.text("not-a-resource") as never);
-      })
+      }),
     ).toThrow(/is not a resource handle/);
   });
 
@@ -469,7 +472,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         defineTrait("unknown-input", { description: "p" });
         port.input.text({ id: "diff" });
         step.command("Read Focus", { input: input.command`echo ${ctx.input.focus as never}` });
-      })
+      }),
     ).toThrow(/ctx\.input: unknown input port\(s\) focus.*declared input ports are: diff/);
   });
 
@@ -478,7 +481,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         defineTrait("orphan-resource", { description: "s" });
         resource.inline("orphan", "Never used.");
-      })
+      }),
     ).toThrow(/declared but never referenced.*resource "orphan"/);
   });
 
@@ -487,7 +490,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       evaluateTraitFunction(() => {
         defineTrait("bad-return");
         return { commitReport: "not-a-slot" };
-      })
+      }),
     ).toThrow(/return value "commitReport" must be a slot handle/);
   });
 
@@ -498,7 +501,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       useIntent({ require: [intent("cite-evidence")] });
     });
     expect(envelope.draft).toMatchObject({ id: "engineering-standards-shape" });
-    expect((envelope.draft as { procedure?: unknown; }).procedure).toBeUndefined();
+    expect((envelope.draft as { procedure?: unknown }).procedure).toBeUndefined();
   });
 
   it("a procedural trait with declared input and returned output builds a valid draft", () => {
@@ -510,7 +513,7 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
       return { review };
     });
     expect(envelope.draft).toMatchObject({ id: "procedural-shape" });
-    const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string; }[]; };
+    const draft = envelope.draft as { port?: readonly { readonly id: string; readonly direction: string }[] };
     const portIds = (draft.port ?? []).map((p) => `${p.id}:${p.direction}`).sort();
     expect(portIds).toEqual(["diff:input", "review:output"]);
   });
@@ -522,8 +525,14 @@ describe("defineTrait/use*/derived manifest build rules (0107)", () => {
         port.input.text({ id: "diff" });
         const review1 = slot.text("review-1");
         const review2 = slot.text("review-2");
-        smart1.prompt("Review (smart-1)", { input: input.prompt`Review ${ctx.input.diff as never}.`, output: review1 });
-        smart2.prompt("Review (smart-2)", { input: input.prompt`Review ${ctx.input.diff as never}.`, output: review2 });
+        smart1.prompt("Review (smart-1)", {
+          input: input.prompt`Review ${ctx.input.diff as never}.`,
+          output: review1,
+        });
+        smart2.prompt("Review (smart-2)", {
+          input: input.prompt`Review ${ctx.input.diff as never}.`,
+          output: review2,
+        });
         return { review1, review2 };
       });
 
@@ -560,7 +569,7 @@ describe("defineVariant/useVariant hook-style families", () => {
   };
 
   it("a family shell binds hook variants and resolves through the object family path", async () => {
-    const family = evaluateTraitFunction(function() {
+    const family = evaluateTraitFunction(function () {
       defineTrait("hook-family", { version: "0.1.0" });
       useVariant(quickVariant).default();
     });
@@ -581,46 +590,46 @@ describe("defineVariant/useVariant hook-style families", () => {
     expect(() =>
       evaluateTraitFunction(() => {
         defineVariant("nope");
-      })
+      }),
     ).toThrow(/defineVariant: called inside a trait function/);
   });
 
   it("defineTrait inside a variant function is a build error", () => {
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(() => {
           defineTrait("wrong-call");
         }).default();
-      })
+      }),
     ).toThrow(/defineTrait: called inside a variant function/);
   });
 
   it("a variant function that never calls defineVariant is a build error", () => {
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(() => undefined).default();
-      })
+      }),
     ).toThrow(/never called defineVariant/);
   });
 
   it("duplicate variant keys are a build error", () => {
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(quickVariant).default();
         useVariant(quickVariant);
-      })
+      }),
     ).toThrow(/duplicate variant key "quick"/);
   });
 
   it("no default marked is a build error, and two defaults are too", () => {
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(quickVariant);
-      })
+      }),
     ).toThrow(/no variant marked default/);
     const other = (ctx: unknown) => {
       void ctx;
@@ -632,21 +641,21 @@ describe("defineVariant/useVariant hook-style families", () => {
       });
     };
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(quickVariant).default();
         useVariant(other).default();
-      })
+      }),
     ).toThrow(/exactly one variant may be the family default/);
   });
 
   it("a family shell registering its own steps is a build error", () => {
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(quickVariant).default();
         step.command("Stray step", { argv: ["true"], output: slot.text("stray") });
-      })
+      }),
     ).toThrow(/family shell must not register its own steps/);
   });
 
@@ -658,29 +667,29 @@ describe("defineVariant/useVariant hook-style families", () => {
         sequence: [],
       }),
     });
-    const family = evaluateTraitFunction(function() {
+    const family = evaluateTraitFunction(function () {
       defineTrait("mixed-family", { version: "0.1.0" });
       useVariant(quickVariant).default();
       useVariant(legacy, "legacy");
     });
     expect(isTraitFamilyHandle(family)).toBe(true);
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(legacy);
-      })
+      }),
     ).toThrow(/needs an explicit family key/);
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("family-shell", { version: "0.1.0" });
         useVariant(quickVariant, "quick");
-      })
+      }),
     ).toThrow(/carries its own key via defineVariant/);
   });
 
   it("a shell's useIntent/useResource distribute into every bound variant, union-merged with the variant's own", async () => {
     const shared = resource.inline("shared-style", "Shared style guide.");
-    const family = evaluateTraitFunction(function() {
+    const family = evaluateTraitFunction(function () {
       defineTrait("shell-facets", { version: "0.1.0" });
       useIntent({ require: [intent("cite-evidence")] });
       useResource(shared);
@@ -703,8 +712,9 @@ describe("defineVariant/useVariant hook-style families", () => {
     const resolved = await resolveTraitFamily(family);
     const quick = resolved.variants.find((entry) => entry.path === "quick");
     const draft = quick?.draft as JsonObject | undefined;
-    const requireSlugs = ((draft?.["intent"] as JsonObject | undefined)?.["require"] as JsonObject[] | undefined)
-      ?.map((entry) => entry["id"]);
+    const requireSlugs = ((draft?.["intent"] as JsonObject | undefined)?.["require"] as JsonObject[] | undefined)?.map(
+      (entry) => entry["id"],
+    );
     expect(requireSlugs).toContain("cite-evidence");
     expect(requireSlugs).toContain("be-concise");
     const resourceRefs = (draft?.["resource"] as JsonObject[] | undefined)?.map((entry) => entry["id"]);
@@ -717,12 +727,12 @@ describe("defineVariant/useVariant hook-style families", () => {
       procedure: procedure({ description: "No steps.", sequence: [] }),
     });
     expect(() =>
-      evaluateTraitFunction(function() {
+      evaluateTraitFunction(function () {
         defineTrait("mixed-shell-facets", { version: "0.1.0" });
         useIntent({ require: [intent("cite-evidence")] });
         useVariant(quickVariant).default();
         useVariant(legacy, "legacy");
-      })
+      }),
     ).toThrow(/object-style handles bypass frame evaluation/);
   });
 
@@ -742,13 +752,13 @@ describe("defineVariant/useVariant hook-style families", () => {
       return { result: out };
     };
     const shared = resource.inline("shared-style", "Shared style guide.");
-    const shellOnly = evaluateTraitFunction(function() {
+    const shellOnly = evaluateTraitFunction(function () {
       defineTrait("twin-shell-only", { version: "0.1.0" });
       useIntent({ require: [intent("cite-evidence")] });
       useResource(shared);
       useVariant(buildVariant(true)).default();
     });
-    const perVariant = evaluateTraitFunction(function() {
+    const perVariant = evaluateTraitFunction(function () {
       defineTrait("twin-per-variant", { version: "0.1.0" });
       useVariant(buildVariant(false)).default();
     });
@@ -757,9 +767,7 @@ describe("defineVariant/useVariant hook-style families", () => {
     }
     const shellResolved = await resolveTraitFamily(shellOnly);
     const perVariantResolved = await resolveTraitFamily(perVariant);
-    const shellDraft = shellResolved.variants.find((entry) => entry.path === "quick")?.draft as
-      | JsonObject
-      | undefined;
+    const shellDraft = shellResolved.variants.find((entry) => entry.path === "quick")?.draft as JsonObject | undefined;
     const perVariantDraft = perVariantResolved.variants.find((entry) => entry.path === "quick")?.draft as
       | JsonObject
       | undefined;
@@ -771,7 +779,7 @@ describe("defineVariant/useVariant hook-style families", () => {
   });
 
   it("a returned decorated output port passes through with its declaration intact", () => {
-    const draft = evaluateTraitFunction(function() {
+    const draft = evaluateTraitFunction(function () {
       defineTrait("decorated-output", { version: "0.1.0", description: "One step." });
       const out = slot.text("payload");
       agent.worker("worker", { description: "Does the step." }).prompt("Do the step", {
@@ -787,8 +795,8 @@ describe("defineVariant/useVariant hook-style families", () => {
           value: out,
         }),
       };
-    }) as { draft: JsonObject; };
-    const ports = (draft.draft as { port?: JsonObject[]; }).port ?? [];
+    }) as { draft: JsonObject };
+    const ports = (draft.draft as { port?: JsonObject[] }).port ?? [];
     const report = ports.find((p) => p["id"] === "report");
     expect(report).toBeDefined();
     expect(report?.["title"]).toBe("Report");
@@ -815,7 +823,7 @@ describe("effect.session.title (0110)", () => {
       effect.session.title(input.prompt`Working on ${topic}`);
       return { topic };
     });
-    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject } };
     expect(draft.sink?.["session-title"]).toEqual({ mode: "verbatim", input: "Working on {slot:topic}" });
   });
 
@@ -827,7 +835,7 @@ describe("effect.session.title (0110)", () => {
       effect.session.title(draftSlot);
       return { draftSlot };
     });
-    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject } };
     expect(draft.sink?.["session-title"]).toEqual({ mode: "generated", input: "slot:draft" });
   });
 
@@ -840,7 +848,7 @@ describe("effect.session.title (0110)", () => {
       effect.session.title([first, input.optional(second)]);
       return { first, second };
     });
-    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject; }; };
+    const draft = envelope.draft as { readonly sink?: { readonly "session-title"?: JsonObject } };
     expect(draft.sink?.["session-title"]).toEqual({
       mode: "generated",
       input: ["slot:first", { slot: "slot:second", optional: true }],
@@ -853,7 +861,7 @@ describe("effect.session.title (0110)", () => {
         defineTrait("sink-duplicate");
         effect.session.title("First title");
         effect.session.title("Second title");
-      })
+      }),
     ).toThrow(/effect\.session\.title: already declared once in this build/);
   });
 
@@ -867,7 +875,7 @@ describe("effect.session.title (0110)", () => {
             effect.session.title("Functional title");
           }),
         }),
-      )
+      ),
     ).toThrow(/\[sink\.session-title\] declared twice/);
   });
 
@@ -875,6 +883,6 @@ describe("effect.session.title (0110)", () => {
     const envelope = evaluateTraitFunction(() => {
       defineTrait("sink-none", { description: "s" });
     });
-    expect((envelope.draft as { readonly sink?: unknown; }).sink).toBeUndefined();
+    expect((envelope.draft as { readonly sink?: unknown }).sink).toBeUndefined();
   });
 });

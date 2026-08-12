@@ -39,10 +39,13 @@ export interface PromptFields {
 export type { PromptInterpolation } from "./handles.js";
 
 /** `prompt.resource(...)`'s accepted shape: a bare resource ref, or a resource plus its own extra declared inputs. */
-export type PromptResourceValue = ResourceHandle | RefHandle | {
-  readonly resource: ResourceHandle | RefHandle | string;
-  readonly input?: PromptFields["input"];
-};
+export type PromptResourceValue =
+  | ResourceHandle
+  | RefHandle
+  | {
+      readonly resource: ResourceHandle | RefHandle | string;
+      readonly input?: PromptFields["input"];
+    };
 
 export interface PromptFunction {
   <Input, Output = unknown>(
@@ -120,19 +123,17 @@ function promptFn(idOrFields: string | PromptFields, text?: string, fields?: Jso
 // generic-merge limitation `port.ts`/`slot.ts` document — so the namespace
 // as a whole still binds through one cast; `promptFn` itself (the part that
 // used to read `args[n]`) is now a real checked overloaded function.
-export const prompt = Object.assign(
-  promptFn,
-  {
-    resource: (value: PromptResourceValue): PromptTemplate => promptResource(value),
-  },
-) as PromptFunction;
+export const prompt = Object.assign(promptFn, {
+  resource: (value: PromptResourceValue): PromptTemplate => promptResource(value),
+}) as PromptFunction;
 
 function promptOf(fields: PromptFields): PromptHandle {
   validateSlug(fields.id, "prompt.id");
   const text = promptTextValue(fields.text);
-  const source = fields.source === undefined
-    ? promptSourceFromText(fields.text, `prompt.${fields.id}.text`)
-    : promptSourceValue(fields.source, `prompt.${fields.id}.source`);
+  const source =
+    fields.source === undefined
+      ? promptSourceFromText(fields.text, `prompt.${fields.id}.text`)
+      : promptSourceValue(fields.source, `prompt.${fields.id}.source`);
   if (text !== undefined && source !== undefined) {
     throw new Error(`prompt.${fields.id}: expected either text prompt body or source, not both`);
   }
@@ -168,8 +169,8 @@ interface TemplateFacets {
 function composeTemplateMeta(parts: readonly TemplateFacets[], joiner: string): TemplateFacets {
   const refs = uniqueInOrder(parts.flatMap((part) => part.refs));
   const requiredRefs = new Set(parts.flatMap((part) => part.refs.filter((ref) => !part.optionalRefs.includes(ref))));
-  const optionalRefs = uniqueInOrder(parts.flatMap((part) => part.optionalRefs)).filter((ref) =>
-    !requiredRefs.has(ref)
+  const optionalRefs = uniqueInOrder(parts.flatMap((part) => part.optionalRefs)).filter(
+    (ref) => !requiredRefs.has(ref),
   );
   return {
     text: parts.map((part) => part.text).join(joiner),
@@ -182,7 +183,7 @@ function composeTemplateMeta(parts: readonly TemplateFacets[], joiner: string): 
 /** A template's facets read off its meta — text-less (`prompt.resource`) templates throw at the call site named by `fieldPath`. */
 function templateFacets(value: PromptTemplate, fieldPath: string): TemplateFacets {
   const meta = metaOf(value);
-  const text = (value as unknown as { readonly text?: unknown; }).text;
+  const text = (value as unknown as { readonly text?: unknown }).text;
   if (typeof text !== "string") {
     throw new Error(`${fieldPath}: expected a prompt template with rendered text, got a resource-backed template`);
   }
@@ -200,10 +201,7 @@ function templateFacets(value: PromptTemplate, fieldPath: string): TemplateFacet
  * rather than duplicating it, to avoid an import cycle: `input.ts`
  * otherwise imports only `handles.ts`/`normalize.ts`/`ref.ts`).
  */
-export function promptTemplate(
-  strings: TemplateStringsArray,
-  values: readonly PromptInterpolation[],
-): PromptTemplate {
+export function promptTemplate(strings: TemplateStringsArray, values: readonly PromptInterpolation[]): PromptTemplate {
   const parts: TemplateFacets[] = [{ text: strings[0] ?? "", refs: [], optionalRefs: [], declarations: {} }];
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -248,9 +246,8 @@ export function promptBoundText(text: string, bindings: Readonly<Record<string, 
       return [name, ref];
     }),
   );
-  const rendered = text.replace(
-    /\{([A-Za-z][A-Za-z0-9-]*)\}/g,
-    (placeholder, name: string) => refs[name] === undefined ? placeholder : `{${refs[name]}}`,
+  const rendered = text.replace(/\{([A-Za-z][A-Za-z0-9-]*)\}/g, (placeholder, name: string) =>
+    refs[name] === undefined ? placeholder : `{${refs[name]}}`,
   );
   return buildPromptTemplate({
     text: rendered,
@@ -262,13 +259,16 @@ export function promptBoundText(text: string, bindings: Readonly<Record<string, 
 
 /** Attaches the hidden, non-enumerable `.extend` member every composable `PromptTemplate` carries. */
 function buildPromptTemplate(facets: TemplateFacets): PromptTemplate {
-  const template = withMeta<{ text: string; }, "template", unknown, "prompt-template">({ text: facets.text }, {
-    kind: "template",
-    refs: [...new Set(facets.refs)],
-    ...(facets.optionalRefs.length === 0 ? {} : { optionalRefs: [...new Set(facets.optionalRefs)] }),
-    declaration: { text: facets.text },
-    declarations: facets.declarations,
-  });
+  const template = withMeta<{ text: string }, "template", unknown, "prompt-template">(
+    { text: facets.text },
+    {
+      kind: "template",
+      refs: [...new Set(facets.refs)],
+      ...(facets.optionalRefs.length === 0 ? {} : { optionalRefs: [...new Set(facets.optionalRefs)] }),
+      declaration: { text: facets.text },
+      declarations: facets.declarations,
+    },
+  );
   const extend = (strings: TemplateStringsArray, ...values: readonly PromptInterpolation[]): PromptTemplate => {
     const extension = promptTemplate(strings, values);
     const composed = composeTemplateMeta([facets, templateFacets(extension, "prompt.extend")], "\n");
@@ -284,14 +284,16 @@ function buildPromptTemplate(facets: TemplateFacets): PromptTemplate {
  * the slot declaration itself.
  */
 function isOptionalSlotRead(value: unknown): value is OptionalSlotRead {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    && "slot" in value && (value as { readonly optional?: unknown; }).optional === true;
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "slot" in value &&
+    (value as { readonly optional?: unknown }).optional === true
+  );
 }
 
-function resolvePromptRef(
-  value: PromptInterpolation,
-  fieldPath: string,
-): { ref: string; optional: boolean; } {
+function resolvePromptRef(value: PromptInterpolation, fieldPath: string): { ref: string; optional: boolean } {
   if (isOptionalSlotRead(value)) {
     const inner = normalizeRefList(value.slot);
     if (inner?.[0] === undefined) throw new Error(`${fieldPath}: expected a slot reference`);
@@ -322,25 +324,22 @@ function resolvePromptRef(
 }
 
 function promptResource(value: PromptResourceValue): PromptTemplate {
-  const resource = "resource" in (value as object)
-    ? (value as { readonly resource: ResourceHandle | RefHandle | string; }).resource
-    : value as ResourceHandle | RefHandle;
-  const input = "input" in (value as object)
-    ? (value as { readonly input?: PromptFields["input"]; }).input
-    : undefined;
+  const resource =
+    "resource" in (value as object)
+      ? (value as { readonly resource: ResourceHandle | RefHandle | string }).resource
+      : (value as ResourceHandle | RefHandle);
+  const input = "input" in (value as object) ? (value as { readonly input?: PromptFields["input"] }).input : undefined;
   const resourceRef = resourceSourceRef(resource, "prompt.resource.resource");
   const refs = input === undefined ? [resourceRef] : [resourceRef, ...(normalizeRefList(input) ?? [])];
-  const template = withMeta<
-    { source: string; input: string[] | undefined; },
-    "template",
-    unknown,
-    "prompt-template"
-  >({ source: resourceRef, input: normalizeRefList(input) }, {
-    kind: "template",
-    refs: unique(refs),
-    declaration: { source: resourceRef },
-    declarations: collectMany([resource, input]),
-  });
+  const template = withMeta<{ source: string; input: string[] | undefined }, "template", unknown, "prompt-template">(
+    { source: resourceRef, input: normalizeRefList(input) },
+    {
+      kind: "template",
+      refs: unique(refs),
+      declaration: { source: resourceRef },
+      declarations: collectMany([resource, input]),
+    },
+  );
   const throwUnextendable = (): never => {
     throw new Error("prompt.resource templates cannot be extended — the body is resource content");
   };
@@ -365,17 +364,19 @@ function promptSourceValue(
   return meta?.kind === "resource" || meta?.ref?.startsWith("resource:") ? meta.ref : undefined;
 }
 function promptRefsForFields(fields: PromptFields): readonly string[] {
-  const textRefs = fields.text === undefined || typeof fields.text === "string" ? [] : metaOf(fields.text)?.refs ?? [];
-  const sourceRefs = fields.source === undefined
-    ? []
-    : typeof fields.source === "string"
-    ? [normalizeResourceSourceString(fields.source, "prompt.source")]
-    : metaOf(fields.source)?.refs
-      ?? (metaOf(fields.source)?.ref === undefined ? [] : [metaOf(fields.source)?.ref as string]);
+  const textRefs =
+    fields.text === undefined || typeof fields.text === "string" ? [] : (metaOf(fields.text)?.refs ?? []);
+  const sourceRefs =
+    fields.source === undefined
+      ? []
+      : typeof fields.source === "string"
+        ? [normalizeResourceSourceString(fields.source, "prompt.source")]
+        : (metaOf(fields.source)?.refs ??
+          (metaOf(fields.source)?.ref === undefined ? [] : [metaOf(fields.source)?.ref as string]));
   return unique([...textRefs, ...sourceRefs]);
 }
 function resourceSourceRef(value: ResourceHandle | RefHandle | string, fieldPath: string): string {
-  return normalizeResourceSourceString(typeof value === "string" ? value : metaOf(value)?.ref ?? "", fieldPath);
+  return normalizeResourceSourceString(typeof value === "string" ? value : (metaOf(value)?.ref ?? ""), fieldPath);
 }
 function normalizeResourceSourceString(value: string, fieldPath: string): string {
   const trimmed = value.trim();

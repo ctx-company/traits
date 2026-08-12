@@ -141,7 +141,7 @@ export function dependency(fields: DependencyFields): CanonicalDependency {
  */
 export function procedure(fields: ProcedureFields): ProcedureHandle {
   const sequenceValues = arrayOf<SequenceHandle | JsonObject>(fields.sequence).flatMap((item) =>
-    materializeSequenceItem(item as SequenceHandle, { kind: "procedure" })
+    materializeSequenceItem(item as SequenceHandle, { kind: "procedure" }),
   );
   validateNoDuplicateTitles(sequenceValues, "procedure");
   const items = sequenceValues.map(normalizeMaterializedSequenceItem);
@@ -228,7 +228,7 @@ export interface ResourceFunction {
    * @example `resource.file("style-guide", { path: "docs/style.md" })`
    * @example `resource.file("evaluator", { path: "scripts/eval.py", digest: "sha256:..." })`
    */
-  file(id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string; }): ResourceHandle;
+  file(id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle;
   /** Embeds content directly in the trait source, no file on disk. @example `resource.inline("guide", "Prefer minimal diffs.")` */
   inline(
     id: string,
@@ -352,18 +352,22 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
   // strictest item sets the contract. Core checks this same rule.
   const requiresEvidence = fields.items.some((item) => item.requiresEvidence === true);
 
-  const verdict = schema.object(`${fields.id}-verdict`, {
-    item: schema.field(schema.enum(itemIds), {
-      description: "Which checklist item this verdict answers.",
-    }),
-    status: schema.field(schema.enum(CHECKLIST_STATUSES), {
-      description: "The verdict for this item.",
-    }),
-    evidence: schema.field(schema.text(), {
-      required: requiresEvidence,
-      description: "Concrete evidence supporting the status.",
-    }),
-  }, { description: `One verdict for one item of checklist resource:${fields.id}.` });
+  const verdict = schema.object(
+    `${fields.id}-verdict`,
+    {
+      item: schema.field(schema.enum(itemIds), {
+        description: "Which checklist item this verdict answers.",
+      }),
+      status: schema.field(schema.enum(CHECKLIST_STATUSES), {
+        description: "The verdict for this item.",
+      }),
+      evidence: schema.field(schema.text(), {
+        required: requiresEvidence,
+        description: "Concrete evidence supporting the status.",
+      }),
+    },
+    { description: `One verdict for one item of checklist resource:${fields.id}.` },
+  );
 
   const declaration = compact({
     id: fields.id,
@@ -375,9 +379,15 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
   // `verdict`/`itemIds` are attached below via `Object.defineProperty`, after
   // this call returns — no expression at this point structurally has them,
   // so the mint of the wider `ChecklistHandle` shape is unavoidable here.
-  const handle = withDeclaration("resource", `resource:${fields.id}`, declaration, {}, {
-    declarations: collectMany([verdict]),
-  }) as ChecklistHandle;
+  const handle = withDeclaration(
+    "resource",
+    `resource:${fields.id}`,
+    declaration,
+    {},
+    {
+      declarations: collectMany([verdict]),
+    },
+  ) as ChecklistHandle;
   recordTraitMint("resource", fields.id, `resource:${fields.id}`, declaration);
 
   // Authoring affordances, not manifest fields: the declaration object is
@@ -389,7 +399,7 @@ function typedChecklist(fields: TypedChecklistFields<readonly ChecklistItemField
 export const resource: ResourceFunction = Object.assign(
   (fields: ResourceFields): ResourceHandle => resourceOf(fields),
   {
-    file: (id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string; }): ResourceHandle =>
+    file: (id: string, fields: Omit<ResourceFields, "id" | "content"> & { readonly path: string }): ResourceHandle =>
       resourceOf({ ...fields, id }),
     inline: (
       id: string,
@@ -468,5 +478,5 @@ export function signal(fields: SignalFields): SignalHandle {
  */
 function arrayOf<T>(value: T | readonly T[] | undefined): readonly T[] {
   if (value === undefined) return [];
-  return Array.isArray(value) ? value as readonly T[] : [value as T];
+  return Array.isArray(value) ? (value as readonly T[]) : [value as T];
 }

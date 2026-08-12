@@ -35,8 +35,7 @@ export function commitTail(options: CommitTailOptions): readonly SequenceHandle[
     id: `${id}-status`,
     description:
       "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
-    hint:
-      "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
+    hint: "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
   });
   const message = slot.text({
     id: `${id}-message`,

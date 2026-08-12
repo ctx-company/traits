@@ -44,9 +44,14 @@ export type Draftable = Brand<string> | JsonObject;
  * yields its own canonical declaration shape, and a plain (unbranded)
  * `JsonObject` passes through unchanged.
  */
-export type DraftOf<T> = T extends Brand<"trait"> ? CanonicalTraitDraft
-  : T extends Brand<infer K> ? (K extends keyof CanonicalDeclarationByKind ? CanonicalDeclarationByKind[K] : JsonObject)
-  : JsonObject;
+export type DraftOf<T> =
+  T extends Brand<"trait">
+    ? CanonicalTraitDraft
+    : T extends Brand<infer K>
+      ? K extends keyof CanonicalDeclarationByKind
+        ? CanonicalDeclarationByKind[K]
+        : JsonObject
+      : JsonObject;
 
 /**
  * `SynthPlan` narrowed to the canonical draft shape: the generated
@@ -160,7 +165,7 @@ export function diagnostics(value: unknown): readonly CdkDiagnostic[] {
  */
 export function toDraftJsonWithDiagnostics<T extends Draftable>(
   value: T,
-): { readonly draft: DraftOf<T>; readonly diagnostics: readonly CdkDiagnostic[]; } {
+): { readonly draft: DraftOf<T>; readonly diagnostics: readonly CdkDiagnostic[] } {
   return { draft: toDraftJson(value), diagnostics: diagnostics(value) };
 }
 
@@ -177,7 +182,7 @@ export function toDraftJsonWithDiagnostics<T extends Draftable>(
  */
 export function synth<T extends Draftable>(
   draft: T,
-  options: { readonly format?: SynthFormat; readonly out?: string; } = {},
+  options: { readonly format?: SynthFormat; readonly out?: string } = {},
 ): SynthPlan<T> {
   const format = options.format ?? "toml";
   const command = ["ctx", "traits", "synth", "<draft.json>", "--format", format];
@@ -238,9 +243,10 @@ export function normalizeValue(value: unknown): JsonValue | undefined {
   if (typeof target !== "object" || target === null) return target as JsonValue;
   return stableObject(
     Object.fromEntries(
-      Object.entries(target as JsonObject).filter(([, item]) => item !== undefined).map(([key, item]) =>
-        [key, normalizeValue(item)] as const
-      ).filter(([, item]) => item !== undefined),
+      Object.entries(target as JsonObject)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, normalizeValue(item)] as const)
+        .filter(([, item]) => item !== undefined),
     ) as JsonObject,
   );
 }
@@ -344,9 +350,10 @@ export function compact(value: Record<string, unknown>): JsonObject {
 }
 export function stableObject<T extends JsonObject>(value: T): T {
   return Object.fromEntries(
-    Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map((
-      [key, item],
-    ) => [key, stableJson(item as JsonValue)]),
+    Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => [key, stableJson(item as JsonValue)]),
   ) as T;
 }
 
@@ -356,7 +363,7 @@ export function compactAs<T>(value: Mutable<T>): T {
 }
 
 /** `-readonly` counterpart to a canonical document type, for incremental construction. */
-export type Mutable<T> = { -readonly [K in keyof T]: T[K]; };
+export type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 export function mutableJsonArray(values: readonly JsonObject[] | undefined): JsonObject[] | undefined {
   return values === undefined ? undefined : [...values];
 }
@@ -418,15 +425,15 @@ export function tokenizeShellLiteral(segment: string, path: string): string[] {
       i = end + 1;
       continue;
     }
-    if (ch === "\"") {
+    if (ch === '"') {
       let j = i + 1;
       let literal = "";
       for (;;) {
         if (j >= segment.length) fail();
         const c = segment.charAt(j);
-        if (c === "\"") break;
+        if (c === '"') break;
         const next = segment.charAt(j + 1);
-        if (c === "\\" && j + 1 < segment.length && (next === "\"" || next === "\\" || next === "`" || next === "$")) {
+        if (c === "\\" && j + 1 < segment.length && (next === '"' || next === "\\" || next === "`" || next === "$")) {
           literal += next;
           j += 2;
           continue;
@@ -468,30 +475,34 @@ export function refText(value: unknown, fieldPath: string): string {
 }
 
 export function normalizeBehavior(value: BehaviorFields | undefined): JsonObject | undefined {
-  return value === undefined ? undefined : compact({
-    tone: normalizeGuidanceList(value.tone),
-    method: normalizeGuidanceList(value.method),
-    verbosity: normalizeGuidanceItem(value.verbosity),
-    directness: normalizeGuidanceItem(value.directness),
-    "scope-control": normalizeGuidanceItem(value.scopeControl),
-    initiative: normalizeGuidanceItem(value.initiative),
-    uncertainty: normalizeGuidanceItem(value.uncertainty),
-    format: normalizeGuidanceList(value.format),
-  });
+  return value === undefined
+    ? undefined
+    : compact({
+        tone: normalizeGuidanceList(value.tone),
+        method: normalizeGuidanceList(value.method),
+        verbosity: normalizeGuidanceItem(value.verbosity),
+        directness: normalizeGuidanceItem(value.directness),
+        "scope-control": normalizeGuidanceItem(value.scopeControl),
+        initiative: normalizeGuidanceItem(value.initiative),
+        uncertainty: normalizeGuidanceItem(value.uncertainty),
+        format: normalizeGuidanceList(value.format),
+      });
 }
 export function normalizeIntent(value: IntentSpec | undefined): JsonObject | undefined {
-  return value === undefined ? undefined : compact({
-    require: normalizeGuidanceList(value.require),
-    focus: normalizeGuidanceList(value.focus),
-    avoid: normalizeGuidanceList(value.avoid),
-    block: normalizeGuidanceList(value.block),
-  });
+  return value === undefined
+    ? undefined
+    : compact({
+        require: normalizeGuidanceList(value.require),
+        focus: normalizeGuidanceList(value.focus),
+        avoid: normalizeGuidanceList(value.avoid),
+        block: normalizeGuidanceList(value.block),
+      });
 }
 /** Normalizes a compact string or rich `{ id, summary?, description? }` value into stable guidance-item JSON. */
 function normalizeGuidanceItem(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return { id: value };
-  const item = value as { readonly id?: string; readonly summary?: string; readonly description?: string; };
+  const item = value as { readonly id?: string; readonly summary?: string; readonly description?: string };
   return compact({ id: item.id, summary: item.summary, description: item.description });
 }
 /** Normalizes a scalar-or-array guidance value into an array of stable guidance-item JSON. */
@@ -547,7 +558,8 @@ export function withoutKeys(value: Record<string, unknown>, keys: readonly strin
   const excluded = new Set(keys);
   return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.has(key))) as JsonObject;
 }
-// dprint-ignore: sdk-generate validates this declaration record from the source text.
+// sdk-generate validates this declaration record from the source text.
+// prettier-ignore
 export function explicitDeclarations(fields: TraitFields): Partial<Record<DeclKind, readonly JsonObject[]>> { return { agent: explicitDeclarationItems("agent", fields.agent), condition: explicitDeclarationItems("condition", fields.condition), port: explicitDeclarationItems("port", fields.port), sequence: explicitDeclarationItems("sequence", fields.sequence), slot: explicitDeclarationItems("slot", fields.slot), setting: explicitDeclarationItems("setting", fields.setting), prompt: explicitDeclarationItems("prompt", fields.prompt), resource: explicitDeclarationItems("resource", fields.resource), signal: explicitDeclarationItems("signal", fields.signal), session: explicitDeclarationItems("session", fields.session) }; }
 /**
  * Merges declaration sets and emits each kind's array in a stable order that
@@ -636,30 +648,28 @@ export function resolveGeneratedBranchArmIds(
     }
   }
   const allocated = new Map<JsonObject, string>();
-  for (
-    const [declaration] of [...generated].sort(([left, leftOrder], [right, rightOrder]) => {
-      const leftBase = metaOf(left)?.generatedBranchArm?.baseId ?? "";
-      const rightBase = metaOf(right)?.generatedBranchArm?.baseId ?? "";
-      return leftBase.localeCompare(rightBase) || leftOrder - rightOrder;
-    })
-  ) {
+  for (const [declaration] of [...generated].sort(([left, leftOrder], [right, rightOrder]) => {
+    const leftBase = metaOf(left)?.generatedBranchArm?.baseId ?? "";
+    const rightBase = metaOf(right)?.generatedBranchArm?.baseId ?? "";
+    return leftBase.localeCompare(rightBase) || leftOrder - rightOrder;
+  })) {
     const generatedMeta = metaOf(declaration)?.generatedBranchArm;
     if (generatedMeta === undefined) continue;
     const id = generatedMeta.baseId;
     if (occupied.has(id)) {
       throw new Error(
-        `generated sequence id ${id} collides with an existing declaration (${anchorText(occupiedSource.get(id))} vs ${
-          anchorText(metaOf(declaration)?.source)
-        })`,
+        `generated sequence id ${id} collides with an existing declaration (${anchorText(occupiedSource.get(id))} vs ${anchorText(
+          metaOf(declaration)?.source,
+        )})`,
       );
     }
     occupied.add(id);
     occupiedSource.set(id, metaOf(declaration)?.source);
     allocated.set(declaration, id);
-    (declaration as { id: JsonValue; }).id = id;
+    (declaration as { id: JsonValue }).id = id;
     const meta = metaOf(declaration);
     if (meta !== undefined) {
-      (meta as { ref?: string; }).ref = `sequence:${id}`;
+      (meta as { ref?: string }).ref = `sequence:${id}`;
       if (meta.sourceMap !== undefined) {
         const remapped = Object.fromEntries(
           Object.entries(meta.sourceMap).map(([path, anchor]) => [
@@ -667,7 +677,7 @@ export function resolveGeneratedBranchArmIds(
             anchor,
           ]),
         );
-        (meta as { sourceMap?: SourceMap; }).sourceMap = remapped;
+        (meta as { sourceMap?: SourceMap }).sourceMap = remapped;
       }
     }
   }
@@ -686,24 +696,25 @@ export function sequenceLinearMap(value: unknown): JsonObject | undefined {
   return declarationMap(value);
 }
 export function conditionMap(values: readonly unknown[]): JsonObject | undefined {
-  return declarationMap(values.flatMap((value) => value === undefined ? [] : Array.isArray(value) ? value : [value]));
+  return declarationMap(values.flatMap((value) => (value === undefined ? [] : Array.isArray(value) ? value : [value])));
 }
 export function promptMap(value: readonly JsonObject[] | undefined): JsonObject | undefined {
   return declarationMap(value ?? []);
 }
 
 function declarationMap(value: unknown): JsonObject | undefined {
-  const entries = (Array.isArray(value) ? value : value === undefined ? [] : [value]).map((item) =>
-    normalizeValue(item) as JsonObject
-  ).filter((item) => typeof item.id === "string").map((item) => {
-    const { id, ...rest } = item as JsonObject & { id: string; };
-    return [id, stableObject(rest)] as const;
-  });
+  const entries = (Array.isArray(value) ? value : value === undefined ? [] : [value])
+    .map((item) => normalizeValue(item) as JsonObject)
+    .filter((item) => typeof item.id === "string")
+    .map((item) => {
+      const { id, ...rest } = item as JsonObject & { id: string };
+      return [id, stableObject(rest)] as const;
+    });
   return entries.length === 0 ? undefined : stableObject(Object.fromEntries(entries) as JsonObject);
 }
 function explicitDeclarationItems(kind: DeclKind, value: unknown): JsonObject[] {
   return (Array.isArray(value) ? value : value === undefined ? [] : [value]).map((item) =>
-    declarationWithPreservedMeta(kind, item)
+    declarationWithPreservedMeta(kind, item),
   );
 }
 function declarationWithPreservedMeta(kind: DeclKind, value: unknown): JsonObject {
@@ -733,8 +744,8 @@ function stableJson(value: JsonValue): JsonValue {
   return Array.isArray(value)
     ? value.map(stableJson)
     : value !== null && typeof value === "object"
-    ? stableObject(value as JsonObject)
-    : value;
+      ? stableObject(value as JsonObject)
+      : value;
 }
 function uniqueDiagnostics(values: readonly CdkDiagnostic[]): CdkDiagnostic[] {
   const byKey = new Map<string, CdkDiagnostic>();
@@ -742,7 +753,7 @@ function uniqueDiagnostics(values: readonly CdkDiagnostic[]): CdkDiagnostic[] {
   return [...byKey.values()].sort((a, b) =>
     `${a.severity}:${a.code}:${a.fieldPath}:${a.message}`.localeCompare(
       `${b.severity}:${b.code}:${b.fieldPath}:${b.message}`,
-    )
+    ),
   );
 }
 /**

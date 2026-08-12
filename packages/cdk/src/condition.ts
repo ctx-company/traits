@@ -23,11 +23,7 @@ import type { SequenceOutputValue } from "./sequence.js";
  * declaration returns — no separate `ConditionHandle` arm is needed), a
  * `condition.*`-built predicate, or a nested array of the same.
  */
-export type GuardValue =
-  | string
-  | RefHandle<"signal" | "condition">
-  | GuardHandle
-  | readonly GuardValue[];
+export type GuardValue = string | RefHandle<"signal" | "condition"> | GuardHandle | readonly GuardValue[];
 /**
  * The check-position value `sequence.branch`'s `check` field accepts: an
  * ordinary guard, or an as-yet-unplaced `sequence.check(...)` step handle
@@ -35,7 +31,7 @@ export type GuardValue =
  * `pass` output becomes the guard, and the step itself must run immediately
  * before the branch evaluates it (see {@link lowerCheckGuard}).
  */
-export type BranchCheckValue = GuardValue | (SequenceHandle & { readonly pass: SlotHandle<boolean>; });
+export type BranchCheckValue = GuardValue | (SequenceHandle & { readonly pass: SlotHandle<boolean> });
 /** Literal or accepted local numeric value used as an ordered-comparison RHS. */
 export type NumericComparisonValue = number | SlotHandle<number> | PortHandle<number> | SettingHandle<number>;
 
@@ -146,7 +142,7 @@ export interface ConditionFunction {
    */
   present(
     subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
-    options?: { readonly field?: string; },
+    options?: { readonly field?: string },
   ): GuardHandle;
   /**
    * Negated {@link ConditionFunction.present} — lowers to
@@ -156,7 +152,7 @@ export interface ConditionFunction {
    */
   absent(
     subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
-    options?: { readonly field?: string; },
+    options?: { readonly field?: string },
   ): GuardHandle;
   /** Guards that a slot's numeric value is less than a literal or accepted numeric slot/input-port value. @example `condition.lt(retryCount, 3)` */
   lt(slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle;
@@ -222,14 +218,14 @@ export interface ConditionFunction {
    * @example `condition.all([condition.equals(verdict, "approved"), condition.empty(findings)])`
    */
   all(items: readonly GuardValue[]): GuardHandle;
-  all(id: string, items: readonly GuardValue[], fields?: { readonly description?: string; }): ConditionHandle;
+  all(id: string, items: readonly GuardValue[], fields?: { readonly description?: string }): ConditionHandle;
   /**
    * Combines several guards with OR. Same inline-vs-declared shape as
    * `condition.all`.
    * @example `condition.any([condition.equals(verdict, "fail"), condition.empty(findings)])`
    */
   any(items: readonly GuardValue[]): GuardHandle;
-  any(id: string, items: readonly GuardValue[], fields?: { readonly description?: string; }): ConditionHandle;
+  any(id: string, items: readonly GuardValue[], fields?: { readonly description?: string }): ConditionHandle;
   /**
    * The one sanctioned raw-JSON guard escape: spread `json` directly into the
    * emitted guard predicate for canonical guard fields no typed builder above
@@ -332,51 +328,72 @@ export interface ConditionOutputFunction {
  */
 export const condition: ConditionFunction = {
   signal: (signalRef: string | RefHandle): GuardHandle =>
-    guardHandle({ signal: refText(signalRef, "condition.signal") }, {
-      declarations: collectMany([signalRef]),
-    }),
+    guardHandle(
+      { signal: refText(signalRef, "condition.signal") },
+      {
+        declarations: collectMany([signalRef]),
+      },
+    ),
   equals: function equals<Value extends JsonValue>(
     target: string | RefHandle<RefKind, Value> | FieldRef<Value>,
     value: Value,
   ): GuardHandle {
     const fieldRef = metaOf(target)?.fieldRef;
     if (fieldRef !== undefined) {
-      return guardHandle({ slot: fieldRef.slotRef, field: fieldRef.field, equals: value }, {
-        declarations: collectMany([target]),
-      });
+      return guardHandle(
+        { slot: fieldRef.slotRef, field: fieldRef.field, equals: value },
+        {
+          declarations: collectMany([target]),
+        },
+      );
     }
-    return guardHandle({ slot: refText(target, "condition.slot"), equals: value }, {
-      declarations: collectMany([target]),
-    });
+    return guardHandle(
+      { slot: refText(target, "condition.slot"), equals: value },
+      {
+        declarations: collectMany([target]),
+      },
+    );
   },
   fieldEquals: (
     slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
     value: JsonValue,
   ): GuardHandle =>
-    guardHandle({ slot: refText(slotRef, "condition.slot"), field, equals: value }, {
-      declarations: collectMany([slotRef]),
-    }),
+    guardHandle(
+      { slot: refText(slotRef, "condition.slot"), field, equals: value },
+      {
+        declarations: collectMany([slotRef]),
+      },
+    ),
   not: (guard: GuardValue): GuardHandle =>
-    guardHandle({ not: normalizeGuard(guard) }, {
-      declarations: collectMany([guard]),
-      defaultOutputPaths: defaultOutputPaths(guard).map((path) => ["not", ...path]),
-    }),
+    guardHandle(
+      { not: normalizeGuard(guard) },
+      {
+        declarations: collectMany([guard]),
+        defaultOutputPaths: defaultOutputPaths(guard).map((path) => ["not", ...path]),
+      },
+    ),
   empty: (slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle =>
-    guardHandle({ empty: refText(slotRef, "condition.empty") }, {
-      declarations: collectMany([slotRef]),
-    }),
+    guardHandle(
+      { empty: refText(slotRef, "condition.empty") },
+      {
+        declarations: collectMany([slotRef]),
+      },
+    ),
   count: (slotRef: string | SlotHandle | SettingHandle | RefHandle): ConditionCountFunction => countFunction(slotRef),
   present: (
     subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
-    options?: { readonly field?: string; },
+    options?: { readonly field?: string },
   ): GuardHandle =>
-    guardHandle({ present: refText(subjectRef, "condition.present"), field: options?.field }, {
-      declarations: collectMany([subjectRef]),
-    }),
+    guardHandle(
+      { present: refText(subjectRef, "condition.present"), field: options?.field },
+      {
+        declarations: collectMany([subjectRef]),
+      },
+    ),
   absent: (
     subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
-    options?: { readonly field?: string; },
+    options?: { readonly field?: string },
   ): GuardHandle => condition.not(condition.present(subjectRef, options)),
   lt: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "less-than", value),
@@ -387,9 +404,12 @@ export const condition: ConditionFunction = {
   gte: (slotRef: string | SlotHandle | SettingHandle | RefHandle, value: NumericComparisonValue): GuardHandle =>
     slotComparison(slotRef, "at-least", value),
   elapsedAtLeast: (value: NumericComparisonValue): GuardHandle =>
-    guardHandle({ "elapsed-seconds-at-least": comparisonValue(value) }, {
-      declarations: collectMany([value]),
-    }),
+    guardHandle(
+      { "elapsed-seconds-at-least": comparisonValue(value) },
+      {
+        declarations: collectMany([value]),
+      },
+    ),
   fieldLt: (slotRef, field, value): GuardHandle => slotComparison(slotRef, "less-than", value, field),
   fieldLte: (slotRef, field, value): GuardHandle => slotComparison(slotRef, "at-most", value, field),
   fieldGt: (slotRef, field, value): GuardHandle => slotComparison(slotRef, "greater-than", value, field),
@@ -400,13 +420,19 @@ export const condition: ConditionFunction = {
     is: (...args: readonly [JsonValue] | readonly [SequenceOutputValue, JsonValue]): GuardHandle =>
       args.length === 1
         ? guardHandle({ equals: args[0] }, { defaultOutput: true })
-        : guardHandle({ output: outputRefText(args[0], "condition.output"), equals: args[1] }, {
-          declarations: collectMany([args[0]]),
-        }),
+        : guardHandle(
+            { output: outputRefText(args[0], "condition.output"), equals: args[1] },
+            {
+              declarations: collectMany([args[0]]),
+            },
+          ),
     fieldIs: (outputRef: SequenceOutputValue, field: string, value: JsonValue): GuardHandle =>
-      guardHandle({ output: outputRefText(outputRef, "condition.output"), field, equals: value }, {
-        declarations: collectMany([outputRef]),
-      }),
+      guardHandle(
+        { output: outputRefText(outputRef, "condition.output"), field, equals: value },
+        {
+          declarations: collectMany([outputRef]),
+        },
+      ),
     lt: (
       ...args: readonly [NumericComparisonValue] | readonly [SequenceOutputValue, NumericComparisonValue]
     ): GuardHandle => outputComparison("less-than", args),
@@ -436,9 +462,9 @@ export const condition: ConditionFunction = {
 export function lowerCheckGuard(
   value: BranchCheckValue,
   path: string,
-): { readonly guard: GuardValue; readonly gateStep?: SequenceHandle; } {
+): { readonly guard: GuardValue; readonly gateStep?: SequenceHandle } {
   if (metaOf(value)?.kind === "sequence-step") {
-    const pass = (value as { readonly pass?: SlotHandle<boolean>; }).pass;
+    const pass = (value as { readonly pass?: SlotHandle<boolean> }).pass;
     if (pass === undefined) {
       throw new Error(
         `${path}: a sequence step used as a check must declare a boolean pass output (see sequence.check)`,
@@ -456,10 +482,7 @@ export function lowerCheckGuard(
  * point that keeps `condition.ts` free of `as JsonObject` casts — every
  * builder above routes through it instead of hand-rolling `withMeta`.
  */
-function guardHandle(
-  predicate: Mutable<CanonicalGuardPredicate>,
-  meta: Omit<Meta, "kind"> = {},
-): GuardHandle {
+function guardHandle(predicate: Mutable<CanonicalGuardPredicate>, meta: Omit<Meta, "kind"> = {}): GuardHandle {
   return withMeta(compactAs<CanonicalGuardPredicate>(predicate), { kind: "guard", ...meta });
 }
 
@@ -509,9 +532,10 @@ function countGuard(
   };
   const rhs = typeof value === "number" ? value : countSpecs.get(value);
   if (rhs === undefined) throw new Error("condition.count: RHS must be another condition.count(...) chain");
-  predicate[modifier] = typeof rhs === "number"
-    ? rhs
-    : compact({ count: rhs.count, field: rhs.filter?.field, "field-equals": rhs.filter?.["field-equals"] });
+  predicate[modifier] =
+    typeof rhs === "number"
+      ? rhs
+      : compact({ count: rhs.count, field: rhs.filter?.field, "field-equals": rhs.filter?.["field-equals"] });
   return guardHandle(predicate, {
     declarations: typeof rhs === "number" ? collectMany([slotRef]) : collectMany([slotRef, rhs.source]),
   });
@@ -550,12 +574,12 @@ function conditionAll(items: readonly GuardValue[]): GuardHandle;
 function conditionAll(
   id: string,
   items: readonly GuardValue[],
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): ConditionHandle;
 function conditionAll(
   idOrItems: string | readonly GuardValue[],
   maybeItems?: readonly GuardValue[],
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): GuardHandle | ConditionHandle {
   return conditionGroup("all", idOrItems, maybeItems, fields);
 }
@@ -563,12 +587,12 @@ function conditionAny(items: readonly GuardValue[]): GuardHandle;
 function conditionAny(
   id: string,
   items: readonly GuardValue[],
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): ConditionHandle;
 function conditionAny(
   idOrItems: string | readonly GuardValue[],
   maybeItems?: readonly GuardValue[],
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): GuardHandle | ConditionHandle {
   return conditionGroup("any", idOrItems, maybeItems, fields);
 }
@@ -576,12 +600,12 @@ function conditionGroup(
   kind: "all" | "any",
   idOrItems: string | readonly GuardValue[],
   maybeItems: readonly GuardValue[] | undefined,
-  maybeFields: { readonly description?: string; } | undefined,
+  maybeFields: { readonly description?: string } | undefined,
 ): GuardHandle | ConditionHandle {
   const items = typeof idOrItems === "string" ? maybeItems : idOrItems;
   const declarations = collectMany(items ?? []);
   const outputPaths = (items ?? []).flatMap((item, index) =>
-    defaultOutputPaths(item).map((path) => [kind, index, ...path] as const)
+    defaultOutputPaths(item).map((path) => [kind, index, ...path] as const),
   );
   const normalizedItems = normalizeGuardList(items ?? []);
   if (typeof idOrItems === "string") {
@@ -592,10 +616,16 @@ function conditionGroup(
       [kind]: normalizedItems,
       description: fields.description,
     });
-    return withDeclaration("condition", `condition:${idOrItems}`, declaration, {}, {
-      declarations,
-      defaultOutputPaths: outputPaths,
-    });
+    return withDeclaration(
+      "condition",
+      `condition:${idOrItems}`,
+      declaration,
+      {},
+      {
+        declarations,
+        defaultOutputPaths: outputPaths,
+      },
+    );
   }
   const predicate: Mutable<CanonicalGuardPredicate> = {};
   predicate[kind] = normalizedItems;
@@ -614,9 +644,7 @@ export function defaultOutputPaths(value: GuardValue | undefined): readonly (rea
 
 /** Normalizes a guard list, dropping the (unreachable for defined items) `undefined` arm `normalizeGuard`'s signature carries for its own recursive/optional callers. */
 function normalizeGuardList(items: readonly GuardValue[]): readonly CanonicalGuardExpr[] {
-  return items
-    .map((item) => normalizeGuard(item))
-    .filter((item): item is CanonicalGuardExpr => item !== undefined);
+  return items.map((item) => normalizeGuard(item)).filter((item): item is CanonicalGuardExpr => item !== undefined);
 }
 
 export function normalizeGuard(value: GuardValue | undefined): CanonicalGuardExpr | undefined {

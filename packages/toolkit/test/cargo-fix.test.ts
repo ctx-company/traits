@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CARGO_DIAGNOSTIC_REDUCER_SOURCE } from "../src/sequence/cargo-fix.ts";
 
-function runReducer(ndjson: string): { readonly status: number | null; readonly stdout: string; readonly stderr: string; } {
+function runReducer(ndjson: string): {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+} {
   const result = spawnSync("node", ["--eval", CARGO_DIAGNOSTIC_REDUCER_SOURCE, "--", "--stdin"], {
     input: ndjson,
     encoding: "utf8",
@@ -21,14 +25,17 @@ afterEach(() => {
 /** A fake `cargo` on PATH that always exits 1, no output — this makes the reducer's own `fail()` surface the
  * *exact argv it invoked cargo with* on its stderr (`cmd + " " + args.join(" ") + " exited " + status`), which
  * proves what `-p` flag (if any) the `--scope=` argv parse produced, without running a real (slow) check/clippy. */
-function withArgvRejectingCargo(): { readonly binDir: string; } {
+function withArgvRejectingCargo(): { readonly binDir: string } {
   const binDir = mkdtempSync(join(tmpdir(), "cargo-fix-argv-"));
   scratchDirs.push(binDir);
   writeFileSync(join(binDir, "cargo"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   return { binDir };
 }
 
-function runReducerAgainstFakeCargo(scopeArg: string | undefined): { readonly status: number | null; readonly stderr: string; } {
+function runReducerAgainstFakeCargo(scopeArg: string | undefined): {
+  readonly status: number | null;
+  readonly stderr: string;
+} {
   const { binDir } = withArgvRejectingCargo();
   const config = JSON.stringify({ checkArgs: [], clippyArgs: null });
   const result = spawnSync(

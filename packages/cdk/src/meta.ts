@@ -49,7 +49,7 @@ export type CanonicalDeclarationByKind = {
   readonly signal: CanonicalSignal;
   readonly slot: CanonicalSlot;
   /** `operation.over(...)`'s CDK-only output-sink handle (slot.ts). Not a Rust-schema type — a small CDK-side wrapper, never emitted on its own (it lowers to `output` list entries). */
-  readonly "output-sink": { readonly slot: string; readonly operation: WriteOperation; };
+  readonly "output-sink": { readonly slot: string; readonly operation: WriteOperation };
 };
 
 /**
@@ -73,11 +73,13 @@ export interface SourceAnchor {
 /** Declaration references mapped to their authoring locations. */
 export type SourceMap = Record<string, SourceAnchor>;
 
-// dprint-ignore: sdk-generate validates this literal union from the source text.
+// sdk-generate validates this literal union from the source text.
+// prettier-ignore
 export type DeclKind = "agent" | "condition" | "port" | "prompt" | "resource" | "schema" | "sequence" | "session" | "setting" | "signal" | "slot";
 
 export interface Meta {
-  // dprint-ignore: sdk-generate validates this literal union from the source text.
+  // sdk-generate validates this literal union from the source text.
+  // prettier-ignore
   readonly kind?: DeclKind | "trait" | "procedure" | "sequence-step" | "sequence-linear" | "template" | "schema-field" | "guard" | "ref" | "behavior" | "output-sink" | "instruction-output" | "output-template";
   readonly ref?: string;
   readonly declaration?: MetaDeclaration;
@@ -134,11 +136,13 @@ export interface Meta {
    * in the same process. A second `output.prompt` claim on the same slot
    * handle for a different agent is a build error (P105 build rule 3).
    */
-  readonly outputTemplateClaim?: { readonly agent: string | undefined; readonly stepId: string; };
-  readonly inlineBranchArms?: {
-    readonly trueArm?: readonly SequenceHandle[];
-    readonly falseArm?: readonly SequenceHandle[];
-  } | undefined;
+  readonly outputTemplateClaim?: { readonly agent: string | undefined; readonly stepId: string };
+  readonly inlineBranchArms?:
+    | {
+        readonly trueArm?: readonly SequenceHandle[];
+        readonly falseArm?: readonly SequenceHandle[];
+      }
+    | undefined;
   /**
    * CDK-only provenance for a `loop`/`forEach` step authored with an inline
    * `body:` array (CDK grammar v2 rule 7) instead of a `sequence:` ref:
@@ -166,7 +170,7 @@ export interface Meta {
    * emitted — `condition.equals` lowers it to the existing canonical
    * `{ slot, field, equals }` guard shape before normalization.
    */
-  readonly fieldRef?: { readonly slotRef: string; readonly field: string; };
+  readonly fieldRef?: { readonly slotRef: string; readonly field: string };
   /**
    * CDK-only provenance recording that a declared schema is a
    * `schema.template(...)` specialization: which template produced it and
@@ -201,10 +205,10 @@ export interface Meta {
 
 export const META: unique symbol = Symbol("ctx.traits.cdk.meta");
 const CDK_SOURCE_PATH = decodeURIComponent(new URL(import.meta.url).pathname);
-const authoredDeclarations: { readonly kind: DeclKind; readonly ref: string; readonly declaration: JsonObject; }[] = [];
+const authoredDeclarations: { readonly kind: DeclKind; readonly ref: string; readonly declaration: JsonObject }[] = [];
 const processDiagnostics: CdkDiagnostic[] = [];
 
-export type CdkObject = { readonly [key: string]: unknown; readonly [META]?: Meta; };
+export type CdkObject = { readonly [key: string]: unknown; readonly [META]?: Meta };
 
 /**
  * Attach non-enumerable CDK metadata and infer the handle brand from its
@@ -219,23 +223,20 @@ export function withMeta<
   MetaKind extends string,
   Value = unknown,
   HandleKind extends string = MetaKind,
->(
-  value: T,
-  meta: Meta & { readonly kind?: MetaKind; },
-): WithHandleValue<T & Brand<HandleKind>, Value> {
+>(value: T, meta: Meta & { readonly kind?: MetaKind }): WithHandleValue<T & Brand<HandleKind>, Value> {
   const anchoredMeta = meta.source === undefined ? { ...meta, source: captureSourceAnchor() } : meta;
   Object.defineProperty(value, META, { value: anchoredMeta, enumerable: false, configurable: true });
   return value as WithHandleValue<T & Brand<HandleKind>, Value>;
 }
 
 export function metaOf(value: unknown): Meta | undefined {
-  return typeof value === "object" && value !== null ? (value as { readonly [META]?: Meta; })[META] : undefined;
+  return typeof value === "object" && value !== null ? (value as { readonly [META]?: Meta })[META] : undefined;
 }
 
 /** `value`'s `output-sink` declaration, narrowed by `Meta<K>`'s kind check — shared by every output-ref reader (sequence.ts, condition.ts). */
 export function outputSinkDeclaration(value: unknown): CanonicalDeclarationByKind["output-sink"] | undefined {
   const meta = metaOf(value);
-  return meta?.kind === "output-sink" ? meta.declaration as CanonicalDeclarationByKind["output-sink"] : undefined;
+  return meta?.kind === "output-sink" ? (meta.declaration as CanonicalDeclarationByKind["output-sink"]) : undefined;
 }
 
 /**
@@ -250,17 +251,15 @@ export function outputSinkDeclaration(value: unknown): CanonicalDeclarationByKin
  * back only one slot).
  */
 export function attachInstructionOutput(value: unknown, slotRef: string, slotDeclaration: JsonObject): void {
-  const meta = metaOf(value) as (Meta & { ref?: string; }) | undefined;
+  const meta = metaOf(value) as (Meta & { ref?: string }) | undefined;
   if (meta?.kind !== "instruction-output") {
     throw new Error("attachInstructionOutput: expected an output.text/output.of instruction-output handle");
   }
   if (meta.ref !== undefined) {
-    throw new Error(
-      `output.text/output.of: already attached to ${meta.ref} — cannot also attach it to ${slotRef}`,
-    );
+    throw new Error(`output.text/output.of: already attached to ${meta.ref} — cannot also attach it to ${slotRef}`);
   }
-  (meta as { ref?: string; }).ref = slotRef;
-  (meta as { declarations?: Partial<Record<DeclKind, readonly JsonObject[]>>; }).declarations = {
+  (meta as { ref?: string }).ref = slotRef;
+  (meta as { declarations?: Partial<Record<DeclKind, readonly JsonObject[]>> }).declarations = {
     ...meta.declarations,
     slot: [...(meta.declarations?.slot ?? []), slotDeclaration],
   };
@@ -272,14 +271,14 @@ export function isInstructionOutputHandle(value: unknown): boolean {
 }
 
 /** The compiled instruction text (+ optional schema ref) an instruction-output handle carries, or `undefined` if it isn't one. */
-export function instructionOutputContent(
-  value: unknown,
-): {
-  readonly text: string;
-  readonly schemaRef?: string;
-  readonly refs?: readonly string[];
-  readonly optionalRefs?: readonly string[];
-} | undefined {
+export function instructionOutputContent(value: unknown):
+  | {
+      readonly text: string;
+      readonly schemaRef?: string;
+      readonly refs?: readonly string[];
+      readonly optionalRefs?: readonly string[];
+    }
+  | undefined {
   const meta = metaOf(value);
   return meta?.kind === "instruction-output" ? meta.instructionOutput : undefined;
 }
@@ -306,18 +305,18 @@ export function outputTemplateContent(value: unknown): Meta["outputTemplate"] {
  */
 export function claimOutputTemplateAuthorship(slotValue: unknown, agent: string | undefined, stepId: string): void {
   const meta = metaOf(slotValue) as
-    | (Meta & { outputTemplateClaim?: { agent: string | undefined; stepId: string; }; })
+    | (Meta & { outputTemplateClaim?: { agent: string | undefined; stepId: string } })
     | undefined;
   if (meta === undefined) return;
   const existing = meta.outputTemplateClaim;
   if (existing !== undefined && existing.agent !== agent) {
     throw new Error(
-      `procedure.sequence ${stepId}: output.prompt claims ${meta.ref ?? "this output slot"} for agent `
-        + `${agent ?? "(none)"}, but procedure.sequence ${existing.stepId} already claims it for agent `
-        + `${existing.agent ?? "(none)"} — an output-template contract belongs to exactly one agent`,
+      `procedure.sequence ${stepId}: output.prompt claims ${meta.ref ?? "this output slot"} for agent ` +
+        `${agent ?? "(none)"}, but procedure.sequence ${existing.stepId} already claims it for agent ` +
+        `${existing.agent ?? "(none)"} — an output-template contract belongs to exactly one agent`,
     );
   }
-  (meta as { outputTemplateClaim?: { agent: string | undefined; stepId: string; }; }).outputTemplateClaim = {
+  (meta as { outputTemplateClaim?: { agent: string | undefined; stepId: string } }).outputTemplateClaim = {
     agent,
     stepId,
   };
@@ -365,34 +364,26 @@ export function withDeclaration<
   publicSurface: T,
   extraMeta: Meta = {},
 ): WithHandleValue<T & Brand<HandleKind>, Value> {
-  const handle = withMeta<T, MetaKind, Value, HandleKind>(
-    publicSurface,
-    {
-      ...extraMeta,
-      kind,
-      ref,
-      // `declaration` is assembled dynamically per call site (compact(...)
-      // over a per-kind field record); the type's payoff is at the reader
-      // boundary (`Meta.declaration: MetaDeclaration`), not this single
-      // producer — same reasoning as `assembleSingleTraitDraft`'s draft cast
-      // (P481 §4.5). This is the one audited `declaration` cast every
-      // declaration builder routes through (P485 Phase 2) — callers no
-      // longer assert their own `Handle<K, Value>` shape at each call site.
-      declaration: declaration as unknown as MetaDeclaration, // audited-unknown-cast: the one declaration-producing cast every builder routes through, see comment above
-    } as Meta & { readonly kind?: MetaKind; },
-  );
+  const handle = withMeta<T, MetaKind, Value, HandleKind>(publicSurface, {
+    ...extraMeta,
+    kind,
+    ref,
+    // `declaration` is assembled dynamically per call site (compact(...)
+    // over a per-kind field record); the type's payoff is at the reader
+    // boundary (`Meta.declaration: MetaDeclaration`), not this single
+    // producer — same reasoning as `assembleSingleTraitDraft`'s draft cast
+    // (P481 §4.5). This is the one audited `declaration` cast every
+    // declaration builder routes through (P485 Phase 2) — callers no
+    // longer assert their own `Handle<K, Value>` shape at each call site.
+    declaration: declaration as unknown as MetaDeclaration, // audited-unknown-cast: the one declaration-producing cast every builder routes through, see comment above
+  } as Meta & { readonly kind?: MetaKind });
   attachMeta(declaration, metaOf(handle) as Meta);
   if (isDeclarationKind(kind)) authoredDeclarations.push({ kind, ref, declaration });
   return handle;
 }
 
 /** Records a build-only authoring advisory without changing emitted values. */
-export function recordDiagnostic(
-  code: string,
-  fieldPath: string,
-  message: string,
-  source?: SourceAnchor,
-): void {
+export function recordDiagnostic(code: string, fieldPath: string, message: string, source?: SourceAnchor): void {
   processDiagnostics.push({
     severity: "warning",
     code,
@@ -423,8 +414,18 @@ export function authoredDeclarationRecords(): readonly {
 }
 
 function isDeclarationKind(value: string): value is DeclKind {
-  return ["agent", "condition", "port", "prompt", "resource", "schema", "sequence", "session", "signal", "slot"]
-    .includes(value);
+  return [
+    "agent",
+    "condition",
+    "port",
+    "prompt",
+    "resource",
+    "schema",
+    "sequence",
+    "session",
+    "signal",
+    "slot",
+  ].includes(value);
 }
 
 /**
@@ -459,9 +460,9 @@ export function withHiddenField<T extends object, Field extends string, Value>(
   value: T,
   field: Field,
   fieldValue: Value,
-): T & { readonly [K in Field]: Value; } {
+): T & { readonly [K in Field]: Value } {
   Object.defineProperty(value, field, { value: fieldValue, enumerable: false });
-  return value as T & { readonly [K in Field]: Value; };
+  return value as T & { readonly [K in Field]: Value };
 }
 
 /**
@@ -484,7 +485,7 @@ export function captureSourceAnchor(): SourceAnchor | undefined {
   return undefined;
 }
 
-function parseStackFrame(line: string): { readonly file: string; readonly line: number; } | undefined {
+function parseStackFrame(line: string): { readonly file: string; readonly line: number } | undefined {
   const trimmed = line.trim();
   const match = /(?:at\s+(?:.*?\()?)(file:\/\/[^:)]+|\/?[^:)]+):(\d+):(\d+)\)?$/.exec(trimmed);
   if (match === null) {
@@ -500,7 +501,5 @@ function parseStackFrame(line: string): { readonly file: string; readonly line: 
 }
 
 function isCdkFrame(file: string): boolean {
-  return file === CDK_SOURCE_PATH
-    || file.includes("/packages/cdk/src/")
-    || file.includes("/packages/cdk/dist/");
+  return file === CDK_SOURCE_PATH || file.includes("/packages/cdk/src/") || file.includes("/packages/cdk/dist/");
 }

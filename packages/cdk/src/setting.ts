@@ -43,7 +43,7 @@ export interface SettingFunction {
 
 function settingOf<Value>(
   schema: "number" | "text" | "boolean",
-  fields: SettingFields<Value> & { readonly min?: number; readonly max?: number; },
+  fields: SettingFields<Value> & { readonly min?: number; readonly max?: number },
 ): SettingHandle<Value> {
   validateSlug(fields.id, "setting.id");
   const declaration = compact({

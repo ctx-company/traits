@@ -312,10 +312,7 @@ const FAMILY_OWNED_KEYS = new Set<string>(["id", "version", "variants"]);
  * ```
  * @see {@link procedure}
  */
-export function trait<const Id extends string>(
-  id: ValidSlug<Id>,
-  fields: Omit<FamilyFields, "id">,
-): TraitFamilyHandle;
+export function trait<const Id extends string>(id: ValidSlug<Id>, fields: Omit<FamilyFields, "id">): TraitFamilyHandle;
 export function trait<const Fields extends FamilyFields>(
   fields: Fields & ValidTraitFields<Fields> & NoExtraFields<Fields, FamilyFields>,
 ): TraitFamilyHandle;
@@ -323,10 +320,7 @@ export function trait<const Id extends string>(id: ValidSlug<Id>, fields: Omit<T
 export function trait<const Fields extends TraitFields>(
   fields: Fields & ValidTraitFields<Fields> & NoExtraFields<Fields, TraitFields>,
 ): TraitHandle;
-export function trait(
-  first: string | TraitFields,
-  second?: Omit<TraitFields, "id">,
-): TraitHandle | TraitFamilyHandle {
+export function trait(first: string | TraitFields, second?: Omit<TraitFields, "id">): TraitHandle | TraitFamilyHandle {
   const fields = canonicalTraitFields(
     (typeof first === "string" ? { ...second, id: first } : first) as TraitFields,
   ) as TraitFields;
@@ -336,8 +330,8 @@ export function trait(
       .map(([key]) => key);
     if (rejectedKeys.length > 0) {
       throw new Error(
-        `trait(): a variant family only accepts id/version/variants — remove ${rejectedKeys.join(", ")} `
-          + "(declare them in each leaf's own variant(...) definition instead)",
+        `trait(): a variant family only accepts id/version/variants — remove ${rejectedKeys.join(", ")} ` +
+          "(declare them in each leaf's own variant(...) definition instead)",
       );
     }
     return buildTraitFamily(fields);
@@ -384,15 +378,16 @@ export function assembleSingleTraitDraft(fields: TraitFields): {
   resolveGeneratedBranchArmIds([fields.procedure, fields.sequence], collected, authored);
   const explicit = explicitDeclarations(fields);
   let merged = mergeDeclarationSets(collected, explicit);
-  const inferred = fields.procedure === undefined
-    ? undefined
-    : inferProcedureContract(
-      normalizeValue(fields.procedure),
-      merged.sequence ?? [],
-      explicit.port ?? [],
-      merged.port ?? [],
-      fields.procedure,
-    );
+  const inferred =
+    fields.procedure === undefined
+      ? undefined
+      : inferProcedureContract(
+          normalizeValue(fields.procedure),
+          merged.sequence ?? [],
+          explicit.port ?? [],
+          merged.port ?? [],
+          fields.procedure,
+        );
   // Output ports are often declared beside their slot and need not be passed
   // through `trait({ port })`. Keep the selected declarations reachable in
   // this assembly so the emitted contract, schema closure, and source map all
@@ -491,7 +486,7 @@ function inferProcedureContract(
   authoredPorts: readonly JsonObject[],
   reachablePorts: readonly JsonObject[],
   procedureHandle: ProcedureHandle,
-): { readonly procedure: JsonValue; readonly ports: readonly JsonObject[]; } | undefined {
+): { readonly procedure: JsonValue; readonly ports: readonly JsonObject[] } | undefined {
   if (procedure === undefined || typeof procedure !== "object" || Array.isArray(procedure)) {
     return procedure === undefined ? undefined : { procedure, ports: [] };
   }
@@ -500,7 +495,7 @@ function inferProcedureContract(
   const producedPorts = new Set<string>();
   const bySequence = new Map(
     sequences.flatMap((sequence) =>
-      typeof sequence.id === "string" ? [[`sequence:${sequence.id}`, sequence] as const] : []
+      typeof sequence.id === "string" ? [[`sequence:${sequence.id}`, sequence] as const] : [],
     ),
   );
   const visitedSequences = new Set<string>();
@@ -527,11 +522,8 @@ function inferProcedureContract(
   };
   visit(procedure);
   const procedurePorts = metaOf(procedureHandle)?.declarations?.port ?? [];
-  const ports = mergeDeclarationSets(
-    { port: authoredPorts },
-    { port: reachablePorts },
-    { port: procedurePorts },
-  ).port ?? [];
+  const ports =
+    mergeDeclarationSets({ port: authoredPorts }, { port: reachablePorts }, { port: procedurePorts }).port ?? [];
   const input: string[] = [];
   const output: string[] = [];
   for (const port of ports) {
@@ -540,8 +532,8 @@ function inferProcedureContract(
     const ref = `port:${id}`;
     if (port.direction === "input" && consumed.has(ref)) input.push(ref);
     if (
-      port.direction === "output"
-      && (producedPorts.has(ref) || (typeof port.value === "string" && produced.has(port.value)))
+      port.direction === "output" &&
+      (producedPorts.has(ref) || (typeof port.value === "string" && produced.has(port.value)))
     ) {
       output.push(ref);
     }
@@ -560,7 +552,7 @@ function inferProcedureContract(
   };
 }
 
-export type CustomSlug = string & { readonly __customSlugBrand: never; };
+export type CustomSlug = string & { readonly __customSlugBrand: never };
 /** A lowercase trait identifier. Literal ids are checked for slug syntax by `trait`. */
 export type Slug = Lowercase<string>;
 /**
@@ -612,22 +604,32 @@ type SlugCharacter =
   | "7"
   | "8"
   | "9";
-type ValidSlugTail<Value extends string> = Value extends "" ? true
-  : Value extends `${SlugCharacter}${infer Rest}` ? ValidSlugTail<Rest>
-  : Value extends `-${infer Rest}` ? Rest extends "" | `-${string}` ? false : ValidSlugTail<Rest>
-  : false;
-type ValidSlug<Value extends string> = string extends Value ? Value
-  : Value extends `${SlugCharacter}${infer Rest}` ? ValidSlugTail<Rest> extends true ? Value : never
-  : never;
-type ValidTraitFields<Fields extends { readonly id?: string; }> = Fields["id"] extends string
-  ? ValidSlug<Fields["id"]> extends never ? never : unknown
+type ValidSlugTail<Value extends string> = Value extends ""
+  ? true
+  : Value extends `${SlugCharacter}${infer Rest}`
+    ? ValidSlugTail<Rest>
+    : Value extends `-${infer Rest}`
+      ? Rest extends "" | `-${string}`
+        ? false
+        : ValidSlugTail<Rest>
+      : false;
+type ValidSlug<Value extends string> = string extends Value
+  ? Value
+  : Value extends `${SlugCharacter}${infer Rest}`
+    ? ValidSlugTail<Rest> extends true
+      ? Value
+      : never
+    : never;
+type ValidTraitFields<Fields extends { readonly id?: string }> = Fields["id"] extends string
+  ? ValidSlug<Fields["id"]> extends never
+    ? never
+    : unknown
   : unknown;
 /** Generic object-form overloads need this explicit excess-key guard. */
 type NoExtraFields<Fields, Shape> = Record<Exclude<keyof Fields, keyof Shape>, never>;
 
-type CallableNamespace<Values extends Record<string, string>> =
-  & ((value: string) => CustomSlug)
-  & PascalCaseLeaves<Values>;
+type CallableNamespace<Values extends Record<string, string>> = ((value: string) => CustomSlug) &
+  PascalCaseLeaves<Values>;
 
 /**
  * Builds a lowercase callable namespace for a flat generated vocabulary map:
@@ -642,9 +644,8 @@ type IntentAxisAliases<Axes extends Record<string, Record<string, string>>> = {
   readonly [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]>;
 };
 
-type IntentNamespace<Axes extends Record<string, Record<string, string>>> =
-  & ((value: string) => CustomSlug)
-  & IntentAxisAliases<Axes>;
+type IntentNamespace<Axes extends Record<string, Record<string, string>>> = ((value: string) => CustomSlug) &
+  IntentAxisAliases<Axes>;
 
 /**
  * Builds the `intent` callable namespace. Built-ins remain facet-qualified;
@@ -653,7 +654,7 @@ type IntentNamespace<Axes extends Record<string, Record<string, string>>> =
 export function callableIntentNamespace<Axes extends Record<string, Record<string, string>>>(
   axes: Axes,
 ): IntentNamespace<Axes> {
-  const aliasedAxes = {} as { [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]>; };
+  const aliasedAxes = {} as { [Axis in keyof Axes]: PascalCaseLeaves<Axes[Axis]> };
   for (const axis of Object.keys(axes) as (keyof Axes)[]) {
     const axisMap = axes[axis] as Record<string, string>;
     aliasedAxes[axis] = pascalCaseLeaves(axisMap) as PascalCaseLeaves<Axes[typeof axis]>;

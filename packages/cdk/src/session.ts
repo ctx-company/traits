@@ -36,13 +36,10 @@ function sessionOf(id: string, opts: SessionOptions = {}): SessionHandle {
   return withDeclaration("session", `session:${id}`, declaration, {});
 }
 
-export const session: SessionFunction = Object.assign(
-  sessionOf,
-  {
-    PerFrame: "per-frame",
-    Persistent: "persistent",
-  } as const,
-);
+export const session: SessionFunction = Object.assign(sessionOf, {
+  PerFrame: "per-frame",
+  Persistent: "persistent",
+} as const);
 
 /**
  * Lowers an `AgentFields.session`/`AgentTemplateFields.session` binding into

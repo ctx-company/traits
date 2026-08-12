@@ -48,7 +48,10 @@ function buildError(title: string | undefined, rule: string, frame: AuthorFrame 
 
 /** Re-runs the 0104 collision rule at scope close, so a build error surfaces at authoring time instead of waiting for `procedure()`'s own re-check. */
 function checkDuplicateTitles(items: readonly RegisteredItem[], scopeLabel: string): void {
-  validateNoDuplicateTitles(items.map((registered) => registered.item as SequenceHandle), scopeLabel);
+  validateNoDuplicateTitles(
+    items.map((registered) => registered.item as SequenceHandle),
+    scopeLabel,
+  );
 }
 
 function itemsOf(scope: Scope): readonly SequenceHandle[] {
@@ -67,13 +70,11 @@ function positionalUntilGuard(): GuardValue | undefined {
   const loopScope = nearestScope("loop");
   if (loopScope?.loop?.untilCondition === undefined) return undefined;
   if (currentScope("flow positional lowering") !== loopScope) return undefined;
-  return condition.not(
-    lowerCheckGuard(loopScope.loop.untilCondition, "flow.until").guard,
-  );
+  return condition.not(lowerCheckGuard(loopScope.loop.untilCondition, "flow.until").guard);
 }
 
 /** Composes `positionalUntilGuard()` into `fields.when`, for container kinds whose object-layer constructor accepts `when` directly. */
-function withPositionalWhen<F extends { readonly when?: GuardValue; }>(fields: F): F {
+function withPositionalWhen<F extends { readonly when?: GuardValue }>(fields: F): F {
   const notUntil = positionalUntilGuard();
   if (notUntil === undefined) return fields;
   return { ...fields, when: fields.when === undefined ? notUntil : condition.all([notUntil, fields.when]) };
@@ -95,8 +96,8 @@ function forbidPositionalUntil(title: string, containerLabel: string, frame: Aut
   if (positionalUntilGuard() === undefined) return;
   throw buildError(
     title,
-    `${containerLabel} registered after flow.until in this loop cannot be guarded without changing arm routing — `
-      + "restructure so it is not positioned after flow.until in the enclosing loop",
+    `${containerLabel} registered after flow.until in this loop cannot be guarded without changing arm routing — ` +
+      "restructure so it is not positioned after flow.until in the enclosing loop",
     frame,
   );
 }
@@ -125,7 +126,7 @@ export const step = {
   check(
     title: string,
     opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
-  ): SequenceHandle & { readonly pass: SlotHandle<boolean>; } {
+  ): SequenceHandle & { readonly pass: SlotHandle<boolean> } {
     requireBuild(`step.check(${JSON.stringify(title)})`);
     const id = opts.id ?? mintId(title);
     const fields = withPositionalWhen({ ...opts, title });
@@ -134,10 +135,7 @@ export const step = {
     return item;
   },
   /** `step.project` (0109 F3): the functional home for a deterministic, zero-prompt `project` step — mirrors `sequence.project`'s `projections` field, with the same `id:` override escape as every other `step.*` registrar. */
-  project(
-    title: string,
-    opts: Omit<ProjectSequenceFields, "id" | "kind" | "title"> & IdOverride,
-  ): SequenceHandle {
+  project(title: string, opts: Omit<ProjectSequenceFields, "id" | "kind" | "title"> & IdOverride): SequenceHandle {
     requireBuild(`step.project(${JSON.stringify(title)})`);
     const frame = captureAuthorFrame();
     forbidPositionalUntil(title, "step.project", frame);
@@ -173,11 +171,7 @@ installSlotForEachLowering((slotHandle, titleText, opts, body) => {
   const id = mintId(titleText);
   const frame = captureAuthorFrame();
   const itemSlot = slot.any({ id: `${id}-item`, description: `Per-item value for the ${id} loop.` });
-  const { scope } = runInScope(
-    "for-each",
-    `items.forEach(${JSON.stringify(titleText)})`,
-    () => body(itemSlot),
-  );
+  const { scope } = runInScope("for-each", `items.forEach(${JSON.stringify(titleText)})`, () => body(itemSlot));
   checkDuplicateTitles(scope.items, `items.forEach(${JSON.stringify(titleText)})`);
   if (scope.items.length === 0) throw buildError(titleText, "items.forEach registered no steps", frame);
   const forEachOpts = opts ?? {};
@@ -204,7 +198,7 @@ installSlotForEachLowering((slotHandle, titleText, opts, body) => {
 
 export interface LoopParam {
   /** Required, callable once — a loop with no way out is not authorable (0102). */
-  maxIterations(bound: number | SettingHandle<number>, opts?: { readonly onExhausted?: ExhaustionPolicy; }): void;
+  maxIterations(bound: number | SettingHandle<number>, opts?: { readonly onExhausted?: ExhaustionPolicy }): void;
   /** Overrides the loop's emitted canonical id (0109 F2), when it must differ from `idFromTitle(title)`. Callable at most once. */
   id(overrideId: string): void;
   /** Wrapper over `flow.until` — the loop's exit guard, on the param the body already holds. */
@@ -216,7 +210,7 @@ export interface LoopParam {
 }
 
 function combineAbortIfArms(
-  arms: readonly { readonly title: string; readonly condition: BranchCheckValue; }[],
+  arms: readonly { readonly title: string; readonly condition: BranchCheckValue }[],
 ): BranchCheckValue | undefined {
   if (arms.length === 0) return undefined;
   // oxlint-disable-next-line typescript/no-non-null-assertion -- length === 1 checked above
@@ -313,9 +307,8 @@ function flowWhen(
   // Success-only block: an object-layer `branch` has no `when` of its own, so the positional
   // guard (if any) ANDs into `check` itself instead — see `positionalUntilGuard`.
   const notUntil = positionalUntilGuard();
-  const check: BranchCheckValue = notUntil === undefined
-    ? cond
-    : condition.all([lowerCheckGuard(cond, label).guard, notUntil]);
+  const check: BranchCheckValue =
+    notUntil === undefined ? cond : condition.all([lowerCheckGuard(cond, label).guard, notUntil]);
   const item = sequence.branch(id, {
     title,
     check,
@@ -341,7 +334,7 @@ const FLOW_FALSE: unique symbol = Symbol("flow.False");
 const FLOW_OTHERWISE: unique symbol = Symbol("flow.Otherwise");
 
 type MatchArmCallback = () => void;
-export type GuardMatchArms = { readonly [FLOW_TRUE]?: MatchArmCallback; readonly [FLOW_FALSE]?: MatchArmCallback; };
+export type GuardMatchArms = { readonly [FLOW_TRUE]?: MatchArmCallback; readonly [FLOW_FALSE]?: MatchArmCallback };
 export type FieldMatchArms = {
   readonly [FLOW_OTHERWISE]?: MatchArmCallback;
   readonly [key: string]: MatchArmCallback | undefined;
@@ -437,7 +430,7 @@ export interface ParParam {
 }
 
 function branchRefFor(loopId: string, registered: RegisteredItem): SequenceLinearHandle {
-  const stepHandle = registered.item as SequenceHandle & { readonly id?: string; };
+  const stepHandle = registered.item as SequenceHandle & { readonly id?: string };
   const branchKey = typeof stepHandle.id === "string" ? stepHandle.id : idFromTitle(registered.title ?? "branch");
   return sequence.linear(`${loopId}-branch-${branchKey}`, [stepHandle]);
 }
@@ -468,9 +461,7 @@ function flowParallel(title: string, body: (par: ParParam) => void): SequenceHan
   const item = sequence.parallel(
     id,
     branches,
-    policy === undefined
-      ? {}
-      : { branchFailure: branches.map((branch) => ({ branch, onFailure: policy })) },
+    policy === undefined ? {} : { branchFailure: branches.map((branch) => ({ branch, onFailure: policy })) },
   );
   registerItem(label, item, title);
   return item;

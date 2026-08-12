@@ -35,7 +35,7 @@ import { condition, flow, operation, step } from "@ctx-traits/cdk";
  */
 export function deriveParkReportStep(
   verdicts: SlotHandle | SlotHandle[],
-  opts: { parkReportSlot: SlotHandle<JsonValue[]>; },
+  opts: { parkReportSlot: SlotHandle<JsonValue[]> },
 ): void {
   const targetParkReport = opts.parkReportSlot;
   const verdictList = Array.isArray(verdicts) ? verdicts : [verdicts];

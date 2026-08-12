@@ -44,7 +44,7 @@ describe("evaluateConfigFunction", () => {
       evaluateConfigFunction(() => {
         defineRun({ frameSeconds: 1 });
         defineRun({ frameSeconds: 2 });
-      })
+      }),
     ).toThrow(/defineRun was already called/);
   });
 
@@ -53,7 +53,7 @@ describe("evaluateConfigFunction", () => {
       evaluateConfigFunction(() => {
         defineHarness("claude", { bin: "claude" });
         defineHarness("claude", { bin: "claude-2" });
-      })
+      }),
     ).toThrow(/defineHarness\("claude", \.\.\.\) was already called/);
   });
 
@@ -63,11 +63,9 @@ describe("evaluateConfigFunction", () => {
 
   it("rejects an async default export", async () => {
     expect(() =>
-      evaluateConfigFunction(
-        (async () => {
-          defineRun({ frameSeconds: 1 });
-        }) as unknown as () => unknown,
-      )
+      evaluateConfigFunction((async () => {
+        defineRun({ frameSeconds: 1 });
+      }) as unknown as () => unknown),
     ).toThrow(/must be synchronous/);
   });
 
@@ -76,7 +74,7 @@ describe("evaluateConfigFunction", () => {
       evaluateConfigFunction(() => {
         defineRun({ frameSeconds: 1 });
         defineConfig({});
-      })
+      }),
     ).toThrow(/mixes defineConfig/);
   });
 
@@ -85,22 +83,28 @@ describe("evaluateConfigFunction", () => {
     expect(() =>
       evaluateConfigFunction(() => {
         defineRun({ frameSeconds: 1 });
-      })
+      }),
     ).toThrow(/mixes defineConfig/);
   });
 
   it("rejects defineRepo outside the user-global layer", () => {
     expect(() =>
-      evaluateConfigFunction(() => {
-        defineRepo("my-repo", {});
-      }, { layer: "repo" })
+      evaluateConfigFunction(
+        () => {
+          defineRepo("my-repo", {});
+        },
+        { layer: "repo" },
+      ),
     ).toThrow(/defineRepo\("my-repo", \.\.\.\) is only allowed in the user-global config/);
   });
 
   it("allows defineRepo in the user-global layer", () => {
-    const config = evaluateConfigFunction(() => {
-      defineRepo("my-repo", { git: { longSeconds: 60 } });
-    }, { layer: "user-global" });
+    const config = evaluateConfigFunction(
+      () => {
+        defineRepo("my-repo", { git: { longSeconds: 60 } });
+      },
+      { layer: "user-global" },
+    );
 
     expect(config).toEqual({ repo: { "my-repo": { git: { longSeconds: 60 } } } });
   });

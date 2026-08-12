@@ -84,12 +84,14 @@ describe("draft synthesis", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         port: plan,
       }),
-    ) as { readonly port?: readonly Record<string, unknown>[]; };
+    ) as { readonly port?: readonly Record<string, unknown>[] };
 
-    expect(draft.port).toContainEqual(expect.objectContaining({
-      id: "plan",
-      default: { value: ".plans/EXECUTION_PLAN.md" },
-    }));
+    expect(draft.port).toContainEqual(
+      expect.objectContaining({
+        id: "plan",
+        default: { value: ".plans/EXECUTION_PLAN.md" },
+      }),
+    );
   });
 
   it("lowers a setting declaration into the canonical [[setting]] array", () => {
@@ -108,15 +110,17 @@ describe("draft synthesis", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         setting: rounds,
       }),
-    ) as { readonly setting?: readonly Record<string, unknown>[]; };
+    ) as { readonly setting?: readonly Record<string, unknown>[] };
 
-    expect(draft.setting).toContainEqual(expect.objectContaining({
-      id: "review-rounds",
-      schema: "number",
-      default: 3,
-      min: 1,
-      max: 10,
-    }));
+    expect(draft.setting).toContainEqual(
+      expect.objectContaining({
+        id: "review-rounds",
+        schema: "number",
+        default: 3,
+        min: 1,
+        max: 10,
+      }),
+    );
   });
 
   it("lowers loop.maxIterations(settingHandle) to max-iterations-from = setting:<id>", () => {
@@ -141,7 +145,7 @@ describe("draft synthesis", () => {
           sequence: [sequence.loop("setting-loop", { sequence: body, iterations: rounds })],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draft.procedure?.sequence?.[0]).toMatchObject({
       kind: "loop",
@@ -211,9 +215,7 @@ describe("draft synthesis", () => {
     expect(first).toBe(second);
     expect(first).toBe(readFileSync(resolve(testDirectory, "fixtures/binding-nesting-draft.json"), "utf8").trim());
     expect(first).toMatch(/"schema":"\[\[schema:text\]\]"/);
-    expect(first).toMatch(
-      /"schema":"\[\(schema:binding-nesting-note-a\|schema:binding-nesting-note-b\)\]"/,
-    );
+    expect(first).toMatch(/"schema":"\[\(schema:binding-nesting-note-a\|schema:binding-nesting-note-b\)\]"/);
   });
 
   it("interpolates resource handles as prompt inputs", () => {
@@ -235,7 +237,7 @@ describe("draft synthesis", () => {
           ],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: unknown; }; readonly prompt?: unknown; };
+    ) as { readonly procedure?: { readonly sequence?: unknown }; readonly prompt?: unknown };
 
     expect(draft.procedure?.sequence).toEqual([
       {
@@ -309,24 +311,28 @@ describe("schema adapters", () => {
     );
 
     expect(zodDraft).toMatchObject({
-      schema: [{
-        id: "result",
-        fields: {
-          name: { schema: "schema:text", required: true },
-          count: { schema: "schema:integer", required: false },
-          tags: { schema: "[schema:text]", required: true },
-          mode: { allowed: ["fast", "safe"] },
+      schema: [
+        {
+          id: "result",
+          fields: {
+            name: { schema: "schema:text", required: true },
+            count: { schema: "schema:integer", required: false },
+            tags: { schema: "[schema:text]", required: true },
+            mode: { allowed: ["fast", "safe"] },
+          },
         },
-      }],
+      ],
     });
     expect(typeBoxDraft).toMatchObject({
-      schema: [{
-        id: "typebox-result",
-        fields: {
-          name: { schema: "schema:text", required: true },
-          count: { schema: "schema:integer", required: false },
+      schema: [
+        {
+          id: "typebox-result",
+          fields: {
+            name: { schema: "schema:text", required: true },
+            count: { schema: "schema:integer", required: false },
+          },
         },
-      }],
+      ],
     });
     expect(JSON.stringify(zodDraft)).toBe(
       JSON.stringify(
@@ -374,19 +380,21 @@ describe("schema adapters", () => {
 
   it("rejects a top-level Zod refinement before the lossy toJsonSchema adapter ever runs", () => {
     expect(() =>
-      schema.zod("refined", z.string().refine((value) => value.length > 0), {
-        toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny),
-      })
+      schema.zod(
+        "refined",
+        z.string().refine((value) => value.length > 0),
+        {
+          toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny),
+        },
+      ),
     ).toThrow(/refinements\/transforms/);
   });
 
   it("rejects a nested Zod transform on an object field", () => {
     expect(() =>
-      schema.zod(
-        "transformed",
-        z.object({ name: z.string().transform((value) => value.trim()) }),
-        { toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny) },
-      )
+      schema.zod("transformed", z.object({ name: z.string().transform((value) => value.trim()) }), {
+        toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny),
+      }),
     ).toThrow(/refinements\/transforms/);
   });
 
@@ -398,9 +406,14 @@ describe("schema adapters", () => {
     expect(() =>
       schema.zod(
         "branded-refined",
-        z.object({ x: z.string().refine((value) => value.length > 0).brand() }),
+        z.object({
+          x: z
+            .string()
+            .refine((value) => value.length > 0)
+            .brand(),
+        }),
         { toJsonSchema: (value) => zodToSupportedJsonSchema(value as z.ZodTypeAny) },
-      )
+      ),
     ).toThrow(/refinements\/transforms/);
   });
 });
@@ -416,7 +429,7 @@ describe("schema authoring sugar", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         slot: slot({ id: "sugar-checklist-plan", schema: schema.checklist() }),
       }),
-    ) as { readonly slot?: readonly { readonly id: string; readonly schema?: string; }[]; };
+    ) as { readonly slot?: readonly { readonly id: string; readonly schema?: string }[] };
 
     const declared = draft.slot?.find((entry) => entry.id === "sugar-checklist-plan");
     expect(declared?.schema).toBe("[schema:checklist-item]");
@@ -459,7 +472,7 @@ describe("schema authoring sugar", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         slot: slot({ id: "sugar-spread-slot", schema: merged }),
       }),
-    ) as { readonly schema?: readonly { readonly id: string; readonly fields?: Record<string, unknown>; }[]; };
+    ) as { readonly schema?: readonly { readonly id: string; readonly fields?: Record<string, unknown> }[] };
 
     const mergedDeclaration = draft.schema?.find((entry) => entry.id === "sugar-spread-merged");
     expect(mergedDeclaration?.fields).toEqual({
@@ -501,7 +514,7 @@ describe("schema authoring sugar", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         slot: slot({ id: "sugar-optional-nested-slot", schema: wrapped }),
       }),
-    ) as { readonly schema?: readonly { readonly id: string; }[]; };
+    ) as { readonly schema?: readonly { readonly id: string }[] };
 
     expect(draft.schema?.map((entry) => entry.id).sort()).toEqual([
       "sugar-optional-nested-inner",
@@ -525,7 +538,8 @@ describe("schema authoring sugar", () => {
 
   it("throws naming the slot and field on unknown field access", () => {
     const noteSchema = schema.object("sugar-unknown-field-note", { status: schema.text() });
-    const noteSlot = slot({ id: "sugar-unknown-field-note-slot", schema: noteSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+    const noteSlot = slot({ id: "sugar-unknown-field-note-slot", schema: noteSchema }) as unknown as {
+      // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
       readonly nope: unknown;
     };
 
@@ -559,8 +573,9 @@ describe("schema authoring sugar", () => {
     // on unknown access.
     const decisionSchema = schema.object("sugar-0085-scalar-leaf-decision", { behavior: schema.text() });
     const hookOutputSchema = schema.object("sugar-0085-scalar-leaf-hook-output", { decision: decisionSchema });
-    const hookSlot = slot({ id: "sugar-0085-scalar-leaf-slot", schema: hookOutputSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-      readonly decision: { readonly behavior: { readonly nope: unknown; }; };
+    const hookSlot = slot({ id: "sugar-0085-scalar-leaf-slot", schema: hookOutputSchema }) as unknown as {
+      // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+      readonly decision: { readonly behavior: { readonly nope: unknown } };
     };
 
     expect(hookSlot.decision.behavior.nope).toBeUndefined();
@@ -569,8 +584,9 @@ describe("schema authoring sugar", () => {
   it("stops recursion at a list field", () => {
     const itemSchema = schema.object("sugar-0085-list-item", { value: schema.text() });
     const containerSchema = schema.object("sugar-0085-list-container", { items: schema.list(itemSchema) });
-    const containerSlot = slot({ id: "sugar-0085-list-slot", schema: containerSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-      readonly items: { readonly value: unknown; };
+    const containerSlot = slot({ id: "sugar-0085-list-slot", schema: containerSchema }) as unknown as {
+      // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+      readonly items: { readonly value: unknown };
     };
 
     expect(containerSlot.items.value).toBeUndefined();
@@ -579,8 +595,9 @@ describe("schema authoring sugar", () => {
   it("throws naming the slot and the full dotted path on an unknown nested field", () => {
     const decisionSchema = schema.object("sugar-0085-unknown-nested-decision", { behavior: schema.text() });
     const hookOutputSchema = schema.object("sugar-0085-unknown-nested-hook-output", { decision: decisionSchema });
-    const hookSlot = slot({ id: "sugar-0085-unknown-nested-slot", schema: hookOutputSchema }) as unknown as { // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
-      readonly decision: { readonly nope: unknown; };
+    const hookSlot = slot({ id: "sugar-0085-unknown-nested-slot", schema: hookOutputSchema }) as unknown as {
+      // audited-unknown-cast: negative-test probe of a property the public type deliberately omits
+      readonly decision: { readonly nope: unknown };
     };
 
     expect(() => hookSlot.decision.nope).toThrow(/sugar-0085-unknown-nested-slot/);
@@ -692,13 +709,15 @@ describe("schema authoring sugar", () => {
     );
 
     expect(draft).toMatchObject({
-      schema: [{
-        id: "sugar-two-spot-specialized",
-        fields: {
-          first: { schema: "schema:number" },
-          second: { schema: "schema:text" },
+      schema: [
+        {
+          id: "sugar-two-spot-specialized",
+          fields: {
+            first: { schema: "schema:number" },
+            second: { schema: "schema:text" },
+          },
         },
-      }],
+      ],
     });
   });
 
@@ -709,11 +728,9 @@ describe("schema authoring sugar", () => {
     // never retype `value` here, and could misfire on an unrelated field
     // that coincidentally shares a spot's name. Resolving by the field's
     // recorded spot origin instead gets this right independent of naming.
-    const itemTemplate = schema.template(
-      "sugar-origin-template",
-      { item: schema.text() },
-      (spots) => ({ value: schema.field(spots.item) }),
-    );
+    const itemTemplate = schema.template("sugar-origin-template", { item: schema.text() }, (spots) => ({
+      value: schema.field(spots.item),
+    }));
 
     const defaulted = itemTemplate("sugar-origin-default");
     const overridden = itemTemplate("sugar-origin-overridden", { item: schema.number() });
@@ -855,7 +872,7 @@ describe("sequence.loop on-exhausted (P399)", () => {
         }),
         signal: [exhaustedOne, exhaustedTwo],
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     const items = draft.procedure?.sequence ?? [];
     expect(items[0]?.["on-exhausted"]).toBeUndefined();
@@ -872,7 +889,7 @@ describe("sequence.loop on-exhausted (P399)", () => {
         ]),
         iterations: 3,
         onExhausted: [],
-      })
+      }),
     ).toThrow(/must not be empty/);
   });
 });
@@ -894,20 +911,23 @@ describe("input.command", () => {
     const template = input.command`git commit -m "hello world" --allow-empty-message`;
     expect(template.argv).toEqual(["git", "commit", "-m", "hello world", "--allow-empty-message"]);
     const escaped = input.command`echo "say \\"hi\\""`;
-    expect(escaped.argv).toEqual(["echo", "say \"hi\""]);
+    expect(escaped.argv).toEqual(["echo", 'say "hi"']);
   });
 
   it("compiles through sequence.command's input field identically to explicit argv", () => {
     const message = slot.text("message");
     const draftFor = (
-      fields: { readonly argv: readonly ArgvItem[]; } | { readonly input: ReturnType<typeof input.command>; },
+      fields: { readonly argv: readonly ArgvItem[] } | { readonly input: ReturnType<typeof input.command> },
     ) =>
       toDraftJson(
         trait("commit-only", {
           version: "0.1.0",
           description: "s",
           name: "Commit Only",
-          procedure: procedure({ description: "No steps.", sequence: [sequence.command({ id: "commit", ...fields })] }),
+          procedure: procedure({
+            description: "No steps.",
+            sequence: [sequence.command({ id: "commit", ...fields })],
+          }),
           slot: [message],
         }),
       );
@@ -950,7 +970,7 @@ describe("input.prompt / output.text / output.of (0045)", () => {
         description: "input.prompt fixture.",
         procedure: procedure({ description: "Review.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: unknown; }; readonly prompt?: unknown; };
+    ) as { readonly procedure?: { readonly sequence?: unknown }; readonly prompt?: unknown };
 
     expect(draft.procedure?.sequence).toEqual([
       { id: "io-review", title: "Io Review", prompt: "prompt:io-review", input: ["slot:io-diff"] },
@@ -973,16 +993,16 @@ describe("input.prompt / output.text / output.of (0045)", () => {
         procedure: procedure({ description: "Summarize.", sequence: [step] }),
       }),
     ) as {
-      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; };
-      readonly prompt?: Record<string, { readonly text?: string; }>;
-      readonly slot?: readonly { readonly id?: string; readonly schema?: string; }[];
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly prompt?: Record<string, { readonly text?: string }>;
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string }[];
     };
 
     expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-summarize"] });
     expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-summarize", schema: "schema:text" }));
     expect(draft.prompt?.["io-summarize"]?.text).toBe(
-      "Summarize the work so far.\n\nWrite a one-paragraph work summary."
-        + "\n\nReturn plain text only, with no surrounding commentary.",
+      "Summarize the work so far.\n\nWrite a one-paragraph work summary." +
+        "\n\nReturn plain text only, with no surrounding commentary.",
     );
   });
 
@@ -1000,8 +1020,8 @@ describe("input.prompt / output.text / output.of (0045)", () => {
         procedure: procedure({ description: "Verdict.", sequence: [step] }),
       }),
     ) as {
-      readonly prompt?: Record<string, { readonly text?: string; }>;
-      readonly slot?: readonly { readonly id?: string; readonly schema?: string; }[];
+      readonly prompt?: Record<string, { readonly text?: string }>;
+      readonly slot?: readonly { readonly id?: string; readonly schema?: string }[];
     };
 
     expect(draft.slot).toContainEqual(expect.objectContaining({ id: "io-verdict", schema: "schema:text" }));
@@ -1022,7 +1042,7 @@ describe("input.prompt / output.text / output.of (0045)", () => {
         description: "multi-output fixture.",
         procedure: procedure({ description: "Multi.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draft.procedure?.sequence?.[0]).toMatchObject({ output: ["slot:io-multi", "slot:io-multi-2"] });
   });
@@ -1043,7 +1063,7 @@ describe("input.prompt / output.text / output.of (0045)", () => {
         description: "consume fixture.",
         procedure: procedure({ description: "Both.", sequence: [producer, consumer] }),
       }),
-    ) as { readonly prompt?: Record<string, { readonly input?: readonly string[]; }>; };
+    ) as { readonly prompt?: Record<string, { readonly input?: readonly string[] }> };
 
     expect(draft.prompt?.["io-consume"]?.input).toEqual(["slot:io-produce"]);
   });
@@ -1059,7 +1079,7 @@ describe("input.prompt / output.text / output.of (0045)", () => {
       sequence.prompt("io-clash", {
         input: input.prompt`Do the work.`,
         output: [clashing, output.text`Summary.`],
-      })
+      }),
     ).toThrow(/io-clash/);
   });
 
@@ -1095,7 +1115,7 @@ describe("prompt template composition (0166)", () => {
         description: "extend chain fixture.",
         procedure: procedure({ description: "Chain.", sequence: [step] }),
       }),
-    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[] }> };
 
     expect(draft.prompt?.["compose-chain"]?.text).toBe(
       "Base prose.\nDoctrine: {slot:compose-doctrine}.\nRules: {slot:compose-rules}.",
@@ -1127,7 +1147,7 @@ describe("prompt template composition (0166)", () => {
         description: "nested template fixture.",
         procedure: procedure({ description: "Nest.", sequence: [step] }),
       }),
-    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[] }> };
 
     expect(draft.prompt?.["compose-nest"]?.text).toBe(
       "Inner: ref {slot:compose-inner} then outer {slot:compose-outer}.",
@@ -1156,7 +1176,7 @@ describe("prompt template composition (0166)", () => {
         description: "optional composition fixture.",
         procedure: procedure({ description: "Optional.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.input).toEqual([
       { slot: "slot:compose-inner-optional", optional: true },
@@ -1179,7 +1199,7 @@ describe("prompt template composition (0166)", () => {
         description: "required-beats-optional fixture.",
         procedure: procedure({ description: "Wins.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.input).toEqual(["slot:compose-required-wins"]);
   });
@@ -1204,7 +1224,7 @@ describe("prompt template composition (0166)", () => {
         description: "duplicate ref fixture.",
         procedure: procedure({ description: "Dup.", sequence: [step] }),
       }),
-    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[]; }>; };
+    ) as { readonly prompt?: Record<string, { readonly text?: string; readonly input?: readonly string[] }> };
 
     expect(draft.prompt?.["compose-dup-refs"]?.text).toBe("First {slot:compose-dup}.\nSecond {slot:compose-dup}.");
     expect(draft.prompt?.["compose-dup-refs"]?.input).toEqual(["slot:compose-dup"]);
@@ -1221,7 +1241,7 @@ describe("prompt template composition (0166)", () => {
         description: "auto-declare fixture.",
         procedure: procedure({ description: "Declare.", sequence: [step] }),
       }),
-    ) as { readonly slot?: readonly { readonly id: string; }[]; };
+    ) as { readonly slot?: readonly { readonly id: string }[] };
 
     expect(draft.slot?.some((entry) => entry.id === "compose-only-inner")).toBe(true);
   });
@@ -1236,8 +1256,7 @@ describe("prompt template composition (0166)", () => {
   it("output.prompt's .extend merges the output contract, lowers an optional slot, and accepts a prose-only extension", () => {
     const verdict = slot.text("compose-out-verdict");
     const extra = slot.text("compose-out-extra");
-    const contract = output.prompt`State your verdict in ${verdict}.`
-      .extend`Also note ${extra.optional()} if relevant.`
+    const contract = output.prompt`State your verdict in ${verdict}.`.extend`Also note ${extra.optional()} if relevant.`
       .extend`Be concise.`;
     const step = sequence.prompt("compose-output", {
       input: input.prompt`Review the change.`,
@@ -1251,8 +1270,8 @@ describe("prompt template composition (0166)", () => {
         procedure: procedure({ description: "Output.", sequence: [step] }),
       }),
     ) as {
-      readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; };
-      readonly prompt?: Record<string, { readonly text?: string; }>;
+      readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown }[] };
+      readonly prompt?: Record<string, { readonly text?: string }>;
     };
 
     expect(draft.procedure?.sequence?.[0]?.output).toEqual([
@@ -1260,8 +1279,8 @@ describe("prompt template composition (0166)", () => {
       { slot: "slot:compose-out-extra", optional: true },
     ]);
     expect(draft.prompt?.["compose-output"]?.text).toBe(
-      "Review the change.\n\nState your verdict in slot:compose-out-verdict.\nAlso note slot:compose-out-extra "
-        + "if relevant.\nBe concise.",
+      "Review the change.\n\nState your verdict in slot:compose-out-verdict.\nAlso note slot:compose-out-extra " +
+        "if relevant.\nBe concise.",
     );
   });
 
@@ -1295,7 +1314,7 @@ describe("sequence.command / sequence.check include", () => {
       }),
     ) as {
       readonly resource?: unknown;
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.resource).toEqual([{ id: "guide", content: "Prefer minimal diffs." }]);
@@ -1312,13 +1331,17 @@ describe("sequence.command / sequence.check include", () => {
         procedure: procedure({
           description: "No steps.",
           sequence: [
-            sequence.check("verify", { cmd: "git diff --quiet", output: slot.boolean("clean"), include: scope }),
+            sequence.check("verify", {
+              cmd: "git diff --quiet",
+              output: slot.boolean("clean"),
+              include: scope,
+            }),
           ],
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "scope")).toBe(true);
@@ -1349,7 +1372,7 @@ describe("sequence.command / sequence.check include", () => {
           ],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.input).toEqual([{ slot: "slot:verdict", optional: true }]);
   });
@@ -1376,12 +1399,9 @@ describe("sequence.command / sequence.check include", () => {
           ],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] } };
 
-    expect(draft.procedure?.sequence?.[0]?.input).toEqual([
-      { slot: "slot:verdict", optional: true },
-      "slot:scope",
-    ]);
+    expect(draft.procedure?.sequence?.[0]?.input).toEqual([{ slot: "slot:verdict", optional: true }, "slot:scope"]);
   });
 
   it("collects a slot declaration reachable only through include(input.optional(slot))", () => {
@@ -1402,7 +1422,7 @@ describe("sequence.command / sequence.check include", () => {
           ],
         }),
       }),
-    ) as { readonly slot?: readonly { readonly id: string; }[]; };
+    ) as { readonly slot?: readonly { readonly id: string }[] };
 
     expect(draft.slot?.some((entry) => entry.id === "scope")).toBe(true);
   });
@@ -1424,7 +1444,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "optional-interpolation fixture.",
         procedure: procedure({ description: "Produce.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.input).toEqual([{ slot: "slot:verdict-inline-optional", optional: true }]);
     expect(JSON.stringify(draft)).toContain("{slot:verdict-inline-optional}");
@@ -1444,7 +1464,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "optional-output fixture.",
         procedure: procedure({ description: "Peek.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.output).toEqual([{ slot: "slot:verdict-optional", optional: true }]);
   });
@@ -1464,7 +1484,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "optional-output fixture.",
         procedure: procedure({ description: "Peek.", sequence: [step] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; }[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown }[] } };
 
     expect(draft.procedure?.sequence?.[0]?.output).toEqual([
       "slot:required-only",
@@ -1487,8 +1507,10 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         procedure: procedure({ description: "Review.", sequence: [step] }),
       }),
     ) as {
-      readonly procedure?: { readonly sequence?: readonly { readonly output?: unknown; readonly input?: unknown; }[]; };
-      readonly prompt?: Record<string, { readonly text?: string; }>;
+      readonly procedure?: {
+        readonly sequence?: readonly { readonly output?: unknown; readonly input?: unknown }[];
+      };
+      readonly prompt?: Record<string, { readonly text?: string }>;
     };
 
     expect(draft.procedure?.sequence?.[0]?.output).toEqual([
@@ -1496,8 +1518,8 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
       { slot: "slot:template-reasoning", optional: true },
     ]);
     expect(draft.prompt?.review?.text).toBe(
-      "Review the change.\n\nState your verdict in slot:template-verdict and your reasoning in "
-        + "slot:template-reasoning.",
+      "Review the change.\n\nState your verdict in slot:template-verdict and your reasoning in " +
+        "slot:template-reasoning.",
     );
     // The template's own output-contract slots must never appear as a READ
     // contract on the step that produces them (P105 blocker fix).
@@ -1527,7 +1549,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "byte-equal fixture.",
         procedure: procedure({ description: "Review.", sequence: [templated] }),
       }),
-    ) as { readonly procedure?: unknown; readonly prompt?: unknown; };
+    ) as { readonly procedure?: unknown; readonly prompt?: unknown };
     const handDraft = toDraftJson(
       trait({
         id: "byte-templated",
@@ -1535,7 +1557,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "byte-equal fixture.",
         procedure: procedure({ description: "Review.", sequence: [handWritten] }),
       }),
-    ) as { readonly procedure?: unknown; readonly prompt?: unknown; };
+    ) as { readonly procedure?: unknown; readonly prompt?: unknown };
 
     expect(templatedDraft.procedure).toEqual(handDraft.procedure);
     expect(templatedDraft.prompt).toEqual(handDraft.prompt);
@@ -1551,7 +1573,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
       sequence.prompt("dup-review", {
         input: input.prompt`Review.`,
         output: [verdict, output.prompt`State your verdict in ${verdict}.`],
-      })
+      }),
     ).toThrow(/claimed more than once/);
   });
 
@@ -1560,11 +1582,8 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
     expect(() =>
       sequence.prompt("dup-review-2", {
         input: input.prompt`Review.`,
-        output: [
-          output.prompt`First verdict in ${verdict}.`,
-          output.prompt`Second verdict in ${verdict}.`,
-        ],
-      })
+        output: [output.prompt`First verdict in ${verdict}.`, output.prompt`Second verdict in ${verdict}.`],
+      }),
     ).toThrow(/claimed more than once/);
   });
 
@@ -1575,7 +1594,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         id: "wrong-kind",
         cmd: "printf peeked",
         output: output.prompt`State your verdict in ${verdict}.`,
-      })
+      }),
     ).toThrow(/valid only on prompt\/ask steps/);
   });
 
@@ -1601,7 +1620,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
           description: "same-agent fixture.",
           procedure: procedure({ description: "Two passes.", sequence: [first, second] }),
         }),
-      )
+      ),
     ).not.toThrow();
   });
 
@@ -1620,7 +1639,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         agent: seatTwo,
         input: input.prompt`Review as seat two.`,
         output: output.prompt`Your verdict in ${verdict}.`,
-      })
+      }),
     ).toThrow(/already claims it for agent/);
     void firstSeat;
   });
@@ -1648,8 +1667,8 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "ask-include-scope")).toBe(true);
@@ -1667,14 +1686,12 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "loop include fixture.",
         procedure: procedure({
           description: "Loop.",
-          sequence: [
-            sequence.loop("loop-with-include", { body: [body], iterations: 1, include: scope }),
-          ],
+          sequence: [sequence.loop("loop-with-include", { body: [body], iterations: 1, include: scope })],
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "loop-include-scope")).toBe(true);
@@ -1704,8 +1721,8 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "for-each-include-scope")).toBe(true);
@@ -1715,7 +1732,10 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
   it("collects a slot declaration reachable only through include on sequence.branch", () => {
     const scope = slot.text("branch-include-scope");
     const marker = slot.text("branch-include-marker");
-    const gate = sequence.check("branch-include-gate", { cmd: "true", output: slot.boolean("branch-include-pass") });
+    const gate = sequence.check("branch-include-gate", {
+      cmd: "true",
+      output: slot.boolean("branch-include-pass"),
+    });
     const success = sequence.command({ id: "branch-include-success", cmd: "printf ok", output: marker });
     const draft = toDraftJson(
       trait({
@@ -1734,13 +1754,13 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "branch-include-scope")).toBe(true);
-    const branchItem = draft.procedure?.sequence?.find((item) =>
-      (item as { readonly kind?: string; }).kind === "branch"
+    const branchItem = draft.procedure?.sequence?.find(
+      (item) => (item as { readonly kind?: string }).kind === "branch",
     );
     expect(branchItem?.input).toEqual(["slot:branch-include-scope"]);
   });
@@ -1758,14 +1778,12 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
         description: "parallel include fixture.",
         procedure: procedure({
           description: "Parallel.",
-          sequence: [
-            sequence.parallel("parallel-with-include", [branch], { include: scope }),
-          ],
+          sequence: [sequence.parallel("parallel-with-include", [branch], { include: scope })],
         }),
       }),
     ) as {
-      readonly slot?: readonly { readonly id: string; }[];
-      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown; }[]; };
+      readonly slot?: readonly { readonly id: string }[];
+      readonly procedure?: { readonly sequence?: readonly { readonly input?: unknown }[] };
     };
 
     expect(draft.slot?.some((entry) => entry.id === "parallel-include-scope")).toBe(true);
@@ -1783,12 +1801,14 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       when: needsHuman,
       output: answer,
     });
-    const draft = toDraftJson(trait("ask", {
-      version: "0.1.0",
-      description: "s",
-      name: "Ask",
-      procedure: procedure({ description: "Ask a human.", sequence: [ask] }),
-    })) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    const draft = toDraftJson(
+      trait("ask", {
+        version: "0.1.0",
+        description: "s",
+        name: "Ask",
+        procedure: procedure({ description: "Ask a human.", sequence: [ask] }),
+      }),
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
     expect(draft.procedure?.sequence?.[0]).toMatchObject({
       kind: "ask",
       when: "signal:needs-human-input",
@@ -1805,17 +1825,19 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       output: proposal,
       onComplete: ready,
     });
-    const draft = toDraftJson(trait("approval-gate", {
-      version: "0.1.0",
-      description: "s",
-      name: "Approval Gate",
-      procedure: procedure({
-        description: "Review a proposal.",
-        sequence: [sequence.gate(producer, { proposal, when: ready, rounds: 2 })],
+    const draft = toDraftJson(
+      trait("approval-gate", {
+        version: "0.1.0",
+        description: "s",
+        name: "Approval Gate",
+        procedure: procedure({
+          description: "Review a proposal.",
+          sequence: [sequence.gate(producer, { proposal, when: ready, rounds: 2 })],
+        }),
       }),
-    })) as {
-      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; };
-      readonly sequence?: Record<string, { readonly sequence?: readonly Record<string, unknown>[]; }>;
+    ) as {
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
+      readonly sequence?: Record<string, { readonly sequence?: readonly Record<string, unknown>[] }>;
     };
 
     expect(draft.procedure?.sequence?.[0]).toMatchObject({
@@ -1827,7 +1849,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const body = draft.sequence?.["produce-gate-body"]?.sequence ?? [];
     expect(body.map((item) => item.kind)).toEqual(["project", undefined, "ask", "branch"]);
     expect(body[2]).toMatchObject({ kind: "ask", input: ["slot:proposal"] });
-    expect(JSON.stringify(draft)).not.toContain("\"kind\":\"gate\"");
+    expect(JSON.stringify(draft)).not.toContain('"kind":"gate"');
   });
 
   it("accepts both direct and derived producer signal emissions", () => {
@@ -1851,7 +1873,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         proposal,
         when: signal({ id: "other-ready", description: "Other." }),
         rounds: 1,
-      })
+      }),
     ).toThrow(/must declare signal:other-ready/);
   });
 
@@ -1873,7 +1895,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         when: ready,
         rounds: 1,
         editStep: unrelated,
-      })
+      }),
     ).toThrow(/editStep must replace slot:edit-proposal/);
   });
 
@@ -1888,12 +1910,10 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         name: "Gate Branch",
         procedure: procedure({
           description: "Gate then branch.",
-          sequence: [
-            sequence.branch("route", { check: gate, success: [mergeStep] }),
-          ],
+          sequence: [sequence.branch("route", { check: gate, success: [mergeStep] })],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     const items = draft.procedure?.sequence ?? [];
     expect(items.filter((item) => item.id === "gate")).toHaveLength(1);
@@ -1918,14 +1938,14 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         name: "Standalone Check",
         procedure: procedure({ description: "One check step.", sequence: [gate] }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draft.procedure?.sequence?.[0]).not.toHaveProperty("pass");
   });
 
   it("accepts success-only and failure-only branches, and rejects neither given", () => {
     const step = sequence.command("noop-step", { cmd: "true" });
-    const draftFor = (fields: { readonly success?: readonly unknown[]; readonly failure?: readonly unknown[]; }) =>
+    const draftFor = (fields: { readonly success?: readonly unknown[]; readonly failure?: readonly unknown[] }) =>
       toDraftJson(
         trait("branch-arms", {
           version: "0.1.0",
@@ -1934,22 +1954,19 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           procedure: procedure({
             description: "One arm each.",
             sequence: [
-              sequence.branch(
-                "route",
-                {
-                  check: condition.output.is("approved"),
-                  ...fields,
-                } as Parameters<typeof sequence.branch>[1],
-              ),
+              sequence.branch("route", {
+                check: condition.output.is("approved"),
+                ...fields,
+              } as Parameters<typeof sequence.branch>[1]),
             ],
           }),
         }),
-      ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+      ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(() => draftFor({ success: [step] })).not.toThrow();
     expect(() => draftFor({ failure: [step] })).not.toThrow();
     expect(() =>
-      sequence.branch("route", { check: condition.output.is("approved") } as Parameters<typeof sequence.branch>[1])
+      sequence.branch("route", { check: condition.output.is("approved") } as Parameters<typeof sequence.branch>[1]),
     ).toThrow(/branch requires success, failure, or both/);
   });
 
@@ -1993,14 +2010,19 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           procedure: procedure({
             description: "One command step.",
             sequence: [
-              sequence.command("gate", { cmd: "true", ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }) }),
+              sequence.command("gate", {
+                cmd: "true",
+                ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
+              }),
             ],
           }),
         }),
-      ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+      ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draftFor(5_000).procedure?.sequence?.[0]).toMatchObject({ command: { "idle-timeout-ms": 5_000 } });
-    const withoutIdle = draftFor(undefined).procedure?.sequence?.[0] as { readonly command?: Record<string, unknown>; };
+    const withoutIdle = draftFor(undefined).procedure?.sequence?.[0] as {
+      readonly command?: Record<string, unknown>;
+    };
     expect(withoutIdle?.command).not.toHaveProperty("idle-timeout-ms");
   });
 
@@ -2013,13 +2035,11 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         name: "Inline Loop Body",
         procedure: procedure({
           description: "Loop with an inline body.",
-          sequence: [
-            sequence.loop("refinement-loop", { body: [bodyStep], iterations: 3 }),
-          ],
+          sequence: [sequence.loop("refinement-loop", { body: [bodyStep], iterations: 3 })],
         }),
       }),
     ) as {
-      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; };
+      readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] };
       readonly sequence?: Record<string, unknown>;
     };
 
@@ -2038,12 +2058,10 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
         name: "Inline ForEach Body",
         procedure: procedure({
           description: "ForEach with an inline body.",
-          sequence: [
-            sequence.forEach("review-each", { over: files, item: currentFile, body: [bodyStep] }),
-          ],
+          sequence: [sequence.forEach("review-each", { over: files, item: currentFile, body: [bodyStep] })],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draft.procedure?.sequence?.[0]?.sequence).toBe("sequence:review-each-body");
   });
@@ -2069,27 +2087,33 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
 
     expect(draft.procedure?.input).toEqual(["port:contract-request"]);
     expect(draft.procedure?.output).toEqual(["port:contract-response"]);
-    expect(draft.port).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "contract-request" }),
-      expect.objectContaining({ id: "contract-response", value: "slot:contract-result" }),
-    ]));
+    expect(draft.port).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "contract-request" }),
+        expect.objectContaining({ id: "contract-response", value: "slot:contract-result" }),
+      ]),
+    );
   });
 
   it("infers a bound output produced by a project step", () => {
     const source = slot.text("project-source");
     const result = slot.text("project-result");
     const response = port.output.of({ id: "project-response", schema: "schema:text", value: result });
-    const draft = toDraftJson(trait("project-contract", {
-      name: "Project Contract",
-      description: "s",
-      port: response,
-      procedure: procedure({
-        description: "Project a result to the response boundary.",
-        sequence: [sequence.project("project-result", {
-          projections: [{ source, destination: result }],
-        })],
+    const draft = toDraftJson(
+      trait("project-contract", {
+        name: "Project Contract",
+        description: "s",
+        port: response,
+        procedure: procedure({
+          description: "Project a result to the response boundary.",
+          sequence: [
+            sequence.project("project-result", {
+              projections: [{ source, destination: result }],
+            }),
+          ],
+        }),
       }),
-    }));
+    );
 
     expect(draft.procedure?.output).toEqual(["port:project-response"]);
   });
@@ -2170,7 +2194,11 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     const promptResult = slot.text("parity-prompt-result");
     const projectResult = slot.text("parity-project-result");
     const promptOutput = port.output.of({ id: "parity-prompt-output", schema: "schema:text", value: promptResult });
-    const projectOutput = port.output.of({ id: "parity-project-output", schema: "schema:text", value: projectResult });
+    const projectOutput = port.output.of({
+      id: "parity-project-output",
+      schema: "schema:text",
+      value: projectResult,
+    });
     const directOutput = port.output.text({ id: "parity-direct-output" });
     const unproduced = port.output.of({
       id: "parity-unproduced",
@@ -2204,11 +2232,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
 
     // Stable id order (0104), not authoring order — the membership matches
     // what was formerly authored on procedure().
-    expect(draft.procedure?.input).toEqual([
-      "port:parity-defaulted",
-      "port:parity-optional",
-      "port:parity-required",
-    ]);
+    expect(draft.procedure?.input).toEqual(["port:parity-defaulted", "port:parity-optional", "port:parity-required"]);
     expect(draft.procedure?.output).toEqual([
       "port:parity-direct-output",
       "port:parity-project-output",
@@ -2243,7 +2267,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
             ],
           }),
         }),
-      )
+      ),
     ).toThrow(/procedure: steps titled "Do The Thing" and "do the thing" both derive id "do-the-thing"/);
   });
 
@@ -2252,7 +2276,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
       sequence.linear("nested-collision", [
         sequence.prompt("alpha", { title: "Same Title", text: input.prompt`One.` }),
         sequence.prompt("beta", { title: "Same Title", text: input.prompt`Two.` }),
-      ])
+      ]),
     ).toThrow(/sequence:nested-collision: steps titled "Same Title" and "Same Title" both derive id "same-title"/);
   });
 
@@ -2277,7 +2301,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
             ],
           }),
         }),
-      )
+      ),
     ).toThrow(/generated sequence id ctx-branch-arm-p-5-route-then collides with an existing declaration/);
   });
 
@@ -2297,7 +2321,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
           ],
         }),
       }),
-    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[]; }; };
+    ) as { readonly procedure?: { readonly sequence?: readonly Record<string, unknown>[] } };
 
     expect(draft.procedure?.sequence?.[0]?.item).toBe("slot:review-each-item");
   });
@@ -2347,7 +2371,7 @@ it("passes metadata family/variant and facets through the draft unchanged", () =
       procedure: procedure({ description: "No steps.", sequence: [] }),
       slot: [slot.text("result")],
     }),
-  ) as { metadata?: Record<string, unknown>; };
+  ) as { metadata?: Record<string, unknown> };
 
   expect(draft.metadata).toEqual({ family: "plan", variant: "quick", tag: ["first-party"] });
 });
@@ -2363,9 +2387,7 @@ describe("agent.* templates vs deprecated bare exports (P459)", () => {
     const namespacedHandle = namespaced("role", { description: "Custom description." });
     const bareHandle = bare("role", { description: "Custom description." });
 
-    expect(toDraftJson(bareHandle)).toEqual(
-      toDraftJson(namespacedHandle),
-    );
+    expect(toDraftJson(bareHandle)).toEqual(toDraftJson(namespacedHandle));
   });
 
   it("reports a deprecation diagnostic only for the bare export", () => {
@@ -2392,9 +2414,7 @@ describe("seats (0162)", () => {
       agent("smart-2", { description: "Reviews the diff." }),
     ];
 
-    expect(minted.map((h) => toDraftJson(h))).toEqual(
-      handWritten.map((h) => toDraftJson(h)),
-    );
+    expect(minted.map((h) => toDraftJson(h))).toEqual(handWritten.map((h) => toDraftJson(h)));
   });
 
   it("mints byte-identical output to hand-numbered agent.reviewer(...) calls", () => {
@@ -2404,9 +2424,7 @@ describe("seats (0162)", () => {
       agent.reviewer("smart-2", { description: "Reviews the diff." }),
     ];
 
-    expect(minted.map((h) => toDraftJson(h))).toEqual(
-      handWritten.map((h) => toDraftJson(h)),
-    );
+    expect(minted.map((h) => toDraftJson(h))).toEqual(handWritten.map((h) => toDraftJson(h)));
   });
 
   it("mints ids in positional order", () => {
@@ -2456,10 +2474,12 @@ describe("session", () => {
     const first = agent("first", { description: "First agent.", session: shared });
     const secondAgent = agent.reviewer("second", { session: shared });
 
-    const draft = toDraftJson(trait("session-sharing", {
-      summary: "Two agents sharing one session.",
-      agent: [first, secondAgent],
-    }));
+    const draft = toDraftJson(
+      trait("session-sharing", {
+        summary: "Two agents sharing one session.",
+        agent: [first, secondAgent],
+      }),
+    );
 
     expect(draft.session).toEqual([{ id: "shared-scan", description: "Shared scan session." }]);
     expect(draft.agent?.map((a) => a["session"])).toEqual(["session:shared-scan", "session:shared-scan"]);
@@ -2469,9 +2489,7 @@ describe("session", () => {
     const shared = session("byte-stable", { description: "Byte-stability check." });
     const withSession = agent("byte-stable-agent", { description: "Agent.", session: shared });
 
-    expect(JSON.stringify(toDraftJson(withSession))).toBe(
-      JSON.stringify(toDraftJson(withSession)),
-    );
+    expect(JSON.stringify(toDraftJson(withSession))).toBe(JSON.stringify(toDraftJson(withSession)));
   });
 
   it("session.PerFrame/session.Persistent lower to bare lifecycle scalars, not a declaration", () => {
@@ -2517,13 +2535,9 @@ describe("session", () => {
       searcher("s", { session: shared }),
     ];
 
-    for (
-      // oxlint-disable-next-line typescript/no-non-null-assertion -- namespacedHandles and bareHandles are built as parallel arrays of equal length above
-      const [namespaced, bare] of namespacedHandles.map((handle, index) => [handle, bareHandles[index]!] as const)
-    ) {
-      expect(toDraftJson(namespaced).session).toBe(
-        "session:shared-role-scan",
-      );
+    for (// oxlint-disable-next-line typescript/no-non-null-assertion -- namespacedHandles and bareHandles are built as parallel arrays of equal length above
+    const [namespaced, bare] of namespacedHandles.map((handle, index) => [handle, bareHandles[index]!] as const)) {
+      expect(toDraftJson(namespaced).session).toBe("session:shared-role-scan");
       expect(toDraftJson(namespaced)).toEqual(toDraftJson(bare));
     }
   });
@@ -2593,7 +2607,7 @@ describe("typed rule/signal/dependency (P459)", () => {
         procedure: procedure({ description: "No steps.", sequence: [] }),
         signal: [signal(fields)],
       }),
-    ) as { readonly signal?: readonly { readonly id: string; readonly description: string; }[]; };
+    ) as { readonly signal?: readonly { readonly id: string; readonly description: string }[] };
 
     expect(draft.signal).toEqual([{ id: "approved", description: "The reviewer approved the change." }]);
 
@@ -2640,8 +2654,11 @@ describe("typed rule/signal/dependency (P459)", () => {
     };
     expect(npmWithRegistry.source).toEqual({ package: "@ctx/shared", registry: "npm" });
 
-    // @ts-expect-error a Git source cannot also carry npm's package field.
-    const mixedSource: DependencyFields["source"] = { git: "https://example.com/shared.git", package: "@ctx/shared" };
+    const mixedSource: DependencyFields["source"] = {
+      git: "https://example.com/shared.git",
+      // @ts-expect-error a Git source cannot also carry npm's package field.
+      package: "@ctx/shared",
+    };
     void mixedSource;
   });
 });
@@ -2803,17 +2820,19 @@ describe("markdown doc-resource helpers (P459)", () => {
         name: "Steps Fixture",
         procedure: procedure({
           description: "No steps.",
-          sequence: [sequence.command({
-            id: "commit",
-            cmd: "git commit",
-            include: steps({
-              id: "validation-steps",
-              items: ["Run the build", "Run the tests"],
+          sequence: [
+            sequence.command({
+              id: "commit",
+              cmd: "git commit",
+              include: steps({
+                id: "validation-steps",
+                items: ["Run the build", "Run the tests"],
+              }),
             }),
-          })],
+          ],
         }),
       }),
-    ) as { readonly resource?: readonly { readonly id: string; readonly content: string; }[]; };
+    ) as { readonly resource?: readonly { readonly id: string; readonly content: string }[] };
 
     expect(draft.resource?.find((entry) => entry.id === "validation-steps")?.content).toBe(
       "## Steps\n\n1. Run the build\n2. Run the tests\n",
@@ -2828,17 +2847,23 @@ describe("markdown doc-resource helpers (P459)", () => {
         name: "Table Callout Fixture",
         procedure: procedure({
           description: "No steps.",
-          sequence: [sequence.command({
-            id: "commit",
-            cmd: "git commit",
-            include: [
-              table({ id: "gates", headers: ["Gate", "Command"], rows: [["build", "pnpm build | ok\nnext"]] }),
-              callout({ id: "note", kind: "warning", body: "Line one\n\nLine two" }),
-            ],
-          })],
+          sequence: [
+            sequence.command({
+              id: "commit",
+              cmd: "git commit",
+              include: [
+                table({
+                  id: "gates",
+                  headers: ["Gate", "Command"],
+                  rows: [["build", "pnpm build | ok\nnext"]],
+                }),
+                callout({ id: "note", kind: "warning", body: "Line one\n\nLine two" }),
+              ],
+            }),
+          ],
         }),
       }),
-    ) as { readonly resource?: readonly { readonly id: string; readonly content: string; }[]; };
+    ) as { readonly resource?: readonly { readonly id: string; readonly content: string }[] };
 
     expect(draft.resource?.find((entry) => entry.id === "gates")?.content).toBe(
       "| Gate | Command |\n| --- | --- |\n| build | pnpm build \\| ok<br>next |\n",

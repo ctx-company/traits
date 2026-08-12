@@ -8,10 +8,11 @@ declare const HANDLE_VALUE: unique symbol;
 declare const FIELD_REF_BRAND: unique symbol;
 
 /** Phantom identity carried by every CDK handle. */
-export type Brand<K extends string> = { readonly [HANDLE_BRAND]: K; };
-type CdkHandle<K extends string, Value = unknown> = CdkObject & Brand<K> & {
-  readonly [HANDLE_VALUE]?: Value;
-};
+export type Brand<K extends string> = { readonly [HANDLE_BRAND]: K };
+type CdkHandle<K extends string, Value = unknown> = CdkObject &
+  Brand<K> & {
+    readonly [HANDLE_VALUE]?: Value;
+  };
 
 /**
  * Attaches the same phantom `Value` marker `CdkHandle`/`Handle` carry, to an
@@ -20,7 +21,7 @@ type CdkHandle<K extends string, Value = unknown> = CdkObject & Brand<K> & {
  * that returns e.g. `SchemaHandle<Value>`/`PortHandle<Value>`/`SlotHandle<
  * Value>` no longer has to re-assert the phantom itself at its own call site.
  */
-export type WithHandleValue<T extends object, Value> = T & { readonly [HANDLE_VALUE]?: Value; };
+export type WithHandleValue<T extends object, Value> = T & { readonly [HANDLE_VALUE]?: Value };
 
 /**
  * A typed reference to one field of an object-schema slot, produced by
@@ -29,7 +30,7 @@ export type WithHandleValue<T extends object, Value> = T & { readonly [HANDLE_VA
  * value)` lowers it to the same canonical `{ slot, field, equals }` guard
  * `condition.fieldEquals` emits by hand.
  */
-export type FieldRef<Value = unknown> = CdkObject & { readonly [FIELD_REF_BRAND]?: Value; };
+export type FieldRef<Value = unknown> = CdkObject & { readonly [FIELD_REF_BRAND]?: Value };
 
 /**
  * Maps an inferred object-schema value type to the field-ref proxy an
@@ -41,15 +42,10 @@ export type FieldRef<Value = unknown> = CdkObject & { readonly [FIELD_REF_BRAND]
  * field names only (task 0085's decision), no list indexing/wildcards.
  */
 export type ObjectFieldRefs<Value> = {
-  readonly [K in keyof Value]-?:
-    & FieldRef<Value[K]>
-    & (
-      // `unknown` here is the intersection identity (`T & unknown` = `T`) — a list or scalar field
-      // contributes no extra field-ref surface beyond `FieldRef<Value[K]>` above.
-      Value[K] extends readonly unknown[] ? unknown
-        : Value[K] extends object ? ObjectFieldRefs<Value[K]>
-        : unknown
-    );
+  readonly [K in keyof Value]-?: FieldRef<Value[K]> &
+    // `unknown` here is the intersection identity (`T & unknown` = `T`) — a list or scalar field
+    // contributes no extra field-ref surface beyond `FieldRef<Value[K]>` above.
+    (Value[K] extends readonly unknown[] ? unknown : Value[K] extends object ? ObjectFieldRefs<Value[K]> : unknown);
 };
 
 /** A typed opaque reference emitted by a CDK builder. */
@@ -82,11 +78,7 @@ export type SlotHandle<Value = unknown> = Handle<"slot", Value>;
 export type DeclaredSlotHandle<Value = unknown> = SlotHandle<Value> & {
   readonly optional: () => OptionalSlotRead<Value>;
   /** `.forEach` is attached non-enumerably at mint time (0106, `slot.ts`) — `items.forEach` is THE for-each spelling (0102). */
-  readonly forEach: (
-    title: string,
-    opts: ForEachRegistrarOptions,
-    body: (item: SlotHandle) => void,
-  ) => SequenceHandle;
+  readonly forEach: (title: string, opts: ForEachRegistrarOptions, body: (item: SlotHandle) => void) => SequenceHandle;
 };
 /**
  * A declared object-schema slot handle: `DeclaredSlotHandle`'s `.optional()`
@@ -99,14 +91,9 @@ export type DeclaredSlotWithFields<Value = unknown> = DeclaredSlotHandle<Value> 
  * per declared field (`slot.foo`, `slot["exit-code"]`) alongside the plain
  * `SlotHandle<Value>` surface. Scalar/list slots stay a bare `SlotHandle`.
  */
-export type SlotWithFields<Value = unknown> =
-  & SlotHandle<Value>
-  & (
-    // `unknown` here is the intersection identity — a list or scalar value adds no field-ref surface.
-    Value extends readonly unknown[] ? unknown
-      : Value extends object ? ObjectFieldRefs<Value>
-      : unknown
-  );
+export type SlotWithFields<Value = unknown> = SlotHandle<Value> &
+  // `unknown` here is the intersection identity — a list or scalar value adds no field-ref surface.
+  (Value extends readonly unknown[] ? unknown : Value extends object ? ObjectFieldRefs<Value> : unknown);
 export type PortHandle<Value = unknown> = Handle<"port", Value>;
 /**
  * A typed operator knob: declared in trait source, resolved from config
@@ -117,7 +104,7 @@ export type PortHandle<Value = unknown> = Handle<"port", Value>;
 export type SettingHandle<Value = unknown> = Handle<"setting", Value>;
 export type PromptHandle<Input = unknown, Output = unknown> = Handle<
   "prompt",
-  { readonly input: Input; readonly output: Output; }
+  { readonly input: Input; readonly output: Output }
 >;
 export type ResourceHandle<Value = unknown> = Handle<"resource", Value>;
 /**
@@ -133,14 +120,14 @@ export type AgentHandle = Handle<"agent"> & {
 };
 export type SchemaHandle<Value = unknown> = Handle<"schema", Value>;
 /** A built-in or collection schema reference with its represented value type. */
-export type SchemaRef<Value = unknown> = string & { readonly __ctxTraitSchemaValue?: Value; };
+export type SchemaRef<Value = unknown> = string & { readonly __ctxTraitSchemaValue?: Value };
 export type SequenceHandle<Input = unknown, Output = unknown> = CdkHandle<
   "sequence-step",
-  { readonly input: Input; readonly output: Output; }
+  { readonly input: Input; readonly output: Output }
 >;
 export type SequenceLinearHandle<Input = unknown, Output = unknown> = Handle<
   "sequence",
-  { readonly input: Input; readonly output: Output; }
+  { readonly input: Input; readonly output: Output }
 >;
 export type ConditionHandle = Handle<"condition">;
 /**
@@ -153,7 +140,7 @@ export type GuardHandle = CanonicalGuardPredicate & Brand<"guard">;
 export type RuleHandle = Handle<"rule">;
 export type ProcedureHandle<Input = unknown, Output = unknown> = CdkHandle<
   "procedure",
-  { readonly input: Input; readonly output: Output; }
+  { readonly input: Input; readonly output: Output }
 >;
 export type TraitHandle = Handle<"trait">;
 /**

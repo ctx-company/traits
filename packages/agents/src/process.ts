@@ -5,7 +5,7 @@ import type { PromptTemplate, SequenceHandle, SlotHandle } from "@ctx-traits/cdk
 type FunctionalAgentRole = {
   readonly prompt: (
     title: string,
-    opts: { readonly id?: string; readonly input: PromptTemplate; readonly output: SlotHandle; },
+    opts: { readonly id?: string; readonly input: PromptTemplate; readonly output: SlotHandle },
   ) => SequenceHandle;
 };
 
@@ -28,18 +28,17 @@ export type {
  */
 export function familyCommitTail(opts: {
   id: string;
-  scribe: { readonly agent: FunctionalAgentRole; readonly text: PromptTemplate; };
+  scribe: { readonly agent: FunctionalAgentRole; readonly text: PromptTemplate };
   receipt: SlotHandle<string>;
   /** 0098: routes the commit through an external approval gate — e.g. `ctx-gate run --`. Absent, the commit command is untouched. */
-  gate?: { prefix: string; title?: string; timeoutMs?: number; };
+  gate?: { prefix: string; title?: string; timeoutMs?: number };
 }): void {
   const { id, scribe, receipt, gate } = opts;
   const status = slot.text({
     id: `${id}-status`,
     description:
       "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
-    hint:
-      "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
+    hint: "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs.",
   });
   const message = slot.text({
     id: `${id}-message`,
@@ -85,10 +84,13 @@ export function familyCommitTail(opts: {
       input: input.command`git reset -q -- .agents/runs`,
       output: unstageOutput,
     });
-    const commitInput = gate === undefined ? input.command`git commit -m ${message}` : (() => {
-      const strings = [`${gate.prefix} git commit -m `, ``];
-      return input.command(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, message);
-    })();
+    const commitInput =
+      gate === undefined
+        ? input.command`git commit -m ${message}`
+        : (() => {
+            const strings = [`${gate.prefix} git commit -m `, ``];
+            return input.command(Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray, message);
+          })();
     step.command(gate?.title ?? "Commit the work", {
       id: `${id}-commit`,
       input: commitInput,

@@ -78,9 +78,9 @@ export interface SchemaFieldRecord {
  * — the canonical `{ id, fields, description }` declaration itself lives
  * only in `Meta.declaration` (see `withDeclaration` in `meta.ts`).
  */
-export type SchemaObjectHandle<Value = unknown> =
-  & SchemaHandle<Value>
-  & { readonly [fieldId: string]: SchemaFieldRecord; };
+export type SchemaObjectHandle<Value = unknown> = SchemaHandle<Value> & {
+  readonly [fieldId: string]: SchemaFieldRecord;
+};
 
 // Reads `Value` straight off `SchemaFieldFields<Value>`'s own type parameter
 // instead of re-deriving it from `Field["schema"]`'s declared (parameter-
@@ -90,11 +90,18 @@ export type SchemaObjectHandle<Value = unknown> =
 // would let the untyped `SchemaEnumSpec` arm's default literal type leak
 // into every field's inferred value, enum or not.
 type InferredFieldValue<Field> = Field extends SchemaFieldFields<infer Value> ? Value : InferredSchemaValue<Field>;
-type InferredSchemaValue<Value> = Value extends SchemaEnumSpec<infer Literals> ? Literals[number]
-  : Value extends SchemaRef<infer Inner> ? Inner
-  : Value extends SchemaHandle<infer Inner> ? Inner
-  : unknown;
-type FieldIsOptional<Field> = Field extends SchemaFieldFields ? (Field["required"] extends false ? true : false)
+type InferredSchemaValue<Value> =
+  Value extends SchemaEnumSpec<infer Literals>
+    ? Literals[number]
+    : Value extends SchemaRef<infer Inner>
+      ? Inner
+      : Value extends SchemaHandle<infer Inner>
+        ? Inner
+        : unknown;
+type FieldIsOptional<Field> = Field extends SchemaFieldFields
+  ? Field["required"] extends false
+    ? true
+    : false
   : false;
 
 /**
@@ -105,9 +112,9 @@ type FieldIsOptional<Field> = Field extends SchemaFieldFields ? (Field["required
  * required — the same author-time inference `slot`/`port` already carry for
  * built-in schema values, extended to declared object shapes.
  */
-export type SchemaObjectValue<Fields extends SchemaObjectFields> =
-  & { [K in keyof Fields as FieldIsOptional<Fields[K]> extends true ? never : K]: InferredFieldValue<Fields[K]>; }
-  & { [K in keyof Fields as FieldIsOptional<Fields[K]> extends true ? K : never]?: InferredFieldValue<Fields[K]>; };
+export type SchemaObjectValue<Fields extends SchemaObjectFields> = {
+  [K in keyof Fields as FieldIsOptional<Fields[K]> extends true ? never : K]: InferredFieldValue<Fields[K]>;
+} & { [K in keyof Fields as FieldIsOptional<Fields[K]> extends true ? K : never]?: InferredFieldValue<Fields[K]> };
 
 declare const SPOT_ORIGIN: unique symbol;
 /**
@@ -123,7 +130,7 @@ declare const SPOT_ORIGIN: unique symbol;
  * name, which breaks the moment `build` renames a spot into a differently
  * named field (see `SchemaTemplateFunction`).
  */
-type SpotOrigin<Name extends PropertyKey> = { readonly [SPOT_ORIGIN]?: Name; };
+type SpotOrigin<Name extends PropertyKey> = { readonly [SPOT_ORIGIN]?: Name };
 /** `build`'s `spots` argument type: every spot value tagged with its own key. */
 type TaggedSpots<Spots extends Record<string, SchemaValue>> = {
   readonly [K in keyof Spots]: Spots[K] & SpotOrigin<K>;
@@ -134,9 +141,14 @@ type TaggedSpots<Spots extends Record<string, SchemaValue>> = {
  * `.schema` — the same two shapes `OriginOf`'s caller (`ResolvedField`)
  * already has to distinguish when substituting an override.
  */
-type OriginOf<Field> = Field extends SpotOrigin<infer Name> ? Name
-  : Field extends { readonly schema: infer FieldSchema; } ? (FieldSchema extends SpotOrigin<infer Name> ? Name : never)
-  : never;
+type OriginOf<Field> =
+  Field extends SpotOrigin<infer Name>
+    ? Name
+    : Field extends { readonly schema: infer FieldSchema }
+      ? FieldSchema extends SpotOrigin<infer Name>
+        ? Name
+        : never
+      : never;
 
 /**
  * Resolves one built `Fields[K]` entry against `Overrides`, keyed by the
@@ -152,7 +164,9 @@ type ResolvedField<Field extends SchemaObjectField, Overrides> = ApplyOverride<
   Overrides[OriginOf<Field> & keyof Overrides]
 >;
 type ApplyOverride<Field extends SchemaObjectField, Override> = Override extends SchemaValue
-  ? (Field extends SchemaFieldFields ? Omit<Field, "schema"> & { readonly schema: Override; } : Override)
+  ? Field extends SchemaFieldFields
+    ? Omit<Field, "schema"> & { readonly schema: Override }
+    : Override
   : Field;
 
 /**
@@ -180,7 +194,7 @@ export type ResolvedFields<Fields extends SchemaObjectFields, Overrides> = {
  * `value`'s sibling fields) keep the template's default-spot types.
  */
 export interface SchemaTemplateFunction<Spots extends Record<string, SchemaValue>, Fields extends SchemaObjectFields> {
-  <Overrides extends { readonly [K in keyof Spots]?: SchemaValue; } = Record<string, never>>(
+  <Overrides extends { readonly [K in keyof Spots]?: SchemaValue } = Record<string, never>>(
     schemaId: string,
     overrides?: Overrides,
   ): SchemaObjectHandle<SchemaObjectValue<ResolvedFields<Fields, Overrides>>>;
@@ -264,7 +278,7 @@ export interface SchemaFunction {
   enum<const T extends readonly EnumLiteral[]>(
     id: string,
     values: T,
-    fields?: { readonly description?: string; },
+    fields?: { readonly description?: string },
   ): SchemaHandle<T[number]>;
   /**
    * Declares a named object schema from a map of field id to field schema.
@@ -280,7 +294,7 @@ export interface SchemaFunction {
   object<Fields extends SchemaObjectFields>(
     id: string,
     fields: Fields,
-    options?: { readonly description?: string; },
+    options?: { readonly description?: string },
   ): SchemaObjectHandle<SchemaObjectValue<Fields>>;
   /**
    * Wraps a schema as one `schema.object` field, attaching
@@ -290,9 +304,8 @@ export interface SchemaFunction {
   field<FieldSchema extends SchemaValue | SchemaEnumSpec>(
     schemaValue: FieldSchema,
     fields?: Omit<SchemaFieldFields, "schema">,
-  ):
-    & SchemaFieldFields<InferredSchemaValue<FieldSchema>>
-    & Pick<FieldSchema, Extract<keyof FieldSchema, typeof SPOT_ORIGIN>>;
+  ): SchemaFieldFields<InferredSchemaValue<FieldSchema>> &
+    Pick<FieldSchema, Extract<keyof FieldSchema, typeof SPOT_ORIGIN>>;
   /**
    * Combines several already-normalized field-record maps (plain
    * `SchemaObjectFields`, or another `schema.object`/`extend`/`template`
@@ -311,7 +324,7 @@ export interface SchemaFunction {
    */
   optional<Field extends SchemaObjectField>(
     fieldValue: Field,
-  ): SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false; };
+  ): SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false };
   /**
    * A monomorphizing factory over `schema.object`: declares several named
    * "spots" with default schemas, and returns a specialization function that
@@ -347,7 +360,7 @@ export interface SchemaFunction {
    * });
    * ```
    */
-  zod(id: string, source: unknown, options: { readonly toJsonSchema: (source: unknown) => unknown; }): SchemaHandle;
+  zod(id: string, source: unknown, options: { readonly toJsonSchema: (source: unknown) => unknown }): SchemaHandle;
   /**
    * Declares a `schema.object`/`schema.enum` from an existing TypeBox (or
    * hand-written) JSON Schema value, same supported-shape constraints as
@@ -363,11 +376,11 @@ export interface SchemaFunction {
    */
   typebox(id: string, jsonSchema: unknown): SchemaHandle;
   /** Stable, guard-visible vocabulary: `pass|fail|needs-changes`. */
-  verdict(id?: string): SchemaHandle<typeof VERDICT_VALUES[number]>;
+  verdict(id?: string): SchemaHandle<(typeof VERDICT_VALUES)[number]>;
   /** Stable workflow vocabulary: `approved|revise`. */
-  decision(id?: string): SchemaHandle<typeof DECISION_VALUES[number]>;
+  decision(id?: string): SchemaHandle<(typeof DECISION_VALUES)[number]>;
   /** Stable binary vocabulary: `yes|no`. */
-  yesNo(id?: string): SchemaHandle<typeof YES_NO_VALUES[number]>;
+  yesNo(id?: string): SchemaHandle<(typeof YES_NO_VALUES)[number]>;
   /** Creates an inline enum schema specification from values in their supplied order. */
   oneOf<const Values extends readonly EnumLiteral[]>(...values: Values): SchemaEnumSpec<Values>;
   /** Creates a declared enum schema from an explicit ID and value tuple. */
@@ -424,20 +437,20 @@ function schemaEnum<const T extends readonly EnumLiteral[]>(values: T): SchemaEn
 function schemaEnum<const T extends readonly EnumLiteral[]>(
   id: string,
   values: T,
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): SchemaHandle<T[number]>;
 function schemaEnum(
   idOrValues: string | readonly EnumLiteral[],
   values?: readonly EnumLiteral[],
-  fields?: { readonly description?: string; },
+  fields?: { readonly description?: string },
 ): SchemaEnumSpec | SchemaHandle {
   // The implementation signature's `values`/`fields` are optional only to
   // fit the single-arg overload above; when `idOrValues` is a string, the
   // second-overload caller has always supplied `values` — the non-null
   // assertion below is the resulting single documented gap, not a cast.
   return typeof idOrValues === "string"
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- see the comment above: values is guaranteed by the overload contract
-    ? schemaEnumDeclaration(idOrValues, values!, fields)
+    ? // oxlint-disable-next-line typescript/no-non-null-assertion -- see the comment above: values is guaranteed by the overload contract
+      schemaEnumDeclaration(idOrValues, values!, fields)
     : schemaEnumSpec(idOrValues);
 }
 
@@ -462,10 +475,7 @@ export const schema: SchemaFunction = {
   number: () => schemaBuiltins.number,
   integer: () => schemaBuiltins.integer,
   any: () => schemaBuiltins.any,
-  checklist: () =>
-    schemaArray(
-      schemaBuiltins.checklistItem as unknown as SchemaValue<ChecklistItem>,
-    ),
+  checklist: () => schemaArray(schemaBuiltins.checklistItem as unknown as SchemaValue<ChecklistItem>),
   list: schemaArray,
   array: schemaArray,
   union: schemaUnion,
@@ -479,7 +489,7 @@ export const schema: SchemaFunction = {
   object: function object<Fields extends SchemaObjectFields>(
     id: string,
     fields: Fields,
-    options: { readonly description?: string; } = {},
+    options: { readonly description?: string } = {},
   ) {
     return schemaObject(id, fields, options);
   },
@@ -487,9 +497,8 @@ export const schema: SchemaFunction = {
     schemaValue: FieldSchema,
     fields: Omit<SchemaFieldFields, "schema"> = {},
   ) {
-    return { ...fields, schema: schemaValue } as
-      & SchemaFieldFields<InferredSchemaValue<FieldSchema>>
-      & Pick<FieldSchema, Extract<keyof FieldSchema, typeof SPOT_ORIGIN>>;
+    return { ...fields, schema: schemaValue } as SchemaFieldFields<InferredSchemaValue<FieldSchema>> &
+      Pick<FieldSchema, Extract<keyof FieldSchema, typeof SPOT_ORIGIN>>;
   },
   extend: (...sources) => schemaExtend(sources),
   optional: function optional<Field extends SchemaObjectField>(fieldValue: Field) {
@@ -540,7 +549,7 @@ function schemaEnumSpec<T extends readonly EnumLiteral[]>(values: T): SchemaEnum
 function schemaEnumDeclaration<const T extends readonly EnumLiteral[]>(
   id: string,
   values: T,
-  fields: { readonly description?: string; } = {},
+  fields: { readonly description?: string } = {},
 ): SchemaHandle<T[number]> {
   validateSlug(id, "schema.id");
   const declaration = compact({
@@ -555,7 +564,7 @@ function schemaEnumDeclaration<const T extends readonly EnumLiteral[]>(
 function schemaObject<Fields extends SchemaObjectFields>(
   id: string,
   fields: Fields,
-  options: { readonly description?: string; },
+  options: { readonly description?: string },
 ): SchemaObjectHandle<SchemaObjectValue<Fields>> {
   validateSlug(id, "schema.id");
   const normalizedFields = normalizedFieldRecords(fields, `schema.${id}.fields`);
@@ -615,9 +624,9 @@ function schemaExtend(sources: readonly (SchemaObjectFields | SchemaObjectHandle
       const previousSource = originOf.get(fieldId);
       if (previousSource !== undefined) {
         throw new Error(
-          `schema.extend: field ${
-            JSON.stringify(fieldId)
-          } is declared by both source ${previousSource} and source ${sourceIndex}`,
+          `schema.extend: field ${JSON.stringify(
+            fieldId,
+          )} is declared by both source ${previousSource} and source ${sourceIndex}`,
         );
       }
       originOf.set(fieldId, sourceIndex);
@@ -639,22 +648,20 @@ function schemaExtend(sources: readonly (SchemaObjectFields | SchemaObjectHandle
  */
 function schemaOptional<Field extends SchemaObjectField>(
   fieldValue: Field,
-): SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false; } {
+): SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false } {
   // `Result`'s `InferredFieldValue<Field>` is a purely compile-time read-back
   // of `Field` — the runtime object below is the same plain field record
   // regardless of what value type it's inferred to carry, so both branches
   // mint the phantom once at their own return.
-  type Result = SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false; };
+  type Result = SchemaFieldFields<InferredFieldValue<Field>> & { readonly required: false };
   if (metaOf(fieldValue)?.ref !== undefined || typeof fieldValue === "string") {
     return { schema: fieldValue as SchemaValue, required: false } as Result;
   }
   const optionalField = { ...(fieldValue as SchemaFieldFields | SchemaEnumSpec), required: false as const };
   const declarations = metaOf(fieldValue)?.declarations;
-  return (
-    declarations === undefined
-      ? optionalField
-      : attachMeta(optionalField, { declarations })
-  ) as unknown as Result; // audited-unknown-cast: phantom-mint over inferred generic, see comment above
+  return (declarations === undefined
+    ? optionalField
+    : attachMeta(optionalField, { declarations })) as unknown as Result; // audited-unknown-cast: phantom-mint over inferred generic, see comment above
 }
 
 /**
@@ -671,7 +678,7 @@ function schemaTemplate<Spots extends Record<string, SchemaValue>, Fields extend
   build: (spots: TaggedSpots<Spots>) => Fields,
 ): SchemaTemplateFunction<Spots, Fields> {
   validateSlug(templateId, "schema.template.id");
-  function specialize<Overrides extends { readonly [K in keyof Spots]?: SchemaValue; } = Record<string, never>>(
+  function specialize<Overrides extends { readonly [K in keyof Spots]?: SchemaValue } = Record<string, never>>(
     schemaId: string,
     overrides?: Overrides,
   ): SchemaObjectHandle<SchemaObjectValue<ResolvedFields<Fields, Overrides>>> {
@@ -713,9 +720,10 @@ function boxSchemaRef(schemaRef: string): SchemaRefBox {
 }
 
 export function schemaArray<Value>(value: SchemaValue<Value>): SchemaRef<Value[]> {
-  const schemaRef = `${schemaForms.list.prefix}${
-    refText(value, "schema.array")
-  }${schemaForms.list.suffix}` as SchemaRef<Value[]>;
+  const schemaRef = `${schemaForms.list.prefix}${refText(
+    value,
+    "schema.array",
+  )}${schemaForms.list.suffix}` as SchemaRef<Value[]>;
   // Box the ref and carry the element's declarations, exactly as schema.union
   // does. A bare template string would render correctly and collect nothing:
   // an object schema reachable only through a list field would never be
@@ -762,9 +770,10 @@ function schemaUnion<const Members extends readonly SchemaValue[]>(
   const seen = new Set<string>();
   for (const member of refs) {
     // A member is a plain schema ref or one list wrapper over a plain ref.
-    const inner = member.startsWith(schemaForms.list.prefix) && member.endsWith(schemaForms.list.suffix)
-      ? member.slice(schemaForms.list.prefix.length, member.length - schemaForms.list.suffix.length)
-      : member;
+    const inner =
+      member.startsWith(schemaForms.list.prefix) && member.endsWith(schemaForms.list.suffix)
+        ? member.slice(schemaForms.list.prefix.length, member.length - schemaForms.list.suffix.length)
+        : member;
     const [kind, path, ...extra] = inner.split(":");
     if (kind !== "schema" || path === undefined || extra.length !== 0) {
       throw new Error(`schema.union: member ${JSON.stringify(member)} must be a schema ref or a list of one`);
@@ -777,9 +786,9 @@ function schemaUnion<const Members extends readonly SchemaValue[]>(
     if (seen.has(member)) throw new Error(`schema.union: duplicate member ${JSON.stringify(member)}`);
     seen.add(member);
   }
-  const schemaRef = `${schemaForms.union.prefix}${
-    refs.join(schemaForms.union.separator)
-  }${schemaForms.union.suffix}` as SchemaRef;
+  const schemaRef = `${schemaForms.union.prefix}${refs.join(
+    schemaForms.union.separator,
+  )}${schemaForms.union.suffix}` as SchemaRef;
   const handle = boxSchemaRef(schemaRef);
   // Same distinct-phantom-family note as `schemaArray` above: `SchemaRef`'s
   // brand isn't `withMeta`'s `Value` mechanism.
@@ -829,7 +838,7 @@ function schemaFieldDeclaration(field: SchemaObjectField, fieldPath: string): Sc
 }
 
 function schemaEnumSpecValue(value: unknown): SchemaEnumSpec | undefined {
-  return metaOf(value)?.kind === "schema-field" ? value as SchemaEnumSpec : undefined;
+  return metaOf(value)?.kind === "schema-field" ? (value as SchemaEnumSpec) : undefined;
 }
 
 function enumSchemaRef(
@@ -863,21 +872,22 @@ function normalizeAllowedValues(values: readonly EnumLiteral[], fieldPath: strin
 }
 
 function assertEnumMatchesSchema(values: readonly EnumLiteral[], schemaValue: SchemaValue, fieldPath: string): void {
-  const expectedType = schemaValue === "schema:text"
-    ? "string"
-    : schemaValue === "schema:number"
-    ? "number"
-    : schemaValue === "schema:integer"
-    ? "number"
-    : schemaValue === "schema:boolean"
-    ? "boolean"
-    : undefined;
+  const expectedType =
+    schemaValue === "schema:text"
+      ? "string"
+      : schemaValue === "schema:number"
+        ? "number"
+        : schemaValue === "schema:integer"
+          ? "number"
+          : schemaValue === "schema:boolean"
+            ? "boolean"
+            : undefined;
   if (expectedType === undefined || values.some((value) => typeof value !== expectedType)) {
     throw new Error(`${fieldPath}: enum values must match the declared scalar type`);
   }
   if (
-    schemaValue === "schema:integer"
-    && values.some((value) => typeof value !== "number" || !Number.isInteger(value))
+    schemaValue === "schema:integer" &&
+    values.some((value) => typeof value !== "number" || !Number.isInteger(value))
   ) {
     throw new Error(`${fieldPath}: enum values must match the declared scalar type`);
   }
@@ -932,7 +942,7 @@ function rejectZodEffects(value: unknown, adapterPath: string, seen: Set<object>
   if (seen.has(value)) return;
   seen.add(value);
 
-  const def = (value as { readonly _def?: Record<string, unknown>; })._def;
+  const def = (value as { readonly _def?: Record<string, unknown> })._def;
   if (typeof def !== "object" || def === null) return;
 
   if (def.typeName === "ZodEffects") {
@@ -1040,10 +1050,10 @@ function normalizeJsonValue(value: unknown, fieldPath: string, ancestors: Set<ob
   const normalized: JsonValue = Array.isArray(value)
     ? value.map((item, index) => normalizeJsonValue(item, `${fieldPath}[${index}]`, ancestors))
     : stableObject(
-      Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, normalizeJsonValue(item, `${fieldPath}.${key}`, ancestors)]),
-      ),
-    );
+        Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [key, normalizeJsonValue(item, `${fieldPath}.${key}`, ancestors)]),
+        ),
+      );
   ancestors.delete(value);
   return normalized;
 }
@@ -1083,8 +1093,8 @@ function optionalString(value: JsonValue | undefined, fieldPath: string): string
 function enumValues(value: JsonValue | undefined, fieldPath: string): EnumLiteral[] | undefined {
   if (value === undefined) return undefined;
   if (
-    !Array.isArray(value)
-    || !value.every((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean")
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean")
   ) {
     throw new Error(`${fieldPath}: expected an array of scalar values`);
   }
@@ -1095,15 +1105,7 @@ function rejectUnsupportedKeywords(schema: JsonSchemaObject, fieldPath: string):
   if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
     throw new Error(`${fieldPath}.additionalProperties: unsupported JSON Schema keyword`);
   }
-  const ignored = new Set([
-    "type",
-    "properties",
-    "required",
-    "items",
-    "enum",
-    "description",
-    "additionalProperties",
-  ]);
+  const ignored = new Set(["type", "properties", "required", "items", "enum", "description", "additionalProperties"]);
   for (const key of Object.keys(schema)) {
     if (!ignored.has(key)) throw new Error(`${fieldPath}.${key}: unsupported JSON Schema keyword`);
   }

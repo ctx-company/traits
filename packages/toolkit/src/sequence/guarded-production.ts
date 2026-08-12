@@ -62,7 +62,7 @@ export type GuardedProductionReviewSeat = GuardedProductionRole & {
    */
   readonly extraInputs?: readonly (SlotHandle | OptionalSlotRead)[];
   /** Optional conditional signal emitted with this review's accepted output. */
-  readonly onComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue; };
+  readonly onComplete?: SignalHandle | { readonly signal: SignalHandle; readonly when: GuardValue };
 };
 
 export type GuardedProductionOptions<Produces> = {
@@ -145,23 +145,24 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
     onAbort,
   } = options;
   if (minRounds !== undefined && carry === undefined) {
-    throw new Error("guardedProduction: \"minRounds\" requires \"carry\"");
+    throw new Error('guardedProduction: "minRounds" requires "carry"');
   }
   if (minRounds !== undefined && minRounds <= 1) {
-    throw new Error("guardedProduction: \"minRounds\" must be greater than 1");
+    throw new Error('guardedProduction: "minRounds" must be greater than 1');
   }
   if (minRounds !== undefined && minRounds >= rounds) {
-    throw new Error("guardedProduction: \"minRounds\" must be less than \"rounds\"");
+    throw new Error('guardedProduction: "minRounds" must be less than "rounds"');
   }
   const seats = Array.isArray(review) ? review : [review];
   const suffix = (index: number) => (seats.length > 1 ? `-${index + 1}` : "");
-  const verdicts = seats.map((seat, index) =>
-    seat.verdictSlot
-      ?? slot.of({
+  const verdicts = seats.map(
+    (seat, index) =>
+      seat.verdictSlot ??
+      slot.of({
         id: `${id}-verdict${suffix(index)}`,
         schema: seat.verdictSchema ?? reviewerVerdict,
         description: `Reviewer verdict for the "${id}" produce-review round.`,
-      })
+      }),
   );
   // The produce step reads its own output slot from the previous round
   // (`input.optional` — absent in round 1, exactly like the verdicts). This
@@ -190,7 +191,7 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
       output: seat.extraOutputs ? [verdicts[index], ...seat.extraOutputs] : verdicts[index],
       input: [input.optional(verdicts[index]), ...(seat.extraInputs ?? [])],
       ...(seat.onComplete === undefined ? {} : { onComplete: seat.onComplete }),
-    })
+    }),
   );
   const sealed = carry === undefined ? undefined : slot.boolean(`${id}-sealed`);
   const body = sequence.linear(
@@ -198,19 +199,19 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
     carry === undefined
       ? [produceStep, ...(evidence ?? []), ...reviewSteps, ...(afterReview ?? [])]
       : [
-        sequence.project(`${id}-unseal`, {
-          // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
-          projections: [{ source: operation.literal(false), destination: sealed! }],
-        }),
-        produceStep,
-        ...(evidence ?? []),
-        ...reviewSteps,
-        ...(afterReview ?? []),
-        sequence.project(`${id}-seal`, {
-          // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
-          projections: [{ source: operation.literal(true), destination: sealed! }],
-        }),
-      ],
+          sequence.project(`${id}-unseal`, {
+            // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
+            projections: [{ source: operation.literal(false), destination: sealed! }],
+          }),
+          produceStep,
+          ...(evidence ?? []),
+          ...reviewSteps,
+          ...(afterReview ?? []),
+          sequence.project(`${id}-seal`, {
+            // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
+            projections: [{ source: operation.literal(true), destination: sealed! }],
+          }),
+        ],
   );
   // A bare `condition.equals` when there is exactly one seat (matches the
   // pre-extension shape byte-for-byte); `condition.all` only wraps when
@@ -220,18 +221,21 @@ export function guardedProduction<Produces>(options: GuardedProductionOptions<Pr
   const perSeatApproved = verdicts.map((verdict) => condition.equals(verdict.status, "approved"));
   // oxlint-disable-next-line typescript/no-non-null-assertion -- length === 1 checked above
   const approved = perSeatApproved.length === 1 ? perSeatApproved[0]! : condition.all(perSeatApproved);
-  const until = carry === undefined
-    ? alsoRequire === undefined ? approved : condition.all([approved, alsoRequire])
-    : condition.all([
-      approved,
-      ...(alsoRequire === undefined ? [] : [alsoRequire]),
-      // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
-      condition.equals(sealed!, true),
-      condition.count(carry).where("needs", []).equals(0),
-      ...(minRounds === undefined
-        ? []
-        : [condition.any([condition.count(carry).equals(0), condition.iterationAtLeast(minRounds - 1)])]),
-    ]);
+  const until =
+    carry === undefined
+      ? alsoRequire === undefined
+        ? approved
+        : condition.all([approved, alsoRequire])
+      : condition.all([
+          approved,
+          ...(alsoRequire === undefined ? [] : [alsoRequire]),
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- this branch only runs when carry !== undefined, which is exactly when sealed was assigned above
+          condition.equals(sealed!, true),
+          condition.count(carry).where("needs", []).equals(0),
+          ...(minRounds === undefined
+            ? []
+            : [condition.any([condition.count(carry).equals(0), condition.iterationAtLeast(minRounds - 1)])]),
+        ]);
   const loopHandle = sequence.loop(id, {
     sequence: body,
     until,

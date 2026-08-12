@@ -74,8 +74,12 @@ function registerVariant<H extends VariantHandleBase>(record: VariantRecord): H 
 }
 
 function isVariantHandle(value: unknown): value is VariantLeafHandle {
-  return typeof value === "object" && value !== null && VARIANT_HANDLE in (value as object)
-    && variantRecords.has((value as VariantHandleBase)[VARIANT_HANDLE]);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    VARIANT_HANDLE in (value as object) &&
+    variantRecords.has((value as VariantHandleBase)[VARIANT_HANDLE])
+  );
 }
 
 function variantRecordOf(handle: VariantLeafHandle): VariantRecord {
@@ -297,12 +301,12 @@ async function resolveVariantFields(
     throw new Error(`variant.import: circular import chain (${[...seen, modulePath].join(" -> ")})`);
   }
   const resolvedUrl = new URL(modulePath, `file://${sourceAnchor.file}`).href;
-  const imported = (await import(resolvedUrl)) as { readonly default?: unknown; };
+  const imported = (await import(resolvedUrl)) as { readonly default?: unknown };
   const exported = imported.default;
   if (!isVariantHandle(exported)) {
     throw new Error(
-      `variant.import(${JSON.stringify(modulePath)}): default export must be a variant(...) or `
-        + `variant.import(...) handle, not a plain object or other value`,
+      `variant.import(${JSON.stringify(modulePath)}): default export must be a variant(...) or ` +
+        `variant.import(...) handle, not a plain object or other value`,
     );
   }
   return resolveVariantFields(exported, [...seen, modulePath]);

@@ -41,8 +41,7 @@ export interface UnionEntry {
 export function provenanceBlock(traitId: string, entry: UnionEntry): string {
   // Illustrative pointer, not a directly runnable command: `ctx traits explain` requires
   // `--task <TASK>` (or `--scaffold`) to reproduce a specific activation decision.
-  const provenance =
-    `[ctx.traits] ${traitId} (model-view-digest: ${entry.digest}) — see \`ctx traits explain ${traitId} --task <task>\``;
+  const provenance = `[ctx.traits] ${traitId} (model-view-digest: ${entry.digest}) — see \`ctx traits explain ${traitId} --task <task>\``;
   return `${provenance}\n${entry.text}`;
 }
 
@@ -78,18 +77,20 @@ function isRecord(value: JsonValue | undefined): value is JsonObject {
 
 /** Every field `ctx_traits_core::resolve::Candidate` mirrors — see {@link ResolveCandidate}. */
 function isResolveCandidate(value: JsonValue): value is ResolveCandidate & JsonObject {
-  return isRecord(value)
-    && typeof value["trait-id"] === "string"
-    && typeof value["version"] === "string"
-    && typeof value["active"] === "boolean"
-    && typeof value["load-level"] === "string"
-    && typeof value["estimated-tokens"] === "number"
-    && typeof value["priority"] === "number"
-    && typeof value["score"] === "number"
-    && typeof value["budget-decision"] === "string"
-    && typeof value["estimate-source"] === "string"
-    && (value["reason-codes"] === undefined
-      || (Array.isArray(value["reason-codes"]) && value["reason-codes"].every((code) => typeof code === "string")));
+  return (
+    isRecord(value) &&
+    typeof value["trait-id"] === "string" &&
+    typeof value["version"] === "string" &&
+    typeof value["active"] === "boolean" &&
+    typeof value["load-level"] === "string" &&
+    typeof value["estimated-tokens"] === "number" &&
+    typeof value["priority"] === "number" &&
+    typeof value["score"] === "number" &&
+    typeof value["budget-decision"] === "string" &&
+    typeof value["estimate-source"] === "string" &&
+    (value["reason-codes"] === undefined ||
+      (Array.isArray(value["reason-codes"]) && value["reason-codes"].every((code) => typeof code === "string")))
+  );
 }
 
 /**
@@ -116,10 +117,12 @@ function asResolveResponse(raw: JsonValue, context: string): ResolveResponse {
 }
 
 function isResolveResponse(value: JsonObject): value is JsonObject & ResolveResponse {
-  return (value["selected"] === undefined
-    || (Array.isArray(value["selected"]) && value["selected"].every(isResolveCandidate)))
-    && (value["rejected"] === undefined
-      || (Array.isArray(value["rejected"]) && value["rejected"].every(isResolveCandidate)));
+  return (
+    (value["selected"] === undefined ||
+      (Array.isArray(value["selected"]) && value["selected"].every(isResolveCandidate))) &&
+    (value["rejected"] === undefined ||
+      (Array.isArray(value["rejected"]) && value["rejected"].every(isResolveCandidate)))
+  );
 }
 
 /** Full structural check for `ctx traits prompt <id> --json`'s response shape. */
@@ -132,10 +135,13 @@ function asPromptResponse(raw: JsonValue, context: string): PromptResponse {
   }
   const digests = raw["digests"];
   if (
-    !isRecord(digests) || typeof digests["source"] !== "string" || typeof digests["canonical"] !== "string"
-    || typeof digests["model-view"] !== "string"
-    || (digests["resource-manifest"] !== undefined && digests["resource-manifest"] !== null
-      && typeof digests["resource-manifest"] !== "string")
+    !isRecord(digests) ||
+    typeof digests["source"] !== "string" ||
+    typeof digests["canonical"] !== "string" ||
+    typeof digests["model-view"] !== "string" ||
+    (digests["resource-manifest"] !== undefined &&
+      digests["resource-manifest"] !== null &&
+      typeof digests["resource-manifest"] !== "string")
   ) {
     throw new CtxCliError(`ctx.traits: malformed response shape from ${context}: "digests" is not well-formed`);
   }
@@ -175,12 +181,14 @@ function unwrapEnvelope<T>(raw: JsonValue, context: string, checkValue: (value: 
 
 /** Every field `ContextPlanRowReport` mirrors — see {@link ContextPlanRow}. */
 function isContextPlanRow(value: JsonValue): value is ContextPlanRow & JsonObject {
-  return isRecord(value)
-    && typeof value["trait-id"] === "string"
-    && typeof value["model-view-digest"] === "string"
-    && typeof value["action"] === "string"
-    && (value["stale-reason"] === undefined || typeof value["stale-reason"] === "string")
-    && typeof value["text"] === "string";
+  return (
+    isRecord(value) &&
+    typeof value["trait-id"] === "string" &&
+    typeof value["model-view-digest"] === "string" &&
+    typeof value["action"] === "string" &&
+    (value["stale-reason"] === undefined || typeof value["stale-reason"] === "string") &&
+    typeof value["text"] === "string"
+  );
 }
 
 /** Full structural check for `ContextPlanReport`'s (`ContextPlanValue`) shape. */
@@ -199,8 +207,10 @@ function asContextPlanValue(raw: JsonValue, context: string): ContextPlanValue {
     }
   }
   if (
-    typeof raw["host"] !== "string" || typeof raw["host-session"] !== "string"
-    || typeof raw["committed"] !== "boolean" || typeof raw["note"] !== "string"
+    typeof raw["host"] !== "string" ||
+    typeof raw["host-session"] !== "string" ||
+    typeof raw["committed"] !== "boolean" ||
+    typeof raw["note"] !== "string"
   ) {
     throw new CtxCliError(
       `ctx.traits: malformed response shape from ${context}: missing/mistyped "host"/"host-session"/"committed"/"note"`,

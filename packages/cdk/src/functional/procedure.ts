@@ -28,7 +28,7 @@ export function attachProcedureFrom<T extends (fields: ProcedureFields) => Proce
     from: (fields: ProcedureFromFields, body: () => void): ProcedureHandle => {
       openBuild();
       let result: unknown;
-      let closed: { readonly items: readonly { readonly item: unknown; }[]; readonly sessionTitleSink: unknown; };
+      let closed: { readonly items: readonly { readonly item: unknown }[]; readonly sessionTitleSink: unknown };
       try {
         result = body();
       } finally {

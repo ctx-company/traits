@@ -37,10 +37,7 @@ export type StageFields = PromptStageFields | CommandStageFields;
  * readable as properties.
  */
 export type Stage<F extends StageFields> = F & {
-  (
-    title: string,
-    overrides?: Partial<PromptRegistrarOptions & CommandStepOptions>,
-  ): SequenceHandle;
+  (title: string, overrides?: Partial<PromptRegistrarOptions & CommandStepOptions>): SequenceHandle;
 };
 
 export function stage<const F extends StageFields>(fields: F): Stage<F> {
@@ -48,7 +45,7 @@ export function stage<const F extends StageFields>(fields: F): Stage<F> {
     title: string,
     overrides: Partial<PromptRegistrarOptions & CommandStepOptions> = {},
   ): SequenceHandle => {
-    const { agent, ...rest } = fields as { readonly agent?: AgentHandle; };
+    const { agent, ...rest } = fields as { readonly agent?: AgentHandle };
     if (agent !== undefined) {
       return agent.prompt(title, { ...rest, ...overrides } as PromptRegistrarOptions);
     }

@@ -90,7 +90,7 @@ export const blockerStepSchema: SchemaHandle = schema.object(
     }),
     status: schema.field(schema.text(), {
       description:
-        "\"open\" or \"done\". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone.",
+        '"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker\'s claim alone.',
     }),
     evidence: schema.field(schema.text(), {
       required: false,
@@ -232,7 +232,7 @@ export const ownerItemSchema: SchemaHandle = schema.object(
     }),
     "substitute-evidence": schema.field(schema.text(), {
       description:
-        "The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); \"none possible\" only when truly nothing applies.",
+        'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.',
     }),
     "close-out": schema.field(schema.text(), {
       description: "The exact command the owner runs or decision the owner makes to finish the item.",
@@ -306,7 +306,7 @@ export const reviewVerdictSchema: SchemaHandle = schema.object(
     }),
     "wall-id": schema.field(schema.text(), {
       description:
-        "Stable wall id copied VERBATIM from an explicit \"**Wall:** <id>\" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.",
+        'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.',
     }),
     remaining: schema.field(schema.text(), {
       required: false,

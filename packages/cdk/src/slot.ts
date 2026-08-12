@@ -63,7 +63,7 @@ export interface SlotFunction {
    * `slot.foo`/`slot["exit-code"]` — for `condition.equals`/`fieldEquals`.
    * @example `slot({ id: "review", schema: schema.text() })`
    */
-  <Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value>;
+  <Value>(fields: SlotFields & { readonly schema: SchemaValue<Value> }): DeclaredSlotWithFields<Value>;
   /** Text-schema slot shorthand; a bare string is shorthand for `{ id: value }`. @example `slot.text("summary")` */
   text(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string>;
   /** Boolean-schema slot shorthand. @example `slot.boolean("approved")` */
@@ -84,7 +84,7 @@ export interface SlotFunction {
   /** List-of-text-slot shorthand, the common case of `slot.array(schema.text(), ...)`. @example `slot.texts("notes")` */
   texts(value: string | Omit<SlotFields, "schema">): DeclaredSlotHandle<string[]>;
   /** Full-form slot declaration, alias of the bare `slot(...)` call for when a named property reads better than a call expression. @example `slot.of({ id: "review", schema: schema.text() })` */
-  of<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value>;
+  of<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value> }): DeclaredSlotWithFields<Value>;
 }
 
 /**
@@ -125,7 +125,7 @@ export interface OperationFunction {
    * field of an object slot without touching the rest of it.
    * @example `operation.over(review, operation.SetField("status"))`
    */
-  SetField(field: string): Extract<WriteOperation, { readonly "set-field": string; }>;
+  SetField(field: string): Extract<WriteOperation, { readonly "set-field": string }>;
   /** Appends a step's output to a list slot instead of replacing it. @example `operation.over(findings, operation.Append)` */
   over<Value>(slotHandle: SlotHandle<Value[]>, operation: "append"): OutputSinkHandle<Value>;
   /** Increments a numeric slot by a step's numeric output. @example `operation.over(retryCount, operation.Increment)` */
@@ -133,7 +133,7 @@ export interface OperationFunction {
   /** Merges a step's object output into an object slot, or writes one field via `operation.SetField`. @example `operation.over(review, operation.Merge)` */
   over<Value>(
     slotHandle: SlotHandle<Value>,
-    operation: "merge" | Extract<WriteOperation, { readonly "set-field": string; }>,
+    operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>,
   ): OutputSinkHandle<JsonValue>;
   /** Replaces the slot's whole value (the default write mode — same as passing the slot directly as `output`). @example `operation.over(review, operation.Replace)` */
   over<Value>(slotHandle: SlotHandle<Value>, operation?: "replace"): OutputSinkHandle<Value>;
@@ -158,7 +158,7 @@ export interface OperationFunction {
  * @see {@link operation.over}
  * @see {@link port}
  */
-function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value>; }): DeclaredSlotWithFields<Value> {
+function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value> }): DeclaredSlotWithFields<Value> {
   // `slotOf` stays non-generic and its return may be an object-schema field
   // proxy (`objectSlotFieldProxy`) rather than a bare handle — neither is
   // statically distinguishable from `DeclaredSlotWithFields<Value>` without running
@@ -170,21 +170,18 @@ function slotFn<Value>(fields: SlotFields & { readonly schema: SchemaValue<Value
 // signature precisely (see `port.ts`'s identical note) — `slotFn` is
 // independently checked as a real generic above; this is the one cast
 // bridging the merge.
-export const slot: SlotFunction = Object.assign(
-  slotFn,
-  {
-    text: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:text"),
-    boolean: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:boolean"),
-    number: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:number"),
-    any: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:any"),
-    array: (schemaValue: SchemaValue, value?: string | Omit<SlotFields, "schema">) =>
-      value === undefined
-        ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaArray(schemaValue))
-        : slotWithSchema(value, schemaArray(schemaValue)),
-    texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaArray("schema:text")),
-    of: slotFn,
-  },
-) as SlotFunction;
+export const slot: SlotFunction = Object.assign(slotFn, {
+  text: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:text"),
+  boolean: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:boolean"),
+  number: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:number"),
+  any: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, "schema:any"),
+  array: (schemaValue: SchemaValue, value?: string | Omit<SlotFields, "schema">) =>
+    value === undefined
+      ? (slotValue: string | Omit<SlotFields, "schema">) => slotWithSchema(slotValue, schemaArray(schemaValue))
+      : slotWithSchema(value, schemaArray(schemaValue)),
+  texts: (value: string | Omit<SlotFields, "schema">) => slotWithSchema(value, schemaArray("schema:text")),
+  of: slotFn,
+}) as SlotFunction;
 
 /**
  * Selects how a sequence step's output writes to a slot: replace it
@@ -211,7 +208,7 @@ function operationOver<Value>(slotHandle: SlotHandle<Value[]>, operation: "appen
 function operationOver(slotHandle: SlotHandle<number>, operation: "increment"): OutputSinkHandle<number>;
 function operationOver<Value>(
   slotHandle: SlotHandle<Value>,
-  operation: "merge" | Extract<WriteOperation, { readonly "set-field": string; }>,
+  operation: "merge" | Extract<WriteOperation, { readonly "set-field": string }>,
 ): OutputSinkHandle<JsonValue>;
 function operationOver<Value>(slotHandle: SlotHandle<Value>, operation?: "replace"): OutputSinkHandle<Value>;
 function operationOver(slotHandle: SlotHandle, writeOperation: WriteOperation = "replace"): OutputSinkHandle {
@@ -263,9 +260,17 @@ function slotOf(fields: SlotFields): DeclaredSlotHandle {
   recordTraitMint("slot", fields.id, `slot:${fields.id}`, declaration);
   const objectFields = objectSchemaFields(fields.schema);
   const declarations = collectMany([handle]);
-  const resolved = objectFields === undefined
-    ? handle as SlotHandle
-    : fieldRefProxy(handle as SlotHandle, fields.id, `slot:${fields.id}`, [], objectFields, declarations) as SlotHandle;
+  const resolved =
+    objectFields === undefined
+      ? (handle as SlotHandle)
+      : (fieldRefProxy(
+          handle as SlotHandle,
+          fields.id,
+          `slot:${fields.id}`,
+          [],
+          objectFields,
+          declarations,
+        ) as SlotHandle);
   // `.optional()` is the per-SITE optionality wrapper, identical in output to
   // `input.optional(slot)` — optionality has never been a property of the slot
   // itself, so the same slot stays required at one step and optional at
@@ -293,8 +298,10 @@ interface SchemaFieldSummary {
 function isSchemaFieldSummaryRecord(fields: JsonObject): fields is JsonObject & Record<string, SchemaFieldSummary> {
   return Object.values(fields).every(
     (value) =>
-      typeof value === "object" && value !== null && !Array.isArray(value)
-      && typeof (value as JsonObject).schema === "string",
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as JsonObject).schema === "string",
   );
 }
 
@@ -305,9 +312,12 @@ function isSchemaFieldSummaryRecord(fields: JsonObject): fields is JsonObject & 
  * per-field access).
  */
 function objectSchemaFields(schemaValue: SchemaValue): Record<string, SchemaFieldSummary> | undefined {
-  const fields = (metaOf(schemaValue)?.declaration as { readonly fields?: JsonObject; } | undefined)?.fields;
-  return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
-      || !isSchemaFieldSummaryRecord(fields)
+  const fields = (metaOf(schemaValue)?.declaration as { readonly fields?: JsonObject } | undefined)?.fields;
+  return fields === undefined ||
+    fields === null ||
+    typeof fields !== "object" ||
+    Array.isArray(fields) ||
+    !isSchemaFieldSummaryRecord(fields)
     ? undefined
     : fields;
 }
@@ -325,12 +335,15 @@ function objectSchemaFieldsByRef(
 ): Record<string, SchemaFieldSummary> | undefined {
   if (!ref.startsWith("schema:") || ref.includes(":", "schema:".length)) return undefined;
   const id = ref.slice("schema:".length);
-  const declaration = declarations.schema?.find((candidate) => (candidate as { readonly id?: string; }).id === id) as
-    | { readonly fields?: JsonObject; }
+  const declaration = declarations.schema?.find((candidate) => (candidate as { readonly id?: string }).id === id) as
+    | { readonly fields?: JsonObject }
     | undefined;
   const fields = declaration?.fields;
-  return fields === undefined || fields === null || typeof fields !== "object" || Array.isArray(fields)
-      || !isSchemaFieldSummaryRecord(fields)
+  return fields === undefined ||
+    fields === null ||
+    typeof fields !== "object" ||
+    Array.isArray(fields) ||
+    !isSchemaFieldSummaryRecord(fields)
     ? undefined
     : fields;
 }
@@ -379,9 +392,10 @@ function fieldRefProxy(
         const nextPath = [...fieldPath, prop];
         const leaf = attachMeta({}, { fieldRef: { slotRef, field: nextPath.join(".") }, declarations });
         const nestedFields = objectSchemaFieldsByRef(field.schema, declarations);
-        fieldRef = nestedFields === undefined
-          ? leaf
-          : fieldRefProxy(leaf, slotId, slotRef, nextPath, nestedFields, declarations) as FieldRef;
+        fieldRef =
+          nestedFields === undefined
+            ? leaf
+            : (fieldRefProxy(leaf, slotId, slotRef, nextPath, nestedFields, declarations) as FieldRef);
         fieldRefCache.set(prop, fieldRef);
       }
       return fieldRef;

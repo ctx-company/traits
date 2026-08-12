@@ -5,7 +5,13 @@
   "license": "Apache-2.0",
   "author": "Oskar Cieslik",
   "homepage": "https://github.com/ctx-company/traits/tree/main/packages/cdk",
-  "keywords": ["ctx", "ctx-traits", "cdk", "agents", "llm"],
+  "keywords": [
+    "ctx",
+    "ctx-traits",
+    "cdk",
+    "agents",
+    "llm"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -41,14 +47,14 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "lint": "oxlint --deny-warnings src test",
-    "format": "dprint fmt",
-    "format:check": "dprint check",
+    "format": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts'",
     "test": "vitest run",
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
-    "dprint": "0.55.2",
+    "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
     "typescript": "^7.0.2",
     "vitest": "4.1.10",

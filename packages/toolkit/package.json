@@ -35,8 +35,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings src test",
-    "format": "dprint fmt",
-    "format:check": "dprint check",
+    "format": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts'",
     "test": "vitest run",
     "prepublishOnly": "pnpm run build"
   },
@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@types/node": "26.2.0",
-    "dprint": "0.55.2",
+    "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
     "typescript": "^7.0.2",
     "vitest": "4.1.10"

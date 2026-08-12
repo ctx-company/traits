@@ -28,9 +28,12 @@ export interface PortFields {
   readonly optional?: boolean;
   readonly title?: string;
   readonly format?: string | readonly string[];
-  readonly default?: { readonly value: string; } | { readonly command?: PortDefaultCommand; } | {
-    readonly cmd: string;
-  };
+  readonly default?:
+    | { readonly value: string }
+    | { readonly command?: PortDefaultCommand }
+    | {
+        readonly cmd: string;
+      };
 }
 
 /**
@@ -70,7 +73,7 @@ export interface PortFields {
  * @see {@link slot}
  */
 export interface PortFunction {
-  <Value>(fields: PortFields & { readonly schema: SchemaValue<Value>; }): PortHandle<Value>;
+  <Value>(fields: PortFields & { readonly schema: SchemaValue<Value> }): PortHandle<Value>;
   input: PortDirectionHelpers;
   output: PortDirectionHelpers;
 }
@@ -88,7 +91,7 @@ export interface PortDirectionHelpers {
    * Port with an explicit schema in this fixed direction.
    * @example `port.input.of({ id: "limit", schema: schema.number() })`
    */
-  of<Value>(fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value>; }): PortHandle<Value>;
+  of<Value>(fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value> }): PortHandle<Value>;
   /**
    * Port with the schema passed positionally instead of nested in `fields`.
    * @example `port.input.of(schema.number(), { id: "limit" })`
@@ -102,7 +105,7 @@ export interface PortDirectionHelpers {
  * @example `port.input.text({ id: "request" })`
  * @see {@link slot}
  */
-function portFn<Value>(fields: PortFields & { readonly schema: SchemaValue<Value>; }): PortHandle<Value> {
+function portFn<Value>(fields: PortFields & { readonly schema: SchemaValue<Value> }): PortHandle<Value> {
   return portOf<Value>(fields);
 }
 
@@ -113,29 +116,29 @@ function portFn<Value>(fields: PortFields & { readonly schema: SchemaValue<Value
 // independently checked as real overloaded generics above; this is the one
 // remaining cast bridging `Object.assign`'s merge, not an unchecked
 // namespace-wide assertion.
-export const port: PortFunction = Object.assign(
-  portFn,
-  { input: portDirectionHelpers("input"), output: portDirectionHelpers("output") },
-) as PortFunction;
+export const port: PortFunction = Object.assign(portFn, {
+  input: portDirectionHelpers("input"),
+  output: portDirectionHelpers("output"),
+}) as PortFunction;
 
 function portDirectionHelpers(direction: "input" | "output"): PortDirectionHelpers {
   function of<Value>(
-    fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value>; },
+    fields: Omit<PortFields, "direction"> & { readonly schema: SchemaValue<Value> },
   ): PortHandle<Value>;
   function of<Value>(
     schemaValue: SchemaValue<Value>,
     fields: Omit<PortFields, "direction" | "schema">,
   ): PortHandle<Value>;
   function of(
-    fieldsOrSchema: (Omit<PortFields, "direction"> & { readonly schema: SchemaValue; }) | SchemaValue,
+    fieldsOrSchema: (Omit<PortFields, "direction"> & { readonly schema: SchemaValue }) | SchemaValue,
     maybeFields?: Omit<PortFields, "direction" | "schema">,
   ): PortHandle {
     return typeof fieldsOrSchema === "string" || metaOf(fieldsOrSchema)?.ref !== undefined
       ? portOf({
-        ...(maybeFields as Omit<PortFields, "direction" | "schema">),
-        direction,
-        schema: fieldsOrSchema as SchemaValue,
-      })
+          ...(maybeFields as Omit<PortFields, "direction" | "schema">),
+          direction,
+          schema: fieldsOrSchema as SchemaValue,
+        })
       : portOf({ ...(fieldsOrSchema as Omit<PortFields, "direction">), direction });
   }
   return {
@@ -165,14 +168,20 @@ function portOf<Value = unknown>(fields: PortFields): PortHandle<Value> {
     format: mutableScalarArray(fields.format),
     default: normalizePortDefault(fields.default),
   });
-  const handle = withDeclaration<CdkObject, "port", Value>("port", `port:${fields.id}`, declaration, {}, {
-    declarations: collectMany([fields.schema, fields.value]),
-  });
+  const handle = withDeclaration<CdkObject, "port", Value>(
+    "port",
+    `port:${fields.id}`,
+    declaration,
+    {},
+    {
+      declarations: collectMany([fields.schema, fields.value]),
+    },
+  );
   recordTraitMint("port", fields.id, `port:${fields.id}`, declaration);
   return handle;
 }
 
 function normalizePortDefault(value: PortFields["default"]): JsonObject | undefined {
   if (value === undefined) return undefined;
-  return "cmd" in value ? { command: { cmd: value.cmd } } : value as JsonObject;
+  return "cmd" in value ? { command: { cmd: value.cmd } } : (value as JsonObject);
 }

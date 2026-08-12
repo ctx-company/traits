@@ -23,29 +23,29 @@ export interface RefFunction {
   /** Bare `"kind:id"` ref string, untyped — prefer a typed `ref.*` kind below when one exists. @example `ref("resource", "style-guide")` */
   <K extends RefKind, Id extends string>(kind: K, id: Id): RefText<K, Id>;
   /** Typed reference to a port declared elsewhere. @example `ref.port({ id: "diff", dependency: "shared" })` */
-  port<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string; }): PortHandle<Value>;
+  port<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string }): PortHandle<Value>;
   /** Typed reference to a slot declared elsewhere. @example `ref.slot("review")` */
-  slot<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string; }): SlotHandle<Value>;
+  slot<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string }): SlotHandle<Value>;
   /** Typed reference to a named prompt declared elsewhere. @example `ref.prompt("instructions")` */
   prompt<Input = unknown, Output = unknown>(
-    id: string | { readonly id: string; readonly dependency?: string; },
+    id: string | { readonly id: string; readonly dependency?: string },
   ): PromptHandle<Input, Output>;
   /** Typed reference to a declared schema. @example `port.output.of({ id: "review", schema: ref.schema("code-review-scaffold"), value: review })` */
-  schema<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string; }): SchemaHandle<Value>;
+  schema<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string }): SchemaHandle<Value>;
   /** Typed reference to a named `sequence.linear` declaration. @example `ref.sequence("refine-work")` */
   sequence<Input = unknown, Output = unknown>(
-    id: string | { readonly id: string; readonly dependency?: string; },
+    id: string | { readonly id: string; readonly dependency?: string },
   ): SequenceLinearHandle<Input, Output>;
   /** Typed reference to a named condition declaration. @example `ref.condition("both-approved")` */
-  condition(id: string | { readonly id: string; readonly dependency?: string; }): ConditionHandle;
+  condition(id: string | { readonly id: string; readonly dependency?: string }): ConditionHandle;
   /** Typed reference to a declared resource. @example `prompt.resource(ref.resource("style-guide"))` */
-  resource<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string; }): ResourceHandle<Value>;
+  resource<Value = unknown>(id: string | { readonly id: string; readonly dependency?: string }): ResourceHandle<Value>;
   /** Typed reference to a declared `[rule.*]` entry. @example `ref.rule("safe")` */
-  rule(id: string | { readonly id: string; readonly dependency?: string; }): RuleHandle;
+  rule(id: string | { readonly id: string; readonly dependency?: string }): RuleHandle;
   /** Typed reference to a declared signal. @example `condition.signal(ref.signal("approved"))` */
-  signal(id: string | { readonly id: string; readonly dependency?: string; }): RefHandle<"signal">;
+  signal(id: string | { readonly id: string; readonly dependency?: string }): RefHandle<"signal">;
   /** Typed reference to a declared `dependency(...)` trait. @example `ref.trait("shared")` */
-  trait(id: string | { readonly id: string; readonly dependency?: string; }): TraitHandle;
+  trait(id: string | { readonly id: string; readonly dependency?: string }): TraitHandle;
 }
 
 /**
@@ -78,7 +78,7 @@ export interface RefFunction {
  * ```
  * @see {@link refText}
  */
-type RefIdArg = string | { readonly id: string; readonly dependency?: string; };
+type RefIdArg = string | { readonly id: string; readonly dependency?: string };
 
 // `.bind(undefined, kind)` erases `refHandle`'s own `Value` generic to a
 // fixed `Handle<K>` (`Value = unknown`) per bound function — the interface's
@@ -96,33 +96,30 @@ function refSlot<Value = unknown>(id: RefIdArg): SlotHandle<Value> {
   return refHandle<"slot", Value>("slot", id);
 }
 function refPrompt<Input = unknown, Output = unknown>(id: RefIdArg): PromptHandle<Input, Output> {
-  return refHandle<"prompt", { readonly input: Input; readonly output: Output; }>("prompt", id);
+  return refHandle<"prompt", { readonly input: Input; readonly output: Output }>("prompt", id);
 }
 function refSchema<Value = unknown>(id: RefIdArg): SchemaHandle<Value> {
   return refHandle<"schema", Value>("schema", id);
 }
 function refSequence<Input = unknown, Output = unknown>(id: RefIdArg): SequenceLinearHandle<Input, Output> {
-  return refHandle<"sequence", { readonly input: Input; readonly output: Output; }>("sequence", id);
+  return refHandle<"sequence", { readonly input: Input; readonly output: Output }>("sequence", id);
 }
 function refResource<Value = unknown>(id: RefIdArg): ResourceHandle<Value> {
   return refHandle<"resource", Value>("resource", id);
 }
 
-export const ref = Object.assign(
-  (kind: RefKind, id: string): string => `${kind}:${id}`,
-  {
-    port: refPort,
-    slot: refSlot,
-    prompt: refPrompt,
-    schema: refSchema,
-    sequence: refSequence,
-    condition: (id: RefIdArg): ConditionHandle => refHandle("condition", id),
-    resource: refResource,
-    rule: (id: RefIdArg): RuleHandle => refHandle("rule", id),
-    signal: (id: RefIdArg): RefHandle<"signal"> => refHandle("signal", id),
-    trait: (id: RefIdArg): TraitHandle => refHandle("trait", id),
-  },
-) as RefFunction;
+export const ref = Object.assign((kind: RefKind, id: string): string => `${kind}:${id}`, {
+  port: refPort,
+  slot: refSlot,
+  prompt: refPrompt,
+  schema: refSchema,
+  sequence: refSequence,
+  condition: (id: RefIdArg): ConditionHandle => refHandle("condition", id),
+  resource: refResource,
+  rule: (id: RefIdArg): RuleHandle => refHandle("rule", id),
+  signal: (id: RefIdArg): RefHandle<"signal"> => refHandle("signal", id),
+  trait: (id: RefIdArg): TraitHandle => refHandle("trait", id),
+}) as RefFunction;
 
 function refHandle<K extends RefKind, Value = unknown>(kind: K, value: RefIdArg): Handle<K, Value> {
   const id = typeof value === "string" ? value : value.id;

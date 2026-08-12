@@ -32,17 +32,17 @@ export interface SinkFields {
   readonly sessionTitle?: SessionTitleSinkInput;
 }
 
-function isPromptTemplate(value: unknown): value is PromptTemplate & { readonly text: string; } {
+function isPromptTemplate(value: unknown): value is PromptTemplate & { readonly text: string } {
   return metaOf(value)?.kind === "template";
 }
 
 function isOptionalSlotInput(value: unknown): value is OptionalSlotInputValue {
   return (
-    value !== null
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && "slot" in value
-    && (value as { readonly optional?: unknown; }).optional === true
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "slot" in value &&
+    (value as { readonly optional?: unknown }).optional === true
   );
 }
 
@@ -65,7 +65,7 @@ export function sessionTitleSinkDraft(value: SessionTitleSinkInput): JsonObject 
     const parts = value.map((part, index) =>
       isOptionalSlotInput(part)
         ? { slot: refText(part.slot, `effect.session.title[${index}]`), optional: true }
-        : refText(part, `effect.session.title[${index}]`)
+        : refText(part, `effect.session.title[${index}]`),
     );
     return { mode: "generated", input: parts };
   }

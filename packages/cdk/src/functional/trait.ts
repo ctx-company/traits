@@ -194,14 +194,12 @@ export function useVariant(value: unknown, key?: string): UseVariantHandle {
   }
   if (typeof value === "function") {
     if (key !== undefined) {
-      throw new Error(
-        "useVariant: a variant function carries its own key via defineVariant — do not pass one here",
-      );
+      throw new Error("useVariant: a variant function carries its own key via defineVariant — do not pass one here");
     }
   } else if (metaOf(value) !== undefined || (value !== null && typeof value === "object")) {
     if (key === undefined || !isSlug(key)) {
       throw new Error(
-        "useVariant: an object-style variant handle needs an explicit family key — useVariant(handle, \"quick\")",
+        'useVariant: an object-style variant handle needs an explicit family key — useVariant(handle, "quick")',
       );
     }
   } else {
@@ -336,11 +334,14 @@ export interface TraitFunctionContext {
 
 /** Rebuilds a full declared port handle from its recorded mint, so a `ctx.input` access can be routed through `TraitFields.port` without needing the original module-scope handle reference. */
 function reconstructDeclaredPortHandle(mint: FrameMint): PortHandle {
-  return withMeta<Record<string, never>, "port">({}, {
-    kind: "port",
-    ref: mint.ref,
-    declaration: mint.declaration as MetaDeclaration,
-  });
+  return withMeta<Record<string, never>, "port">(
+    {},
+    {
+      kind: "port",
+      ref: mint.ref,
+      declaration: mint.declaration as MetaDeclaration,
+    },
+  );
 }
 
 function outputPortFromReturn(key: string, value: unknown): PortHandle {
@@ -353,9 +354,9 @@ function outputPortFromReturn(key: string, value: unknown): PortHandle {
     const direction = (meta.declaration as CanonicalPort | undefined)?.direction;
     if (direction !== "output") {
       throw new Error(
-        `evaluateTraitFunction: return value ${
-          JSON.stringify(key)
-        } is an input port — only output ports and slots may be returned`,
+        `evaluateTraitFunction: return value ${JSON.stringify(
+          key,
+        )} is an input port — only output ports and slots may be returned`,
       );
     }
     return value as PortHandle;
@@ -420,10 +421,7 @@ interface EvaluatedFrame {
 }
 
 /** Opens a build+frame pair, runs `fn` synchronously, and closes both — the one evaluation shape trait and variant functions share. */
-function runFrame(
-  fn: (ctx: TraitFunctionContext) => unknown,
-  frameKind: "trait" | "variant",
-): EvaluatedFrame {
+function runFrame(fn: (ctx: TraitFunctionContext) => unknown, frameKind: "trait" | "variant"): EvaluatedFrame {
   openBuild();
   openTraitFrame(frameKind);
   const frame = currentTraitFrame("evaluateTraitFunction");
@@ -486,7 +484,7 @@ function assembleSingleTrait(
   }
   const inputPorts = [...traitFrame.inputAccessed].map((id) =>
     // oxlint-disable-next-line typescript/no-non-null-assertion -- every id in inputAccessed passed the unknownInputs check above, so it is a key of declaredInputPorts
-    reconstructDeclaredPortHandle(declaredInputPorts.get(id)!)
+    reconstructDeclaredPortHandle(declaredInputPorts.get(id)!),
   );
 
   let outputPorts: PortHandle[] = [];
@@ -497,7 +495,7 @@ function assembleSingleTrait(
       );
     }
     outputPorts = Object.entries(result as Record<string, unknown>).map(([key, value]) =>
-      outputPortFromReturn(key, value)
+      outputPortFromReturn(key, value),
     );
   }
 
@@ -506,7 +504,7 @@ function assembleSingleTrait(
     const description = traitFrame.fields?.description;
     if (typeof description !== "string" || description.trim() === "") {
       throw new Error(
-        "defineTrait: a procedural trait (one that registers steps) requires defineTrait({ description: \"...\" }) — a text description of the trait",
+        'defineTrait: a procedural trait (one that registers steps) requires defineTrait({ description: "..." }) — a text description of the trait',
       );
     }
     procedureHandle = procedureOf({
@@ -536,9 +534,7 @@ function assembleSingleTrait(
     ...(resource === undefined ? {} : { resource }),
     ...(ports.length === 0 ? {} : { port: ports }),
     ...(procedureHandle === undefined ? {} : { procedure: procedureHandle }),
-    ...(sessionTitleSink === undefined
-      ? {}
-      : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
+    ...(sessionTitleSink === undefined ? {} : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
   };
 
   const handle = trait(traitFrame.slug as string, fields);
@@ -572,7 +568,7 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
   }
   const inputPorts = [...traitFrame.inputAccessed].map((id) =>
     // oxlint-disable-next-line typescript/no-non-null-assertion -- every id in inputAccessed passed the unknownInputs check above
-    reconstructDeclaredPortHandle(declaredInputPorts.get(id)!)
+    reconstructDeclaredPortHandle(declaredInputPorts.get(id)!),
   );
 
   let outputPorts: PortHandle[] = [];
@@ -583,7 +579,7 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
       );
     }
     outputPorts = Object.entries(result as Record<string, unknown>).map(([key, value]) =>
-      outputPortFromReturn(key, value)
+      outputPortFromReturn(key, value),
     );
   }
 
@@ -592,7 +588,7 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
     const description = traitFrame.fields?.description;
     if (typeof description !== "string" || description.trim() === "") {
       throw new Error(
-        "defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { description: \"...\" }) — a text description of the variant",
+        'defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { description: "..." }) — a text description of the variant',
       );
     }
     procedureHandle = procedureOf({
@@ -619,9 +615,7 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
     ...(resource === undefined ? {} : { resource }),
     ...(ports.length === 0 ? {} : { port: ports }),
     ...(procedureHandle === undefined ? {} : { procedure: procedureHandle }),
-    ...(sessionTitleSink === undefined
-      ? {}
-      : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
+    ...(sessionTitleSink === undefined ? {} : { sink: { sessionTitle: sessionTitleSink as SessionTitleSinkInput } }),
   };
 }
 
@@ -672,11 +666,11 @@ function mergeShellFacetsIntoVariant(familyFrame: TraitFrame, variantFrame: Trai
   for (const slug of guidanceSlugs(variantIntent.avoid)) {
     if (requireSlugs.has(slug)) {
       throw new Error(
-        `useIntent: ${
-          JSON.stringify(slug)
-        } is declared in both require and avoid once the family shell's useIntent is merged into variant ${
-          JSON.stringify(variantFrame.slug)
-        } — contradictory intent`,
+        `useIntent: ${JSON.stringify(
+          slug,
+        )} is declared in both require and avoid once the family shell's useIntent is merged into variant ${JSON.stringify(
+          variantFrame.slug,
+        )} — contradictory intent`,
       );
     }
   }
@@ -684,9 +678,7 @@ function mergeShellFacetsIntoVariant(familyFrame: TraitFrame, variantFrame: Trai
 
 function assembleFamily(familyFrame: TraitFrame, familyItems: readonly RegisteredItem[]): ReturnType<typeof trait> {
   if (familyItems.length > 0) {
-    throw new Error(
-      "useVariant: a family shell must not register its own steps — procedures belong to the variants",
-    );
+    throw new Error("useVariant: a family shell must not register its own steps — procedures belong to the variants");
   }
   const shellHasDeclaredFacets = Object.keys(familyFrame.intent).length > 0 || familyFrame.resources.length > 0;
   const variants: Record<string, unknown> = {};
@@ -719,20 +711,18 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
     if (binding.isDefault) {
       if (defaultKey !== undefined) {
         throw new Error(
-          `useVariant: both ${JSON.stringify(defaultKey)} and ${
-            JSON.stringify(key)
-          } marked default — exactly one variant may be the family default`,
+          `useVariant: both ${JSON.stringify(defaultKey)} and ${JSON.stringify(
+            key,
+          )} marked default — exactly one variant may be the family default`,
         );
       }
       defaultKey = key;
-      handle = (handle as { default(): unknown; }).default();
+      handle = (handle as { default(): unknown }).default();
     }
     variants[key] = handle;
   }
   if (defaultKey === undefined) {
-    throw new Error(
-      "useVariant: no variant marked default — chain .default() onto exactly one useVariant(...) call",
-    );
+    throw new Error("useVariant: no variant marked default — chain .default() onto exactly one useVariant(...) call");
   }
   const rawName = familyFrame.fields?.name as string | undefined;
   // A family shell's display name lives in trait.toml and trait() rejects
@@ -744,12 +734,15 @@ function assembleFamily(familyFrame: TraitFrame, familyItems: readonly Registere
   const description = familyFrame.fields?.description as string | undefined;
   const summary = familyFrame.fields?.summary as string | undefined;
   const metadata = familyFrame.fields?.metadata as TraitMetadata | undefined;
-  return trait(familyFrame.slug as string, {
-    ...(name === undefined ? {} : { name }),
-    ...(version === undefined ? {} : { version }),
-    ...(description === undefined ? {} : { description }),
-    ...(summary === undefined ? {} : { summary }),
-    ...(metadata === undefined ? {} : { metadata }),
-    variants: variants as TraitFields["variants"],
-  } as TraitFields);
+  return trait(
+    familyFrame.slug as string,
+    {
+      ...(name === undefined ? {} : { name }),
+      ...(version === undefined ? {} : { version }),
+      ...(description === undefined ? {} : { description }),
+      ...(summary === undefined ? {} : { summary }),
+      ...(metadata === undefined ? {} : { metadata }),
+      variants: variants as TraitFields["variants"],
+    } as TraitFields,
+  );
 }

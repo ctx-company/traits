@@ -67,7 +67,7 @@ export type LoopExitPolicy = "continue" | "abort";
 export interface LoopScopeState {
   /** Once set, everything registered into this loop scope from this point onward — leaf or container — is guarded `not(cond)` (0106 positional lowering). */
   untilCondition?: BranchCheckValue;
-  readonly abortIfArms: { readonly title: string; readonly condition: BranchCheckValue; }[];
+  readonly abortIfArms: { readonly title: string; readonly condition: BranchCheckValue }[];
   maxIterationsCalled: boolean;
   maxIterationsValue?: number | SettingHandle<number>;
   onExhausted?: LoopExitPolicy;
@@ -131,7 +131,7 @@ export function declareSessionTitleSink(value: unknown): void {
 }
 
 /** Closes the root scope and returns its registered items plus any `effect.session.title(...)` payload — throws if scopes are unbalanced (a `flow.*` block never popped its scope). */
-export function closeBuild(): { readonly items: readonly RegisteredItem[]; readonly sessionTitleSink: unknown; } {
+export function closeBuild(): { readonly items: readonly RegisteredItem[]; readonly sessionTitleSink: unknown } {
   const build = activeBuild;
   if (build === undefined) throw new Error("procedure.from: no active build to close");
   if (build.scopes.length !== 1) {
@@ -172,9 +172,7 @@ function pushScope(kind: ScopeKind, caller: string): Scope {
   const scope: Scope = {
     kind,
     items: [],
-    ...(kind === "loop"
-      ? { loop: { abortIfArms: [], maxIterationsCalled: false, onComplete: [], onAbort: [] } }
-      : {}),
+    ...(kind === "loop" ? { loop: { abortIfArms: [], maxIterationsCalled: false, onComplete: [], onAbort: [] } } : {}),
     ...(kind === "parallel" ? { parallel: {} } : {}),
   };
   build.scopes.push(scope);
@@ -198,7 +196,7 @@ export function runInScope<T>(
   kind: ScopeKind,
   label: string,
   callback: () => T,
-): { readonly result: T; readonly scope: Scope; } {
+): { readonly result: T; readonly scope: Scope } {
   pushScope(kind, label);
   let result: T;
   let scope: Scope;
@@ -255,7 +253,7 @@ export function dispatchAgentPrompt(
 ): SequenceHandle {
   if (agentPromptLowering === undefined) {
     throw new Error(
-      "agent.prompt: the functional layer has not loaded — import \"@ctx-traits/cdk\" before calling .prompt(...)",
+      'agent.prompt: the functional layer has not loaded — import "@ctx-traits/cdk" before calling .prompt(...)',
     );
   }
   return agentPromptLowering(agentHandle, title, opts);
@@ -269,7 +267,7 @@ export function dispatchSlotForEach(
 ): SequenceHandle {
   if (slotForEachLowering === undefined) {
     throw new Error(
-      "slot.forEach: the functional layer has not loaded — import \"@ctx-traits/cdk\" before calling .forEach(...)",
+      'slot.forEach: the functional layer has not loaded — import "@ctx-traits/cdk" before calling .forEach(...)',
     );
   }
   return slotForEachLowering(slotHandle, title, opts, body);

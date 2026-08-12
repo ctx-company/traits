@@ -102,4 +102,4 @@ export interface Envelope<T> {
 // JSON grammar aliases, matching `packages/cdk/src/generated.ts` verbatim. Not part of the
 // package's public surface — index.ts imports them but does not re-export.
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
-export type JsonObject = { readonly [key: string]: JsonValue | undefined; };
+export type JsonObject = { readonly [key: string]: JsonValue | undefined };

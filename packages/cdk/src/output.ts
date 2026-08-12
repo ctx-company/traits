@@ -81,7 +81,7 @@ export type { OutputPromptInterpolation } from "./handles.js";
 function buildInstructionOutput(
   strings: TemplateStringsArray,
   values: readonly PromptInterpolation[],
-  schema: { readonly ref: string; readonly value: SchemaValue; } | undefined,
+  schema: { readonly ref: string; readonly value: SchemaValue } | undefined,
 ): InstructionOutputHandle {
   const built = promptTemplate(strings, values);
   const builtMeta = metaOf(built);
@@ -92,16 +92,19 @@ function buildInstructionOutput(
     builtMeta?.declarations ?? {},
     schema === undefined ? {} : collectMany([schema.value]),
   );
-  return withMeta({}, {
-    kind: "instruction-output",
-    instructionOutput: {
-      text,
-      ...(schema === undefined ? {} : { schemaRef: schema.ref }),
-      ...(refs === undefined || refs.length === 0 ? {} : { refs }),
-      ...(optionalRefs === undefined || optionalRefs.length === 0 ? {} : { optionalRefs }),
+  return withMeta(
+    {},
+    {
+      kind: "instruction-output",
+      instructionOutput: {
+        text,
+        ...(schema === undefined ? {} : { schemaRef: schema.ref }),
+        ...(refs === undefined || refs.length === 0 ? {} : { refs }),
+        ...(optionalRefs === undefined || optionalRefs.length === 0 ? {} : { optionalRefs }),
+      },
+      declarations,
     },
-    declarations,
-  }) as InstructionOutputHandle;
+  ) as InstructionOutputHandle;
 }
 
 /**
@@ -113,11 +116,14 @@ function buildInstructionOutput(
 function resolveOutputPromptRef(
   value: OutputPromptInterpolation,
   fieldPath: string,
-): { readonly ref: string; readonly optional: boolean; readonly slotValue: SlotHandle; } {
+): { readonly ref: string; readonly optional: boolean; readonly slotValue: SlotHandle } {
   const wrapper = value as OptionalSlotRead;
   if (
-    value !== null && typeof value === "object" && !Array.isArray(value)
-    && "slot" in wrapper && wrapper.optional === true
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "slot" in wrapper &&
+    wrapper.optional === true
   ) {
     const ref = refText(wrapper.slot, fieldPath);
     if (!ref.startsWith("slot:")) throw new Error(`${fieldPath}: optional() applies to slot refs only`);
@@ -168,8 +174,9 @@ function composeOutputTemplateParts(base: OutputTemplateParts, extension: Output
     ...base.refs.filter((ref) => !base.optionalRefs.includes(ref)),
     ...extension.refs.filter((ref) => !extension.optionalRefs.includes(ref)),
   ]);
-  const optionalRefs = uniqueInOrder([...base.optionalRefs, ...extension.optionalRefs])
-    .filter((ref) => !requiredRefs.has(ref));
+  const optionalRefs = uniqueInOrder([...base.optionalRefs, ...extension.optionalRefs]).filter(
+    (ref) => !requiredRefs.has(ref),
+  );
   const slotByRef = new Map([...base.slotByRef, ...extension.slotByRef]);
   return {
     text: `${base.text}\n${extension.text}`,
@@ -186,16 +193,19 @@ function finishOutputTemplate(parts: OutputTemplateParts): OutputTemplateHandle 
       "output.prompt: expected at least one interpolated slot — a template with zero interpolations has no output contract",
     );
   }
-  const template = withMeta({}, {
-    kind: "output-template",
-    outputTemplate: {
-      text: parts.text,
-      refs: parts.refs,
-      ...(parts.optionalRefs.length === 0 ? {} : { optionalRefs: parts.optionalRefs }),
-      slots: parts.refs.map((ref) => parts.slotByRef.get(ref)),
+  const template = withMeta(
+    {},
+    {
+      kind: "output-template",
+      outputTemplate: {
+        text: parts.text,
+        refs: parts.refs,
+        ...(parts.optionalRefs.length === 0 ? {} : { optionalRefs: parts.optionalRefs }),
+        slots: parts.refs.map((ref) => parts.slotByRef.get(ref)),
+      },
+      declarations: parts.declarations,
     },
-    declarations: parts.declarations,
-  }) as OutputTemplateHandle;
+  ) as OutputTemplateHandle;
   const extend = (
     strings: TemplateStringsArray,
     ...values: readonly OutputPromptInterpolation[]

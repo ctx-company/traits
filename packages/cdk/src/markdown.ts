@@ -8,7 +8,7 @@ export interface StepsFields {
   readonly items: readonly string[];
 }
 
-type TableRow<Headers extends readonly string[]> = { readonly [Index in keyof Headers]: string; };
+type TableRow<Headers extends readonly string[]> = { readonly [Index in keyof Headers]: string };
 
 export interface SnippetFields {
   readonly id: string;
@@ -52,15 +52,14 @@ export function steps(fields: StepsFields): ResourceHandle {
 export function table<
   const Headers extends readonly string[],
   const Rows extends readonly TableRow<NoInfer<Headers>>[],
->(
-  fields: { readonly id: string; readonly headers: Headers; readonly rows: Rows; },
-): ResourceHandle {
+>(fields: { readonly id: string; readonly headers: Headers; readonly rows: Rows }): ResourceHandle {
   const renderRow = (cells: readonly string[]): string => `| ${cells.map(escapeTableCell).join(" | ")} |`;
-  const content = [
-    renderRow(fields.headers),
-    `| ${fields.headers.map(() => "---").join(" | ")} |`,
-    ...fields.rows.map(renderRow),
-  ].join("\n") + "\n";
+  const content =
+    [
+      renderRow(fields.headers),
+      `| ${fields.headers.map(() => "---").join(" | ")} |`,
+      ...fields.rows.map(renderRow),
+    ].join("\n") + "\n";
   return resource.inline(fields.id, content);
 }
 
@@ -89,7 +88,10 @@ export function snippet(fields: SnippetFields): ResourceHandle {
  */
 export function callout(fields: CalloutFields): ResourceHandle {
   const marker = { note: "NOTE", warning: "WARNING", tip: "TIP" }[fields.kind];
-  const body = fields.body.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join("\n");
+  const body = fields.body
+    .split(/\r\n|\r|\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
   return resource.inline(fields.id, `> [!${marker}]\n${body}\n`);
 }
 

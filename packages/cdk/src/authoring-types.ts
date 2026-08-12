@@ -16,15 +16,15 @@ export interface VariantHandleBase {
   readonly [VARIANT_HANDLE]: string;
 }
 /** A complete variant leaf definition, authored inline via `variant({...})`. */
-export type VariantHandle = VariantHandleBase & { readonly default: () => VariantHandle; };
+export type VariantHandle = VariantHandleBase & { readonly default: () => VariantHandle };
 /** A variant leaf resolved from another module via `variant.import(path)`. */
-export type VariantImportHandle = VariantHandleBase & { readonly default: () => VariantImportHandle; };
+export type VariantImportHandle = VariantHandleBase & { readonly default: () => VariantImportHandle };
 export type VariantLeafHandle = VariantHandle | VariantImportHandle;
 /**
  * A (possibly nested) `variants` map: leaves keyed by segment, or nested
  * maps for a deeper level — joined with `:` when flattened (`strict:sub`).
  */
-export type TraitFamilyMap = { readonly [segment: string]: VariantLeafHandle | TraitFamilyMap; };
+export type TraitFamilyMap = { readonly [segment: string]: VariantLeafHandle | TraitFamilyMap };
 
 /** One resolved variant: its colon-joined path and the variant definition it resolved to. */
 export interface FlattenedVariant {
@@ -35,9 +35,9 @@ export interface FlattenedVariant {
 
 /** The recursive variant topology a package manifest records: each level's default and each variant's path. */
 export type VariantTopologyNode =
-  | { readonly kind: "variant"; readonly path: string; }
+  | { readonly kind: "variant"; readonly path: string }
   | {
-    readonly kind: "map";
-    readonly default: string;
-    readonly children: Readonly<Record<string, VariantTopologyNode>>;
-  };
+      readonly kind: "map";
+      readonly default: string;
+      readonly children: Readonly<Record<string, VariantTopologyNode>>;
+    };

@@ -22,12 +22,12 @@ export const cargoDiagnosticSchema: SchemaHandle<CargoDiagnostic> = schema.objec
     code: schema.field(schema.text(), {
       description: "message.code.code, or the empty string when cargo reports no lint/error code.",
     }),
-    level: schema.field(schema.text(), { description: "message.level verbatim (e.g. \"error\", \"warning\")." }),
+    level: schema.field(schema.text(), { description: 'message.level verbatim (e.g. "error", "warning").' }),
     message: schema.field(schema.text(), { description: "message.message verbatim." }),
   },
   {
     description:
-      "One `reason == \"compiler-message\"` diagnostic from a cargo check/clippy run, deduplicated across both on (file, line, column, code) and sorted by that same key.",
+      'One `reason == "compiler-message"` diagnostic from a cargo check/clippy run, deduplicated across both on (file, line, column, code) and sorted by that same key.',
   },
 );
 
@@ -211,14 +211,7 @@ export function cargoFixLoop(options: CargoFixLoopOptions): readonly SequenceHan
   const captureStep = (stepId: string) =>
     sequence.command(stepId, {
       title: "Capture and reduce cargo check + clippy diagnostics",
-      argv: [
-        "node",
-        "--eval",
-        CARGO_DIAGNOSTIC_REDUCER_SOURCE.trim(),
-        "--",
-        config,
-        ...scopeArgv,
-      ],
+      argv: ["node", "--eval", CARGO_DIAGNOSTIC_REDUCER_SOURCE.trim(), "--", config, ...scopeArgv],
       // Keeps the scope port's own declaration reachable in the canonical output: the fused argv string above
       // carries only its textual ref, not a link back to the `port.input.text(...)` declaration itself.
       ...(scope === undefined ? {} : { include: scope.port }),

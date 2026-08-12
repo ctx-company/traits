@@ -34,7 +34,7 @@ export function evaluateConfigFunction(fn: () => unknown, opts: EvaluateConfigFu
   let frame: ConfigFrame;
   try {
     const result = fn();
-    if (result !== undefined && result !== null && typeof (result as { then?: unknown; }).then === "function") {
+    if (result !== undefined && result !== null && typeof (result as { then?: unknown }).then === "function") {
       throw new Error(
         "evaluateConfigFunction: the config default export returned a promise — config.ts must be synchronous",
       );
@@ -54,9 +54,9 @@ export function evaluateConfigFunction(fn: () => unknown, opts: EvaluateConfigFu
     if (repoKeys !== undefined && repoKeys.size > 0) {
       const [firstKey] = repoKeys.keys();
       throw new Error(
-        `defineRepo(${
-          JSON.stringify(firstKey)
-        }, ...) is only allowed in the user-global config — [repo.*] is rejected outside the user-global layer`,
+        `defineRepo(${JSON.stringify(
+          firstKey,
+        )}, ...) is only allowed in the user-global config — [repo.*] is rejected outside the user-global layer`,
       );
     }
   }
