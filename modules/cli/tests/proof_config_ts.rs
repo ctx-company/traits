@@ -36,7 +36,7 @@ export default defineConfig({\n\
 } as never);\n";
 
 /// 1. A `config.ts` project builds `generated/config.toml`, and a
-/// resolution command (dependency listing) reads its `[vendor]` table.
+///    resolution command (dependency listing) reads its `[vendor]` table.
 #[test]
 fn config_ts_builds_and_resolution_reads_generated_document() {
     let scratch = ScratchRoot::new("p0177-build-and-read");
@@ -117,7 +117,7 @@ export default defineConfig({\n\
 }
 
 /// 3. `config.ts` and a hand-authored `config.toml` both present refuses,
-/// naming both paths.
+///    naming both paths.
 #[test]
 fn source_and_hand_authored_document_both_present_refuses() {
     let scratch = ScratchRoot::new("p0177-both-present");
@@ -147,7 +147,7 @@ fn source_and_hand_authored_document_both_present_refuses() {
 }
 
 /// 4. A TOML-only repo (no `config.ts`) resolves with `node` entirely
-/// absent from `PATH`.
+///    absent from `PATH`.
 #[test]
 fn toml_only_repo_never_shells_out_to_node() {
     let scratch = ScratchRoot::new("p0177-toml-only-no-node");
@@ -177,7 +177,7 @@ fn toml_only_repo_never_shells_out_to_node() {
 }
 
 /// 5. A fixture carrying only a legacy `.ctx/traits/vendor.toml` gets no
-/// successful manifest read — proven behaviorally, not by grep.
+///    successful manifest read — proven behaviorally, not by grep.
 #[test]
 fn legacy_vendor_toml_has_no_read_path() {
     let scratch = ScratchRoot::new("p0177-legacy-vendor-toml");
@@ -208,9 +208,9 @@ fn legacy_vendor_toml_has_no_read_path() {
 }
 
 /// 6. A repo still carrying the retired P457 `.ctx/config.ts` refuses
-/// naming 0178's `runtime.ts`, and does NOT block the new `.ctx/traits/
-/// config.ts` pathway (regression proof for the wrong-constant bug this
-/// round fixed).
+///    naming 0178's `runtime.ts`, and does NOT block the new `.ctx/traits/
+///    config.ts` pathway (regression proof for the wrong-constant bug this
+///    round fixed).
 #[test]
 fn retired_dot_ctx_config_ts_refuses_naming_0178() {
     let scratch = ScratchRoot::new("p0177-retired-source-refuses");

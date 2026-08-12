@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0177"
 title = "config.ts: the committed project manifest — vendor.toml folds in, config.lock pins it"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 
