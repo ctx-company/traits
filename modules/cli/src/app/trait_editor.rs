@@ -52,6 +52,12 @@ struct EditorState {
     drift: String,
     sections: Vec<Section>,
     list: ScrollList,
+    /// The section list's last-rendered row budget, recorded by `draw` so
+    /// key-time `ScrollList::apply` clamps against the real window instead
+    /// of `usize::MAX` (which pins the selection to the bottom row once the
+    /// list outgrows the rect). `0` until the first draw — `clamp` treats
+    /// that like the length-only clamp.
+    list_rows: usize,
     detail_scroll: ViewportScroll,
     focus: Focus,
     modal_host: ModalHost<ActionTag>,
@@ -80,6 +86,7 @@ impl EditorState {
             drift,
             sections,
             list,
+            list_rows: 0,
             detail_scroll: ViewportScroll::new(),
             focus: Focus::Master,
             modal_host: ModalHost::new(),
@@ -173,7 +180,7 @@ pub(crate) fn run(trait_arg: &str) -> crate::Result<()> {
     let mut state = EditorState::load(&canonical_path)?;
     let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(io_err)?;
     while !state.quit && !pane.detached() {
-        draw(&mut pane, &state).map_err(io_err)?;
+        draw(&mut pane, &mut state).map_err(io_err)?;
         let key = pane
             .poll_key(std::time::Duration::from_millis(250))
             .map_err(io_err)?;
@@ -234,7 +241,12 @@ fn handle_key(pane: &mut RatatuiPane, state: &mut EditorState, key: KeyEvent) ->
         }
         _ if state.focus == Focus::Master => {
             if let Some(delta) = tui_kit::scroll_key(&key) {
-                state.list.apply(delta, usize::MAX);
+                let rows = if state.list_rows == 0 {
+                    usize::MAX
+                } else {
+                    state.list_rows
+                };
+                state.list.apply(delta, rows);
                 state.detail_scroll = ViewportScroll::new();
             }
         }
@@ -365,7 +377,7 @@ fn run_check(state: &mut EditorState) {
     state.detail_scroll = ViewportScroll::new();
 }
 
-fn draw(pane: &mut RatatuiPane, state: &EditorState) -> std::io::Result<()> {
+fn draw(pane: &mut RatatuiPane, state: &mut EditorState) -> std::io::Result<()> {
     pane.draw(|frame| {
         let area = frame.area();
         let layout = Layout::default()
@@ -391,12 +403,16 @@ fn draw(pane: &mut RatatuiPane, state: &EditorState) -> std::io::Result<()> {
             separator: SEPARATOR_WIDTH,
         };
         match bounds.compute(layout[1], LEFT_MIN) {
-            tui_kit::SplitLayout::Full(rect) => render_sections(frame, rect, state),
+            tui_kit::SplitLayout::Full(rect) => {
+                state.list_rows = rect.height as usize;
+                render_sections(frame, rect, state);
+            }
             tui_kit::SplitLayout::Split {
                 left,
                 separator,
                 right,
             } => {
+                state.list_rows = left.height as usize;
                 render_sections(frame, left, state);
                 tui_kit::render_separator_column(frame, separator);
                 render_detail(frame, right, state);

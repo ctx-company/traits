@@ -1330,11 +1330,18 @@ impl State {
     }
 
     fn move_selection(&mut self, delta: i32) {
-        // The visible-row window is only known at draw time (the pane
-        // area's height varies with the terminal), so key handling only
-        // moves the selection; the render pass re-clamps the scroll offset
-        // against the real rect height on the next render.
-        self.current_list_mut().move_by(delta as i64, usize::MAX);
+        // Clamp against the list pane's last-rendered height so `clamp`'s
+        // sticky-window rule applies at key time: moving within the window
+        // only moves the selection, and the offset grows/shrinks only when
+        // the selection crosses the window's own edge. Before the first
+        // draw (no layout yet) fall back to the length-only clamp; the
+        // render pass still re-resolves against the real rect height, so a
+        // resize between key and draw only tightens the window.
+        let rows = self
+            .last_pane_layout
+            .rect(list_pane_id(self.screen))
+            .map_or(usize::MAX, |rect| rect.height.saturating_sub(2) as usize);
+        self.current_list_mut().move_by(delta as i64, rows);
         // Navigation is an explicit user choice, so later snapshots must not
         // snap the list back to the run-view handoff target.
         if self.screen == Screen::Sessions {
