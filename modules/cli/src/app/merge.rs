@@ -1018,7 +1018,7 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
     // worktree is touched, on every later merge attempt of this run-id. The
     // preflight clean-`main` check above does NOT catch this incident class,
     // since the P477 write it exists to cover landed in gitignored
-    // `.ctx/config.toml`, leaving the tracked tree clean.
+    // `.ctx/traits/runtime.toml`, leaving the tracked tree clean.
     if let Some(finding) = session
         .provenance
         .out_of_tree_mutations
@@ -2804,7 +2804,7 @@ fn resolve_merger(
     // write-confinement payloads generated for that same worktree.
     // Repository-relative path values resolve against the invocation
     // checkout, not the worktree. Empty overlay (byte-identical to no
-    // overlay) when `.ctx/config.toml [worktree]` declared none.
+    // overlay) when `.ctx/traits/runtime.toml [worktree]` declared none.
     let (merger_env_overlay, confinement) =
         ctx_traits_io::confinement::resolve_worktree_spawn(&profile.worktree, Some(worktree_path))?;
 

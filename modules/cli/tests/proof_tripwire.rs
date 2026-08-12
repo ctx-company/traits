@@ -23,11 +23,11 @@ fn init_fixture_repo(repo: &Path, home: &Path, cmd: &str, extra_config: &str) {
     git_init_on_branch(repo, "main");
     fs::write(
         repo.join(".gitignore"),
-        ".ctx/traits/worktrees/\n.ctx/config.toml\n",
+        ".ctx/traits/worktrees/\n.ctx/traits/runtime.toml\n",
     )
     .unwrap();
     if !extra_config.is_empty() {
-        fs::write(repo.join(".ctx/config.toml"), extra_config).unwrap();
+        fs::write(repo.join(".ctx/traits/runtime.toml"), extra_config).unwrap();
     }
     fs::write(
         repo.join(".ctx/traits/demo/generated/index.toml"),
@@ -110,7 +110,7 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
         .unwrap_or_else(|error| panic!("stdout was not a JSON envelope: {error}\n{stdout}"))
 }
 
-/// A `cmd` that writes into `<repo>/.ctx/config.toml` — gitignored in this
+/// A `cmd` that writes into `<repo>/.ctx/traits/runtime.toml` — gitignored in this
 /// fixture, so this is exactly the P477 incident class the sentinel leg
 /// exists to cover, not the status leg. Writes a syntactically valid,
 /// schema-compliant one-line TOML document (an empty `[worktree]` table),
@@ -120,7 +120,7 @@ fn value_json(output: &std::process::Output) -> serde_json::Value {
 /// reasons unrelated to the tripwire.
 fn write_gitignored_config_cmd(repo: &Path) -> String {
     format!(
-        "printf '[worktree]' > {}/.ctx/config.toml",
+        "printf '[worktree]' > {}/.ctx/traits/runtime.toml",
         repo.canonicalize().unwrap().display()
     )
 }
@@ -197,7 +197,7 @@ fn gitignored_invocation_repo_write_parks_and_does_not_land() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|path| path.as_str().unwrap().contains(".ctx/config.toml")),
+            .any(|path| path.as_str().unwrap().contains(".ctx/traits/runtime.toml")),
         "finding must name the offending path: {finding}"
     );
     assert_eq!(finding["policy"], "park");
@@ -285,7 +285,7 @@ fn seeded_park_evidence_refuses_an_explicit_merge_of_an_otherwise_clean_completi
     let mut ledger: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
     ledger["provenance"]["out-of-tree-mutations"] = serde_json::json!([{
-        "paths": [".ctx/config.toml"],
+        "paths": [".ctx/traits/runtime.toml"],
         "frame": "run 1 / source 1: Run command (item:command, kind:command)",
         "policy": "park",
         "detected-at-epoch": 1,
@@ -309,7 +309,7 @@ fn seeded_park_evidence_refuses_an_explicit_merge_of_an_otherwise_clean_completi
         merge_envelope["value"]["reason"]
             .as_str()
             .unwrap()
-            .contains(".ctx/config.toml"),
+            .contains(".ctx/traits/runtime.toml"),
         "park reason must name the offending path: {merge_envelope}"
     );
 

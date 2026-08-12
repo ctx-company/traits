@@ -106,7 +106,7 @@ transport = "cli"
 session-mode = "per-frame"
 "#
     );
-    write_file(&repo.join("ctx.toml"), &ctx_toml);
+    write_file(&repo.join(".ctx/traits/runtime.toml"), &ctx_toml);
 }
 
 /// Minimal fixture family: `topic`/`output-dir` input ports, the exact

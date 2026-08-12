@@ -58,7 +58,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         utf8(&init).1
     );
     fs::write(
-        proj.join(".ctx/config.toml"),
+        proj.join(".ctx/traits/runtime.toml"),
         "[agent.role.worker]\nharness = \"claude-code\"\n",
     )
     .unwrap();

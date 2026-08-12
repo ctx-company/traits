@@ -4,8 +4,7 @@
 //! JSON session ledgers and rejects symlinked paths instead of silently
 //! following them. Bare session IDs default to the invocation repository's
 //! global per-repository runs root (P426; `~/.config/ctx/runs/<repo-key>/`)
-//! unless a session store is supplied, with a one-release fallback to the
-//! legacy repo-local `.ctx/runs` for sessions written before P426.
+//! unless a session store is supplied.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::HashMap;
@@ -25,13 +24,6 @@ pub fn default_session_store() -> crate::Result<Utf8PathBuf> {
     crate::state::current_global_runs_root()
 }
 
-/// Legacy repo-local session-ledger store (`.ctx/runs`), retained as a
-/// one-release dual-read fallback for bare session IDs written before the
-/// global default took effect.
-fn legacy_session_store() -> crate::Result<Utf8PathBuf> {
-    crate::state::current_legacy_runs_root()
-}
-
 pub fn session_store_path(store: Option<&str>, session_id: &str) -> crate::Result<Utf8PathBuf> {
     validate_bare_session_id(session_id)?;
     let root = match store {
@@ -42,16 +34,13 @@ pub fn session_store_path(store: Option<&str>, session_id: &str) -> crate::Resul
 }
 
 /// Resolve a bare session ID to its ledger path. An explicit store override
-/// always wins; otherwise the global path is preferred, falling back to the
-/// legacy repo-local path only when a ledger already exists there (so a
-/// session written before P426 keeps resolving), and defaulting to the
-/// global path for a session about to be created.
+/// always wins; otherwise the global path is used, defaulting to it for a
+/// session about to be created.
 ///
 /// `session` may also be an unambiguous prefix of a persisted session ID
 /// (P421): an exact-ID ledger always wins over a prefix match, and a prefix
 /// matching more than one ledger is an ambiguity error rather than a
-/// first-match guess. Store precedence for prefix scanning follows the same
-/// global-then-legacy order as exact resolution.
+/// first-match guess.
 pub fn resolve_session_path(session: &str, store: Option<&str>) -> crate::Result<Utf8PathBuf> {
     if let Some(path) = explicit_run_session_path(session) {
         return Ok(Utf8PathBuf::from(path));
@@ -69,16 +58,7 @@ pub fn resolve_session_path(session: &str, store: Option<&str>) -> crate::Result
     if global.is_file() {
         return Ok(global);
     }
-    if let Ok(legacy_root) = legacy_session_store() {
-        let legacy = legacy_root.join(format!("{session}.json"));
-        if legacy.is_file() {
-            return Ok(legacy);
-        }
-    }
-    let mut roots = vec![default_session_store()?];
-    if let Ok(legacy_root) = legacy_session_store() {
-        roots.push(legacy_root);
-    }
+    let roots = vec![default_session_store()?];
     Ok(resolve_session_prefix_in_stores(session, &roots)?.unwrap_or(global))
 }
 
@@ -293,32 +273,16 @@ fn session_ledger_names(root: &Utf8Path) -> crate::Result<Vec<String>> {
 }
 
 /// List persisted session-ledger paths. An explicit `store` scans only that
-/// directory; the default scans the global root first and the legacy
-/// repo-local root second, deduplicating by file name so a session present
-/// in both never appears twice — the global copy always wins the dedup.
+/// directory; the default scans the global root.
 pub fn session_store_paths(store: Option<&str>) -> crate::Result<Vec<Utf8PathBuf>> {
-    if let Some(store) = store {
-        let root = Utf8PathBuf::from(store);
-        return Ok(session_ledger_names(&root)?
-            .into_iter()
-            .map(|name| root.join(name))
-            .collect());
-    }
-    let global_root = default_session_store()?;
-    let mut seen = std::collections::BTreeSet::new();
-    let mut paths: Vec<Utf8PathBuf> = Vec::new();
-    for name in session_ledger_names(&global_root)? {
-        seen.insert(name.clone());
-        paths.push(global_root.join(name));
-    }
-    if let Ok(legacy_root) = legacy_session_store() {
-        for name in session_ledger_names(&legacy_root)? {
-            if seen.contains(&name) {
-                continue;
-            }
-            paths.push(legacy_root.join(name));
-        }
-    }
+    let root = match store {
+        Some(store) => Utf8PathBuf::from(store),
+        None => default_session_store()?,
+    };
+    let mut paths: Vec<Utf8PathBuf> = session_ledger_names(&root)?
+        .into_iter()
+        .map(|name| root.join(name))
+        .collect();
     paths.sort();
     Ok(paths)
 }
@@ -863,9 +827,9 @@ pub fn session_task(session: &ctx_traits_core::procedure::session::Session) -> O
 }
 
 /// One row of the P423 dashboard SESSIONS-screen inventory: a ledger this
-/// repository's default global-then-legacy stores actually contain, resolved
-/// enough to display and act on without re-parsing it a second time per
-/// screen refresh.
+/// repository's default global store actually contains, resolved enough to
+/// display and act on without re-parsing it a second time per screen
+/// refresh.
 pub struct RunInventoryRow {
     pub session_id: String,
     pub ledger_path: Utf8PathBuf,
@@ -922,8 +886,7 @@ impl InventoryCache {
 }
 
 /// Build the SESSIONS-screen inventory for this repository's default session
-/// stores (global-first, legacy-fallback, same dedup as [`session_store_paths`]).
-/// Every ledger under those stores is included — reading failures become
+/// store. Every ledger under that store is included — reading failures become
 /// `InventoryOutcome::Unreadable` rows rather than aborting the scan, so one
 /// corrupt ledger never hides every other session from the dashboard.
 pub fn current_repo_run_inventory() -> crate::Result<Vec<RunInventoryRow>> {
@@ -941,9 +904,9 @@ pub fn current_repo_run_inventory_cached(
 }
 
 /// Build inventory rows from an already-resolved set of ledger paths —
-/// shared by [`current_repo_run_inventory`] (global-first, legacy-fallback
-/// for the current repository) and [`machine_wide_run_inventory`] (one
-/// indexed repository's global store, P439). One-shot callers pass a
+/// shared by [`current_repo_run_inventory`] (the current repository's global
+/// store) and [`machine_wide_run_inventory`] (one indexed repository's
+/// global store, P439). One-shot callers pass a
 /// throwaway cache (`InventoryCache::new()`); a caller ticking repeatedly
 /// (the dashboard) owns and reuses one across calls so a cache hit is a
 /// refcount bump instead of a full re-parse.
@@ -1030,9 +993,8 @@ pub struct MachineRunInventoryEntry {
 /// invocation identity recorded in [`crate::state::read_repo_index`], each
 /// with its runs scanned from its own [`crate::state::global_runs_root`] —
 /// the consumer half of P426/P439's ad-hoc-run producer, and the dashboard
-/// ALL mode's data source. Only the current repository's inventory
-/// ([`current_repo_run_inventory`]) also dual-reads the legacy repo-local
-/// store; every other indexed entry is read from its global root alone.
+/// ALL mode's data source. Every indexed entry, including the current
+/// repository, is read from its global root alone.
 pub fn machine_wide_run_inventory() -> crate::Result<Vec<MachineRunInventoryEntry>> {
     let mut cache = InventoryCache::new();
     machine_wide_run_inventory_cached(&mut cache)

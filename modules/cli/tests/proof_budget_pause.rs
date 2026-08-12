@@ -98,7 +98,7 @@ fn init_fixture_repo(repo: &Path, home: &Path, harness_id: &str, script: &Path, 
     git_init(repo);
     fs::write(repo.join(".gitignore"), "ctx.toml\n.ctx/runs/\n").unwrap();
     fs::write(
-        repo.join("ctx.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         ctx_toml(harness_id, script, max_tokens),
     )
     .unwrap();
@@ -234,7 +234,7 @@ printf '{{"answer2":"done2"}}'
     // Raising the cap (a config edit, not a new resume mechanism) and
     // re-driving with the same `--session` resumes past the pause.
     fs::write(
-        repo.join("ctx.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         ctx_toml("budget-worker", &script, 1000),
     )
     .unwrap();

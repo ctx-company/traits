@@ -211,7 +211,7 @@ pub struct BaseLockEntry {
     /// npm SRI integrity string for the base package's tarball.
     pub integrity: String,
     /// Path to the base's published project manifest, relative to the base
-    /// package root (e.g. `.ctx/traits.toml`). Descriptive only: base
+    /// package root (e.g. `.ctx/traits/config.toml`). Descriptive only: base
     /// resolution never trusts this string to build a filesystem path, it
     /// re-discovers the manifest inside a freshly staged, integrity-verified
     /// base package every time.

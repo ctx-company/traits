@@ -992,7 +992,7 @@ fn emit_build_cache_prune_report(
 /// (project + machine layers) rooted at `root_path` — the selected
 /// repository (honoring an explicit `--repo-root`), not the invocation CWD —
 /// the same resolution doctor's `--config` report uses. Never trusts the
-/// gitignored `.ctx/config.toml` as shipped source; only the isolated
+/// gitignored `.ctx/traits/runtime.toml` as shipped source; only the isolated
 /// configuration a caller's environment resolves.
 fn declared_build_cache_names(
     root_path: &camino::Utf8Path,

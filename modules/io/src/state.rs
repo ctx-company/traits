@@ -13,10 +13,6 @@
 //! `.ctx/worktrees` are project content or deliberately repo-local and are
 //! never touched by anything in this module — see [`crate::layout`]'s module
 //! doc for that boundary.
-//!
-//! One release of legacy `.ctx/{runs,debug,cache}` reads remains supported
-//! (global-first, legacy-fallback); [`plan_migration`]/[`apply_migration`]
-//! back `ctx doctor --migrate-state`.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
@@ -76,8 +72,8 @@ pub fn config_home_dir() -> crate::Result<Utf8PathBuf> {
 }
 
 /// Global `ctx` config-home root (`$XDG_CONFIG_HOME/ctx` or
-/// `$HOME/.config/ctx`). Houses [`config.toml`](crate::layout::GLOBAL_RUNTIME_CONFIG),
-/// [`crate::trust`]'s store, `repos.toml`, and the `runs`/`debug`/`cache`
+/// `$HOME/.config/ctx`). Houses [`traits/runtime.toml`](crate::layout::GLOBAL_RUNTIME_CONFIG),
+/// [`crate::trust`]'s store, `checkouts.toml`, and the `runs`/`debug`/`cache`
 /// per-repository roots this module resolves.
 pub fn global_ctx_root() -> crate::Result<Utf8PathBuf> {
     Ok(config_home_dir()?.join("ctx"))
@@ -227,7 +223,7 @@ pub fn state_repo_root() -> crate::Result<Utf8PathBuf> {
 /// expressed relative to the current working directory.
 ///
 /// Project-tier (`.ctx/traits`) resolution has never required a Git
-/// repository — a plain directory with a `.ctx/traits.toml` manifest is a
+/// repository — a plain directory with a `.ctx/traits/config.toml` manifest is a
 /// valid project on its own — so an ad-hoc (non-repository) invocation
 /// resolves to `.` here, exactly the literal cwd it has always used.
 /// Inside a Git repository, this resolves to `.` when the invocation cwd is
@@ -342,36 +338,9 @@ pub fn current_global_context_root() -> crate::Result<Utf8PathBuf> {
     global_context_root(&current_repo_key()?)
 }
 
-/// Legacy repo-local runs root (`.ctx/runs`) under `repo_root`.
-pub fn legacy_runs_root(repo_root: &Utf8Path) -> Utf8PathBuf {
-    repo_root.join(crate::layout::RUN_ROOT)
-}
-
-/// Legacy repo-local debug root (`.ctx/debug`) under `repo_root`.
-pub fn legacy_debug_root(repo_root: &Utf8Path) -> Utf8PathBuf {
-    repo_root.join(crate::layout::DEBUG_ROOT)
-}
-
-/// Legacy repo-local cache root (`.ctx/cache`) under `repo_root`.
-pub fn legacy_cache_root(repo_root: &Utf8Path) -> Utf8PathBuf {
-    repo_root.join(".ctx").join("cache")
-}
-
-/// Legacy runs root for the current invocation's repository.
-pub fn current_legacy_runs_root() -> crate::Result<Utf8PathBuf> {
-    Ok(legacy_runs_root(&state_repo_root()?))
-}
-
-/// Legacy debug root for the current invocation's repository.
-pub fn current_legacy_debug_root() -> crate::Result<Utf8PathBuf> {
-    Ok(legacy_debug_root(&state_repo_root()?))
-}
-
 // ---------------------------------------------------------------------------
 /// Machine-local index of known checkouts (P569). Generated, never authored.
 const CHECKOUT_INDEX: &str = "checkouts.toml";
-/// P569 predecessor of [`CHECKOUT_INDEX`], still read.
-const LEGACY_CHECKOUT_INDEX: &str = "repos.toml";
 
 // checkout index: repository path + last-seen
 // ---------------------------------------------------------------------------
@@ -394,18 +363,8 @@ fn repo_index_path() -> crate::Result<Utf8PathBuf> {
     // P569: an index of checkouts — repo key -> path + last seen — so the
     // keyed `runs/<key>`, `cache/<key>` trees can point back at real working
     // copies. Named for what it indexes; `repos.toml` read as a list of
-    // repositories you had configured, which it never was. The pre-rename
-    // name is still read below so an existing machine keeps its index.
-    let root = global_ctx_root()?;
-    let current = root.join(CHECKOUT_INDEX);
-    if current.exists() {
-        return Ok(current);
-    }
-    let legacy = root.join(LEGACY_CHECKOUT_INDEX);
-    if legacy.exists() {
-        return Ok(legacy);
-    }
-    Ok(current)
+    // repositories you had configured, which it never was.
+    Ok(global_ctx_root()?.join(CHECKOUT_INDEX))
 }
 
 fn read_repo_index_document(path: &Utf8Path) -> crate::Result<RepoIndexDocument> {
@@ -470,7 +429,7 @@ pub fn read_repo_index() -> crate::Result<Vec<RepoIndexEntry>> {
 }
 
 /// Record (or refresh) the current repository's canonical path and
-/// last-seen time in `repos.toml`, under an exclusive `flock` on a sibling
+/// last-seen time in `checkouts.toml`, under an exclusive `flock` on a sibling
 /// lock file so two runs starting at once never lose each other's entry
 /// (reuses [`crate::file_lock`], the same primitive [`crate::merge_lock`]
 /// and [`crate::builtin_store`] use for cross-process serialization).
@@ -525,387 +484,4 @@ fn epoch_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-// ---------------------------------------------------------------------------
-// Orphaned index entries (moved/renamed/deleted repositories)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrphanedRepo {
-    pub key: String,
-    pub indexed_path: String,
-}
-
-/// Indexed repositories whose recorded path no longer resolves to that same
-/// key: moved, renamed, or deleted since last seen. Never mutates the index
-/// or any state directory — a moved repository gets a brand-new key on its
-/// next run (see module doc); this only reports the old one so an owner can
-/// decide whether to prune it by hand.
-pub fn find_orphans() -> crate::Result<Vec<OrphanedRepo>> {
-    let mut orphans = Vec::new();
-    for entry in read_repo_index()? {
-        let recorded = Utf8Path::new(&entry.path);
-        // An ad-hoc entry's key carries the `adhoc-` prefix `current_repo_key`
-        // adds for a non-repository cwd; recompute the same way so ad-hoc
-        // entries are not spuriously reported as orphaned.
-        let still_valid = canonical_repo_root(recorded)
-            .map(|canonical| {
-                let plain = repo_key(&canonical);
-                entry.key == plain || entry.key == format!("adhoc-{plain}")
-            })
-            .unwrap_or(false);
-        if !still_valid {
-            orphans.push(OrphanedRepo {
-                key: entry.key,
-                indexed_path: entry.path,
-            });
-        }
-    }
-    Ok(orphans)
-}
-
-// ---------------------------------------------------------------------------
-// Migration plan / apply (`ctx doctor --migrate-state [--apply]`)
-// ---------------------------------------------------------------------------
-
-/// Deliberately excludes `context` (P498): that family has no pre-P498
-/// repo-local predecessor to migrate away from and no legacy fallback of its
-/// own, so `plan_migration`/`apply_migration` have nothing to do for it —
-/// see [`global_context_root`]'s doc comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateFamily {
-    Runs,
-    Debug,
-    Cache,
-}
-
-impl StateFamily {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Runs => "runs",
-            Self::Debug => "debug",
-            Self::Cache => "cache",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PlannedMove {
-    pub family: StateFamily,
-    pub source: Utf8PathBuf,
-    pub dest: Utf8PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct PlannedConflict {
-    pub family: StateFamily,
-    pub source: Utf8PathBuf,
-    pub dest: Utf8PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct MigrationPlan {
-    pub repo_key: String,
-    pub canonical_repo_root: Utf8PathBuf,
-    pub moves: Vec<PlannedMove>,
-    pub conflicts: Vec<PlannedConflict>,
-    pub orphans: Vec<OrphanedRepo>,
-}
-
-/// Entries directly under `dir`, sorted by name, as `(name, path)`. Missing
-/// `dir` is an empty result, not an error, so planning never requires a
-/// family to already exist.
-fn dir_entries(dir: &Utf8Path) -> crate::Result<Vec<(String, Utf8PathBuf)>> {
-    let read_dir = match std::fs::read_dir(dir.as_std_path()) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(crate::environment::Error::Filesystem {
-                path: dir.to_string(),
-                source,
-            }
-            .into());
-        }
-    };
-    let mut names = Vec::new();
-    for entry in read_dir {
-        let entry = entry.map_err(|source| crate::environment::Error::Filesystem {
-            path: dir.to_string(),
-            source,
-        })?;
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        names.push(name);
-    }
-    names.sort();
-    Ok(names
-        .into_iter()
-        .map(|name| {
-            let source = dir.join(&name);
-            (name, source)
-        })
-        .collect())
-}
-
-fn plan_family_moves(
-    family: StateFamily,
-    legacy_root: &Utf8Path,
-    global_root: &Utf8Path,
-    skip_names: &[&str],
-    moves: &mut Vec<PlannedMove>,
-    conflicts: &mut Vec<PlannedConflict>,
-) -> crate::Result<()> {
-    for (name, source) in dir_entries(legacy_root)? {
-        if skip_names.contains(&name.as_str()) {
-            continue;
-        }
-        let dest = global_root.join(&name);
-        if dest.exists() {
-            conflicts.push(PlannedConflict {
-                family,
-                source,
-                dest,
-            });
-        } else {
-            moves.push(PlannedMove {
-                family,
-                source,
-                dest,
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Plan the one-release legacy-to-global migration for the invocation
-/// repository. Read-only: never touches the filesystem. `.ctx/runs/profiles`
-/// (committed project configuration, not run state) and `.ctx/worktrees`
-/// are never planned for a move.
-pub fn plan_migration() -> crate::Result<MigrationPlan> {
-    let repo_root = state_repo_root()?;
-    let canonical = canonical_repo_root(&repo_root)?;
-    let key = repo_key(&canonical);
-
-    let mut moves = Vec::new();
-    let mut conflicts = Vec::new();
-
-    plan_family_moves(
-        StateFamily::Runs,
-        &legacy_runs_root(&repo_root),
-        &global_runs_root(&key)?,
-        &["profiles"],
-        &mut moves,
-        &mut conflicts,
-    )?;
-    plan_family_moves(
-        StateFamily::Debug,
-        &legacy_debug_root(&repo_root),
-        &global_debug_root(&key)?,
-        &[],
-        &mut moves,
-        &mut conflicts,
-    )?;
-    plan_family_moves(
-        StateFamily::Cache,
-        &legacy_cache_root(&repo_root),
-        &global_cache_root(&key)?,
-        &[],
-        &mut moves,
-        &mut conflicts,
-    )?;
-
-    Ok(MigrationPlan {
-        repo_key: key,
-        canonical_repo_root: canonical,
-        moves,
-        conflicts,
-        orphans: find_orphans()?,
-    })
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MigrationReport {
-    pub moved: Vec<PlannedMove>,
-    pub failed: Vec<(PlannedMove, String)>,
-}
-
-/// Apply a previously computed [`MigrationPlan`]'s moves. Conflicts are
-/// never touched (the plan already excludes them from `moves`). Each move
-/// first tries a `rename` and falls back to safe copy-then-remove (so a
-/// cross-filesystem move between the repository checkout and the config
-/// home never fails outright); a failed move leaves its source data intact
-/// and is reported rather than aborting the whole apply.
-pub fn apply_migration(plan: &MigrationPlan) -> crate::Result<MigrationReport> {
-    let mut report = MigrationReport::default();
-    for planned in &plan.moves {
-        match move_path(&planned.source, &planned.dest) {
-            Ok(()) => report.moved.push(planned.clone()),
-            Err(error) => report.failed.push((planned.clone(), error.to_string())),
-        }
-    }
-    Ok(report)
-}
-
-fn move_path(source: &Utf8Path, dest: &Utf8Path) -> crate::Result<()> {
-    if let Some(parent) = dest.parent() {
-        crate::path_safety::create_dir_all_no_symlinks(parent, "global state directory")?;
-    }
-    if dest.exists() {
-        return Err(crate::environment::Error::Filesystem {
-            path: dest.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "migration destination already exists",
-            ),
-        }
-        .into());
-    }
-    match std::fs::rename(source.as_std_path(), dest.as_std_path()) {
-        Ok(()) => Ok(()),
-        Err(_) => copy_then_remove(source, dest),
-    }
-}
-
-/// Copy `source` into a uniquely named sibling staging path next to `dest`,
-/// then publish by renaming the *complete* staging tree onto `dest` — never
-/// copying directly into `dest` — so a nested-copy failure partway through
-/// (a rejected symlink, a mid-copy IO error) leaves neither a partial `dest`
-/// nor stray staging residue: the staging path is removed on every failure
-/// path, and `source` is only removed once publication has fully succeeded.
-fn copy_then_remove(source: &Utf8Path, dest: &Utf8Path) -> crate::Result<()> {
-    let metadata = std::fs::symlink_metadata(source.as_std_path()).map_err(|source_err| {
-        crate::environment::Error::Filesystem {
-            path: source.to_string(),
-            source: source_err,
-        }
-    })?;
-    if metadata.is_symlink() {
-        return Err(crate::environment::Error::Filesystem {
-            path: source.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "refusing to migrate a symlinked entry",
-            ),
-        }
-        .into());
-    }
-
-    let staging = staging_path(dest)?;
-    remove_staging_residue(&staging);
-
-    let copy_result = if metadata.is_dir() {
-        copy_dir_recursive(source, &staging)
-    } else {
-        std::fs::copy(source.as_std_path(), staging.as_std_path())
-            .map(|_| ())
-            .map_err(|source_err| {
-                crate::environment::Error::Filesystem {
-                    path: source.to_string(),
-                    source: source_err,
-                }
-                .into()
-            })
-    };
-    if let Err(error) = copy_result {
-        remove_staging_residue(&staging);
-        return Err(error);
-    }
-
-    if let Err(source_err) = std::fs::rename(staging.as_std_path(), dest.as_std_path()) {
-        remove_staging_residue(&staging);
-        return Err(crate::environment::Error::Filesystem {
-            path: dest.to_string(),
-            source: source_err,
-        }
-        .into());
-    }
-
-    remove_path(source, &metadata)
-}
-
-/// A staging path guaranteed distinct from `dest` itself: a `.migrate-` sibling
-/// under `dest`'s parent, named from `dest`'s own leaf plus this process id and
-/// a monotonic timestamp, so two moves that share a destination parent (the
-/// common case — every move in one family shares the family's global root)
-/// never collide.
-fn staging_path(dest: &Utf8Path) -> crate::Result<Utf8PathBuf> {
-    let parent = dest
-        .parent()
-        .ok_or_else(|| crate::environment::Error::Filesystem {
-            path: dest.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "migration destination has no parent directory",
-            ),
-        })?;
-    let leaf = dest.file_name().unwrap_or("state");
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    Ok(parent.join(format!(
-        ".migrate-staging-{leaf}-{}-{seed}",
-        std::process::id()
-    )))
-}
-
-fn remove_staging_residue(staging: &Utf8Path) {
-    let _ = std::fs::remove_dir_all(staging.as_std_path());
-    let _ = std::fs::remove_file(staging.as_std_path());
-}
-
-fn copy_dir_recursive(source: &Utf8Path, dest: &Utf8Path) -> crate::Result<()> {
-    std::fs::create_dir_all(dest.as_std_path()).map_err(|source_err| {
-        crate::environment::Error::Filesystem {
-            path: dest.to_string(),
-            source: source_err,
-        }
-    })?;
-    for (name, child_source) in dir_entries(source)? {
-        let child_dest = dest.join(&name);
-        let child_meta =
-            std::fs::symlink_metadata(child_source.as_std_path()).map_err(|source_err| {
-                crate::environment::Error::Filesystem {
-                    path: child_source.to_string(),
-                    source: source_err,
-                }
-            })?;
-        if child_meta.is_symlink() {
-            return Err(crate::environment::Error::Filesystem {
-                path: child_source.to_string(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "refusing to migrate a symlinked entry",
-                ),
-            }
-            .into());
-        } else if child_meta.is_dir() {
-            copy_dir_recursive(&child_source, &child_dest)?;
-        } else {
-            std::fs::copy(child_source.as_std_path(), child_dest.as_std_path()).map_err(
-                |source_err| crate::environment::Error::Filesystem {
-                    path: child_source.to_string(),
-                    source: source_err,
-                },
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_path(path: &Utf8Path, metadata: &std::fs::Metadata) -> crate::Result<()> {
-    let result = if metadata.is_dir() {
-        std::fs::remove_dir_all(path.as_std_path())
-    } else {
-        std::fs::remove_file(path.as_std_path())
-    };
-    result.map_err(|source| {
-        crate::environment::Error::Filesystem {
-            path: path.to_string(),
-            source,
-        }
-        .into()
-    })
 }

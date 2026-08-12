@@ -1,7 +1,7 @@
 //! Harness registry and runtime configuration parsing at the IO boundary.
 //!
 //! Trait source stays portable: this module reads machine-local harness and
-//! agent-role configuration from `.ctx/config.toml`, layers `--assign`
+//! agent-role configuration from `.ctx/traits/runtime.toml`, layers `--assign`
 //! overrides on top, validates the result against a loaded trait, probes
 //! configured harness binaries, and produces opaque run-session assignment
 //! evidence for core.
@@ -22,10 +22,8 @@ pub fn activity_adapter_kind(
 }
 
 pub use crate::layout::{
-    GLOBAL_RUNTIME_CONFIG, GLOBAL_RUNTIME_CONFIG_SOURCE, HARNESS_REGISTRY,
-    LEGACY_CTX_GLOBAL_RUNTIME_CONFIG, LEGACY_CTX_RUNTIME_CONFIG, LEGACY_GLOBAL_RUNTIME_CONFIG,
-    LEGACY_HARNESS_REGISTRY, LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RETIRED_RUNTIME_CONFIG_SOURCE,
-    RUNTIME_CONFIG, RUNTIME_CONFIG_SOURCE,
+    GLOBAL_RUNTIME_CONFIG, GLOBAL_RUNTIME_CONFIG_SOURCE, HARNESS_REGISTRY, PROJECT_CONFIG,
+    RETIRED_RUNTIME_CONFIG_SOURCE, RUNTIME_CONFIG, RUNTIME_CONFIG_SOURCE,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -664,7 +662,7 @@ fn combined_worktree_env(worktree: &WorktreeConfig) -> BTreeMap<String, String> 
 /// any harness/model/session field a hard decode error naming the field,
 /// rather than a silently ignored table, so a vendored trait can never bind
 /// lifecycle, harness, or model selection; those stay machine-private in
-/// `.ctx/config.toml [agent.role.<role>]`. Not canonical bytes: tuning it
+/// `.ctx/traits/runtime.toml [agent.role.<role>]`. Not canonical bytes: tuning it
 /// never re-baselines the trait's digest.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -709,10 +707,6 @@ fn manifest_budget_to_run(budget: &ctx_traits_core::manifest::ManifestBudget) ->
 pub enum PackageRunConfigTier {
     /// `trait.toml` `[budget]`/`[variant.<vid>.budget]`/`[defaults]` (0176).
     Manifest,
-    /// Legacy family-manifest-declared per-variant `run-config` file.
-    LegacyDeclared,
-    /// Legacy package-root `config.toml` sidecar ([`TraitRunConfig`]).
-    LegacySidecar,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -798,7 +792,7 @@ pub struct RuntimeConfig {
     pub trait_defaults: BTreeMap<String, TraitDefaults>,
     /// P342 worktree preparation: gitignored seed roots, ordered literal-argv
     /// setup commands, and the environment overlay applied inside a run
-    /// worktree. `.ctx/config.toml [worktree]` is the single source for
+    /// worktree. `.ctx/traits/runtime.toml [worktree]` is the single source for
     /// worktree creation, drive/resume, and merge — all three read this one
     /// resolved `WorktreeConfig`.
     #[serde(default)]
@@ -1445,7 +1439,6 @@ pub struct ConfigReport {
     /// the report so presentation layers, rather than this library, decide
     /// how and where to display them.
     pub requirement_conflicts: Vec<ConfigRequirementConflict>,
-    pub foreign_config: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -1650,7 +1643,7 @@ pub fn resolve_registry_base(start_dir: &Utf8Path) -> Option<String> {
         .and_then(|registry| registry.base)
 }
 
-/// A `.ctx/config.toml [host.<name>]` override for one built-in host, or a
+/// A `.ctx/traits/runtime.toml [host.<name>]` override for one built-in host, or a
 /// fully-specified addition of a new host not in the built-in table. Every
 /// field is optional so a config entry may override only the fields it
 /// cares about (e.g. just `project-path`) while leaving the rest of a
@@ -2913,7 +2906,7 @@ impl ResolvedRuntimeAssignments {
 }
 
 /// Resolve machine-local harness registry/agent defaults from
-/// `.ctx/config.toml` and layer `--assign` overrides on top. Callers with no
+/// `.ctx/traits/runtime.toml` and layer `--assign` overrides on top. Callers with no
 /// trait package context (merge/generate/run-info) use this; it never
 /// consults a package sidecar.
 pub fn resolve_runtime_assignments(
@@ -3182,7 +3175,7 @@ fn resolve_run_repo_key() -> Option<String> {
 
 /// The active P451 repo-qualifier key for the current invocation — `None`
 /// for an ad-hoc (non-Git) invocation. `ctx traits doctor --config` reports
-/// this so an operator copying a key from `repos.toml` (which also contains
+/// this so an operator copying a key from `checkouts.toml` (which also contains
 /// worktree-derived keys) can confirm which one actually matches a
 /// `[repo."<key>"]` block.
 pub fn active_repo_qualifier_key() -> Option<String> {
@@ -3525,24 +3518,6 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
     }
 }
 
-/// Load the optional package-root `config.toml` sidecar (legacy, P312;
-/// superseded by `trait.toml` `[budget]`, 0176). Returns `Ok(None)` only when the
-/// file is absent; a malformed or out-of-scope sidecar (e.g. an `[assign]`
-/// or `[worktree]` table) is always a hard structured `deny_unknown_fields`
-/// decode error, never silently ignored.
-pub fn load_trait_run_config(trait_root: &Utf8Path) -> crate::Result<Option<TraitRunConfig>> {
-    let path = crate::layout::package_run_config_path(trait_root);
-    let Some(text) = crate::read::read_optional_text(&path)? else {
-        return Ok(None);
-    };
-    let config: TraitRunConfig =
-        toml::from_str(&text).map_err(|source| crate::parse::Error::TomlDecode {
-            context: path.to_string(),
-            source,
-        })?;
-    Ok(Some(config))
-}
-
 /// Which package-level run-config tier is active for a resolved trait, and
 /// the path it was read from — surfaced to `ctx traits check`. `Ok(None)`
 /// means no package tier is active (built-in defaults apply).
@@ -3553,15 +3528,10 @@ pub fn describe_active_package_run_config(
     Ok(load_selected_trait_run_config(trait_ref, trait_root)?.map(|(_, path, tier)| (tier, path)))
 }
 
-/// Resolve the effective package-tier run config for the selected variant,
-/// in precedence order: `trait.toml`'s `[budget]` (overlaid by the selected
-/// `[variant.<vid>.budget]`) plus `[defaults.port]` (0176) beats a native
-/// family's declared per-variant sidecar (part of the family manifest, so a
-/// missing or malformed one is a hard configuration error), which beats the
-/// legacy package-root `config.toml` sidecar. A manifest stating any of the
-/// three sections uses them exclusively — the legacy forms are never
-/// consulted. A package still carrying the retired `runtime.toml` sidecar is
-/// a hard error, not a fallback.
+/// Resolve the effective package-tier run config for the selected variant:
+/// `trait.toml`'s `[budget]` (overlaid by the selected `[variant.<vid>.budget]`)
+/// plus `[defaults.port]` (0176). A package still carrying the retired
+/// `runtime.toml` sidecar is a hard error, not a fallback.
 fn load_selected_trait_run_config(
     trait_ref: Option<&ctx_traits_core::Trait>,
     trait_root: &Utf8Path,
@@ -3615,45 +3585,7 @@ fn load_selected_trait_run_config(
         )));
     }
 
-    let selected = if let Some(variant) = trait_ref.and_then(|trait_ref| trait_ref.variant.as_ref())
-    {
-        crate::family_manifest::read_family_table(&crate::layout::package_manifest_path(
-            trait_root,
-        ))?
-        .and_then(|table| {
-            table
-                .variant(variant.as_str())
-                .and_then(|(_, variant)| variant.run_config.clone())
-        })
-    } else {
-        None
-    };
-    if let Some(relative_path) = selected {
-        let path = trait_root.join(relative_path);
-        if !path.is_file() {
-            return Err(crate::Error::Usage {
-                message: format!("declared native-family run config does not exist: {path}"),
-            });
-        }
-        let config = decode_trait_run_config_at(&path)?;
-        return Ok(Some((config, path, PackageRunConfigTier::LegacyDeclared)));
-    }
-    Ok(load_trait_run_config(trait_root)?.map(|config| {
-        let path = crate::layout::package_run_config_path(trait_root);
-        (config, path, PackageRunConfigTier::LegacySidecar)
-    }))
-}
-
-/// Decode a [`TraitRunConfig`] (legacy budget-only sidecar shape) from an
-/// explicit file path, for the declared per-variant lookup above.
-pub fn decode_trait_run_config_at(path: &Utf8Path) -> crate::Result<TraitRunConfig> {
-    let text = crate::read::read_text(path)?;
-    let config: TraitRunConfig =
-        toml::from_str(&text).map_err(|source| crate::parse::Error::TomlDecode {
-            context: path.to_string(),
-            source,
-        })?;
-    Ok(config)
+    Ok(None)
 }
 
 /// Load a caller-selected `--budget` document from an explicit file path
@@ -3675,7 +3607,9 @@ pub fn load_budget_document(path: &Utf8Path) -> crate::Result<BudgetDocument> {
 /// loop, and session next-action hints) so the remediation text is written
 /// once instead of drifting across three near-duplicate copies.
 pub fn unassigned_role_remediation(role: &str) -> String {
-    format!("pass --assign {role}=<harness-id> or add it to .ctx/config.toml [agent.role.{role}]")
+    format!(
+        "pass --assign {role}=<harness-id> or add it to .ctx/traits/runtime.toml [agent.role.{role}]"
+    )
 }
 
 /// 0025: guard against a trait agent id that looks like an expansion seat
@@ -4120,8 +4054,6 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     // silently sees a half-defined harness (the narrator lost `--model` that
     // way). One choke point, so a raw `harness.get(id)` is always effective.
     merge_built_in_harness_overrides(&mut runtime.harness);
-    let foreign_config =
-        foreign_config_path()?.filter(|path| !documents.iter().any(|(_, p, _)| p == path));
     if let Some(max_in_flight) = runtime.drive.as_ref().and_then(|drive| drive.max_in_flight)
         && max_in_flight == 0
     {
@@ -4174,7 +4106,6 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
         winners,
         tier_warnings,
         requirement_conflicts,
-        foreign_config: foreign_config.map(|path| path.to_string()),
     })
 }
 
@@ -5132,7 +5063,7 @@ fn toml_value_at<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Val
 }
 
 /// The resolved config-layer paths runtime config resolution itself reads
-/// (user-global config, every ancestor `.ctx/config.toml`/`.ctx/harness.toml`
+/// (user-global config, every ancestor `.ctx/traits/runtime.toml`/`.ctx/harness.toml`
 /// up to the repo root, `$CTX_CONFIG` — see [`crate::env_reference::env_reference`]
 /// for `CTX_CONFIG`'s full contract) — exposed so P479's tripwire default
 /// sentinel set is *the same* enumeration config resolution uses, never a
@@ -5180,11 +5111,6 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
     }
     ancestors.reverse();
     for ancestor in ancestors {
-        layers.push((ConfigLayer::Repo, ancestor.join(LEGACY_HARNESS_REGISTRY)));
-        layers.push((ConfigLayer::Repo, ancestor.join(LEGACY_RUNTIME_CONFIG)));
-        // P569: `.ctx/config.toml` before `.ctx/traits/runtime.toml`, so a
-        // checkout carrying both is governed by the new name.
-        layers.push((ConfigLayer::Repo, ancestor.join(LEGACY_CTX_RUNTIME_CONFIG)));
         layers.push((ConfigLayer::Repo, ancestor.join(HARNESS_REGISTRY)));
         // 0177: `.ctx/traits/config.toml` (`PROJECT_CONFIG`) no longer
         // decodes as `RuntimeConfig` — it is the declarative `ConfigDocument`
@@ -5228,7 +5154,21 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
     if let Ok(path) = std::env::var("CTX_CONFIG") {
         layers.push((ConfigLayer::Environment, Utf8PathBuf::from(path)));
     }
-    Ok(layers)
+    // The hand-path candidate above and the `[GLOBAL_]RUNTIME_CONFIG_SOURCE`
+    // resolution below it can both resolve to the same on-disk path (no `.ts`
+    // source present); dedup so that path is never read as two separate
+    // documents, which would otherwise double-count its requirement
+    // conflicts and winner contributions.
+    let mut deduped: Vec<(ConfigLayer, Utf8PathBuf)> = Vec::with_capacity(layers.len());
+    for entry in layers {
+        if !deduped
+            .iter()
+            .any(|(layer, path)| *layer == entry.0 && *path == entry.1)
+        {
+            deduped.push(entry);
+        }
+    }
+    Ok(deduped)
 }
 
 // ---------------------------------------------------------------------------
@@ -5549,23 +5489,9 @@ pub fn apply_agent_config_migration(plans: &[AgentConfigLayerPlan]) -> AppliedAg
     AppliedAgentConfigMigration { rewritten, failed }
 }
 
-fn foreign_config_path() -> crate::Result<Option<Utf8PathBuf>> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    let Some(home) = home else { return Ok(None) };
-    let path = Utf8PathBuf::from_path_buf(std::path::PathBuf::from(home).join(".ctx/config.toml"))
-        .map_err(|path| {
-            config_error(
-                "foreign-config",
-                format!("path is not UTF-8: {}", path.display()),
-            )
-        })?;
-    Ok(path.exists().then_some(path))
-}
-
-/// Global runtime config candidates, legacy first so the current path wins
-/// the merge in [`resolve_runtime_config`]. Both live directly under the
-/// `ctx` config-home directory (never under a nested `.ctx/`, which is a
-/// project-relative concept — see [`GLOBAL_RUNTIME_CONFIG`]).
+/// Global runtime config candidate under the `ctx` config-home directory
+/// (never under a nested `.ctx/`, which is a project-relative concept — see
+/// [`GLOBAL_RUNTIME_CONFIG`]).
 fn global_runtime_config_paths() -> crate::Result<Vec<Utf8PathBuf>> {
     // Absence of `HOME`/`XDG_CONFIG_HOME` is not fatal here (unlike other
     // global-state consumers): a global runtime config is optional, so a
@@ -5574,11 +5500,7 @@ fn global_runtime_config_paths() -> crate::Result<Vec<Utf8PathBuf>> {
     let Ok(ctx_dir) = crate::state::global_ctx_root() else {
         return Ok(Vec::new());
     };
-    Ok(vec![
-        ctx_dir.join(LEGACY_GLOBAL_RUNTIME_CONFIG),
-        ctx_dir.join(LEGACY_CTX_GLOBAL_RUNTIME_CONFIG),
-        ctx_dir.join(GLOBAL_RUNTIME_CONFIG),
-    ])
+    Ok(vec![ctx_dir.join(GLOBAL_RUNTIME_CONFIG)])
 }
 
 /// True when `dir` (already canonicalized) is the resolved `ctx` config-home
@@ -6754,7 +6676,7 @@ fn merge_assignment(base: &mut ProfileAssignment, next: &ProfileAssignment) {
 }
 
 /// Field-by-field overlay used by [`merge_assignment`] to layer an explicit
-/// `--assign`/profile entry over `.ctx/config.toml` role/tier defaults: only
+/// `--assign`/profile entry over `.ctx/traits/runtime.toml` role/tier defaults: only
 /// fields `next` actually sets replace the corresponding field on `base`.
 fn merge_assignment_fields(base: &mut ProfileAssignment, next: &ProfileAssignment) {
     if next.mode_authored {
@@ -8176,7 +8098,7 @@ pub fn detect_builtin_harnesses(configured: &HarnessRegistry) -> Vec<BuiltinHarn
 
 /// The single-line, copy-pasteable no-candidate remediation (P427): every
 /// probed built-in binary, plus a `printf`-and-append shell command that
-/// writes a concrete, valid `.ctx/config.toml` snippet pinning `role` to the
+/// writes a concrete, valid `.ctx/traits/runtime.toml` snippet pinning `role` to the
 /// first probed candidate's built-in id. Uses dotted-key TOML
 /// (`agent.role.<role>.harness = "<id>"`) rather than a `[table]` header
 /// followed by a key on the same line — the latter is not valid single-line
@@ -8208,7 +8130,7 @@ pub fn no_builtin_harness_message(rows: &[BuiltinHarnessDetection], role: &str) 
         .unwrap_or("claude-code");
     let role_key = format!("agent.role.{role}.harness");
     format!(
-        "no built-in harness found on PATH (probed {probed}); install {names}, then pin the role to it, or run: printf '{role_key} = \"{example_id}\"\\n' >> .ctx/config.toml"
+        "no built-in harness found on PATH (probed {probed}); install {names}, then pin the role to it, or run: printf '{role_key} = \"{example_id}\"\\n' >> .ctx/traits/runtime.toml"
     )
 }
 
@@ -9344,7 +9266,7 @@ mod config_tests {
             config.authored_requirements = authored_requirement_values(&document);
             config
         };
-        let repo_path = Utf8PathBuf::from("repository/.ctx/config.toml");
+        let repo_path = Utf8PathBuf::from("repository/.ctx/traits/runtime.toml");
         let environment_path = Utf8PathBuf::from("environment.toml");
         let repo = parse("schema-version = \"repository\"");
         let environment = parse("schema-version = \"environment\"");
@@ -9380,7 +9302,7 @@ mod config_tests {
         assert_eq!(winners["schema-version"].layer, ConfigLayer::Repo);
         assert_eq!(
             winners["schema-version"].source.as_deref(),
-            Some("repository/.ctx/config.toml")
+            Some("repository/.ctx/traits/runtime.toml")
         );
         assert_eq!(
             winners["schema-version"].reason,
@@ -10306,22 +10228,6 @@ mod config_tests {
     }
 
     #[test]
-    fn manifest_without_run_config_sections_falls_through_to_legacy_sidecar() {
-        let root = scratch_package_root("manifest-plain");
-        std::fs::write(
-            root.join("trait.toml"),
-            "[package]\nid = \"fixture\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        std::fs::write(root.join("config.toml"), "[budget]\nframe-seconds = 700\n").unwrap();
-        let (config, _, tier) = load_selected_trait_run_config(None, &root)
-            .expect("legacy sidecar resolves")
-            .expect("legacy sidecar is active");
-        assert_eq!(tier, PackageRunConfigTier::LegacySidecar);
-        assert_eq!(config.budget.frame_seconds, Some(700));
-    }
-
-    #[test]
     fn decodes_trait_scoped_seat_toml_shapes() {
         let runtime: RuntimeConfig = toml::from_str(concat!(
             "[trait.deep-research.agent.role.worker]\n",
@@ -10593,7 +10499,9 @@ mod config_tests {
                 ConfiguredPortDefault {
                     value: value.clone(),
                     layer: ConfigLayer::Repo,
-                    evidence: format!(".ctx/config.toml:trait.example.defaults.port.{port}"),
+                    evidence: format!(
+                        ".ctx/traits/runtime.toml:trait.example.defaults.port.{port}"
+                    ),
                 },
             );
         }
@@ -10783,7 +10691,7 @@ mod config_tests {
             &mut effective,
             parse("[trait.example.defaults.port]\nplan = \"repo-plan\"\n"),
             ConfigLayer::Repo,
-            Some(".ctx/config.toml".into()),
+            Some(".ctx/traits/runtime.toml".into()),
             &mut winners,
         );
         apply_environment_defaults(

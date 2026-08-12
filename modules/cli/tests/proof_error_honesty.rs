@@ -134,10 +134,10 @@ fn write_critical_finding_skill(dir: &Path, relative: &str) {
 
 /// `doctor` exits `EXIT_FINDINGS` (6) — distinct from 0 (nothing to report)
 /// and 1 (could not run at all) — when it ran to completion and reports a
-/// critical finding; `--migrate-state --json` (a separate, housekeeping-only
-/// handler `justfile:564` depends on) still exits 0 unconditionally.
+/// critical finding; `--migrate-config --json` (a separate, housekeeping-only
+/// handler) still exits 0 unconditionally.
 #[test]
-fn doctor_exit_split_findings_vs_could_not_run_vs_migrate_state() {
+fn doctor_exit_split_findings_vs_could_not_run_vs_migrate_config() {
     let scratch = ScratchRoot::new("p491-doctor-exit-split");
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -184,7 +184,7 @@ fn doctor_exit_split_findings_vs_could_not_run_vs_migrate_state() {
     );
 
     let output = run_ctx(
-        &["traits", "doctor", "--migrate-state", "--json"],
+        &["traits", "doctor", "--migrate-config", "--json"],
         &repo,
         &scratch.home(),
     );
@@ -201,7 +201,7 @@ fn build_seeded_park_run(repo: &Path, home: &Path) -> String {
     support::git_init(repo);
     fs::write(
         repo.join(".gitignore"),
-        ".ctx/traits/worktrees/\n.ctx/config.toml\n",
+        ".ctx/traits/worktrees/\n.ctx/traits/runtime.toml\n",
     )
     .unwrap();
     fs::write(
@@ -297,7 +297,7 @@ argv = ["sh", "-c", "true"]
     let mut ledger: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
     ledger["provenance"]["out-of-tree-mutations"] = serde_json::json!([{
-        "paths": [".ctx/config.toml"],
+        "paths": [".ctx/traits/runtime.toml"],
         "frame": "run 1 / source 1: Run command (item:command, kind:command)",
         "policy": "park",
         "detected-at-epoch": 1,

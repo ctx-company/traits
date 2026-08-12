@@ -31,7 +31,7 @@ pub struct InitReport {
     pub entries: Vec<InitEntry>,
 }
 
-/// Initialize `.ctx/traits/` and `.ctx/traits.toml` under `repo_root`, and,
+/// Initialize `.ctx/traits/` and `.ctx/traits/config.toml` under `repo_root`, and,
 /// when `name` is supplied, an additional starter package at
 /// `.ctx/traits/<slugified-name>/` (`trait.toml` + `source/index.ts`).
 ///

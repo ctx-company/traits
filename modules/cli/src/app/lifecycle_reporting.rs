@@ -62,7 +62,7 @@ struct InitReportJson<'a> {
     entries: Vec<InitEntryJson<'a>>,
 }
 
-/// Scaffold the v2 layout: `.ctx/traits/`, `.ctx/traits.toml`, and,
+/// Scaffold the v2 layout: `.ctx/traits/`, `.ctx/traits/config.toml`, and,
 /// optionally, a starter package. Never overwrites an existing authored
 /// file and never touches the retired `.agents/traits/` layout.
 pub(crate) fn handle_init(name: Option<&str>, json: bool) -> crate::Result<CommandOutput<()>> {

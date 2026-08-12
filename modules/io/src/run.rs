@@ -1020,7 +1020,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
     // `ctx traits merge <run-id>` can resolve back to this worktree.
     let mut worktree_retry_warnings: Vec<String> = Vec::new();
     // Effective worktree env overlay: only resolved (and only non-empty) when
-    // a worktree is actually prepared and `.ctx/config.toml [worktree]` declared one.
+    // a worktree is actually prepared and `.ctx/traits/runtime.toml [worktree]` declared one.
     // Repository-relative path values are resolved against the invocation
     // repository root, never the generated worktree. Empty otherwise, so
     // host-side runs stay byte-identical.
@@ -1614,7 +1614,7 @@ pub fn start(request: StartRequest<'_>) -> crate::Result<StartOutcome> {
             );
         })?;
     }
-    // `repos.toml` is operational index evidence, not canonical ledger
+    // `checkouts.toml` is operational index evidence, not canonical ledger
     // state, but P426 requires it maintained on every accepted run —
     // ephemeral and explicit-`--out` runs included, not only ones that
     // write a default-path session ledger. An index failure (e.g. no HOME)
@@ -2069,7 +2069,7 @@ mod startup_observer_tests {
         std::fs::create_dir_all(fixture.root.join("warm-valid")).unwrap();
         std::fs::write(fixture.root.join("warm-valid/cache"), "warm\n").unwrap();
         std::fs::write(
-            fixture.root.join(".ctx/config.toml"),
+            fixture.root.join(".ctx/traits/runtime.toml"),
             "[worktree]\nseed = [\"seed.txt\"]\nwarm = [\"warm-valid\"]\n",
         )
         .unwrap();
@@ -2168,7 +2168,8 @@ mod startup_observer_tests {
             crate::harness_config::ConfiguredPortDefault {
                 value: ".plans/OVERRIDE.md".to_string(),
                 layer: crate::harness_config::ConfigLayer::Repo,
-                evidence: ".ctx/config.toml:trait.default-fixture.defaults.port.plan".to_string(),
+                evidence: ".ctx/traits/runtime.toml:trait.default-fixture.defaults.port.plan"
+                    .to_string(),
             },
         )]);
         values.clear();
@@ -2184,7 +2185,7 @@ mod startup_observer_tests {
         );
         assert_eq!(
             values[0].producer_evidence.as_deref(),
-            Some(".ctx/config.toml:trait.default-fixture.defaults.port.plan")
+            Some(".ctx/traits/runtime.toml:trait.default-fixture.defaults.port.plan")
         );
 
         values = parse_initial_sets(&["plan=.plans/EXPLICIT.md".to_string()]).unwrap();
@@ -2231,27 +2232,9 @@ mod startup_observer_tests {
             Some("port[plan].default.value")
         );
 
+        std::fs::create_dir_all(fixture.root.join(".ctx/traits")).unwrap();
         std::fs::write(
-            fixture.root.join(".ctx/traits/startup-fixture/config.toml"),
-            "[defaults.port]\nplan = \".plans/SIDECAR.md\"\n",
-        )
-        .unwrap();
-        let sidecar = accepted(fixture.start_with_inputs(Vec::new()));
-        assert_eq!(sidecar.value, Value::String(".plans/SIDECAR.md".into()));
-        assert_eq!(
-            sidecar.source,
-            ctx_traits_core::procedure::runtime::ValueSource::TraitConfig
-        );
-        assert!(
-            sidecar
-                .producer_evidence
-                .as_deref()
-                .is_some_and(|evidence| evidence.ends_with(":defaults.port.plan"))
-        );
-
-        std::fs::create_dir_all(fixture.root.join(".ctx")).unwrap();
-        std::fs::write(
-            fixture.root.join(".ctx/config.toml"),
+            fixture.root.join(".ctx/traits/runtime.toml"),
             "[trait.startup-fixture.defaults.port]\nplan = \".plans/SCOPED.md\"\n",
         )
         .unwrap();
@@ -2262,7 +2245,7 @@ mod startup_observer_tests {
             ctx_traits_core::procedure::runtime::ValueSource::TraitConfig
         );
         assert!(scoped.producer_evidence.as_deref().is_some_and(|evidence| {
-            evidence.ends_with(".ctx/config.toml:trait.startup-fixture.defaults.port.plan")
+            evidence.ends_with(".ctx/traits/runtime.toml:trait.startup-fixture.defaults.port.plan")
         }));
 
         let explicit = accepted(fixture.start_with_inputs(
@@ -2296,12 +2279,7 @@ mod startup_observer_tests {
         .unwrap();
         std::fs::write(
             trait_root.join("trait.toml"),
-            "[package]\nid = \"awaiting-fixture\"\nversion = \"0.1.0\"\nname = \"Awaiting fixture\"\nstatus = \"ready\"\n",
-        )
-        .unwrap();
-        std::fs::write(
-            trait_root.join("config.toml"),
-            "[defaults.port]\nconfigured = \".plans/CONFIGURED.md\"\n",
+            "[package]\nid = \"awaiting-fixture\"\nversion = \"0.1.0\"\nname = \"Awaiting fixture\"\nstatus = \"ready\"\n\n[defaults.port]\nconfigured = \".plans/CONFIGURED.md\"\n",
         )
         .unwrap();
         let trait_path = trait_path.to_string_lossy().into_owned();
@@ -2367,7 +2345,7 @@ mod startup_observer_tests {
             .collect();
         let configured_evidence = format!(
             "{}:defaults.port.configured",
-            trait_root.join("config.toml").display()
+            trait_root.join("trait.toml").display()
         );
         for (port, source, evidence) in [
             (

@@ -16,10 +16,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::harness::OutputObserver;
 
-/// Legacy repo-relative debug-trace root (pre-P426). No longer written to;
-/// see [`crate::state::global_debug_root`] for the active default.
-pub use crate::layout::DEBUG_ROOT as DEBUG_TRACE_ROOT;
-
 pub struct HarnessAttemptStart<'a> {
     /// Names the trace directory — runs are the identity users see and paste.
     pub run_id: &'a str,

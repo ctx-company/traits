@@ -96,7 +96,7 @@ fn init_fixture_repo(repo: &Path, home: &Path, script: &Path) {
     fs::write(repo.join(".gitignore"), "ctx.toml\n.ctx/runs/\n").unwrap();
     let script = script.to_string_lossy().replace('\\', "\\\\");
     fs::write(
-        repo.join("ctx.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         format!(
             r#"schema-version = "0.4"
 

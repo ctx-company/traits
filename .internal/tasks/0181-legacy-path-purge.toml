@@ -3,7 +3,6 @@ key = "0181"
 title = "legacy path purge: every dual-read tail in layout dies"
 status = "ready"
 raised = "2026-08-12"
-relations.depends-on = ["0176", "0177", "0178", "0179"]
 content = """
 
 Owner ruling 2026-08-12: "no legacy stuff please, we're not out yet,
@@ -47,3 +46,11 @@ paths resolves everything; this repo and the config-home carry no file
 that only a purged path would have read; `just test` and `just
 test-full` green.
 """
+
+[relations]
+depends-on = [
+    "0176",
+    "0177",
+    "0178",
+    "0179",
+]

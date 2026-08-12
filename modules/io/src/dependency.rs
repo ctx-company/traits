@@ -1076,14 +1076,8 @@ fn resolve_source(
             package_path,
         } => {
             let base_dir = git_repo_cache_dir(repo_root, &url)?;
-            let legacy_base_dir = legacy_git_repo_cache_dir(repo_root, &url);
-            let (rev, checkout_dir) = resolve_git_source(
-                &base_dir,
-                Some(&legacy_base_dir),
-                &url,
-                requested_ref.as_deref(),
-                locked_rev,
-            )?;
+            let (rev, checkout_dir) =
+                resolve_git_source(&base_dir, &url, requested_ref.as_deref(), locked_rev)?;
             let root = match package_path {
                 Some(path) => checkout_dir.join(validate_relative_path(&path)?),
                 None => checkout_dir,
@@ -1116,18 +1110,6 @@ fn git_repo_cache_dir(repo_root: &Utf8Path, url: &str) -> crate::Result<Utf8Path
     Ok(crate::state::global_cache_root(&key)?.join("git").join(hex))
 }
 
-/// One-release legacy fallback base directory for [`git_repo_cache_dir`]'s
-/// pre-P426 repo-local shape (`.ctx/cache/git/<hex>`). Never written to —
-/// only [`resolve_git_source`]'s locked-revision fast path reads an already
-/// materialized immutable checkout here.
-fn legacy_git_repo_cache_dir(repo_root: &Utf8Path, url: &str) -> Utf8PathBuf {
-    let hex = Digest::from_bytes(url.as_bytes())
-        .as_str()
-        .trim_start_matches("sha256:")
-        .to_string();
-    repo_root.join(".ctx").join("cache").join("git").join(hex)
-}
-
 fn git_clone_dir(base_dir: &Utf8Path) -> Utf8PathBuf {
     base_dir.join("clone")
 }
@@ -1142,17 +1124,14 @@ fn git_rev_checkout_dir(base_dir: &Utf8Path, rev: &str) -> Utf8PathBuf {
 /// mutable fetch clone: two syncs resolving different refs of the same URL
 /// each get their own checkout directory, so one can never read content
 /// belonging to the other's resolved revision. When `locked_rev` already has
-/// a materialized checkout under `base_dir` (global) or, failing that,
-/// `legacy_base_dir` (the one-release pre-P426 repo-local fallback, read-only
-/// — a hit there is never copied or written back), it is reused directly with
-/// no network access. Otherwise the fetch, resolution, and checkout run under
+/// a materialized checkout under `base_dir`, it is reused directly with no
+/// network access. Otherwise the fetch, resolution, and checkout run under
 /// an exclusive per-URL `flock` held for the whole sequence, so concurrent
 /// syncs of the same URL serialize instead of racing the shared mutable
 /// clone; a contender that arrives after the lock is released simply finds
 /// its checkout directory already published and reuses it.
 fn resolve_git_source(
     base_dir: &Utf8Path,
-    legacy_base_dir: Option<&Utf8Path>,
     url: &str,
     requested_ref: Option<&str>,
     locked_rev: Option<&str>,
@@ -1166,12 +1145,6 @@ fn resolve_git_source(
         let checkout_dir = git_rev_checkout_dir(base_dir, rev);
         if checkout_dir.is_dir() {
             return Ok((rev.to_string(), checkout_dir));
-        }
-        if let Some(legacy_base_dir) = legacy_base_dir {
-            let legacy_checkout_dir = git_rev_checkout_dir(legacy_base_dir, rev);
-            if legacy_checkout_dir.is_dir() {
-                return Ok((rev.to_string(), legacy_checkout_dir));
-            }
         }
     }
 

@@ -37,7 +37,7 @@ fn traits_help_text() -> String {
 
 Usage: ctx traits [OPTIONS] [COMMAND] [--json]  (bare `ctx traits` opens the dashboard on a TTY)
 Manage:
-  init        Scaffold .ctx/traits.toml and .ctx/traits/, and optionally a starter package
+  init        Scaffold .ctx/traits/config.toml and .ctx/traits/, and optionally a starter package
   new         Scaffold a new trait package from a template, or list available templates
   list        List local trait packages from .ctx/traits, plus the built-in meta-trait packages
 Author:
@@ -61,7 +61,7 @@ Dependencies:
   dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
   import      Import an Agent Skills SKILL.md into a draft-status, unreviewed canonical trait package
 Maintain:
-  doctor      Inspect a folder of Agent-Skills-style files before importing (or, with --migrate-state/--migrate-config, the legacy-to-global runtime state/agent-config migrations)
+  doctor      Inspect a folder of Agent-Skills-style files before importing (or, with --migrate-config, the legacy agent-config migration)
   cache       Cache lifecycle commands
   config      TypeScript config authoring commands (build)
   task        Task board document commands (import)
@@ -287,7 +287,7 @@ pub enum TaskUpdateStatus {
 /// Nested `ctx traits ...` subcommands.
 #[derive(Subcommand, Debug)]
 pub enum TraitsCommand {
-    /// Scaffold .ctx/traits.toml and .ctx/traits/, and optionally a starter package.
+    /// Scaffold .ctx/traits/config.toml and .ctx/traits/, and optionally a starter package.
     ///
     /// With no name, initializes the project roots only. With a name, also
     /// creates `.ctx/traits/<slugified-name>/trait.toml` and `source/index.ts`.
@@ -392,8 +392,7 @@ pub enum TraitsCommand {
         run: String,
 
         /// Run-session store directory to resolve the run-id/session from.
-        /// Defaults to this repository's global per-repository runs root
-        /// (see `ctx traits doctor --migrate-state`).
+        /// Defaults to this repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -438,34 +437,22 @@ pub enum TraitsCommand {
         #[arg(long)]
         json: bool,
 
-        /// Report the invocation repository's global-vs-legacy runtime state
-        /// (P426): repo key, global/legacy roots, planned moves, conflicts,
-        /// and orphaned `repos.toml` entries. Read-only unless `--apply` is
-        /// also given. Mutually exclusive with the default source-inspection
-        /// report.
-        #[arg(long = "migrate-state")]
-        migrate_state: bool,
-
         /// Scan every runtime-config layer for pre-P476 legacy `[agent]`
         /// keys (`[agent.master]`/`[agent.narrator]`/`[agent.merger]`/
         /// `[agent.merger-deep]`, or a bare `agent.<scalar>`) and report the
         /// exact `[agent.role.*]` rewrite for each. Read-only unless
         /// `--apply` is also given. Mutually exclusive with the default
-        /// source-inspection report, `--config`, and `--migrate-state`.
-        #[arg(long = "migrate-config", conflicts_with_all = ["config", "migrate_state"])]
+        /// source-inspection report and `--config`.
+        #[arg(long = "migrate-config", conflicts_with_all = ["config"])]
         migrate_config: bool,
 
-        /// Perform the plan a companion mode reports. Three mutually
-        /// exclusive modes: with `--migrate-state`, move nonconflicting
-        /// legacy `.ctx/{runs,debug,cache}` state into the global
-        /// per-repository roots (never overwrites a conflicting destination
-        /// and leaves source data intact on a per-entry failure); with
-        /// `--migrate-config`, rewrite nonconflicting legacy `[agent]` keys
-        /// to their `[agent.role.*]` destination (never overwrites a
-        /// conflict, never rewrites a P457-generated `config.toml`, leaves
-        /// source data intact on a per-entry failure); alone (no
-        /// `--migrate-state`, no `--migrate-config`, no `--config`), append
-        /// any missing canonical entry to the invocation repository's nested
+        /// Perform the plan a companion mode reports. Two mutually exclusive
+        /// modes: with `--migrate-config`, rewrite nonconflicting legacy
+        /// `[agent]` keys to their `[agent.role.*]` destination (never
+        /// overwrites a conflict, never rewrites a P457-generated
+        /// `config.toml`, leaves source data intact on a per-entry failure);
+        /// alone (no `--migrate-config`, no `--config`), append any missing
+        /// canonical entry to the invocation repository's nested
         /// `.ctx/.gitignore` (P446) — creating it if absent, preserving
         /// every existing byte otherwise, and never performing Git index
         /// surgery (a tracked runtime path is only ever reported with a
@@ -477,8 +464,8 @@ pub enum TraitsCommand {
         /// Append the full per-candidate narrative (every field, including
         /// healthy candidates) after the compact panel. Applies only to the
         /// default source-inspection report; mutually exclusive with
-        /// `--config`, `--migrate-state`, and `--migrate-config`.
-        #[arg(long, conflicts_with_all = ["config", "migrate_state", "migrate_config"])]
+        /// `--config` and `--migrate-config`.
+        #[arg(long, conflicts_with_all = ["config", "migrate_config"])]
         verbose: bool,
     },
     /// Show launch claim readiness and allowed public wording.
@@ -1247,8 +1234,7 @@ pub enum TraitsCommand {
         session: String,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1354,7 +1340,7 @@ pub enum TraitsCommand {
     /// (`--deep` selects a judgment-capable merger instead) before
     /// fast-forwarding. Every landing path then runs the declared `[merge]
     /// gate` — an ordered list of repository commands configured in
-    /// `.ctx/config.toml`, empty by default — before touching `main`; merge
+    /// `.ctx/traits/runtime.toml`, empty by default — before touching `main`; merge
     /// machinery executes only what a repository declares and judges its
     /// outcome, it never inspects the repository for a Justfile or any other
     /// tool. Any failed precondition, unresolved conflict, judgment call, red
@@ -1368,8 +1354,7 @@ pub enum TraitsCommand {
         run_id: String,
 
         /// Run-session store directory to resolve the run-id from. Defaults
-        /// to this repository's global per-repository runs root (see `ctx
-        /// traits doctor --migrate-state`).
+        /// to this repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1447,8 +1432,7 @@ pub enum TraitsCommand {
         session: String,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1479,8 +1463,7 @@ pub enum TraitsCommand {
         session: String,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1500,8 +1483,7 @@ pub enum TraitsCommand {
         session: String,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1530,8 +1512,7 @@ pub enum TraitsCommand {
         session: Option<String>,
 
         /// Run-session store directory for store-scoped pulls. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -1559,8 +1540,7 @@ pub enum TraitsCommand {
         file: Option<String>,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -2083,7 +2063,7 @@ pub enum HostCommand {
 
         /// Target host: cursor, copilot, gemini, cline, kiro, claude-code,
         /// opencode, codex, pi, or a host fully specified in
-        /// `.ctx/config.toml [host.<name>]`.
+        /// `.ctx/traits/runtime.toml [host.<name>]`.
         #[arg(long)]
         host: String,
 
@@ -2278,8 +2258,7 @@ pub struct SessionStartArgs {
     pub sets: Vec<String>,
 
     /// Run-session store directory for bare session IDs. Defaults to this
-    /// repository's global per-repository runs root (see `ctx traits doctor
-    /// --migrate-state`).
+    /// repository's global per-repository runs root.
     #[arg(long)]
     pub session_store: Option<String>,
 
@@ -2457,8 +2436,7 @@ pub struct SessionStateArgs {
     pub session: String,
 
     /// Run-session store directory for bare session IDs. Defaults to this
-    /// repository's global per-repository runs root (see `ctx traits doctor
-    /// --migrate-state`).
+    /// repository's global per-repository runs root.
     #[arg(long)]
     pub session_store: Option<String>,
 
@@ -2481,8 +2459,7 @@ pub enum SessionFrameCommand {
         session: String,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -2504,8 +2481,7 @@ pub enum SessionFrameCommand {
         file: Option<String>,
 
         /// Run-session store directory for bare session IDs. Defaults to this
-        /// repository's global per-repository runs root (see `ctx traits doctor
-        /// --migrate-state`).
+        /// repository's global per-repository runs root.
         #[arg(long)]
         session_store: Option<String>,
 
@@ -2739,7 +2715,7 @@ pub enum DependencyCommand {
     /// Fetches metadata and the tarball entirely in Rust (no node/npm/pnpm on
     /// the consume path), verifies npm SHA-512 SRI before extraction, and
     /// stages every check (integrity, schema version, optional `ctx.digests`
-    /// publisher claim) before touching `.ctx/traits.toml`, `.ctx/traits.lock`,
+    /// publisher claim) before touching `.ctx/traits/config.toml`, `.ctx/traits/config.lock`,
     /// or the vendor tree. `path:<relative-path>` (P535) is also accepted:
     /// project-scoped only (refused with `-g`/`--global`), it copies a
     /// sibling repository's committed trait package through the same safe
@@ -2763,7 +2739,7 @@ pub enum DependencyCommand {
 
         /// Add to the per-machine global tier
         /// (`~/.config/ctx/traits.toml`) instead of this project's
-        /// `.ctx/traits.toml`. A global trait resolves in every project (and
+        /// `.ctx/traits/config.toml`. A global trait resolves in every project (and
         /// outside any repository) whenever no nearer-tier trait shadows it.
         #[arg(short = 'g', long = "global")]
         global: bool,
@@ -2958,8 +2934,7 @@ pub enum CacheCommand {
         repo_root: Option<String>,
 
         /// Cache root override. Defaults to this repository's global
-        /// per-repository cache root's `traits` subfamily (see `ctx traits
-        /// doctor --migrate-state`).
+        /// per-repository cache root's `traits` subfamily.
         #[arg(long)]
         cache_root: Option<String>,
 
@@ -2974,8 +2949,7 @@ pub enum CacheCommand {
         repo_root: Option<String>,
 
         /// Cache root override. Defaults to this repository's global
-        /// per-repository cache root's `traits` subfamily (see `ctx traits
-        /// doctor --migrate-state`).
+        /// per-repository cache root's `traits` subfamily.
         #[arg(long)]
         cache_root: Option<String>,
 
@@ -2990,8 +2964,7 @@ pub enum CacheCommand {
         repo_root: Option<String>,
 
         /// Cache root override. Defaults to this repository's global
-        /// per-repository cache root's `traits` subfamily (see `ctx traits
-        /// doctor --migrate-state`).
+        /// per-repository cache root's `traits` subfamily.
         #[arg(long)]
         cache_root: Option<String>,
 

@@ -57,7 +57,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
     // reaches the trust check on any machine with no coding agent installed,
     // which is every CI runner and no developer laptop.
     fs::write(
-        proj.join(".ctx/config.toml"),
+        proj.join(".ctx/traits/runtime.toml"),
         "[agent.role.worker]\nharness = \"claude-code\"\n",
     )
     .unwrap();

@@ -14,10 +14,6 @@ use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 
 pub use ctx_traits_core::cache::StoredCacheArtifact;
 
-/// Legacy repo-relative generated cache root (pre-P426). [`cache_root`]'s
-/// no-override default no longer resolves here; see its doc comment.
-pub use crate::layout::CACHE_ROOT as DEFAULT_CACHE_DIR;
-
 /// Metadata file name for stored cache artifact records.
 const METADATA_FILENAME: &str = "cache-metadata.json";
 
@@ -156,9 +152,7 @@ fn trait_explanation_path(
 
 /// Resolve the cache root from an optional override or the invocation
 /// repository's global per-repository cache root (P426). An explicit
-/// override always wins and is never redirected through global state. This
-/// is the *write* root — rebuild/prune always target it; see
-/// [`cache_read_root`] for the global-first, legacy-fallback read root.
+/// override always wins and is never redirected through global state.
 pub fn cache_root(
     repo_root: &Utf8Path,
     cache_root_override: Option<&str>,
@@ -172,29 +166,13 @@ pub fn cache_root(
     }
 }
 
-/// Resolve the cache root to *read* generated cache metadata from: an
-/// explicit override always wins (identical to [`cache_root`]); otherwise the
-/// global root if it already holds a metadata file, else the one-release
-/// legacy repo-local `.ctx/cache/traits` fallback if *that* holds one, else
-/// the (empty) global root. Never used to decide a write destination —
-/// rebuild/prune always call [`cache_root`] directly so a repair or new
-/// record is never written into legacy state.
+/// Resolve the cache root to *read* generated cache metadata from: identical
+/// to [`cache_root`], the single write/read root.
 pub fn cache_read_root(
     repo_root: &Utf8Path,
     cache_root_override: Option<&str>,
 ) -> crate::Result<Utf8PathBuf> {
-    if let Some(path) = cache_root_override {
-        return Ok(Utf8PathBuf::from(path));
-    }
-    let global = cache_root(repo_root, None)?;
-    if global.join(METADATA_FILENAME).is_file() {
-        return Ok(global);
-    }
-    let legacy = repo_root.join(crate::layout::CACHE_ROOT);
-    if legacy.join(METADATA_FILENAME).is_file() {
-        return Ok(legacy);
-    }
-    Ok(global)
+    cache_root(repo_root, cache_root_override)
 }
 
 /// Stored cache metadata as persisted on disk.

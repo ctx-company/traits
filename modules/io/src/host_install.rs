@@ -231,11 +231,11 @@ pub enum Error {
         new_path: String,
     },
     #[error(
-        "host {host:?} has no portable global filesystem location; add a `global-path` under [host.{host}] in .ctx/config.toml or the global config to override"
+        "host {host:?} has no portable global filesystem location; add a `global-path` under [host.{host}] in .ctx/traits/runtime.toml or the global config to override"
     )]
     GlobalUnsupported { host: String },
     #[error(
-        "host {host:?} has no project-scoped discovery location; add a `project-path` under [host.{host}] in .ctx/config.toml to override, or pass --global"
+        "host {host:?} has no project-scoped discovery location; add a `project-path` under [host.{host}] in .ctx/traits/runtime.toml to override, or pass --global"
     )]
     ProjectUnsupported { host: String },
     #[error(

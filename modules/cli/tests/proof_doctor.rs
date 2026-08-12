@@ -253,7 +253,7 @@ fn json_and_verbose_json_are_byte_equal_and_contain_no_panel_framing() {
 }
 
 #[test]
-fn verbose_conflicts_with_config_and_migrate_state() {
+fn verbose_conflicts_with_config_and_migrate_config() {
     let scratch = ScratchRoot::new("p466-verbose-conflicts");
     let repo = scratch_repo(&scratch);
 
@@ -265,7 +265,7 @@ fn verbose_conflicts_with_config_and_migrate_state() {
     assert_ne!(config_output.status.code(), Some(0));
 
     let migrate_output = run_ctx(
-        &["traits", "doctor", "--migrate-state", "--verbose"],
+        &["traits", "doctor", "--migrate-config", "--verbose"],
         &repo,
         &scratch.home(),
     );

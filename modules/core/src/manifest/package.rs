@@ -117,8 +117,6 @@ pub struct PackageFamilyVariant {
     pub path: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_config: Option<String>,
 }
 
 /// One `[variant.<vid>]` table: the author's per-variant config. Accepts
@@ -360,12 +358,6 @@ pub fn decode_package_manifest(text: &str, origin: &str) -> crate::Result<Option
             crate::shared::validate_slug_shape(name, &format!("family.variant.{name}"))?;
             names.insert(name);
             validate_family_relative_path(&variant.path, &format!("family.variant.{name}.path"))?;
-            if let Some(config) = &variant.run_config {
-                validate_family_relative_path(
-                    config,
-                    &format!("family.variant.{name}.run-config"),
-                )?;
-            }
             for alias in &variant.aliases {
                 crate::shared::validate_slug_shape(
                     alias,

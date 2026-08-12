@@ -3,9 +3,10 @@
 //!
 //! `.ctx/` inside a repository checkout mixes committed project source
 //! (`.ctx/traits/<id>/`, `.ctx/traits.{toml,lock}`) with machine-local and
-//! generated content (`.ctx/config.toml`, `.ctx/harness.toml`,
-//! `.ctx/worktrees/`, `.ctx/traits/vendored/`, and the transitional pre-P426
-//! `.ctx/{runs,debug,cache}` families). A committed nested `.ctx/.gitignore`
+//! generated content (`.ctx/traits/runtime.toml`, `.ctx/harness.toml`,
+//! `.ctx/traits/worktrees/`, `.ctx/traits/vendored/`, and the transitional
+//! pre-P426 `.ctx/{runs,debug,cache}` families). A committed nested
+//! `.ctx/.gitignore`
 //! makes that boundary self-enforcing without ever touching the repository's
 //! root `.gitignore`, which this module never reads or writes.
 //!
@@ -269,7 +270,7 @@ pub struct TrackedRuntimeFinding {
     pub remedy: String,
 }
 
-/// Tracked `.ctx/config.toml`, `.ctx/config.ts`, `.ctx/traits/runtime.toml`
+/// Tracked `.ctx/config.ts`, `.ctx/traits/runtime.toml`
 /// (machine-local per 0037 — the committed tier is `.ctx/traits/config.toml`),
 /// and tracked files under
 /// `.ctx/{worktrees,runs,debug,cache}`, discovered via `git ls-files` with
@@ -277,7 +278,6 @@ pub struct TrackedRuntimeFinding {
 /// those runtime paths is tracked.
 pub fn tracked_runtime_paths(repo_root: &Utf8Path) -> crate::Result<Vec<TrackedRuntimeFinding>> {
     let candidates = [
-        ".ctx/config.toml",
         ".ctx/config.ts",
         ".ctx/traits/runtime.toml",
         ".ctx/traits/worktrees",

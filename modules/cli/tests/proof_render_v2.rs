@@ -96,13 +96,15 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
     write_fixture_file(
-        &repo.join(format!(".ctx/traits/{TRAIT_ID}/trait.toml")),
+        &repo.join(format!(".ctx/traits/authored/{TRAIT_ID}/trait.toml")),
         &format!(
             "[package]\nid = {TRAIT_ID:?}\nversion = \"0.1.0\"\nname = \"Render V2 Fixture\"\nstatus = \"draft\"\n"
         ),
     );
     write_fixture_file(
-        &repo.join(format!(".ctx/traits/{TRAIT_ID}/generated/index.toml")),
+        &repo.join(format!(
+            ".ctx/traits/authored/{TRAIT_ID}/generated/index.toml"
+        )),
         TRAIT_MANIFEST,
     );
     require_success(

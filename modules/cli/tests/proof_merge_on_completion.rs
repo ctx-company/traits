@@ -25,7 +25,7 @@ const EXIT_MERGE_FAILED: i32 = 5;
 /// this repository's own — so the declared `[merge] gate` (P477) `ctx
 /// traits merge` runs inside the generated worktree stays exactly
 /// `test_recipe`, never a real workspace build. Declares `[merge] gate =
-/// [["just", "test"]]` in `.ctx/config.toml` so these Justfile-recipe-driven
+/// [["just", "test"]]` in `.ctx/traits/runtime.toml` so these Justfile-recipe-driven
 /// proofs keep exercising the gate exactly as the pre-P477 hardcoded chain
 /// did — see [`init_fixture_repo_without_gate`] for the no-declaration
 /// (product-default) shape.
@@ -45,7 +45,7 @@ fn init_fixture_repo_on_branch(
     init_fixture_repo_inner(repo, home, branch, cmd, |repo| {
         fs::write(repo.join("Justfile"), format!("test:\n\t{test_recipe}\n")).unwrap();
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             "[merge]\ngate = [[\"just\", \"test\"]]\n",
         )
         .unwrap();
@@ -179,11 +179,20 @@ fn install_counting_merger(repo: &Path, marker: &Path) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    fs::write(
-        repo.join("ctx.toml"),
-        format!(
-            r#"schema-version = "0.4"
-
+    // Append (never overwrite): a caller may already have written
+    // `.ctx/traits/runtime.toml` (e.g. a `[merge]` gate declaration) before
+    // installing this merger, and the two must layer into one document
+    // rather than clobber each other.
+    {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(repo.join(".ctx/traits/runtime.toml"))
+            .unwrap();
+        write!(
+            file,
+            r#"
 [harness.counter]
 kind = "custom"
 bin = "{}"
@@ -205,11 +214,11 @@ reasoning-effort = "low"
 sandbox = false
 "#,
             script.display()
-        ),
-    )
-    .unwrap();
+        )
+        .unwrap();
+    }
     Command::new("git")
-        .args(["add", "ctx.toml"])
+        .args(["add", ".ctx/traits/runtime.toml"])
         .current_dir(repo)
         .status()
         .unwrap();
@@ -754,7 +763,7 @@ fn declared_false_gate_parks_and_retains_branch_and_worktree() {
     let repo = scratch.home().join("repo");
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             "[merge]\ngate = [[\"sh\", \"-c\", \"echo gate >> gate-count; exit 1\"]]\n",
         )
         .unwrap();
@@ -878,7 +887,7 @@ fn deep_prompt_references_stages_instead_of_inlining_file_bytes() {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     fs::write(
-        repo.join("ctx.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         format!(
             r#"schema-version = "0.4"
 
@@ -1160,7 +1169,7 @@ fn target_advance_retries_mechanically_and_reruns_the_gate() {
     let gate_count_text = gate_count.to_string_lossy();
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             format!(
                 "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"echo gate >> '{gate_count_text}'; if [ ! -f '{raced_text}' ]; then touch '{raced_text}'; echo target-race > '{repo_text}/target-race'; git -C '{repo_text}' add target-race; git -C '{repo_text}' commit -qm target-race; fi\"]]\n"
             ),
@@ -1219,7 +1228,7 @@ fn race_retry_conflict_parks_without_a_second_merger_dispatch() {
     let raced_text = raced.to_string_lossy();
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             format!(
                 "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"if [ ! -f '{raced_text}' ]; then touch '{raced_text}'; echo target > '{repo_text}/conflict'; git -C '{repo_text}' add conflict; git -C '{repo_text}' commit -qm target-race; fi\"]]\n"
             ),
@@ -1307,7 +1316,7 @@ fn checkout_branch_probe_race_retry_parks_with_zero_merger_dispatches() {
     let marker = repo.join("merger-calls");
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             "[merge]\nretry-attempts = 2\nretry-backoff-ms = 1\ngate = [[\"true\"]]\n",
         )
         .unwrap();
@@ -1445,7 +1454,7 @@ fn init_fixture_repo_with_blocking_gate(
 ) {
     init_fixture_repo_inner(repo, home, "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             format!(
                 "[merge]\ngate = [[\"sh\", \"-c\", \"touch '{}'; until [ -f '{}' ]; do sleep 0.05; done\"]]\ngate-seconds = 60\nretry-backoff-ms = 25\n",
                 gate_entered.display(),
@@ -1463,14 +1472,14 @@ fn init_fixture_repo_with_blocking_gate(
 /// ever regresses, never a tuned expectation for the healthy path.
 fn install_counting_merger_with_frame_budget(repo: &Path, marker: &Path, frame_seconds: u64) {
     install_counting_merger(repo, marker);
-    let ctx_toml = repo.join("ctx.toml");
+    let ctx_toml = repo.join(".ctx/traits/runtime.toml");
     let mut contents = fs::read_to_string(&ctx_toml).unwrap();
     contents.push_str(&format!(
         "\n[agent.role.merger.budget]\nframe-seconds = {frame_seconds}\n"
     ));
     fs::write(&ctx_toml, contents).unwrap();
     Command::new("git")
-        .args(["add", "ctx.toml"])
+        .args(["add", ".ctx/traits/runtime.toml"])
         .current_dir(repo)
         .status()
         .unwrap();
@@ -1760,7 +1769,7 @@ fn exhausted_target_races_record_all_attempts_in_one_terminal_park() {
     let repo_text = repo.to_string_lossy();
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             format!(
                 "[merge]\ngate = [[\"sh\", \"-c\", \"git -C '{repo_text}' commit --allow-empty -qm target-race\"]]\n"
             ),
@@ -1829,7 +1838,7 @@ fn no_wait_stops_after_one_retryable_attempt_without_exhaustion() {
     let gate_count_text = gate_count.to_string_lossy();
     init_fixture_repo_inner(&repo, &scratch.home(), "main", "true", |repo| {
         fs::write(
-            repo.join(".ctx/config.toml"),
+            repo.join(".ctx/traits/runtime.toml"),
             format!(
                 "[merge]\nretry-attempts = 5\nretry-backoff-ms = 1\ngate = [[\"sh\", \"-c\", \"echo gate >> '{gate_count_text}'; git -C '{repo_text}' commit --allow-empty -qm target-race\"]]\n"
             ),
@@ -2033,7 +2042,7 @@ fn merge_branch_config_override_beats_discovery_and_names_both_branches() {
     let repo = clone_fixture(&upstream, &scratch.home(), "repo");
 
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[merge]\ngate = [[\"just\", \"test\"]]\nbranch = \"release\"\n",
     )
     .unwrap();

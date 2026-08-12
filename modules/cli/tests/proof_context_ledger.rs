@@ -43,13 +43,13 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
     write_fixture_file(
-        &repo.join(".ctx/traits/context-ledger-fixture/trait.toml"),
+        &repo.join(".ctx/traits/authored/context-ledger-fixture/trait.toml"),
         &format!(
             "[package]\nid = {TRAIT_ID:?}\nversion = \"0.1.0\"\nname = \"Context Ledger Fixture\"\nstatus = \"draft\"\n"
         ),
     );
     write_fixture_file(
-        &repo.join(".ctx/traits/context-ledger-fixture/generated/index.toml"),
+        &repo.join(".ctx/traits/authored/context-ledger-fixture/generated/index.toml"),
         &manifest("P498 context-ledger fixture."),
     );
     require_success(
@@ -69,7 +69,7 @@ fn ready_repo(scratch: &ScratchRoot) -> PathBuf {
 
 fn edit_trait_summary(repo: &Path, summary: &str) {
     write_fixture_file(
-        &repo.join(".ctx/traits/context-ledger-fixture/generated/index.toml"),
+        &repo.join(".ctx/traits/authored/context-ledger-fixture/generated/index.toml"),
         &manifest(summary),
     );
 }

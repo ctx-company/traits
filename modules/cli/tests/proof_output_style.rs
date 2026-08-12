@@ -650,7 +650,7 @@ fn run_progress_modes_remain_line_oriented_when_stdio_is_piped() {
     )
     .unwrap();
     fs::write(
-        fixture.repo.join(".ctx/config.toml"),
+        fixture.repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nwarm = [\"missing-warm\", \"warm-valid\"]\n",
     )
     .unwrap();

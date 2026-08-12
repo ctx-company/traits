@@ -327,7 +327,7 @@ pub fn require_success_with_env(
 /// repository on branch `main` with a fixed identity, matching
 /// `scripts/byte_compare.rs`'s `scratch_git_init`: repo-authored
 /// project-tier resolution only consults the project tier inside a genuine
-/// Git repository, so a bare directory with just `.ctx/traits.toml` does not
+/// Git repository, so a bare directory with just `.ctx/traits/config.toml` does not
 /// qualify.
 pub fn git_init(dir: &Path) {
     git_init_on_branch(dir, "main");
@@ -340,13 +340,13 @@ pub fn git_init(dir: &Path) {
 /// never masquerades as a harness-specific behavior difference.
 pub fn write_hook_fixture_trait(repo: &Path, id: &str, name: &str, keyword: &str, summary: &str) {
     write_fixture_file(
-        &repo.join(format!(".ctx/traits/{id}/trait.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/trait.toml")),
         &format!(
             "[package]\nid = {id:?}\nversion = \"0.1.0\"\nname = {name:?}\nstatus = \"draft\"\n"
         ),
     );
     write_fixture_file(
-        &repo.join(format!(".ctx/traits/{id}/generated/index.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/generated/index.toml")),
         &hook_fixture_manifest(id, name, keyword, summary),
     );
 }

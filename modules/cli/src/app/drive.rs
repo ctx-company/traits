@@ -1942,7 +1942,7 @@ fn drive_loop(
     // every subprocess launched inside the run worktree (command frames,
     // harness probe, cold/warm CLI + MCP harnesses, narrators). Only non-empty
     // when a worktree is actually in play (`execution_dir` set) and
-    // `.ctx/config.toml [worktree]` declared an overlay; repository-relative
+    // `.ctx/traits/runtime.toml [worktree]` declared an overlay; repository-relative
     // path values resolve against the invocation checkout, never the
     // worktree. Re-resolved here on every drive/resume rather than persisted
     // into the ledger.

@@ -75,28 +75,31 @@ fn git_rev_parse_head(repo: &Path, home: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn extract_quoted_after(text: &str, marker: &str) -> Option<String> {
-    let start = text.find(marker)? + marker.len();
-    let end = text[start..].find('"')? + start;
-    Some(text[start..end].to_string())
-}
-
 /// Resolve this repository's global run-ledger root (P426) by asking the
-/// compiled binary itself, rather than re-deriving the repo-key hash here
-/// and risking it drifting from `modules/io/src/state.rs`'s real algorithm.
+/// compiled binary itself for its active repo-qualifier key, rather than
+/// re-deriving the repo-key hash here and risking it drifting from
+/// `modules/io/src/state.rs`'s real algorithm, then joining the same
+/// `<config-home>/ctx/runs/<repo-key>` shape `global_runs_root` builds.
 fn global_runs_root(repo: &Path, home: &Path) -> std::path::PathBuf {
     let stdout = require_success(
-        "`ctx traits doctor --migrate-state --json`",
-        &["traits", "doctor", "--migrate-state", "--json"],
+        "`ctx traits doctor --config`",
+        &["traits", "doctor", "--config"],
         repo,
         home,
     );
-    let at = stdout
-        .find("\"runs\"")
-        .expect("doctor --migrate-state --json reports a runs field");
-    let global = extract_quoted_after(&stdout[at..], "\"global\": \"")
-        .expect("doctor --migrate-state --json reports runs.global");
-    std::path::PathBuf::from(global)
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("repo.active-key:"))
+        .expect("doctor --config reports a repo.active-key row");
+    let key = line
+        .split_once(':')
+        .expect("repo.active-key row has a value")
+        .1
+        .split('[')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    home.join("ctx").join("runs").join(key)
 }
 
 /// The fixture trait's `ctx.toml`: every role backed by `ctx-fixture-agent`
@@ -178,7 +181,7 @@ transport = "cli"
 session-mode = "per-frame"
 "#
     );
-    write_file(&repo.join("ctx.toml"), &ctx_toml);
+    write_file(&repo.join(".ctx/traits/runtime.toml"), &ctx_toml);
 }
 
 /// Shared by every fixture trait variant this suite authors (single- and

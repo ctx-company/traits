@@ -28,8 +28,6 @@ struct ConfigDoctorReport {
     knobs: std::collections::BTreeMap<String, ConfigDoctorValue>,
     tier_warnings: Vec<String>,
     requirement_conflicts: Vec<ctx_traits_io::harness_config::ConfigRequirementConflict>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    foreign_config: Option<String>,
     /// P427 zero-config fallback: one row per compiled-in built-in harness,
     /// in fixed candidate order, reporting exactly what automatic selection
     /// would see this invocation.
@@ -1002,7 +1000,6 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
         knobs,
         tier_warnings: report.tier_warnings,
         requirement_conflicts: report.requirement_conflicts,
-        foreign_config: report.foreign_config,
         builtin_harnesses,
         generated,
         environment,
@@ -1043,9 +1040,6 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
                 "  warning: {} rejected from {}; repository requirement from {} remains effective",
                 conflict.field, conflict.rejected_source, conflict.repo_source
             );
-        }
-        if let Some(path) = &output.foreign_config {
-            println!("  hint: foreign config exists but was not loaded: {path}");
         }
         for line in &output.generated {
             println!("  {line}");
@@ -1345,207 +1339,6 @@ fn format_winner(winner: &ctx_traits_io::harness_config::ConfigWinner) -> String
 }
 
 // ---------------------------------------------------------------------------
-// `ctx traits doctor --migrate-state [--apply]` (P426)
-// ---------------------------------------------------------------------------
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct StateFamilyReport {
-    global: String,
-    legacy: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct PlannedMoveReport {
-    family: &'static str,
-    source: String,
-    dest: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct OrphanReport {
-    key: String,
-    indexed_path: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct AppliedReport {
-    moved: Vec<PlannedMoveReport>,
-    failed: Vec<PlannedMoveFailureReport>,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct PlannedMoveFailureReport {
-    #[serde(flatten)]
-    planned: PlannedMoveReport,
-    error: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct MigrateStateReport {
-    action: &'static str,
-    repo_key: String,
-    canonical_repo_root: String,
-    runs: StateFamilyReport,
-    debug: StateFamilyReport,
-    cache: StateFamilyReport,
-    moves: Vec<PlannedMoveReport>,
-    conflicts: Vec<PlannedMoveReport>,
-    orphans: Vec<OrphanReport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    applied: Option<AppliedReport>,
-    note: &'static str,
-}
-
-fn move_report(
-    family: ctx_traits_io::state::StateFamily,
-    source: &Utf8Path,
-    dest: &Utf8Path,
-) -> PlannedMoveReport {
-    PlannedMoveReport {
-        family: family.label(),
-        source: source.to_string(),
-        dest: dest.to_string(),
-    }
-}
-
-pub(crate) fn handle_doctor_migrate_state(
-    apply: bool,
-    json: bool,
-) -> crate::Result<CommandOutput<()>> {
-    let plan = ctx_traits_io::state::plan_migration()?;
-
-    let runs = StateFamilyReport {
-        global: ctx_traits_io::state::global_runs_root(&plan.repo_key)?.to_string(),
-        legacy: ctx_traits_io::state::legacy_runs_root(&plan.canonical_repo_root).to_string(),
-    };
-    let debug = StateFamilyReport {
-        global: ctx_traits_io::state::global_debug_root(&plan.repo_key)?.to_string(),
-        legacy: ctx_traits_io::state::legacy_debug_root(&plan.canonical_repo_root).to_string(),
-    };
-    let cache = StateFamilyReport {
-        global: ctx_traits_io::state::global_cache_root(&plan.repo_key)?.to_string(),
-        legacy: ctx_traits_io::state::legacy_cache_root(&plan.canonical_repo_root).to_string(),
-    };
-
-    let moves: Vec<PlannedMoveReport> = plan
-        .moves
-        .iter()
-        .map(|m| move_report(m.family, &m.source, &m.dest))
-        .collect();
-    let conflicts: Vec<PlannedMoveReport> = plan
-        .conflicts
-        .iter()
-        .map(|c| move_report(c.family, &c.source, &c.dest))
-        .collect();
-    let orphans: Vec<OrphanReport> = plan
-        .orphans
-        .iter()
-        .map(|o| OrphanReport {
-            key: o.key.clone(),
-            indexed_path: o.indexed_path.clone(),
-        })
-        .collect();
-
-    let applied = if apply {
-        let result = ctx_traits_io::state::apply_migration(&plan)?;
-        Some(AppliedReport {
-            moved: result
-                .moved
-                .iter()
-                .map(|m| move_report(m.family, &m.source, &m.dest))
-                .collect(),
-            failed: result
-                .failed
-                .iter()
-                .map(|(m, error)| PlannedMoveFailureReport {
-                    planned: move_report(m.family, &m.source, &m.dest),
-                    error: error.clone(),
-                })
-                .collect(),
-        })
-    } else {
-        None
-    };
-
-    let report = MigrateStateReport {
-        action: if apply { "apply" } else { "plan" },
-        repo_key: plan.repo_key.clone(),
-        canonical_repo_root: plan.canonical_repo_root.to_string(),
-        runs,
-        debug,
-        cache,
-        moves,
-        conflicts,
-        orphans,
-        applied,
-        note: "conflicts are never overwritten; re-run with --apply after resolving them by hand",
-    };
-
-    if json {
-        print_json_report(&Envelope::ok(report), "doctor migrate-state report")?;
-    } else {
-        println!(
-            "ctx traits doctor --migrate-state{}",
-            if apply { " --apply" } else { "" }
-        );
-        println!("  repo-key: {}", report.repo_key);
-        println!("  canonical-repo-root: {}", report.canonical_repo_root);
-        println!(
-            "  runs: global={} legacy={}",
-            report.runs.global, report.runs.legacy
-        );
-        println!(
-            "  debug: global={} legacy={}",
-            report.debug.global, report.debug.legacy
-        );
-        println!(
-            "  cache: global={} legacy={}",
-            report.cache.global, report.cache.legacy
-        );
-        println!("  moves: {}", report.moves.len());
-        for m in &report.moves {
-            println!("    [{}] {} -> {}", m.family, m.source, m.dest);
-        }
-        println!("  conflicts: {}", report.conflicts.len());
-        for c in &report.conflicts {
-            println!(
-                "    [{}] {} (dest already exists: {})",
-                c.family, c.source, c.dest
-            );
-        }
-        println!("  orphans: {}", report.orphans.len());
-        for o in &report.orphans {
-            println!("    {} -> {}", o.key, o.indexed_path);
-        }
-        if let Some(applied) = &report.applied {
-            println!(
-                "  applied: moved={} failed={}",
-                applied.moved.len(),
-                applied.failed.len()
-            );
-            for failure in &applied.failed {
-                println!(
-                    "    failed: [{}] {} -> {}: {}",
-                    failure.planned.family,
-                    failure.planned.source,
-                    failure.planned.dest,
-                    failure.error
-                );
-            }
-        }
-        println!("  note: {}", report.note);
-    }
-
-    Ok(CommandOutput::new(()))
-}
-
-// ---------------------------------------------------------------------------
 // `ctx traits doctor --migrate-config [--apply]` (P514)
 // ---------------------------------------------------------------------------
 
@@ -1745,7 +1538,7 @@ struct DoctorGlobalStoreFinding {
 /// tracked runtime paths, and the global-store warning, gathered before
 /// doctor's no-source early exit so a fresh repository with no importable
 /// file still sees these findings. `applied_entries` is non-empty only when
-/// `ctx traits doctor --apply` (without `--migrate-state`) actually appended
+/// `ctx traits doctor --apply` (without `--migrate-config`) actually appended
 /// missing entries this call.
 #[derive(serde::Serialize, Default)]
 #[serde(rename_all = "kebab-case")]

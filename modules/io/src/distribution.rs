@@ -2,8 +2,8 @@
 //!
 //! Implements `ctx traits install/remove/update/outdated/info`: stages a
 //! verified npm package completely before ever mutating project files, then
-//! atomically publishes the vendor tree, updates `.ctx/traits.lock`, and
-//! surgically edits `.ctx/traits.toml` (only the `[dependencies]` table).
+//! atomically publishes the vendor tree, updates `.ctx/traits/config.lock`, and
+//! surgically edits `.ctx/traits/config.toml` (only the `[dependencies]` table).
 //!
 //! Every mutating operation (`install`/`update`/`remove`) fully prepares its
 //! manifest text, lock text, and vendor tree *before* touching any live
@@ -58,7 +58,7 @@ impl DistributionScope {
     /// for a project scope, the `ctx` config-home root for global. Also the
     /// directory a scoped caller resolves `[registry] base` config from
     /// (`resolve_registry_options`) — the same root a project/global
-    /// `.ctx/config.toml` would live under.
+    /// `.ctx/traits/runtime.toml` would live under.
     pub fn boundary(&self) -> &Utf8Path {
         match self {
             Self::Project(root) | Self::Global(root) => root,
@@ -472,7 +472,7 @@ pub fn resolve_registry_options(start_dir: &Utf8Path) -> RegistryOptions<'static
 ///
 /// Stages the tarball fully (fetch, integrity, extraction, trait discovery,
 /// digest computation, claim verification, schema check) before ever
-/// touching `.ctx/traits.toml`, `.ctx/traits.lock`, or the vendor tree. A
+/// touching `.ctx/traits/config.toml`, `.ctx/traits/config.lock`, or the vendor tree. A
 /// failed staging step leaves every project file untouched.
 pub fn install(
     scope: &DistributionScope,
@@ -1821,41 +1821,25 @@ struct ResolvedBase {
     packages: BTreeMap<String, ProjectPackageDependency>,
 }
 
-/// Locate the one project-manifest payload an `extends` base package
-/// publishes, at the same repo-relative `.ctx/traits.*` location its own
-/// `ctx traits init` would have created it — the same encoding-priority scan
-/// as [`crate::discovery::manifest`], rooted at a staged base package
-/// instead of a repository.
+/// Locate the project-manifest payload an `extends` base package publishes,
+/// at the same repo-relative `.ctx/traits/config.toml` location its own
+/// `ctx traits init` would have created it — the same probe as
+/// [`crate::discovery::manifest`], rooted at a staged base package instead
+/// of a repository.
 fn discover_base_manifest(staging_root: &Utf8Path) -> crate::Result<(Utf8PathBuf, String)> {
-    let mut found = Vec::new();
-    for extension in ["toml", "json", "yaml", "yml"] {
-        let path = crate::layout::project_manifest_path(staging_root, extension);
-        if path.is_file() {
-            found.push(path);
-        }
-    }
-    match found.len() {
-        0 => Err(crate::environment::Error::Filesystem {
+    let path = crate::layout::project_manifest_path(staging_root, "toml");
+    if path.is_file() {
+        let relative = path.strip_prefix(staging_root).unwrap_or(&path).to_string();
+        Ok((path, relative))
+    } else {
+        Err(crate::environment::Error::Filesystem {
             path: staging_root.to_string(),
             source: std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "extends base package does not publish a .ctx/traits.{toml,json,yaml,yml} project manifest",
+                "extends base package does not publish a .ctx/traits/config.toml project manifest",
             ),
         }
-        .into()),
-        1 => {
-            let path = found.remove(0);
-            let relative = path.strip_prefix(staging_root).unwrap_or(&path).to_string();
-            Ok((path, relative))
-        }
-        _ => Err(crate::environment::Error::Filesystem {
-            path: staging_root.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "extends base package publishes multiple project manifest encodings",
-            ),
-        }
-        .into()),
+        .into())
     }
 }
 
@@ -2544,7 +2528,7 @@ fn with_notes(err: crate::Error, notes: Vec<String>) -> crate::Error {
     }
 }
 
-/// Build the edited `.ctx/traits.toml` text with `alias`'s `[dependencies]`
+/// Build the edited `.ctx/traits/config.toml` text with `alias`'s `[dependencies]`
 /// entry set to `{ npm = package, version = requested }`, without writing
 /// anything. Pure preparation so a parse failure never mutates live state.
 /// `true` when the project manifest already declares `alias` pointing at

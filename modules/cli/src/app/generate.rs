@@ -779,7 +779,7 @@ fn builtin_assignments(
     }
     let resolved = ctx_traits_io::harness_config::resolve_runtime_assignments(assignments)?;
     // Layer every configured seat of the role (role/tier defaults <
-    // `.ctx/config.toml` role table/list < profile < `--assign`) without
+    // `.ctx/traits/runtime.toml` role table/list < profile < `--assign`) without
     // resolving models against a harness catalog yet: `--model` still needs
     // to replace whatever selector this layering produced before any
     // resolution happens, so catalog resolution stays solely owned by the

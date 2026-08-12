@@ -27,7 +27,7 @@ fn write_fixture_file(path: &Path, contents: &str) {
 }
 
 /// A fresh Git repository with a hand-written, minimal `status = "draft"`
-/// package under `.ctx/traits/render-trust-fixture` — no `node`/`pnpm`
+/// package under `.ctx/traits/authored/render-trust-fixture` — no `node`/`pnpm`
 /// dependency (`generated/index.toml` is authored directly, in the style of
 /// `proof_cli_surface.rs`'s `seed_demo_trait`). Under a scratch `HOME`, this
 /// trait is always both draft (status) and unreviewed (trust: no record).
@@ -36,13 +36,13 @@ fn draft_repo(scratch: &ScratchRoot) -> std::path::PathBuf {
     fs::create_dir_all(&repo).unwrap();
     git_init(&repo);
     write_fixture_file(
-        &repo.join(".ctx/traits/render-trust-fixture/trait.toml"),
+        &repo.join(".ctx/traits/authored/render-trust-fixture/trait.toml"),
         &format!(
             "[package]\nid = {TRAIT_ID:?}\nversion = \"0.1.0\"\nname = \"Render Trust Fixture\"\nstatus = \"draft\"\n"
         ),
     );
     write_fixture_file(
-        &repo.join(".ctx/traits/render-trust-fixture/generated/index.toml"),
+        &repo.join(".ctx/traits/authored/render-trust-fixture/generated/index.toml"),
         TRAIT_MANIFEST,
     );
     repo

@@ -7,8 +7,8 @@ use camino::Utf8Path;
 use ctx_traits_io::run::{TraitSourceDrift, trait_source_drift_from};
 use support::{ScratchRoot, controlled_command, ctx_bin, git_init, require_success, run_ctx, utf8};
 
-const FILE: &str = ".ctx/traits/pin/generated/index.toml";
-const FLAT_FILE: &str = ".ctx/traits/pin/trait.toml";
+const FILE: &str = ".ctx/traits/authored/pin/generated/index.toml";
+const FLAT_FILE: &str = ".ctx/traits/authored/pin/trait.toml";
 
 fn manifest(summary: &str) -> String {
     format!(
@@ -64,10 +64,10 @@ fn symlink_source(target: &std::path::Path, link: &std::path::Path) {
 fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     let scratch = ScratchRoot::new("trait-shape-pinning");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits/authored/pin/generated")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/traits/pin/trait.toml"),
+        repo.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -115,7 +115,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     )
     .expect("the owning repository's rebuilt path supplies pinned package context");
     assert!(
-        loaded.trait_root.ends_with(".ctx/traits/pin"),
+        loaded.trait_root.ends_with(".ctx/traits/authored/pin"),
         "pinned commands and resources must resolve from the owning package"
     );
     assert_eq!(
@@ -148,10 +148,10 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
 
     // The supplied path belongs to another package. It must neither replace
     // the pin nor contribute the command/resource root for pinned execution.
-    let foreign = "foreign/.ctx/traits/pin/generated/index.toml";
-    fs::create_dir_all(repo.join("foreign/.ctx/traits/pin/generated")).unwrap();
+    let foreign = "foreign/.ctx/traits/authored/pin/generated/index.toml";
+    fs::create_dir_all(repo.join("foreign/.ctx/traits/authored/pin/generated")).unwrap();
     fs::write(
-        repo.join("foreign/.ctx/traits/pin/trait.toml"),
+        repo.join("foreign/.ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"foreign\"\nversion = \"0.1.0\"\nname = \"Foreign\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -165,7 +165,7 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
     .expect("the recorded context remains a safe fallback");
     assert_ne!(
         unrelated.trait_root,
-        repo.join("foreign/.ctx/traits/pin"),
+        repo.join("foreign/.ctx/traits/authored/pin"),
         "an unrelated package must not provide package context for pinned bytes"
     );
     let foreign_resume = run_ctx(
@@ -256,10 +256,10 @@ fn explicit_file_resume_replays_pinned_source_after_rebuild() {
 fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     let scratch = ScratchRoot::new("trait-shape-legacy-recovery");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits/authored/pin/generated")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/traits/pin/trait.toml"),
+        repo.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -309,7 +309,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
     .unwrap();
     // A decodable but mismatching explicit file must not hide the unchanged
     // recorded-path fallback for a legacy ledger.
-    let mismatch = ".ctx/traits/pin/generated/mismatch.toml";
+    let mismatch = ".ctx/traits/authored/pin/generated/mismatch.toml";
     fs::write(repo.join(mismatch), manifest("source B")).unwrap();
     let fallback = run_ctx(
         &[
@@ -330,7 +330,7 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
         "matching recorded path must survive a mismatching explicit candidate: stdout={stdout} stderr={stderr}"
     );
     fs::write(repo.join(FILE), manifest("source B")).unwrap();
-    let recovered = ".ctx/traits/pin/generated/recovered.toml";
+    let recovered = ".ctx/traits/authored/pin/generated/recovered.toml";
     fs::write(repo.join(recovered), source_a).unwrap();
 
     let before_status = fs::read_to_string(&ledger).unwrap();
@@ -393,10 +393,10 @@ fn legacy_status_accepts_explicit_recovery_without_persisting_a_warning() {
 fn malformed_pin_is_not_reported_as_a_legacy_ledger() {
     let scratch = ScratchRoot::new("trait-shape-malformed-pin");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits/authored/pin/generated")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/traits/pin/trait.toml"),
+        repo.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -460,19 +460,19 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
     let scratch = ScratchRoot::new("trait-shape-flat-owner-context");
     let owner = scratch.home().join("owner");
     let dashboard = scratch.home().join("dashboard");
-    fs::create_dir_all(owner.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(owner.join(".ctx/traits/authored/pin/generated")).unwrap();
     fs::create_dir_all(&dashboard).unwrap();
     git_init(&owner);
     git_init(&dashboard);
     fs::write(
-        owner.join(".ctx/traits/pin/trait.toml"),
+        owner.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
     fs::write(owner.join(FILE), resource_manifest("source A")).unwrap();
-    fs::create_dir_all(owner.join(".ctx/traits/pin/resources")).unwrap();
+    fs::create_dir_all(owner.join(".ctx/traits/authored/pin/resources")).unwrap();
     fs::write(
-        owner.join(".ctx/traits/pin/resources/session-package"),
+        owner.join(".ctx/traits/authored/pin/resources/session-package"),
         "owner package resource\n",
     )
     .unwrap();
@@ -542,10 +542,10 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
 
     let session: ctx_traits_core::procedure::session::Session =
         serde_json::from_str(&fs::read_to_string(&ledger).unwrap()).unwrap();
-    let foreign = dashboard.join(".ctx/traits/pin/generated/index.toml");
+    let foreign = dashboard.join(".ctx/traits/authored/pin/generated/index.toml");
     fs::create_dir_all(foreign.parent().unwrap()).unwrap();
     fs::write(
-        dashboard.join(".ctx/traits/pin/trait.toml"),
+        dashboard.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Foreign Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -557,8 +557,11 @@ fn flat_legacy_owner_context_replays_pinned_resources_from_another_repository() 
         "test",
     )
     .expect("foreign flat context must leave the pinned source authoritative");
-    assert!(loaded.trait_root.ends_with(".ctx/traits/pin"));
-    assert_ne!(loaded.trait_root, dashboard.join(".ctx/traits/pin"));
+    assert!(loaded.trait_root.ends_with(".ctx/traits/authored/pin"));
+    assert_ne!(
+        loaded.trait_root,
+        dashboard.join(".ctx/traits/authored/pin")
+    );
 
     // A package in another repository may claim the same package and trait ID,
     // but it must not redirect the pinned resource root during a real resume.
@@ -590,7 +593,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     let output_repo = scratch.home().join("output");
     let resume_repo = scratch.home().join("resume");
     let nested_owner = owner.join("nested");
-    fs::create_dir_all(owner.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(owner.join(".ctx/traits/authored/pin/generated")).unwrap();
     fs::create_dir_all(&nested_owner).unwrap();
     fs::create_dir_all(&output_repo).unwrap();
     fs::create_dir_all(&resume_repo).unwrap();
@@ -598,7 +601,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     git_init(&output_repo);
     git_init(&resume_repo);
     fs::write(
-        owner.join(".ctx/traits/pin/trait.toml"),
+        owner.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
@@ -606,28 +609,28 @@ fn source_owner_root_survives_an_outside_ledger_output() {
     fs::create_dir_all(target.parent().unwrap()).unwrap();
     fs::write(&target, resource_manifest("source A")).unwrap();
     symlink_source(
-        std::path::Path::new("../../../../target/different-extension.json"),
+        std::path::Path::new("../../../../../target/different-extension.json"),
         &owner.join(FILE),
     );
-    fs::create_dir_all(owner.join(".ctx/traits/pin/resources")).unwrap();
+    fs::create_dir_all(owner.join(".ctx/traits/authored/pin/resources")).unwrap();
     fs::write(
-        owner.join(".ctx/traits/pin/resources/session-package"),
+        owner.join(".ctx/traits/authored/pin/resources/session-package"),
         "owner package resource\n",
     )
     .unwrap();
     // Give the output repository a same-path package whose resource cannot
     // satisfy the owner's declaration. A ledger-root package context would
     // therefore redirect this run and fail.
-    fs::create_dir_all(output_repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(output_repo.join(".ctx/traits/authored/pin/generated")).unwrap();
     fs::write(
-        output_repo.join(".ctx/traits/pin/trait.toml"),
+        output_repo.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Output Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();
     fs::write(output_repo.join(FILE), resource_manifest("output source")).unwrap();
-    fs::create_dir_all(output_repo.join(".ctx/traits/pin/resources")).unwrap();
+    fs::create_dir_all(output_repo.join(".ctx/traits/authored/pin/resources")).unwrap();
     fs::write(
-        output_repo.join(".ctx/traits/pin/resources/session-package"),
+        output_repo.join(".ctx/traits/authored/pin/resources/session-package"),
         "foreign package resource\n",
     )
     .unwrap();
@@ -650,7 +653,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
             "traits",
             "run",
             "--file",
-            "../.ctx/traits/pin/generated/index.toml",
+            "../.ctx/traits/authored/pin/generated/index.toml",
             "--no-drive",
             "--out",
             ledger.to_str().unwrap(),
@@ -717,7 +720,7 @@ fn source_owner_root_survives_an_outside_ledger_output() {
                 .expect("the pinned document must retain the owner package context");
         assert_eq!(
             fs::canonicalize(loaded.trait_root).unwrap(),
-            fs::canonicalize(owner.join(".ctx/traits/pin")).unwrap(),
+            fs::canonicalize(owner.join(".ctx/traits/authored/pin")).unwrap(),
             "pinned loading must retain the owner's package root"
         );
     }
@@ -899,10 +902,10 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
 fn trust_status_keeps_exact_digest_history_authoritative() {
     let scratch = ScratchRoot::new("trait-shape-exact-trust");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx/traits/pin/generated")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits/authored/pin/generated")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/traits/pin/trait.toml"),
+        repo.join(".ctx/traits/authored/pin/trait.toml"),
         "[package]\nid = \"pin\"\nversion = \"0.1.0\"\nname = \"Pin\"\nstatus = \"draft\"\n",
     )
     .unwrap();

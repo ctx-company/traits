@@ -104,7 +104,7 @@ transport = "cli"
 session-mode = "per-frame"
 "#
     );
-    write_file(&repo.join("ctx.toml"), &ctx_toml);
+    write_file(&repo.join(".ctx/traits/runtime.toml"), &ctx_toml);
 }
 
 #[test]
@@ -237,7 +237,7 @@ session-mode = "per-frame"
 frame-seconds = 2
 "#
     );
-    write_file(&repo.join("ctx.toml"), &ctx_toml);
+    write_file(&repo.join(".ctx/traits/runtime.toml"), &ctx_toml);
 }
 
 #[test]

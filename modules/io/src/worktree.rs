@@ -1984,22 +1984,7 @@ pub fn worktree_path_for(id: &str) -> crate::Result<Utf8PathBuf> {
 fn resolve_worktree_location(id: &str) -> crate::Result<(Utf8PathBuf, Utf8PathBuf, String)> {
     validate_worktree_id(id)?;
     let repo_root = crate::repository::discover_repo_root()?;
-    // 0052 dual-read. A worktree that ALREADY exists under the pre-0052 root
-    // keeps resolving there for its whole life: its absolute path is recorded
-    // in the session ledger and in `.git/worktrees/*/gitdir`, so relocating it
-    // under a live or parked run would break exactly the thing the run needs
-    // to resume. Nothing is moved — new worktrees are created under the
-    // current root and the old ones drain away as their runs land, which is
-    // why this needs no migration step and no window where a run is at risk.
-    let current = repo_root.join(crate::layout::worktree_root()).join(id);
-    let legacy = repo_root
-        .join(crate::layout::legacy_worktree_root())
-        .join(id);
-    let path = if !current.exists() && legacy.exists() {
-        legacy
-    } else {
-        current
-    };
+    let path = repo_root.join(crate::layout::worktree_root()).join(id);
     let branch = format!("ctx/run/{id}");
     Ok((repo_root, path, branch))
 }

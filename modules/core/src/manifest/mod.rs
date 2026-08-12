@@ -1,8 +1,7 @@
 //! Project manifest model.
 //!
-//! The repo-level `.ctx/traits.toml` project manifest declares which traits a
-//! repo uses. TOML, JSON, YAML, and YML are alternate encodings of one
-//! canonical schema. TOML is preferred for human authoring.
+//! The repo-level `.ctx/traits/config.toml` project manifest declares which
+//! traits a repo uses.
 //!
 //! All field names are kebab-case. Scalar-or-array authoring sugar is handled
 //! by `OneOrMany` field types from `shared` on domain struct fields directly.

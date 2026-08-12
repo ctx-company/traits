@@ -52,12 +52,6 @@ const TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/authored";
 /// still carrying this directory is refused by [`refuse_retired_roots`]
 /// naming the `git mv` to [`TRAIT_PACKAGE_ROOT`].
 const RETIRED_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/packages";
-/// P569 predecessor of [`TRAIT_PACKAGE_ROOT`]. Packages used to sit directly
-/// under `.ctx/traits/`, sharing that namespace with `vendor/` and (since the
-/// manifest move) `vendor.toml`/`runtime.toml` — so a package could never be
-/// named `vendor` or `runtime` without colliding. `packages/` (now
-/// `authored/`) gives package ids a namespace of their own.
-const LEGACY_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits";
 const PROJECT_MANIFEST_ROOT: &str = ".ctx/traits";
 /// Stem of the committed project config document (0177). `vendor.toml`
 /// (P569's `vendor` stem) and the machine-tier reading of this same path as
@@ -88,10 +82,6 @@ pub const CANONICAL_SOURCE_MAP: &str = "index.map";
 /// canonical document; the two are disambiguated structurally, not by name —
 /// see `decode_package_manifest`'s `[package]`-table check.
 pub const PACKAGE_MANIFEST: &str = "trait.toml";
-/// Legacy package-root run-config sidecar (P312), still read. Superseded by
-/// `trait.toml` `[budget]` (0176): budget only, never canonical trait
-/// bytes and never read from `generated/`.
-pub const PACKAGE_RUN_CONFIG: &str = "config.toml";
 /// RETIRED per-package budget sidecar (0036, retired 0176). Never read as
 /// config anymore: the author's budget lives in `trait.toml` `[budget]` /
 /// `[variant.<vid>.budget]` and `[defaults.port]`. The constant survives
@@ -103,31 +93,14 @@ pub const TRAIT_MANIFEST: &str = "trait.toml";
 /// Legacy source-map name (pre-v2 layouts).
 pub const TRAIT_SOURCE_MAP: &str = "trait.map";
 pub const TRAIT_LOCKFILE: &str = "trait.lock";
-/// Legacy repo-local generated-cache root (pre-P426), retained as a
-/// one-release dual-read fallback. See [`crate::state::global_cache_root`]
-/// for the active default.
-pub const CACHE_ROOT: &str = ".ctx/cache/traits";
-/// Legacy repo-local debug-trace root (pre-P426), retained as a one-release
-/// fallback for `doctor --migrate-state` visibility. See
-/// [`crate::state::global_debug_root`] for the active default.
-pub const DEBUG_ROOT: &str = ".ctx/debug";
-/// Legacy repo-local run-ledger root (pre-P426), retained as a one-release
-/// dual-read fallback. See [`crate::state::global_runs_root`] for the active
-/// default.
-pub const RUN_ROOT: &str = ".ctx/runs";
 /// Active repo-local run-worktree root (0052). Everything this product owns
 /// repo-locally lives under `.ctx/traits/`; `.ctx/` is a shared namespace and
 /// a top-level `worktrees/` there is a claim this product should not make.
 ///
 /// The other four repo-local roots 0052 named — `.ctx/cache/traits`,
 /// `.ctx/cache/builtin-traits`, `.ctx/runs`, `.ctx/debug` — were already moved
-/// OUT of the repository entirely by P426 and survive only as the legacy
-/// fallbacks documented above. This was the one still live.
+/// OUT of the repository entirely by P426. This was the one still live.
 pub const WORKTREE_ROOT: &str = ".ctx/traits/worktrees";
-/// Pre-0052 run-worktree root at `.ctx/`'s top level. Still resolved for a
-/// worktree that already exists there, so a checkout with live or parked runs
-/// keeps working across the change — see [`crate::worktree::worktree_path_for`].
-pub const LEGACY_WORKTREE_ROOT: &str = ".ctx/worktrees";
 /// Machine-local runtime configuration path (P311; retiered by 0037). What
 /// I decide, on THIS machine: seats, models, credentials, absolute paths,
 /// and any budget this machine wants different. Gitignored and never
@@ -135,6 +108,7 @@ pub const LEGACY_WORKTREE_ROOT: &str = ".ctx/worktrees";
 /// Read after [`PROJECT_CONFIG`] at each ancestor so a machine-local field
 /// wins the field-wise merge over the committed project decision.
 pub const RUNTIME_CONFIG: &str = ".ctx/traits/runtime.toml";
+
 /// Committed project config document path (0177; retires the 0037
 /// `RuntimeConfig` meaning this path used to carry). This is now the
 /// hand-authored face of `ConfigDocument`: `[vendor]` (dependency
@@ -151,34 +125,13 @@ pub const PROJECT_CONFIG: &str = ".ctx/traits/config.toml";
 /// default forever, a commented one keeps inheriting). Never read by config
 /// resolution — it exists to be copied to `runtime.toml`.
 pub const RUNTIME_CONFIG_EXAMPLE: &str = ".ctx/traits/runtime.example.toml";
-/// P569 predecessor of [`RUNTIME_CONFIG`], still read so an existing checkout
-/// keeps working. `config.toml` claimed a scope it never had — the document
-/// configures trait EXECUTION, nothing else — and sat beside `traits.toml`
-/// with nothing marking one committed and the other machine-local. The new
-/// name pairs with `vendor.toml` as *how* to *what*, and matches the
-/// `RuntimeConfig` type it deserializes into.
-pub const LEGACY_CTX_RUNTIME_CONFIG: &str = ".ctx/config.toml";
-/// Legacy repo-local runtime configuration path (pre-P311), retained as a
-/// dual-read fallback so existing `ctx.toml` files keep resolving.
-pub const LEGACY_RUNTIME_CONFIG: &str = "ctx.toml";
-/// Current repo-local harness registry path (P311). Read after the legacy
-/// [`LEGACY_HARNESS_REGISTRY`] sibling at each ancestor so `.ctx/` paths
-/// always win the merge.
+/// Current repo-local harness registry path (P311).
 pub const HARNESS_REGISTRY: &str = ".ctx/harness.toml";
-/// Legacy repo-local harness registry path (pre-P311), retained as a
-/// dual-read fallback so existing `ctx-harness.toml` files keep resolving.
-pub const LEGACY_HARNESS_REGISTRY: &str = "ctx-harness.toml";
 /// Current global runtime configuration file name, joined onto
 /// `${XDG_CONFIG_HOME:-$HOME/.config}/ctx`. Distinct from [`RUNTIME_CONFIG`]
 /// so the project's `.ctx/`-relative layout never leaks into the
 /// config-home-relative global path.
 pub const GLOBAL_RUNTIME_CONFIG: &str = "traits/runtime.toml";
-/// P569 predecessor of [`GLOBAL_RUNTIME_CONFIG`], still read. Same rename,
-/// machine tier.
-pub const LEGACY_CTX_GLOBAL_RUNTIME_CONFIG: &str = "config.toml";
-/// Legacy global runtime configuration file name (pre-P311), joined onto the
-/// same `ctx` config-home directory as [`GLOBAL_RUNTIME_CONFIG`].
-pub const LEGACY_GLOBAL_RUNTIME_CONFIG: &str = "ctx.toml";
 /// Optional repo-local TypeScript authoring source for [`PROJECT_CONFIG`]
 /// (0177; retires P457's `RUNTIME_CONFIG_SOURCE`, which built the sibling
 /// `.ctx/config.toml` as a `RuntimeConfig` — that pathway dies with no
@@ -213,15 +166,6 @@ pub const GLOBAL_RUNTIME_CONFIG_SOURCE: &str = "traits/runtime.ts";
 /// the acceptance in the trust store — see `crate::runtime_acceptance`.
 /// Committed, never gitignored.
 pub const RUNTIME_CONFIG_EXAMPLE_TS: &str = ".ctx/traits/runtime.example.ts";
-/// Legacy repo-local runtime materialization root for the embedded
-/// first-party built-in meta-trait packages (P337; pre-P426), retained as a
-/// one-release dual-read fallback. A sibling of [`CACHE_ROOT`], never nested
-/// under it: the two have different lifecycles (generated-cache pruning must
-/// never touch the built-in store), and different write authority (only
-/// `builtin_store::ensure_store_published` ever writes here). See
-/// [`legacy_builtin_store_root_path`] and [`builtin_store_root_path`] for the
-/// legacy/active roots.
-pub const BUILTIN_STORE_ROOT: &str = ".ctx/cache/builtin-traits";
 
 /// The version segment of the built-in trait store
 /// (`.ctx/cache/builtin-traits/<CLI_VERSION>/<id>`). One store directory per
@@ -269,46 +213,9 @@ pub fn trait_authoring_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
     resolved_package_root(repo_root)
 }
 
-/// The package root in effect for `repo_root`: the current `authored/` tree,
-/// or the pre-P569 flat tree when a checkout still has packages there and no
-/// `authored/` directory yet. Reads AND writes follow the same answer, so a
-/// half-migrated store is not something a single command can create.
+/// The package root in effect for `repo_root`: the `authored/` tree.
 pub fn resolved_package_root(repo_root: &Utf8Path) -> Utf8PathBuf {
-    let current = repo_root.join(TRAIT_PACKAGE_ROOT);
-    if current.is_dir() {
-        return current;
-    }
-    let legacy = repo_root.join(LEGACY_TRAIT_PACKAGE_ROOT);
-    // The legacy root only counts when it actually holds a package: after the
-    // manifest move it always exists (it holds `vendor.toml`), so mere
-    // existence would strand every fresh repo on the old layout.
-    if legacy.is_dir() && legacy_root_holds_a_package(&legacy) {
-        return legacy;
-    }
-    current
-}
-
-/// Whether a pre-P569 `.ctx/traits` directory contains at least one package —
-/// a child directory that is not one of the reserved non-package names and
-/// carries a manifest under either name.
-fn legacy_root_holds_a_package(legacy_root: &Utf8Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(legacy_root) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let Ok(name) = entry.file_name().into_string() else {
-            return false;
-        };
-        let reserved = matches!(
-            name.as_str(),
-            "vendor" | "packages" | "authored" | "vendored" | "generated"
-        );
-        if reserved || !entry.path().is_dir() {
-            return false;
-        }
-        let root = legacy_root.join(&name);
-        root.join(PACKAGE_MANIFEST).is_file() || root.join(GENERATED).is_dir()
-    })
+    repo_root.join(TRAIT_PACKAGE_ROOT)
 }
 
 /// Repo-relative portable protocol/runtime root.
@@ -324,11 +231,6 @@ pub fn trait_protocol_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
 /// Working-directory-relative worktree root.
 pub fn worktree_root() -> &'static str {
     WORKTREE_ROOT
-}
-
-/// Working-directory-relative pre-0052 worktree root, still read.
-pub fn legacy_worktree_root() -> &'static str {
-    LEGACY_WORKTREE_ROOT
 }
 
 /// Hand-authored config document path under `repo_root` (0177), ignoring any
@@ -492,16 +394,9 @@ pub fn resolve_package_manifest(package_root: &Utf8Path) -> Option<Utf8PathBuf> 
         .find(|candidate| candidate.is_file())
 }
 
-/// Path of the optional package-root run-config sidecar ([`PACKAGE_RUN_CONFIG`])
-/// for a resolved package root. The file may not exist; callers treat absence
-/// as "no sidecar" rather than an error.
-pub fn package_run_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
-    package_root.join(PACKAGE_RUN_CONFIG)
-}
-
 /// Path of the committed per-package `runtime.toml` ([`PACKAGE_RUNTIME_CONFIG`])
 /// for a resolved package root. The file may not exist; callers treat
-/// absence as "fall back to the legacy sidecar/declared forms".
+/// absence as "not declared".
 pub fn package_runtime_config_path(package_root: &Utf8Path) -> Utf8PathBuf {
     package_root.join(PACKAGE_RUNTIME_CONFIG)
 }
@@ -563,31 +458,17 @@ pub fn is_vendored_package_root(package_root: &Utf8Path) -> bool {
 
 pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
     // Packages live at `.ctx/traits/authored/<id>` (0179, formerly
-    // `packages/`); the predicate matched `.ctx/traits/<id>` and so stopped
-    // recognizing them, which surfaced as `ctx traits build` refusing every
-    // native family with "not under a recognized package's source root" even
-    // though `init` had just created the package.
-    //
-    // Both shapes are accepted: a checkout that predates the P569 move keeps
-    // its flat `.ctx/traits/<id>` packages working, and dropping that arm
-    // made `package_root_for_manifest` stop recognizing `generated/` on
-    // those packages — which then resolved a package root INTO its own
-    // generated directory and broke lifecycle writes.
+    // `packages/`).
     let Some(parent) = package_root.parent() else {
         return false;
     };
-    if parent.file_name() == Some("authored") {
-        return parent
-            .parent()
-            .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
-            && parent
-                .parent()
-                .and_then(Utf8Path::parent)
-                .is_some_and(|ctx_dir| ctx_dir.file_name() == Some(".ctx"));
-    }
-    parent.file_name() == Some("traits")
+    parent.file_name() == Some("authored")
         && parent
             .parent()
+            .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
+        && parent
+            .parent()
+            .and_then(Utf8Path::parent)
             .is_some_and(|ctx_dir| ctx_dir.file_name() == Some(".ctx"))
 }
 
@@ -823,13 +704,6 @@ pub fn trait_source_map_path(repo_root: &Utf8Path, trait_id: &str) -> Result<Utf
     Ok(TraitPackageRoot::new(repo_root, trait_id)?
         .source_map()
         .to_path_buf())
-}
-
-/// Legacy repo-local built-in trait store root under `repo_root`
-/// (`.ctx/cache/builtin-traits`), retained as a one-release dual-read
-/// fallback. See [`crate::state::global_cache_root`] for the active default.
-pub fn legacy_builtin_store_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
-    repo_root.join(BUILTIN_STORE_ROOT)
 }
 
 /// Active runtime built-in trait store root: the global per-repository cache
@@ -1106,15 +980,6 @@ mod retired_layout_root_tests {
         assert!(!is_vendored_package_root(Utf8Path::new(
             "/repo/.ctx/traits/vendor/demo"
         )));
-    }
-
-    #[test]
-    fn legacy_flat_root_excludes_reserved_directory_names() {
-        let legacy_root = scratch_dir("legacy-flat-exclusions");
-        for reserved in ["authored", "vendored", "generated", "vendor", "packages"] {
-            std::fs::create_dir_all(legacy_root.join(reserved)).unwrap();
-        }
-        assert!(!legacy_root_holds_a_package(&legacy_root));
     }
 }
 

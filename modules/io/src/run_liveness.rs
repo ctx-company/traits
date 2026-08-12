@@ -17,7 +17,7 @@
 //! ran cleanup. A row present with the lock free is an orphan — the row
 //! names exactly what a later cleanup (P511/P512) should look at.
 //!
-//! This index is a pointer index like `repos.toml`
+//! This index is a pointer index like `checkouts.toml`
 //! ([`crate::state::touch_repo_index`]), never a payload cache: no session
 //! status, no token counts, nothing that could drift from — and quietly
 //! start lying about — the ledger it points at.

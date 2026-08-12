@@ -9,7 +9,7 @@ use support::{
 };
 
 /// P476: this must run against a scratch repo, never `repo_root()` — the
-/// real repo's own `.ctx/config.toml` is migrated by the owner separately
+/// real repo's own `.ctx/traits/runtime.toml` is migrated by the owner separately
 /// (§7 of the P476 draft: the run must not pre-migrate it, and the old
 /// pre-P476 shape parses under this binary only until the owner's own
 /// migration lands), so asserting success against it here would couple this
@@ -47,10 +47,10 @@ fn doctor_reports_effective_defaults_and_rejects_conflicting_path() {
 fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     let scratch = ScratchRoot::new("p101-requirement-leaves");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "schema-version = 'repo-schema'\n\
 [worktree]\nsetup = []\nenabled = false\n\n\
 [budget]\nmax-frames = 7\n\n\
@@ -79,12 +79,12 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
     for expected in [
-        "worktree.setup: 0 [repo:",
-        "worktree.enabled: false [repo:",
-        "budget.max-frames: 7 [repo:",
-        "drive.strict-loops: false [repo:",
-        "merge.overlap: park [repo:",
-        "merge.gate: absent (empty) [repo:",
+        "worktree.setup: 0 [local (this machine):",
+        "worktree.enabled: false [local (this machine):",
+        "budget.max-frames: 7 [local (this machine):",
+        "drive.strict-loops: false [local (this machine):",
+        "merge.overlap: park [local (this machine):",
+        "merge.gate: absent (empty) [local (this machine):",
     ] {
         assert!(stdout.contains(expected), "missing {expected:?}: {stdout}");
     }
@@ -95,8 +95,8 @@ fn doctor_keeps_repository_requirement_leaves_over_ctx_config() {
 fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     let scratch = ScratchRoot::new("p1010-layered-provenance");
     let repo = scratch.home().join("repo");
-    let global = scratch.home().join("ctx/config.toml");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    let global = scratch.home().join("ctx/traits/runtime.toml");
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     fs::create_dir_all(global.parent().unwrap()).unwrap();
     git_init(&repo);
 
@@ -138,7 +138,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     )
     .unwrap();
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[budget]\nmax-frames = 7\n\
 [host.layered]\nformat = 'repo-format'\n\
 [harness.layered]\nbin = 'repo-bin'\n\
@@ -165,7 +165,7 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     let repo_source = fs::canonicalize(&repo)
         .unwrap()
         .join(".")
-        .join(".ctx/config.toml")
+        .join(".ctx/traits/runtime.toml")
         .display()
         .to_string();
     let environment_source = environment.display().to_string();
@@ -182,22 +182,22 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
     let (text, _) = utf8(&text_output);
     for expected in [
         format!("host.layered.profile: personal-profile [user-global: {global_source}] [your per-repo override]"),
-        format!("host.layered.format: repo-format [repo: {repo_source}] [repo default]"),
+        format!("host.layered.format: repo-format [local (this machine): {repo_source}] [repo default]"),
         format!("host.layered.project-path: environment-project [environment: {environment_source}] [environment override]"),
         format!("harness.layered.cli.prompt-via: stdin [user-global: {global_source}] [default]"),
-        format!("harness.layered.bin: repo-bin [repo: {repo_source}] [repo default]"),
-        format!("harness.layered.mcp.mcp-config-flag: --repo-mcp [repo: {repo_source}] [repo default]"),
+        format!("harness.layered.bin: repo-bin [local (this machine): {repo_source}] [repo default]"),
+        format!("harness.layered.mcp.mcp-config-flag: --repo-mcp [local (this machine): {repo_source}] [repo default]"),
         format!("agent.role.worker.1.harness: environment-worker [environment: {environment_source}] [environment override]"),
-        format!("budget.max-frames: 7 [repo: {repo_source}] [repo requirement]"),
+        format!("budget.max-frames: 7 [local (this machine): {repo_source}] [repo requirement]"),
         "publish.exclude: [\".git\",\"node_modules\",\"target\",\".turbo\",\"global-exclude\",\"duplicate-exclude\",\"repo-exclude\",\"environment-exclude\",\"personal-exclude\"]".to_string(),
         format!("worktree.env.GLOBAL_ONLY: global [user-global: {global_source}] [additive]"),
         format!("worktree.env.PERSONAL_ONLY: personal [user-global: {global_source}] [additive]"),
-        format!("worktree.env.REPO_ONLY: repo [repo: {repo_source}] [additive]"),
+        format!("worktree.env.REPO_ONLY: repo [local (this machine): {repo_source}] [additive]"),
         format!("worktree.env.ENV_ONLY: environment [environment: {environment_source}] [additive]"),
-        format!("worktree.env.CONFLICT: repo [repo: {repo_source}] [additive]"),
-        format!("worktree.build-cache.shared.env: REPO_CACHE [repo: {repo_source}] [additive]"),
+        format!("worktree.env.CONFLICT: repo [local (this machine): {repo_source}] [additive]"),
+        format!("worktree.build-cache.shared.env: REPO_CACHE [local (this machine): {repo_source}] [additive]"),
         format!("worktree.build-cache.personal-only.env: PERSONAL_ONLY_CACHE [user-global: {global_source}] [additive]"),
-        format!("worktree.build-cache.repo-only.env: REPO_ONLY_CACHE [repo: {repo_source}] [additive]"),
+        format!("worktree.build-cache.repo-only.env: REPO_ONLY_CACHE [local (this machine): {repo_source}] [additive]"),
         format!("worktree.build-cache.environment-only.env: ENV_ONLY_CACHE [environment: {environment_source}] [additive]"),
         format!("warning: worktree.env.CONFLICT rejected from {global_source}; repository requirement from {repo_source} remains effective"),
         format!("warning: worktree.env.CONFLICT rejected from {environment_source}; repository requirement from {repo_source} remains effective"),
@@ -417,8 +417,8 @@ fn layered_doctor_reports_exact_leaf_provenance_and_additive_contributors() {
 fn layered_single_assignment_and_harness_leaves_keep_each_winner() {
     let scratch = ScratchRoot::new("p1010-single-table-leaves");
     let repo = scratch.home().join("repo");
-    let global = scratch.home().join("ctx/config.toml");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    let global = scratch.home().join("ctx/traits/runtime.toml");
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     fs::create_dir_all(global.parent().unwrap()).unwrap();
     git_init(&repo);
 
@@ -448,7 +448,7 @@ fn layered_single_assignment_and_harness_leaves_keep_each_winner() {
     )
     .unwrap();
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[harness.layered]\nbin = 'repo-bin'\n\
          [harness.layered.mcp]\nallowed-tools = ['repo-tool']\n\
           [agent.role.reviewer]\nreasoning-effort = 'medium'\n",
@@ -466,7 +466,7 @@ fn layered_single_assignment_and_harness_leaves_keep_each_winner() {
     let repo_source = fs::canonicalize(&repo)
         .unwrap()
         .join(".")
-        .join(".ctx/config.toml")
+        .join(".ctx/traits/runtime.toml")
         .display()
         .to_string();
     let environment_source = environment.display().to_string();
@@ -612,9 +612,9 @@ fn legacy_agent_keys_fail_parse_naming_their_role_replacement() {
 fn migrate_config_rewrites_legacy_agent_keys_and_reports_conflicts() {
     let scratch = ScratchRoot::new("p514-migrate-config");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
-    let config_path = repo.join(".ctx/config.toml");
+    let config_path = repo.join(".ctx/traits/runtime.toml");
     fs::write(
         &config_path,
         "# operator notes: seats tuned 2026-07\n\
@@ -730,9 +730,9 @@ deep = true\n",
     // (f) a pre-existing [agent.role.default] alongside [agent.master] is a
     // reported conflict, left untouched.
     let conflict_repo = scratch.home().join("conflict-repo");
-    fs::create_dir_all(conflict_repo.join(".ctx")).unwrap();
+    fs::create_dir_all(conflict_repo.join(".ctx/traits")).unwrap();
     git_init(&conflict_repo);
-    let conflict_config = conflict_repo.join(".ctx/config.toml");
+    let conflict_config = conflict_repo.join(".ctx/traits/runtime.toml");
     let conflict_text =
         "[agent.role.default]\nharness = \"claude\"\n\n[agent.master]\nharness = \"claude\"\n";
     fs::write(&conflict_config, conflict_text).unwrap();
@@ -769,9 +769,9 @@ deep = true\n",
 fn migrate_config_rewrites_an_inline_agent_table_losslessly() {
     let scratch = ScratchRoot::new("p514-migrate-config-inline-agent");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
-    let config_path = repo.join(".ctx/config.toml");
+    let config_path = repo.join(".ctx/traits/runtime.toml");
     let original_text = "agent = { master = { harness = \"opencode\", model = \"gpt\" } }\n";
     fs::write(&config_path, original_text).unwrap();
 
@@ -818,10 +818,10 @@ fn migrate_config_rewrites_an_inline_agent_table_losslessly() {
 fn doctor_config_renders_every_seat_through_one_uniform_listing() {
     let scratch = ScratchRoot::new("p476-doctor-uniform-seats");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[agent.role.default]\nharness = 'claude'\n\n\
 [agent.role.narrator]\nharness = 'claude'\n\n\
 [agent.role.merger]\nharness = 'claude'\nmodel = 'sonnet'\nreasoning-effort = 'medium'\n\n\
@@ -852,7 +852,7 @@ fn doctor_config_renders_every_seat_through_one_uniform_listing() {
             "agent.role.{role}.harness must report its configured harness: {line}"
         );
         assert!(
-            line.contains("[repo:"),
+            line.contains("[local (this machine):"),
             "agent.role.{role}.harness must carry its repo-layer source: {line}"
         );
     }
@@ -881,16 +881,16 @@ fn doctor_uses_repo_defaults_after_global_defaults() {
     let scratch = ScratchRoot::new("p418-precedence");
     let repo = scratch.home().join("repo");
     let global = scratch.home().join("ctx");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
-    fs::create_dir_all(&global).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
+    fs::create_dir_all(global.join("traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[drive]\nmax-in-flight = 2\n[agent.role.worker]\nharness = 'repo-worker'\n",
     )
     .unwrap();
     fs::write(
-        global.join("config.toml"),
+        global.join("traits/runtime.toml"),
         "[agent.role.worker]\nharness = 'global-worker'\n",
     )
     .unwrap();
@@ -904,7 +904,10 @@ fn doctor_uses_repo_defaults_after_global_defaults() {
     .unwrap();
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
-    assert!(stdout.contains("drive.max-in-flight: 2 [repo:"), "{stdout}");
+    assert!(
+        stdout.contains("drive.max-in-flight: 2 [local (this machine):"),
+        "{stdout}"
+    );
     assert!(
         stdout.contains("agent.role.worker.harness: repo-worker"),
         "{stdout}"
@@ -953,7 +956,7 @@ fn merge_gate_defaults_to_empty_and_default_ceiling() {
 fn merge_retry_policy_uses_nearest_values_and_reports_provenance() {
     let scratch = ScratchRoot::new("p478-merge-retry-policy");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     let config = scratch.home().join("retry.toml");
     fs::write(
@@ -985,10 +988,10 @@ fn merge_retry_policy_uses_nearest_values_and_reports_provenance() {
 fn merge_retry_policy_repository_requirements_win_over_environment() {
     let scratch = ScratchRoot::new("p478-merge-retry-requirement-precedence");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[merge]\nretry-attempts = 3\nretry-backoff-ms = 25\n",
     )
     .unwrap();
@@ -1009,11 +1012,11 @@ fn merge_retry_policy_repository_requirements_win_over_environment() {
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
     assert!(
-        stdout.contains("merge.retry-attempts: 3 [repo:"),
+        stdout.contains("merge.retry-attempts: 3 [local (this machine):"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("merge.retry-backoff-ms: 25 [repo:"),
+        stdout.contains("merge.retry-backoff-ms: 25 [local (this machine):"),
         "{stdout}"
     );
 }
@@ -1050,12 +1053,16 @@ fn merge_gate_explicit_empty_overrides_a_farther_declaration() {
     let scratch = ScratchRoot::new("p477-gate-override");
     let repo = scratch.home().join("repo");
     let global = scratch.home().join("ctx");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
-    fs::create_dir_all(&global).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
+    fs::create_dir_all(global.join("traits")).unwrap();
     git_init(&repo);
-    fs::write(repo.join(".ctx/config.toml"), "[merge]\ngate = []\n").unwrap();
     fs::write(
-        global.join("config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
+        "[merge]\ngate = []\n",
+    )
+    .unwrap();
+    fs::write(
+        global.join("traits/runtime.toml"),
         "[merge]\ngate = [[\"global-only-cmd\"]]\n",
     )
     .unwrap();
@@ -1070,7 +1077,7 @@ fn merge_gate_explicit_empty_overrides_a_farther_declaration() {
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
     assert!(
-        stdout.contains("merge.gate: absent (empty) [repo:"),
+        stdout.contains("merge.gate: absent (empty) [local (this machine):"),
         "an explicit empty repo-layer gate must win over the farther global declaration: {stdout}"
     );
 }
@@ -1082,16 +1089,16 @@ fn merge_gate_repo_declaration_replaces_global_wholesale() {
     let scratch = ScratchRoot::new("p477-gate-replace");
     let repo = scratch.home().join("repo");
     let global = scratch.home().join("ctx");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
-    fs::create_dir_all(&global).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
+    fs::create_dir_all(global.join("traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[merge]\ngate = [[\"repo-cmd\"]]\ngate-seconds = 30\n",
     )
     .unwrap();
     fs::write(
-        global.join("config.toml"),
+        global.join("traits/runtime.toml"),
         "[merge]\ngate = [[\"global-cmd\"], [\"another-global-cmd\"]]\n",
     )
     .unwrap();
@@ -1106,10 +1113,13 @@ fn merge_gate_repo_declaration_replaces_global_wholesale() {
     assert_exit_code(&output, 0);
     let (stdout, _) = utf8(&output);
     assert!(
-        stdout.contains(r#"merge.gate: [["repo-cmd"]] [repo:"#),
+        stdout.contains(r#"merge.gate: [["repo-cmd"]] [local (this machine):"#),
         "the nearer repo declaration must replace the farther one wholesale, never concatenate: {stdout}"
     );
-    assert!(stdout.contains("merge.gate-seconds: 30 [repo:"), "{stdout}");
+    assert!(
+        stdout.contains("merge.gate-seconds: 30 [local (this machine):"),
+        "{stdout}"
+    );
 }
 
 /// P477: an invalid `[merge] gate-seconds` (zero) must fail validation on
@@ -1233,10 +1243,10 @@ fn seat_budgets_default_to_todays_built_in_numbers() {
 fn declared_seat_budget_renders_value_and_source_layer() {
     let scratch = ScratchRoot::new("p475-budget-provenance");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[agent.role.merger-deep]\nharness = 'claude'\nmodel = 'opus'\nreasoning-effort = 'high'\n\n\
 [agent.role.merger-deep.budget]\nframe-seconds = 1200\n\n\
 [agent.role.narrator]\nharness = 'claude'\n\n\
@@ -1257,7 +1267,7 @@ fn declared_seat_budget_renders_value_and_source_layer() {
         })
         .unwrap_or_else(|| panic!("missing merger-deep budget row: {stdout}"));
     assert!(
-        merger_deep_line.contains("1200") && merger_deep_line.contains("[repo:"),
+        merger_deep_line.contains("1200") && merger_deep_line.contains("[local (this machine):"),
         "{merger_deep_line}"
     );
     let narrator_line = stdout
@@ -1268,7 +1278,7 @@ fn declared_seat_budget_renders_value_and_source_layer() {
         })
         .unwrap_or_else(|| panic!("missing narrator budget row: {stdout}"));
     assert!(
-        narrator_line.contains("45") && narrator_line.contains("[repo:"),
+        narrator_line.contains("45") && narrator_line.contains("[local (this machine):"),
         "{narrator_line}"
     );
     // merger (undeclared) must stay at its own built-in default, unaffected
@@ -1286,10 +1296,10 @@ fn declared_seat_budget_renders_value_and_source_layer() {
 fn raising_merger_budget_moves_derived_lock_wait_by_25x_delta() {
     let scratch = ScratchRoot::new("p475-lock-wait-derivation");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[agent.role.merger]\nharness = 'claude'\nmodel = 'sonnet'\nreasoning-effort = 'medium'\n\n\
 [agent.role.merger.budget]\nframe-seconds = 1000\n",
     )
@@ -1326,10 +1336,10 @@ fn raising_merger_budget_moves_derived_lock_wait_by_25x_delta() {
 fn list_backed_role_budget_rows_pair_the_correct_seat() {
     let scratch = ScratchRoot::new("p475-seat-budget-pairing");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[[agent.role.worker]]\nharness = 'claude'\n\n\
 [agent.role.worker.budget]\nframe-seconds = 111\n\n\
 [[agent.role.worker]]\nharness = 'claude'\n\n\
@@ -1362,10 +1372,10 @@ fn list_backed_role_budget_rows_pair_the_correct_seat() {
 fn run_level_frame_seconds_is_visible_alongside_a_masked_role_budget() {
     let scratch = ScratchRoot::new("p475-run-level-masks-role-budget");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[budget]\nframe-seconds = 42\n\n\
 [agent.role.worker]\nharness = 'claude'\n\n\
 [agent.role.worker.budget]\nframe-seconds = 777\n",
@@ -1378,11 +1388,11 @@ fn run_level_frame_seconds_is_visible_alongside_a_masked_role_budget() {
         &scratch.home(),
     );
     assert!(
-        stdout.contains("budget.frame-seconds: 42 [repo:"),
+        stdout.contains("budget.frame-seconds: 42 [local (this machine):"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("agent.role.worker.budget.frame-seconds: 777 [repo:"),
+        stdout.contains("agent.role.worker.budget.frame-seconds: 777 [local (this machine):"),
         "a role budget must still be visible in doctor's per-seat listing even though `[budget]` would mask it for drive frames: {stdout}"
     );
 }
@@ -1407,9 +1417,9 @@ fn one_shot_seat_budget_rejects_idle_seconds_and_max_retries() {
         ),
     ] {
         let repo = scratch.home().join(expected_path.replace('.', "-"));
-        fs::create_dir_all(repo.join(".ctx")).unwrap();
+        fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
         git_init(&repo);
-        fs::write(repo.join(".ctx/config.toml"), config).unwrap();
+        fs::write(repo.join(".ctx/traits/runtime.toml"), config).unwrap();
         let output = run_ctx(&["traits", "doctor", "--config"], &repo, &scratch.home());
         assert_ne!(output.status.code(), Some(0), "config: {config:?}");
         let (_, stderr) = utf8(&output);
@@ -1591,7 +1601,7 @@ output = ["slot:notified"]
     fs::copy(&seed, &configured).unwrap();
 
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nenabled = false\n\n[budget]\nmax-frames = 10\nframe-seconds = 20\ntotal-seconds = 30\nmax-retries = 2\nattach-wait-seconds = 4\nidle-seconds = 5\n\n[drive]\nmax-in-flight = 1\nwait = false\nstrict-loops = false\n",
     )
     .unwrap();
@@ -1766,7 +1776,7 @@ fn named_build_caches_export_concurrently_through_the_public_worktree_path() {
     seed_and_activate_fixture(&repo, &scratch.home(), "p428-worktree-env");
 
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nsetup = [[\"/bin/sh\", \"-c\", \"printf '%s|%s' \\\"$CARGO_TARGET_DIR\\\" \\\"$PNPM_STORE\\\" > env-capture.txt\"]]\n\n\
 [worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n\
 [worktree.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
@@ -1827,14 +1837,14 @@ fn build_cache_report_path(stdout: &str, name: &str) -> String {
 fn build_cache_prune_selects_one_or_all_declared_caches_and_never_touches_undeclared() {
     let scratch = ScratchRoot::new("p428-prune");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     std::process::Command::new("git")
         .args(["init", "-q"])
         .current_dir(&repo)
         .status()
         .unwrap();
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n\n[worktree.build-cache.pnpm]\nenv = \"PNPM_STORE\"\n",
     )
     .unwrap();
@@ -1974,10 +1984,10 @@ fn build_target_prune_reclaims_the_undeclared_legacy_cache_and_keeps_neighbors()
 fn linked_worktree_build_cache_export_doctor_and_prune_use_the_main_checkout_key() {
     let scratch = ScratchRoot::new("p512-linked-build-cache");
     let repo = scratch.home().join("repo");
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     git_init(&repo);
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
     )
     .unwrap();
@@ -2057,7 +2067,7 @@ fn linked_worktree_cache_export_uses_main_key_without_rebasing_relative_overlays
     let repo = scratch.home().join("repo");
     seed_and_activate_fixture(&repo, &scratch.home(), "p512-linked-cache-env");
     fs::write(
-        repo.join(".ctx/config.toml"),
+        repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nsetup = [[\"/bin/sh\", \"-c\", \"printf '%s|%s' \\\"$CARGO_TARGET_DIR\\\" \\\"$RELATIVE_OVERLAY\\\" > env-capture.txt\"]]\n\n[worktree.env]\nRELATIVE_OVERLAY = \"./linked-local\"\n\n[worktree.build-cache.cargo]\nenv = \"CARGO_TARGET_DIR\"\n",
     )
     .unwrap();
@@ -2132,7 +2142,7 @@ fn build_cache_prune_authority_is_rooted_at_selected_repo_not_undeclared_names()
     let repo_a = scratch.home().join("repo-a");
     let repo_b = scratch.home().join("repo-b");
     for repo in [&repo_a, &repo_b] {
-        fs::create_dir_all(repo.join(".ctx")).unwrap();
+        fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
         std::process::Command::new("git")
             .args(["init", "-q"])
             .current_dir(repo)
@@ -2140,12 +2150,12 @@ fn build_cache_prune_authority_is_rooted_at_selected_repo_not_undeclared_names()
             .unwrap();
     }
     fs::write(
-        repo_a.join(".ctx/config.toml"),
+        repo_a.join(".ctx/traits/runtime.toml"),
         "[worktree.build-cache.repo-a-only]\nenv = \"REPO_A_ONLY\"\n",
     )
     .unwrap();
     fs::write(
-        repo_b.join(".ctx/config.toml"),
+        repo_b.join(".ctx/traits/runtime.toml"),
         "[worktree.build-cache.repo-b-only]\nenv = \"REPO_B_ONLY\"\n",
     )
     .unwrap();

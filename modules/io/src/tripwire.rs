@@ -283,12 +283,7 @@ fn status_records(main_root: &Utf8Path) -> crate::Result<Vec<(String, String)>> 
 }
 
 fn push_if_in_scope(records: &mut Vec<(String, String)>, xy: &str, path: &str) {
-    // Both roots: 0052 moved run worktrees under `.ctx/traits/`, and a
-    // checkout that still holds pre-0052 worktrees must not have them
-    // reported as escapes either.
-    if path.starts_with(crate::layout::WORKTREE_ROOT)
-        || path.starts_with(crate::layout::LEGACY_WORKTREE_ROOT)
-    {
+    if path.starts_with(crate::layout::WORKTREE_ROOT) {
         return;
     }
     records.push((xy.to_string(), path.to_string()));
@@ -404,7 +399,8 @@ mod tests {
         std::fs::write(repo.path.join(".gitignore").as_std_path(), b".ctx/\n").unwrap();
         run(&repo.path, &["add", ".gitignore"]);
         run(&repo.path, &["commit", "-q", "-m", "ignore .ctx"]);
-        let sentinel = repo.path.join(".ctx/config.toml");
+        let sentinel = repo.path.join(".ctx/traits/runtime.toml");
+        std::fs::create_dir_all(sentinel.parent().unwrap().as_std_path()).unwrap();
         std::fs::write(sentinel.as_std_path(), b"a = 1\n").unwrap();
 
         let mut wire = tripwire(&repo, vec![sentinel.clone()]);
@@ -412,7 +408,7 @@ mod tests {
         std::fs::write(sentinel.as_std_path(), b"a = 2\n").unwrap();
 
         let finding = wire.checkpoint().unwrap().expect("finding");
-        assert_eq!(finding.paths, vec![".ctx/config.toml".to_string()]);
+        assert_eq!(finding.paths, vec![".ctx/traits/runtime.toml".to_string()]);
 
         // Prove the same mutation is absent from the status leg alone.
         let status_only = status_records(&repo.path).unwrap();
@@ -422,12 +418,13 @@ mod tests {
     #[test]
     fn write_under_worktrees_subtree_is_not_a_finding() {
         let repo = init_repo("worktrees-subtree");
-        std::fs::create_dir_all(repo.path.join(".ctx/worktrees/self").as_std_path()).unwrap();
+        std::fs::create_dir_all(repo.path.join(".ctx/traits/worktrees/self").as_std_path())
+            .unwrap();
         let mut wire = tripwire(&repo, Vec::new());
         assert!(wire.checkpoint().unwrap().is_none());
         std::fs::write(
             repo.path
-                .join(".ctx/worktrees/self/scratch.txt")
+                .join(".ctx/traits/worktrees/self/scratch.txt")
                 .as_std_path(),
             b"x\n",
         )

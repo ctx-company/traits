@@ -261,7 +261,7 @@ fn startup_pty_commits_each_failed_stage_before_restoring_the_terminal() {
 
     let fixture = command_trait_fixture();
     fs::write(
-        fixture.repo.join(".ctx/config.toml"),
+        fixture.repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nseed = [\"../invalid\"]\n",
     )
     .unwrap();
@@ -275,7 +275,7 @@ fn startup_pty_commits_each_failed_stage_before_restoring_the_terminal() {
 
     let fixture = command_trait_fixture();
     fs::write(
-        fixture.repo.join(".ctx/config.toml"),
+        fixture.repo.join(".ctx/traits/runtime.toml"),
         "[worktree]\nwarm = [\"../invalid\"]\n",
     )
     .unwrap();

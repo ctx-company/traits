@@ -564,7 +564,7 @@ pub fn render_codex_payload(
 /// this repo's own `[worktree.env] CARGO_TARGET_DIR`) is blanket-denied here
 /// while `render_claude_code_settings` allows it via
 /// `additionalDirectories` — the exact asymmetry that has already killed a
-/// frame in practice (`.ctx/config.toml:171-175`).
+/// frame in practice (`.ctx/traits/runtime.toml:171-175`).
 ///
 /// As of 2026-07-27, OpenCode 1.17.18 documents an allow default for edits;
 /// `--auto` only approves requests that would otherwise ask, and explicit
@@ -835,6 +835,9 @@ mod tests {
     }
 
     fn touch(path: &Utf8Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent.as_std_path()).expect("touch parent dir");
+        }
         std::fs::write(path.as_std_path(), b"").expect("touch");
     }
 
@@ -859,7 +862,7 @@ mod tests {
         mkdir(&main_root.join(".ctx/worktrees/self"));
         mkdir(&main_root.join(".ctx/worktrees/other"));
         mkdir(&main_root.join("modules/io"));
-        touch(&main_root.join(".ctx/config.toml"));
+        touch(&main_root.join(".ctx/traits/runtime.toml"));
 
         let plan = build_confinement_plan(
             main_root,
@@ -870,7 +873,7 @@ mod tests {
         .expect("build plan");
 
         let denies = deny_strings(&plan);
-        assert!(denies.contains(&"file:.ctx/config.toml".to_string()));
+        assert!(denies.contains(&"dir:.ctx/traits".to_string()));
         assert!(denies.contains(&"dir:.ctx/worktrees/other".to_string()));
         assert!(denies.contains(&"dir:modules".to_string()));
         assert!(
@@ -952,7 +955,7 @@ mod tests {
         mkdir(&main_root.join(".ctx/worktrees/self"));
         mkdir(&main_root.join(".ctx/worktrees/other"));
         mkdir(&main_root.join(".ctx/cache/build-target"));
-        touch(&main_root.join(".ctx/config.toml"));
+        touch(&main_root.join(".ctx/traits/runtime.toml"));
 
         let plan = build_confinement_plan(
             main_root,
@@ -979,7 +982,7 @@ mod tests {
             "an out-of-worktree carve-out (e.g. a build cache) must be an allowed external_directory carve-out too"
         );
 
-        let incident_path = format!("{main_root}/.ctx/config.toml");
+        let incident_path = format!("{main_root}/.ctx/traits/runtime.toml");
         let sibling = format!("{main_root}/.ctx/worktrees/other");
         assert!(
             external_directory.get(&incident_path).is_none(),

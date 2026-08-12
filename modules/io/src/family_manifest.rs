@@ -32,7 +32,6 @@ pub struct FamilyTable {
 pub struct FamilyVariant {
     pub relative_path: String,
     pub aliases: Vec<String>,
-    pub run_config: Option<String>,
 }
 
 impl FamilyTable {
@@ -151,26 +150,11 @@ pub fn read_family_table(manifest_path: &Utf8Path) -> crate::Result<Option<Famil
             ctx_traits_core::shared::validate_slug_shape(alias, "family variant alias")
                 .map_err(crate::Error::from)?;
         }
-        let run_config = entry
-            .get("run-config")
-            .and_then(|item| item.as_str())
-            .map(str::to_string);
-        if entry.get("run-config").is_some() && run_config.is_none() {
-            return Err(crate::Error::Usage {
-                message: format!(
-                    "{manifest_path}: [family.{label}.{name}].run-config must be a string"
-                ),
-            });
-        }
-        if let Some(run_config) = &run_config {
-            validate_relative_path(manifest_path, label, name, "run-config", run_config)?;
-        }
         variants.insert(
             name.to_string(),
             FamilyVariant {
                 relative_path: relative_path.to_string(),
                 aliases,
-                run_config,
             },
         );
     }

@@ -69,7 +69,8 @@ printf '{"answer":"fast"}'
 }
 
 fn init_fixture_repo(repo: &Path, home: &Path, harness_script: &Path) {
-    fs::create_dir_all(repo.join(".ctx/traits/fixture-p451-repo-smart/generated")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits/authored/fixture-p451-repo-smart/generated"))
+        .unwrap();
     git_init(repo);
     fs::write(repo.join(".gitignore"), "ctx.toml\n.ctx/runs/\n").unwrap();
     let script = harness_script.to_string_lossy().replace('\\', "\\\\");
@@ -95,14 +96,14 @@ session-mode = "per-frame"
 model = "base-model"
 "#
     );
-    fs::write(repo.join("ctx.toml"), ctx_toml).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), ctx_toml).unwrap();
     fs::write(
-        repo.join(".ctx/traits/fixture-p451-repo-smart/trait.toml"),
+        repo.join(".ctx/traits/authored/fixture-p451-repo-smart/trait.toml"),
         TRAIT_MANIFEST,
     )
     .unwrap();
     fs::write(
-        repo.join(".ctx/traits/fixture-p451-repo-smart/generated/index.toml"),
+        repo.join(".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml"),
         TRAIT_CANONICAL,
     )
     .unwrap();
@@ -112,7 +113,7 @@ model = "base-model"
         repo,
         home,
     );
-    let fixture = ".ctx/traits/fixture-p451-repo-smart/generated/index.toml";
+    let fixture = ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml";
     require_success(
         "p451-repo-qualifier-proof `ctx traits review --approve`",
         &["traits", "review", "--file", fixture, "--approve"],
@@ -196,7 +197,7 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
     git_init(&repo);
     let active_key = active_repo_key(&repo, &home);
 
-    let global_config = home.join("ctx").join("config.toml");
+    let global_config = home.join("ctx").join("traits").join("runtime.toml");
     fs::create_dir_all(global_config.parent().unwrap()).unwrap();
     fs::write(
         &global_config,
@@ -213,7 +214,7 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
             "traits",
             "run",
             "--file",
-            ".ctx/traits/fixture-p451-repo-smart/generated/index.toml",
+            ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml",
             "--out",
             &ledger.to_string_lossy(),
             "--json",
@@ -242,7 +243,7 @@ fn repo_qualifier_governs_dispatch_and_renders_in_doctor() {
             "traits",
             "run",
             "--file",
-            ".ctx/traits/fixture-p451-repo-smart/generated/index.toml",
+            ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml",
             "--out",
             &ledger.to_string_lossy(),
             "--json",
@@ -309,7 +310,7 @@ fn repo_qualifier_is_inert_for_a_non_matching_key() {
     let script = home.join("repo-qualifier-worker.sh");
     write_executable(&script, fast_worker_script());
 
-    let global_config = home.join("ctx").join("config.toml");
+    let global_config = home.join("ctx").join("traits").join("runtime.toml");
     fs::create_dir_all(global_config.parent().unwrap()).unwrap();
     fs::write(
         &global_config,
@@ -324,7 +325,7 @@ fn repo_qualifier_is_inert_for_a_non_matching_key() {
             "traits",
             "run",
             "--file",
-            ".ctx/traits/fixture-p451-repo-smart/generated/index.toml",
+            ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml",
             "--out",
             &ledger.to_string_lossy(),
             "--json",
@@ -366,7 +367,7 @@ fn repo_scoped_variant_declaration_is_derivable_with_no_base_level_sibling() {
     git_init(&repo);
     let active_key = active_repo_key(&repo, &home);
 
-    let global_config = home.join("ctx").join("config.toml");
+    let global_config = home.join("ctx").join("traits").join("runtime.toml");
     fs::create_dir_all(global_config.parent().unwrap()).unwrap();
     fs::write(
         &global_config,
@@ -383,7 +384,7 @@ fn repo_scoped_variant_declaration_is_derivable_with_no_base_level_sibling() {
             "traits",
             "run",
             "--file",
-            ".ctx/traits/fixture-p451-repo-smart/generated/index.toml",
+            ".ctx/traits/authored/fixture-p451-repo-smart/generated/index.toml",
             "--out",
             &ledger.to_string_lossy(),
             "--json",

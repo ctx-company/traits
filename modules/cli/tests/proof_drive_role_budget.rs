@@ -102,7 +102,7 @@ session-mode = "per-frame"
 {extra_role_toml}
 "#
     );
-    fs::write(repo.join("ctx.toml"), ctx_toml).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), ctx_toml).unwrap();
     fs::write(
         repo.join(".ctx/traits/fixture-p475-budget/trait.toml"),
         TRAIT_MANIFEST,

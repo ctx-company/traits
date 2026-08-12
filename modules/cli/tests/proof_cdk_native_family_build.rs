@@ -349,50 +349,19 @@ fn default_variant_check_covers_complete_family_drift() {
     let root = proj.join(".ctx/traits/authored/family-fixture");
     let manifest = root.join("trait.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
-    let with_run_config = manifest_text.replace(
-        "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
-        "[family.variant.quick]\npath = \"generated/quick/index.toml\"\nrun-config = \"run-config/quick.toml\"",
-    );
-    fs::create_dir_all(root.join("run-config")).unwrap();
-    fs::write(
-        root.join("run-config/quick.toml"),
-        "schema-version = \"0.1\"\n\n[budget]\nmax-frames = 10\n",
-    )
-    .unwrap();
-    fs::write(&manifest, &with_run_config).unwrap();
-    let rebuild = run_ctx(
-        &[
-            "traits",
-            "build",
-            ".ctx/traits/authored/family-fixture/source/index.ts",
-        ],
-        &proj,
-        &home,
-    );
-    assert!(
-        rebuild.status.success(),
-        "rebuild with authored run-config failed: {}",
-        utf8(&rebuild).1
-    );
-    let post_rebuild_manifest = fs::read_to_string(&manifest).unwrap();
-    assert!(
-        !post_rebuild_manifest.contains("run-config"),
-        "rebuild must stop emitting run-config declarations: {post_rebuild_manifest}"
-    );
     assert!(
         !root.join("runtime.toml").exists(),
-        "rebuild must never create the retired package runtime.toml (0176)"
+        "build must never create the retired package runtime.toml (0176)"
     );
-    assert_family_check(&proj, &home, true, "rebuild after dropping run-config");
 
-    let missing_alias = post_rebuild_manifest.replace("aliases = [\"family-fixture-quick\"]\n", "");
+    let missing_alias = manifest_text.replace("aliases = [\"family-fixture-quick\"]\n", "");
     assert_ne!(
-        missing_alias, post_rebuild_manifest,
+        missing_alias, manifest_text,
         "fixture must contain quick alias"
     );
     fs::write(&manifest, missing_alias).unwrap();
     assert_family_check(&proj, &home, false, "missing generated alias");
-    fs::write(&manifest, &post_rebuild_manifest).unwrap();
+    fs::write(&manifest, &manifest_text).unwrap();
 
     let quick = root.join("generated/quick/index.toml");
     let quick_text = fs::read_to_string(&quick).unwrap();

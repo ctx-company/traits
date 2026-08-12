@@ -54,7 +54,7 @@ transport = "cli"
 session-mode = "per-frame"
 "#
     );
-    write_file(&repo.join("ctx.toml"), &ctx_toml);
+    write_file(&repo.join(".ctx/traits/runtime.toml"), &ctx_toml);
 }
 
 /// Recursively finds a file named `trust.toml` anywhere under `root`, the

@@ -295,7 +295,7 @@ transport = "cli"
 session-mode = "per-frame"
 "#
     );
-    fs::write(repo.join("ctx.toml"), ctx_toml).unwrap();
+    fs::write(repo.join(".ctx/traits/runtime.toml"), ctx_toml).unwrap();
     fs::write(
         repo.join(".ctx/traits/fixture-p464/trait.toml"),
         TRAIT_MANIFEST,

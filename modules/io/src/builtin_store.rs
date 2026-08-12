@@ -66,29 +66,15 @@ pub fn resolve_builtin_manifest_path(
         return Ok(None);
     }
     // Ordered read-candidate policy: a valid global store always wins; only
-    // when the global store is not (yet) valid does a valid one-release
-    // legacy `.ctx/cache/builtin-traits` store serve as a read-only
-    // fallback; only when neither is usable does this repair/publish the
-    // global store. An unsafe shape in either candidate is a hard `Err`
-    // propagated as-is — it is never downgraded to "absent" — so a
-    // symlinked or malformed store of either kind cannot be silently
-    // shadowed by publishing a fresh global store underneath it.
+    // when it is not (yet) usable does this repair/publish the global store.
+    // An unsafe shape is a hard `Err` propagated as-is — it is never
+    // downgraded to "absent" — so a symlinked or malformed store cannot be
+    // silently shadowed by publishing a fresh global store underneath it.
     let global_version_dir =
         crate::layout::builtin_store_version_dir(repo_root, crate::layout::CLI_VERSION)?;
     if store_is_valid(&global_version_dir)? {
         crate::layout::validate_trait_id(trait_id)?;
         let package_root = global_version_dir.join(trait_id);
-        return Ok(Some(
-            package_root
-                .join(crate::layout::GENERATED)
-                .join(crate::layout::CANONICAL_MANIFEST),
-        ));
-    }
-    let legacy_version_dir =
-        crate::layout::legacy_builtin_store_root_path(repo_root).join(crate::layout::CLI_VERSION);
-    if store_is_valid(&legacy_version_dir)? {
-        crate::layout::validate_trait_id(trait_id)?;
-        let package_root = legacy_version_dir.join(trait_id);
         return Ok(Some(
             package_root
                 .join(crate::layout::GENERATED)
