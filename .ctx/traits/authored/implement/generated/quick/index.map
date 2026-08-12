@@ -15,42 +15,42 @@
     "end": 11
   },
   "port:commit-report": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/port.ts",
-    "start": 12,
-    "end": 12
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 47,
+    "end": 47
   },
   "port:park-report": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/port.ts",
-    "start": 20,
-    "end": 20
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 55,
+    "end": 55
   },
   "port:task": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/port.ts",
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
     "start": 6,
     "end": 6
   },
   "prompt:building-produce": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 39,
-    "end": 39
+    "file": ".ctx/traits/authored/implement/source/variant/quick/stage/build.ts",
+    "start": 10,
+    "end": 10
   },
   "prompt:building-review": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 46,
-    "end": 46
+    "file": ".ctx/traits/authored/implement/source/variant/quick/stage/build.ts",
+    "start": 22,
+    "end": 22
   },
   "prompt:draft-the-work": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 67,
-    "end": 67
+    "file": ".ctx/traits/authored/implement/source/variant/quick/stage/draft.ts",
+    "start": 9,
+    "end": 9
   },
   "prompt:shipping-message": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 54,
-    "end": 54
+    "file": ".ctx/traits/authored/implement/source/variant/quick/stage/git.ts",
+    "start": 5,
+    "end": 5
   },
   "resource:task-board": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/resource.ts",
+    "file": ".ctx/traits/authored/implement/source/variant/quick/resource.ts",
     "start": 3,
     "end": 3
   },
@@ -65,24 +65,24 @@
     "end": 84
   },
   "schema:repo-gates-result": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 125,
-    "end": 125
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 24,
+    "end": 24
   },
   "schema:review-verdict": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/schema.ts",
+    "file": ".ctx/traits/authored/implement/source/variant/quick/schema.ts",
     "start": 4,
     "end": 4
   },
   "sequence:building-body/building-produce": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 77,
-    "end": 77
+    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
+    "start": 40,
+    "end": 40
   },
   "sequence:building-body/building-review": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 85,
-    "end": 85
+    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
+    "start": 44,
+    "end": 44
   },
   "sequence:building-body/capture-diff": {
     "file": "packages/toolkit/src/sequence/evidence.ts",
@@ -130,14 +130,14 @@
     "end": 48
   },
   "sequence:procedure/building": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 74,
-    "end": 74
+    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
+    "start": 37,
+    "end": 37
   },
   "sequence:procedure/draft-the-work": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 66,
-    "end": 66
+    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
+    "start": 35,
+    "end": 35
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -150,39 +150,39 @@
     "end": 57
   },
   "signal:gate-timed-out": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 163,
-    "end": 163
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 62,
+    "end": 62
   },
   "slot:commit-output": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 15,
-    "end": 15
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 22,
+    "end": 22
   },
   "slot:draft": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 12,
+    "end": 12
   },
   "slot:park-report": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 26,
-    "end": 26
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 33,
+    "end": 33
   },
   "slot:repo-gates-passed": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 121,
-    "end": 121
-  },
-  "slot:review-diff": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 109,
-    "end": 109
-  },
-  "slot:review-verdict": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 20,
     "end": 20
+  },
+  "slot:review-diff": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 7,
+    "end": 7
+  },
+  "slot:review-verdict": {
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 27,
+    "end": 27
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
@@ -205,13 +205,13 @@
     "end": 51
   },
   "slot:work-summary": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 10,
-    "end": 10
+    "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
+    "start": 17,
+    "end": 17
   },
   "trait:implement": {
-    "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 114,
-    "end": 114
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

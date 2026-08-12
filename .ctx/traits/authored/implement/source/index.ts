@@ -1,14 +1,21 @@
-import { trait, variant } from "@ctx-traits/cdk";
+import { defineTrait, useVariant } from "@ctx-traits/cdk";
 
-export default trait("implement", {
-  version: "0.24.0",
-  variants: {
-    quick: variant.import("./variants/quick.ts"),
-    default: variant.import("./variants/default.ts").default(),
-    smart: variant.import("./variants/smart.ts"),
-    strict: variant.import("./variants/strict.ts"),
-    phase: variant.import("./variants/phase.ts"),
-    gated: variant.import("./variants/gated.ts"),
-    guarded: variant.import("./variants/guarded.ts"),
-  },
-});
+import { default as variants } from "./variant/index.ts";
+import { default as defaultVariant } from "./variants/default.ts";
+import { default as gated } from "./variants/gated.ts";
+import { default as guarded } from "./variants/guarded.ts";
+import { default as phase } from "./variants/phase.ts";
+import { default as smart } from "./variants/smart.ts";
+import { default as strict } from "./variants/strict.ts";
+
+export default function () {
+  defineTrait("Implement", { version: "0.24.0" });
+
+  useVariant(variants.quick);
+  useVariant(defaultVariant, "default").default();
+  useVariant(smart, "smart");
+  useVariant(strict, "strict");
+  useVariant(phase, "phase");
+  useVariant(gated, "gated");
+  useVariant(guarded, "guarded");
+}

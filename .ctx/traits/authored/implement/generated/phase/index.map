@@ -26,13 +26,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 169,
-    "end": 169
+    "start": 114,
+    "end": 114
   },
   "port:leftovers": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 186,
-    "end": 186
+    "start": 131,
+    "end": 131
   },
   "port:park-report": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -41,8 +41,8 @@
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 39,
-    "end": 39
+    "start": 44,
+    "end": 44
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -61,8 +61,8 @@
   },
   "prompt:copy-the-task-contract": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 267,
-    "end": 267
+    "start": 212,
+    "end": 212
   },
   "prompt:planning-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -86,8 +86,8 @@
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 53,
-    "end": 53
+    "start": 58,
+    "end": 58
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -125,9 +125,9 @@
     "end": 217
   },
   "schema:repo-gates-result": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 125,
-    "end": 125
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 24,
+    "end": 24
   },
   "schema:review-finding": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -246,8 +246,8 @@
   },
   "sequence:procedure/copy-the-task-contract": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 266,
-    "end": 266
+    "start": 211,
+    "end": 211
   },
   "sequence:procedure/planning": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -265,9 +265,9 @@
     "end": 57
   },
   "signal:gate-timed-out": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 163,
-    "end": 163
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 62,
+    "end": 62
   },
   "slot:building-sealed": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -276,18 +276,18 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 105,
-    "end": 105
+    "start": 110,
+    "end": 110
   },
   "slot:draft": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 68,
-    "end": 68
+    "start": 73,
+    "end": 73
   },
   "slot:leftovers": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 79,
-    "end": 79
+    "start": 84,
+    "end": 84
   },
   "slot:park-report": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -300,14 +300,14 @@
     "end": 303
   },
   "slot:repo-gates-passed": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 121,
-    "end": 121
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 20,
+    "end": 20
   },
   "slot:review-diff": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 109,
-    "end": 109
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 7,
+    "end": 7
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",
@@ -341,13 +341,13 @@
   },
   "slot:task-brief": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 62,
-    "end": 62
+    "start": 67,
+    "end": 67
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 73,
-    "end": 73
+    "start": 78,
+    "end": 78
   },
   "trait:implement": {
     "file": ".ctx/traits/authored/implement/source/variants/phase.ts",

@@ -65,9 +65,9 @@
     "end": 84
   },
   "schema:repo-gates-result": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 125,
-    "end": 125
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 24,
+    "end": 24
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/schema.ts",
@@ -150,9 +150,9 @@
     "end": 57
   },
   "signal:gate-timed-out": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 163,
-    "end": 163
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 62,
+    "end": 62
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
@@ -170,14 +170,14 @@
     "end": 26
   },
   "slot:repo-gates-passed": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 121,
-    "end": 121
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 20,
+    "end": 20
   },
   "slot:review-diff": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 109,
-    "end": 109
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 7,
+    "end": 7
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
