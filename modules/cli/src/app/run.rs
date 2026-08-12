@@ -511,13 +511,25 @@ pub(crate) fn handle_session_start(
             );
             crate::app::drive::print_report(&drive, Some(&completion.session))?;
         }
+        // A landed auto-merge folds into the run panel as its final state
+        // (`landed` + one landing row) instead of printing a second panel —
+        // one run, one state. The separate merge panel remains for every
+        // non-landed outcome (parked/failed carry reason + next-action rows
+        // the user must see) and under `--verbose`.
+        let landed = completion
+            .merge
+            .as_ref()
+            .is_some_and(|report| report.status == "merged");
         print_final_output(
             &completion.session,
             &drive,
             loaded_trait.as_ref().map(|loaded| &loaded.trait_ref),
             input.verbose,
+            landed,
         )?;
-        if let Some(report) = &completion.merge {
+        if let Some(report) = &completion.merge
+            && (input.verbose || !landed)
+        {
             crate::app::merge::print_report(report)?;
         }
         // P550: the story pane opens AFTER the merge report above, so the
@@ -525,7 +537,12 @@ pub(crate) fn handle_session_start(
         // (not only success), since the pane must render a parked/blocked/
         // failed/cancelled run exactly as honestly as a completed one.
         if let Some(level) = input.story {
-            print_story_at_termination(&completion.session, &merge_session_path, level)?;
+            print_story_at_termination(
+                &completion.session,
+                &merge_session_path,
+                level,
+                input.verbose,
+            )?;
         }
     }
     completion.into_command_output()
@@ -543,6 +560,7 @@ fn print_story_at_termination(
     session: &ctx_traits_core::procedure::session::Session,
     ledger_path: &camino::Utf8Path,
     level: ctx_traits_core::procedure::story::StoryLevel,
+    verbose: bool,
 ) -> crate::Result<()> {
     use std::io::IsTerminal;
 
@@ -557,7 +575,13 @@ fn print_story_at_termination(
         let title = format!("story · {} · {disposition}", session.run_id.as_str());
         return crate::app::story_view::run(session, &report, level, &title);
     }
-    crate::app::story::print_plain_story(session, &report, level)
+    // The plain (non-interactive) termination story stays brief by default —
+    // disposition, outcome, never-cleared blockers. The full section walk is
+    // an explicit ask: `--verbose`, or a story level beyond the default.
+    if verbose || level != ctx_traits_core::procedure::story::StoryLevel::Default {
+        return crate::app::story::print_plain_story(session, &report, level);
+    }
+    crate::app::story::print_plain_story_brief(session, &report)
 }
 
 /// Typed terminal disposition of the P460 post-drive completion-to-landing
@@ -991,6 +1015,7 @@ fn print_final_output(
     drive: &crate::app::drive::DriveReport,
     trait_ref: Option<&ctx_traits_core::Trait>,
     verbose: bool,
+    landed: bool,
 ) -> crate::Result<()> {
     use crate::app::presentation::{
         HumanOutputMode, Panel, PanelRow, PanelSection, RowTone, emit_human,
@@ -1026,7 +1051,26 @@ fn print_final_output(
         HumanOutputMode::Compact
     };
 
-    let mut panel = Panel::new("ctx", "run", drive.panel_status());
+    // A completed run whose auto-merge landed reports ONE terminal state:
+    // `landed` subsumes `completed` (a run cannot land without completing),
+    // and the landing revision becomes a row of this panel rather than a
+    // second panel's worth of output.
+    let status = if landed {
+        crate::app::presentation::PanelStatus::Passed("landed".to_string())
+    } else {
+        drive.panel_status()
+    };
+    let mut panel = Panel::new("ctx", "run", status);
+    if landed {
+        use ctx_traits_core::procedure::session::{LandingState, landing_state};
+        let landing = match landing_state(session) {
+            Some(LandingState::Landed {
+                revision: Some(revision),
+            }) => format!("merged to main ({revision})"),
+            _ => "merged to main".to_string(),
+        };
+        panel = panel.row(PanelRow::toned("landing", landing, RowTone::Default));
+    }
     match &session.completion {
         Some(completion) if !completion.final_outputs.is_empty() => {
             for output in &completion.final_outputs {

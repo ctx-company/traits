@@ -104,11 +104,13 @@ pub(crate) fn disposition_sentence(session: &Session, report: &StoryReport) -> S
             .as_ref()
             .expect("filtered to Some outcome above");
         return match landing.frame.status {
+            // One terminal state: `landed` subsumes `completed` — a run
+            // cannot land without completing, so naming both is noise.
             MergeStatus::Merged => match landing_state(session) {
                 Some(LandingState::Landed {
                     revision: Some(revision),
-                }) => format!("This run completed and merged to main (landed {revision})."),
-                _ => "This run completed and merged to main.".to_string(),
+                }) => format!("This run landed on main ({revision})."),
+                _ => "This run landed on main.".to_string(),
             },
             MergeStatus::Parked => {
                 format!("This run parked during landing: {}", explanation.sentence)
@@ -888,6 +890,42 @@ pub(crate) fn print_plain_story(
     level: StoryLevel,
 ) -> crate::Result<()> {
     render_plain(session, report, level)
+}
+
+/// The non-verbose termination story: the disposition sentence, the
+/// trait/elapsed line, the OUTCOME rows, and any never-cleared blockers —
+/// the important details a reader needs after a run ends, without the
+/// event-by-event JOURNEY/COMMANDS walk (`--verbose` or an explicit story
+/// level beyond the default still gets the full render).
+pub(crate) fn print_plain_story_brief(
+    session: &Session,
+    report: &StoryReport,
+) -> crate::Result<()> {
+    let disposition = disposition_sentence(session, report);
+    let landing_row = landing_outcome_row(session);
+    w(disposition.clone())?;
+    w(format!(
+        "{} | elapsed {}",
+        report.trait_id,
+        tui::elapsed_text(std::time::Duration::from_secs(report.elapsed_seconds))
+    ))?;
+    w(String::new())?;
+    w("OUTCOME".to_string())?;
+    for row in outcome_rows(report, &disposition, landing_row.as_deref()) {
+        w(row)?;
+    }
+    let unresolved: Vec<String> = blocker_rows(report)
+        .into_iter()
+        .filter(|row| row.contains("never cleared"))
+        .collect();
+    if !unresolved.is_empty() {
+        w(String::new())?;
+        w("BLOCKERS NEVER CLEARED".to_string())?;
+        for row in unresolved {
+            w(row)?;
+        }
+    }
+    Ok(())
 }
 
 fn render_plain(session: &Session, report: &StoryReport, level: StoryLevel) -> crate::Result<()> {

@@ -100,7 +100,21 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
             },
         );
     });
-    state.last_tree_lines = journey_row_lines(&journey_lines, 80);
+    // The teardown scrollback keeps the FOLDED journey: top-level steps and
+    // loop containers (whose rows already carry their aggregate elapsed),
+    // plus every summary tail line — never the per-iteration walk. The full
+    // event-by-event tree stays available through the story surfaces; the
+    // terminal record after a long run should be the important details, not
+    // hundreds of iteration rows.
+    let folded: Vec<JourneyRow> = journey_lines
+        .iter()
+        .filter(|row| match &row.0 {
+            JourneyRowKind::Step(step) => journey_step_depth(step) == 0,
+            JourneyRowKind::Line(_) => true,
+        })
+        .cloned()
+        .collect();
+    state.last_tree_lines = journey_row_lines(&folded, 80);
     state
         .handled_generation
         .fetch_max(input_generation, Ordering::Release);

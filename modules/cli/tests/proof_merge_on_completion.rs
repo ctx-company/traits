@@ -711,7 +711,9 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
 
     // Second, independent fixture: same proof against the PLAIN (non-JSON)
     // report, whose renderer is a distinct code path (`merge::print_report`)
-    // from the JSON serialization asserted above.
+    // from the JSON serialization asserted above. Task 0173 folds a landed
+    // run's merge panel into the run panel by default, so `--verbose` is
+    // required here to reach `merge::print_report` at all.
     let plain_scratch = ScratchRoot::new("p477-no-gate-plain");
     let plain_repo = plain_scratch.home().join("repo");
     init_fixture_repo_without_gate(&plain_repo, &plain_scratch.home(), "true");
@@ -723,6 +725,7 @@ fn no_gate_declared_lands_with_one_advisory_and_removes_worktree() {
             ".ctx/traits/demo/generated/index.toml",
             "--worktree",
             "--merge",
+            "--verbose",
             "--progress",
             "none",
         ],

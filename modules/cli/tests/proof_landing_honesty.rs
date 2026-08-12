@@ -348,7 +348,7 @@ fn merged_run_reports_landed_with_revision() {
     assert_exit_code(&story, 0);
     let (stdout, _) = utf8(&story);
     assert!(
-        stdout.contains("merged to main (landed "),
+        stdout.contains("landed on main ("),
         "story disposition for a landed run must state the landed revision: {stdout}"
     );
 }
