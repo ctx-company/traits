@@ -2549,10 +2549,33 @@ pub(crate) fn run_for_session(
     run_with_initial_session(Some(session_id), guide_chat)
 }
 
+/// Routes decode warnings away from the terminal for the dashboard's whole
+/// lifetime (P244's inline-pane rationale, applied to the alt-screen
+/// dashboard: a raw stderr write while ratatui owns the terminal scrolls
+/// the real screen out from under the pane). Dropped after the pane, so
+/// the deduped lines print onto a restored terminal.
+struct DecodeWarningCapture;
+
+impl DecodeWarningCapture {
+    fn arm() -> Self {
+        ctx_traits_io::decode_diagnostics::begin_capture();
+        Self
+    }
+}
+
+impl Drop for DecodeWarningCapture {
+    fn drop(&mut self) {
+        for line in ctx_traits_io::decode_diagnostics::end_capture() {
+            eprintln!("{line}");
+        }
+    }
+}
+
 fn run_with_initial_session(
     initial_session_id: Option<String>,
     guide_chat: Option<run_view::GuideChatHandle>,
 ) -> crate::Result<()> {
+    let _decode_warning_capture = DecodeWarningCapture::arm();
     let mut pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
         ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
             path: "<tty>".to_string(),
@@ -2580,6 +2603,9 @@ fn run_with_initial_session(
                 state.guide_chat.as_ref(),
                 state.guide_chat_session_id.as_deref(),
             );
+            // The observer's own capture-end disarmed the shared toggle;
+            // re-arm before this pane retakes the terminal.
+            ctx_traits_io::decode_diagnostics::begin_capture();
             pane = RatatuiPane::new_forwarding_ctrl_c().map_err(|source| {
                 ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
                     path: "<tty>".to_string(),

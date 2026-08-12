@@ -24,6 +24,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// lifetime instead of patching those two call sites individually.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Every line ever emitted (or captured) by this process. A decode warning
+/// describes a document, not an event: the dashboard and history panes
+/// decode the same historical session canonicals over and over, and
+/// repeating the identical advisory hundreds of times is what turned a
+/// one-line migration hint into an unusable wall. One process, one print
+/// per unique line.
+static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Starts routing every subsequent [`print_decode_warnings`] line into an
 /// in-memory buffer instead of `stderr`, until [`end_capture`] is called.
@@ -47,9 +54,18 @@ pub fn end_capture() -> Vec<String> {
 /// the order given — or, while [`begin_capture`] is active, buffer it for
 /// [`end_capture`] to return instead. `label` identifies what was decoded (a
 /// manifest path, a built-in package id, a source description, ...).
+/// Deduplicated per process: the same (label, warning) pair prints once,
+/// however many times the document is re-decoded.
 pub fn print_decode_warnings(label: &str, warnings: &[String]) {
     for warning in warnings {
         let line = format!("ctx traits: {label}: {warning}");
+        {
+            let mut seen = SEEN.lock().unwrap_or_else(|poison| poison.into_inner());
+            if seen.contains(&line) {
+                continue;
+            }
+            seen.push(line.clone());
+        }
         if CAPTURING.load(Ordering::SeqCst) {
             let mut captured = CAPTURED.lock().unwrap_or_else(|poison| poison.into_inner());
             captured.push(line);
