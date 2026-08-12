@@ -7,6 +7,7 @@ import type {
   HostOverride,
   MergeTable,
   ModelPricing,
+  PreferencesTable,
   PublishTable,
   RegistryTable,
   RepoOverride,
@@ -98,6 +99,16 @@ export function defineHost(id: string, fields: HostOverride): void {
  */
 export function defineRepo(key: string, fields: RepoOverride): void {
   registerKeyed("defineRepo", "repo", key, fields);
+}
+
+/**
+ * `[preferences]` — one per config build, second call is a named error.
+ * Only legal in a user-global config build, exactly like {@link defineRepo};
+ * `evaluateConfigFunction` rejects a registered preferences table when the
+ * build's layer is not `"user-global"`.
+ */
+export function definePreferences(fields: PreferencesTable): void {
+  registerSingleton("definePreferences", "preferences", fields);
 }
 
 /**

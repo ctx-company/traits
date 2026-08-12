@@ -2896,17 +2896,51 @@ pub enum DependencyCommand {
 /// `ctx traits config ...` subcommands (P457).
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
-    /// Compile a `config.ts` authoring source into the generated
-    /// `config.toml` beside it, through the same node-invoking CDK build
-    /// runner traits use — the only path in the product that touches node
-    /// for config. A repo with no `config.ts` never needs this command: its
-    /// `config.toml` stays hand-authored, TOML-first, zero-drift-check,
-    /// zero-node.
+    /// Compile a `config.ts` or `runtime.ts` authoring source into its
+    /// generated `.toml` sibling under `generated/`, through the same
+    /// node-invoking CDK build runner traits use — the only path in the
+    /// product that touches node for config. A repo with neither source
+    /// never needs this command: its `config.toml`/`runtime.toml` stay
+    /// hand-authored, TOML-first, zero-drift-check, zero-node.
     Build {
-        /// `config.ts` source path. Defaults to `.ctx/config.ts` resolved
-        /// from the current directory; pass an explicit path (e.g.
-        /// `~/.config/ctx/config.ts`) to build the global layer.
+        /// Source path. Defaults to `layout::CONFIG_SOURCE`
+        /// (`.ctx/traits/config.ts`) resolved from the current directory;
+        /// pass an explicit path (e.g. `.ctx/traits/runtime.ts`, or a
+        /// config-home path) to build a different source.
         path: Option<String>,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Accept the repo- or global-tier `runtime.example.ts`/`.toml`
+    /// (0178): shows the example's content (or a diff against the
+    /// previously accepted content, on re-acceptance), materializes the
+    /// machine-local `runtime.ts`/`.toml` copy, and records a digest stamp
+    /// covering the example's bytes in the trust store. Never runs
+    /// non-interactively without `--yes` — acceptance is the operator's
+    /// step, never auto-approved by a running loop.
+    Accept {
+        /// Accept without an interactive confirmation prompt (non-TTY
+        /// contexts, e.g. scripted setup). Still shows the content.
+        #[arg(long)]
+        yes: bool,
+
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Scaffold the config-home `traits/` directory for the global tier
+    /// (0178): `--global` writes a minimal `package.json` pinning
+    /// `@ctx-traits/config` there so a global `traits/runtime.ts` can
+    /// resolve the authoring package. Node/package-manager install remains
+    /// the operator's own step — this only makes the dependency resolvable
+    /// once they run it.
+    Init {
+        /// Scaffold the global (config-home) tier. Currently the only
+        /// supported scope — omitting it is a usage error.
+        #[arg(long)]
+        global: bool,
 
         /// Emit structured JSON.
         #[arg(long)]

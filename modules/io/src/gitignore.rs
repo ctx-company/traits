@@ -61,9 +61,12 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
     "traits/runtime.toml",
     "harness.toml",
     "traits/vendored/",
-    // 0178 tier: the compiler-written runtime artifact is machine-local, like
-    // `traits/runtime.toml` above. 0177's sibling `traits/generated/config.toml`
-    // is the COMMITTED tier and is deliberately NOT listed here.
+    // 0178: the machine-local TypeScript authoring source and its
+    // compiler-written artifact, both like `traits/runtime.toml` above. The
+    // committed sibling `traits/runtime.example.ts` is deliberately NOT
+    // listed here, nor is 0177's sibling `traits/generated/config.toml`
+    // (the COMMITTED config-document tier).
+    "traits/runtime.ts",
     "traits/generated/runtime.toml",
     "runs/",
     "debug/",

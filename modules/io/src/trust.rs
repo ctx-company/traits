@@ -260,6 +260,12 @@ pub fn classify_records(document: &Document, current: &[(String, String)]) -> Ve
     document
         .digests
         .iter()
+        .filter(|record| {
+            !record
+                .trait_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("runtime-example:"))
+        })
         .map(|record| match &record.trait_id {
             Some(id) => match current_by_id.get(id.as_str()) {
                 Some(current_digests) => {

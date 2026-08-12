@@ -234,6 +234,14 @@ fn merge_config_json(subcommand: cli::ConfigCommand, namespace_json: bool) -> cl
             path,
             json: json || namespace_json,
         },
+        cli::ConfigCommand::Accept { yes, json } => cli::ConfigCommand::Accept {
+            yes,
+            json: json || namespace_json,
+        },
+        cli::ConfigCommand::Init { global, json } => cli::ConfigCommand::Init {
+            global,
+            json: json || namespace_json,
+        },
     }
 }
 
@@ -1545,6 +1553,12 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 match merge_config_json(subcommand, json) {
                     cli::ConfigCommand::Build { path, json } => {
                         crate::app::config_build::handle_config_build(path.as_deref(), json)
+                    }
+                    cli::ConfigCommand::Accept { yes, json } => {
+                        crate::app::config_accept::handle_config_accept(yes, json)
+                    }
+                    cli::ConfigCommand::Init { global, json } => {
+                        crate::app::config_build::handle_config_init(global, json)
                     }
                 }
             }

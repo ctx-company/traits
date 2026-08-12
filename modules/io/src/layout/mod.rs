@@ -187,13 +187,32 @@ pub const LEGACY_GLOBAL_RUNTIME_CONFIG: &str = "ctx.toml";
 /// the compiled `generated/config.toml` instead of the hand-authored
 /// [`PROJECT_CONFIG`] path — see `crate::config_document`.
 pub const CONFIG_SOURCE: &str = ".ctx/traits/config.ts";
-/// The retired P457 TypeScript authoring source (`RUNTIME_CONFIG_SOURCE`),
-/// which built a marker-headed sibling `.ctx/config.toml` as a
-/// `RuntimeConfig`. Refusal-only — never read for content. A repo still
-/// carrying this path refuses naming 0178's `runtime.ts` as the future
-/// home for committed executable runtime facts. Not to be confused with
-/// [`CONFIG_SOURCE`], the new declarative `ConfigDocument` source.
+/// The retired P457 TypeScript authoring source (formerly named
+/// `RUNTIME_CONFIG_SOURCE`), which built a marker-headed sibling
+/// `.ctx/config.toml` as a `RuntimeConfig`. Refusal-only — never read for
+/// content. A repo still carrying this path refuses, naming
+/// [`RUNTIME_CONFIG_SOURCE`] as the current home for committed executable
+/// runtime facts. Not to be confused with [`CONFIG_SOURCE`], the declarative
+/// `ConfigDocument` source.
 pub const RETIRED_RUNTIME_CONFIG_SOURCE: &str = ".ctx/config.ts";
+/// Optional repo-local TypeScript authoring source for [`RUNTIME_CONFIG`]
+/// (0178; outright rename of P457's `RUNTIME_CONFIG_SOURCE`, no dual-read).
+/// When present, resolution honors the compiled
+/// `generated/runtime.toml` artifact under [`TRAIT_GENERATED_ROOT`] instead
+/// of the hand-authored [`RUNTIME_CONFIG`] path, mirroring [`CONFIG_SOURCE`]'s
+/// pathway — see `crate::runtime_source`. A hand [`RUNTIME_CONFIG`] alongside
+/// this source is a refusal (one authority per fact).
+pub const RUNTIME_CONFIG_SOURCE: &str = ".ctx/traits/runtime.ts";
+/// Global-tier counterpart of [`RUNTIME_CONFIG_SOURCE`], joined onto the same
+/// `ctx` config-home directory as [`GLOBAL_RUNTIME_CONFIG`].
+pub const GLOBAL_RUNTIME_CONFIG_SOURCE: &str = "traits/runtime.ts";
+/// Repo-local committed example for [`RUNTIME_CONFIG_SOURCE`]'s acceptance
+/// model (0178): complete, works as-is TypeScript. A repo carrying this file
+/// refuses to run until the operator accepts it (`ctx traits config
+/// accept`), which materializes [`RUNTIME_CONFIG_SOURCE`] and digest-stamps
+/// the acceptance in the trust store — see `crate::runtime_acceptance`.
+/// Committed, never gitignored.
+pub const RUNTIME_CONFIG_EXAMPLE_TS: &str = ".ctx/traits/runtime.example.ts";
 /// Legacy repo-local runtime materialization root for the embedded
 /// first-party built-in meta-trait packages (P337; pre-P426), retained as a
 /// one-release dual-read fallback. A sibling of [`CACHE_ROOT`], never nested

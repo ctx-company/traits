@@ -8,6 +8,7 @@ mod agent_dispatch;
 mod assist_round;
 mod cdk_build;
 mod command_handlers;
+mod config_accept;
 mod config_build;
 mod config_types;
 mod context_cache;

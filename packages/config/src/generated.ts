@@ -11,6 +11,7 @@ export interface CtxConfig {
   harness?: Record<string, HarnessDefinition>;
   host?: Record<string, HostOverride>;
   merge?: MergeTable;
+  preferences?: PreferencesTable;
   pricing?: Record<string, ModelPricing>;
   publish?: PublishTable;
   registry?: RegistryTable;
@@ -33,6 +34,8 @@ export type BillingMode = "subscription" | "api";
 export interface BuildCacheConfig {
   env: string;
 }
+
+export type ConfigFormatPreference = "toml" | "ts";
 
 export interface DriveTable {
   inlinePromptBytes?: number;
@@ -116,6 +119,10 @@ export interface ModelPricing {
 
 export interface PortDefaults {
   port?: Record<string, string>;
+}
+
+export interface PreferencesTable {
+  configFormat?: ConfigFormatPreference;
 }
 
 export interface ProfileAssignment {

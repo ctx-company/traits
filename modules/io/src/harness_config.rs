@@ -22,9 +22,10 @@ pub fn activity_adapter_kind(
 }
 
 pub use crate::layout::{
-    GLOBAL_RUNTIME_CONFIG, HARNESS_REGISTRY, LEGACY_CTX_GLOBAL_RUNTIME_CONFIG,
-    LEGACY_CTX_RUNTIME_CONFIG, LEGACY_GLOBAL_RUNTIME_CONFIG, LEGACY_HARNESS_REGISTRY,
-    LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RETIRED_RUNTIME_CONFIG_SOURCE, RUNTIME_CONFIG,
+    GLOBAL_RUNTIME_CONFIG, GLOBAL_RUNTIME_CONFIG_SOURCE, HARNESS_REGISTRY,
+    LEGACY_CTX_GLOBAL_RUNTIME_CONFIG, LEGACY_CTX_RUNTIME_CONFIG, LEGACY_GLOBAL_RUNTIME_CONFIG,
+    LEGACY_HARNESS_REGISTRY, LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RETIRED_RUNTIME_CONFIG_SOURCE,
+    RUNTIME_CONFIG, RUNTIME_CONFIG_SOURCE,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -850,6 +851,13 @@ pub struct RuntimeConfig {
     /// [`resolve_config_report`]).
     #[serde(default)]
     pub repo: BTreeMap<String, RepoOverride>,
+    /// `[preferences]` (0178): global-only tool-behavior settings (never
+    /// execution config) — e.g. `config-format` for scaffold commands.
+    /// Accepted only in the carried GLOBAL config file, exactly like
+    /// `[repo."<key>"]` above — a non-empty table declared in any other
+    /// layer is a hard config error (see [`resolve_config_report`]).
+    #[serde(default)]
+    pub preferences: Option<PreferencesTable>,
     /// Requirement declarations captured from the authored TOML document.
     /// Serde defaults erase the distinction between an absent `false`/empty
     /// value and an explicitly authored one, but repository requirements need
@@ -949,6 +957,9 @@ enum ConfigLeaf {
     RegistryBase,
     TasksDispatchTrait,
     TasksAutoClose,
+    /// 0178 `[preferences] config-format`: global-only tool-behavior knob,
+    /// never a repository requirement.
+    PreferencesConfigFormat,
     HarnessDynamic,
     AgentDynamic,
     HostDynamic,
@@ -1010,6 +1021,7 @@ impl ConfigLeaf {
         Self::RegistryBase,
         Self::TasksDispatchTrait,
         Self::TasksAutoClose,
+        Self::PreferencesConfigFormat,
         Self::HarnessDynamic,
         Self::AgentDynamic,
         Self::HostDynamic,
@@ -1069,6 +1081,7 @@ impl ConfigLeaf {
             Self::RegistryBase => "registry.base",
             Self::TasksDispatchTrait => "tasks.dispatch-trait",
             Self::TasksAutoClose => "tasks.auto-close",
+            Self::PreferencesConfigFormat => "preferences.config-format",
             Self::HarnessDynamic => "harness.*",
             Self::AgentDynamic => "agent.*",
             Self::HostDynamic => "host.*",
@@ -1102,7 +1115,10 @@ impl ConfigLeaf {
             | Self::HostDynamic
             | Self::RepoDynamic
             | Self::PricingDynamic
-            | Self::TraitDynamic => ConfigSemantic::Default,
+            | Self::TraitDynamic
+            // Global-only, like `RepoDynamic` above — never a repository
+            // requirement.
+            | Self::PreferencesConfigFormat => ConfigSemantic::Default,
             Self::SchemaVersion
             | Self::WorktreeSetup
             | Self::WorktreeSetupSeconds
@@ -1197,6 +1213,26 @@ pub struct TasksTable {
     /// override. `None` when unconfigured.
     #[serde(default)]
     pub auto_close: Option<ctx_traits_core::task::AutoClosePolicy>,
+}
+
+/// `[preferences]` (0178): tool-behavior settings, distinct from execution
+/// config — global-only, consulted by scaffold commands. `config-format`
+/// picks the scaffold default; the scaffold default stays TS regardless of
+/// this table's absence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PreferencesTable {
+    #[serde(default)]
+    pub config_format: Option<ConfigFormatPreference>,
+}
+
+/// `[preferences] config-format` (0178): which authoring format a scaffold
+/// command writes by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigFormatPreference {
+    Toml,
+    Ts,
 }
 
 /// `[drive]` (0176): the run driver's policy knobs — how frames dispatch and
@@ -3951,6 +3987,14 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
                 ),
             );
         }
+        if layer != ConfigLayer::UserGlobal && next.preferences.is_some() {
+            return invalid_config(
+                "preferences",
+                format!(
+                    "[preferences] is only accepted in the carried global config file ({GLOBAL_RUNTIME_CONFIG}); found one in {path}"
+                ),
+            );
+        }
         documents.push((layer, path, next));
     }
 
@@ -4000,6 +4044,8 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     // runtime document, so `resolve_runtime_assignments_impl` (which reads
     // `runtime_config.repo`) and `doctor --config` never see it.
     runtime.repo = machine.repo;
+    // `[preferences]` is global-only exactly like `[repo.*]` above.
+    runtime.preferences = machine.preferences;
     runtime.pre_environment_agent = runtime.agent.clone();
     for (layer, _, document) in &documents {
         if *layer == ConfigLayer::Environment {
@@ -4375,7 +4421,8 @@ fn apply_requirement_leaf(target: &mut RuntimeConfig, source: &RuntimeConfig, le
         | ConfigLeaf::HostDynamic
         | ConfigLeaf::RepoDynamic
         | ConfigLeaf::PricingDynamic
-        | ConfigLeaf::TraitDynamic => {
+        | ConfigLeaf::TraitDynamic
+        | ConfigLeaf::PreferencesConfigFormat => {
             unreachable!("only requirement leaves are applied directly")
         }
     }
@@ -5103,6 +5150,23 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
     for path in globals {
         layers.push((ConfigLayer::UserGlobal, path));
     }
+    // 0178: the global tier's `GLOBAL_RUNTIME_CONFIG_SOURCE` (`traits/runtime.ts`),
+    // when present, wins over the hand `GLOBAL_RUNTIME_CONFIG` sibling —
+    // resolved to `traits/generated/runtime.toml` under the same config-home
+    // directory. Only the current global name participates; the legacy
+    // `config.toml`/`ctx.toml` names have no TypeScript-authoring pathway.
+    if let Ok(ctx_dir) = crate::state::global_ctx_root() {
+        let source_path = ctx_dir.join(GLOBAL_RUNTIME_CONFIG_SOURCE);
+        let hand_path = ctx_dir.join(GLOBAL_RUNTIME_CONFIG);
+        let generated_path = ctx_dir.join("traits/generated/runtime.toml");
+        if let Some(resolved) = crate::runtime_source::resolve_runtime_document_path(
+            &source_path,
+            &hand_path,
+            &generated_path,
+        )? {
+            layers.push((ConfigLayer::UserGlobal, resolved));
+        }
+    }
     let cwd = absolute_utf8_path(start_dir, "runtime.config.cwd")?;
     let repo_root = crate::repository::discover_repo_root().ok();
     let mut ancestors = Vec::new();
@@ -5126,13 +5190,33 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
         // now (`[vendor]`, and eventually team setting overrides / dispatch
         // defaults, not yet wired into this layer stack — see task 0177's
         // work summary). Only the machine-local runtime tier remains here.
+        //
         layers.push((ConfigLayer::Repo, ancestor.join(RUNTIME_CONFIG)));
+        // 0178: `RUNTIME_CONFIG_SOURCE` (`runtime.ts`), when present, wins
+        // over the hand `RUNTIME_CONFIG` sibling pushed just above (which the
+        // never-built/both-present guards below ensure cannot itself exist
+        // in that case) — resolved to the compiled `generated/runtime.toml`
+        // artifact via `crate::runtime_source`, appended as an additional
+        // candidate so `runtime_config_layer_paths`' unconditional
+        // enumeration contract (existence checked by callers, not here)
+        // still holds.
+        let source_path = ancestor.join(RUNTIME_CONFIG_SOURCE);
+        let hand_path = ancestor.join(RUNTIME_CONFIG);
+        let generated_path =
+            crate::layout::trait_generated_root_path(ancestor).join("runtime.toml");
+        if let Some(resolved) = crate::runtime_source::resolve_runtime_document_path(
+            &source_path,
+            &hand_path,
+            &generated_path,
+        )? {
+            layers.push((ConfigLayer::Repo, resolved));
+        }
         if ancestor.join(RETIRED_RUNTIME_CONFIG_SOURCE).exists() {
             return Err(crate::Error::Core(
                 ctx_traits_core::manifest::Error::InvalidField {
                     field_path: "config".to_string(),
                     message: format!(
-                        "{} carries {RETIRED_RUNTIME_CONFIG_SOURCE} — the config.ts -> RuntimeConfig pathway retired in 0177; committed executable runtime facts have no read until 0178's runtime.ts lands",
+                        "{} carries {RETIRED_RUNTIME_CONFIG_SOURCE} — the config.ts -> RuntimeConfig pathway retired in 0177; committed executable runtime facts live in {RUNTIME_CONFIG_SOURCE}",
                         ancestor
                     ),
                 }
@@ -6000,6 +6084,10 @@ fn merge_machine_config(
         );
     }
     merge_agent_defaults(&mut base.agent, agent);
+    if next.preferences.is_some() {
+        record_winner(winners, "preferences".to_string(), layer, source.clone());
+        base.preferences = next.preferences;
+    }
     for (repo_key, repo_override) in next.repo {
         let target = base.repo.entry(repo_key.clone()).or_default();
         reconcile_assignment_winners(

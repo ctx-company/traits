@@ -16,6 +16,7 @@ const SINGLETON_TABLES = [
   "agent",
   "publish",
   "registry",
+  "preferences",
 ] as const;
 
 const KEYED_TABLES = ["pricing", "harness", "host", "repo", "trait"] as const;
@@ -67,6 +68,11 @@ export function evaluateConfigFunction(fn: () => unknown, opts: EvaluateConfigFu
         `defineRepo(${JSON.stringify(
           firstKey,
         )}, ...) is only allowed in the user-global config — [repo.*] is rejected outside the user-global layer`,
+      );
+    }
+    if (frame.singletons.has("preferences")) {
+      throw new Error(
+        "definePreferences(...) is only allowed in the user-global config — [preferences] is rejected outside the user-global layer",
       );
     }
   }

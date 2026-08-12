@@ -1,5 +1,6 @@
 //! Run and session command handlers.
 
+use std::io::IsTerminal;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -210,8 +211,97 @@ pub(crate) struct SetInputs<'a> {
     pub(crate) json: bool,
 }
 
+/// Run-dispatch acceptance gate (0178 deliverable 2): a repo carrying a
+/// committed `runtime.example.ts` that has never been accepted, or whose
+/// example has changed since the last acceptance, refuses run dispatch and
+/// names `ctx traits config accept`. Read-only commands (`check`, `doctor`,
+/// `config build`, `config accept` itself) never call this. Non-TTY
+/// contexts always refuse — acceptance is never automatic.
+///
+/// Scoped to the `.ts` example only, NOT the pre-existing `runtime.example.
+/// toml` (0037): that convention predates this gate and every repo/fixture
+/// that already relies on it (this repo included) would trip an unaccepted-
+/// example refusal on every run with no migration path. `ctx traits config
+/// accept` itself still accepts either format — this narrows only which
+/// example blocks *dispatch*.
+fn guard_runtime_acceptance() -> crate::Result<()> {
+    let cwd = camino::Utf8PathBuf::from_path_buf(std::env::current_dir().map_err(|source| {
+        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+            path: ".".to_string(),
+            source,
+        })
+    })?)
+    .map_err(|_| crate::Error::Command {
+        message: "current directory is not valid UTF-8".to_string(),
+    })?;
+    // `stable_repo_root` probes from its argument's *parent* — join a
+    // synthetic leaf so the probe starts at `cwd` itself.
+    let repo_root = match crate::app::cdk_build::stable_repo_root(&cwd.join(".ctx-accept-probe")) {
+        Ok(root) => root,
+        Err(_) => return Ok(()),
+    };
+    let (example_ts, _example_toml, _source) = crate::app::config_accept::repo_paths(&repo_root);
+    if !example_ts.exists() {
+        return Ok(());
+    }
+    let repo_key =
+        ctx_traits_io::state::repo_key(&ctx_traits_io::state::canonical_repo_root(&repo_root)?);
+    let acceptance = ctx_traits_io::runtime_acceptance::check_acceptance(&example_ts, &repo_key)?;
+    if !matches!(
+        acceptance,
+        ctx_traits_io::runtime_acceptance::Acceptance::NeedsAcceptance { .. }
+    ) {
+        return Ok(());
+    }
+
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if !interactive {
+        return Err(crate::Error::Command {
+            message: "this repo's runtime.example.ts/.toml has not been accepted — run `ctx traits config accept`".to_string(),
+        });
+    }
+
+    let example_path = example_ts;
+    let content = ctx_traits_io::read::read_text(&example_path)?;
+    println!("{content}");
+    print!("accept {example_path} as this repo's runtime configuration? [y/N] ");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).map_err(|source| {
+        ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
+            path: "stdin".to_string(),
+            source,
+        })
+    })?;
+    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+        return Err(crate::Error::Command {
+            message: format!(
+                "declined — run `ctx traits config accept` when ready to accept {example_path}"
+            ),
+        });
+    }
+
+    let machine_path = if example_path.extension() == Some("ts") {
+        example_path
+            .parent()
+            .map(|p| p.join("runtime.ts"))
+            .unwrap_or_else(|| example_path.clone())
+    } else {
+        example_path
+            .parent()
+            .map(|p| p.join("runtime.toml"))
+            .unwrap_or_else(|| example_path.clone())
+    };
+    ctx_traits_io::runtime_acceptance::accept(&example_path, &machine_path, &repo_key)?;
+    if machine_path.extension() == Some("ts") {
+        crate::app::config_build::handle_config_build(Some(machine_path.as_str()), true)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn handle_run(input: RunInputs<'_>) -> crate::Result<CommandOutput<()>> {
     let json = split_trailing_json_flag(input.trait_args, input.json).1;
+    guard_runtime_acceptance()?;
     let outcome = start_run_session(input, false)?;
 
     if json {
@@ -351,6 +441,7 @@ fn start_run_session(
 pub(crate) fn handle_session_start(
     input: SessionStartInputs<'_>,
 ) -> crate::Result<CommandOutput<()>> {
+    guard_runtime_acceptance()?;
     if input.master.is_some() {
         if let Some(view) = input.startup.as_ref() {
             view.fail("--master was removed; use --assign default=<harness> instead");

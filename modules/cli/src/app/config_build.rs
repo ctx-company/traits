@@ -43,6 +43,13 @@ fn resolve_source_path(path: Option<&str>) -> Utf8PathBuf {
     }
 }
 
+/// Is `source_path`'s basename the runtime document source, not the config
+/// document source? Dispatches `config build`'s target model/type and
+/// output path — see `handle_config_build`.
+fn is_runtime_source(source_path: &Utf8Path) -> bool {
+    source_path.file_name() == Some("runtime.ts")
+}
+
 pub(crate) fn handle_config_build(
     path: Option<&str>,
     json: bool,
@@ -64,6 +71,9 @@ pub(crate) fn handle_config_build(
     } else {
         "repo"
     };
+    if is_runtime_source(&source_path) {
+        return handle_runtime_build(&source_path, &canonical_source, &repo_root, layer, json);
+    }
     let run = ctx_traits_io::cdk_build::run_node_module(
         ctx_traits_io::cdk_build::CdkBuildRequest {
             source_path: source_path.clone(),
@@ -139,6 +149,104 @@ pub(crate) fn handle_config_build(
     }
 
     let panel = config_build_panel(&source_path, &target_path, &entries);
+    emit_human(false, &panel, HumanOutputMode::Compact, || Ok(()))?;
+
+    Ok(CommandOutput::new(()))
+}
+
+/// `runtime.ts` -> `generated/runtime.toml` half of `config build` (0178):
+/// validates the module graph's default export as `RuntimeConfig` (executable
+/// facts `ConfigDocument` cannot express decode here) instead of
+/// `ConfigDocument`, and mirrors `resolve_runtime_config`'s `[preferences]`/
+/// `[repo.*]` global-only refusals at build time so a repo-scope source can
+/// never bypass them by never running `config build` against `resolve`.
+fn handle_runtime_build(
+    source_path: &Utf8Path,
+    canonical_source: &Utf8Path,
+    repo_root: &Utf8Path,
+    layer: &str,
+    json: bool,
+) -> crate::Result<CommandOutput<()>> {
+    let run = ctx_traits_io::cdk_build::run_node_module(
+        ctx_traits_io::cdk_build::CdkBuildRequest {
+            source_path: source_path.to_path_buf(),
+            repo_root: Some(repo_root.to_path_buf()),
+            timeout_ms: ctx_traits_io::cdk_build::DEFAULT_BUILD_TIMEOUT_MS,
+            capture_limit: ctx_traits_io::harness::DEFAULT_CAPTURE_LIMIT,
+            env: vec![("CTX_CONFIG_BUILD_LAYER".to_string(), layer.to_string())],
+        },
+        ctx_traits_io::cdk_build::NODE_EMIT_CONFIG_SCRIPT.as_str(),
+        "@ctx-traits/config",
+        "config build",
+    )?;
+    let envelope: ConfigEmitEnvelope = serde_json::from_str(&run.stdout).map_err(|source| {
+        crate::Error::json(
+            format!("runtime module emitted non-JSON on stdout from {source_path}"),
+            source,
+        )
+    })?;
+    let config = crate::app::config_types::camel_to_kebab(&envelope.config)?;
+    let runtime_config: ctx_traits_io::harness_config::RuntimeConfig =
+        serde_json::from_value(config.clone()).map_err(|source| {
+            crate::Error::json(
+                format!("{source_path} does not decode as a valid runtime config"),
+                source,
+            )
+        })?;
+    if layer != "user-global" && !runtime_config.repo.is_empty() {
+        return Err(ctx_traits_io::Error::Core(
+            ctx_traits_core::manifest::Error::InvalidField {
+                field_path: "repo".to_string(),
+                message: format!(
+                    "{source_path} declares [repo.*] in a repo-scope runtime config — [repo.*] blocks are only accepted in the carried global config file"
+                ),
+            }
+            .into(),
+        )
+        .into());
+    }
+    if layer != "user-global" && runtime_config.preferences.is_some() {
+        return Err(ctx_traits_io::Error::Core(
+            ctx_traits_core::manifest::Error::InvalidField {
+                field_path: "preferences".to_string(),
+                message: format!(
+                    "{source_path} declares [preferences] in a repo-scope runtime config — [preferences] is only accepted in the carried global config file"
+                ),
+            }
+            .into(),
+        )
+        .into());
+    }
+
+    let config_dir = canonical_source
+        .parent()
+        .unwrap_or_else(|| Utf8Path::new("."))
+        .to_path_buf();
+    let mut entries = local_source_entries(&envelope.sources, &config_dir)?;
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let toml_body = render_sorted_toml(&config)?;
+    let header = ctx_traits_io::config_source::render_header(&entries);
+    let output_text = format!("{header}{toml_body}");
+
+    let target_path = if layer == "user-global" {
+        config_dir.join("generated").join("runtime.toml")
+    } else {
+        ctx_traits_io::layout::trait_generated_root_path(repo_root).join("runtime.toml")
+    };
+    ctx_traits_io::write::write_build_output(&target_path, &output_text)?;
+
+    if json {
+        let report = ConfigBuildReportJson {
+            source: source_path.as_str(),
+            target: target_path.as_str(),
+            sources: entries.iter().map(|entry| entry.path.as_str()).collect(),
+        };
+        crate::app::command_handlers::print_json_report(&report, "config build output")?;
+        return Ok(CommandOutput::new(()));
+    }
+
+    let panel = config_build_panel(source_path, &target_path, &entries);
     emit_human(false, &panel, HumanOutputMode::Compact, || Ok(()))?;
 
     Ok(CommandOutput::new(()))
@@ -299,6 +407,69 @@ fn render_sorted_toml(config: &serde_json::Value) -> crate::Result<String> {
     toml::to_string_pretty(&value).map_err(|source| crate::Error::Command {
         message: format!("failed to render generated config.toml: {source}"),
     })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct ConfigInitReportJson<'a> {
+    package_json: &'a str,
+}
+
+/// `ctx traits config init --global` (0178): scaffold the config-home
+/// `traits/` directory with a minimal `package.json` pinning
+/// `@ctx-traits/config`, so a global `traits/runtime.ts` can resolve the
+/// authoring package once the operator runs their package manager's
+/// install — that install itself stays the operator's own step, never run
+/// here.
+pub(crate) fn handle_config_init(global: bool, json: bool) -> crate::Result<CommandOutput<()>> {
+    if !global {
+        return Err(crate::Error::Command {
+            message: "config init requires --global — the repo tier has no scaffold command (0179 owns init/layout rework)".to_string(),
+        });
+    }
+
+    let ctx_dir = ctx_traits_io::state::global_ctx_root()?;
+    let traits_dir = ctx_dir.join("traits");
+    let package_json_path = traits_dir.join("package.json");
+
+    if !package_json_path.exists() {
+        // Pinned to `packages/config/package.json`'s current version; the
+        // operator resolves it through their package manager's usual
+        // registry/link configuration — this scaffold only makes the
+        // dependency declaration resolvable, it never runs the install.
+        const CONFIG_PACKAGE_VERSION: &str = "0.1.0-alpha.0";
+        let contents = format!(
+            "{{\n  \"private\": true,\n  \"dependencies\": {{\n    \"@ctx-traits/config\": \"{CONFIG_PACKAGE_VERSION}\"\n  }}\n}}\n",
+        );
+        ctx_traits_io::write::write_build_output(&package_json_path, &contents)?;
+    }
+
+    if json {
+        let report = ConfigInitReportJson {
+            package_json: package_json_path.as_str(),
+        };
+        crate::app::command_handlers::print_json_report(&report, "config init output")?;
+        return Ok(CommandOutput::new(()));
+    }
+
+    let panel = Panel::new(
+        "ctx",
+        "config init --global",
+        PanelStatus::Passed("scaffolded".to_string()),
+    )
+    .row(PanelRow::toned(
+        "package.json",
+        package_json_path.as_str(),
+        RowTone::Default,
+    ));
+    emit_human(false, &panel, HumanOutputMode::Compact, || {
+        println!(
+            "run your package manager's install in {traits_dir} to resolve @ctx-traits/config before authoring traits/runtime.ts"
+        );
+        Ok(())
+    })?;
+
+    Ok(CommandOutput::new(()))
 }
 
 fn json_to_toml(value: &serde_json::Value) -> Option<toml::Value> {

@@ -3,7 +3,6 @@ key = "0178"
 title = "runtime.ts: machine execution config — example-seeded, accepted once, digest-stamped"
 status = "ready"
 raised = "2026-08-12"
-relations.depends-on = ["0177"]
 content = """
 
 Owner rulings 2026-08-12:
@@ -78,3 +77,6 @@ both-present refusals; [preferences]/[repo.*] in a repo-scope document
 refuse; scaffolded global tier compiles a global runtime.ts; `just
 test` and `just test-full` green.
 """
+
+[relations]
+depends-on = ["0177"]
