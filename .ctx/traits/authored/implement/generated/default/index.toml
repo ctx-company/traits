@@ -3,7 +3,6 @@ schema-version = "0.4"
 version = "0.24.0"
 name = "Implement (Default)"
 description = "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
-summary = "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
 variant = "default"
 
 [metadata]
@@ -854,7 +853,7 @@ input = [
 output = ["slot:planning-verdict"]
 
 [procedure]
-description = "Implement one task from the task board end to end: extract its contract, draft the approach, implement it, refine against two independent reviewers until both approve, then summarize and commit — favoring the minimal, reuse-first implementation."
+description = "Surveyed dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement it, then a doubly-reviewed bounded refinement loop — then summarize and commit."
 input = ["port:task"]
 output = [
     "port:commit-report",

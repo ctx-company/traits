@@ -91,8 +91,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 24,
-    "end": 24
+    "start": 136,
+    "end": 136
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/schema.ts",
@@ -221,8 +221,8 @@
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 62,
-    "end": 62
+    "start": 174,
+    "end": 174
   },
   "slot:brief": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
@@ -296,13 +296,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 20,
-    "end": 20
+    "start": 132,
+    "end": 132
   },
   "slot:review-diff": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 7,
-    "end": 7
+    "start": 119,
+    "end": 119
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
