@@ -7,7 +7,14 @@ summary = "Quick's implementation loop with the owner inside it: draft the appro
 variant = "gated"
 
 [metadata]
-tag = ["dogfood", "implementation", "review", "lean", "human-in-the-loop", "plannotator"]
+tag = [
+    "dogfood",
+    "implementation",
+    "review",
+    "lean",
+    "human-in-the-loop",
+    "plannotator",
+]
 
 [[intent.require]]
 id = "correctness"
@@ -70,7 +77,10 @@ schema = "[schema:review-verdict]"
 optional = true
 description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A run that exhausts on owner denials alone (reviewer approved every round) parks with this empty; slot:owner-decision is the evidence in that case."
 title = "Park Report"
-format = ["structured", "table"]
+format = [
+    "structured",
+    "table",
+]
 value = "slot:park-report"
 
 [[port]]
@@ -343,7 +353,10 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if the run as a whole cannot reach an approvable state — never merely because one blocker is outside this round's reach. none otherwise."
-allowed = ["none", "needs-owner"]
+allowed = [
+    "none",
+    "needs-owner",
+]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -358,7 +371,10 @@ description = "Present ONLY when this verdict forgives a plan-fidelity gap — a
 schema = "schema:text"
 required = true
 description = "approved when the draft is correct and introduces no new smell — even if a forgivable plan-fidelity gap remains; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = ["approved", "revise"]
+allowed = [
+    "approved",
+    "revise",
+]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -388,7 +404,10 @@ text = """
     An owner decision may be attached: it is the owner's gate verdict on a previous round's briefing — always "annotated" (an approved verdict would already have ended the loop, and a dismissal halts the run before another round starts) — and its feedback text is the owner's exact words on what must change. The reviewer records an unsatisfied annotation as a typed blocker; read the feedback itself as the authoritative statement of what the owner wants.
     Run this task's own Done-when gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns."""
-input = ["port:task", "slot:plan"]
+input = [
+    "port:task",
+    "slot:plan",
+]
 output = ["slot:work-summary"]
 
 [prompt.building-review]
@@ -401,7 +420,13 @@ text = """
     Your own verdict from last round is attached when one exists: this round's verdict EXTENDS it. Carry every open blocker's id and steps forward VERBATIM — same order, same wording; verify each open step with your own tools and flip its status to done only on evidence you confirmed, recording that evidence on the step. Append genuinely new findings as new steps at the end or as new blockers; set recurrence-of on every carried blocker; drop a blocker only when every step is done, and name the drop in the advisory. Never renumber, reword, or re-derive a carried step — a vanished or rewritten step erases the worker's progress and moves the target, which is how loops stall.
     Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it. Approving does not end the loop by itself: it summons the owner, whose gate is the final word.
     Escalation: set escalation to needs-owner if and only if the run as a whole cannot reach an approvable state (the task file is a placeholder, lacks a falsifiable Done-when, names a prerequisite task not landed in this tree, or is marked superseded/cancelled) — never merely because one blocker is outside this round's reach. Record the one owner action that would clear it in escalation-reason; otherwise set escalation to none and leave escalation-reason empty."""
-input = ["port:task", "slot:plan", "slot:work-summary", "slot:review-diff", "slot:repo-gates-passed"]
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+]
 output = ["slot:review-verdict"]
 
 [prompt.draft-the-work]
@@ -410,7 +435,10 @@ text = """
         Create an implementation draft for {port:task} from its file on the task board {resource:task-board}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Reference files by path. Do not implement anything. The owner will annotate this draft next — write it to be read cold."""
-input = ["port:task", "resource:task-board"]
+input = [
+    "port:task",
+    "resource:task-board",
+]
 output = ["slot:draft"]
 
 [prompt.refine-the-plan-against-the-owner-s-annotations]
@@ -420,7 +448,10 @@ text = """
         If hookSpecificOutput.decision.behavior is "approve", the refined plan may be the draft unchanged.
         If it is "deny", hookSpecificOutput.decision.message is the owner's annotation — every point it raises must be visibly and provably addressed in the refined plan (not merely acknowledged): change the affected section, or state explicitly why the draft already covers it.
         Reference files by path; do not inline documents. Do not implement anything yet."""
-input = ["slot:draft", "slot:plan-decision"]
+input = [
+    "slot:draft",
+    "slot:plan-decision",
+]
 output = ["slot:plan"]
 
 [prompt.write-the-brief-and-commit-message]
@@ -430,7 +461,12 @@ text = """
     Inspect the working tree with your tools (git diff, git status) so the record reflects the actual change, not just the summary's claims.
     Write: a short kebab-case slug for this task; the brief in markdown — what was built, why, how it was validated, and what the review found; and the commit message — a short subject line naming the change, then a one-paragraph summary of what was implemented and how it was validated.
     Return the slug, the markdown, and the commit message as the typed output. Do not write any file and do not run git commands; later runtime steps save and commit."""
-input = ["port:task", "slot:plan", "slot:work-summary", "slot:review-verdict"]
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
+]
 output = ["slot:brief"]
 
 [prompt.write-the-round-briefing]
@@ -440,7 +476,12 @@ text = """
     Inspect the working tree with your tools (git diff, git status, the changed files) so the briefing reflects what actually changed, not just what the summary claims.
     Write a short markdown briefing for the owner, to be read cold — the owner has not seen the working tree: what changed and why, what the review checked and found (including advisory notes worth the owner's attention), and what the owner is being asked to confirm.
     Return only the briefing markdown."""
-input = ["port:task", "slot:plan", "slot:work-summary", "slot:review-verdict"]
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
+]
 output = ["slot:owner-briefing"]
 
 [[sequence.building-body.sequence]]
@@ -449,12 +490,12 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-  "port:task",
-  "slot:plan",
-  { slot = "slot:review-verdict", optional = true },
-  { slot = "slot:work-summary", optional = true },
-  { slot = "slot:repo-gates-passed", optional = true },
-  { slot = "slot:owner-decision", optional = true },
+    "port:task",
+    "slot:plan",
+    { slot = "slot:review-verdict", optional = true },
+    { slot = "slot:work-summary", optional = true },
+    { slot = "slot:repo-gates-passed", optional = true },
+    { slot = "slot:owner-decision", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -465,7 +506,10 @@ kind = "check"
 output = ["slot:repo-gates-passed"]
 
 [sequence.building-body.sequence.command]
-argv = ["just", "test"]
+argv = [
+    "just",
+    "test",
+]
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"
@@ -473,7 +517,14 @@ title = "Capture the changed-file inventory"
 output = ["slot:review-diff"]
 
 [sequence.building-body.sequence.command]
-argv = ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"]
+argv = [
+    "git",
+    "diff",
+    "--stat",
+    "--",
+    ".",
+    ":(exclude).agents/runs",
+]
 
 [[sequence.building-body.sequence]]
 id = "building-review"
@@ -481,13 +532,13 @@ title = "Building Review"
 agent = "agent:smart-1"
 prompt = "prompt:building-review"
 input = [
-  "port:task",
-  "slot:plan",
-  "slot:work-summary",
-  "slot:review-diff",
-  "slot:repo-gates-passed",
-  { slot = "slot:review-verdict", optional = true },
-  { slot = "slot:owner-decision", optional = true },
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+    { slot = "slot:review-verdict", optional = true },
+    { slot = "slot:owner-decision", optional = true },
 ]
 output = ["slot:review-verdict"]
 
@@ -535,7 +586,12 @@ id = "write-the-brief-and-commit-message"
 title = "Write the brief and commit message"
 agent = "agent:smart-1"
 prompt = "prompt:write-the-brief-and-commit-message"
-input = ["port:task", "slot:plan", "slot:work-summary", "slot:review-verdict"]
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
+]
 output = ["slot:brief"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -543,7 +599,11 @@ id = "lift-brief"
 title = "Lift Brief"
 kind = "project"
 input = ["slot:brief"]
-output = ["slot:brief-slug", "slot:brief-markdown", "slot:commit-message"]
+output = [
+    "slot:brief-slug",
+    "slot:brief-markdown",
+    "slot:commit-message",
+]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.projection]]
 source = "slot:brief"
@@ -563,32 +623,38 @@ destination = "slot:commit-message"
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "save-the-brief-to-internal-briefs"
 title = "Save the brief to .internal/briefs/"
-input = ["slot:brief-markdown", "slot:brief-slug"]
+input = [
+    "slot:brief-markdown",
+    "slot:brief-slug",
+]
 output = ["slot:brief-write-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
 argv = [
-  "sh",
-  "-c",
-  'mkdir -p .internal/briefs && printf %s "$1" > ".internal/briefs/$2.md"',
-  "sh",
-  "{slot:brief-markdown}",
-  "{slot:brief-slug}",
+    "sh",
+    "-c",
+    'mkdir -p .internal/briefs && printf %s "$1" > ".internal/briefs/$2.md"',
+    "sh",
+    "{slot:brief-markdown}",
+    "{slot:brief-slug}",
 ]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "show-the-brief-to-the-owner-plannotator-display-only"
 title = "Show the brief to the owner (plannotator, display only)"
-input = ["slot:brief-slug", "slot:brief-write-output"]
+input = [
+    "slot:brief-slug",
+    "slot:brief-write-output",
+]
 output = ["slot:brief-display-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
 argv = [
-  "sh",
-  "-c",
-  'PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator annotate "$1"',
-  "sh",
-  ".internal/briefs/{slot:brief-slug}.md",
+    "sh",
+    "-c",
+    'PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator annotate "$1"',
+    "sh",
+    ".internal/briefs/{slot:brief-slug}.md",
 ]
 idle-timeout-ms = 14400000
 
@@ -598,7 +664,11 @@ title = "Stage all changes"
 output = ["slot:stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["git", "add", "-A"]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "unstage-runtime-state"
@@ -606,7 +676,13 @@ title = "Unstage runtime state"
 output = ["slot:unstage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["git", "reset", "-q", "--", ".agents/runs"]
+argv = [
+    "git",
+    "reset",
+    "-q",
+    "--",
+    ".agents/runs",
+]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "commit-the-work"
@@ -615,14 +691,24 @@ input = ["slot:commit-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["git", "commit", "-m", "{slot:commit-message}"]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
 
 [[sequence.ctx-branch-arm-s-13-building-body-10-owner-gate-then.sequence]]
 id = "write-the-round-briefing"
 title = "Write the round briefing"
 agent = "agent:smart-1"
 prompt = "prompt:write-the-round-briefing"
-input = ["port:task", "slot:plan", "slot:work-summary", "slot:review-verdict"]
+input = [
+    "port:task",
+    "slot:plan",
+    "slot:work-summary",
+    "slot:review-verdict",
+]
 output = ["slot:owner-briefing"]
 
 [[sequence.ctx-branch-arm-s-13-building-body-10-owner-gate-then.sequence]]
@@ -633,11 +719,11 @@ output = ["slot:owner-decision"]
 
 [sequence.ctx-branch-arm-s-13-building-body-10-owner-gate-then.sequence.command]
 argv = [
-  "sh",
-  "-c",
-  """d=$(mktemp -d) && printf %s "$1" > "$d/briefing.md" && PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator annotate "$d/briefing.md" --gate --json > "$d/decision.json"; s=$?; [ -s "$d/decision.json" ] && cat "$d/decision.json"; if [ $s -eq 0 ] && grep -q '"decision":"dismissed"' "$d/decision.json"; then echo "owner closed the briefing without a decision — halting the run" >&2; s=65; fi; rm -rf "$d"; exit $s""",
-  "sh",
-  "{slot:owner-briefing}",
+    "sh",
+    "-c",
+    """d=$(mktemp -d) && printf %s "$1" > "$d/briefing.md" && PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator annotate "$d/briefing.md" --gate --json > "$d/decision.json"; s=$?; [ -s "$d/decision.json" ] && cat "$d/decision.json"; if [ $s -eq 0 ] && grep -q '"decision":"dismissed"' "$d/decision.json"; then echo "owner closed the briefing without a decision — halting the run" >&2; s=65; fi; rm -rf "$d"; exit $s""",
+    "sh",
+    "{slot:owner-briefing}",
 ]
 idle-timeout-ms = 14400000
 
@@ -659,7 +745,11 @@ operation = "append"
 [procedure]
 description = "Implement one task from the task board with the owner in the loop: confirm plannotator is installed, draft the work and put the owner inside plannotator to annotate the draft, refine it into the plan, then repeat worker-then-review — summoning the owner on every gate-green approved round — until the reviewer and the owner both approve; then record a tracked brief and commit."
 input = ["port:task"]
-output = ["port:brief-report", "port:commit-report", "port:park-report"]
+output = [
+    "port:brief-report",
+    "port:commit-report",
+    "port:park-report",
+]
 
 [[procedure.sequence]]
 id = "confirm-plannotator-is-installed"
@@ -667,14 +757,21 @@ title = "Confirm plannotator is installed"
 output = ["slot:preflight-output"]
 
 [procedure.sequence.command]
-argv = ["sh", "-c", "command -v plannotator"]
+argv = [
+    "sh",
+    "-c",
+    "command -v plannotator",
+]
 
 [[procedure.sequence]]
 id = "draft-the-work"
 title = "Draft the work"
 agent = "agent:smart-1"
 prompt = "prompt:draft-the-work"
-input = ["port:task", "resource:task-board"]
+input = [
+    "port:task",
+    "resource:task-board",
+]
 output = ["slot:draft"]
 
 [[procedure.sequence]]
@@ -685,11 +782,11 @@ output = ["slot:plan-decision"]
 
 [procedure.sequence.command]
 argv = [
-  "sh",
-  "-c",
-  """printf %s "$1" | jq -n --arg plan "$(cat)" '{hook_event_name: "PreToolUse", tool_name: "ExitPlanMode", tool_input: {plan: $plan}}' | PLANNOTATOR_ORIGIN=implement-gated PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator""",
-  "sh",
-  "{slot:draft}",
+    "sh",
+    "-c",
+    """printf %s "$1" | jq -n --arg plan "$(cat)" '{hook_event_name: "PreToolUse", tool_name: "ExitPlanMode", tool_input: {plan: $plan}}' | PLANNOTATOR_ORIGIN=implement-gated PLANNOTATOR_PORT="${PLANNOTATOR_PORT:-7411-7460}" plannotator""",
+    "sh",
+    "{slot:draft}",
 ]
 idle-timeout-ms = 14400000
 
@@ -698,7 +795,10 @@ id = "refine-the-plan-against-the-owner-s-annotations"
 title = "Refine the plan against the owner's annotations"
 agent = "agent:smart-1"
 prompt = "prompt:refine-the-plan-against-the-owner-s-annotations"
-input = ["slot:draft", "slot:plan-decision"]
+input = [
+    "slot:draft",
+    "slot:plan-decision",
+]
 output = ["slot:plan"]
 
 [[procedure.sequence]]
@@ -736,7 +836,11 @@ title = "Check working tree status"
 output = ["slot:shipping-status"]
 
 [procedure.sequence.command]
-argv = ["git", "status", "--porcelain"]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
 
 [[procedure.sequence]]
 id = "shipping-maybe-commit"

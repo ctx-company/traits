@@ -16,8 +16,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 13,
-    "end": 13
+    "start": 14,
+    "end": 14
   },
   "prompt:format": {
     "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
@@ -41,8 +41,8 @@
   },
   "slot:result": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 12,
-    "end": 12
+    "start": 13,
+    "end": 13
   },
   "slot:task-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",

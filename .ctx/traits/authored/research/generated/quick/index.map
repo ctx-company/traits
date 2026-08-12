@@ -16,8 +16,8 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 92,
-    "end": 92
+    "start": 108,
+    "end": 108
   },
   "port:output-dir": {
     "file": ".ctx/traits/authored/research/source/data.ts",
@@ -26,18 +26,18 @@
   },
   "port:park-report": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 98,
-    "end": 98
-  },
-  "port:report-path": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
     "start": 115,
     "end": 115
   },
+  "port:report-path": {
+    "file": ".ctx/traits/authored/research/source/data.ts",
+    "start": 133,
+    "end": 133
+  },
   "port:research-report": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 107,
-    "end": 107
+    "start": 124,
+    "end": 124
   },
   "port:topic": {
     "file": ".ctx/traits/authored/research/source/data.ts",
@@ -46,38 +46,38 @@
   },
   "prompt:researching-produce": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 66,
-    "end": 66
+    "start": 74,
+    "end": 74
   },
   "prompt:researching-review": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 76,
-    "end": 76
+    "start": 84,
+    "end": 84
   },
   "prompt:scope-the-topic": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 56,
-    "end": 56
+    "start": 64,
+    "end": 64
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 94,
-    "end": 94
+    "start": 102,
+    "end": 102
   },
   "resource:citation-style": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 133,
-    "end": 133
+    "start": 151,
+    "end": 151
   },
   "resource:research-standards": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 123,
-    "end": 123
+    "start": 141,
+    "end": 141
   },
   "resource:source-quality-guide": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 128,
-    "end": 128
+    "start": 146,
+    "end": 146
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -101,23 +101,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 92,
-    "end": 92
+    "start": 94,
+    "end": 94
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 65,
-    "end": 65
+    "start": 64,
+    "end": 64
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 78,
-    "end": 78
+    "start": 77,
+    "end": 77
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-unstage-runtime": {
     "file": "packages/agents/src/process.ts",
-    "start": 83,
-    "end": 83
+    "start": 82,
+    "end": 82
   },
   "sequence:ctx-branch-arm-s-16-researching-body-18-park-report-record-then/park-report-append": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -126,33 +126,33 @@
   },
   "sequence:procedure/brief-path": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 167,
-    "end": 167
+    "start": 185,
+    "end": 185
   },
   "sequence:procedure/researching": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 62,
-    "end": 62
+    "start": 70,
+    "end": 70
   },
   "sequence:procedure/scope-the-topic": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 55,
-    "end": 55
+    "start": 63,
+    "end": 63
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 64,
-    "end": 64
+    "start": 63,
+    "end": 63
   },
   "sequence:procedure/shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 58,
-    "end": 58
+    "start": 57,
+    "end": 57
   },
   "sequence:procedure/topic-slug": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 146,
-    "end": 146
+    "start": 164,
+    "end": 164
   },
   "sequence:researching-body/park-report-clear": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -166,48 +166,48 @@
   },
   "sequence:researching-body/researching-produce": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 65,
-    "end": 65
+    "start": 73,
+    "end": 73
   },
   "sequence:researching-body/researching-review": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 75,
-    "end": 75
-  },
-  "slot:commit-output": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 87,
-    "end": 87
-  },
-  "slot:park-report": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 72,
-    "end": 72
-  },
-  "slot:report-path": {
-    "file": ".ctx/traits/authored/research/source/data.ts",
     "start": 83,
     "end": 83
   },
+  "slot:commit-output": {
+    "file": ".ctx/traits/authored/research/source/data.ts",
+    "start": 103,
+    "end": 103
+  },
+  "slot:park-report": {
+    "file": ".ctx/traits/authored/research/source/data.ts",
+    "start": 86,
+    "end": 86
+  },
+  "slot:report-path": {
+    "file": ".ctx/traits/authored/research/source/data.ts",
+    "start": 98,
+    "end": 98
+  },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 70,
-    "end": 70
+    "start": 76,
+    "end": 76
   },
   "slot:scope-note": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 33,
-    "end": 33
+    "start": 40,
+    "end": 40
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 44,
-    "end": 44
+    "start": 43,
+    "end": 43
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 48,
-    "end": 48
+    "start": 47,
+    "end": 47
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
@@ -216,22 +216,22 @@
   },
   "slot:shipping-unstage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 52,
-    "end": 52
+    "start": 51,
+    "end": 51
   },
   "slot:topic-slug": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 79,
-    "end": 79
+    "start": 93,
+    "end": 93
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/research/source/data.ts",
-    "start": 65,
-    "end": 65
+    "start": 70,
+    "end": 70
   },
   "trait:research": {
     "file": ".ctx/traits/authored/research/source/variants/quick.ts",
-    "start": 38,
-    "end": 38
+    "start": 45,
+    "end": 45
   }
 }

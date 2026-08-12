@@ -76,13 +76,13 @@
   },
   "schema:brief": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/schema.ts",
-    "start": 77,
-    "end": 77
+    "start": 76,
+    "end": 76
   },
   "schema:owner-decision": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/schema.ts",
-    "start": 66,
-    "end": 66
+    "start": 65,
+    "end": 65
   },
   "schema:plan-decision": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/schema.ts",
@@ -91,8 +91,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 132,
-    "end": 132
+    "start": 125,
+    "end": 125
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/schema.ts",
@@ -136,48 +136,48 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 266,
-    "end": 266
+    "start": 265,
+    "end": 265
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/lift-brief": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 222,
-    "end": 222
+    "start": 221,
+    "end": 221
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/save-the-brief-to-internal-briefs": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 229,
-    "end": 229
+    "start": 228,
+    "end": 228
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/show-the-brief-to-the-owner-plannotator-display-only": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 242,
-    "end": 242
+    "start": 241,
+    "end": 241
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 258,
-    "end": 258
+    "start": 257,
+    "end": 257
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/unstage-runtime-state": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 262,
-    "end": 262
+    "start": 261,
+    "end": 261
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/write-the-brief-and-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 218,
-    "end": 218
+    "start": 217,
+    "end": 217
   },
   "sequence:ctx-branch-arm-s-13-building-body-10-owner-gate-then/summon-the-owner-plannotator-gated": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 187,
-    "end": 187
+    "start": 184,
+    "end": 184
   },
   "sequence:ctx-branch-arm-s-13-building-body-10-owner-gate-then/write-the-round-briefing": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 173,
-    "end": 173
+    "start": 170,
+    "end": 170
   },
   "sequence:ctx-branch-arm-s-13-building-body-18-park-report-record-then/park-report-append": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -196,8 +196,8 @@
   },
   "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 212,
-    "end": 212
+    "start": 211,
+    "end": 211
   },
   "sequence:procedure/confirm-plannotator-is-installed": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
@@ -216,122 +216,122 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 217,
-    "end": 217
+    "start": 216,
+    "end": 216
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 170,
-    "end": 170
+    "start": 163,
+    "end": 163
   },
   "slot:brief": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 54,
-    "end": 54
+    "start": 60,
+    "end": 60
   },
   "slot:brief-display-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 75,
-    "end": 75
+    "start": 82,
+    "end": 82
   },
   "slot:brief-markdown": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 63,
-    "end": 63
+    "start": 70,
+    "end": 70
   },
   "slot:brief-slug": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 59,
-    "end": 59
+    "start": 66,
+    "end": 66
   },
   "slot:brief-write-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 71,
-    "end": 71
+    "start": 78,
+    "end": 78
   },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 67,
-    "end": 67
+    "start": 74,
+    "end": 74
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 93,
-    "end": 93
+    "start": 103,
+    "end": 103
   },
   "slot:draft": {
-    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 9,
-    "end": 9
-  },
-  "slot:owner-briefing": {
-    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 42,
-    "end": 42
-  },
-  "slot:owner-decision": {
-    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 47,
-    "end": 47
-  },
-  "slot:park-report": {
-    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 35,
-    "end": 35
-  },
-  "slot:plan": {
-    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 19,
-    "end": 19
-  },
-  "slot:plan-decision": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
     "start": 14,
     "end": 14
   },
+  "slot:owner-briefing": {
+    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
+    "start": 48,
+    "end": 48
+  },
+  "slot:owner-decision": {
+    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
+    "start": 53,
+    "end": 53
+  },
+  "slot:park-report": {
+    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
+    "start": 41,
+    "end": 41
+  },
+  "slot:plan": {
+    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
+    "start": 24,
+    "end": 24
+  },
+  "slot:plan-decision": {
+    "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
+    "start": 19,
+    "end": 19
+  },
   "slot:preflight-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 4,
-    "end": 4
+    "start": 9,
+    "end": 9
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
+    "start": 121,
+    "end": 121
   },
   "slot:review-diff": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 116,
-    "end": 116
+    "start": 109,
+    "end": 109
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 30,
-    "end": 30
+    "start": 36,
+    "end": 36
   },
   "slot:shipping-status": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 80,
-    "end": 80
+    "start": 88,
+    "end": 88
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 85,
-    "end": 85
+    "start": 94,
+    "end": 94
   },
   "slot:unstage-output": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 89,
-    "end": 89
+    "start": 98,
+    "end": 98
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/variants/gated/slot.ts",
-    "start": 25,
-    "end": 25
+    "start": 31,
+    "end": 31
   },
   "trait:implement": {
     "file": ".ctx/traits/authored/implement/source/variants/gated.ts",
-    "start": 275,
-    "end": 275
+    "start": 274,
+    "end": 274
   }
 }

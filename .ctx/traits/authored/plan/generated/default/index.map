@@ -16,38 +16,38 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 13,
-    "end": 13
+    "start": 14,
+    "end": 14
   },
   "prompt:refine-task": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 23,
-    "end": 23
+    "start": 24,
+    "end": 24
   },
   "prompt:split": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 44,
-    "end": 44
+    "start": 45,
+    "end": 45
   },
   "prompt:write": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 60,
-    "end": 60
+    "start": 61,
+    "end": 61
   },
   "sequence:procedure/refine-task": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 20,
-    "end": 20
+    "start": 21,
+    "end": 21
   },
   "sequence:procedure/split": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 41,
-    "end": 41
+    "start": 42,
+    "end": 42
   },
   "sequence:procedure/write": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 57,
-    "end": 57
+    "start": 58,
+    "end": 58
   },
   "slot:grounding": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
@@ -56,8 +56,8 @@
   },
   "slot:result": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 12,
-    "end": 12
+    "start": 13,
+    "end": 13
   },
   "slot:task-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
@@ -66,7 +66,7 @@
   },
   "trait:plan": {
     "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 70,
-    "end": 70
+    "start": 71,
+    "end": 71
   }
 }

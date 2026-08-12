@@ -66,8 +66,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 132,
-    "end": 132
+    "start": 125,
+    "end": 125
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/schema.ts",
@@ -106,23 +106,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 92,
-    "end": 92
+    "start": 94,
+    "end": 94
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 65,
-    "end": 65
+    "start": 64,
+    "end": 64
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 78,
-    "end": 78
+    "start": 77,
+    "end": 77
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-unstage-runtime": {
     "file": "packages/agents/src/process.ts",
-    "start": 83,
-    "end": 83
+    "start": 82,
+    "end": 82
   },
   "sequence:ctx-branch-arm-s-13-building-body-18-park-report-record-then/park-report-append": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -141,23 +141,23 @@
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 64,
-    "end": 64
+    "start": 63,
+    "end": 63
   },
   "sequence:procedure/shipping-status": {
     "file": "packages/agents/src/process.ts",
-    "start": 58,
-    "end": 58
+    "start": 57,
+    "end": 57
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 170,
-    "end": 170
+    "start": 163,
+    "end": 163
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 16,
-    "end": 16
+    "start": 15,
+    "end": 15
   },
   "slot:draft": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
@@ -166,33 +166,33 @@
   },
   "slot:park-report": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 27,
-    "end": 27
+    "start": 26,
+    "end": 26
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
+    "start": 121,
+    "end": 121
   },
   "slot:review-diff": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 116,
-    "end": 116
+    "start": 109,
+    "end": 109
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
-    "start": 21,
-    "end": 21
+    "start": 20,
+    "end": 20
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 44,
-    "end": 44
+    "start": 43,
+    "end": 43
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 48,
-    "end": 48
+    "start": 47,
+    "end": 47
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
@@ -201,8 +201,8 @@
   },
   "slot:shipping-unstage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 52,
-    "end": 52
+    "start": 51,
+    "end": 51
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/variants/quick/slot.ts",
@@ -211,7 +211,7 @@
   },
   "trait:implement": {
     "file": ".ctx/traits/authored/implement/source/variants/quick.ts",
-    "start": 112,
-    "end": 112
+    "start": 114,
+    "end": 114
   }
 }

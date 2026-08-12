@@ -26,68 +26,68 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 176,
-    "end": 176
+    "start": 169,
+    "end": 169
   },
   "port:leftovers": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 193,
-    "end": 193
+    "start": 186,
+    "end": 186
   },
   "port:park-report": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 79,
-    "end": 79
+    "start": 112,
+    "end": 112
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 46,
-    "end": 46
+    "start": 39,
+    "end": 39
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 124,
-    "end": 124
+    "start": 157,
+    "end": 157
   },
   "prompt:building-review-1": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 139,
-    "end": 139
+    "start": 172,
+    "end": 172
   },
   "prompt:building-review-2": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 150,
-    "end": 150
+    "start": 183,
+    "end": 183
   },
   "prompt:copy-the-task-contract": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 271,
-    "end": 271
+    "start": 267,
+    "end": 267
   },
   "prompt:planning-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 96,
-    "end": 96
+    "start": 129,
+    "end": 129
   },
   "prompt:planning-review": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 107,
-    "end": 107
+    "start": 140,
+    "end": 140
   },
   "prompt:research": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 89,
-    "end": 89
+    "start": 122,
+    "end": 122
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 250,
-    "end": 250
+    "start": 282,
+    "end": 282
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 60,
-    "end": 60
+    "start": 53,
+    "end": 53
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -121,13 +121,13 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 132,
-    "end": 132
+    "start": 125,
+    "end": 125
   },
   "schema:review-verdict-smart": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 55,
-    "end": 55
+    "start": 77,
+    "end": 77
   },
   "schema:reviewer-verdict": {
     "file": "packages/toolkit/src/schema.ts",
@@ -136,28 +136,28 @@
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 205,
-    "end": 205
+    "start": 238,
+    "end": 238
   },
   "sequence:building-body/building-review-1": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 220,
-    "end": 220
+    "start": 253,
+    "end": 253
   },
   "sequence:building-body/building-review-2": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 225,
-    "end": 225
+    "start": 258,
+    "end": 258
   },
   "sequence:building-body/building-seal": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 233,
-    "end": 233
+    "start": 266,
+    "end": 266
   },
   "sequence:building-body/building-unseal": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 203,
-    "end": 203
+    "start": 236,
+    "end": 236
   },
   "sequence:building-body/capture-diff": {
     "file": "packages/toolkit/src/sequence/evidence.ts",
@@ -186,23 +186,23 @@
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 92,
-    "end": 92
+    "start": 94,
+    "end": 94
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 65,
-    "end": 65
+    "start": 64,
+    "end": 64
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
     "file": "packages/agents/src/process.ts",
-    "start": 78,
-    "end": 78
+    "start": 77,
+    "end": 77
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-unstage-runtime": {
     "file": "packages/agents/src/process.ts",
-    "start": 83,
-    "end": 83
+    "start": 82,
+    "end": 82
   },
   "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -216,113 +216,113 @@
   },
   "sequence:planning-body/planning-produce": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 183,
-    "end": 183
+    "start": 216,
+    "end": 216
   },
   "sequence:planning-body/planning-review": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 189,
-    "end": 189
+    "start": 222,
+    "end": 222
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 200,
-    "end": 200
+    "start": 233,
+    "end": 233
   },
   "sequence:procedure/copy-the-task-contract": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 270,
-    "end": 270
+    "start": 266,
+    "end": 266
   },
   "sequence:procedure/planning": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 180,
-    "end": 180
+    "start": 213,
+    "end": 213
   },
   "sequence:procedure/research": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 172,
-    "end": 172
+    "start": 205,
+    "end": 205
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
-    "start": 64,
-    "end": 64
-  },
-  "sequence:procedure/shipping-status": {
-    "file": "packages/agents/src/process.ts",
-    "start": 58,
-    "end": 58
-  },
-  "signal:gate-timed-out": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 170,
-    "end": 170
-  },
-  "slot:building-sealed": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 198,
-    "end": 198
-  },
-  "slot:commit-output": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 112,
-    "end": 112
-  },
-  "slot:draft": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 75,
-    "end": 75
-  },
-  "slot:leftovers": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 86,
-    "end": 86
-  },
-  "slot:park-report": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 73,
-    "end": 73
-  },
-  "slot:planning-verdict": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 174,
-    "end": 174
-  },
-  "slot:repo-gates-passed": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 128,
-    "end": 128
-  },
-  "slot:research-notes": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 48,
-    "end": 48
-  },
-  "slot:review-diff": {
-    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 116,
-    "end": 116
-  },
-  "slot:review-verdict-1": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 62,
-    "end": 62
-  },
-  "slot:review-verdict-2": {
-    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
     "start": 63,
     "end": 63
   },
+  "sequence:procedure/shipping-status": {
+    "file": "packages/agents/src/process.ts",
+    "start": 57,
+    "end": 57
+  },
+  "signal:gate-timed-out": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 163,
+    "end": 163
+  },
+  "slot:building-sealed": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 231,
+    "end": 231
+  },
+  "slot:commit-output": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 105,
+    "end": 105
+  },
+  "slot:draft": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 68,
+    "end": 68
+  },
+  "slot:leftovers": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 79,
+    "end": 79
+  },
+  "slot:park-report": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 106,
+    "end": 106
+  },
+  "slot:planning-verdict": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 207,
+    "end": 207
+  },
+  "slot:repo-gates-passed": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 121,
+    "end": 121
+  },
+  "slot:research-notes": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 70,
+    "end": 70
+  },
+  "slot:review-diff": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 109,
+    "end": 109
+  },
+  "slot:review-verdict-1": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 87,
+    "end": 87
+  },
+  "slot:review-verdict-2": {
+    "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
+    "start": 92,
+    "end": 92
+  },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
-    "start": 44,
-    "end": 44
+    "start": 43,
+    "end": 43
   },
   "slot:shipping-stage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 48,
-    "end": 48
+    "start": 47,
+    "end": 47
   },
   "slot:shipping-status": {
     "file": "packages/agents/src/process.ts",
@@ -331,22 +331,22 @@
   },
   "slot:shipping-unstage-output": {
     "file": "packages/agents/src/process.ts",
-    "start": 52,
-    "end": 52
+    "start": 51,
+    "end": 51
   },
   "slot:task-brief": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 69,
-    "end": 69
+    "start": 62,
+    "end": 62
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
-    "start": 80,
-    "end": 80
+    "start": 73,
+    "end": 73
   },
   "trait:implement": {
     "file": ".ctx/traits/authored/implement/source/variants/smart.ts",
-    "start": 268,
-    "end": 268
+    "start": 300,
+    "end": 300
   }
 }

@@ -1,8 +1,8 @@
 {
   "agent:scribe": {
     "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 9,
-    "end": 9
+    "start": 10,
+    "end": 10
   },
   "agent:smart-1": {
     "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
@@ -16,73 +16,73 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 13,
-    "end": 13
-  },
-  "prompt:critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 65,
-    "end": 65
-  },
-  "prompt:refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 28,
-    "end": 28
-  },
-  "prompt:revise": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 76,
-    "end": 76
-  },
-  "prompt:split": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 49,
-    "end": 49
-  },
-  "prompt:write": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 86,
-    "end": 86
-  },
-  "sequence:procedure/critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 62,
-    "end": 62
-  },
-  "sequence:procedure/refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 25,
-    "end": 25
-  },
-  "sequence:procedure/revise": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 73,
-    "end": 73
-  },
-  "sequence:procedure/split": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 46,
-    "end": 46
-  },
-  "sequence:procedure/write": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 83,
-    "end": 83
-  },
-  "slot:critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 19,
-    "end": 19
-  },
-  "slot:grounding": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
     "start": 14,
     "end": 14
   },
+  "prompt:critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 67,
+    "end": 67
+  },
+  "prompt:refine-task": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 30,
+    "end": 30
+  },
+  "prompt:revise": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 78,
+    "end": 78
+  },
+  "prompt:split": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 51,
+    "end": 51
+  },
+  "prompt:write": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 88,
+    "end": 88
+  },
+  "sequence:procedure/critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 64,
+    "end": 64
+  },
+  "sequence:procedure/refine-task": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 27,
+    "end": 27
+  },
+  "sequence:procedure/revise": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 75,
+    "end": 75
+  },
+  "sequence:procedure/split": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 48,
+    "end": 48
+  },
+  "sequence:procedure/write": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 85,
+    "end": 85
+  },
+  "slot:critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 21,
+    "end": 21
+  },
+  "slot:grounding": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 15,
+    "end": 15
+  },
   "slot:result": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
-    "start": 12,
-    "end": 12
+    "start": 13,
+    "end": 13
   },
   "slot:task-files": {
     "file": ".ctx/traits/authored/plan/source/data.ts",
@@ -91,7 +91,7 @@
   },
   "trait:plan": {
     "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 96,
-    "end": 96
+    "start": 98,
+    "end": 98
   }
 }

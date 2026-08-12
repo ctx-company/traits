@@ -7,7 +7,13 @@ summary = "Turn a described task into codebase-grounded, house-format task files
 variant = "complex"
 
 [metadata]
-tag = ["task", "plan", "bootstrap", "planning", "review"]
+tag = [
+    "task",
+    "plan",
+    "bootstrap",
+    "planning",
+    "review",
+]
 
 [[intent.focus]]
 id = "specific"
@@ -84,7 +90,10 @@ text = """
             Independently critique the grounding notes {slot:grounding} and the task files {slot:task-files}, as if reviewing someone else's work.
             Check every task for: roughly 10-15 minute sizing (flag anything larger or vaguer); an observable, verifiable Done when; dependency ordering (each task depends only on earlier ones); standalone completeness (the grounding a task needs is folded into its own body); and any rule or validation gate from the grounding that a task omits or contradicts.
             Return the concrete list of defects to fix, each naming the task or grounding section and the specific change needed. If nothing needs fixing, say so explicitly."""
-input = ["slot:grounding", "slot:task-files"]
+input = [
+    "slot:grounding",
+    "slot:task-files",
+]
 output = ["slot:critique"]
 
 [prompt.refine-task]
@@ -111,7 +120,10 @@ text = """
 
             Apply the critique {slot:critique} to the task files {slot:task-files}, in one bounded pass — do not expand scope beyond what the critique names.
             Return the full revised set of task files, replacing the prior set."""
-input = ["slot:critique", "slot:task-files"]
+input = [
+    "slot:critique",
+    "slot:task-files",
+]
 output = ["slot:task-files"]
 
 [prompt.split]
@@ -129,7 +141,10 @@ Task format doctrine: Format each task as one standalone Markdown file for .inte
             Break the refined work into small, ordered task files.
             Fold the grounding each task needs — its files, gates, invariants, constraints — into that task's own body and Watch section, so every file stands alone.
             Do not implement anything."""
-input = ["port:task", "slot:grounding"]
+input = [
+    "port:task",
+    "slot:grounding",
+]
 output = ["slot:task-files"]
 
 [prompt.write]
@@ -161,7 +176,10 @@ id = "split"
 title = "Split the work into task files"
 agent = "agent:smart-1"
 prompt = "prompt:split"
-input = ["port:task", "slot:grounding"]
+input = [
+    "port:task",
+    "slot:grounding",
+]
 output = ["slot:task-files"]
 
 [[procedure.sequence]]
@@ -169,7 +187,10 @@ id = "critique"
 title = "Critique the task files (smart-1)"
 agent = "agent:smart-1"
 prompt = "prompt:critique"
-input = ["slot:grounding", "slot:task-files"]
+input = [
+    "slot:grounding",
+    "slot:task-files",
+]
 output = ["slot:critique"]
 
 [[procedure.sequence]]
@@ -177,7 +198,10 @@ id = "revise"
 title = "Apply the critique (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:revise"
-input = ["slot:critique", "slot:task-files"]
+input = [
+    "slot:critique",
+    "slot:task-files",
+]
 output = ["slot:task-files"]
 
 [[procedure.sequence]]

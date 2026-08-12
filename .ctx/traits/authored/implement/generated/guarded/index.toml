@@ -7,7 +7,13 @@ summary = "Quick dogfood implementation procedure, with the final commit held fo
 variant = "guarded"
 
 [metadata]
-tag = ["dogfood", "implementation", "review", "lean", "gated"]
+tag = [
+    "dogfood",
+    "implementation",
+    "review",
+    "lean",
+    "gated",
+]
 
 [[intent.require]]
 id = "correctness"
@@ -57,7 +63,10 @@ schema = "[schema:review-verdict]"
 optional = true
 description = "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created."
 title = "Park Report"
-format = ["structured", "table"]
+format = [
+    "structured",
+    "table",
+]
 value = "slot:park-report"
 
 [[port]]
@@ -243,7 +252,10 @@ description = "The blocking defects that must be fixed before merge: correctness
 schema = "schema:text"
 required = true
 description = "needs-owner if and only if the run as a whole cannot reach an approvable state — never merely because one blocker is outside this round's reach. none otherwise."
-allowed = ["none", "needs-owner"]
+allowed = [
+    "none",
+    "needs-owner",
+]
 
 [schema.fields.escalation-reason]
 schema = "schema:text"
@@ -258,7 +270,10 @@ description = "Present ONLY when this verdict forgives a plan-fidelity gap — a
 schema = "schema:text"
 required = true
 description = "approved when the draft is correct and introduces no new smell — even if a forgivable plan-fidelity gap remains; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = ["approved", "revise"]
+allowed = [
+    "approved",
+    "revise",
+]
 
 [schema.fields.wall-id]
 schema = "schema:text"
@@ -292,7 +307,10 @@ text = """
     A repository gate result may be attached. When its ok field is false, re-run its argv verbatim — that exact command is what decides done-ness, whatever any document or reviewer calls the gate — and repair what it reports. Its tail is the gate's own output and states the actual reason — start there rather than guessing. A tail showing the gate could not run at all (missing recipe, command not found) is a repository misconfiguration you cannot fix from inside the run: report it in the work summary instead of attempting a code change. A gate result whose timed-out field is true is a repo condition — the ceiling is fixed in the trait — never your blocker to fix; report it and stop, do not spend the round chasing it.
     Run this task's own Done-when gates before reporting.
     Return the full work summary: what changed (files), how you validated it, open concerns."""
-input = ["port:task", "slot:draft"]
+input = [
+    "port:task",
+    "slot:draft",
+]
 output = ["slot:work-summary"]
 
 [prompt.building-review]
@@ -304,7 +322,13 @@ text = """
     Your own verdict from last round is attached when one exists: this round's verdict EXTENDS it. Carry every open blocker's id and steps forward VERBATIM — same order, same wording; verify each open step with your own tools and flip its status to done only on evidence you confirmed, recording that evidence on the step. Append genuinely new findings as new steps at the end or as new blockers; set recurrence-of on every carried blocker; drop a blocker only when every step is done, and name the drop in the advisory. Never renumber, reword, or re-derive a carried step — a vanished or rewritten step erases the worker's progress and moves the target, which is how loops stall.
     Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
     Escalation: set escalation to needs-owner if and only if the run as a whole cannot reach an approvable state (the task file is a placeholder, lacks a falsifiable Done-when, names a prerequisite task not landed in this tree, or is marked superseded/cancelled) — never merely because one blocker is outside this round's reach. Record the one owner action that would clear it in escalation-reason; otherwise set escalation to none and leave escalation-reason empty."""
-input = ["port:task", "slot:draft", "slot:work-summary", "slot:review-diff", "slot:repo-gates-passed"]
+input = [
+    "port:task",
+    "slot:draft",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+]
 output = ["slot:review-verdict"]
 
 [prompt.draft-the-work]
@@ -313,7 +337,10 @@ text = """
         Create an implementation draft for {port:task} from its file on the task board {resource:task-board}. Task files are named NNNN-kebab-slug.md; the requested task names its file by number, full name, or filename — read that file with your tools. It is the sole binding authority for this run.
         Cover: scope, files to touch, approach, validation plan, risks.
         Reference files by path. Do not implement anything."""
-input = ["port:task", "resource:task-board"]
+input = [
+    "port:task",
+    "resource:task-board",
+]
 output = ["slot:draft"]
 
 [prompt.shipping-message]
@@ -321,7 +348,10 @@ text = """
 The review has ended approved and the work is being committed.
     Write a concise commit message from the draft {slot:draft} and the verdict {slot:review-verdict}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
     Return exactly that message. Do not run git commands and do not write files."""
-input = ["slot:draft", "slot:review-verdict"]
+input = [
+    "slot:draft",
+    "slot:review-verdict",
+]
 output = ["slot:shipping-message"]
 
 [[sequence.building-body.sequence]]
@@ -330,11 +360,11 @@ title = "Building Produce"
 agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
-  "port:task",
-  "slot:draft",
-  { slot = "slot:review-verdict", optional = true },
-  { slot = "slot:work-summary", optional = true },
-  { slot = "slot:repo-gates-passed", optional = true },
+    "port:task",
+    "slot:draft",
+    { slot = "slot:review-verdict", optional = true },
+    { slot = "slot:work-summary", optional = true },
+    { slot = "slot:repo-gates-passed", optional = true },
 ]
 output = ["slot:work-summary"]
 
@@ -345,7 +375,10 @@ kind = "check"
 output = ["slot:repo-gates-passed"]
 
 [sequence.building-body.sequence.command]
-argv = ["just", "test"]
+argv = [
+    "just",
+    "test",
+]
 
 [[sequence.building-body.sequence]]
 id = "capture-diff"
@@ -353,7 +386,14 @@ title = "Capture the changed-file inventory"
 output = ["slot:review-diff"]
 
 [sequence.building-body.sequence.command]
-argv = ["git", "diff", "--stat", "--", ".", ":(exclude).agents/runs"]
+argv = [
+    "git",
+    "diff",
+    "--stat",
+    "--",
+    ".",
+    ":(exclude).agents/runs",
+]
 
 [[sequence.building-body.sequence]]
 id = "building-review"
@@ -361,12 +401,12 @@ title = "Building Review"
 agent = "agent:smart-1"
 prompt = "prompt:building-review"
 input = [
-  "port:task",
-  "slot:draft",
-  "slot:work-summary",
-  "slot:review-diff",
-  "slot:repo-gates-passed",
-  { slot = "slot:review-verdict", optional = true },
+    "port:task",
+    "slot:draft",
+    "slot:work-summary",
+    "slot:review-diff",
+    "slot:repo-gates-passed",
+    { slot = "slot:review-verdict", optional = true },
 ]
 output = ["slot:review-verdict"]
 
@@ -398,7 +438,10 @@ id = "shipping-message"
 title = "Write the commit message (scribe)"
 agent = "agent:scribe"
 prompt = "prompt:shipping-message"
-input = ["slot:draft", "slot:review-verdict"]
+input = [
+    "slot:draft",
+    "slot:review-verdict",
+]
 output = ["slot:shipping-message"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
@@ -407,7 +450,11 @@ title = "Stage all changes"
 output = ["slot:shipping-stage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["git", "add", "-A"]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-unstage-runtime"
@@ -415,7 +462,13 @@ title = "Unstage runtime state"
 output = ["slot:shipping-unstage-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["git", "reset", "-q", "--", ".agents/runs"]
+argv = [
+    "git",
+    "reset",
+    "-q",
+    "--",
+    ".agents/runs",
+]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-commit"
@@ -424,7 +477,15 @@ input = ["slot:shipping-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = ["ctx-gate", "run", "--", "git", "commit", "-m", "{slot:shipping-message}"]
+argv = [
+    "ctx-gate",
+    "run",
+    "--",
+    "git",
+    "commit",
+    "-m",
+    "{slot:shipping-message}",
+]
 timeout-ms = 28800000
 
 [[sequence.ctx-branch-arm-s-13-building-body-18-park-report-record-then.sequence]]
@@ -445,14 +506,20 @@ operation = "append"
 [procedure]
 description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
 input = ["port:task"]
-output = ["port:commit-report", "port:park-report"]
+output = [
+    "port:commit-report",
+    "port:park-report",
+]
 
 [[procedure.sequence]]
 id = "draft-the-work"
 title = "Draft the work"
 agent = "agent:smart-1"
 prompt = "prompt:draft-the-work"
-input = ["port:task", "resource:task-board"]
+input = [
+    "port:task",
+    "resource:task-board",
+]
 output = ["slot:draft"]
 
 [[procedure.sequence]]
@@ -485,7 +552,11 @@ title = "Check working tree status"
 output = ["slot:shipping-status"]
 
 [procedure.sequence.command]
-argv = ["git", "status", "--porcelain"]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
 
 [[procedure.sequence]]
 id = "shipping-maybe-commit"

@@ -16,13 +16,13 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 108,
-    "end": 108
+    "start": 115,
+    "end": 115
   },
   "port:publish-report": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 115,
-    "end": 115
+    "start": 122,
+    "end": 122
   },
   "port:version": {
     "file": ".ctx/traits/authored/release/source/data.ts",
@@ -196,38 +196,38 @@
   },
   "slot:changelog-entry": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 65,
-    "end": 65
+    "start": 68,
+    "end": 68
   },
   "slot:changelog-verdict": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 69,
-    "end": 69
+    "start": 73,
+    "end": 73
   },
   "slot:changelog-write-output": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 74,
-    "end": 74
+    "start": 78,
+    "end": 78
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 36,
-    "end": 36
+    "start": 38,
+    "end": 38
   },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 87,
-    "end": 87
+    "start": 92,
+    "end": 92
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 91,
-    "end": 91
+    "start": 96,
+    "end": 96
   },
   "slot:current-branch": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 28,
-    "end": 28
+    "start": 29,
+    "end": 29
   },
   "slot:gate-passed": {
     "file": ".ctx/traits/authored/release/source/data.ts",
@@ -241,53 +241,53 @@
   },
   "slot:last-tag": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 32,
-    "end": 32
+    "start": 34,
+    "end": 34
   },
   "slot:new-version": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 45,
-    "end": 45
+    "start": 48,
+    "end": 48
   },
   "slot:publish-output": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 103,
-    "end": 103
+    "start": 109,
+    "end": 109
   },
   "slot:push-output": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 99,
-    "end": 99
+    "start": 104,
+    "end": 104
   },
   "slot:stage-output": {
-    "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 79,
-    "end": 79
-  },
-  "slot:tag-output": {
-    "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 95,
-    "end": 95
-  },
-  "slot:unstage-output": {
     "file": ".ctx/traits/authored/release/source/data.ts",
     "start": 83,
     "end": 83
   },
+  "slot:tag-output": {
+    "file": ".ctx/traits/authored/release/source/data.ts",
+    "start": 100,
+    "end": 100
+  },
+  "slot:unstage-output": {
+    "file": ".ctx/traits/authored/release/source/data.ts",
+    "start": 87,
+    "end": 87
+  },
   "slot:version-diff": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 55,
-    "end": 55
+    "start": 58,
+    "end": 58
   },
   "slot:version-summary": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 51,
-    "end": 51
+    "start": 54,
+    "end": 54
   },
   "slot:version-verdict": {
     "file": ".ctx/traits/authored/release/source/data.ts",
-    "start": 59,
-    "end": 59
+    "start": 62,
+    "end": 62
   },
   "trait:release": {
     "file": "[eval1]",
