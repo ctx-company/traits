@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0168"
 title = "#trait/* imports: trait sources reference their source root without ../ chains"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-c009e64c749a8071ab9a288875a0456219d1ab254b6deef33dc6cb9f22f2f36a merged as 497f663c1ae6c8e67bc19cb86e6660aa6c773aa9"
 content = """
 
 

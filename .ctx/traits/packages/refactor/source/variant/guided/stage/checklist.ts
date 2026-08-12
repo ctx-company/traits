@@ -1,7 +1,8 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1 } from "../../../shared/agent.ts";
-import { plan } from "../../../shared/data.ts";
+import { smart1 } from "#trait/shared/agent.ts";
+import { plan } from "#trait/shared/data.ts";
+
 import * as data from "../data.ts";
 
 export const compose = cdk.stage({

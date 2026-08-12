@@ -17,9 +17,6 @@ export const commitSubmit = cdk.stage({
     output: commitOutput,
 });
 
-// Every variant flavors the commit-message INPUT (which verdicts, which
-// record it writes from), so the prompt lives in each variant's local
-// stage/git.ts; the return contract is the shared half.
 export const commitMessageOutput = cdk.output.prompt`
     Return exactly the finished commit message — the runtime injects it into
     the git commit step (${commitMessageSlot})

@@ -6,7 +6,7 @@ export default function () {
     defineTrait("Refactor", { version: "0.11.0" });
 
     useIntent(shared.intent);
-    useResource(shared.resources);
+    useResource([shared.resource.architectureDialect, shared.resource.smellCatalog]);
 
     useVariant(variants.quick).default();
     useVariant(variants.guided);

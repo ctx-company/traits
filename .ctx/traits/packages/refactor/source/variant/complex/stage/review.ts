@@ -1,9 +1,9 @@
 import { INTEGRITY_DOCTRINE } from "@ctx-traits/agents";
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1, smart2 } from "../../../shared/agent.ts";
-import { plan, reviewVerdict1, reviewVerdict2, target, workSummary } from "../../../shared/data.ts";
-import { architectureDialect } from "../../../shared/resource.ts";
+import { smart1, smart2 } from "#trait/shared/agent.ts";
+import { plan, reviewVerdict1, reviewVerdict2, target, workSummary } from "#trait/shared/data.ts";
+import { architectureDialect } from "#trait/shared/resource.ts";
 
 const input = cdk.input.prompt(
     `Review the refactored state of {target} against the agreed design {agreedDesign}, independently of the other reviewer.

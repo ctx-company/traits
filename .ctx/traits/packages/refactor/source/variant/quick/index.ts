@@ -1,16 +1,16 @@
 import { condition, defineVariant, flow } from "@ctx-traits/cdk";
 
-import * as shared from "../../shared/index.ts";
+import * as shared from "#trait/shared/index.ts";
 
 import * as stage from "./stage/index.ts";
 
 export default function () {
     defineVariant("Quick", {
-        summary:
-            "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit.",
-        metadata: { tag: shared.tag },
         description:
             "Refactor one module or entity quickly: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, commit.",
+        summary:
+            "Quick refactoring procedure: turn the target into an actionable checklist, implement it, one reviewer pass, apply that pass once if needed, and commit.",
+        metadata: { tag: shared.metadata.tag },
     });
 
     shared.stage.checklist.compose("Checklist the target");
@@ -19,7 +19,7 @@ export default function () {
         loop.maxIterations(2, { onExhausted: "continue" });
         shared.stage.implement.apply("Implement the checklist");
         shared.stage.review.judge("Review the implementation");
-        flow.until(condition.fieldEquals(shared.stage.review.judge.output, "status", "approved"));
+        loop.until(condition.fieldEquals(shared.stage.review.judge.output, "status", "approved"));
     });
 
     stage.git.status("Check working tree status");

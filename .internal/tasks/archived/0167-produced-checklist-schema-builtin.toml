@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0167"
 title = "produced-checklist schema: a builtin for model-generated item lists with coverage semantics"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-6a2fb7b80c9f4cba43bb9e75a9356ee18f85dc611f616c0ef913d0f58778d7eb merged as 3bd6d3718e6cac1918dd2ddd9da7a616477e3ec8"
 content = """
 
 

@@ -1,5 +1,4 @@
 import * as cdk from "@ctx-traits/cdk";
-
 import * as schema from "./schema.ts";
 
 export const slot = {

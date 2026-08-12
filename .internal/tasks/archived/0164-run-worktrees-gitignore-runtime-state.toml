@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0164"
 title = "run worktrees: the runtime guarantees its own state is git-ignored"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-af756c7a1d9fbbc127dced8738161ebc258a93f7e65fea6a17f46d4eea0080ac merged as 7c4277afbc1f7e1d52c9c2b95e0121e49fbeed9e"
 content = """
 
 

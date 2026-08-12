@@ -1,10 +1,8 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { scribe } from "../../../shared/agent.ts";
-import { plan, reviewVerdict1 } from "../../../shared/data.ts";
-import { commitMessageOutput } from "../../../shared/stage/git.ts";
-
-export * from "../../../shared/stage/git.ts";
+import { scribe } from "#trait/shared/agent.ts";
+import { plan, reviewVerdict1 } from "#trait/shared/data.ts";
+import { commitMessageOutput } from "#trait/shared/stage/git.ts";
 
 export const commitMessage = cdk.stage({
     agent: scribe,

@@ -1,7 +1,7 @@
 import type { IntentSpec } from "@ctx-traits/cdk";
 import * as cdk from "@ctx-traits/cdk";
 
-export const intent: IntentSpec = {
+export default {
     require: [
         cdk.intent.require.AnnotationFidelity,
         cdk.intent.require.BehaviorPreservingDefault,
@@ -18,4 +18,4 @@ export const intent: IntentSpec = {
         cdk.intent.avoid.ScopeCreep,
         cdk.intent.avoid.SilentDeviation,
     ],
-};
+} as IntentSpec;

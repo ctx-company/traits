@@ -1,13 +1,12 @@
 import { condition, defineVariant, flow } from "@ctx-traits/cdk";
 
-import * as shared from "../../shared/index.ts";
+import * as shared from "#trait/shared/index.ts";
 
 import * as stage from "./stage/index.ts";
 
 export default function () {
     defineVariant("Complex", {
-        metadata: { tag: shared.tag },
-        summary: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
+        metadata: { tag: shared.metadata.tag },
         description: "Refactor procedure: survey, frame, design, implement, refine, and commit.",
     });
 
@@ -22,7 +21,7 @@ export default function () {
         stage.review.first("Review refactor");
         stage.review.second("Cross-review refactor");
 
-        flow.untilAll([
+        loop.untilAll([
             condition.fieldEquals(stage.review.first.output, "status", "approved"),
             condition.fieldEquals(stage.review.second.output, "status", "approved"),
         ]);

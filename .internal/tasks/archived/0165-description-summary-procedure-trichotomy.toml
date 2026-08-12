@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0165"
 title = "one prose per audience: description (agents+users), summary (users), procedure text dies"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-e70767325a8a19ba4a15af85e6a02bbf09643e663dd7aea01f7aed0b78008832 merged as c05f1a705fdb2bf1f129dbd51e6b25bcb8188818"
 content = """
 
 

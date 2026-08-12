@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0166"
 title = "prompt templates compose: .extend() chaining and nested template interpolation"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-f425a5b8c7c25d3bb38eb183b32d769b9842e82fb231bf3663abb17ad13dfca3 merged as ac144c94d719628eaae0a58d79022f348f2dc75c"
 content = """
 
 

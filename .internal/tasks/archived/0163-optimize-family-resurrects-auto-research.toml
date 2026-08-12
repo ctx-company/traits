@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0163"
 title = "optimize: measurement-gated experiment family — resurrects auto-research under its true name"
-status = "ready"
+status = "done"
 raised = "2026-08-11"
+closed = "2026-08-11"
+origin = "run run-56500d2154a807d2d9137196882f0688e093caf66e41f9948eed0da04ef593a5 merged as df0b6b43172705119058826d4288e4738564f3c5"
 content = """
 
 
