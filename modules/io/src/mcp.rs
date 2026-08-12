@@ -604,6 +604,10 @@ fn mcp_error_envelope<T>(error: &crate::Error, call_payload: bool) -> Envelope<T
             ResponseError::new("io.conflicting-cdk-sources", "conflicting CDK sources")
                 .with_detail("id", id.clone())
         }
+        crate::Error::Layout(crate::layout::Error::RetiredLayoutRoots { commands }) => {
+            ResponseError::new("io.retired-layout-roots", "retired trait layout roots")
+                .with_detail("commands", commands.clone())
+        }
         crate::Error::Export(export) => ResponseError::new("io.export", "export error")
             .with_detail("path", export.path().to_string())
             .with_detail("message", export.to_string()),

@@ -2,7 +2,7 @@
 //!
 //! Core only plans dependency source actions. This module executes local,
 //! npm, and Git package reads, vendors the package evidence under
-//! `.ctx/traits/vendor` (generated, gitignored content — P446 — unaffected
+//! `.ctx/traits/vendored` (generated, gitignored content — P446 — unaffected
 //! by P426's runtime-state relocation), and computes digest layers for
 //! lock/check. Git sources use a deterministic,
 //! URL-keyed cache under this repository's global per-repository cache

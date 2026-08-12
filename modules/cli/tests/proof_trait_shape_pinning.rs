@@ -767,8 +767,8 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
     let scratch = ScratchRoot::new("trait-shape-symlink-parent-dotdot");
     let repo = scratch.home().join("repo");
     let nested = repo.join("nested");
-    let selected_package = repo.join("outside/.ctx/traits/packages/pin");
-    let collapsed_package = nested.join(".ctx/traits/packages/pin");
+    let selected_package = repo.join("outside/.ctx/traits/authored/pin");
+    let collapsed_package = nested.join(".ctx/traits/authored/pin");
     fs::create_dir_all(selected_package.join("generated")).unwrap();
     fs::create_dir_all(collapsed_package.join("generated")).unwrap();
     fs::create_dir_all(repo.join("outside/child")).unwrap();
@@ -811,7 +811,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
         &nested.join("link"),
     );
 
-    let selected = "link/../.ctx/traits/packages/pin/generated/index.toml";
+    let selected = "link/../.ctx/traits/authored/pin/generated/index.toml";
     let activation_source = selected_package.join("generated/index.toml");
     require_success(
         "activate symlink traversal fixture",
@@ -858,7 +858,7 @@ fn relative_source_preserves_symlink_parent_dotdot_traversal() {
     let session: ctx_traits_core::procedure::session::Session =
         serde_json::from_str(&fs::read_to_string(&ledger).unwrap()).unwrap();
     let recorded = &session.provenance.trait_source.as_ref().unwrap().path;
-    assert!(recorded.contains("link/../.ctx/traits/packages/pin/generated/index.toml"));
+    assert!(recorded.contains("link/../.ctx/traits/authored/pin/generated/index.toml"));
     assert_ne!(
         fs::canonicalize(recorded).unwrap(),
         fs::canonicalize(collapsed_package.join("generated/index.toml")).unwrap(),

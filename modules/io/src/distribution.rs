@@ -79,7 +79,7 @@ impl DistributionScope {
         }
     }
 
-    /// Vendor root for this scope: `.ctx/traits/vendor` under a project
+    /// Vendor root for this scope: `.ctx/traits/vendored` under a project
     /// root, or `traits` directly under the global config root (P439's
     /// contracted `~/.config/ctx/traits/<package>/` layout).
     pub fn vendor_root(&self) -> Utf8PathBuf {
@@ -99,6 +99,9 @@ impl DistributionScope {
     }
 
     pub fn vendored_package_root(&self, alias: &str) -> crate::Result<Utf8PathBuf> {
+        if let Self::Project(root) = self {
+            crate::layout::refuse_retired_roots(root)?;
+        }
         crate::layout::validate_trait_id(alias).map_err(crate::Error::from)?;
         Ok(self.vendor_root().join(alias))
     }
@@ -1415,7 +1418,7 @@ pub fn inspect_local_package(root: &Utf8Path) -> crate::Result<LocalPackageInspe
 /// When `root`'s package manifest declares a native `[family]` table
 /// (P530/P531), enumerate one [`LocalTraitPackage`] per declared variant
 /// instead of the single canonical document ordinary (non-family) packages
-/// resolve to — a folded family package (e.g. `.ctx/traits/packages/implement/`)
+/// resolve to — a folded family package (e.g. `.ctx/traits/authored/implement/`)
 /// otherwise has no single `generated/index.toml`, so treating it like an
 /// ordinary package would silently install zero or one of its variants
 /// (P535 risk). Returns `Ok(None)` when `root` is not a native family at
@@ -3326,7 +3329,7 @@ pub fn resolve_vendored_trait_id(
 
 /// [`resolve_vendored_trait_id`], generalized with an optional native family
 /// variant selector (P535 fix): a folded family package's variants (e.g.
-/// `.ctx/traits/packages/implement/`) all share one `id`, distinguished only
+/// `.ctx/traits/authored/implement/`) all share one `id`, distinguished only
 /// by `variant`/`is_default_variant` — `variant: None` (or `Some("default")`)
 /// resolves the family's declared default variant, `Some(other)` resolves
 /// that exact name.

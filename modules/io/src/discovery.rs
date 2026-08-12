@@ -136,7 +136,7 @@ pub fn trait_authoring_packages(
         let Some(trait_id) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if trait_id == "vendor" {
+        if trait_id == "vendored" || trait_id == "generated" {
             continue;
         }
         if let Some(source_path) = crate::layout::trait_cdk_source_path(repo_root, &trait_id)? {
@@ -171,6 +171,7 @@ pub fn trait_inventory_ids(repo_root: &Utf8Path) -> Result<Vec<String>, crate::E
 /// a candidate trait package. Only `trait.toml` is checked (the preferred
 /// encoding). Returns results in deterministic sorted order by trait ID.
 pub fn trait_packages(repo_root: &Utf8Path) -> Result<Vec<TraitPackage>, crate::Error> {
+    crate::layout::refuse_retired_roots(repo_root)?;
     let traits_root = crate::layout::trait_protocol_root_path(repo_root);
     let mut packages = Vec::new();
 
@@ -264,7 +265,7 @@ fn trait_package_dir_names(traits_root: &Utf8Path) -> Result<Vec<String>, crate:
 
     dir_names.sort();
 
-    dir_names.retain(|name| name != "vendor");
+    dir_names.retain(|name| name != "vendored" && name != "generated");
     Ok(dir_names)
 }
 

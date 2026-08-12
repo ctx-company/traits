@@ -214,10 +214,10 @@ version = "^1.0.0""#,
 
     #[test]
     fn decodes_path_shape() {
-        let dep = decode(r#"path = "../sibling/.ctx/traits/packages/implement""#).unwrap();
+        let dep = decode(r#"path = "../sibling/.ctx/traits/authored/implement""#).unwrap();
         assert_eq!(
             dep,
-            ProjectPackageDependency::path("../sibling/.ctx/traits/packages/implement")
+            ProjectPackageDependency::path("../sibling/.ctx/traits/authored/implement")
         );
     }
 

@@ -301,12 +301,13 @@ pub fn infer_repo_root_from_trait_file(trait_file: &Utf8Path) -> &Utf8Path {
     let Some(parent) = trait_root.parent() else {
         return trait_root;
     };
-    // P569: packages live at `<repo>/.ctx/traits/packages/<id>`; a checkout
-    // that predates the move still has `<repo>/.ctx/traits/<id>`. Walking a
-    // fixed number of levels silently returned the PACKAGE root as the repo
-    // root on the new layout, which made a default export target resolve
-    // inside the trait's own source directory and get refused.
-    let traits_dir = if parent.file_name() == Some("packages") {
+    // 0179 (formerly P569's `packages/`): packages live at
+    // `<repo>/.ctx/traits/authored/<id>`; a checkout that predates the move
+    // still has `<repo>/.ctx/traits/<id>`. Walking a fixed number of levels
+    // silently returned the PACKAGE root as the repo root on the new layout,
+    // which made a default export target resolve inside the trait's own
+    // source directory and get refused.
+    let traits_dir = if parent.file_name() == Some("authored") {
         match parent.parent() {
             Some(dir) => dir,
             None => return trait_root,

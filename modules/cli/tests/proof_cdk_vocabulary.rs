@@ -57,7 +57,7 @@ fn build_intent_fixture(label: &str, trait_id: &str, intent_expression: &str) ->
         &home,
     );
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(
         &source_path,
         intent_fixture_source(trait_id, intent_expression),
@@ -69,14 +69,14 @@ fn build_intent_fixture(label: &str, trait_id: &str, intent_expression: &str) ->
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &proj,
         &home,
     );
 
     let canonical_toml = fs::read(proj.join(format!(
-        ".ctx/traits/packages/{trait_id}/generated/index.toml"
+        ".ctx/traits/authored/{trait_id}/generated/index.toml"
     )))
     .unwrap_or_else(|error| panic!("cannot read canonical output for {trait_id}: {error}"));
 

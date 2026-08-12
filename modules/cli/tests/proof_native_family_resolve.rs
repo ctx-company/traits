@@ -62,7 +62,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
     )
     .unwrap();
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source())
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
 
@@ -70,7 +70,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         proj,
         home,
@@ -87,7 +87,7 @@ fn add_family_variant_dependencies(proj: &std::path::Path) {
         ("default", "family-dep-default"),
         ("quick", "family-dep-quick"),
     ] {
-        let dependency_root = proj.join(format!(".ctx/traits/packages/{alias}"));
+        let dependency_root = proj.join(format!(".ctx/traits/authored/{alias}"));
         fs::create_dir_all(dependency_root.join("generated")).unwrap();
         fs::write(
             dependency_root.join("trait.toml"),
@@ -105,7 +105,7 @@ fn add_family_variant_dependencies(proj: &std::path::Path) {
         .unwrap();
 
         let variant_path = proj.join(format!(
-            ".ctx/traits/packages/family-fixture/generated/{variant}/index.toml"
+            ".ctx/traits/authored/family-fixture/generated/{variant}/index.toml"
         ));
         let mut variant_text = fs::read_to_string(&variant_path).unwrap();
         variant_text.push_str(&format!(
@@ -186,7 +186,7 @@ fn legacy_leaf_table_manifest_still_resolves() {
     let proj = home.join("repo");
     build_family_fixture(&proj, &home);
 
-    let manifest_path = proj.join(".ctx/traits/packages/family-fixture/trait.toml");
+    let manifest_path = proj.join(".ctx/traits/authored/family-fixture/trait.toml");
     let manifest_text = fs::read_to_string(&manifest_path).unwrap();
     let legacy_text = manifest_text
         .replace("[family.variant.", "[family.leaf.")
@@ -263,7 +263,7 @@ fn operandless_vendor_locks_every_family_variant() {
         vendor.status.success(),
         "operand-less vendor failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let lock_path = proj.join(".ctx/traits/packages/family-fixture/trait.lock");
+    let lock_path = proj.join(".ctx/traits/authored/family-fixture/trait.lock");
     assert!(
         lock_path.is_file(),
         "vendor did not create {}\nstdout: {stdout}\nstderr: {stderr}",
@@ -275,8 +275,11 @@ fn operandless_vendor_locks_every_family_variant() {
     assert!(lock_text.contains("variant = \"quick\""));
     assert!(lock_text.contains("alias = \"family-dep-default\""));
     assert!(lock_text.contains("alias = \"family-dep-quick\""));
-    assert!(proj.join(".ctx/traits/vendor/family-dep-default").is_dir());
-    assert!(proj.join(".ctx/traits/vendor/family-dep-quick").is_dir());
+    assert!(
+        proj.join(".ctx/traits/vendored/family-dep-default")
+            .is_dir()
+    );
+    assert!(proj.join(".ctx/traits/vendored/family-dep-quick").is_dir());
 
     fs::write(
         &lock_path,
@@ -314,7 +317,7 @@ fn operandless_vendor_locks_every_family_variant() {
         approve.status.success(),
         "bulk trust approval failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let package_manifest = proj.join(".ctx/traits/packages/family-fixture/trait.toml");
+    let package_manifest = proj.join(".ctx/traits/authored/family-fixture/trait.toml");
     let package_text = fs::read_to_string(&package_manifest).unwrap();
     fs::write(
         package_manifest,
@@ -377,7 +380,7 @@ fn bare_id_does_not_fall_back_to_unrelated_default_suffix_package() {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{ordinary_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{ordinary_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -424,13 +427,13 @@ fn source_less_canonical_package_remains_valid() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/source-less/source/index.ts",
+            ".ctx/traits/authored/source-less/source/index.ts",
         ],
         &proj,
         &home,
     );
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
-    fs::remove_dir_all(proj.join(".ctx/traits/packages/source-less/source")).unwrap();
+    fs::remove_dir_all(proj.join(".ctx/traits/authored/source-less/source")).unwrap();
 
     let list = run_ctx(&["traits", "list", "--json"], &proj, &home);
     let (stdout, stderr) = utf8(&list);

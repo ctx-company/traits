@@ -63,7 +63,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
     )
     .unwrap();
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{TRAIT_ID}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{TRAIT_ID}/source/index.ts"));
     fs::write(&source_path, family_fixture_source())
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
 
@@ -71,7 +71,7 @@ fn build_family_fixture(proj: &std::path::Path, home: &std::path::Path) {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{TRAIT_ID}/source/index.ts"),
+            &format!(".ctx/traits/authored/{TRAIT_ID}/source/index.ts"),
         ],
         proj,
         home,

@@ -403,7 +403,7 @@ fn normal_components(path: &Utf8Path) -> Option<Vec<&str>> {
 }
 
 /// Extracts the trait ID from a package-relative tail (e.g. `["generated",
-/// "index.toml"]`) under either the current `.ctx/traits/packages/<id>/...`
+/// "index.toml"]`) under either the current `.ctx/traits/authored/<id>/...`
 /// root or the pre-P569 flat `.ctx/traits/<id>/...` root — the same two
 /// shapes [`crate::layout::is_canonical_package_root`] accepts for reads, so
 /// the safe writer accepts whichever shape a checkout's packages actually
@@ -416,7 +416,7 @@ fn trait_id_for_tail<'a>(normals: &[&'a str], tail: &[&str]) -> Option<&'a str> 
     let head = &normals[..normals.len() - tail_len];
     match head {
         [".ctx", "traits", id] if !id.is_empty() => Some(*id),
-        [".ctx", "traits", "packages", id] if !id.is_empty() => Some(*id),
+        [".ctx", "traits", "authored", id] if !id.is_empty() => Some(*id),
         _ => None,
     }
 }

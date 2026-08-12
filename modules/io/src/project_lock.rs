@@ -133,7 +133,7 @@ impl ResolvedPackageLockPaths {
 ///
 /// This is the only sanctioned way to turn project-lock evidence into
 /// filesystem paths (P438 recurrence: a forged lock must never be able to
-/// point list/run/sync outside `.ctx/traits/vendor/<matching-alias>`).
+/// point list/run/sync outside `.ctx/traits/vendored/<matching-alias>`).
 /// Rejects: a `vendored-path` that does not exactly equal the layout-derived
 /// path for `entry.alias` (catches both traversal/absolute forgeries and a
 /// vendor path stolen from a different alias/package), and any
@@ -150,7 +150,7 @@ pub fn resolve_package_lock_paths(
 /// Scope-generic sibling of [`resolve_package_lock_paths`]: validates
 /// `entry` against a caller-supplied expected vendor root and expected
 /// `vendored-path` string instead of assuming the project's
-/// `.ctx/traits/vendor/<alias>` layout, so [`crate::distribution`]'s global
+/// `.ctx/traits/vendored/<alias>` layout, so [`crate::distribution`]'s global
 /// tier reuses the exact same forged-lock rejection rules.
 pub fn resolve_package_lock_paths_in(
     expected_vendor_root: &Utf8Path,

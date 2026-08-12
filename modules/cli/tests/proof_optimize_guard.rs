@@ -6,7 +6,7 @@
 //!
 //! Rather than hand-authoring a reduced mechanism (research_family's own
 //! precedent), this suite reads the ACTUAL built canonical
-//! (`.ctx/traits/packages/optimize/generated/experiment/index.toml`, and
+//! (`.ctx/traits/authored/optimize/generated/experiment/index.toml`, and
 //! the `benchmark` variant) at test-run time and drives it end to end under
 //! `ctx traits run` in a disposable scratch repository — the real guard
 //! code the round ships, not a paraphrase of it. Only the trait `id` is
@@ -94,7 +94,7 @@ fn summary_json(stdout: &str) -> serde_json::Value {
 /// independently of the real `optimize` package.
 fn real_generated_canonical(variant: &str, fixture_id: &str) -> String {
     let path = repo_root().join(format!(
-        ".ctx/traits/packages/optimize/generated/{variant}/index.toml"
+        ".ctx/traits/authored/optimize/generated/{variant}/index.toml"
     ));
     let text = fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
@@ -232,12 +232,12 @@ fn setup_fixture(
     support::require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{fixture_id}/trait.toml")),
+        &repo.join(format!(".ctx/traits/authored/{fixture_id}/trait.toml")),
         &package_toml(fixture_id, "Optimize Fixture"),
     );
     write_file(
         &repo.join(format!(
-            ".ctx/traits/packages/{fixture_id}/generated/index.toml"
+            ".ctx/traits/authored/{fixture_id}/generated/index.toml"
         )),
         &real_generated_canonical(variant, fixture_id),
     );

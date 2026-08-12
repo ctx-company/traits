@@ -79,7 +79,7 @@ const AUTHORING_PACKAGE_VERSION: &str = "0.1.0-alpha.0";
 /// Scaffold `.ctx/package.json`, the manifest for authoring-time npm packages.
 ///
 /// Trait sources import `@ctx-traits/cdk` by bare specifier, and Node resolves
-/// that by walking up from the importing file: `.ctx/traits/packages/<id>/
+/// that by walking up from the importing file: `.ctx/traits/authored/<id>/
 /// source/` → … → `.ctx/` → the repository root. So packages installed here are
 /// found without any resolver configuration, and a project that already has its
 /// own root `node_modules` keeps resolving through the next step up, unchanged.

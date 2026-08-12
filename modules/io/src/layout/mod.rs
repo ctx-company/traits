@@ -38,14 +38,25 @@ pub enum Error {
     InvalidTraitId { id: String, reason: String },
     #[error("conflicting CDK sources for trait {id:?}: both trait.ts and trait.mjs exist")]
     ConflictingCdkSources { id: String },
+    #[error("this repo still carries a retired .ctx/traits layout; migrate it first: {commands}")]
+    RetiredLayoutRoots { commands: String },
 }
 
-const TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/packages";
+/// Directory names state WRITE AUTHORITY (0179): `authored/` is what YOU
+/// write, `vendored/` is what the fetcher writes, `generated/` (below) is
+/// what the compiler writes. The prior name `packages/` named the category
+/// both authored and vendored trees share instead of the property that
+/// separates them.
+const TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/authored";
+/// Retired 0179 predecessor of [`TRAIT_PACKAGE_ROOT`]. No dual-read — a repo
+/// still carrying this directory is refused by [`refuse_retired_roots`]
+/// naming the `git mv` to [`TRAIT_PACKAGE_ROOT`].
+const RETIRED_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/packages";
 /// P569 predecessor of [`TRAIT_PACKAGE_ROOT`]. Packages used to sit directly
 /// under `.ctx/traits/`, sharing that namespace with `vendor/` and (since the
 /// manifest move) `vendor.toml`/`runtime.toml` — so a package could never be
-/// named `vendor` or `runtime` without colliding. `packages/` gives package
-/// ids a namespace of their own.
+/// named `vendor` or `runtime` without colliding. `packages/` (now
+/// `authored/`) gives package ids a namespace of their own.
 const LEGACY_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits";
 const PROJECT_MANIFEST_ROOT: &str = ".ctx/traits";
 /// P569 predecessor root of [`PROJECT_MANIFEST_ROOT`]: the manifest used to
@@ -58,7 +69,17 @@ const LEGACY_PROJECT_MANIFEST_ROOT: &str = ".ctx";
 const PROJECT_MANIFEST_STEM: &str = "vendor";
 /// P569 predecessor stem, still read.
 const LEGACY_PROJECT_MANIFEST_STEM: &str = "traits";
-const TRAIT_VENDOR_ROOT: &str = ".ctx/traits/vendor";
+const TRAIT_VENDOR_ROOT: &str = ".ctx/traits/vendored";
+/// Retired 0179 predecessor of [`TRAIT_VENDOR_ROOT`]. No dual-read — a repo
+/// still carrying this directory is refused by [`refuse_retired_roots`]
+/// naming the `git mv` to [`TRAIT_VENDOR_ROOT`].
+const RETIRED_TRAIT_VENDOR_ROOT: &str = ".ctx/traits/vendor";
+/// Traits-level catalog of compiler-written artifacts (0179): 0177's
+/// `generated/config.toml` and 0178's `generated/runtime.toml`. Machine-
+/// written only, one writer (the config compiler) — never a package
+/// namespace, and never hand-edited, the same contract a package's own
+/// `generated/` carries.
+pub const TRAIT_GENERATED_ROOT: &str = ".ctx/traits/generated";
 pub const GENERATED: &str = "generated";
 pub const SOURCE_DIR: &str = "source";
 /// Canonical trait document under `generated/`.
@@ -185,6 +206,36 @@ pub const BUILTIN_STORE_ROOT: &str = ".ctx/cache/builtin-traits";
 /// reusing a possibly-stale prior materialization.
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Traits-level generated-catalog root under `repo_root` (0179). See
+/// [`TRAIT_GENERATED_ROOT`] for the write-authority contract.
+pub fn trait_generated_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    repo_root.join(TRAIT_GENERATED_ROOT)
+}
+
+/// Refuses a repo still carrying a retired `.ctx/traits/packages` or
+/// `.ctx/traits/vendor` directory (0179 hard rename, no dual-read), naming
+/// both `git mv` commands. Called from the entry points that already return
+/// `Result` — package discovery and the vendor-root resolver — so build,
+/// run, list, sync, and dependency all refuse before touching a
+/// half-renamed tree instead of silently misreading it.
+pub fn refuse_retired_roots(repo_root: &Utf8Path) -> Result<(), Error> {
+    let retired_package = repo_root.join(RETIRED_TRAIT_PACKAGE_ROOT);
+    let retired_vendor = repo_root.join(RETIRED_TRAIT_VENDOR_ROOT);
+    let mut commands = Vec::new();
+    if retired_package.is_dir() {
+        commands.push("git mv .ctx/traits/packages .ctx/traits/authored");
+    }
+    if retired_vendor.is_dir() {
+        commands.push("git mv .ctx/traits/vendor .ctx/traits/vendored");
+    }
+    if commands.is_empty() {
+        return Ok(());
+    }
+    Err(Error::RetiredLayoutRoots {
+        commands: commands.join("; "),
+    })
+}
+
 /// Repo-relative CDK authoring root.
 pub fn trait_authoring_root() -> &'static str {
     TRAIT_PACKAGE_ROOT
@@ -195,9 +246,9 @@ pub fn trait_authoring_root_path(repo_root: &Utf8Path) -> Utf8PathBuf {
     resolved_package_root(repo_root)
 }
 
-/// The package root in effect for `repo_root`: the current `packages/` tree,
+/// The package root in effect for `repo_root`: the current `authored/` tree,
 /// or the pre-P569 flat tree when a checkout still has packages there and no
-/// `packages/` directory yet. Reads AND writes follow the same answer, so a
+/// `authored/` directory yet. Reads AND writes follow the same answer, so a
 /// half-migrated store is not something a single command can create.
 pub fn resolved_package_root(repo_root: &Utf8Path) -> Utf8PathBuf {
     let current = repo_root.join(TRAIT_PACKAGE_ROOT);
@@ -215,8 +266,8 @@ pub fn resolved_package_root(repo_root: &Utf8Path) -> Utf8PathBuf {
 }
 
 /// Whether a pre-P569 `.ctx/traits` directory contains at least one package —
-/// a child directory that is not `vendor`/`packages` and carries a manifest
-/// under either name.
+/// a child directory that is not one of the reserved non-package names and
+/// carries a manifest under either name.
 fn legacy_root_holds_a_package(legacy_root: &Utf8Path) -> bool {
     let Ok(entries) = std::fs::read_dir(legacy_root) else {
         return false;
@@ -225,7 +276,11 @@ fn legacy_root_holds_a_package(legacy_root: &Utf8Path) -> bool {
         let Ok(name) = entry.file_name().into_string() else {
             return false;
         };
-        if name == "vendor" || name == "packages" || !entry.path().is_dir() {
+        let reserved = matches!(
+            name.as_str(),
+            "vendor" | "packages" | "authored" | "vendored" | "generated"
+        );
+        if reserved || !entry.path().is_dir() {
             return false;
         }
         let root = legacy_root.join(&name);
@@ -484,7 +539,7 @@ pub fn is_vendored_package_root(package_root: &Utf8Path) -> bool {
     let Some(parent) = package_root.parent() else {
         return false;
     };
-    parent.file_name() == Some("vendor")
+    parent.file_name() == Some("vendored")
         && parent
             .parent()
             .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
@@ -495,21 +550,21 @@ pub fn is_vendored_package_root(package_root: &Utf8Path) -> bool {
 }
 
 pub fn is_canonical_package_root(package_root: &Utf8Path) -> bool {
-    // Packages live at `.ctx/traits/packages/<id>` since the layout move; the
-    // predicate matched `.ctx/traits/<id>` and so stopped recognizing them,
-    // which surfaced as `ctx traits build` refusing every native family with
-    // "not under a recognized package's source root" even though `init` had
-    // just created the package.
+    // Packages live at `.ctx/traits/authored/<id>` (0179, formerly
+    // `packages/`); the predicate matched `.ctx/traits/<id>` and so stopped
+    // recognizing them, which surfaced as `ctx traits build` refusing every
+    // native family with "not under a recognized package's source root" even
+    // though `init` had just created the package.
     //
-    // Both shapes are accepted: a checkout that predates the move keeps its
-    // flat `.ctx/traits/<id>` packages working, and dropping that arm made
-    // `package_root_for_manifest` stop recognizing `generated/` on those
-    // packages — which then resolved a package root INTO its own generated
-    // directory and broke lifecycle writes.
+    // Both shapes are accepted: a checkout that predates the P569 move keeps
+    // its flat `.ctx/traits/<id>` packages working, and dropping that arm
+    // made `package_root_for_manifest` stop recognizing `generated/` on
+    // those packages — which then resolved a package root INTO its own
+    // generated directory and broke lifecycle writes.
     let Some(parent) = package_root.parent() else {
         return false;
     };
-    if parent.file_name() == Some("packages") {
+    if parent.file_name() == Some("authored") {
         return parent
             .parent()
             .is_some_and(|traits_dir| traits_dir.file_name() == Some("traits"))
@@ -956,6 +1011,98 @@ pub(crate) fn validate_trait_id(trait_id: &str) -> Result<(), Error> {
             id: trait_id.to_string(),
             reason: "trait ID must be a normal path component".to_string(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod retired_layout_root_tests {
+    use super::*;
+
+    fn scratch_dir(name: &str) -> Utf8PathBuf {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is UTF-8")
+            .join(format!(
+                "ctx-retired-layout-roots-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(dir.as_std_path());
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir
+    }
+
+    #[test]
+    fn resolved_package_root_prefers_authored_over_the_retired_packages_dir() {
+        let repo_root = scratch_dir("resolved-package-root");
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/authored")).unwrap();
+        assert_eq!(
+            resolved_package_root(&repo_root),
+            repo_root.join(".ctx/traits/authored")
+        );
+    }
+
+    #[test]
+    fn refuse_retired_roots_is_ok_on_a_migrated_repo() {
+        let repo_root = scratch_dir("migrated-ok");
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/authored")).unwrap();
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/vendored")).unwrap();
+        assert!(refuse_retired_roots(&repo_root).is_ok());
+    }
+
+    #[test]
+    fn refuse_retired_roots_names_both_git_mv_commands() {
+        let repo_root = scratch_dir("both-retired");
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/packages")).unwrap();
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/vendor")).unwrap();
+        let err = refuse_retired_roots(&repo_root).expect_err("retired roots must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("git mv .ctx/traits/packages .ctx/traits/authored"),
+            "names the authored migration: {message}"
+        );
+        assert!(
+            message.contains("git mv .ctx/traits/vendor .ctx/traits/vendored"),
+            "names the vendored migration: {message}"
+        );
+    }
+
+    #[test]
+    fn refuse_retired_roots_reports_only_the_retired_dir_actually_present() {
+        let repo_root = scratch_dir("packages-only-retired");
+        std::fs::create_dir_all(repo_root.join(".ctx/traits/packages")).unwrap();
+        let err = refuse_retired_roots(&repo_root).expect_err("retired packages must refuse");
+        let message = err.to_string();
+        assert!(message.contains("authored"));
+        assert!(!message.contains("vendored"));
+    }
+
+    #[test]
+    fn is_canonical_package_root_matches_authored_not_the_retired_packages_name() {
+        assert!(is_canonical_package_root(Utf8Path::new(
+            "/repo/.ctx/traits/authored/implement"
+        )));
+        assert!(!is_canonical_package_root(Utf8Path::new(
+            "/repo/.ctx/traits/packages/implement"
+        )));
+    }
+
+    #[test]
+    fn is_vendored_package_root_matches_vendored_not_the_retired_vendor_name() {
+        assert!(is_vendored_package_root(Utf8Path::new(
+            "/repo/.ctx/traits/vendored/demo"
+        )));
+        assert!(!is_vendored_package_root(Utf8Path::new(
+            "/repo/.ctx/traits/vendor/demo"
+        )));
+    }
+
+    #[test]
+    fn legacy_flat_root_excludes_reserved_directory_names() {
+        let legacy_root = scratch_dir("legacy-flat-exclusions");
+        for reserved in ["authored", "vendored", "generated", "vendor", "packages"] {
+            std::fs::create_dir_all(legacy_root.join(reserved)).unwrap();
+        }
+        assert!(!legacy_root_holds_a_package(&legacy_root));
     }
 }
 

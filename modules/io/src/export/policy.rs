@@ -312,7 +312,8 @@ fn inside_traits_source(path: &Utf8Path) -> bool {
         .collect();
     components.windows(2).enumerate().any(|(index, window)| {
         matches!(window, [".agents", "traits"])
-            || matches!(window, [".ctx", "traits"]) && components.get(index + 2) != Some(&"vendor")
+            || matches!(window, [".ctx", "traits"])
+                && components.get(index + 2) != Some(&"vendored")
     })
 }
 

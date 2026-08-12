@@ -145,7 +145,7 @@ pub struct PackageLockEntry {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub path: String,
     /// Vendor directory path relative to the repo root
-    /// (`.ctx/traits/vendor/<alias>`).
+    /// (`.ctx/traits/vendored/<alias>`).
     pub vendored_path: String,
     /// Aggregate digest over every regular file's relative path and content
     /// under the vendored package (see
@@ -226,7 +226,7 @@ pub struct BaseLockEntry {
 /// package.
 ///
 /// A native family package (P530/P531; folded and shared via `path:` since
-/// P535, e.g. `.ctx/traits/packages/implement/`) contributes one entry per
+/// P535, e.g. `.ctx/traits/authored/implement/`) contributes one entry per
 /// declared variant, and every variant shares the same canonical `id` —
 /// only `variant`/`is_default_variant`/`aliases` and each entry's own
 /// `canonical_path` tell them apart. Resolution must therefore never key
@@ -277,7 +277,7 @@ package = "@scope/demo"
 requested = "^1.0.0"
 resolved-version = "1.2.0"
 integrity = "sha512-abc"
-vendored-path = ".ctx/traits/vendor/demo"
+vendored-path = ".ctx/traits/vendored/demo"
 tree-digest = "sha256:deadbeef"
 "#;
         let entry: PackageLockEntry = toml::from_str(toml).unwrap();
@@ -291,8 +291,8 @@ tree-digest = "sha256:deadbeef"
         let entry = PackageLockEntry {
             alias: "implement".to_string(),
             transport: PackageTransport::Path,
-            path: ".ctx/traits/packages/implement".to_string(),
-            vendored_path: ".ctx/traits/vendor/implement".to_string(),
+            path: ".ctx/traits/authored/implement".to_string(),
+            vendored_path: ".ctx/traits/vendored/implement".to_string(),
             tree_digest: "sha256:cafebabe".to_string(),
             ..Default::default()
         };
@@ -303,7 +303,7 @@ tree-digest = "sha256:deadbeef"
         );
         let decoded: PackageLockEntry = toml::from_str(&text).unwrap();
         assert_eq!(decoded.transport, PackageTransport::Path);
-        assert_eq!(decoded.identity(), "path:.ctx/traits/packages/implement");
+        assert_eq!(decoded.identity(), "path:.ctx/traits/authored/implement");
         assert_eq!(decoded.path, entry.path);
     }
 }

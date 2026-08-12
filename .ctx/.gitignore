@@ -2,7 +2,8 @@
 # vendor.toml, vendor.lock, and the packages themselves — is the committed
 # half and travels with the repo.
 traits/runtime.toml
-traits/vendor/
+traits/vendored/
+traits/generated/runtime.toml
 worktrees/
 config.ts
 config.toml

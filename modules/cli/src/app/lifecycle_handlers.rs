@@ -83,15 +83,15 @@ fn extract_package_id_from_path(path: &camino::Utf8Path) -> Option<&str> {
 
 /// The package id in a canonical-manifest path, under either package root.
 ///
-/// P569 moved packages from `.ctx/traits/<id>` to `.ctx/traits/packages/<id>`;
-/// both shapes are accepted so a checkout that predates the move can still be
-/// activated.
+/// P569 moved packages from `.ctx/traits/<id>` to `.ctx/traits/packages/<id>`
+/// (0179: `authored/<id>`); both shapes are accepted so a checkout that
+/// predates the move can still be activated.
 fn package_id_from_normals<'a>(normals: &[&'a str]) -> Option<&'a str> {
     let id = match normals {
         [
             ".ctx",
             "traits",
-            "packages",
+            "authored",
             id,
             "generated",
             "trait.toml" | "index.toml",

@@ -134,7 +134,7 @@ fn refine_apply_loop_exhaustion_writes_nothing_and_names_the_failing_rung() {
     // genuinely hold the last round's candidate text, not just be a stated
     // fact in the error message.
     let candidate_path = proj
-        .join(".ctx/traits/packages")
+        .join(".ctx/traits/authored")
         .join("refine-loop-exhaustion-fixture-candidate")
         .join("candidate.json");
     let candidate_contents = fs::read_to_string(&candidate_path).unwrap_or_else(|error| {

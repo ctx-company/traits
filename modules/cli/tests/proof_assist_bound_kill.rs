@@ -182,14 +182,14 @@ fn command_bound_kill_names_the_bound_and_preserves_the_candidate() {
         "the killed round's diagnostic must name the bound: {killed_round}"
     );
 
-    let scratch_package = proj.join(format!(".ctx/traits/packages/{trait_id}-candidate"));
+    let scratch_package = proj.join(format!(".ctx/traits/authored/{trait_id}-candidate"));
     assert!(
         scratch_package.join("source/index.ts").is_file(),
         "the scratch candidate must be preserved at {} after the kill",
         scratch_package.display()
     );
 
-    let target_package = proj.join(format!(".ctx/traits/packages/{trait_id}"));
+    let target_package = proj.join(format!(".ctx/traits/authored/{trait_id}"));
     assert!(
         !target_package.exists(),
         "a killed run must never write the target package at {}",

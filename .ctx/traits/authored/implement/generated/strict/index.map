@@ -1,0 +1,342 @@
+{
+  "agent:clerk": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 45,
+    "end": 45
+  },
+  "agent:scribe": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 21,
+    "end": 21
+  },
+  "agent:smart-1": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:smart-2": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:worker": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 11,
+    "end": 11
+  },
+  "port:commit-report": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 176,
+    "end": 176
+  },
+  "port:leftovers": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 193,
+    "end": 193
+  },
+  "port:park-report": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 212,
+    "end": 212
+  },
+  "port:task": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 46,
+    "end": 46
+  },
+  "prompt:building-produce": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 81,
+    "end": 81
+  },
+  "prompt:building-review-1": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 97,
+    "end": 97
+  },
+  "prompt:building-review-2": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 108,
+    "end": 108
+  },
+  "prompt:copy-the-task-contract": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 271,
+    "end": 271
+  },
+  "prompt:planning-produce": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 57,
+    "end": 57
+  },
+  "prompt:planning-review": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 68,
+    "end": 68
+  },
+  "prompt:shipping-message": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 206,
+    "end": 206
+  },
+  "resource:task-board": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 60,
+    "end": 60
+  },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 104,
+    "end": 104
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 84,
+    "end": 84
+  },
+  "schema:decision": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 21,
+    "end": 21
+  },
+  "schema:deviation-report": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 160,
+    "end": 160
+  },
+  "schema:leftover": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 252,
+    "end": 252
+  },
+  "schema:owner-item": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 217,
+    "end": 217
+  },
+  "schema:repo-gates-result": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 132,
+    "end": 132
+  },
+  "schema:review-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 283,
+    "end": 283
+  },
+  "schema:reviewer-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 18,
+    "end": 18
+  },
+  "sequence:building-body/building-produce": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 161,
+    "end": 161
+  },
+  "sequence:building-body/building-review-1": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 176,
+    "end": 176
+  },
+  "sequence:building-body/building-review-2": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 181,
+    "end": 181
+  },
+  "sequence:building-body/building-seal": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 189,
+    "end": 189
+  },
+  "sequence:building-body/building-unseal": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 159,
+    "end": 159
+  },
+  "sequence:building-body/capture-diff": {
+    "file": "packages/toolkit/src/sequence/evidence.ts",
+    "start": 35,
+    "end": 35
+  },
+  "sequence:building-body/park-report-clear": {
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 42,
+    "end": 42
+  },
+  "sequence:building-body/park-report-record-1": {
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 47,
+    "end": 47
+  },
+  "sequence:building-body/park-report-record-2": {
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 47,
+    "end": 47
+  },
+  "sequence:building-body/repo-gates": {
+    "file": "packages/toolkit/src/sequence/evidence.ts",
+    "start": 34,
+    "end": 34
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
+    "file": "packages/agents/src/process.ts",
+    "start": 92,
+    "end": 92
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-message": {
+    "file": "packages/agents/src/process.ts",
+    "start": 65,
+    "end": 65
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-stage": {
+    "file": "packages/agents/src/process.ts",
+    "start": 78,
+    "end": 78
+  },
+  "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-unstage-runtime": {
+    "file": "packages/agents/src/process.ts",
+    "start": 83,
+    "end": 83
+  },
+  "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then/park-report-append-1": {
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 48,
+    "end": 48
+  },
+  "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then/park-report-append-2": {
+    "file": "packages/toolkit/src/sequence/park-report.ts",
+    "start": 48,
+    "end": 48
+  },
+  "sequence:planning-body/planning-produce": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 139,
+    "end": 139
+  },
+  "sequence:planning-body/planning-review": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 145,
+    "end": 145
+  },
+  "sequence:procedure/building": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 156,
+    "end": 156
+  },
+  "sequence:procedure/copy-the-task-contract": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 270,
+    "end": 270
+  },
+  "sequence:procedure/planning": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 136,
+    "end": 136
+  },
+  "sequence:procedure/shipping-maybe-commit": {
+    "file": "packages/agents/src/process.ts",
+    "start": 64,
+    "end": 64
+  },
+  "sequence:procedure/shipping-status": {
+    "file": "packages/agents/src/process.ts",
+    "start": 58,
+    "end": 58
+  },
+  "signal:gate-timed-out": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 170,
+    "end": 170
+  },
+  "slot:building-sealed": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 154,
+    "end": 154
+  },
+  "slot:commit-output": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 112,
+    "end": 112
+  },
+  "slot:deviation-report": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 44,
+    "end": 44
+  },
+  "slot:draft": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 75,
+    "end": 75
+  },
+  "slot:leftovers": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 86,
+    "end": 86
+  },
+  "slot:park-report": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 106,
+    "end": 106
+  },
+  "slot:planning-verdict": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 130,
+    "end": 130
+  },
+  "slot:repo-gates-passed": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 128,
+    "end": 128
+  },
+  "slot:review-diff": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 116,
+    "end": 116
+  },
+  "slot:review-verdict-1": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 54,
+    "end": 54
+  },
+  "slot:review-verdict-2": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 55,
+    "end": 55
+  },
+  "slot:shipping-message": {
+    "file": "packages/agents/src/process.ts",
+    "start": 44,
+    "end": 44
+  },
+  "slot:shipping-stage-output": {
+    "file": "packages/agents/src/process.ts",
+    "start": 48,
+    "end": 48
+  },
+  "slot:shipping-status": {
+    "file": "packages/agents/src/process.ts",
+    "start": 37,
+    "end": 37
+  },
+  "slot:shipping-unstage-output": {
+    "file": "packages/agents/src/process.ts",
+    "start": 52,
+    "end": 52
+  },
+  "slot:task-brief": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 69,
+    "end": 69
+  },
+  "slot:work-summary": {
+    "file": ".ctx/traits/authored/implement/source/sequence/family.ts",
+    "start": 80,
+    "end": 80
+  },
+  "trait:implement": {
+    "file": ".ctx/traits/authored/implement/source/variants/strict.ts",
+    "start": 224,
+    "end": 224
+  }
+}

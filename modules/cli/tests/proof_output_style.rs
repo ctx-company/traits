@@ -278,7 +278,7 @@ fn build_trait_fixture(label: &str, trait_id: &str) -> BuiltTraitFixture {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &repo,
         &home,
@@ -337,7 +337,7 @@ fn explain_default_output_matches_the_panel_registry_shape() {
     let trait_toml = fixture
         .repo
         .join(format!(
-            ".ctx/traits/packages/{}/generated/index.toml",
+            ".ctx/traits/authored/{}/generated/index.toml",
             fixture.trait_id
         ))
         .to_string_lossy()
@@ -412,7 +412,7 @@ fn build_default_output_matches_the_panel_registry_shape() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/fixture-build-panel/source/index.ts",
+            ".ctx/traits/authored/fixture-build-panel/source/index.ts",
         ],
         &repo,
         &home,

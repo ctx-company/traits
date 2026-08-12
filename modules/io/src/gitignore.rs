@@ -4,7 +4,7 @@
 //! `.ctx/` inside a repository checkout mixes committed project source
 //! (`.ctx/traits/<id>/`, `.ctx/traits.{toml,lock}`) with machine-local and
 //! generated content (`.ctx/config.toml`, `.ctx/harness.toml`,
-//! `.ctx/worktrees/`, `.ctx/traits/vendor/`, and the transitional pre-P426
+//! `.ctx/worktrees/`, `.ctx/traits/vendored/`, and the transitional pre-P426
 //! `.ctx/{runs,debug,cache}` families). A committed nested `.ctx/.gitignore`
 //! makes that boundary self-enforcing without ever touching the repository's
 //! root `.gitignore`, which this module never reads or writes.
@@ -55,7 +55,11 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
     // are deliberately NOT listed here.
     "traits/runtime.toml",
     "harness.toml",
-    "traits/vendor/",
+    "traits/vendored/",
+    // 0178 tier: the compiler-written runtime artifact is machine-local, like
+    // `traits/runtime.toml` above. 0177's sibling `traits/generated/config.toml`
+    // is the COMMITTED tier and is deliberately NOT listed here.
+    "traits/generated/runtime.toml",
     "runs/",
     "debug/",
     "cache/",

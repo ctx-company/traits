@@ -553,11 +553,11 @@ fn setup_fixture(
     require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{id}/trait.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/trait.toml")),
         &trait_manifest(id),
     );
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{id}/generated/index.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/generated/index.toml")),
         trait_toml,
     );
     write_fixture_ctx_toml(&repo);

@@ -66,7 +66,7 @@ fn build_publishes_native_family_variants_and_manifest_table() {
         utf8(&init).1
     );
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source())
         .unwrap_or_else(|error| panic!("cannot write {}: {error}", source_path.display()));
 
@@ -74,7 +74,7 @@ fn build_publishes_native_family_variants_and_manifest_table() {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -85,7 +85,7 @@ fn build_publishes_native_family_variants_and_manifest_table() {
         "expected `ctx traits build` to publish a native family\nstdout: {stdout}\nstderr: {stderr}"
     );
 
-    let package_root = proj.join(format!(".ctx/traits/packages/{trait_id}"));
+    let package_root = proj.join(format!(".ctx/traits/authored/{trait_id}"));
     for variant_name in ["default", "quick"] {
         let variant_toml = package_root.join(format!("generated/{variant_name}/index.toml"));
         let variant_map = package_root.join(format!("generated/{variant_name}/index.map"));
@@ -169,14 +169,14 @@ fn building_a_variant_name_republishes_its_complete_native_family() {
             .status
             .success()
     );
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source()).unwrap();
     assert!(
         run_ctx(
             &[
                 "traits",
                 "build",
-                ".ctx/traits/packages/family-fixture/source/index.ts",
+                ".ctx/traits/authored/family-fixture/source/index.ts",
             ],
             &proj,
             &home,
@@ -204,7 +204,7 @@ fn building_a_variant_name_republishes_its_complete_native_family() {
     );
     for variant_name in ["default", "quick"] {
         let variant = fs::read_to_string(proj.join(format!(
-            ".ctx/traits/packages/{trait_id}/generated/{variant_name}/index.toml"
+            ".ctx/traits/authored/{trait_id}/generated/{variant_name}/index.toml"
         )))
         .unwrap();
         assert!(
@@ -227,7 +227,7 @@ fn build_refuses_native_family_with_no_package_manifest() {
     symlink_node_modules(&proj);
 
     let trait_id = "family-fixture";
-    let source_dir = proj.join(format!(".ctx/traits/packages/{trait_id}/source"));
+    let source_dir = proj.join(format!(".ctx/traits/authored/{trait_id}/source"));
     fs::create_dir_all(&source_dir).unwrap();
     fs::write(source_dir.join("index.ts"), family_fixture_source()).unwrap();
 
@@ -235,7 +235,7 @@ fn build_refuses_native_family_with_no_package_manifest() {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -246,7 +246,7 @@ fn build_refuses_native_family_with_no_package_manifest() {
         "expected `ctx traits build` to refuse a family with no package manifest\nstdout: {stdout}\nstderr: {stderr}"
     );
 
-    let package_root = proj.join(format!(".ctx/traits/packages/{trait_id}"));
+    let package_root = proj.join(format!(".ctx/traits/authored/{trait_id}"));
     assert!(
         !package_root.join("trait.toml").exists(),
         "build must not create a [family]-only trait.toml on refusal"
@@ -279,14 +279,14 @@ fn build_refuses_native_family_with_mismatched_package_identity() {
         utf8(&init).1
     );
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{package_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{package_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source()).unwrap();
 
     let build = run_ctx(
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{package_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{package_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -297,7 +297,7 @@ fn build_refuses_native_family_with_mismatched_package_identity() {
         "expected `ctx traits build` to refuse a family/manifest identity mismatch\nstdout: {stdout}\nstderr: {stderr}"
     );
 
-    let package_root = proj.join(format!(".ctx/traits/packages/{package_id}"));
+    let package_root = proj.join(format!(".ctx/traits/authored/{package_id}"));
     assert!(
         !package_root.join("generated").exists(),
         "build must not write any variant output on an identity-mismatch refusal"
@@ -332,13 +332,13 @@ fn default_variant_check_covers_complete_family_drift() {
     symlink_node_modules(&proj);
     let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
     assert!(init.status.success(), "init failed: {}", utf8(&init).1);
-    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    let source = proj.join(".ctx/traits/authored/family-fixture/source/index.ts");
     fs::write(&source, family_fixture_source()).unwrap();
     let build = run_ctx(
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,
@@ -346,7 +346,7 @@ fn default_variant_check_covers_complete_family_drift() {
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
     assert_family_check(&proj, &home, true, "baseline");
 
-    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let root = proj.join(".ctx/traits/authored/family-fixture");
     let manifest = root.join("trait.toml");
     let manifest_text = fs::read_to_string(&manifest).unwrap();
     let with_run_config = manifest_text.replace(
@@ -364,7 +364,7 @@ fn default_variant_check_covers_complete_family_drift() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,
@@ -439,20 +439,20 @@ fn trait_toml_budget_survives_rebuild_and_retired_runtime_toml_refuses() {
     symlink_node_modules(&proj);
     let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
     assert!(init.status.success(), "init failed: {}", utf8(&init).1);
-    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    let source = proj.join(".ctx/traits/authored/family-fixture/source/index.ts");
     fs::write(&source, family_fixture_source()).unwrap();
     let build = run_ctx(
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,
     );
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
 
-    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let root = proj.join(".ctx/traits/authored/family-fixture");
     let manifest = root.join("trait.toml");
     let budget_sections = "\n[budget]\nmax-frames = 10\nframe-seconds = 1200\n\n\
                            [variant.quick.budget]\nframe-seconds = 900\n";
@@ -462,7 +462,7 @@ fn trait_toml_budget_survives_rebuild_and_retired_runtime_toml_refuses() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,
@@ -525,20 +525,20 @@ fn build_generates_and_owns_package_json() {
     symlink_node_modules(&proj);
     let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
     assert!(init.status.success(), "init failed: {}", utf8(&init).1);
-    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
+    let source = proj.join(".ctx/traits/authored/family-fixture/source/index.ts");
     fs::write(&source, family_fixture_source()).unwrap();
     let build = run_ctx(
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,
     );
     assert!(build.status.success(), "build failed: {}", utf8(&build).1);
 
-    let root = proj.join(".ctx/traits/packages/family-fixture");
+    let root = proj.join(".ctx/traits/authored/family-fixture");
     let manifest_text = fs::read_to_string(root.join("trait.toml")).unwrap();
     let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
     let manifest_version = manifest["package"]["version"].as_str().unwrap().to_string();
@@ -577,7 +577,7 @@ fn build_generates_and_owns_package_json() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
+            ".ctx/traits/authored/family-fixture/source/index.ts",
         ],
         &proj,
         &home,

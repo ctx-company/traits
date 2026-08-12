@@ -172,7 +172,7 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
         "failing-rung must match the last round's rung"
     );
 
-    let target_package = proj.join(format!(".ctx/traits/packages/{trait_id}"));
+    let target_package = proj.join(format!(".ctx/traits/authored/{trait_id}"));
     assert!(
         !target_package.exists(),
         "a non-converging run must never write the target package at {}",
@@ -180,12 +180,12 @@ fn generate_loop_exhaustion_writes_no_package_and_preserves_scratch() {
     );
     assert!(
         !proj
-            .join(format!(".ctx/traits/packages/{trait_id}/trait.lock"))
+            .join(format!(".ctx/traits/authored/{trait_id}/trait.lock"))
             .exists(),
         "a non-converging run must never write trait.lock"
     );
 
-    let scratch_package = proj.join(format!(".ctx/traits/packages/{trait_id}-candidate"));
+    let scratch_package = proj.join(format!(".ctx/traits/authored/{trait_id}-candidate"));
     assert!(
         scratch_package.join("source/index.ts").is_file(),
         "the scratch candidate must be preserved at {} for a non-converging run",

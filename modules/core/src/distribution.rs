@@ -638,11 +638,11 @@ mod install_spec_tests {
     #[test]
     fn parse_install_spec_decodes_a_relative_path() {
         let InstallSpec::Path(spec) =
-            parse_install_spec("path:.ctx/traits/packages/implement").unwrap()
+            parse_install_spec("path:.ctx/traits/authored/implement").unwrap()
         else {
             panic!("expected path variant");
         };
-        assert_eq!(spec.relative_path, ".ctx/traits/packages/implement");
+        assert_eq!(spec.relative_path, ".ctx/traits/authored/implement");
         assert_eq!(spec.default_alias, "implement");
     }
 
@@ -658,13 +658,13 @@ mod install_spec_tests {
     #[test]
     fn parse_install_spec_preserves_parent_dir_traversal_for_sibling_repos() {
         let InstallSpec::Path(spec) =
-            parse_install_spec("path:../ctx-gate/.ctx/traits/packages/refactor").unwrap()
+            parse_install_spec("path:../ctx-gate/.ctx/traits/authored/refactor").unwrap()
         else {
             panic!("expected path variant");
         };
         assert_eq!(
             spec.relative_path,
-            "../ctx-gate/.ctx/traits/packages/refactor"
+            "../ctx-gate/.ctx/traits/authored/refactor"
         );
         assert_eq!(spec.default_alias, "refactor");
     }
@@ -742,13 +742,13 @@ mod install_spec_tests {
     #[test]
     fn parse_install_spec_still_accepts_slash_separated_paths_with_parent_traversal() {
         let InstallSpec::Path(spec) =
-            parse_install_spec("path:../sibling-repo/.ctx/traits/packages/implement").unwrap()
+            parse_install_spec("path:../sibling-repo/.ctx/traits/authored/implement").unwrap()
         else {
             panic!("expected path variant");
         };
         assert_eq!(
             spec.relative_path,
-            "../sibling-repo/.ctx/traits/packages/implement"
+            "../sibling-repo/.ctx/traits/authored/implement"
         );
     }
 }

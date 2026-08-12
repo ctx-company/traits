@@ -1,0 +1,97 @@
+{
+  "agent:scribe": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 9,
+    "end": 9
+  },
+  "agent:smart-1": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 5,
+    "end": 5
+  },
+  "port:task": {
+    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "start": 3,
+    "end": 3
+  },
+  "port:written-files": {
+    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "start": 13,
+    "end": 13
+  },
+  "prompt:critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 65,
+    "end": 65
+  },
+  "prompt:refine-task": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 28,
+    "end": 28
+  },
+  "prompt:revise": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 76,
+    "end": 76
+  },
+  "prompt:split": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 49,
+    "end": 49
+  },
+  "prompt:write": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 86,
+    "end": 86
+  },
+  "sequence:procedure/critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 62,
+    "end": 62
+  },
+  "sequence:procedure/refine-task": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 25,
+    "end": 25
+  },
+  "sequence:procedure/revise": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 73,
+    "end": 73
+  },
+  "sequence:procedure/split": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 46,
+    "end": 46
+  },
+  "sequence:procedure/write": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 83,
+    "end": 83
+  },
+  "slot:critique": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 19,
+    "end": 19
+  },
+  "slot:grounding": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 14,
+    "end": 14
+  },
+  "slot:result": {
+    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "start": 12,
+    "end": 12
+  },
+  "slot:task-files": {
+    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "start": 7,
+    "end": 7
+  },
+  "trait:plan": {
+    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
+    "start": 96,
+    "end": 96
+  }
+}

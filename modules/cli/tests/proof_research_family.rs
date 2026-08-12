@@ -110,7 +110,7 @@ session-mode = "per-frame"
 }
 
 /// Minimal fixture family: `topic`/`output-dir` input ports, the exact
-/// topic-slug shell derivation `.ctx/traits/packages/research/source/
+/// topic-slug shell derivation `.ctx/traits/authored/research/source/
 /// data.ts`'s `deriveTopicSlugStep` authors, a `printf`-only report-path
 /// derivation, a bounded typed-plan cardinality-gated loop
 /// (`condition.count(stream-plan).equals(2)` — 0153's deterministic gate,
@@ -374,11 +374,11 @@ fn setup_fixture(
     support::require_success("`ctx traits init`", &["traits", "init"], &repo, &home);
 
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{id}/trait.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/trait.toml")),
         &trait_manifest(id),
     );
     write_file(
-        &repo.join(format!(".ctx/traits/packages/{id}/generated/index.toml")),
+        &repo.join(format!(".ctx/traits/authored/{id}/generated/index.toml")),
         trait_toml,
     );
     write_fixture_ctx_toml(&repo);

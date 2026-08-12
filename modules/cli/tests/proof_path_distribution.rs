@@ -24,7 +24,7 @@ fn trait_doc(id: &str, summary: &str) -> String {
 
 /// A native family variant's canonical document (P535 fix): unlike
 /// `trait_doc`, every variant of a real folded family package (e.g.
-/// `.ctx/traits/packages/implement/`) shares the SAME `id` and is told
+/// `.ctx/traits/authored/implement/`) shares the SAME `id` and is told
 /// apart only by `variant` — never by encoding the variant name into the id
 /// itself.
 fn family_variant_trait_doc(id: &str, variant: &str, summary: &str) -> String {
@@ -158,7 +158,7 @@ fn path_dependency_installs_and_resolves_without_leaking_absolute_paths() {
         "committed lock leaked an absolute temporary path: {lock_text}"
     );
 
-    let vendored = consumer.join(".ctx/traits/vendor/demo/generated/index.toml");
+    let vendored = consumer.join(".ctx/traits/vendored/demo/generated/index.toml");
     assert!(vendored.is_file(), "vendored trait file was not written");
 
     let list_stdout = require_success(
@@ -204,7 +204,7 @@ fn ordinary_reconcile_ignores_producer_rebuild_but_explicit_update_accepts_it() 
         &consumer,
         &home,
     );
-    let vendored = consumer.join(".ctx/traits/vendor/demo/generated/index.toml");
+    let vendored = consumer.join(".ctx/traits/vendored/demo/generated/index.toml");
     let vendored_before = fs::read_to_string(&vendored).unwrap();
     assert!(vendored_before.contains("v1"));
 
@@ -244,7 +244,7 @@ fn ordinary_reconcile_ignores_producer_rebuild_but_explicit_update_accepts_it() 
     );
 }
 
-/// Installing the folded `.ctx/traits/packages/implement/`-shaped native
+/// Installing the folded `.ctx/traits/authored/implement/`-shaped native
 /// family package by relative path vendors every declared variant, not just
 /// one — and every variant shares one `id`, exactly the real folded packages'
 /// shape (differentiated by `variant`, never by encoding the variant name into
@@ -326,7 +326,7 @@ fn path_dependency_installs_every_family_variant() {
         id_occurrences >= 2,
         "install report is missing one of the two family-demo variant entries: {add_stdout}"
     );
-    let vendored_root = consumer.join(".ctx/traits/vendor/family-install");
+    let vendored_root = consumer.join(".ctx/traits/vendored/family-install");
     for path in [
         "trait.toml",
         "generated/default/index.toml",

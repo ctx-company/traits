@@ -65,21 +65,21 @@ fn init_and_build(
     assert!(init.status.success(), "{}", utf8(&init).1);
     if let Some(package_json) = package_json {
         fs::write(
-            proj.join(format!(".ctx/traits/packages/{trait_id}/package.json")),
+            proj.join(format!(".ctx/traits/authored/{trait_id}/package.json")),
             package_json,
         )
         .unwrap();
     }
     fs::write(
-        proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts")),
+        proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts")),
         fixture_source(data_specifier),
     )
     .unwrap();
-    fs::create_dir_all(proj.join(format!(".ctx/traits/packages/{trait_id}/source/shared")))
+    fs::create_dir_all(proj.join(format!(".ctx/traits/authored/{trait_id}/source/shared")))
         .unwrap();
     fs::write(
         proj.join(format!(
-            ".ctx/traits/packages/{trait_id}/source/shared/data.ts"
+            ".ctx/traits/authored/{trait_id}/source/shared/data.ts"
         )),
         DATA_TS,
     )
@@ -88,7 +88,7 @@ fn init_and_build(
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         proj,
         home,
@@ -123,11 +123,11 @@ fn alias_import_builds_byte_identical_to_relative_import() {
     );
 
     let relative_canonical = fs::read(relative_proj.join(format!(
-        ".ctx/traits/packages/{trait_id}/generated/index.toml"
+        ".ctx/traits/authored/{trait_id}/generated/index.toml"
     )))
     .unwrap();
     let alias_canonical = fs::read(alias_proj.join(format!(
-        ".ctx/traits/packages/{trait_id}/generated/index.toml"
+        ".ctx/traits/authored/{trait_id}/generated/index.toml"
     )))
     .unwrap();
     assert_eq!(
@@ -149,12 +149,12 @@ fn alias_import_to_missing_file_fails_build_with_resolved_path() {
     let init = run_ctx(&["traits", "init", trait_id], &proj, &home);
     assert!(init.status.success(), "{}", utf8(&init).1);
     fs::write(
-        proj.join(format!(".ctx/traits/packages/{trait_id}/package.json")),
+        proj.join(format!(".ctx/traits/authored/{trait_id}/package.json")),
         PACKAGE_JSON_WITH_ALIAS,
     )
     .unwrap();
     fs::write(
-        proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts")),
+        proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts")),
         fixture_source("#trait/missing.ts"),
     )
     .unwrap();
@@ -163,7 +163,7 @@ fn alias_import_to_missing_file_fails_build_with_resolved_path() {
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -175,7 +175,7 @@ fn alias_import_to_missing_file_fails_build_with_resolved_path() {
     );
     let combined = format!("{stdout}{stderr}");
     assert!(
-        combined.contains(&format!("packages/{trait_id}/source/missing.ts")),
+        combined.contains(&format!("authored/{trait_id}/source/missing.ts")),
         "expected the resolved missing-file path in the error: {combined}"
     );
 }

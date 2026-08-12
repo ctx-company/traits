@@ -1,0 +1,127 @@
+{
+  "agent:reviewer": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "port:range": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 4,
+    "end": 4
+  },
+  "port:review-document-report": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 53,
+    "end": 53
+  },
+  "port:review-verdict-report": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 47,
+    "end": 47
+  },
+  "port:tree-status-report": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 59,
+    "end": 59
+  },
+  "prompt:review-the-range": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 24,
+    "end": 24
+  },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 104,
+    "end": 104
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 84,
+    "end": 84
+  },
+  "schema:owner-item": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 217,
+    "end": 217
+  },
+  "schema:review-tree-status": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 37,
+    "end": 37
+  },
+  "schema:review-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 283,
+    "end": 283
+  },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-commit-log": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 56,
+    "end": 56
+  },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/capture-the-diff-inventory": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 52,
+    "end": 52
+  },
+  "sequence:ctx-branch-arm-p-14-range-resolved-then/diff-non-empty": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 61,
+    "end": 61
+  },
+  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/assert-the-reviewed-tree-stayed-clean": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 70,
+    "end": 70
+  },
+  "sequence:ctx-branch-arm-s-39-ctx-branch-arm-p-14-range-resolved-then-14-diff-non-empty-then/review-the-range": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 62,
+    "end": 62
+  },
+  "sequence:procedure/range-resolved": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 51,
+    "end": 51
+  },
+  "sequence:procedure/resolve-the-range": {
+    "file": ".ctx/traits/authored/review/source/variants/default.ts",
+    "start": 46,
+    "end": 46
+  },
+  "slot:commit-log": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 19,
+    "end": 19
+  },
+  "slot:diff-stat": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 14,
+    "end": 14
+  },
+  "slot:range-resolved": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 10,
+    "end": 10
+  },
+  "slot:review-document": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 30,
+    "end": 30
+  },
+  "slot:review-verdict": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 24,
+    "end": 24
+  },
+  "slot:tree-status": {
+    "file": ".ctx/traits/authored/review/source/data.ts",
+    "start": 41,
+    "end": 41
+  },
+  "trait:review": {
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
+  }
+}

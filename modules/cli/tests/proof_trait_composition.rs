@@ -92,13 +92,13 @@ fn write_locked_dependency_fixture(dep_root: &std::path::Path, label: &str) {
         "`ctx traits init fixture-dep` for the dependency fixture failed: {}",
         utf8(&init).1
     );
-    let dep_source_path = dep_proj.join(".ctx/traits/packages/fixture-dep/source/index.ts");
+    let dep_source_path = dep_proj.join(".ctx/traits/authored/fixture-dep/source/index.ts");
     fs::write(&dep_source_path, dep_trait_source()).unwrap();
     let build = run_ctx(
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/fixture-dep/source/index.ts",
+            ".ctx/traits/authored/fixture-dep/source/index.ts",
         ],
         &dep_proj,
         &dep_home,
@@ -109,7 +109,7 @@ fn write_locked_dependency_fixture(dep_root: &std::path::Path, label: &str) {
         "building the dependency fixture's own trait package failed\nstdout: {stdout}\nstderr: {stderr}"
     );
 
-    let dep_package_root = dep_proj.join(".ctx/traits/packages/fixture-dep");
+    let dep_package_root = dep_proj.join(".ctx/traits/authored/fixture-dep");
     fs::create_dir_all(dep_root).unwrap();
     copy_dir_recursive(&dep_package_root, dep_root);
     fs::write(dep_root.join("package.json"), DEP_PACKAGE_JSON).unwrap();
@@ -194,14 +194,14 @@ fn family_variant_canonicals_carry_the_derived_dependency_stamp() {
         utf8(&init).1
     );
 
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, family_fixture_source()).unwrap();
 
     let build = run_ctx(
         &[
             "traits",
             "build",
-            &format!(".ctx/traits/packages/{trait_id}/source/index.ts"),
+            &format!(".ctx/traits/authored/{trait_id}/source/index.ts"),
         ],
         &proj,
         &home,
@@ -214,7 +214,7 @@ fn family_variant_canonicals_carry_the_derived_dependency_stamp() {
 
     for variant in ["default", "quick"] {
         let canonical_path = proj.join(format!(
-            ".ctx/traits/packages/{trait_id}/generated/{variant}/index.toml"
+            ".ctx/traits/authored/{trait_id}/generated/{variant}/index.toml"
         ));
         let canonical = fs::read_to_string(&canonical_path)
             .unwrap_or_else(|error| panic!("reading {canonical_path:?}: {error}"));
@@ -296,7 +296,7 @@ fn scaffold_single_dep_project(
         "`ctx traits init {trait_id}` failed: {}",
         utf8(&init).1
     );
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, single_fixture_source()).unwrap();
 
     (proj, home, dep_root)
@@ -310,7 +310,7 @@ fn build_single_dep_fixture(
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/single-dep-fixture/source/index.ts",
+            ".ctx/traits/authored/single-dep-fixture/source/index.ts",
         ],
         proj,
         home,
@@ -329,7 +329,7 @@ fn first_build_writes_a_dependency_lock_pin() {
         build.status.success(),
         "build failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    let lock_path = proj.join(".ctx/traits/packages/single-dep-fixture/trait.lock");
+    let lock_path = proj.join(".ctx/traits/authored/single-dep-fixture/trait.lock");
     let lock = fs::read_to_string(&lock_path)
         .unwrap_or_else(|error| panic!("reading {lock_path:?}: {error}"));
     assert!(
@@ -379,7 +379,7 @@ fn tampered_dependency_content_fails_rebuild_until_relocked() {
         &[
             "traits",
             "build",
-            ".ctx/traits/packages/single-dep-fixture/source/index.ts",
+            ".ctx/traits/authored/single-dep-fixture/source/index.ts",
             "--relock",
         ],
         &proj,
@@ -478,7 +478,7 @@ fn tampered_shipped_canonical_fails_locked_check_until_rebuilt() {
         utf8(&build).1
     );
 
-    let canonical_path = proj.join(".ctx/traits/packages/single-dep-fixture/generated/index.toml");
+    let canonical_path = proj.join(".ctx/traits/authored/single-dep-fixture/generated/index.toml");
     let canonical = fs::read_to_string(&canonical_path).unwrap();
 
     // Tamper the shipped canonical without touching source/ at all.
@@ -496,7 +496,7 @@ fn tampered_shipped_canonical_fails_locked_check_until_rebuilt() {
             "traits",
             "check",
             "--file",
-            ".ctx/traits/packages/single-dep-fixture/generated/index.toml",
+            ".ctx/traits/authored/single-dep-fixture/generated/index.toml",
             "--locked",
             "--json",
         ],
@@ -534,7 +534,7 @@ fn tampered_shipped_canonical_fails_locked_check_until_rebuilt() {
             "traits",
             "check",
             "--file",
-            ".ctx/traits/packages/single-dep-fixture/generated/index.toml",
+            ".ctx/traits/authored/single-dep-fixture/generated/index.toml",
             "--locked",
         ],
         &proj,
@@ -587,7 +587,7 @@ fn local_path_symlinked_dependency_yields_an_identical_canonical_modulo_source()
         "`ctx traits init {trait_id}` failed: {}",
         utf8(&init).1
     );
-    let source_path = proj.join(format!(".ctx/traits/packages/{trait_id}/source/index.ts"));
+    let source_path = proj.join(format!(".ctx/traits/authored/{trait_id}/source/index.ts"));
     fs::write(&source_path, single_fixture_source()).unwrap();
 
     let build = build_single_dep_fixture(&proj, &home);
@@ -598,7 +598,7 @@ fn local_path_symlinked_dependency_yields_an_identical_canonical_modulo_source()
     );
 
     let canonical_path = proj.join(format!(
-        ".ctx/traits/packages/{trait_id}/generated/index.toml"
+        ".ctx/traits/authored/{trait_id}/generated/index.toml"
     ));
     let canonical = fs::read_to_string(&canonical_path).unwrap();
     assert!(
@@ -633,7 +633,7 @@ fn local_path_symlinked_dependency_yields_an_identical_canonical_modulo_source()
         "npm-shape build over the same consumer fixture failed\nstdout: {npm_stdout}\nstderr: {npm_stderr}"
     );
     let npm_canonical_path = npm_proj.join(format!(
-        ".ctx/traits/packages/{trait_id}/generated/index.toml"
+        ".ctx/traits/authored/{trait_id}/generated/index.toml"
     ));
     let npm_canonical = fs::read_to_string(&npm_canonical_path).unwrap();
 
