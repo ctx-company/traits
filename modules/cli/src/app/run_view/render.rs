@@ -913,10 +913,11 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
             if !ok && let Some(code) = exit_code {
                 tail.push_str(&format!(" (exit {code})"));
             }
-            if let Some(elapsed) = step.elapsed {
-                tail.push_str(" \u{b7} ");
-                tail.push_str(&tui::elapsed_text(elapsed));
-            }
+            // A check always shows a duration: one that finished inside a
+            // single drive call never gets a measured interval, and that
+            // reads as instant — 00:00:00 — not as unknown.
+            tail.push_str(" \u{b7} ");
+            tail.push_str(&tui::elapsed_text(step.elapsed.unwrap_or_default()));
             (
                 tail,
                 if ok {
@@ -942,10 +943,10 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
             if !succeeded && let Some(code) = exit_code {
                 tail.push_str(&format!(" (exit {code})"));
             }
-            if let Some(elapsed) = step.elapsed {
-                tail.push_str(" \u{b7} ");
-                tail.push_str(&tui::elapsed_text(elapsed));
-            }
+            // Same contract as the check arm: an unmeasured command is an
+            // instant one, and instant is 00:00:00, never a missing field.
+            tail.push_str(" \u{b7} ");
+            tail.push_str(&tui::elapsed_text(step.elapsed.unwrap_or_default()));
             (
                 tail,
                 if succeeded {
@@ -957,10 +958,8 @@ pub(super) fn story_row_line(step: &HistoryStep) -> EventRow {
         }
         (_, Some(ctx_traits_core::procedure::run::PlannedSequenceKind::Command), None) => {
             let mut tail = step.label.clone();
-            if let Some(elapsed) = step.elapsed {
-                tail.push_str(" \u{b7} ");
-                tail.push_str(&tui::elapsed_text(elapsed));
-            }
+            tail.push_str(" \u{b7} ");
+            tail.push_str(&tui::elapsed_text(step.elapsed.unwrap_or_default()));
             (tail, tui::Tone::Muted)
         }
         (Some(summary), _, _) => (format!("{}: {}", step.label, summary), tui::Tone::Default),
@@ -1923,6 +1922,22 @@ mod tests {
         };
         let rendered = story_row_line(&command);
         assert_eq!(rendered.tail, "command \u{b7} 00:00:05");
+
+        // An instantly-completing command never gets a measured interval;
+        // its history row still shows a duration — zero, not absent.
+        let instant = story_row_line(&HistoryStep {
+            label: "command".to_string(),
+            kind: Some(PlannedSequenceKind::Command),
+            outcome: Some(HistoryOutcome::Command {
+                succeeded: true,
+                exit_code: Some(0),
+            }),
+            elapsed: None,
+            output_tokens: None,
+            summary: None,
+            summary_at: None,
+        });
+        assert_eq!(instant.tail, "command \u{b7} succeeded \u{b7} 00:00:00");
 
         let check = |ok, exit_code, summary: Option<&str>| {
             story_row_line(&HistoryStep {
