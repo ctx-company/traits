@@ -7,7 +7,7 @@
 
 use camino::Utf8Path;
 
-use ctx_traits_core::manifest::{PackageManifest, PackageMetadata, ProjectManifest};
+use ctx_traits_core::manifest::{PackageManifest, PackageMetadata};
 
 /// One path `ctx traits init` touched, and whether it was newly created or
 /// already existed and was left untouched.
@@ -44,8 +44,7 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
     let authoring_root = crate::layout::trait_authoring_root_path(repo_root);
     entries.push(ensure_dir(&authoring_root, "trait authoring root")?);
 
-    entries.push(ensure_project_manifest(repo_root)?);
-    entries.push(ensure_project_config(repo_root)?);
+    entries.push(ensure_config_document(repo_root)?);
     entries.push(ensure_runtime_example(repo_root)?);
     entries.push(ensure_authoring_manifest(repo_root)?);
     // `.ctx/.gitignore`, so the machine-local half of `.ctx` — worktrees, runs,
@@ -113,28 +112,6 @@ fn ensure_authoring_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
     }
 }
 
-/// 0037: scaffold the committed `.ctx/traits/config.toml` — what the PROJECT
-/// decides, for everyone.
-///
-/// Populated with the project-facing sections (worktree policy, run budgets,
-/// the merge gate) and comments explaining each; the knobs themselves ship
-/// COMMENTED OUT showing their defaults, per task 0019's rule — a written
-/// value freezes today's default into the file forever, a commented one keeps
-/// inheriting. This is a file the project fills in.
-fn ensure_project_config(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
-    let path = repo_root.join(crate::layout::PROJECT_CONFIG);
-    match crate::package_scaffold::create_new_file(
-        &path,
-        "project config",
-        PROJECT_CONFIG_TEMPLATE,
-    )? {
-        crate::package_scaffold::CreateOutcome::Created => Ok(InitEntry::Created(path.to_string())),
-        crate::package_scaffold::CreateOutcome::AlreadyExists => {
-            Ok(InitEntry::Preserved(path.to_string()))
-        }
-    }
-}
-
 /// 0037: scaffold the committed `.ctx/traits/runtime.example.toml` — the
 /// template for the machine-local `runtime.toml` beside it.
 ///
@@ -157,75 +134,25 @@ fn ensure_runtime_example(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
 }
 
 /// Committed project-tier scaffold written by [`ensure_project_config`].
-/// Same schema as the runtime tier — the tier carries the meaning, not the
-/// key set — so the sections here are guidance about what a PROJECT usually
-/// decides, not a restriction.
-const PROJECT_CONFIG_TEMPLATE: &str = r#"# ctx.traits project config — what THIS PROJECT decides, for everyone.
+/// `ConfigDocument`'s own schema (0177) — declarative, repo-only facts
+/// (`[vendor]`, and eventually setting overrides / dispatch defaults), never
+/// the executable facts `runtime.toml` carries.
+const PROJECT_CONFIG_TEMPLATE: &str = r#"# ctx.traits config — the committed project document (Cargo.toml-like:
+# dependency vendoring plus basic project settings). Repo-only, declarative:
+# everything here is safe to consume on clone without an acceptance step.
+# Executable facts — argv, gates, harness bins — never belong here; see
+# `runtime.toml` for HOW traits execute on this machine.
 #
-# Committed and shared. Decisions that travel with the repository belong here:
-# "this project runs in worktrees", setup commands, seeds, the merge gate.
-# The machine-local half lives beside it in `runtime.toml` (gitignored, copied
-# from `runtime.example.toml`); a field stated there overrides the same field
-# here and nothing else. Same schema in both files — the only question is
-# "shared, or mine?".
-#
-# Every key below is commented out and shows its default. Uncomment only what
-# this project actually decides: a commented key keeps inheriting future
-# defaults, while a written one pins today's value forever.
-#
-# `ctx traits doctor --config` prints what is actually in effect, and which
-# tier each value came from.
+# `[vendor]` is exactly what `vendor.toml` used to hold: this project's
+# trait dependency declarations.
 
-schema-version = "0.1.0"
+[vendor]
+schema-version = "0.1"
+# extends = "@org/team-base"      # depth-one manifest inheritance (P443)
 
-# --- Worktree runs (`--worktree`) ---------------------------------------------
-# [worktree]
-# seed = []                       # gitignored paths to copy in (e.g. [".plans"])
-# warm = []                       # dirs to copy-on-write clone (e.g. ["target"])
-# setup = []                      # one-time commands, e.g. [["pnpm", "install"]]
-# setup-seconds = 120
-#
-# [worktree.env]                  # env for every process in the worktree.
-# # `{worktree}/...` resolves per run; `.ctx/...` against the invocation checkout.
-# # CARGO_TARGET_DIR = "{worktree}/target"
-#
-# [worktree.retention]
-# cheap = []                      # deleted at every drive exit
-# expensive = []                  # kept for a warm resume, then aged out
-#
-# [worktree.confinement]
-# enabled = true                  # harness-native write confinement
-# sandbox = true                  # plus an OS sandbox around the spawn
-# allow = []                      # extra writable dirs outside the worktree
-#
-# [worktree.tripwire]
-# policy = "park"                 # park | warn — out-of-tree mutation findings
-
-# --- Budgets (execution ceilings; fallback under authored trait.toml budgets) --
-# [budget]
-# total-seconds = 3600            # the ONLY whole-run clock
-# max-frames = 200
-# frame-seconds = 1800            # floor for roles declaring no budget
-# max-retries = 3
-
-# --- Drive policy (how frames dispatch and present) ---------------------------
-# [drive]
-# inline-prompt-bytes = 300000
-
-# --- Landing merge gate ------------------------------------------------------
-# [merge]
-# deep = false                    # use a judgment-capable merger
-# gate = []                       # e.g. [["just", "test"]] — runs during landing
-
-# --- Agents (usually machine-local — see runtime.example.toml) -----------------
-# A project MAY commit a seat decision, e.g. reviewers run at high effort:
-#
-# [agent.role.reviewer]
-# reasoning-effort = "high"
-#
-# Committing a `model` here binds every collaborator to a model they may not
-# have access to. Allowed — but models, credentials and machine paths usually
-# belong in your own `runtime.toml`.
+# [vendor.dependencies.some-alias]
+# npm = "@org/some-trait"
+# version = "^1.0.0"
 "#;
 
 /// Fully-commented machine-tier template written by [`ensure_runtime_example`].
@@ -237,8 +164,9 @@ const RUNTIME_EXAMPLE_TEMPLATE: &str = r#"# ctx.traits runtime config — HOW tr
 # This is the committed EXAMPLE. Copy it to `runtime.toml` beside it (which is
 # gitignored and never scaffolded) and uncomment what your machine needs:
 # seats, models, credentials, absolute paths, and any budget you want
-# different. A field stated in `runtime.toml` overrides the same field in the
-# committed `config.toml` and nothing else — same schema in both files.
+# different. `runtime.toml` carries executable facts (RuntimeConfig) — a
+# distinct schema from the committed `config.toml` (`ConfigDocument`, 0177):
+# they layer on precedence, not on shared fields.
 #
 # Every key below is commented out and shows its default. Uncomment only what
 # you need to change: a commented key keeps inheriting future defaults, while a
@@ -300,44 +228,16 @@ fn ensure_dir(path: &Utf8Path, label: &str) -> crate::Result<InitEntry> {
     }
 }
 
-fn ensure_project_manifest(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
-    match crate::discovery::manifest(repo_root)? {
-        crate::discovery::ManifestDiscovery::Found(manifest) => {
-            Ok(InitEntry::Preserved(manifest.path.to_string()))
-        }
-        crate::discovery::ManifestDiscovery::Conflict { found } => Err(fs_err(
-            repo_root,
-            format!(
-                "multiple project manifests already exist ({}); resolve the conflict before running init",
-                found
-                    .iter()
-                    .map(|m| m.path.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )),
-        crate::discovery::ManifestDiscovery::NotFound => {
-            let path = crate::layout::project_manifest_path(repo_root, "toml");
-            let manifest = ProjectManifest {
-                schema_version: "0.1".to_string(),
-                extends: None,
-                project: None,
-                trait_entries: Vec::new(),
-                dependencies: Vec::new(),
-                packages: std::collections::BTreeMap::new(),
-            };
-            let text = ctx_traits_core::encoding::encode(
-                ctx_traits_core::encoding::Encoding::Toml,
-                &manifest,
-            )?;
-            match crate::package_scaffold::create_new_file(&path, "project manifest", &text)? {
-                crate::package_scaffold::CreateOutcome::Created => {
-                    Ok(InitEntry::Created(path.to_string()))
-                }
-                crate::package_scaffold::CreateOutcome::AlreadyExists => {
-                    Ok(InitEntry::Preserved(path.to_string()))
-                }
-            }
+fn ensure_config_document(repo_root: &Utf8Path) -> crate::Result<InitEntry> {
+    let path = repo_root.join(crate::layout::PROJECT_CONFIG);
+    match crate::package_scaffold::create_new_file(
+        &path,
+        "config document",
+        PROJECT_CONFIG_TEMPLATE,
+    )? {
+        crate::package_scaffold::CreateOutcome::Created => Ok(InitEntry::Created(path.to_string())),
+        crate::package_scaffold::CreateOutcome::AlreadyExists => {
+            Ok(InitEntry::Preserved(path.to_string()))
         }
     }
 }
@@ -455,14 +355,6 @@ export const draft = trait({{
     )
 }
 
-fn fs_err(path: &Utf8Path, message: impl Into<String>) -> crate::Error {
-    crate::environment::Error::Filesystem {
-        path: path.to_string(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, message.into()),
-    }
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
@@ -509,17 +401,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(repo.as_std_path());
     }
 
-    /// Both scaffolds decode as the one shared `RuntimeConfig` schema — the
-    /// tier carries the meaning, not the key set — so an author uncommenting
-    /// any shown knob starts from a document the resolver already accepts.
+    /// `config.toml` decodes as `ConfigDocument` (0177) and
+    /// `runtime.example.toml` decodes as `RuntimeConfig` — the two scaffolds
+    /// no longer share a schema, unlike pre-0177.
     #[test]
-    fn both_templates_decode_as_the_shared_runtime_schema() {
-        for (label, template) in [
-            ("config.toml", super::PROJECT_CONFIG_TEMPLATE),
-            ("runtime.example.toml", super::RUNTIME_EXAMPLE_TEMPLATE),
-        ] {
-            let decoded: Result<crate::harness_config::RuntimeConfig, _> = toml::from_str(template);
-            assert!(decoded.is_ok(), "{label} template decodes: {decoded:?}");
-        }
+    fn scaffolds_decode_as_their_own_schemas() {
+        let config: Result<crate::config_document::ConfigDocument, _> =
+            toml::from_str(super::PROJECT_CONFIG_TEMPLATE);
+        assert!(config.is_ok(), "config.toml template decodes: {config:?}");
+        let runtime: Result<crate::harness_config::RuntimeConfig, _> =
+            toml::from_str(super::RUNTIME_EXAMPLE_TEMPLATE);
+        assert!(
+            runtime.is_ok(),
+            "runtime.example.toml template decodes: {runtime:?}"
+        );
     }
 }

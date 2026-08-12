@@ -24,7 +24,7 @@ pub fn activity_adapter_kind(
 pub use crate::layout::{
     GLOBAL_RUNTIME_CONFIG, HARNESS_REGISTRY, LEGACY_CTX_GLOBAL_RUNTIME_CONFIG,
     LEGACY_CTX_RUNTIME_CONFIG, LEGACY_GLOBAL_RUNTIME_CONFIG, LEGACY_HARNESS_REGISTRY,
-    LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RUNTIME_CONFIG,
+    LEGACY_RUNTIME_CONFIG, PROJECT_CONFIG, RETIRED_RUNTIME_CONFIG_SOURCE, RUNTIME_CONFIG,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -3936,9 +3936,6 @@ pub fn resolve_config_report(start_dir: &Utf8Path) -> crate::Result<ConfigReport
     let mut tier_warnings = Vec::new();
 
     for (layer, path) in layers {
-        if crate::config_source::is_generated_config_candidate(&path) {
-            crate::config_source::guard_never_built(&path)?;
-        }
         if !path.exists() {
             continue;
         }
@@ -5034,9 +5031,6 @@ fn legacy_agent_key_error(text: &str) -> Option<String> {
 
 pub fn load_runtime_config(path: &Utf8Path) -> crate::Result<RuntimeConfig> {
     let text = crate::read::read_text(path)?;
-    if crate::config_source::is_generated_config_candidate(path) {
-        crate::config_source::guard_config_toml(path, &text)?;
-    }
     let mut config: RuntimeConfig = toml::from_str(&text).map_err(|source| {
         if let Some(message) = legacy_agent_key_error(&text) {
             return config_error("agent", message);
@@ -5127,12 +5121,24 @@ fn runtime_config_layers(start_dir: &Utf8Path) -> crate::Result<Vec<(ConfigLayer
         // checkout carrying both is governed by the new name.
         layers.push((ConfigLayer::Repo, ancestor.join(LEGACY_CTX_RUNTIME_CONFIG)));
         layers.push((ConfigLayer::Repo, ancestor.join(HARNESS_REGISTRY)));
-        // 0037: the committed project tier (`.ctx/traits/config.toml`) merges
-        // BEFORE the machine-local `.ctx/traits/runtime.toml`, so a local
-        // field overrides the project decision field-wise and nothing else —
-        // built-in < package < machine ~/.config < config.toml < runtime.toml.
-        layers.push((ConfigLayer::Repo, ancestor.join(PROJECT_CONFIG)));
+        // 0177: `.ctx/traits/config.toml` (`PROJECT_CONFIG`) no longer
+        // decodes as `RuntimeConfig` — it is the declarative `ConfigDocument`
+        // now (`[vendor]`, and eventually team setting overrides / dispatch
+        // defaults, not yet wired into this layer stack — see task 0177's
+        // work summary). Only the machine-local runtime tier remains here.
         layers.push((ConfigLayer::Repo, ancestor.join(RUNTIME_CONFIG)));
+        if ancestor.join(RETIRED_RUNTIME_CONFIG_SOURCE).exists() {
+            return Err(crate::Error::Core(
+                ctx_traits_core::manifest::Error::InvalidField {
+                    field_path: "config".to_string(),
+                    message: format!(
+                        "{} carries {RETIRED_RUNTIME_CONFIG_SOURCE} — the config.ts -> RuntimeConfig pathway retired in 0177; committed executable runtime facts have no read until 0178's runtime.ts lands",
+                        ancestor
+                    ),
+                }
+                .into(),
+            ));
+        }
     }
     if let Ok(path) = std::env::var("CTX_CONFIG") {
         layers.push((ConfigLayer::Environment, Utf8PathBuf::from(path)));
@@ -5379,28 +5385,6 @@ pub fn plan_agent_config_migration(
             continue;
         }
         let text = crate::read::read_text(&path)?;
-        if crate::config_source::is_generated_config_candidate(&path) {
-            let source_path = crate::config_source::sibling_source_path(&path);
-            if source_path.exists() {
-                let result = plan_agent_config_rewrite(&text)?;
-                let carries_legacy_keys = !result.rewrites.is_empty()
-                    || !result.conflicts.is_empty()
-                    || result.refusal.is_some();
-                if !carries_legacy_keys {
-                    continue;
-                }
-                plans.push(AgentConfigLayerPlan {
-                    layer,
-                    refusal: Some(format!(
-                        "{path} is generated from {source_path} — migrate {source_path} and re-run `ctx traits config build`"
-                    )),
-                    path: path.to_string(),
-                    rewrites: Vec::new(),
-                    conflicts: Vec::new(),
-                });
-                continue;
-            }
-        }
         let result = plan_agent_config_rewrite(&text)?;
         if result.rewrites.is_empty() && result.conflicts.is_empty() && result.refusal.is_none() {
             continue;
@@ -10327,26 +10311,23 @@ mod config_tests {
         );
     }
 
-    /// 0037: at every ancestor, the committed project tier
-    /// (`.ctx/traits/config.toml`) merges immediately before the
-    /// machine-local `.ctx/traits/runtime.toml`, so a local field wins the
-    /// field-wise merge and nothing else does.
+    /// 0177: `.ctx/traits/config.toml` (`PROJECT_CONFIG`) no longer decodes
+    /// as `RuntimeConfig` — the machine-local `runtime.toml` tier is the
+    /// only committed-adjacent `RuntimeConfig` layer enumerated per ancestor
+    /// now (see `runtime_config_layers`'s doc comment for the open item on
+    /// re-injecting the config document's declarative facts).
     #[test]
-    fn project_config_layers_immediately_before_machine_runtime_config() {
+    fn project_config_no_longer_a_runtime_config_layer() {
         let layers = runtime_config_layers(Utf8Path::new(".")).expect("layers enumerate");
         let paths: Vec<String> = layers.iter().map(|(_, path)| path.to_string()).collect();
-        let mut pairs = 0;
-        for (index, path) in paths.iter().enumerate() {
-            if path.ends_with(PROJECT_CONFIG) {
-                let next = paths.get(index + 1).expect("project tier is never last");
-                assert!(
-                    next.ends_with(RUNTIME_CONFIG),
-                    "expected {RUNTIME_CONFIG} directly after {path}, found {next}"
-                );
-                pairs += 1;
-            }
-        }
-        assert!(pairs > 0, "no project-tier layer enumerated: {paths:?}");
+        assert!(
+            paths.iter().any(|path| path.ends_with(RUNTIME_CONFIG)),
+            "runtime.toml tier still enumerated: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|path| path.ends_with(PROJECT_CONFIG)),
+            "config.toml must not be read as RuntimeConfig anymore: {paths:?}"
+        );
     }
 
     /// 0037: a machine-local `runtime.toml` stating ONE field overrides that

@@ -1,15 +1,14 @@
 //! Deterministic, symlink-safe reads/writes for the project-level
-//! `.ctx/traits/vendor.lock` (P438/P535). See
-//! [`ctx_traits_core::project_lock`] for the evidence model, and
-//! [`crate::layout::project_lock_path`] for the current/legacy layout this
-//! module writes through.
+//! `.ctx/traits/config.lock` (P438/P535; renamed from `vendor.lock` by
+//! 0177 — constants/docs/proofs only, no data migration since `vendor.lock`
+//! never materialized). See [`ctx_traits_core::project_lock`] for the
+//! evidence model, and [`crate::layout::project_lock_path`] for the path
+//! this module writes through.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ctx_traits_core::project_lock::{PackageLockEntry, ProjectLock};
 
-/// Project lock path under a repo root — the current
-/// `.ctx/traits/vendor.lock`, or the P569-predecessor `.ctx/traits.lock` for
-/// a checkout that has not migrated its manifest.
+/// Project lock path under a repo root — `.ctx/traits/config.lock`.
 pub fn project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
     crate::layout::project_lock_path(repo_root)
 }

@@ -35,31 +35,37 @@ pub(crate) fn handle_search(
         }
         ctx_traits_io::discovery::ManifestDiscovery::Found(found) => {
             let text = ctx_traits_io::read::read_text(&found.path)?;
-            let encoding = ctx_traits_core::encoding::Encoding::from_path(&found.path)?;
-            let manifest = ctx_traits_core::encoding::decode_manifest(encoding, &text)?;
-            let mut profiles: Vec<(String, String)> = Vec::new();
-            let mut source_kinds = std::collections::BTreeMap::new();
-            for entry in &manifest.trait_entries {
-                source_kinds.insert(
-                    entry.id.clone(),
-                    entry.source.manifest_source_kind().to_string(),
-                );
-                let mut entry_targets: Vec<String> =
-                    entry.target.iter().map(|s| s.to_string()).collect();
-                if entry_targets.is_empty()
-                    && let Some(proj) = &manifest.project
-                {
-                    entry_targets = proj.default_target.iter().map(|s| s.to_string()).collect();
-                }
-                entry_targets.sort();
-                entry_targets.dedup();
-                for t in entry_targets {
-                    profiles.push((entry.id.clone(), t));
-                }
-            }
+            let document = ctx_traits_io::config_document::decode(&found.path, &text)
+                .map_err(crate::Error::from)?;
             manifest_path = Some(found.path.to_string());
             manifest_encoding = Some(found.encoding.to_string());
-            (profiles, source_kinds, "loaded")
+            match &document.vendor {
+                None => (Vec::new(), std::collections::BTreeMap::new(), "not-loaded"),
+                Some(manifest) => {
+                    let mut profiles: Vec<(String, String)> = Vec::new();
+                    let mut source_kinds = std::collections::BTreeMap::new();
+                    for entry in &manifest.trait_entries {
+                        source_kinds.insert(
+                            entry.id.clone(),
+                            entry.source.manifest_source_kind().to_string(),
+                        );
+                        let mut entry_targets: Vec<String> =
+                            entry.target.iter().map(|s| s.to_string()).collect();
+                        if entry_targets.is_empty()
+                            && let Some(proj) = &manifest.project
+                        {
+                            entry_targets =
+                                proj.default_target.iter().map(|s| s.to_string()).collect();
+                        }
+                        entry_targets.sort();
+                        entry_targets.dedup();
+                        for t in entry_targets {
+                            profiles.push((entry.id.clone(), t));
+                        }
+                    }
+                    (profiles, source_kinds, "loaded")
+                }
+            }
         }
         ctx_traits_io::discovery::ManifestDiscovery::Conflict { found } => {
             let paths: Vec<String> = found.iter().map(|m| m.path.to_string()).collect();

@@ -59,16 +59,11 @@ const RETIRED_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits/packages";
 /// `authored/`) gives package ids a namespace of their own.
 const LEGACY_TRAIT_PACKAGE_ROOT: &str = ".ctx/traits";
 const PROJECT_MANIFEST_ROOT: &str = ".ctx/traits";
-/// P569 predecessor root of [`PROJECT_MANIFEST_ROOT`]: the manifest used to
-/// sit at `.ctx/traits.toml`, one letter from the per-package `trait.toml`.
-const LEGACY_PROJECT_MANIFEST_ROOT: &str = ".ctx";
-/// Stem of the project dependency manifest. `vendor` names all three faces of
-/// one thing — `vendor.toml` declared, `vendor.lock` resolved, `vendor/`
-/// fetched — instead of `traits.toml` colliding by a single letter with the
-/// per-package manifest.
-const PROJECT_MANIFEST_STEM: &str = "vendor";
-/// P569 predecessor stem, still read.
-const LEGACY_PROJECT_MANIFEST_STEM: &str = "traits";
+/// Stem of the committed project config document (0177). `vendor.toml`
+/// (P569's `vendor` stem) and the machine-tier reading of this same path as
+/// `RuntimeConfig` both die with no legacy read — dependency declarations
+/// now live under `[vendor]` in this document instead of a standalone file.
+const PROJECT_MANIFEST_STEM: &str = "config";
 const TRAIT_VENDOR_ROOT: &str = ".ctx/traits/vendored";
 /// Retired 0179 predecessor of [`TRAIT_VENDOR_ROOT`]. No dual-read — a repo
 /// still carrying this directory is refused by [`refuse_retired_roots`]
@@ -140,11 +135,15 @@ pub const LEGACY_WORKTREE_ROOT: &str = ".ctx/worktrees";
 /// Read after [`PROJECT_CONFIG`] at each ancestor so a machine-local field
 /// wins the field-wise merge over the committed project decision.
 pub const RUNTIME_CONFIG: &str = ".ctx/traits/runtime.toml";
-/// Committed project configuration path (0037): what the PROJECT decides,
-/// for everyone — "this project runs in worktrees", setup commands, the
-/// merge gate, seeds. Same schema as [`RUNTIME_CONFIG`]; the tier carries
-/// the meaning, not the key set. Read before [`RUNTIME_CONFIG`] at each
-/// ancestor so the machine-local file overrides it field-wise.
+/// Committed project config document path (0177; retires the 0037
+/// `RuntimeConfig` meaning this path used to carry). This is now the
+/// hand-authored face of `ConfigDocument`: `[vendor]` (dependency
+/// declarations, formerly `vendor.toml`), team-level trait setting
+/// overrides, and dispatch defaults — declarative facts only, never
+/// executable ones (see `crate::config_document`). When a sibling
+/// [`CONFIG_SOURCE`] exists, this path is instead the machine-written
+/// artifact under [`crate::layout::TRAIT_GENERATED_ROOT`] built by `ctx
+/// traits config build` — see [`config_document_path`].
 pub const PROJECT_CONFIG: &str = ".ctx/traits/config.toml";
 /// Committed, fully-commented template for [`RUNTIME_CONFIG`] (0037),
 /// scaffolded by `ctx traits init`. Every knob present but commented out
@@ -180,16 +179,21 @@ pub const LEGACY_CTX_GLOBAL_RUNTIME_CONFIG: &str = "config.toml";
 /// Legacy global runtime configuration file name (pre-P311), joined onto the
 /// same `ctx` config-home directory as [`GLOBAL_RUNTIME_CONFIG`].
 pub const LEGACY_GLOBAL_RUNTIME_CONFIG: &str = "ctx.toml";
-/// Optional repo-local TypeScript authoring source for [`RUNTIME_CONFIG`]
-/// (P457). When present, the sibling `config.toml` must be a generated
-/// artifact (`# ctx:generated` marker + source manifest) — see
-/// `crate::config_source`. Absent by default; a repo with no `config.ts`
-/// keeps the hand-authored, TOML-first, zero-drift-check, zero-node path.
-pub const RUNTIME_CONFIG_SOURCE: &str = ".ctx/config.ts";
-/// Optional global TypeScript authoring source for [`GLOBAL_RUNTIME_CONFIG`]
-/// (P457), joined onto the same `ctx` config-home directory. Same generated
-/// -artifact contract as [`RUNTIME_CONFIG_SOURCE`].
-pub const GLOBAL_RUNTIME_CONFIG_SOURCE: &str = "config.ts";
+/// Optional repo-local TypeScript authoring source for [`PROJECT_CONFIG`]
+/// (0177; retires P457's `RUNTIME_CONFIG_SOURCE`, which built the sibling
+/// `.ctx/config.toml` as a `RuntimeConfig` — that pathway dies with no
+/// legacy read; a repo still carrying `.ctx/config.ts` refuses naming
+/// 0178's `runtime.ts`). When present, [`config_document_path`] resolves to
+/// the compiled `generated/config.toml` instead of the hand-authored
+/// [`PROJECT_CONFIG`] path — see `crate::config_document`.
+pub const CONFIG_SOURCE: &str = ".ctx/traits/config.ts";
+/// The retired P457 TypeScript authoring source (`RUNTIME_CONFIG_SOURCE`),
+/// which built a marker-headed sibling `.ctx/config.toml` as a
+/// `RuntimeConfig`. Refusal-only — never read for content. A repo still
+/// carrying this path refuses naming 0178's `runtime.ts` as the future
+/// home for committed executable runtime facts. Not to be confused with
+/// [`CONFIG_SOURCE`], the new declarative `ConfigDocument` source.
+pub const RETIRED_RUNTIME_CONFIG_SOURCE: &str = ".ctx/config.ts";
 /// Legacy repo-local runtime materialization root for the embedded
 /// first-party built-in meta-trait packages (P337; pre-P426), retained as a
 /// one-release dual-read fallback. A sibling of [`CACHE_ROOT`], never nested
@@ -308,52 +312,41 @@ pub fn legacy_worktree_root() -> &'static str {
     LEGACY_WORKTREE_ROOT
 }
 
-/// Project manifest path for an encoding extension such as `toml`.
+/// Hand-authored config document path under `repo_root` (0177), ignoring any
+/// `[`CONFIG_SOURCE`]` generated pathway. `extension` is accepted for
+/// call-site compatibility with the pre-0177 multi-encoding manifest, but
+/// the config document is TOML-only, ever — a non-`"toml"` extension never
+/// resolves to an existing path.
 pub fn project_manifest_path(repo_root: &Utf8Path, extension: &str) -> Utf8PathBuf {
-    let current = repo_root
-        .join(PROJECT_MANIFEST_ROOT)
-        .join(format!("{PROJECT_MANIFEST_STEM}.{extension}"));
-    if current.exists() {
-        return current;
+    if extension == "toml" {
+        return repo_root.join(PROJECT_CONFIG);
     }
-    // P569: a checkout that predates the rename keeps its manifest where it is
-    // — reads AND writes follow it, so `dependency add` does not silently
-    // start a second manifest beside the one already in use. A fresh repo has
-    // neither, so this returns the new path and init scaffolds there.
-    let legacy = legacy_project_manifest_path(repo_root, extension);
-    if legacy.exists() { legacy } else { current }
-}
-
-/// P569 predecessor location of [`project_manifest_path`]. Read when the new
-/// path is absent so an existing checkout is not stranded; never written.
-pub fn legacy_project_manifest_path(repo_root: &Utf8Path, extension: &str) -> Utf8PathBuf {
     repo_root
-        .join(LEGACY_PROJECT_MANIFEST_ROOT)
-        .join(format!("{LEGACY_PROJECT_MANIFEST_STEM}.{extension}"))
+        .join(PROJECT_MANIFEST_ROOT)
+        .join(format!("{PROJECT_MANIFEST_STEM}.{extension}"))
 }
 
-/// Project lock path, paired with [`project_manifest_path`]'s current/legacy
-/// layout (P535): a fresh checkout locks at `.ctx/traits/vendor.lock`
-/// alongside `vendor.toml`; an existing checkout that still has
-/// `.ctx/traits.lock` (P569 predecessor) keeps reading/writing there so it is
-/// not stranded beside a manifest it never migrated.
+/// Committed config document path under `repo_root` (0177), resolving the
+/// `[`CONFIG_SOURCE`]`-generated pathway before the hand-authored
+/// [`PROJECT_CONFIG`] path: when `.ctx/traits/config.ts` exists, the
+/// document lives at `generated/config.toml` under
+/// [`TRAIT_GENERATED_ROOT`], compiled by `ctx traits config build`.
+/// Drift/staleness/both-present refusals are `crate::config_document`'s
+/// concern, not this path resolver's.
+pub fn config_document_path(repo_root: &Utf8Path) -> Utf8PathBuf {
+    if repo_root.join(CONFIG_SOURCE).exists() {
+        return trait_generated_root_path(repo_root).join("config.toml");
+    }
+    repo_root.join(PROJECT_CONFIG)
+}
+
+/// Project lock path (0177: `config.lock`, renamed from P535's
+/// `vendor.lock`; no legacy read — `vendor.lock` never materialized in any
+/// known checkout).
 pub fn project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
-    let current = repo_root
-        .join(PROJECT_MANIFEST_ROOT)
-        .join(format!("{PROJECT_MANIFEST_STEM}.lock"));
-    if current.exists() {
-        return current;
-    }
-    let legacy = legacy_project_lock_path(repo_root);
-    if legacy.exists() { legacy } else { current }
-}
-
-/// P569 predecessor location of [`project_lock_path`]. Read when the new path
-/// is absent so an existing checkout is not stranded; never written.
-pub fn legacy_project_lock_path(repo_root: &Utf8Path) -> Utf8PathBuf {
     repo_root
-        .join(LEGACY_PROJECT_MANIFEST_ROOT)
-        .join(format!("{LEGACY_PROJECT_MANIFEST_STEM}.lock"))
+        .join(PROJECT_MANIFEST_ROOT)
+        .join(format!("{PROJECT_MANIFEST_STEM}.lock"))
 }
 
 /// Project-local host-placement manifest path (`.ctx/host-placements.toml`),

@@ -1,24 +1,25 @@
-//! Generated-config marker/manifest format (P457).
+//! Generated `ConfigDocument` source-manifest format (0177; retires P457's
+//! in-file marker contract).
 //!
-//! An optional `.ctx/config.ts` (or global `config.ts`) is a TypeScript
-//! authoring source that `ctx traits config build` compiles into the sibling
-//! `config.toml`. When a `config.ts` is present, the sibling `config.toml`
-//! MUST be a generated artifact: a leading comment block naming a
-//! `# ctx:generated` marker plus a `(path, sha256)` manifest over the full
-//! transitive local module graph `config.ts` imports. Every config load
-//! re-hashes exactly the listed files and refuses on drift. A repo with no
-//! `config.ts` never parses this header and never hashes anything — the
-//! hand-authored, TOML-first default stays byte-identical to before this
-//! module existed.
+//! `.ctx/traits/config.ts` is an optional TypeScript authoring source that
+//! `ctx traits config build` compiles into
+//! `.ctx/traits/generated/config.toml`. LOCATION states authority now — a
+//! file under `generated/` is machine-written by construction, never
+//! hand-edited — so there is no in-file marker to parse or forge. This
+//! module keeps only the source-manifest machinery: a leading `# ctx:source
+//! <path> <sha256>` comment block over the full transitive local module
+//! graph `config.ts` imports, re-hashed on every read so drift refuses
+//! naming the changed file. `crate::config_document` owns the
+//! source/generated/hand-authored path selection this module's callers key
+//! their checks on.
 
 use camino::{Utf8Path, Utf8PathBuf};
 
 use ctx_traits_core::digest::Digest;
 
-pub const MARKER_LINE: &str = "# ctx:generated — built from config.ts by `ctx traits config build`; edit config.ts, not this file";
 const SOURCE_PREFIX: &str = "# ctx:source ";
-/// The authoring source file name, sibling to the generated `config.toml` in
-/// every layer (repo-local and global).
+/// The authoring source file name, sibling to the config document's own
+/// root (not to the generated artifact — see `crate::config_document`).
 pub const SOURCE_FILE_NAME: &str = "config.ts";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,29 +34,13 @@ pub struct GeneratedHeader {
     pub entries: Vec<SourceEntry>,
 }
 
-/// Sibling `config.ts` path for a given `config.toml`-named path (same
-/// directory, `config.ts` in place of `config.toml`).
-pub fn sibling_source_path(config_toml_path: &Utf8Path) -> Utf8PathBuf {
-    let dir = config_toml_path
-        .parent()
-        .unwrap_or_else(|| Utf8Path::new(""));
-    dir.join(SOURCE_FILE_NAME)
-}
-
-/// True when `path`'s file name is exactly `config.toml` — the only names
-/// this guard applies to (never `harness.toml`, never the legacy
-/// `ctx.toml`/`ctx-harness.toml` names).
-pub fn is_generated_config_candidate(path: &Utf8Path) -> bool {
-    path.file_name() == Some("config.toml")
-}
-
-/// Render the leading comment-block header for a freshly built `config.toml`.
-/// `entries` must already be sorted by path (callers building the manifest
-/// from a filesystem walk should sort before calling).
+/// Render the leading `# ctx:source` comment block for a freshly built
+/// generated config document. `entries` must already be sorted by path
+/// (callers building the manifest from a filesystem walk should sort before
+/// calling). No marker line: the file's location under `generated/` is
+/// itself the authority signal.
 pub fn render_header(entries: &[SourceEntry]) -> String {
     let mut out = String::new();
-    out.push_str(MARKER_LINE);
-    out.push('\n');
     for entry in entries {
         out.push_str(SOURCE_PREFIX);
         out.push_str(entry.path.as_str());
@@ -63,37 +48,38 @@ pub fn render_header(entries: &[SourceEntry]) -> String {
         out.push_str(&entry.digest.to_string());
         out.push('\n');
     }
-    out.push('\n');
+    if !entries.is_empty() {
+        out.push('\n');
+    }
     out
 }
 
-/// Parse the leading comment block of `text`. Returns `None` when the first
-/// line is not the exact `# ctx:generated` marker — i.e. an ordinary,
-/// hand-authored `config.toml` never has a header to parse. Stops at the
+/// Parse the leading `# ctx:source` comment block of `text`. Stops at the
 /// first non-comment, non-blank line, so an authored comment further down
-/// the file can never forge a manifest entry.
-pub fn parse_header(text: &str) -> Option<GeneratedHeader> {
-    let mut lines = text.lines();
-    let first = lines.next()?;
-    if first != MARKER_LINE {
-        return None;
-    }
+/// the file can never forge a manifest entry. Returns an empty manifest
+/// (never `None`) when no source lines lead the file — callers key whether
+/// to parse at all on the document's *location*, not on this return value.
+pub fn parse_header(text: &str) -> GeneratedHeader {
     let mut entries = Vec::new();
-    for line in lines {
+    for line in text.lines() {
         if line.is_empty() {
             break;
         }
         let Some(rest) = line.strip_prefix(SOURCE_PREFIX) else {
             break;
         };
-        let (path, digest) = rest.rsplit_once(' ')?;
-        let digest = Digest::parse(digest).ok()?;
+        let Some((path, digest)) = rest.rsplit_once(' ') else {
+            break;
+        };
+        let Ok(digest) = Digest::parse(digest) else {
+            break;
+        };
         entries.push(SourceEntry {
             path: Utf8PathBuf::from(path),
             digest,
         });
     }
-    Some(GeneratedHeader { entries })
+    GeneratedHeader { entries }
 }
 
 /// Hash raw file bytes (never the normalized/source-digest form — this is
@@ -129,51 +115,43 @@ fn resolve_relative(config_dir: &Utf8Path, entry_path: &Utf8Path) -> crate::Resu
     Ok(config_dir.join(entry_path))
 }
 
-/// Guard a `config.toml`-named path whose sibling `config.ts` exists but the
-/// `config.toml` itself does not: it was never built.
-pub fn guard_never_built(config_toml_path: &Utf8Path) -> crate::Result<()> {
-    let source_path = sibling_source_path(config_toml_path);
-    if source_path.exists() && !config_toml_path.exists() {
+/// Guard a config document location where `source_path` (`config.ts`)
+/// exists but `generated_path` (`generated/config.toml`) does not: it was
+/// never built.
+pub fn guard_never_built(source_path: &Utf8Path, generated_path: &Utf8Path) -> crate::Result<()> {
+    if source_path.exists() && !generated_path.exists() {
         return Err(refusal(format!(
-            "{source_path} has no built {config_toml_path} — run `ctx traits config build`"
+            "{source_path} has no built {generated_path} — run `ctx traits config build`"
         )));
     }
     Ok(())
 }
 
-/// Guard an already-read `config.toml`'s text against its sibling
-/// `config.ts`, if one exists. Reuses the text the caller already read — no
-/// second filesystem read of the TOML file itself.
-pub fn guard_config_toml(config_toml_path: &Utf8Path, config_toml_text: &str) -> crate::Result<()> {
-    let source_path = sibling_source_path(config_toml_path);
-    if !source_path.exists() {
-        // No sibling source: ordinary TOML, zero check, zero node — the
-        // default, most common case, and covers the seeded-worktree case
-        // (a marked config.toml with no config.ts loads normally).
-        return Ok(());
-    }
-    let Some(header) = parse_header(config_toml_text) else {
-        return Err(refusal(format!(
-            "{config_toml_path} was not generated from {source_path} (missing # ctx:generated marker) — run `ctx traits config build` to regenerate it, or delete {source_path} to go TOML-first"
-        )));
-    };
-    let config_dir = config_toml_path
-        .parent()
-        .unwrap_or_else(|| Utf8Path::new(""));
+/// Guard an already-read generated document's text against its source-entry
+/// manifest, re-hashing each listed file relative to `source_dir` (the
+/// authoring source's own directory, not the generated file's directory —
+/// the two are no longer siblings under 0177). Reuses the text the caller
+/// already read — no second filesystem read of the TOML file itself.
+pub fn guard_generated_config(
+    generated_path: &Utf8Path,
+    generated_text: &str,
+    source_dir: &Utf8Path,
+) -> crate::Result<()> {
+    let header = parse_header(generated_text);
     for entry in &header.entries {
-        let resolved = resolve_relative(config_dir, &entry.path)?;
+        let resolved = resolve_relative(source_dir, &entry.path)?;
         let actual = match hash_file(&resolved) {
             Ok(digest) => digest,
             Err(_) => {
                 return Err(refusal(format!(
-                    "{} changed since {config_toml_path} was built (missing) — run `ctx traits config build`",
+                    "{} changed since {generated_path} was built (missing) — run `ctx traits config build`",
                     entry.path
                 )));
             }
         };
         if actual != entry.digest {
             return Err(refusal(format!(
-                "{} changed since {config_toml_path} was built — run `ctx traits config build`",
+                "{} changed since {generated_path} was built — run `ctx traits config build`",
                 entry.path
             )));
         }
@@ -199,23 +177,23 @@ mod tests {
         ];
         let rendered = render_header(&entries);
         let text = format!("{rendered}[dummy]\nkey = 1\n");
-        let parsed = parse_header(&text).expect("marker present");
+        let parsed = parse_header(&text);
         assert_eq!(parsed.entries, entries);
     }
 
     #[test]
-    fn no_marker_returns_none() {
-        assert!(parse_header("[dummy]\nkey = 1\n").is_none());
+    fn no_source_lines_is_empty_manifest() {
+        assert!(parse_header("[dummy]\nkey = 1\n").entries.is_empty());
     }
 
     #[test]
     fn user_comment_below_header_is_not_a_manifest_entry() {
         let text = format!(
-            "{MARKER_LINE}\n# ctx:source config.ts sha256:{}\n\n# ctx:source evil.ts sha256:{}\n[dummy]\n",
+            "# ctx:source config.ts sha256:{}\n\n# ctx:source evil.ts sha256:{}\n[dummy]\n",
             "0".repeat(64),
             "1".repeat(64)
         );
-        let parsed = parse_header(&text).expect("marker present");
+        let parsed = parse_header(&text);
         assert_eq!(parsed.entries.len(), 1);
     }
 }

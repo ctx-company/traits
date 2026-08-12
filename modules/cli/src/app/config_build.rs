@@ -1,13 +1,13 @@
-//! CLI orchestration for `ctx traits config build` (P457): compile an
-//! optional TypeScript `config.ts` authoring source into the generated
-//! `config.toml` the loader guard in `ctx_traits_io::harness_config`
-//! verifies on every later read.
+//! CLI orchestration for `ctx traits config build` (0177; retires P457's
+//! `RuntimeConfig` target): compile `.ctx/traits/config.ts` into
+//! `.ctx/traits/generated/config.toml`, validated against `ConfigDocument`
+//! — the committed, declarative project document, not `RuntimeConfig`.
 //!
 //! This is the one command allowed to bypass the drift guard on its own
-//! read path — it never reads `config.toml` through
-//! `ctx_traits_io::harness_config::load_runtime_config`, only through this
-//! module's own node-invoking build, so a drifted or unmarked config never
-//! deadlocks the command that repairs it.
+//! read path — it never reads the generated document through
+//! `ctx_traits_io::config_document::read_document`, only through this
+//! module's own node-invoking build, so a drifted artifact never deadlocks
+//! the command that repairs it.
 
 use std::collections::BTreeSet;
 
@@ -34,13 +34,12 @@ struct ConfigBuildReportJson<'a> {
 }
 
 /// Resolve the `config.ts` path a `config build [path]` invocation targets:
-/// the given path verbatim, or `.ctx/config.ts` relative to the current
-/// directory when omitted (the repo-local layer; an explicit path is how
-/// the global layer, `~/.config/ctx/config.ts`, gets built).
+/// the given path verbatim, or `.ctx/traits/config.ts` relative to the
+/// current directory when omitted.
 fn resolve_source_path(path: Option<&str>) -> Utf8PathBuf {
     match path {
         Some(path) => Utf8PathBuf::from(path),
-        None => Utf8PathBuf::from(ctx_traits_io::layout::RUNTIME_CONFIG_SOURCE),
+        None => Utf8PathBuf::from(ctx_traits_io::layout::CONFIG_SOURCE),
     }
 }
 
@@ -90,16 +89,29 @@ pub(crate) fn handle_config_build(
     // steps see the same shape the loader will.
     let config = crate::app::config_types::camel_to_kebab(&envelope.config)?;
 
-    // Validate through the loader's own model: a typo'd key, a bad
-    // `transport`, an unknown table all fail here, in the same
-    // `deny_unknown_fields` code that later loads the generated TOML.
-    let _runtime_config: ctx_traits_io::harness_config::RuntimeConfig =
+    // Validate through the document's own model: a typo'd key, a bad table
+    // shape, or an executable-fact field (structurally absent from
+    // `ConfigDocument`) all fail here, in the same `deny_unknown_fields`
+    // code that later loads the generated TOML.
+    let config_document: ctx_traits_io::config_document::ConfigDocument =
         serde_json::from_value(config.clone()).map_err(|source| {
             crate::Error::json(
                 format!("{source_path} does not decode as a valid config"),
                 source,
             )
         })?;
+    if layer == "user-global" && config_document.vendor.is_some() {
+        return Err(ctx_traits_io::Error::Core(
+            ctx_traits_core::manifest::Error::InvalidField {
+                field_path: "config".to_string(),
+                message: format!(
+                    "{source_path} declares [vendor] in a global-scope config — dependencies are project identity, not a machine's"
+                ),
+            }
+            .into(),
+        )
+        .into());
+    }
 
     let config_dir = canonical_source
         .parent()
@@ -112,7 +124,8 @@ pub(crate) fn handle_config_build(
     let header = ctx_traits_io::config_source::render_header(&entries);
     let output_text = format!("{header}{toml_body}");
 
-    let target_path = canonical_source.with_file_name("config.toml");
+    let target_path =
+        ctx_traits_io::layout::trait_generated_root_path(&repo_root).join("config.toml");
     ctx_traits_io::write::write_build_output(&target_path, &output_text)?;
 
     if json {

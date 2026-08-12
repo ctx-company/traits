@@ -991,28 +991,23 @@ fn read_project_manifest(
     repo_root: &Utf8Path,
     explicit_manifest: Option<&Utf8Path>,
 ) -> crate::Result<Option<(Utf8PathBuf, ProjectManifest)>> {
-    let manifest_path = match explicit_manifest {
+    // 0177: the project manifest is the `[vendor]` table of the committed
+    // config document (`.ctx/traits/config.toml`, or its `config.ts`
+    // generated pathway) — the standalone `vendor.toml` and its JSON/YAML
+    // variants no longer exist.
+    let document_path = match explicit_manifest {
         Some(path) => resolve_relative(repo_root, path),
-        None => match crate::discovery::manifest(repo_root)? {
-            crate::discovery::ManifestDiscovery::Found(manifest) => manifest.path,
-            crate::discovery::ManifestDiscovery::NotFound => return Ok(None),
-            crate::discovery::ManifestDiscovery::Conflict { found } => {
-                let paths = found
-                    .iter()
-                    .map(|manifest| manifest.path.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return invalid_input(
-                    repo_root,
-                    format!("multiple project manifests found: {paths}"),
-                );
-            }
+        None => match crate::config_document::resolve_document_path(repo_root)? {
+            Some(path) => path,
+            None => return Ok(None),
         },
     };
-    let encoding = ctx_traits_core::encoding::Encoding::from_path(&manifest_path)?;
-    let text = crate::read::read_text(&manifest_path)?;
-    let manifest = ctx_traits_core::encoding::decode_manifest(encoding, &text)?;
-    Ok(Some((manifest_path, manifest)))
+    let text = crate::read::read_text(&document_path)?;
+    let document = crate::config_document::decode(&document_path, &text)?;
+    let Some(manifest) = document.vendor else {
+        return Ok(None);
+    };
+    Ok(Some((document_path, manifest)))
 }
 
 struct ResolvedSource {

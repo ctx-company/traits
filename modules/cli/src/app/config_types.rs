@@ -17,23 +17,25 @@ use serde_json::Value;
 /// PascalCase).
 const ROOT_TYPE_NAME: &str = "CtxConfig";
 
-/// Load `RuntimeConfig`'s `schemars`-derived JSON Schema once, as the root
-/// object plus its `$defs` map. Shared by [`render`] (the TS mirror) and
-/// [`camel_to_kebab`] (the JS-object -> Rust-model key rewrite every
-/// `config build` runs before validation).
-fn load_schema() -> crate::Result<(
+/// Load a `schemars`-derived JSON Schema once, as the root object plus its
+/// `$defs` map. [`render`] (the TS mirror) uses `RuntimeConfig`; the TS
+/// surface (`packages/config`) still mirrors that shape pending 0180's
+/// `defineConfig` vocabulary split. [`camel_to_kebab`] (the JS-object ->
+/// Rust-model key rewrite every `config build` runs before validation)
+/// uses `ConfigDocument` — the type `config build` actually decodes and
+/// validates against since 0177.
+fn load_schema_for<T: schemars::JsonSchema>() -> crate::Result<(
     serde_json::Map<String, Value>,
     serde_json::Map<String, Value>,
 )> {
-    let schema: schemars::Schema =
-        schemars::schema_for!(ctx_traits_io::harness_config::RuntimeConfig);
+    let schema: schemars::Schema = schemars::schema_for!(T);
     let schema: Value = serde_json::to_value(&schema)
-        .map_err(|source| crate::Error::json("serialize RuntimeConfig JSON schema", source))?;
+        .map_err(|source| crate::Error::json("serialize config JSON schema", source))?;
     let object = schema
         .as_object()
         .cloned()
         .ok_or_else(|| crate::Error::Command {
-            message: "RuntimeConfig schema root is not a JSON object".to_string(),
+            message: "config schema root is not a JSON object".to_string(),
         })?;
     let defs = object
         .get("$defs")
@@ -43,19 +45,20 @@ fn load_schema() -> crate::Result<(
     Ok((object, defs))
 }
 
-/// Rewrite a `config build`-emitted JS object's keys from the generated
-/// TypeScript surface's camelCase field names back to the kebab-case names
-/// `RuntimeConfig` (and the TOML it loads) actually use — walking the same
-/// schema [`render`] mirrors, so the two can never drift apart. Only keys
-/// that are themselves schema *field names* are renamed: a `Record<string,
-/// T>` map's keys (harness IDs, role names, `[worktree.env]` variable names,
+/// Rewrite a `config build`-emitted JS object's keys from `config.ts`'s
+/// camelCase field names back to the kebab-case names `ConfigDocument`
+/// (and the TOML it loads) actually use — walking `ConfigDocument`'s own
+/// schema, the type `config build` validates against since 0177 (distinct
+/// from [`render`]'s `RuntimeConfig` schema, which mirrors the TS surface
+/// pending 0180). Only keys that are themselves schema *field names* are
+/// renamed: a `Record<string, T>` map's keys (vendor aliases, trait IDs,
 /// ...) are author-chosen identifiers and pass through byte-for-byte. A key
-/// with no matching field in its object's schema (a typo) is left exactly
-/// as authored, so `RuntimeConfig`'s `deny_unknown_fields` decode error
-/// names the real, un-renamed mistake rather than a silently kebab-cased
-/// guess.
+/// with no matching field in its object's schema (a typo, or a field
+/// outside `ConfigDocument` entirely) is left exactly as authored, so
+/// `ConfigDocument`'s `deny_unknown_fields` decode error names the real,
+/// un-renamed mistake rather than a silently kebab-cased guess.
 pub(crate) fn camel_to_kebab(value: &Value) -> crate::Result<Value> {
-    let (root, defs) = load_schema()?;
+    let (root, defs) = load_schema_for::<ctx_traits_io::config_document::ConfigDocument>()?;
     convert(value, &root, &defs)
 }
 
@@ -196,7 +199,7 @@ fn camel_to_kebab_str(name: &str) -> String {
 }
 
 pub(crate) fn render() -> crate::Result<String> {
-    let (object, defs) = load_schema()?;
+    let (object, defs) = load_schema_for::<ctx_traits_io::harness_config::RuntimeConfig>()?;
     let object = &object;
 
     let mut out = String::new();
@@ -479,13 +482,13 @@ fn to_camel_case(name: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 0171: `modelTier` is gone from the rendered TS surface, but
-    /// `camel_to_kebab` — shared with the loader's `load_schema` — must
-    /// still rename a legacy author's `modelTier` key to `model-tier` so
-    /// `RuntimeConfig`'s retired-warning path handles it, instead of a
-    /// `deny_unknown_fields` decode error.
+    /// `camel_to_kebab` walks `ConfigDocument`'s schema (0177) — `agent.
+    /// role.*.modelTier` was a `RuntimeConfig`-authoring concern from the
+    /// retired P457 `config.ts` pathway and has no equivalent here; an
+    /// unmatched key passes through unrenamed rather than being force-fit
+    /// into a schema it doesn't belong to.
     #[test]
-    fn camel_to_kebab_still_renames_legacy_model_tier() {
+    fn camel_to_kebab_passes_through_keys_outside_the_document_schema() {
         let input = serde_json::json!({
             "agent": {
                 "role": {
@@ -495,7 +498,7 @@ mod tests {
         });
         let converted = camel_to_kebab(&input).expect("camel_to_kebab");
         assert_eq!(
-            converted["agent"]["role"]["worker"]["model-tier"],
+            converted["agent"]["role"]["worker"]["modelTier"],
             serde_json::json!("top")
         );
     }

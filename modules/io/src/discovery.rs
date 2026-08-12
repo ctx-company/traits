@@ -1,21 +1,10 @@
-//! Project manifest discovery.
-//!
-//! Scans a repository root for `.ctx/traits.toml`, `.ctx/traits.json`,
-//! `.ctx/traits.yaml`, and `.ctx/traits.yml` with deterministic conflict
-//! diagnostics. Scanning is shallow and explicit: only the supplied root
-//! directory is checked, no recursive walking.
+//! Project manifest discovery (0177: the `[vendor]` table of the committed
+//! config document — `.ctx/traits/config.toml`, TOML-only, ever; the
+//! standalone `vendor.toml` and its JSON/YAML variants are gone).
 //!
 //! Also discovers portable protocol packages under the repo-local protocol root.
 
 use camino::{Utf8Path, Utf8PathBuf};
-
-/// Manifest file names in deterministic priority order.
-const MANIFEST_FILES: &[(&str, &str)] = &[
-    ("toml", "toml"),
-    ("json", "json"),
-    ("yaml", "yaml"),
-    ("yml", "yml"),
-];
 
 /// Discovered manifest path and its encoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,40 +24,19 @@ pub enum ManifestDiscovery {
     Conflict { found: Vec<Manifest> },
 }
 
-/// Discover a project manifest in the given repository root.
-///
-/// Scans only `.ctx` for `traits.{toml,json,yaml,yml}`. If
-/// multiple encodings exist, returns `Conflict` so the caller can report the
-/// ambiguity and request an explicit `--manifest` path.
+/// Discover the config document under the given repository root, honoring
+/// the `config.ts` generated pathway ahead of the hand-authored
+/// `config.toml` (see `crate::config_document::resolve_document_path`).
+/// `Conflict` is unreachable now that only one encoding exists — the
+/// variant survives for callers matching on it exhaustively.
 pub fn manifest(repo_root: &Utf8Path) -> Result<ManifestDiscovery, crate::Error> {
-    let found = scan_manifest_files(repo_root)?;
-
-    match found.len() {
-        0 => Ok(ManifestDiscovery::NotFound),
-        1 => {
-            let mut found = found.into_iter();
-            if let Some(manifest) = found.next() {
-                Ok(ManifestDiscovery::Found(manifest))
-            } else {
-                Ok(ManifestDiscovery::NotFound)
-            }
-        }
-        _ => Ok(ManifestDiscovery::Conflict { found }),
+    match crate::config_document::resolve_document_path(repo_root)? {
+        Some(path) => Ok(ManifestDiscovery::Found(Manifest {
+            path,
+            encoding: "toml",
+        })),
+        None => Ok(ManifestDiscovery::NotFound),
     }
-}
-
-/// Scan `.ctx` for manifest files in deterministic order.
-fn scan_manifest_files(repo_root: &Utf8Path) -> Result<Vec<Manifest>, crate::Error> {
-    let mut found = Vec::new();
-
-    for (extension, encoding) in MANIFEST_FILES {
-        let path = crate::layout::project_manifest_path(repo_root, extension);
-        if path.is_file() {
-            found.push(Manifest { path, encoding });
-        }
-    }
-
-    Ok(found)
 }
 
 // ---------------------------------------------------------------------------

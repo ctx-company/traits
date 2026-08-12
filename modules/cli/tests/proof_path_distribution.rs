@@ -130,7 +130,7 @@ fn path_dependency_installs_and_resolves_without_leaking_absolute_paths() {
     // (matching pre-P535 npm install reports) — a reporting convenience,
     // never committed. Committed evidence (manifest, lock) is what must
     // never carry an absolute temporary path.
-    let manifest_text = fs::read_to_string(consumer.join(".ctx/traits/vendor.toml")).unwrap();
+    let manifest_text = fs::read_to_string(consumer.join(".ctx/traits/config.toml")).unwrap();
     assert!(
         manifest_text.contains("path = \"../producer/demo\""),
         "committed manifest does not record the path: dependency: {manifest_text}"
@@ -140,7 +140,7 @@ fn path_dependency_installs_and_resolves_without_leaking_absolute_paths() {
         "committed manifest leaked an absolute temporary path: {manifest_text}"
     );
 
-    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/vendor.lock")).unwrap();
+    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/config.lock")).unwrap();
     assert!(
         lock_text.contains("transport = \"path\""),
         "committed lock does not record the path transport: {lock_text}"
@@ -232,7 +232,7 @@ fn ordinary_reconcile_ignores_producer_rebuild_but_explicit_update_accepts_it() 
         &consumer,
         &home,
     );
-    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/vendor.lock")).unwrap();
+    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/config.lock")).unwrap();
     assert!(
         !lock_text.contains(home.to_str().unwrap()),
         "committed lock leaked an absolute temporary path after update: {lock_text}"
@@ -339,7 +339,7 @@ fn path_dependency_installs_every_family_variant() {
             "package install did not mirror {path}"
         );
     }
-    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/vendor.lock")).unwrap();
+    let lock_text = fs::read_to_string(consumer.join(".ctx/traits/config.lock")).unwrap();
     let canonical_digests = lock_text
         .lines()
         .filter_map(|line| {

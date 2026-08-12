@@ -115,21 +115,65 @@ impl DistributionScope {
         }
     }
 
+    /// Table path from the manifest document root to `[dependencies]`: a
+    /// project manifest's dependency declarations live under `[vendor]`
+    /// (0177, since the manifest itself is the `[vendor]` table of the
+    /// committed config document), while the global manifest
+    /// (`~/.config/ctx/traits.toml`) is never wrapped.
+    fn dependencies_table_path(&self) -> &'static [&'static str] {
+        match self {
+            Self::Project(_) => &["vendor", "dependencies"],
+            Self::Global(_) => &["dependencies"],
+        }
+    }
+
+    /// Starting document text for a from-scratch manifest write at this
+    /// scope: a project manifest's `schema-version` lives under `[vendor]`.
+    fn empty_manifest_text(&self) -> &'static str {
+        match self {
+            Self::Project(_) => "[vendor]\nschema-version = \"0.2\"\n",
+            Self::Global(_) => "schema-version = \"0.2\"\n",
+        }
+    }
+
     fn read_manifest(&self) -> crate::Result<ctx_traits_core::manifest::ProjectManifest> {
-        let manifest_path = self.manifest_path("toml");
-        let text = std::fs::read_to_string(&manifest_path).map_err(|source| {
-            crate::environment::Error::Filesystem {
-                path: manifest_path.to_string(),
-                source,
+        match self {
+            // Project scope's manifest is the `[vendor]` table of the
+            // committed config document (0177), not a bare `ProjectManifest`
+            // file — route through `config_document` so this never diverges
+            // from `crate::dependency::read_project_manifest`'s reader.
+            Self::Project(root) => {
+                let document = crate::config_document::read_document(root)?;
+                document
+                    .and_then(|document| document.vendor)
+                    .ok_or_else(|| {
+                        crate::environment::Error::Filesystem {
+                            path: self.manifest_path("toml").to_string(),
+                            source: std::io::Error::new(
+                                std::io::ErrorKind::NotFound,
+                                "no [vendor] table in the config document",
+                            ),
+                        }
+                        .into()
+                    })
             }
-        })?;
-        toml::from_str(&text).map_err(|source| {
-            crate::parse::Error::TomlDecode {
-                context: format!("decode {manifest_path}"),
-                source,
+            Self::Global(_) => {
+                let manifest_path = self.manifest_path("toml");
+                let text = std::fs::read_to_string(&manifest_path).map_err(|source| {
+                    crate::environment::Error::Filesystem {
+                        path: manifest_path.to_string(),
+                        source,
+                    }
+                })?;
+                toml::from_str(&text).map_err(|source| {
+                    crate::parse::Error::TomlDecode {
+                        context: format!("decode {manifest_path}"),
+                        source,
+                    }
+                    .into()
+                })
             }
-            .into()
-        })
+        }
     }
 
     fn read_lock(&self) -> crate::Result<Option<ProjectLock>> {
@@ -843,10 +887,7 @@ pub fn remove(scope: &DistributionScope, operand: &str) -> crate::Result<RemoveR
             source: Box::new(source),
         }
     })?;
-    if let Some(deps) = document
-        .get_mut("dependencies")
-        .and_then(|d| d.as_table_like_mut())
-    {
+    if let Some(deps) = get_nested_table_mut(&mut document, scope.dependencies_table_path()) {
         deps.remove(&alias);
     }
     let manifest_text = document.to_string();
@@ -1045,7 +1086,9 @@ pub fn outdated(
     repo_root: &Utf8Path,
     registry: RegistryOptions<'_>,
 ) -> crate::Result<Vec<OutdatedRow>> {
-    let manifest = read_project_manifest(repo_root)?;
+    let Some(manifest) = read_project_manifest(repo_root)? else {
+        return Ok(Vec::new());
+    };
     let lock = crate::project_lock::read_project_lock(repo_root)?;
     let mut rows = Vec::new();
     for (alias, dependency) in &manifest.packages {
@@ -2096,6 +2139,38 @@ fn epoch_nanos() -> u128 {
         .unwrap_or_default()
 }
 
+/// Walk (creating tables as needed) from `document`'s root to the table at
+/// `path`, e.g. `["vendor", "dependencies"]` for a project manifest.
+fn ensure_nested_table<'a>(
+    document: &'a mut toml_edit::DocumentMut,
+    path: &[&str],
+) -> &'a mut dyn toml_edit::TableLike {
+    let mut current: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for segment in path {
+        if current.get(segment).is_none() {
+            current.insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        current = current
+            .get_mut(segment)
+            .and_then(|item| item.as_table_like_mut())
+            .expect("just-inserted or existing table");
+    }
+    current
+}
+
+/// The table at `path` without creating any missing segment, unlike
+/// [`ensure_nested_table`].
+fn get_nested_table_mut<'a>(
+    document: &'a mut toml_edit::DocumentMut,
+    path: &[&str],
+) -> Option<&'a mut dyn toml_edit::TableLike> {
+    let mut current: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for segment in path {
+        current = current.get_mut(segment)?.as_table_like_mut()?;
+    }
+    Some(current)
+}
+
 fn backup_path(path: &Utf8Path, label: &str) -> Utf8PathBuf {
     path.with_file_name(format!(
         "{}.{label}-backup-{}-{}",
@@ -2148,6 +2223,7 @@ fn publish_staged_package(
         assert_no_symlink_ancestors(&manifest_path, scope.boundary())?;
         let manifest_snapshot = FileSnapshot::capture(&manifest_path)?;
         let manifest_text = prepare_manifest_dependency_text(
+            scope,
             manifest_snapshot.previous.as_deref(),
             alias,
             identity,
@@ -2506,6 +2582,7 @@ fn restore_manifest_dependency_declaration(
     assert_no_symlink_ancestors(&manifest_path, scope.boundary())?;
     let manifest_snapshot = FileSnapshot::capture(&manifest_path)?;
     let manifest_text = prepare_manifest_dependency_text(
+        scope,
         manifest_snapshot.previous.as_deref(),
         alias,
         identity,
@@ -2519,6 +2596,7 @@ fn restore_manifest_dependency_declaration(
 }
 
 fn prepare_manifest_dependency_text(
+    scope: &DistributionScope,
     existing_text: Option<&str>,
     alias: &str,
     identity: &PackageIdentity,
@@ -2526,25 +2604,14 @@ fn prepare_manifest_dependency_text(
 ) -> crate::Result<String> {
     let text = existing_text
         .map(str::to_string)
-        .unwrap_or_else(|| "schema-version = \"0.2\"\n".to_string());
+        .unwrap_or_else(|| scope.empty_manifest_text().to_string());
     let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
         crate::parse::Error::TomlEditDecode {
             context: format!("parse {manifest_path} for install"),
             source: Box::new(source),
         }
     })?;
-    if document.get("dependencies").is_none() {
-        document["dependencies"] = toml_edit::table();
-    }
-    let deps = document["dependencies"]
-        .as_table_like_mut()
-        .ok_or_else(|| crate::environment::Error::Filesystem {
-            path: manifest_path.to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "[dependencies] must be a table",
-            ),
-        })?;
+    let deps = ensure_nested_table(&mut document, scope.dependencies_table_path());
     let mut entry = toml_edit::InlineTable::new();
     match identity {
         PackageIdentity::Npm { package, requested } => {
@@ -2564,21 +2631,9 @@ fn prepare_manifest_dependency_text(
 
 fn read_project_manifest(
     repo_root: &Utf8Path,
-) -> crate::Result<ctx_traits_core::manifest::ProjectManifest> {
-    let manifest_path = crate::layout::project_manifest_path(repo_root, "toml");
-    let text = std::fs::read_to_string(&manifest_path).map_err(|source| {
-        crate::environment::Error::Filesystem {
-            path: manifest_path.to_string(),
-            source,
-        }
-    })?;
-    toml::from_str(&text).map_err(|source| {
-        crate::parse::Error::TomlDecode {
-            context: format!("decode {manifest_path}"),
-            source,
-        }
-        .into()
-    })
+) -> crate::Result<Option<ctx_traits_core::manifest::ProjectManifest>> {
+    let document = crate::config_document::read_document(repo_root)?;
+    Ok(document.and_then(|document| document.vendor))
 }
 
 fn parse_selector(version: &str) -> crate::Result<VersionSelector> {
@@ -2669,11 +2724,9 @@ pub fn reconcile_project_dependencies(
     locked: bool,
     registry: RegistryOptions<'_>,
 ) -> crate::Result<Vec<String>> {
-    let manifest_path = crate::layout::project_manifest_path(repo_root, "toml");
-    if !manifest_path.is_file() {
+    let Some(manifest) = read_project_manifest(repo_root)? else {
         return Ok(Vec::new());
-    }
-    let manifest = read_project_manifest(repo_root)?;
+    };
     if manifest.packages.is_empty() && manifest.extends.is_none() {
         return Ok(Vec::new());
     }
@@ -4107,8 +4160,7 @@ aliases = ["family-demo-quick"]
         let manifest_path = scope.manifest_path("toml");
         let manifest_text = std::fs::read_to_string(manifest_path.as_std_path()).unwrap();
         let mut document = manifest_text.parse::<toml_edit::DocumentMut>().unwrap();
-        document["dependencies"]
-            .as_table_like_mut()
+        get_nested_table_mut(&mut document, scope.dependencies_table_path())
             .unwrap()
             .remove("demo");
         std::fs::write(manifest_path.as_std_path(), document.to_string()).unwrap();

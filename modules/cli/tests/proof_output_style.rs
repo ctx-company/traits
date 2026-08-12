@@ -225,10 +225,11 @@ fn config_build_default_output_matches_the_panel_registry_shape() {
     let scratch = ScratchRoot::new("p467-config-build-panel-shape");
     let repo = scratch_repo(&scratch);
     symlink_node_modules(&repo);
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     fs::write(
-        repo.join(".ctx/config.ts"),
+        repo.join(".ctx/traits/config.ts"),
         "import { defineConfig } from \"@ctx-traits/config\";\n\n\
-         export default defineConfig({\n  budget: { maxRetries: 3 },\n});\n",
+         export default defineConfig({});\n",
     )
     .unwrap();
 
@@ -778,11 +779,12 @@ fn remove_default_output_matches_the_panel_registry_shape() {
     // `modules/io/src/distribution.rs`) — `remove` only ever rewrites this
     // manifest/lock text locally, so no install (and no network) is needed
     // to exercise it.
-    fs::create_dir_all(repo.join(".ctx")).unwrap();
+    fs::create_dir_all(repo.join(".ctx/traits")).unwrap();
     fs::write(
-        repo.join(".ctx/traits.toml"),
-        "schema-version = \"0.2\"\n\n\
-         [dependencies.demo-dep]\n\
+        repo.join(".ctx/traits/config.toml"),
+        "[vendor]\n\
+         schema-version = \"0.2\"\n\n\
+         [vendor.dependencies.demo-dep]\n\
          npm = \"demo-dep\"\n\
          version = \"1.0.0\"\n",
     )

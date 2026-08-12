@@ -971,29 +971,19 @@ pub(crate) fn handle_doctor_config(json: bool) -> crate::Result<CommandOutput<()
             .into_iter()
             .map(Into::into)
             .collect();
+    // 0177: the generated pathway is now the config *document*
+    // (`.ctx/traits/config.ts` -> `.ctx/traits/generated/config.toml`), not
+    // `RuntimeConfig` — the P457 pathway this loop used to inspect retired.
     let mut generated = Vec::new();
-    for (label, path) in [
-        (
-            "repo",
-            Some(Utf8PathBuf::from(ctx_traits_io::layout::RUNTIME_CONFIG)),
-        ),
-        (
-            "global",
-            ctx_traits_io::state::global_ctx_root()
-                .ok()
-                .map(|root| root.join(ctx_traits_io::layout::GLOBAL_RUNTIME_CONFIG)),
-        ),
-    ] {
-        let Some(path) = path else { continue };
-        if !path.exists() {
-            continue;
-        }
-        let Ok(text) = ctx_traits_io::read::read_text(&path) else {
-            continue;
-        };
-        if let Some(header) = ctx_traits_io::config_source::parse_header(&text) {
+    if let Ok(repo_root) = ctx_traits_io::repository::discover_repo_root() {
+        let generated_config_path =
+            ctx_traits_io::layout::trait_generated_root_path(&repo_root).join("config.toml");
+        if generated_config_path.exists()
+            && let Ok(text) = ctx_traits_io::read::read_text(&generated_config_path)
+        {
+            let header = ctx_traits_io::config_source::parse_header(&text);
             generated.push(format!(
-                "{label}: generated from config.ts, {} sources",
+                "repo: generated from config.ts, {} sources",
                 header.entries.len()
             ));
         }

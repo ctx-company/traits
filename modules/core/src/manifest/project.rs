@@ -7,14 +7,17 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::dependency::Dependency;
 use super::source::TraitSource;
 use crate::shared::TargetList;
 
-/// Repo-level project manifest (`.ctx/traits.toml` / `.json` / `.yaml`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Repo-level project manifest, embedded as `[vendor]` in the committed
+/// config document (`.ctx/traits/config.toml`, 0177) — formerly the
+/// standalone `vendor.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProjectManifest {
     pub schema_version: String,
@@ -66,7 +69,7 @@ pub struct ProjectManifest {
 /// decoder tries each variant with unknown fields denied, so a mixed
 /// declaration (both sources) or an empty one (neither) matches nothing and
 /// fails to decode instead of silently picking a source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", untagged)]
 pub enum ProjectPackageDependency {
     Npm {
@@ -166,7 +169,7 @@ impl ProjectPackageDependency {
 }
 
 /// Project-level metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProjectMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,7 +182,7 @@ pub struct ProjectMetadata {
 }
 
 /// A trait dependency entry in the project manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct TraitEntry {
     pub id: String,

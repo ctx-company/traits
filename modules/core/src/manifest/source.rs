@@ -11,12 +11,18 @@
 //! (`owner/repo`) is CLI-edge sugar only and must never appear in canonical
 //! persisted data.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Normalized trait dependency source.
 ///
 /// Invalid states are unrepresentable: a Git source always has a URL, a local
 /// source always has a path, and `ref` only exists on Git sources.
+/// [`JsonSchema`] is hand-written (below), delegating to [`TraitSourceRaw`]:
+/// the enum's own (de)serialization goes through that DTO already, and the
+/// schema (used by `ctx traits config build`'s camelCase-key rewrite) must
+/// describe the same `source = { git, ref, path, ... }` table shape
+/// authors actually write, not this normalized enum's variant shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraitSource {
     /// Local filesystem path source.
@@ -110,7 +116,7 @@ impl TraitSource {
 ///
 /// Used only at the serialization boundary. Normalizes into `TraitSource`
 /// before core code uses the source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct TraitSourceRaw {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +131,16 @@ struct TraitSourceRaw {
     package: Option<String>,
     #[serde(rename = "package-index", skip_serializing_if = "Option::is_none")]
     package_index: Option<String>,
+}
+
+impl JsonSchema for TraitSource {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TraitSource".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        TraitSourceRaw::json_schema(generator)
+    }
 }
 
 impl TraitSourceRaw {

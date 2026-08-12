@@ -47,8 +47,13 @@ pub const CANONICAL_ENTRIES: &[&str] = &[
     // never rewritten in place, only drained as their runs land.
     "traits/worktrees/",
     "worktrees/",
-    "config.toml",
-    "config.ts",
+    // Anchored (`/config.toml`, `/config.ts`): these name the retired P457
+    // `.ctx/config.toml`/`.ctx/config.ts` pathway, one directory up from
+    // `.ctx/traits/`. Unanchored, either pattern's basename match would also
+    // hide the COMMITTED `.ctx/traits/config.toml` document (0177) and its
+    // `.ctx/traits/config.ts` authoring source — a bug this anchoring fixes.
+    "/config.toml",
+    "/config.ts",
     // 0037: the machine-local runtime tier. The committed siblings —
     // `traits/config.toml` (project decisions) and
     // `traits/runtime.example.toml` (the template this file is copied from) —
