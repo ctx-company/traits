@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0178"
 title = "runtime.ts: machine execution config — example-seeded, accepted once, digest-stamped"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
 content = """
 
