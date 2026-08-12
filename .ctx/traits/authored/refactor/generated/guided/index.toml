@@ -1,13 +1,18 @@
 id = "refactor"
 schema-version = "0.4"
-version = "0.11.0"
+version = "0.12.0"
 name = "Guided"
 description = "Collect human annotations interactively, plan them as a checklist, implement every item in a reviewed loop, and commit."
 summary = "Turns human annotations into implemented, reviewed changes."
 variant = "guided"
 
 [metadata]
-tag = ["first-party", "refactoring", "review", "multi-agent"]
+tag = [
+    "first-party",
+    "refactoring",
+    "review",
+    "multi-agent",
+]
 
 [[intent.require]]
 id = "annotation-fidelity"
@@ -272,11 +277,14 @@ description = "The blocking defects that must be fixed before merge: a behavior 
 schema = "schema:text"
 required = true
 description = "approved when the framed change is correct, behavior-preserving, and introduces no new smell — even if the broader ideal is not fully reached; revise only when a blocking defect remains. Set to approved if and only if blockers is empty."
-allowed = ["approved", "revise"]
+allowed = [
+    "approved",
+    "revise",
+]
 
 [[agent]]
 id = "scribe"
-description = "Writes the refactor commit message from the agreed design and survey record; git staging and committing run as command steps."
+description = "Writes the commit message from the agreed design and survey record; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
@@ -312,7 +320,10 @@ text = """
     - the complete deviation report: every rejected-but-considered proposal, including any new ones this round (slot:deviation-report)
 """
 input = ["slot:plan"]
-output = ["slot:work-summary", "slot:deviation-report"]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
 
 [prompt.review-the-implementation]
 text = """
@@ -324,7 +335,11 @@ Review the implemented state of the working tree against the plan {slot:plan}.
                     A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict."""
-input = ["slot:plan", "slot:work-summary", "resource:architecture-dialect"]
+input = [
+    "slot:plan",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
 output = ["slot:review-verdict-1"]
 
 [prompt.write-the-commit-message]
@@ -339,7 +354,10 @@ text = """
     Return exactly the finished commit message — the runtime injects it into
     the git commit step (slot:commit-message)
 """
-input = ["slot:review-verdict-1", "slot:plan"]
+input = [
+    "slot:review-verdict-1",
+    "slot:plan",
+]
 output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
@@ -347,7 +365,10 @@ id = "write-the-commit-message"
 title = "Write the commit message"
 agent = "agent:scribe"
 prompt = "prompt:write-the-commit-message"
-input = ["slot:review-verdict-1", "slot:plan"]
+input = [
+    "slot:review-verdict-1",
+    "slot:plan",
+]
 output = ["slot:commit-message"]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
@@ -356,7 +377,11 @@ title = "Stage all changes"
 output = ["slot:stage-output"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
-argv = ["git", "add", "-A"]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
 id = "commit-the-refactor"
@@ -365,7 +390,12 @@ input = ["slot:commit-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
-argv = ["git", "commit", "-m", "{slot:commit-message}"]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "implement-the-checklist"
@@ -373,18 +403,25 @@ title = "Implement the checklist"
 agent = "agent:worker"
 prompt = "prompt:implement-the-checklist"
 input = [
-  "slot:plan",
-  { slot = "slot:review-verdict-1", optional = true },
-  { slot = "slot:review-verdict-2", optional = true },
+    "slot:plan",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
 ]
-output = ["slot:work-summary", "slot:deviation-report"]
+output = [
+    "slot:work-summary",
+    "slot:deviation-report",
+]
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "review-the-implementation"
 title = "Review the implementation"
 agent = "agent:smart-1"
 prompt = "prompt:review-the-implementation"
-input = ["slot:plan", "slot:work-summary", "resource:architecture-dialect"]
+input = [
+    "slot:plan",
+    "slot:work-summary",
+    "resource:architecture-dialect",
+]
 output = ["slot:review-verdict-1"]
 
 [procedure]
@@ -427,7 +464,11 @@ title = "Check working tree status"
 output = ["slot:git-status"]
 
 [procedure.sequence.command]
-argv = ["git", "status", "--porcelain"]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
 
 [[procedure.sequence]]
 id = "maybe-commit"

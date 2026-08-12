@@ -1,9 +1,10 @@
 id = "refactor"
 schema-version = "0.4"
 version = "0.12.0"
-name = "Quick"
-description = "Refactor one module or entity quickly: checklist, implementation, review, fixing, commit."
-variant = "quick"
+name = "Guarded"
+description = "Refactor one module or entity quickly with the final commit held for the owner's ctx-gate approval: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, then the gated commit."
+summary = "Quick refactoring procedure with a guarded commit: checklist, implement, one reviewer pass, one round of fixes if needed — then the commit waits for the owner's ctx-gate approval."
+variant = "guarded"
 
 [metadata]
 tag = [
@@ -351,18 +352,24 @@ argv = [
 ]
 
 [[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
-id = "commit-the-refactor"
-title = "Commit the refactor"
+id = "commit-the-refactor-awaiting-ctx-gate-approval"
+title = "Commit the refactor (awaiting ctx-gate approval)"
 input = ["slot:commit-message"]
 output = ["slot:commit-output"]
 
 [sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
 argv = [
+    "env",
+    "CTX_GATE_STATE_DIR=/Users/rpunkfu/ctx-company/ctx-gate/.ctx/gate/state",
+    "ctx-gate",
+    "run",
+    "--",
     "git",
     "commit",
     "-m",
     "{slot:commit-message}",
 ]
+timeout-ms = 28800000
 
 [[sequence.reviewed-refinement-body.sequence]]
 id = "implement-the-checklist"
@@ -392,7 +399,7 @@ input = [
 output = ["slot:review-verdict-1"]
 
 [procedure]
-description = "Refactor one module or entity quickly: checklist, implementation, review, fixing, commit."
+description = "Refactor one module or entity quickly with the final commit held for the owner's ctx-gate approval: an actionable checklist, implementation, exactly one reviewer pass, one round of fixes if needed, then the gated commit."
 input = ["port:target"]
 output = ["port:commit-report"]
 

@@ -1,6 +1,6 @@
 [package]
 id = "refactor"
-version = "0.11.0"
+version = "0.12.0"
 name = "Refactor"
 status = "ready"
 
@@ -12,6 +12,10 @@ default = "quick"
 [family.variant.quick]
 path = "generated/quick/index.toml"
 aliases = ["refactor-quick"]
+
+[family.variant.guarded]
+path = "generated/guarded/index.toml"
+aliases = ["refactor-guarded"]
 
 [family.variant.guided]
 path = "generated/guided/index.toml"
@@ -38,3 +42,9 @@ frame-seconds = 3600
 total-seconds = 10800
 max-retries = 3
 idle-seconds = 900
+
+# The guarded commit waits on the owner's ctx-gate approval (up to 8h,
+# declared as the step's own timeout-ms); the run's total budget must
+# survive the owner being away.
+[variant.guarded.budget]
+total-seconds = 86400
