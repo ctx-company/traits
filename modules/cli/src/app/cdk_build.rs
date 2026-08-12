@@ -411,11 +411,6 @@ pub(crate) fn publish_cdk_family(
         });
     }
     let manifest_path = ctx_traits_io::layout::package_manifest_path(&package_root);
-    // Publishing refreshes generated paths and aliases, but variant-owned
-    // budget sidecars are authored package configuration and must survive
-    // rebuilds.
-    let existing_family = ctx_traits_io::family_manifest::read_family_table(&manifest_path)?;
-    consolidate_legacy_run_configs_into_runtime_toml(&package_root, existing_family.as_ref())?;
     let manifest_entries = variants
         .iter()
         .map(
@@ -442,64 +437,6 @@ pub(crate) fn publish_cdk_family(
         manifest_path,
         variants,
     })
-}
-
-/// One-time migration (0036): when an existing family manifest still
-/// declares per-variant `run-config` sidecars and the package has no
-/// `runtime.toml` yet, fold those sidecars into one — the default variant's
-/// file becomes the top-level budget, every other declared variant becomes a
-/// `[variant.<vid>]` overlay — and write it before
-/// [`ctx_traits_io::family_manifest::write_family_table`] drops the
-/// declarations on this same publish. A no-op once `runtime.toml` exists (a
-/// package on the new shape is never rewritten by a rebuild) or when no
-/// variant declares `run-config` (nothing to consolidate).
-fn consolidate_legacy_run_configs_into_runtime_toml(
-    package_root: &Utf8Path,
-    existing_family: Option<&ctx_traits_io::family_manifest::FamilyTable>,
-) -> crate::Result<()> {
-    let runtime_path = ctx_traits_io::layout::package_runtime_config_path(package_root);
-    if runtime_path.is_file() {
-        return Ok(());
-    }
-    let Some(existing_family) = existing_family else {
-        return Ok(());
-    };
-    let mut default_budget = None;
-    let mut default_defaults = ctx_traits_io::harness_config::PortDefaults::default();
-    let mut variant_budgets = std::collections::BTreeMap::new();
-    for (name, variant) in &existing_family.variants {
-        let Some(run_config) = variant.run_config.as_ref() else {
-            continue;
-        };
-        let path = package_root.join(run_config);
-        let config = ctx_traits_io::harness_config::decode_trait_run_config_at(&path)?;
-        if name == &existing_family.default {
-            default_defaults = config.defaults;
-            default_budget = Some(config.budget);
-        } else {
-            if !config.defaults.port.is_empty() {
-                return Err(crate::Error::Command {
-                    message: format!(
-                        "package variant '{name}' declares [defaults.port] in its run-config \
-                         sidecar ({path}), but runtime.toml can only carry [defaults.port] on \
-                         the default variant — remove it or make '{name}' the default variant \
-                         before rebuilding"
-                    ),
-                });
-            }
-            variant_budgets.insert(name.clone(), config.budget);
-        }
-    }
-    if default_budget.is_none() && default_defaults.port.is_empty() && variant_budgets.is_empty() {
-        return Ok(());
-    }
-    let text = ctx_traits_io::harness_config::render_package_runtime_config(
-        &default_budget.unwrap_or_default(),
-        &default_defaults,
-        &variant_budgets,
-    );
-    ctx_traits_io::write::write_text(&runtime_path, &text)?;
-    Ok(())
 }
 
 /// Enforce the same `[package]` identity invariant [`build_cdk_package`]'s

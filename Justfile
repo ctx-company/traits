@@ -82,6 +82,14 @@ test:
 	target_dir="$CARGO_TARGET_DIR"
 	just sdk-check
 	just ts-format-check
+	# ts-typecheck in the PER-ROUND gate (owner ruling 2026-08-11): twice now
+	# a run iterated green for its whole build loop while carrying a
+	# TS-only defect the landing gate then caught (tone.Blunt in
+	# functional.test.ts; 0162's seats() signature) — the worker gets told
+	# at merge time about a defect it could have fixed in round 1. tsc is
+	# ~15s warm, well inside the per-round budget. ts-test stays
+	# landing-only: vitest suites are the slow half.
+	just ts-typecheck
 	cargo fmt --check
 	cargo clippy --workspace --all-features -- -D warnings
 	cargo test --workspace --lib

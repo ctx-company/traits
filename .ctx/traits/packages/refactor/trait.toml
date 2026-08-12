@@ -24,3 +24,17 @@ aliases = ["refactor-complex"]
 [publish]
 name = "@ctx-traits/refactor"
 access = "public"
+
+[budget]
+max-frames = 1000
+frame-seconds = 1200
+total-seconds = 10800
+max-retries = 3
+idle-seconds = 1200
+
+[variant.guided.budget]
+max-frames = 100
+frame-seconds = 3600
+total-seconds = 10800
+max-retries = 3
+idle-seconds = 900

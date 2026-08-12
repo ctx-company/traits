@@ -485,7 +485,6 @@ pub fn generated_package_json_value(
             crate::layout::TRAIT_LOCKFILE,
             crate::layout::GENERATED,
             "resources",
-            crate::layout::PACKAGE_RUNTIME_CONFIG,
             crate::layout::SOURCE_DIR,
         ],
     })

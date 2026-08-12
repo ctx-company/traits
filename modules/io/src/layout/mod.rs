@@ -73,16 +73,14 @@ pub const CANONICAL_SOURCE_MAP: &str = "index.map";
 /// see `decode_package_manifest`'s `[package]`-table check.
 pub const PACKAGE_MANIFEST: &str = "trait.toml";
 /// Legacy package-root run-config sidecar (P312), still read. Superseded by
-/// [`PACKAGE_RUNTIME_CONFIG`] (0036): budget only, never canonical trait
+/// `trait.toml` `[budget]` (0176): budget only, never canonical trait
 /// bytes and never read from `generated/`.
 pub const PACKAGE_RUN_CONFIG: &str = "config.toml";
-/// Committed per-package budget document (0036). Shares its filename with
-/// the machine-tier [`RUNTIME_CONFIG`], disambiguated by location, not name:
-/// permission narrows as authority moves away from the machine owner —
-/// machine tier gets the full schema, package tier ([`crate::harness_config::PackageRuntimeConfig`])
-/// gets `[budget]` only. Supersedes both [`PACKAGE_RUN_CONFIG`] and the
-/// family manifest's per-variant `run-config` declarations; both remain a
-/// compatibility read when this file is absent.
+/// RETIRED per-package budget sidecar (0036, retired 0176). Never read as
+/// config anymore: the author's budget lives in `trait.toml` `[budget]` /
+/// `[variant.<vid>.budget]` and `[defaults.port]`. The constant survives
+/// only so resolution can refuse a package still carrying the file with a
+/// tombstone naming the new home, instead of silently ignoring it.
 pub const PACKAGE_RUNTIME_CONFIG: &str = "runtime.toml";
 /// Legacy canonical document name (flat vendored packages, pre-v2 layouts).
 pub const TRAIT_MANIFEST: &str = "trait.toml";

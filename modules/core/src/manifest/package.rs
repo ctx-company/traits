@@ -16,7 +16,7 @@ use super::dependency::Dependency;
 use super::source::TraitSource;
 
 /// The root `trait.toml` package manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PackageManifest {
     pub package: PackageMetadata,
@@ -25,6 +25,25 @@ pub struct PackageManifest {
     /// byte-compatible with the pre-family manifest format.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family: Option<PackageFamily>,
+
+    /// `[budget]`: the author's default execution envelope (0176). Budgets
+    /// are DATA, not behavior — they live outside every digest, so retuning
+    /// one never forces re-trust (the same boundary 0172 drew for resolved
+    /// setting values). For a family this is the default variant's budget;
+    /// `[variant.<vid>.budget]` overlays it per non-default variant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<ManifestBudget>,
+
+    /// `[variant.<vid>]`: per-variant author config, budget-only (0176).
+    /// Deliberately a sibling of `[family]`, never inside it — the build
+    /// regenerates `[family]` wholesale, while this table is hand-authored
+    /// and must survive a rebuild untouched.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variant: BTreeMap<String, PackageVariantConfig>,
+
+    /// `[defaults.port]`: author-supplied caller-arg fallbacks (0176).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<ManifestDefaults>,
 
     /// `[dependencies]` table keyed by alias: `alias = { path = ".." }`,
     /// `alias = { npm = "@scope/pkg" }`, or `alias = { git = "..." }`.
@@ -100,6 +119,54 @@ pub struct PackageFamilyVariant {
     pub aliases: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_config: Option<String>,
+}
+
+/// One `[variant.<vid>]` table: the author's per-variant config. Accepts
+/// `budget` and nothing else — **permission narrows as authority moves away
+/// from the machine owner**; do not widen this for symmetry with the machine
+/// tier's variant tables.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PackageVariantConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<ManifestBudget>,
+}
+
+/// `[defaults]`: author-supplied input fallbacks. Accepts `port` and nothing
+/// else (same narrowing rule as [`PackageVariantConfig`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ManifestDefaults {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub port: BTreeMap<String, String>,
+}
+
+/// The author's execution-envelope statement: the engine-defined budget
+/// vocabulary, every field optional (stated replaces, omitted inherits).
+/// Mirrors the io-layer run budget field-for-field; the io layer converts.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ManifestBudget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_frames: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach_wait_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_idle_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<f64>,
 }
 
 /// `[package]` identity metadata.
@@ -314,6 +381,43 @@ pub fn decode_package_manifest(text: &str, origin: &str) -> crate::Result<Option
             }
         }
     }
+    for name in manifest.variant.keys() {
+        crate::shared::validate_slug_shape(name, &format!("variant.{name}"))?;
+        let Some(family) = &manifest.family else {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("variant.{name}"),
+                message: "per-variant config requires a [family]; a single-trait package \
+                          states its budget under [budget]"
+                    .to_string(),
+            }
+            .into());
+        };
+        if !family.variant.contains_key(name) {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("variant.{name}"),
+                message: format!(
+                    "does not name a declared family.variant (declared: {})",
+                    family
+                        .variant
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+            .into());
+        }
+        if name == &family.default {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("variant.{name}"),
+                message: format!(
+                    "names the family default {name:?}; the default variant's budget is \
+                     the top-level [budget]"
+                ),
+            }
+            .into());
+        }
+    }
     Ok(Some(manifest))
 }
 
@@ -331,4 +435,89 @@ fn validate_family_relative_path(path: &str, field_path: &str) -> crate::Result<
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FAMILY_HEADER: &str = concat!(
+        "[package]\n",
+        "id = \"fixture\"\n",
+        "version = \"0.1.0\"\n",
+        "\n",
+        "[family]\n",
+        "default = \"quick\"\n",
+        "[family.variant.quick]\n",
+        "path = \"generated/quick/index.toml\"\n",
+        "[family.variant.gated]\n",
+        "path = \"generated/gated/index.toml\"\n",
+    );
+
+    fn decode(text: &str) -> crate::Result<Option<PackageManifest>> {
+        decode_package_manifest(text, "trait.toml")
+    }
+
+    #[test]
+    fn budget_and_variant_overlay_and_port_defaults_decode() {
+        let text = format!(
+            "{FAMILY_HEADER}\n[budget]\nframe-seconds = 1200\nmax-cost-usd = 2.5\n\n\
+             [variant.gated.budget]\ntotal-seconds = 86400\n\n[defaults.port]\nplan = \"x\"\n"
+        );
+        let manifest = decode(&text).expect("decodes").expect("is a manifest");
+        let budget = manifest.budget.expect("budget stated");
+        assert_eq!(budget.frame_seconds, Some(1200));
+        assert_eq!(budget.max_cost_usd, Some(2.5));
+        assert_eq!(
+            manifest.variant["gated"]
+                .budget
+                .as_ref()
+                .and_then(|b| b.total_seconds),
+            Some(86400)
+        );
+        assert_eq!(
+            manifest.defaults.expect("defaults stated").port["plan"],
+            "x"
+        );
+    }
+
+    #[test]
+    fn budget_rejects_out_of_scope_keys() {
+        for section in [
+            "[budget]\nharness = \"opencode\"\n",
+            "[variant.gated]\nmodel = \"x\"\n",
+            "[variant.gated.budget]\nworktree = true\n",
+            "[defaults]\nsetting = { a = 1 }\n",
+        ] {
+            let text = format!("{FAMILY_HEADER}\n{section}");
+            assert!(
+                decode(&text).is_err(),
+                "out-of-scope key must refuse: {section}"
+            );
+        }
+    }
+
+    #[test]
+    fn variant_overlay_for_an_undeclared_variant_refuses_naming_the_declared_set() {
+        let text = format!("{FAMILY_HEADER}\n[variant.turbo.budget]\nframe-seconds = 1\n");
+        let error = decode(&text).expect_err("unknown variant refuses");
+        let message = format!("{error:#}");
+        assert!(message.contains("variant.turbo"), "{message}");
+        assert!(message.contains("gated, quick"), "{message}");
+    }
+
+    #[test]
+    fn variant_overlay_for_the_family_default_refuses() {
+        let text = format!("{FAMILY_HEADER}\n[variant.quick.budget]\nframe-seconds = 1\n");
+        let error = decode(&text).expect_err("default-variant overlay refuses");
+        assert!(format!("{error:#}").contains("top-level [budget]"));
+    }
+
+    #[test]
+    fn variant_overlay_without_a_family_refuses() {
+        let text = "[package]\nid = \"fixture\"\nversion = \"0.1.0\"\n\n\
+                    [variant.quick.budget]\nframe-seconds = 1\n";
+        let error = decode(text).expect_err("no-family overlay refuses");
+        assert!(format!("{error:#}").contains("requires a [family]"));
+    }
 }

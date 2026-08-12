@@ -24,3 +24,23 @@ aliases = ["research-deep"]
 [publish]
 name = "@ctx-traits/research"
 access = "public"
+
+[budget]
+max-frames = 60
+frame-seconds = 1800
+total-seconds = 14400
+max-retries = 3
+idle-seconds = 900
+
+[defaults.port]
+output-dir = ".internal/research"
+
+[variant.quick.budget]
+frame-seconds = 1800
+total-seconds = 7200
+idle-seconds = 600
+
+[variant.deep.budget]
+frame-seconds = 1800
+total-seconds = 28800
+idle-seconds = 900

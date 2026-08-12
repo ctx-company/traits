@@ -154,14 +154,14 @@ pub(crate) fn build_check_report(
                 )?;
             if let Some((tier, run_config_path)) = active_run_config.as_ref() {
                 let message = match tier {
-                    ctx_traits_io::harness_config::PackageRunConfigTier::Runtime => format!(
-                        "package {run_config_path} is active: its budget sets vendored execution caps below CLI flags but above built-in defaults; review it since a vendored trait's budget may raise execution caps, and CLI budget flags always override it"
+                    ctx_traits_io::harness_config::PackageRunConfigTier::Manifest => format!(
+                        "package budget in {run_config_path} is active: its [budget] sets vendored execution caps below CLI flags but above built-in defaults; review it since a vendored trait's budget may raise execution caps, and CLI budget flags always override it"
                     ),
                     ctx_traits_io::harness_config::PackageRunConfigTier::LegacyDeclared => format!(
-                        "legacy declared run-config {run_config_path} is active: migrate this package to runtime.toml (0036); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
+                        "legacy declared run-config {run_config_path} is active: migrate this package to trait.toml [budget] (0176); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
                     ),
                     ctx_traits_io::harness_config::PackageRunConfigTier::LegacySidecar => format!(
-                        "legacy package sidecar {run_config_path} is active: migrate this package to runtime.toml (0036); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
+                        "legacy package sidecar {run_config_path} is active: migrate this package to trait.toml [budget] (0176); its [budget] sets vendored execution caps below CLI flags but above built-in defaults"
                     ),
                 };
                 check_warnings.push(ctx_traits_core::check::CheckWarning {

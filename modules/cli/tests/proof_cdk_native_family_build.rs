@@ -379,12 +379,11 @@ fn default_variant_check_covers_complete_family_drift() {
         !post_rebuild_manifest.contains("run-config"),
         "rebuild must stop emitting run-config declarations: {post_rebuild_manifest}"
     );
-    let runtime_toml = fs::read_to_string(root.join("runtime.toml")).unwrap();
     assert!(
-        runtime_toml.contains("[variant.quick]") && runtime_toml.contains("max-frames = 10"),
-        "rebuild must consolidate the authored run-config into runtime.toml: {runtime_toml}"
+        !root.join("runtime.toml").exists(),
+        "rebuild must never create the retired package runtime.toml (0176)"
     );
-    assert_family_check(&proj, &home, true, "consolidated runtime.toml");
+    assert_family_check(&proj, &home, true, "rebuild after dropping run-config");
 
     let missing_alias = post_rebuild_manifest.replace("aliases = [\"family-fixture-quick\"]\n", "");
     assert_ne!(
@@ -424,13 +423,15 @@ fn default_variant_check_covers_complete_family_drift() {
     );
 }
 
-/// Consolidation must carry an authored `[defaults.port]` on the default
-/// variant's declared run-config forward into `runtime.toml`, not silently
-/// drop it — `[defaults.port]` is a live capability of the new shape, not
-/// out-of-scope authored configuration.
+/// The author's `trait.toml` `[budget]`/`[variant.<vid>.budget]`/`[defaults]`
+/// sections are hand-owned data (0176): a rebuild — which regenerates
+/// `[family]` wholesale — must carry them through byte-for-byte, and a
+/// package still carrying the retired `runtime.toml` sidecar must fail
+/// `ctx traits check` with a tombstone naming the new home, never fall back
+/// to reading it.
 #[test]
-fn rebuild_consolidation_carries_default_variant_defaults_forward() {
-    let scratch = ScratchRoot::new("cdk-native-family-consolidate-defaults");
+fn trait_toml_budget_survives_rebuild_and_retired_runtime_toml_refuses() {
+    let scratch = ScratchRoot::new("cdk-native-family-trait-toml-budget");
     let home = scratch.home();
     let proj = home.join("repo");
     fs::create_dir_all(&proj).unwrap();
@@ -453,22 +454,10 @@ fn rebuild_consolidation_carries_default_variant_defaults_forward() {
 
     let root = proj.join(".ctx/traits/packages/family-fixture");
     let manifest = root.join("trait.toml");
+    let budget_sections = "\n[budget]\nmax-frames = 10\nframe-seconds = 1200\n\n\
+                           [variant.quick.budget]\nframe-seconds = 900\n";
     let manifest_text = fs::read_to_string(&manifest).unwrap();
-    let with_run_config = manifest_text.replace(
-        "[family.variant.default]\npath = \"generated/default/index.toml\"",
-        "[family.variant.default]\npath = \"generated/default/index.toml\"\nrun-config = \"run-config/default.toml\"",
-    );
-    assert_ne!(
-        with_run_config, manifest_text,
-        "fixture must declare a default variant path to rewrite"
-    );
-    fs::create_dir_all(root.join("run-config")).unwrap();
-    fs::write(
-        root.join("run-config/default.toml"),
-        "schema-version = \"0.1\"\n\n[budget]\nmax-frames = 10\n\n[defaults.port]\nplan = \"sidecar\"\n",
-    )
-    .unwrap();
-    fs::write(&manifest, &with_run_config).unwrap();
+    fs::write(&manifest, format!("{manifest_text}{budget_sections}")).unwrap();
     let rebuild = run_ctx(
         &[
             "traits",
@@ -480,79 +469,45 @@ fn rebuild_consolidation_carries_default_variant_defaults_forward() {
     );
     assert!(
         rebuild.status.success(),
-        "rebuild with authored default-variant defaults failed: {}",
+        "rebuild with authored budget sections failed: {}",
         utf8(&rebuild).1
     );
-    let runtime_toml = fs::read_to_string(root.join("runtime.toml")).unwrap();
-    assert!(
-        runtime_toml.contains("[defaults.port]") && runtime_toml.contains("plan = \"sidecar\""),
-        "rebuild must carry the default variant's [defaults.port] into runtime.toml: {runtime_toml}"
-    );
-}
-
-/// A non-default variant's declared run-config cannot carry `[defaults.port]`
-/// forward — `runtime.toml`'s `[variant.<vid>]` tables are budget-only, so
-/// this is unrepresentable in the new shape and must hard-error rather than
-/// silently drop the authored defaults.
-#[test]
-fn rebuild_consolidation_rejects_non_default_variant_defaults() {
-    let scratch = ScratchRoot::new("cdk-native-family-consolidate-defaults-reject");
-    let home = scratch.home();
-    let proj = home.join("repo");
-    fs::create_dir_all(&proj).unwrap();
-    git_init(&proj);
-    symlink_node_modules(&proj);
-    let init = run_ctx(&["traits", "init", "family-fixture"], &proj, &home);
-    assert!(init.status.success(), "init failed: {}", utf8(&init).1);
-    let source = proj.join(".ctx/traits/packages/family-fixture/source/index.ts");
-    fs::write(&source, family_fixture_source()).unwrap();
-    let build = run_ctx(
-        &[
-            "traits",
-            "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
-        ],
-        &proj,
-        &home,
-    );
-    assert!(build.status.success(), "build failed: {}", utf8(&build).1);
-
-    let root = proj.join(".ctx/traits/packages/family-fixture");
-    let manifest = root.join("trait.toml");
-    let manifest_text = fs::read_to_string(&manifest).unwrap();
-    let with_run_config = manifest_text.replace(
-        "[family.variant.quick]\npath = \"generated/quick/index.toml\"",
-        "[family.variant.quick]\npath = \"generated/quick/index.toml\"\nrun-config = \"run-config/quick.toml\"",
-    );
-    fs::create_dir_all(root.join("run-config")).unwrap();
-    fs::write(
-        root.join("run-config/quick.toml"),
-        "schema-version = \"0.1\"\n\n[budget]\nmax-frames = 10\n\n[defaults.port]\nplan = \"sidecar\"\n",
-    )
-    .unwrap();
-    fs::write(&manifest, &with_run_config).unwrap();
-    let rebuild = run_ctx(
-        &[
-            "traits",
-            "build",
-            ".ctx/traits/packages/family-fixture/source/index.ts",
-        ],
-        &proj,
-        &home,
-    );
-    assert!(
-        !rebuild.status.success(),
-        "rebuild must refuse to consolidate a non-default variant's [defaults.port]"
-    );
-    let (stdout, stderr) = utf8(&rebuild);
-    assert!(
-        (stdout.contains("quick") && stdout.contains("defaults.port"))
-            || (stderr.contains("quick") && stderr.contains("defaults.port")),
-        "refusal must name the offending variant and field\nstdout: {stdout}\nstderr: {stderr}"
-    );
+    let post_rebuild_manifest = fs::read_to_string(&manifest).unwrap();
+    for fragment in [
+        "[budget]",
+        "max-frames = 10",
+        "[variant.quick.budget]",
+        "frame-seconds = 900",
+    ] {
+        assert!(
+            post_rebuild_manifest.contains(fragment),
+            "rebuild must carry the hand-authored {fragment} through: {post_rebuild_manifest}"
+        );
+    }
     assert!(
         !root.join("runtime.toml").exists(),
-        "refused consolidation must not partially write runtime.toml"
+        "rebuild must never create the retired package runtime.toml"
+    );
+    assert_family_check(&proj, &home, true, "authored budget sections");
+
+    fs::write(root.join("runtime.toml"), "[budget]\nmax-frames = 5\n").unwrap();
+    let check = run_ctx(
+        &["traits", "check", "family-fixture", "--json"],
+        &proj,
+        &home,
+    );
+    assert!(
+        !check.status.success(),
+        "a package still carrying runtime.toml must fail check"
+    );
+    let (stdout, stderr) = utf8(&check);
+    assert!(
+        stdout.contains("retired") || stderr.contains("retired"),
+        "tombstone must name the retirement\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("trait.toml [budget]") || stderr.contains("trait.toml [budget]"),
+        "tombstone must point at the new home\nstdout: {stdout}\nstderr: {stderr}"
     );
 }
 

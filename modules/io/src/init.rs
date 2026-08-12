@@ -395,6 +395,9 @@ pub(crate) fn package_manifest_text(trait_id: &str, name: &str) -> crate::Result
         // init` is what fills this in, so the author states their own npm
         // name rather than inheriting a scope they cannot publish to.
         publish: None,
+        budget: None,
+        variant: Default::default(),
+        defaults: None,
     };
     Ok(ctx_traits_core::encoding::encode(
         ctx_traits_core::encoding::Encoding::Toml,

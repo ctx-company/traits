@@ -679,109 +679,31 @@ pub struct PortDefaults {
     pub port: BTreeMap<String, String>,
 }
 
-/// Committed per-package `runtime.toml` (0036): the AUTHOR's budget-only
-/// successor to [`TraitRunConfig`]'s `config.toml` sidecar and to a family
-/// manifest's per-variant `run-config` declarations. Top-level budget keys
-/// are the package default; a `[variant.<vid>]` table overlays them (stated
-/// replaces, omitted inherits — [`overlay_budget`]).
-///
-/// Decoded manually rather than via `#[serde(flatten)]`, because serde
-/// silently disables `deny_unknown_fields` under `flatten` — the schema must
-/// keep rejecting `[assign]`, `[worktree]`, harness, or model exactly as the
-/// legacy sidecar did. **Permission narrows as authority moves away from the
-/// machine owner**: the machine tier (`.ctx/traits/runtime.toml`) gets the
-/// full schema, the package tier gets `[budget]` (plus `[defaults.port]`)
-/// only — do not widen this for symmetry with the machine tier.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct PackageRuntimeConfig {
-    pub schema_version: Option<String>,
-    pub budget: RunProfileBudget,
-    pub defaults: PortDefaults,
-    /// `[variant.<vid>]`: budget-only overlay tables, keyed by variant id.
-    /// Never contains an entry for the family's default variant — its
-    /// budget is expressed at the top level.
-    pub variant: BTreeMap<String, RunProfileBudget>,
-}
-
-impl PackageRuntimeConfig {
-    fn decode(text: &str, path: &Utf8Path) -> crate::Result<Self> {
-        let table: toml::Table =
-            toml::from_str(text).map_err(|source| crate::parse::Error::TomlDecode {
-                context: path.to_string(),
-                source,
-            })?;
-        let mut schema_version = None;
-        let mut defaults = PortDefaults::default();
-        let mut variant = BTreeMap::new();
-        let mut budget_table = toml::Table::new();
-        for (key, value) in table {
-            match key.as_str() {
-                "schema-version" => {
-                    schema_version = value.as_str().map(str::to_string);
-                }
-                "defaults" => {
-                    defaults =
-                        value
-                            .try_into()
-                            .map_err(|source| crate::parse::Error::TomlDecode {
-                                context: format!("{path} [defaults]"),
-                                source,
-                            })?;
-                }
-                "variant" => {
-                    let table = value
-                        .as_table()
-                        .cloned()
-                        .ok_or_else(|| crate::Error::Usage {
-                            message: format!("{path}: `variant` must be a table"),
-                        })?;
-                    for (name, entry) in table {
-                        let entry_table =
-                            entry
-                                .as_table()
-                                .cloned()
-                                .ok_or_else(|| crate::Error::Usage {
-                                    message: format!("{path}: [variant.{name}] must be a table"),
-                                })?;
-                        let budget: RunProfileBudget =
-                            toml::Value::Table(entry_table)
-                                .try_into()
-                                .map_err(|source| crate::parse::Error::TomlDecode {
-                                    context: format!("{path} [variant.{name}]"),
-                                    source,
-                                })?;
-                        variant.insert(name, budget);
-                    }
-                }
-                _ => {
-                    budget_table.insert(key, value);
-                }
-            }
-        }
-        let budget: RunProfileBudget =
-            toml::Value::Table(budget_table)
-                .try_into()
-                .map_err(|source| crate::parse::Error::TomlDecode {
-                    context: path.to_string(),
-                    source,
-                })?;
-        Ok(Self {
-            schema_version,
-            budget,
-            defaults,
-            variant,
-        })
+/// Convert the author's `trait.toml` budget statement into the io-layer run
+/// budget, field for field. The manifest mirror exists because core cannot
+/// name io types; the two field sets must stay identical (0176).
+fn manifest_budget_to_run(budget: &ctx_traits_core::manifest::ManifestBudget) -> RunProfileBudget {
+    RunProfileBudget {
+        max_frames: budget.max_frames,
+        frame_seconds: budget.frame_seconds,
+        total_seconds: budget.total_seconds,
+        max_retries: budget.max_retries,
+        attach_wait_seconds: budget.attach_wait_seconds,
+        idle_seconds: budget.idle_seconds,
+        command_seconds: budget.command_seconds,
+        command_idle_seconds: budget.command_idle_seconds,
+        max_tokens: budget.max_tokens,
+        max_cost_usd: budget.max_cost_usd,
     }
 }
 
 /// Which tier supplied the resolved package-level run config, most-current
-/// first. Surfaced to `ctx traits check` (`run-config-sidecar-active`) so an
-/// author can tell whether a package is already on the current `runtime.toml`
-/// shape or still needs migrating.
+/// first. Surfaced to `ctx traits check` so an author can tell whether a
+/// package is on the current `trait.toml` shape or still needs migrating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageRunConfigTier {
-    /// Committed `runtime.toml` ([`PackageRuntimeConfig`]).
-    Runtime,
+    /// `trait.toml` `[budget]`/`[variant.<vid>.budget]`/`[defaults]` (0176).
+    Manifest,
     /// Legacy family-manifest-declared per-variant `run-config` file.
     LegacyDeclared,
     /// Legacy package-root `config.toml` sidecar ([`TraitRunConfig`]).
@@ -3517,7 +3439,7 @@ fn overlay_budget(base: &mut RunProfileBudget, next: &RunProfileBudget) {
 }
 
 /// Load the optional package-root `config.toml` sidecar (legacy, P312;
-/// superseded by [`PackageRuntimeConfig`]). Returns `Ok(None)` only when the
+/// superseded by `trait.toml` `[budget]`, 0176). Returns `Ok(None)` only when the
 /// file is absent; a malformed or out-of-scope sidecar (e.g. an `[assign]`
 /// or `[worktree]` table) is always a hard structured `deny_unknown_fields`
 /// decode error, never silently ignored.
@@ -3545,35 +3467,64 @@ pub fn describe_active_package_run_config(
 }
 
 /// Resolve the effective package-tier run config for the selected variant,
-/// in precedence order: committed `runtime.toml` ([`PackageRuntimeConfig`],
-/// top-level budget overlaid by the selected `[variant.<vid>]`) beats a
-/// native family's declared per-variant sidecar (part of the family
-/// manifest, so a missing or malformed one is a hard configuration error),
-/// which beats the legacy package-root `config.toml` sidecar. A package
-/// carrying `runtime.toml` uses it exclusively — the legacy forms are never
-/// consulted once it exists.
+/// in precedence order: `trait.toml`'s `[budget]` (overlaid by the selected
+/// `[variant.<vid>.budget]`) plus `[defaults.port]` (0176) beats a native
+/// family's declared per-variant sidecar (part of the family manifest, so a
+/// missing or malformed one is a hard configuration error), which beats the
+/// legacy package-root `config.toml` sidecar. A manifest stating any of the
+/// three sections uses them exclusively — the legacy forms are never
+/// consulted. A package still carrying the retired `runtime.toml` sidecar is
+/// a hard error, not a fallback.
 fn load_selected_trait_run_config(
     trait_ref: Option<&ctx_traits_core::Trait>,
     trait_root: &Utf8Path,
 ) -> crate::Result<Option<(TraitRunConfig, Utf8PathBuf, PackageRunConfigTier)>> {
-    let runtime_path = crate::layout::package_runtime_config_path(trait_root);
-    if let Some(text) = crate::read::read_optional_text(&runtime_path)? {
-        let config = PackageRuntimeConfig::decode(&text, &runtime_path)?;
-        let mut budget = config.budget;
-        if let Some(variant_budget) = trait_ref
+    let retired_path = crate::layout::package_runtime_config_path(trait_root);
+    if retired_path.is_file() {
+        return Err(crate::Error::Usage {
+            message: format!(
+                "the package-level runtime.toml is retired (0176): move its budget keys into \
+                 trait.toml [budget] (and [variant.<vid>.budget] overlays), [defaults.port] into \
+                 trait.toml [defaults.port], then delete {retired_path}"
+            ),
+        });
+    }
+
+    let manifest_path = crate::layout::package_manifest_path(trait_root);
+    if let Some(text) = crate::read::read_optional_text(&manifest_path)?
+        && let Some(manifest) =
+            ctx_traits_core::manifest::decode_package_manifest(&text, manifest_path.as_str())?
+        && (manifest.budget.is_some()
+            || manifest.defaults.is_some()
+            || !manifest.variant.is_empty())
+    {
+        let mut budget = manifest
+            .budget
+            .as_ref()
+            .map(manifest_budget_to_run)
+            .unwrap_or_default();
+        if let Some(overlay) = trait_ref
             .and_then(|trait_ref| trait_ref.variant.as_deref())
-            .and_then(|variant| config.variant.get(variant))
+            .and_then(|variant| manifest.variant.get(variant))
+            .and_then(|config| config.budget.as_ref())
         {
-            overlay_budget(&mut budget, variant_budget);
+            overlay_budget(&mut budget, &manifest_budget_to_run(overlay));
         }
+        let defaults = PortDefaults {
+            port: manifest
+                .defaults
+                .as_ref()
+                .map(|defaults| defaults.port.clone())
+                .unwrap_or_default(),
+        };
         return Ok(Some((
             TraitRunConfig {
-                schema_version: config.schema_version,
+                schema_version: None,
                 budget,
-                defaults: config.defaults,
+                defaults,
             },
-            runtime_path,
-            PackageRunConfigTier::Runtime,
+            manifest_path,
+            PackageRunConfigTier::Manifest,
         )));
     }
 
@@ -3607,10 +3558,7 @@ fn load_selected_trait_run_config(
 }
 
 /// Decode a [`TraitRunConfig`] (legacy budget-only sidecar shape) from an
-/// explicit file path. Shared by the declared per-variant lookup above and
-/// by the rebuild-time consolidation into `runtime.toml`
-/// ([`render_package_runtime_config`]), which reads the same legacy files
-/// before their `run-config` declarations are dropped.
+/// explicit file path, for the declared per-variant lookup above.
 pub fn decode_trait_run_config_at(path: &Utf8Path) -> crate::Result<TraitRunConfig> {
     let text = crate::read::read_text(path)?;
     let config: TraitRunConfig =
@@ -3619,62 +3567,6 @@ pub fn decode_trait_run_config_at(path: &Utf8Path) -> crate::Result<TraitRunConf
             source,
         })?;
     Ok(config)
-}
-
-/// Render a [`PackageRuntimeConfig`]-shaped document from a resolved default
-/// budget plus per-variant overlays: the one-time rebuild consolidation
-/// `publish_cdk_family` runs when an existing family declares `run-config`
-/// files and no `runtime.toml` exists yet, so a rebuild never orphans
-/// authored budgets once the declarations are dropped. `default_defaults` is
-/// the default variant's `[defaults.port]` table (empty when none was
-/// authored) — carried forward at top level per the same schema decision
-/// that keeps `[defaults.port]` live in [`PackageRuntimeConfig`].
-pub fn render_package_runtime_config(
-    default_budget: &RunProfileBudget,
-    default_defaults: &PortDefaults,
-    variant_budgets: &BTreeMap<String, RunProfileBudget>,
-) -> String {
-    let mut text = String::new();
-    push_budget_lines(&mut text, default_budget);
-    if !default_defaults.port.is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str("[defaults.port]\n");
-        for (port, value) in &default_defaults.port {
-            text.push_str(&format!("{port} = {value:?}\n"));
-        }
-    }
-    for (name, budget) in variant_budgets {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(&format!("[variant.{name}]\n"));
-        push_budget_lines(&mut text, budget);
-    }
-    text
-}
-
-fn push_budget_lines(text: &mut String, budget: &RunProfileBudget) {
-    let fields: [(&str, Option<u64>); 9] = [
-        ("max-frames", budget.max_frames),
-        ("frame-seconds", budget.frame_seconds),
-        ("total-seconds", budget.total_seconds),
-        ("max-retries", budget.max_retries),
-        ("attach-wait-seconds", budget.attach_wait_seconds),
-        ("idle-seconds", budget.idle_seconds),
-        ("command-seconds", budget.command_seconds),
-        ("command-idle-seconds", budget.command_idle_seconds),
-        ("max-tokens", budget.max_tokens),
-    ];
-    for (key, value) in fields {
-        if let Some(value) = value {
-            text.push_str(&format!("{key} = {value}\n"));
-        }
-    }
-    if let Some(max_cost_usd) = budget.max_cost_usd {
-        text.push_str(&format!("max-cost-usd = {max_cost_usd}\n"));
-    }
 }
 
 /// Load and validate a caller-selected narrow runtime profile from an
@@ -10226,101 +10118,120 @@ mod config_tests {
         );
     }
 
-    #[test]
-    fn package_runtime_config_decodes_top_level_budget_and_variant_overlay() {
-        let config = PackageRuntimeConfig::decode(
-            "frame-seconds = 1200\ntotal-seconds = 3600\n\n[variant.quick]\nframe-seconds = 900\n",
-            Utf8Path::new("runtime.toml"),
-        )
-        .expect("runtime.toml decodes");
-        assert_eq!(config.budget.frame_seconds, Some(1200));
-        assert_eq!(config.budget.total_seconds, Some(3600));
-        let quick = &config.variant["quick"];
-        assert_eq!(quick.frame_seconds, Some(900));
-        // Variant overlay leaves everything it doesn't state unset — the
-        // overlay itself happens via `overlay_budget`, not at decode time.
-        assert_eq!(quick.total_seconds, None);
-    }
-
-    #[test]
-    fn package_runtime_config_variant_overlay_inherits_omitted_keys_via_overlay_budget() {
-        let config = PackageRuntimeConfig::decode(
-            "frame-seconds = 1200\ntotal-seconds = 3600\nmax-retries = 3\n\n[variant.quick]\nframe-seconds = 900\n",
-            Utf8Path::new("runtime.toml"),
-        )
-        .expect("runtime.toml decodes");
-        let mut effective = config.budget.clone();
-        overlay_budget(&mut effective, &config.variant["quick"]);
-        assert_eq!(effective.frame_seconds, Some(900));
-        assert_eq!(effective.total_seconds, Some(3600));
-        assert_eq!(effective.max_retries, Some(3));
-    }
-
-    #[test]
-    fn package_runtime_config_rejects_unknown_top_level_field() {
-        for text in [
-            "[assign.worker]\nharness = \"x\"\n",
-            "[worktree]\nbranch = \"x\"\n",
-            "harness = \"opencode\"\n",
-            "model = \"x\"\n",
-        ] {
-            let error = PackageRuntimeConfig::decode(text, Utf8Path::new("runtime.toml"))
-                .expect_err("out-of-scope field must be a hard decode error");
-            let message = error.to_string();
-            assert!(
-                message.contains("unknown field"),
-                "expected an unknown-field error, got: {message}"
-            );
+    fn scratch_package_root(prefix: &str) -> Utf8PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        // Pid recycling can hand this process a leftover dir; only exclusive
+        // creation guarantees the dir is empty, so retry past leftovers.
+        loop {
+            let dir = std::env::temp_dir().join(format!(
+                "{prefix}-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Utf8PathBuf::from_path_buf(dir).unwrap(),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("creating scratch dir {}: {err}", dir.display()),
+            }
         }
     }
 
-    #[test]
-    fn package_runtime_config_rejects_unknown_variant_field() {
-        assert!(
-            PackageRuntimeConfig::decode(
-                "[variant.quick]\nharness = \"opencode\"\n",
-                Utf8Path::new("runtime.toml"),
-            )
-            .is_err()
+    const MANIFEST_WITH_BUDGETS: &str = concat!(
+        "[package]\n",
+        "id = \"fixture\"\n",
+        "version = \"0.1.0\"\n",
+        "\n",
+        "[family]\n",
+        "default = \"quick\"\n",
+        "[family.variant.quick]\n",
+        "path = \"generated/quick/index.toml\"\n",
+        "[family.variant.gated]\n",
+        "path = \"generated/gated/index.toml\"\n",
+        "\n",
+        "[budget]\n",
+        "frame-seconds = 1200\n",
+        "total-seconds = 3600\n",
+        "max-retries = 3\n",
+        "\n",
+        "[variant.gated.budget]\n",
+        "frame-seconds = 900\n",
+        "\n",
+        "[defaults.port]\n",
+        "plan = \"manifest\"\n",
+    );
+
+    fn variant_trait(variant: Option<&str>) -> ctx_traits_core::Trait {
+        let variant_line = variant
+            .map(|value| format!("variant = \"{value}\"\n"))
+            .unwrap_or_default();
+        let text = format!(
+            "id = \"fixture\"\nschema-version = \"0.3\"\nversion = \"0.1.0\"\nname = \"Fixture\"\nsummary = \"Minimal fixture.\"\n{variant_line}"
         );
-        // A variant table is budget-only: no nested `variant` or `defaults`.
+        ctx_traits_core::encoding::decode_trait(ctx_traits_core::encoding::Encoding::Toml, &text)
+            .expect("minimal trait decodes")
+    }
+
+    #[test]
+    fn manifest_budget_and_selected_variant_overlay_resolve_from_trait_toml() {
+        let root = scratch_package_root("manifest-budget");
+        std::fs::write(root.join("trait.toml"), MANIFEST_WITH_BUDGETS).unwrap();
+        let trait_ref = variant_trait(Some("gated"));
+        let (config, path, tier) = load_selected_trait_run_config(Some(&trait_ref), &root)
+            .expect("manifest tier resolves")
+            .expect("manifest tier is active");
+        assert_eq!(tier, PackageRunConfigTier::Manifest);
+        assert_eq!(path, root.join("trait.toml"));
+        // Overlay: stated replaces, omitted inherits.
+        assert_eq!(config.budget.frame_seconds, Some(900));
+        assert_eq!(config.budget.total_seconds, Some(3600));
+        assert_eq!(config.budget.max_retries, Some(3));
+        assert_eq!(config.defaults.port["plan"], "manifest");
+    }
+
+    #[test]
+    fn manifest_budget_without_variant_selection_uses_the_top_level_budget() {
+        let root = scratch_package_root("manifest-budget-default");
+        std::fs::write(root.join("trait.toml"), MANIFEST_WITH_BUDGETS).unwrap();
+        let (config, _, tier) = load_selected_trait_run_config(None, &root)
+            .expect("manifest tier resolves")
+            .expect("manifest tier is active");
+        assert_eq!(tier, PackageRunConfigTier::Manifest);
+        assert_eq!(config.budget.frame_seconds, Some(1200));
+    }
+
+    #[test]
+    fn retired_package_runtime_toml_is_a_hard_error_not_a_tier() {
+        let root = scratch_package_root("retired-runtime");
+        std::fs::write(root.join("trait.toml"), MANIFEST_WITH_BUDGETS).unwrap();
+        std::fs::write(root.join("runtime.toml"), "frame-seconds = 900\n").unwrap();
+        let error = load_selected_trait_run_config(None, &root)
+            .expect_err("retired sidecar must refuse, not fall back");
+        let message = format!("{error:#}");
         assert!(
-            PackageRuntimeConfig::decode(
-                "[variant.quick.variant]\nframe-seconds = 900\n",
-                Utf8Path::new("runtime.toml"),
-            )
-            .is_err()
+            message.contains("retired"),
+            "tombstone names the retirement: {message}"
+        );
+        assert!(
+            message.contains("trait.toml [budget]"),
+            "tombstone points at the new home: {message}"
         );
     }
 
     #[test]
-    fn package_runtime_config_decodes_top_level_defaults() {
-        let config = PackageRuntimeConfig::decode(
-            "[defaults.port]\nplan = \"sidecar\"\n",
-            Utf8Path::new("runtime.toml"),
+    fn manifest_without_run_config_sections_falls_through_to_legacy_sidecar() {
+        let root = scratch_package_root("manifest-plain");
+        std::fs::write(
+            root.join("trait.toml"),
+            "[package]\nid = \"fixture\"\nversion = \"0.1.0\"\n",
         )
-        .expect("defaults.port decodes");
-        assert_eq!(config.defaults.port["plan"], "sidecar");
-    }
-
-    #[test]
-    fn render_package_runtime_config_carries_default_defaults_forward() {
-        let mut defaults = PortDefaults::default();
-        defaults
-            .port
-            .insert("plan".to_string(), "sidecar".to_string());
-        let text = render_package_runtime_config(
-            &RunProfileBudget {
-                max_frames: Some(10),
-                ..RunProfileBudget::default()
-            },
-            &defaults,
-            &BTreeMap::new(),
-        );
-        let config = PackageRuntimeConfig::decode(&text, Utf8Path::new("runtime.toml"))
-            .expect("rendered runtime.toml decodes");
-        assert_eq!(config.budget.max_frames, Some(10));
-        assert_eq!(config.defaults.port["plan"], "sidecar");
+        .unwrap();
+        std::fs::write(root.join("config.toml"), "[budget]\nframe-seconds = 700\n").unwrap();
+        let (config, _, tier) = load_selected_trait_run_config(None, &root)
+            .expect("legacy sidecar resolves")
+            .expect("legacy sidecar is active");
+        assert_eq!(tier, PackageRunConfigTier::LegacySidecar);
+        assert_eq!(config.budget.frame_seconds, Some(700));
     }
 
     #[test]
@@ -10694,13 +10605,6 @@ mod config_tests {
             "overlay must not clear an unset field"
         );
         assert_eq!(budget.max_cost_usd, Some(2.5));
-
-        // `push_budget_lines`/`render_package_runtime_config` round trip:
-        // the rendered document decodes back to the same resolved budget.
-        let rendered =
-            render_package_runtime_config(&budget, &PortDefaults::default(), &BTreeMap::new());
-        assert!(rendered.contains("max-tokens = 1000"));
-        assert!(rendered.contains("max-cost-usd = 2.5"));
     }
 
     #[test]

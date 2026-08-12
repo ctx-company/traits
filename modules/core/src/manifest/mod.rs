@@ -16,7 +16,8 @@ mod source;
 
 pub use dependency::{Dependency, validate_dependencies};
 pub use package::{
-    PackageDependencySpec, PackageManifest, PackageMetadata, PackageStatus, decode_package_manifest,
+    ManifestBudget, ManifestDefaults, PackageDependencySpec, PackageManifest, PackageMetadata,
+    PackageStatus, PackageVariantConfig, decode_package_manifest,
 };
 pub use project::{ProjectManifest, ProjectMetadata, ProjectPackageDependency, TraitEntry};
 pub use source::TraitSource;

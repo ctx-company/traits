@@ -16,3 +16,13 @@ aliases = ["release-default"]
 [publish]
 name = "@ctx-traits/release"
 access = "public"
+
+# The gated push/publish steps wait on an owner's ctx-gate approval (up to
+# 8h each, declared as their own timeout-ms — gate-timeout-lives-in-the-trait);
+# the run's total budget must survive the owner being away.
+[budget]
+max-frames = 200
+frame-seconds = 1800
+total-seconds = 86400
+max-retries = 3
+idle-seconds = 600

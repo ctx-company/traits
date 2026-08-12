@@ -5,7 +5,6 @@
     "trait.lock",
     "generated",
     "resources",
-    "runtime.toml",
     "source"
   ],
   "imports": {
