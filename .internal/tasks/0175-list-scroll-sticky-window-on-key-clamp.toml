@@ -1,0 +1,63 @@
+schema-version = "0.2"
+key = "0175"
+title = "list scrolling: selection moves inside the window without dragging it"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner ask 2026-08-12:
+
+6. Dashboard (etc.) scrolling is weird: after scrolling down, when the
+   active line is the last visible line, arrow-up scrolls the viewport
+   while keeping the selection pinned at the bottom. Expected: the
+   selection moves up inside the window; the viewport scrolls only when
+   the selection would leave the top.
+
+Root cause (mapped): `ScrollList.offset` is write-dead — every key-time
+mutator passes `rows == usize::MAX` (pane height unknown at key time),
+and the render pass resolves the window on a scratch copy
+(`ScrollList::window`), so each frame re-derives
+`offset = selected + 1 - rows`, pinning the selection to the bottom row
+once the list outgrows one screen. `clamp`'s sticky rule itself is
+correct; it just never runs with real rows. Affects all five dashboard
+lists (shared `render_list_pane` path) and the trait editor's section
+list.
+
+Reference implementation exists: commit 3d48e092 on branch
+ctx/parked/cli-ux-0173-0175 (workspace lib tests + clippy green).
+
+"""
+scope = """
+## Decisions (as implemented in the reference commit)
+
+- Key-time clamping uses the REAL last-rendered height: the dashboard's
+  `move_selection` reads `last_pane_layout.rect(list_pane_id(screen))`
+  (height minus the two border rows, the same derivation
+  `state_pane_scroll_rows` already uses); the trait editor records the
+  section list's rect height at draw (`list_rows`) and passes it to
+  `ScrollList::apply`.
+- The kit itself is untouched: `window()` stays a scratch resolver,
+  render stays read-only, no `offset()` accessor appears — the tui_kit
+  module doctrine (P505) holds; only the `rows` argument becomes honest.
+- Before the first draw (no layout yet) the length-only clamp
+  (`usize::MAX`) remains the fallback.
+
+## Watch
+
+- First key press after legacy state snaps the persisted offset to the
+  currently rendered window (one-time, invisible); from then on the
+  window is sticky in both directions.
+- tui_panes' scratch-window tests (tui_panes.rs ~719) keep passing —
+  the render contract did not change.
+
+"""
+validation = """
+## Done when
+
+In a dashboard list taller than the pane: scroll to mid-list, place the
+selection on the last visible row, press up — the selection moves up one
+row and the viewport does not move; the viewport scrolls up only once
+the selection reaches the top visible row, and down only past the
+bottom row; same behavior on all five dashboard screens and the trait
+editor; `cargo test -p ctx-traits-cli --lib` green.
+"""

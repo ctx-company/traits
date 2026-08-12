@@ -1,0 +1,74 @@
+schema-version = "0.2"
+key = "0173"
+title = "terminal output: one landed state, brief by default, folded teardown"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner asks 2026-08-12 (verbatim intent):
+
+1. Unless verbose, `merge`/run-complete output must be very simple and
+   short.
+2. When a run completes AND its auto-merge lands, never show `completed`
+   and `merged` as two simultaneous states — one terminal state.
+3. When a trait run ends, no event dump, nothing 200 miles long — only
+   important, human-readable details.
+
+Mechanism (mapped): the long tail is (a) the plain termination story
+printing all four sections (JOURNEY/BLOCKERS/COMMANDS/OUTCOME) at every
+story-enabled completion (story.rs `project_human_story`), and (b) the
+TUI teardown committing the ENTIRE journey tree to scrollback
+(`RunPanel::close` -> `last_tree_lines`, run_view.rs). The dual state is
+the run panel (`(ctx) run ... completed`) plus a second merge panel
+(`(ctx) merge ... passed`) plus the story's fused sentence "This run
+completed and merged to main".
+
+Reference implementation exists: commit 3d48e092 on branch
+ctx/parked/cli-ux-0173-0175 (workspace lib tests + clippy green) —
+land it or use it as the spec at dispatch.
+
+"""
+scope = """
+## Decisions (as implemented in the reference commit)
+
+- **Landed subsumes completed.** When the auto-merge lands, the run
+  panel's closing state becomes `landed` (not `completed`) and gains one
+  `landing: merged to main (<revision>)` row; the separate merge panel is
+  NOT printed. The merge panel remains for every non-landed outcome
+  (parked/failed carry reason + next-action rows) and under `--verbose`.
+- **Story disposition sentence** for the merged case becomes "This run
+  landed on main (<revision>)." — one state, house verb.
+- **Brief plain story by default**: the non-interactive termination story
+  prints disposition + trait/elapsed + OUTCOME rows + never-cleared
+  blockers only. Full section walk stays behind `--verbose` or an
+  explicit story level beyond the default. The interactive story pane is
+  untouched (it pages; it does not scroll away).
+- **Folded teardown scrollback**: `RunPanel::close` commits top-level
+  journey steps and loop containers (rows already carrying aggregate
+  elapsed) plus the summary tail lines (digest stamp, outputs box) —
+  never per-iteration rows.
+- Standalone `ctx traits merge` success output is already two content
+  lines; unchanged. `--json` paths byte-identical throughout.
+
+## Watch
+
+- `proof_merge_on_completion.rs` asserts plain-output shapes for the
+  run-with-merge path — re-run it; the JSON assertions must stay
+  untouched.
+- Parked/failed landings must keep their full reason/next rows — brevity
+  only ever removes redundancy on success paths.
+
+"""
+validation = """
+## Done when
+
+A completed `--merge --worktree` run prints ONE panel closing `landed`
+with a landing row naming the revision, and no separate merge panel; a
+parked landing still prints the merge panel with reason and next rows;
+non-verbose plain story at termination is disposition + outcome +
+never-cleared blockers only, with the full sections under `--verbose`;
+TUI teardown scrollback for a multi-round run shows top-level rows and
+the summary tail, no per-iteration rows; `--json` output byte-identical;
+`just test` and `just test-full` green including
+proof_merge_on_completion.
+"""

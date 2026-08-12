@@ -1,0 +1,65 @@
+schema-version = "0.2"
+key = "0174"
+title = "command steps: tick their own clock, record their own durations"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner asks 2026-08-12:
+
+4. While a command step runs, the PREVIOUS prompt step's duration keeps
+   incrementing and the command step's does not — a transition is not
+   happening.
+5. History rows for command steps show no duration at all.
+
+Root cause (mapped): the run pane's per-step clock (`active_started`) is
+re-armed only in `RunPanel::refresh`, which fires when the drive thread
+returns from `run::call` — but `advance_command_frames` (io/run.rs)
+drains every consecutive command frame INSIDE that one blocking call.
+During a trailing command the only signal is the tick observer's ledger
+reload (`maybe_reload_from_ledger`), which was documented to
+deliberately leave the clock untouched. Consequences: the finished
+prompt row keeps ticking, the command's wall time is folded into the
+prompt's `finished_durations` entry, and the history renderer's
+Command/Check arms never print elapsed anyway (render.rs
+`story_row_line`).
+
+Reference implementation exists: commit 3d48e092 on branch
+ctx/parked/cli-ux-0173-0175 (workspace lib tests + clippy green).
+
+"""
+scope = """
+## Decisions (as implemented in the reference commit)
+
+- Extract `refresh`'s transition block into one shared
+  `transition_active_step(state, session)`; the ledger reload invokes it
+  too, so the prompt's clock freezes at the acceptance and the command
+  row ticks under its own key.
+- Narration stays lossless: completed-step contexts are QUEUED
+  (`pending_completed`) and drained one per `refresh` return, so a
+  transition detected between drive boundaries still gets its
+  step-summary narrator call afterwards.
+- History Command/Check arms append `· <elapsed>` like the generic
+  fallback arm; the no-outcome command arm shows label + elapsed.
+- Loop containers keep crediting through the same transition path
+  (aggregate `loop_elapsed` unchanged in shape).
+
+## Watch
+
+- `refresh` must stay idempotent when the reload already transitioned
+  (active key equal -> no double-freeze).
+- Multiple consecutive command frames: each acceptance bumps the ledger
+  revision, so each command key gets its own interval on the next
+  reload/refresh — verify none are folded together.
+
+"""
+validation = """
+## Done when
+
+In a live TUI run with a trailing command step: the prompt row's
+duration stops at the acceptance, the command row ticks its own elapsed;
+after completion the history shows `<command> · succeeded · <elapsed>`
+(and checks likewise); the prompt step's narrator summary still arrives;
+`cargo test -p ctx-traits-cli --lib` green (including the updated
+story_row_line test); `just test` green.
+"""
