@@ -241,6 +241,7 @@ impl PackageDependencySpec {
             id: self.id.clone().unwrap_or_else(|| alias.to_string()),
             version: self.version.clone(),
             source: Some(source),
+            digest: None,
         })
     }
 }

@@ -312,7 +312,7 @@ fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result
 /// belongs to: an `--out` redirect targets a caller-chosen path with no
 /// package around it, and a built-in store package is read-only. Neither is
 /// an error in `build`'s own terms.
-fn record_lock_evidence(target: &camino::Utf8Path) -> crate::Result<()> {
+fn record_lock_evidence(target: &camino::Utf8Path, relock: bool) -> crate::Result<()> {
     let repo_root = crate::app::lifecycle_reporting::current_utf8_dir()?;
     ctx_traits_io::dependency::sync(ctx_traits_io::dependency::SyncRequest {
         repo_root: &repo_root,
@@ -320,6 +320,7 @@ fn record_lock_evidence(target: &camino::Utf8Path) -> crate::Result<()> {
         trait_file: Some(target),
         mode: ctx_traits_io::dependency::SyncMode::Write,
     })?;
+    ctx_traits_io::dependency::sync_derived_dependency_locks(target, relock)?;
     Ok(())
 }
 
@@ -328,6 +329,7 @@ pub(crate) fn handle_build(
     format: &str,
     out: Option<&str>,
     json: bool,
+    relock: bool,
 ) -> crate::Result<CommandOutput<()>> {
     let source_path = if matches!(camino::Utf8Path::new(path).extension(), Some("ts" | "mjs")) {
         camino::Utf8PathBuf::from(path)
@@ -347,7 +349,7 @@ pub(crate) fn handle_build(
             // Every variant, so a family's lock carries the whole topology
             // the approval guard and the drift gate both read (P532).
             for variant in &family_report.variants {
-                record_lock_evidence(camino::Utf8Path::new(&variant.target))?;
+                record_lock_evidence(camino::Utf8Path::new(&variant.target), relock)?;
             }
             match OutputMode::select(json, false) {
                 OutputMode::Json => {
@@ -392,7 +394,7 @@ pub(crate) fn handle_build(
     // An `--out` build writes outside the package, so there is no package
     // lock the digests belong to; see `record_lock_evidence`.
     if out.is_none() {
-        record_lock_evidence(&target_path)?;
+        record_lock_evidence(&target_path, relock)?;
     }
 
     match OutputMode::select(json, false) {

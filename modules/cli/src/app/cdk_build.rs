@@ -37,6 +37,23 @@ struct CdkBuildEnvelope {
     diagnostics: Vec<CdkAuthoringDiagnostic>,
     #[serde(default, rename = "authoredDeclarations")]
     authored_declarations: Vec<CdkAuthoredDeclaration>,
+    #[serde(default, rename = "traitDependencies")]
+    trait_dependencies: Vec<CdkTraitDependency>,
+}
+
+/// One dependency trait package the import-graph walk crossed into during a
+/// single build (task 0170). `files` are the `file:` URLs of that package's
+/// own files that were actually loaded — the exact input set the derived
+/// `[[dependency]].digest` is computed over.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct CdkTraitDependency {
+    #[serde(rename = "packageRoot")]
+    package_root: String,
+    #[serde(default, rename = "packageJsonName")]
+    package_json_name: Option<String>,
+    #[serde(default, rename = "packageJsonVersion")]
+    package_json_version: Option<String>,
+    files: Vec<String>,
 }
 
 /// One resolved variant emitted inside a `FamilyEnvelope` (`packages/cdk/src/variant.ts`).
@@ -65,6 +82,11 @@ struct CdkFamilyBuildEnvelope {
     topology: serde_json::Value,
     #[serde(alias = "leaves")]
     variants: Vec<CdkFamilyVariantEnvelope>,
+    /// Trait dependency packages the shared import-graph walk crossed into
+    /// while resolving the family module (task 0170) — the resolve tracker
+    /// runs once per Node process, so this list applies to every variant.
+    #[serde(default, rename = "traitDependencies")]
+    trait_dependencies: Vec<CdkTraitDependency>,
 }
 
 /// One family variant's complete synth result, keyed by its variant name
@@ -175,8 +197,14 @@ pub(crate) fn synthesize_cdk_source_any(
         let family = synthesize_cdk_family(&source_path, &repo_root, emitted_json, output_format)?;
         return Ok(CdkSynthResult::Family(Box::new(family)));
     }
-    let (draft_json, source_map, mut authoring_diagnostics, authored_declarations) =
-        parse_cdk_build_stdout(emitted_json)?;
+    let (
+        draft_json,
+        source_map,
+        mut authoring_diagnostics,
+        authored_declarations,
+        trait_dependencies,
+    ) = parse_cdk_build_stdout(emitted_json)?;
+    let draft_json = stamp_derived_dependencies(draft_json, &trait_dependencies)?;
     // The CDK runtime captures each construct's source anchor from a Node
     // `Error().stack` frame, which is inherently an OS-absolute (or
     // `file://`-decoded absolute) path — there is no "relative mode" to ask
@@ -250,9 +278,10 @@ fn synthesize_cdk_family(
             .iter()
             .map(format_authoring_diagnostic)
             .collect::<Vec<_>>();
+        let draft = stamp_derived_dependencies(variant.draft, &envelope.trait_dependencies)?;
         let response = ctx_traits_core::synth::synthesize(ctx_traits_core::synth::Request {
             document_kind: ctx_traits_core::synth::DocumentKind::Trait,
-            draft_json: variant.draft,
+            draft_json: draft,
             output_format,
             provenance: ctx_traits_core::synth::ProvenanceSeed {
                 generator_package: Some("ctx-traits-cli-build".to_string()),
@@ -626,6 +655,7 @@ fn canonicalize_utf8(path: &Utf8Path) -> Option<Utf8PathBuf> {
         .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_cdk_build_stdout(
     emitted_json: serde_json::Value,
 ) -> crate::Result<(
@@ -633,11 +663,13 @@ fn parse_cdk_build_stdout(
     ctx_traits_core::source_map::SourceMap,
     Vec<CdkAuthoringDiagnostic>,
     Vec<CdkAuthoredDeclaration>,
+    Vec<CdkTraitDependency>,
 )> {
     let Some(object) = emitted_json.as_object() else {
         return Ok((
             emitted_json,
             ctx_traits_core::source_map::SourceMap::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         ));
@@ -646,6 +678,7 @@ fn parse_cdk_build_stdout(
         return Ok((
             emitted_json,
             ctx_traits_core::source_map::SourceMap::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         ));
@@ -659,7 +692,237 @@ fn parse_cdk_build_stdout(
         envelope.source_map,
         envelope.diagnostics,
         envelope.authored_declarations,
+        envelope.trait_dependencies,
     ))
+}
+
+/// Derive an alias slug from an npm package name for a build-stamped
+/// dependency row: the scope-less final path segment, lowercased, with any
+/// character outside `[a-z0-9-]` collapsed to `-`. Collisions across scopes
+/// (`@a/x` and `@b/x`) are caught by [`ctx_traits_core::manifest::validate_dependencies`]'s
+/// duplicate-alias check, same as a hand-authored collision would be.
+fn derive_dependency_alias(package_json_name: Option<&str>, package_root: &Utf8Path) -> String {
+    let raw = package_json_name
+        .and_then(|name| name.rsplit('/').next())
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| package_root.file_name().unwrap_or("dependency").to_string());
+    let slug: String = raw
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "dependency".to_string()
+    } else {
+        slug.to_string()
+    }
+}
+
+/// Digest of the dependency content actually consumed: sorted
+/// (package-root-relative-path, content bytes) pairs of every file the
+/// import-graph walk recorded as loaded from that package, so the stamp is
+/// insensitive to files the dependency ships but this build never imported.
+fn digest_trait_dependency_files(
+    package_root: &Utf8Path,
+    file_urls: &[String],
+) -> crate::Result<ctx_traits_core::digest::Digest> {
+    let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(file_urls.len());
+    for url in file_urls {
+        let path = url_to_path(url)?;
+        let contents =
+            std::fs::read(path.as_std_path()).map_err(|source| crate::Error::Command {
+                message: format!("reading dependency file {path}: {source}"),
+            })?;
+        let relative = path
+            .strip_prefix(package_root)
+            .map(|rel| rel.as_str().to_string())
+            .unwrap_or_else(|_| path.to_string());
+        entries.push((relative, contents));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut buffer = Vec::new();
+    for (relative, contents) in entries {
+        buffer.extend_from_slice(relative.as_bytes());
+        buffer.push(0);
+        buffer.extend_from_slice(&contents);
+        buffer.push(0);
+    }
+    Ok(ctx_traits_core::digest::Digest::from_bytes(&buffer))
+}
+
+fn url_to_path(url: &str) -> crate::Result<Utf8PathBuf> {
+    let rest = url
+        .strip_prefix("file://")
+        .ok_or_else(|| crate::Error::Command {
+            message: format!("expected a file: URL from the CDK resolve tracker, got {url:?}"),
+        })?;
+    let decoded = percent_decode(rest);
+    Utf8PathBuf::from_path_buf(std::path::PathBuf::from(decoded)).map_err(|path| {
+        crate::Error::Command {
+            message: format!("resolve-tracker file URL is not valid UTF-8: {path:?}"),
+        }
+    })
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(value) = u8::from_str_radix(&input[i + 1..i + 3], 16)
+        {
+            out.push(value);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Stamp derived `[[dependency]]` rows into a draft's `dependency` array for
+/// every trait package the import-graph walk crossed into during this build
+/// (task 0170). Nothing here is user-authored: id/version come from the
+/// dependency's own `trait.toml`, digest is computed from the exact files
+/// this build loaded from it. Returns the draft unchanged when no trait
+/// dependency was crossed.
+fn stamp_derived_dependencies(
+    mut draft_json: serde_json::Value,
+    trait_dependencies: &[CdkTraitDependency],
+) -> crate::Result<serde_json::Value> {
+    if trait_dependencies.is_empty() {
+        return Ok(draft_json);
+    }
+    let mut stamped = Vec::with_capacity(trait_dependencies.len());
+    for dep in trait_dependencies {
+        let package_root = Utf8PathBuf::from(&dep.package_root);
+        let manifest_path = ctx_traits_io::layout::package_manifest_path(&package_root);
+        let manifest_text = ctx_traits_io::read::read_text(&manifest_path)?;
+        let manifest = ctx_traits_core::manifest::decode_package_manifest(
+            &manifest_text,
+            manifest_path.as_str(),
+        )?
+        .ok_or_else(|| crate::Error::Command {
+            message: format!(
+                "dependency trait package at {package_root} has no decodable trait.toml"
+            ),
+        })?;
+        // Consumer-side dependency health gate (task 0170 Watch): a
+        // dependency trait package with no `trait.lock` of its own has no
+        // pinned resolution to trust, so the CONSUMER build refuses naming
+        // it rather than silently stamping unpinned content.
+        if !ctx_traits_io::lockfile::lockfile_path(&package_root).exists() {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "dependency {:?} has no trait.lock at {package_root}; a dependency trait \
+                     package must ship a lock recording its own pinned resolution before it \
+                     can be consumed",
+                    manifest.package.id
+                ),
+            });
+        }
+        // The dependency's own `trait.lock` records a self entry (written by
+        // `ctx_traits_io::dependency::sync`'s "self" load, which every
+        // `ctx traits build` performs via `record_lock_evidence`, regardless
+        // of whether the package declares dependencies of its own) whose
+        // `digests.source` pins that trait's own canonical content. Re-verify
+        // it in place with the same VerifyLocked path `ctx traits check
+        // --locked` uses, rather than re-deriving a second digest scheme: a
+        // dependency whose shipped canonical no longer matches its own
+        // shipped lock (tampered in transit, or shipped stale) must not be
+        // silently trusted just because a lock file happens to exist. Only
+        // runs when the dependency ships a decodable canonical trait
+        // document — packages that expose plain importable source with no
+        // canonical of their own have nothing here to self-verify against.
+        // `resolve_package_manifest`'s third candidate is the flat root
+        // `trait.toml` used by legacy vendored packages, which would
+        // wrongly resolve back to the v2 package manifest we just decoded
+        // above (a v2 package's root `trait.toml` is never its canonical) —
+        // so only the two `generated/` candidates apply here.
+        let canonical_candidates = [
+            package_root.join("generated").join("index.toml"),
+            package_root.join("generated").join("trait.toml"),
+        ];
+        if let Some(canonical_path) = canonical_candidates
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+        {
+            let self_check =
+                ctx_traits_io::dependency::sync(ctx_traits_io::dependency::SyncRequest {
+                    repo_root: &package_root,
+                    manifest_path: None,
+                    trait_file: Some(&canonical_path),
+                    mode: ctx_traits_io::dependency::SyncMode::VerifyLocked,
+                })?;
+            if !self_check.passed {
+                return Err(crate::Error::Command {
+                    message: format!(
+                        "dependency {:?} at {package_root} has a trait.lock that does not match \
+                         its shipped content ({}); a tampered or stale dependency package cannot \
+                         be consumed",
+                        manifest.package.id,
+                        self_check.warnings.join("; ")
+                    ),
+                });
+            }
+        }
+        let digest = digest_trait_dependency_files(&package_root, &dep.files)?;
+        let source = if package_root
+            .components()
+            .any(|component| component.as_str() == "node_modules")
+        {
+            ctx_traits_core::manifest::TraitSource::Npm {
+                package: dep
+                    .package_json_name
+                    .clone()
+                    .unwrap_or_else(|| manifest.package.id.clone()),
+                package_path: None,
+            }
+        } else {
+            ctx_traits_core::manifest::TraitSource::local(package_root.to_string())
+        };
+        stamped.push(ctx_traits_core::manifest::Dependency {
+            alias: derive_dependency_alias(dep.package_json_name.as_deref(), &package_root),
+            id: manifest.package.id.clone(),
+            version: dep
+                .package_json_version
+                .clone()
+                .unwrap_or_else(|| manifest.package.version.clone()),
+            source: Some(source),
+            digest: Some(digest.as_str().to_string()),
+        });
+    }
+    // The CDK draft can already carry hand-authored `[[dependency]]` rows via
+    // the legacy qualified-ref interop path (`packages/cdk/src/trait.ts`
+    // `dependency?: CanonicalDependency | readonly CanonicalDependency[]`),
+    // which the task keeps working, just untaught. Stamped rows are appended
+    // to whatever is already declared, never replace it — an authored trait
+    // that also imports a dependency package must keep both.
+    let mut combined: Vec<ctx_traits_core::manifest::Dependency> = draft_json
+        .as_object()
+        .and_then(|object| object.get("dependency"))
+        .cloned()
+        .map(|value| match value {
+            serde_json::Value::Array(_) => serde_json::from_value(value),
+            other => serde_json::from_value(serde_json::Value::Array(vec![other])),
+        })
+        .transpose()
+        .map_err(|source| crate::Error::json("decode authored dependency rows", source))?
+        .unwrap_or_default();
+    combined.extend(stamped);
+    combined.sort_by(|a, b| a.id.cmp(&b.id));
+    ctx_traits_core::manifest::validate_dependencies(&combined)?;
+    let combined_json = serde_json::to_value(&combined)
+        .map_err(|source| crate::Error::json("encode derived dependency stamps", source))?;
+    if let Some(object) = draft_json.as_object_mut() {
+        object.insert("dependency".to_string(), combined_json);
+    }
+    Ok(draft_json)
 }
 
 fn orphan_diagnostics(
@@ -1066,4 +1329,134 @@ pub(crate) fn ensure_unambiguous_cdk_source(source_path: &Utf8Path) -> crate::Re
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::*;
+
+    /// A scratch directory removed on drop, avoiding a `tempfile` dependency
+    /// for these three tests.
+    struct ScratchDir(Utf8PathBuf);
+
+    impl ScratchDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .unwrap()
+                .join(format!(
+                    "ctx-traits-stamp-test-{label}-{}-{n}",
+                    std::process::id()
+                ));
+            std::fs::create_dir_all(path.as_std_path()).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Utf8Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.0.as_std_path());
+        }
+    }
+
+    /// Writes a minimal trait package (`trait.toml` + one source file) under
+    /// `root` and returns the [`CdkTraitDependency`] the resolve tracker
+    /// would have recorded for it.
+    fn write_dependency_fixture(root: &Utf8Path, id: &str, version: &str) -> CdkTraitDependency {
+        std::fs::create_dir_all(root.as_std_path()).unwrap();
+        std::fs::write(
+            root.join("trait.toml").as_std_path(),
+            format!("[package]\nid = \"{id}\"\nversion = \"{version}\"\n"),
+        )
+        .unwrap();
+        let file = root.join("index.mjs");
+        std::fs::write(file.as_std_path(), b"export default {};").unwrap();
+        std::fs::write(
+            root.join("trait.lock").as_std_path(),
+            "[metadata]\nschema-version = \"0.1\"\n",
+        )
+        .unwrap();
+        CdkTraitDependency {
+            package_root: root.to_string(),
+            package_json_name: Some(id.to_string()),
+            package_json_version: Some(version.to_string()),
+            files: vec![format!("file://{file}")],
+        }
+    }
+
+    #[test]
+    fn stamp_appends_to_authored_dependency_rows() {
+        let dir = ScratchDir::new("appends");
+        let root = dir.path().join("dep");
+        let dep = write_dependency_fixture(&root, "ctx/dep", "0.1.0");
+
+        let authored = serde_json::json!({
+            "dependency": {
+                "alias": "handauthored",
+                "id": "ctx/legacy",
+                "version": "1.0.0"
+            }
+        });
+
+        let stamped = stamp_derived_dependencies(authored, &[dep]).unwrap();
+        let rows = stamped
+            .get("dependency")
+            .and_then(serde_json::Value::as_array)
+            .expect("dependency array");
+        assert_eq!(
+            rows.len(),
+            2,
+            "authored row must survive alongside the stamp: {rows:?}"
+        );
+        let ids: Vec<&str> = rows
+            .iter()
+            .map(|row| row.get("id").and_then(serde_json::Value::as_str).unwrap())
+            .collect();
+        assert!(ids.contains(&"ctx/legacy"));
+        assert!(ids.contains(&"ctx/dep"));
+        let stamped_row = rows
+            .iter()
+            .find(|row| row.get("id").and_then(serde_json::Value::as_str) == Some("ctx/dep"))
+            .unwrap();
+        assert!(
+            stamped_row
+                .get("digest")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn stamp_rejects_alias_collision_between_authored_and_stamped_rows() {
+        let dir = ScratchDir::new("collision");
+        let root = dir.path().join("dep");
+        let dep = write_dependency_fixture(&root, "ctx/dep", "0.1.0");
+        // The derived alias for "ctx/dep" is "dep" (scope-less, slugified) —
+        // collide it with an authored row using the same alias.
+        let authored = serde_json::json!({
+            "dependency": {
+                "alias": "dep",
+                "id": "ctx/other",
+                "version": "1.0.0"
+            }
+        });
+
+        let result = stamp_derived_dependencies(authored, &[dep]);
+        assert!(
+            result.is_err(),
+            "alias collision between authored and stamped rows must be rejected"
+        );
+    }
+
+    #[test]
+    fn stamp_no_dependencies_leaves_draft_unchanged() {
+        let draft = serde_json::json!({ "dependency": { "alias": "x", "id": "ctx/x", "version": "1.0.0" } });
+        let out = stamp_derived_dependencies(draft.clone(), &[]).unwrap();
+        assert_eq!(draft, out);
+    }
 }

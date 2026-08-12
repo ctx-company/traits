@@ -37,6 +37,13 @@ pub struct Dependency {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub source: Option<TraitSource>,
+
+    /// Build-derived digest of the dependency content actually consumed
+    /// (imported) by this canonical. Present only on stamps the build
+    /// writes for import-based composition (task 0170) — never
+    /// hand-authored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 /// Validate a list of dependencies.

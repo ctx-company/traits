@@ -256,7 +256,13 @@ pub(crate) fn handle_generate(input: GenerateInputs<'_>) -> crate::Result<Comman
     })?;
     // Only `build` writes `generated/` + `trait.lock` (the 0065 invariant);
     // the loop's own evaluate rung never mutates the real package.
-    crate::app::schema_synth_build::handle_build(source_target.as_str(), "toml", None, false)?;
+    crate::app::schema_synth_build::handle_build(
+        source_target.as_str(),
+        "toml",
+        None,
+        false,
+        false,
+    )?;
 
     Ok(CommandOutput::new(()))
 }

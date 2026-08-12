@@ -1055,12 +1055,68 @@ const dependencyUrls = new Set();
 function isBareSpecifier(specifier) {
   return !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:') && !specifier.startsWith('#');
 }
+
+// P0170: classify a bare-specifier resolution as either a trait package (its
+// package root ships a sibling trait.toml — the dependency's contribution
+// gets inlined into this canonical and provenance-stamped) or an ordinary
+// npm library (recorded only as an authoring dependency, unchanged from
+// pre-0170 behavior). Realpath-resolved so pnpm/npm-link symlinked package
+// roots classify by their physical location, not the symlink path.
+const traitPackagesByRoot = new Map();
+function classifyResolvedUrl(url) {
+  let dir;
+  try {
+    dir = path.dirname(fileURLToPath(url));
+  } catch {
+    return null;
+  }
+  for (let depth = 0; depth < 64; depth += 1) {
+    const packageJsonPath = path.join(dir, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      const traitTomlPath = path.join(dir, 'trait.toml');
+      if (fs.existsSync(traitTomlPath)) {
+        let realRoot;
+        try {
+          realRoot = fs.realpathSync(dir);
+        } catch {
+          realRoot = dir;
+        }
+        if (!traitPackagesByRoot.has(realRoot)) {
+          let packageJsonName;
+          let packageJsonVersion;
+          try {
+            const pkgJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJsonName = pkgJson.name;
+            packageJsonVersion = pkgJson.version;
+          } catch {
+            // package.json unreadable/invalid — still record the root; the
+            // Rust side falls back to trait.toml identity.
+          }
+          traitPackagesByRoot.set(realRoot, {
+            packageRoot: realRoot,
+            packageJsonName,
+            packageJsonVersion,
+            files: new Set(),
+          });
+        }
+        return traitPackagesByRoot.get(realRoot);
+      }
+      return null; // ordinary npm package (no trait.toml) — not walked as trait content
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
 "#;
 
 fn node_emit_draft_script() -> String {
     const HEAD: &str = r#"
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { registerHooks } from 'node:module';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 const sourcePath = process.argv[process.argv.length - 1];
 // P0107 package-level provenance: every bare-specifier import resolved from
@@ -1075,10 +1131,23 @@ registerHooks({
     const result = nextResolve(specifier, context);
     const parentIsDependency = context.parentURL ? dependencyUrls.has(context.parentURL) : false;
     if (isBareSpecifier(specifier)) {
-      if (!parentIsDependency) packageDependencies.add(specifier);
+      if (!parentIsDependency) {
+        const traitPackage = classifyResolvedUrl(result.url);
+        if (traitPackage) {
+          traitPackage.files.add(result.url);
+        } else {
+          packageDependencies.add(specifier);
+        }
+      }
       dependencyUrls.add(result.url);
     } else if (parentIsDependency) {
       dependencyUrls.add(result.url);
+      for (const traitPackage of traitPackagesByRoot.values()) {
+        if (result.url.startsWith(pathToFileURL(traitPackage.packageRoot).href)) {
+          traitPackage.files.add(result.url);
+          break;
+        }
+      }
     }
     return result;
   },
@@ -1114,6 +1183,14 @@ if (envelope === undefined) {
   envelope = { draft, __map: {}, authoredDeclarations: [] };
 }
 envelope.packageDependencies = Array.from(packageDependencies).sort();
+envelope.traitDependencies = Array.from(traitPackagesByRoot.values())
+  .map((p) => ({
+    packageRoot: p.packageRoot,
+    packageJsonName: p.packageJsonName,
+    packageJsonVersion: p.packageJsonVersion,
+    files: Array.from(p.files).sort(),
+  }))
+  .sort((a, b) => a.packageRoot.localeCompare(b.packageRoot));
 process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
 "#;
     format!("{HEAD}{RESOLVE_TRACKER_PRELUDE}{TAIL}")

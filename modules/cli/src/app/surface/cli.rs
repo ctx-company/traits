@@ -871,6 +871,12 @@ pub enum TraitsCommand {
         /// Emit structured JSON build evidence instead of the plain report.
         #[arg(long)]
         json: bool,
+
+        /// Rewrite an existing import-resolved-dependency lock pin instead
+        /// of refusing on digest mismatch. Never a side effect of an
+        /// ordinary build (task 0170).
+        #[arg(long)]
+        relock: bool,
     },
     /// Mechanically migrate a canonical trait from its declared
     /// `schema-version` to a newer supported version.

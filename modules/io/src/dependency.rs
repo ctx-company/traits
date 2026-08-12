@@ -140,10 +140,16 @@ pub fn sync(request: SyncRequest<'_>) -> crate::Result<SyncReport> {
     let manifest_deps = package_manifest_dependencies(&trait_root)?;
     let dependencies =
         merge_declarations([project.dependencies, manifest_deps, trait_deps].concat())?;
-    let dependency_aliases = dependencies
+    let mut dependency_aliases = dependencies
         .iter()
         .map(|declaration| declaration.dependency.alias.clone())
         .collect::<BTreeSet<_>>();
+    // Build-derived (digest-carrying) dependency rows are pinned by
+    // `sync_derived_dependency_locks`, not this legacy hand-authored path
+    // (`trait_dependency_declarations` filters them out above) — but this
+    // function's own garbage-collection retain below must not delete their
+    // lock entries just because they are absent from `dependencies`.
+    dependency_aliases.extend(stamped_dependencies(&trait_root, trait_file)?.into_keys());
     let mut lockfile =
         crate::lockfile::read_lockfile(&trait_root)?.unwrap_or_else(|| crate::lockfile::Document {
             metadata: Some(crate::lockfile::Metadata {
@@ -599,9 +605,19 @@ pub fn trait_dependency_declarations(
         ));
     }
     Ok(TraitDependencyDeclarations {
+        // P0170: a `[[dependency]]` row carrying a `digest` is a build-written
+        // provenance stamp for content the import graph already inlined into
+        // this canonical (`stamp_derived_dependencies` in
+        // `modules/cli/src/app/cdk_build.rs`) — not a hand-authored,
+        // separately-fetchable dependency. Only digest-less (authored)
+        // rows go through this legacy vendor/lock-sync path; a stamped row
+        // would otherwise send `ctx traits sync`/`build` out to fetch an npm
+        // package that may not even be published (its content already lives
+        // in the consuming canonical).
         dependencies: trait_ref
             .dependencies
             .into_iter()
+            .filter(|dependency| dependency.digest.is_none())
             .map(|dependency| DependencyDeclaration {
                 dependency,
                 base_dir: trait_root.clone(),
@@ -635,6 +651,119 @@ fn package_trait_dependency_declarations(
     Ok(TraitDependencyDeclarations {
         dependencies,
         warnings,
+    })
+}
+
+/// Pin, and refuse-on-mismatch, every build-derived (digest-carrying)
+/// `[[dependency]]` row on the package the given trait file belongs to
+/// (task 0170 pinning chain).
+///
+/// This is the counterpart to legacy `sync`'s hand-authored path, over
+/// content the import graph already inlined rather than something to fetch:
+/// first build for a given dependency `id` writes the pin; every later
+/// build compares the freshly computed digest against the pinned one and
+/// hard-refuses on mismatch unless `relock` is set, naming the dependency
+/// and both digests. A stamped dependency whose own package has no
+/// `trait.lock` fails the build naming that dependency — an unpinned
+/// dependency source cannot itself be trusted as pinned content.
+pub fn sync_derived_dependency_locks(trait_file: &Utf8Path, relock: bool) -> crate::Result<()> {
+    let (_, trait_root, _, _) = crate::run::load_trait(trait_file.as_str())?;
+    let stamped = stamped_dependencies(&trait_root, trait_file)?;
+    if stamped.is_empty() {
+        return Ok(());
+    }
+    let mut lockfile = crate::lockfile::read_lockfile(&trait_root)?.unwrap_or_default();
+    let mut changed = false;
+    for dependency in stamped.values() {
+        let digest = dependency
+            .digest
+            .clone()
+            .expect("filtered on digest.is_some()");
+        match lockfile.dependency_entry(&dependency.id).cloned() {
+            None => {
+                lockfile.upsert_dependency_entry(derived_lock_entry(dependency, &digest)?);
+                changed = true;
+            }
+            Some(existing) => {
+                let locked_digest = existing.source_digest().unwrap_or_default();
+                if locked_digest != digest {
+                    if !relock {
+                        return invalid_input(
+                            &trait_root,
+                            format!(
+                                "dependency {:?} content digest changed since it was locked \
+                                 (locked {locked_digest}, now {digest}); rebuild with --relock \
+                                 to accept the new pin, or restore the dependency's original content",
+                                dependency.id
+                            ),
+                        );
+                    }
+                    lockfile.upsert_dependency_entry(derived_lock_entry(dependency, &digest)?);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        crate::lockfile::write_lockfile(&trait_root, &mut lockfile)?;
+    }
+    Ok(())
+}
+
+/// Every build-derived (digest-carrying) `[[dependency]]` row declared
+/// across a package's trait file(s) — the whole family when the package is
+/// one, keyed by dependency id so a family's variants agreeing on the same
+/// dependency collapse to one entry.
+fn stamped_dependencies(
+    trait_root: &Utf8Path,
+    trait_file: &Utf8Path,
+) -> crate::Result<BTreeMap<String, Dependency>> {
+    let package_manifest = crate::layout::package_manifest_path(trait_root);
+    let trait_files = match crate::family_manifest::read_family_table(&package_manifest)? {
+        Some(family) => family
+            .variants
+            .into_values()
+            .map(|variant| trait_root.join(variant.relative_path))
+            .collect(),
+        None => vec![trait_file.to_path_buf()],
+    };
+    let mut stamped = BTreeMap::new();
+    for file in &trait_files {
+        let (variant_trait, ..) = crate::run::load_trait(file.as_str())?;
+        for dependency in variant_trait.dependencies {
+            if dependency.digest.is_some() {
+                stamped.insert(dependency.id.clone(), dependency);
+            }
+        }
+    }
+    Ok(stamped)
+}
+
+fn derived_lock_entry(
+    dependency: &Dependency,
+    digest: &str,
+) -> crate::Result<crate::lockfile::LockDependencyEntry> {
+    Ok(crate::lockfile::LockDependencyEntry {
+        alias: dependency.id.clone(),
+        id: dependency.id.clone(),
+        requested_version: Some(dependency.version.clone()),
+        resolved_version: Some(dependency.version.clone()),
+        source: dependency
+            .source
+            .as_ref()
+            .map(toml::Value::try_from)
+            .transpose()
+            .map_err(|source| crate::parse::Error::TomlEncode {
+                context: format!("encode lock source for dependency {}", dependency.id),
+                source,
+            })?,
+        vendored_path: String::new(),
+        digests: Some(crate::lockfile::LockDependencyDigests {
+            source: Some(digest.to_string()),
+            ..Default::default()
+        }),
+        rev: None,
+        attestation: None,
     })
 }
 

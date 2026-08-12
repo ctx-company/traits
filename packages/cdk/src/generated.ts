@@ -692,6 +692,13 @@ export type CanonicalDependency = {
    */
   readonly "alias": string;
   /**
+   * Build-derived digest of the dependency content actually consumed
+   * (imported) by this canonical. Present only on stamps the build
+   * writes for import-based composition (task 0170) — never
+   * hand-authored.
+   */
+  readonly "digest"?: string | undefined;
+  /**
    * The trait ID being depended on (e.g. `"ctx/aws-log-primitives"`).
    */
   readonly "id": string;
