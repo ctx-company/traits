@@ -1,0 +1,67 @@
+schema-version = "0.2"
+key = "0186"
+title = "release: decompose the flat hook file into shared stage modules"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner directive 2026-08-12: bring every first-party trait family up to
+the authoring format refactor now demonstrates (contract: task 0102;
+refactor is the reference — task 0183 describes the target layout).
+
+release is HALF-migrated: its single default variant already uses
+defineVariant hooks, flow.when refusal idiom, and tagged-template
+prompts — but as one flat monolith: every slot in one giant
+source/data.ts (~25 exports), all prompts and step.command calls inline
+in source/variants/default.ts, agents in source/agent.ts, the release
+manifest resource in source/resource.ts.
+
+The flow itself is the repo's most safety-critical: preflight gates ->
+version bump loop -> changelog loop -> commit tail -> gated tag push ->
+gated publish, with the irreversible edge behind explicit ctx-gate
+owner approval (0098 pattern) and every refusal path parking via the
+maybe-commit idiom (the enclosing flow.when simply closes over nothing
+further).
+
+"""
+scope = """
+## Decisions
+
+- Format-only: no prompt, flow, gate, or knob changes. Generated
+  canonical is the proof (see Done when).
+- Decompose into shared stage modules along the flow's own seams —
+  preflight, version, changelog, commit tail, tag-push, publish — so
+  variant/default/index.ts reads as the flow skeleton the header
+  comment currently narrates. Slots move next to the stage that owns
+  them; only genuinely cross-stage data stays in shared/data.ts.
+- ONE variant stays one variant: the decomposition is for legibility
+  and for making a future variant (e.g. a dry-run) cheap — do not
+  invent variants now.
+- `#trait/*` alias imports + barrels per refactor.
+
+## Watch
+
+- The ctx-gate invocations guarding tag push and publish must emerge
+  BYTE-IDENTICAL in the generated canonical's argv — that edge is the
+  0098 contract with the owner; any drift there is a blocker, not a
+  wrap artifact.
+- The refusal-path comments (dirty tree / red gate / unapproved review
+  park by doing nothing more) carry the family-wide maybe-commit
+  doctrine — they survive, attached to the stages they govern.
+- Landing recipe: `just ts-build` FIRST, then `ctx traits build`, then
+  `ctx traits export release --update-skill-lock`.
+
+"""
+validation = """
+## Done when
+
+`just ts-build` green; `ctx traits build` regenerates
+generated/default/index.toml; whitespace-normalized diff against the
+pre-migration canonical shows no semantic drift — every step id
+preserved, every argv (the ctx-gate lines especially) byte-identical,
+prompt bodies equal modulo the sanctioned rule-6 wrap (0046) — with
+any surviving hunk explained in the commit message; `ctx traits export
+release --update-skill-lock` refreshes the projection lock;
+`ctx traits check` green; `just test` green. No frozen-inventory or
+golden tests added.
+"""

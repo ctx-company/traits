@@ -1,0 +1,69 @@
+schema-version = "0.2"
+key = "0188"
+title = "review: stage-module decomposition, read-only doctrine intact"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner directive 2026-08-12: bring every first-party trait family up to
+the authoring format refactor now demonstrates (contract: task 0102;
+refactor is the reference — task 0183 describes the target layout).
+
+review is HALF-migrated, the same way release is: its single default
+variant already uses defineVariant hooks, flow.when nesting, and the
+maybe-commit park idiom — but flat: all slots in source/data.ts, the
+reviewer agent in source/agent.ts, every prompt and step inline in
+source/variants/default.ts. It also still uses the OLD prompt
+interpolation form in one place — `input.prompt(text, { bindings })`
+with `{placeholder}` markers — where the reference format uses tagged
+templates.
+
+The flow: resolve the range (deterministic sh step) -> capture evidence
+(diff --stat + log --oneline, never patch bodies) -> single reviewer
+pass splicing CODE_INTEGRITY_DOCTRINE -> read-only assertion (tree
+stayed clean). No worker, no commit tail — nothing to fix, only to
+judge.
+
+"""
+scope = """
+## Decisions
+
+- Format-only: no prompt, flow, or knob changes. Generated canonical
+  is the proof (see Done when).
+- Decompose along the flow's seams into shared/stage modules —
+  resolve-range, evidence capture, review pass, clean-tree assertion —
+  with slots owned by their stage; variant/default/index.ts reads as
+  the skeleton. One variant stays one variant.
+- Convert the `input.prompt(text, { bindings })` call to the tagged-
+  template form, WITHOUT rewording the prompt body.
+- `#trait/*` alias imports + barrels per refactor.
+
+## Watch
+
+- The resolve-range step is a quoting-sensitive `sh -c` one-liner
+  (case patterns, rev-parse fallbacks) — its argv must emerge
+  byte-identical in the canonical; /bin/sh-on-Linux is dash, so any
+  accidental re-quoting is a portability regression, not cosmetics.
+- Two comments carry rulings and must survive attached to their
+  stages: the header's park-by-doing-nothing idiom, and the
+  detection-not-prevention note on the clean-tree assertion (true
+  deny-all-writes is runtime work, filed as a leftover — do not build
+  it here).
+- The CODE_INTEGRITY_DOCTRINE splice from @ctx-traits/agents stays a
+  splice — do not inline its text.
+- Landing recipe: `just ts-build` FIRST, then `ctx traits build`, then
+  `ctx traits export review --update-skill-lock`.
+
+"""
+validation = """
+## Done when
+
+`just ts-build` green; `ctx traits build` regenerates
+generated/default/index.toml; whitespace-normalized diff against the
+pre-migration canonical shows no semantic drift — step ids preserved,
+the resolve-range and evidence argv byte-identical, prompt bodies equal
+modulo the sanctioned rule-6 wrap (0046) — surviving hunks explained
+in the commit message; `ctx traits export review --update-skill-lock`
+refreshes the projection lock; `ctx traits check` green; `just test`
+green. No frozen-inventory or golden tests added.
+"""

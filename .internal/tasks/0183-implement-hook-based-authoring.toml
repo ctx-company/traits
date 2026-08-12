@@ -1,0 +1,90 @@
+schema-version = "0.2"
+key = "0183"
+title = "implement: port all seven variants to the hook-based functional format"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner directive 2026-08-12: bring every first-party trait family up to
+the authoring format refactor now demonstrates — hook-based, functional,
+and readable as prose. refactor is the reference implementation; the
+format contract is task 0102 (landed 2026-08-05, implemented 0103-0109)
+— cite it, do not re-litigate it.
+
+implement is the FURTHEST from the target and the largest surface: seven
+variants (quick, default, smart, strict, phase, gated, guarded) still in
+the oldest style — `variant({...})` default exports wrapping
+`procedure.from(...)`, flat source/variants/*.ts files with per-variant
+{agent,port,resource,schema,slot}.ts subdirs, shared helpers in
+source/sequence/family.ts, and family intent/behavior constants in
+source/core.ts.
+
+Target shape (read refactor/source/ before starting):
+source/shared/{agent,data,intent,metadata,resource,schema}.ts plus
+source/shared/stage/*.ts callable stage modules; one
+source/variant/<vid>/ dir per variant whose index.ts default-exports a
+function calling defineVariant + useIntent/useBehavior, composes stages
+titled at the call site under flow.loop/flow.when/flow.match +
+condition.*, and returns its report data; variant-level stage overrides
+re-export the base module and shadow only what changes (`export * from
+"#trait/variant/quick/stage/git.ts"` — the refactor:guarded idiom);
+`#trait/*` import alias (package.json imports map) instead of relative
+paths.
+
+"""
+scope = """
+## Decisions
+
+- This is a FORMAT-ONLY migration: no prompt rewording, no flow
+  changes, no new knobs. The generated canonicals are the proof — see
+  Done when.
+- source/sequence/family.ts helpers (gateAndDiffEvidence,
+  deriveParkReportStep, familyCommitTail, gateTimedOut and friends)
+  become shared/stage modules where implement-specific; anything
+  genuinely generic that research also consumes already lives in
+  @ctx-traits/agents and stays there (second-consumer rule) — do not
+  duplicate it back into the trait.
+- core.ts FAMILY_BEHAVIOR / *_INTENT constants split into
+  shared/intent.ts + shared/metadata.ts per the refactor layout.
+- guarded reuses quick via the export-and-shadow stage override exactly
+  as refactor:guarded does (that pattern was lifted FROM
+  implement:guarded's semantics — now the format flows back). While
+  touching it: give implement:guarded the same trait.toml
+  [variant.guarded.budget] day-ceiling overlay refactor 0.12.0 carries
+  (guarded runs wait on a human at ctx-gate; the default total budget
+  parks them). Overlay is appended AFTER `ctx traits build` — 0176
+  validation refuses overlays naming variants not yet in [family].
+- The doctrine header comments carry rulings (the 2026-07-27
+  "DELIBERATELY LEAN" block on quick, the 0109 functional-port notes,
+  the 0098 gate parameterization note) — they survive the migration,
+  attached to whatever module now holds the thing they govern.
+
+## Watch
+
+- Hand-chosen step ids: the 0109 pilot already proved they port via the
+  registrars' `id:` override — preserve every existing id so ledgers,
+  history, and park-report projections keep resolving. The 0047
+  park-report triad stays a deterministic `step.project`, never a
+  spliced doctrine block.
+- Landing recipe (memory-backed): `just ts-build` FIRST, then
+  `ctx traits build` in the package, then
+  `ctx traits export implement --update-skill-lock` — a stale CDK dist
+  silently drops intent tables from canonicals.
+- Seven variants is too much for one dispatch iteration budget — the
+  run should land variant-by-variant (quick first, guarded last), each
+  step leaving generated/ true.
+
+"""
+validation = """
+## Done when
+
+`just ts-build` green; `ctx traits build` regenerates all seven
+generated/<vid>/index.toml; a whitespace-normalized diff of each
+generated canonical against its pre-migration state shows no semantic
+drift — step ids preserved, command argv byte-identical, prompt bodies
+equal modulo the sanctioned rule-6 wrap (0046) — with any surviving
+hunk explained in the commit message; trait.toml gains
+[variant.guarded.budget]; `ctx traits export implement
+--update-skill-lock` refreshes the projection lock; `ctx traits check`
+green; `just test` green. No frozen-inventory or golden tests added.
+"""

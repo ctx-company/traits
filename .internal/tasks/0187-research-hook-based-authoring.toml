@@ -1,0 +1,66 @@
+schema-version = "0.2"
+key = "0187"
+title = "research: port the three variants to the hook-based functional format"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner directive 2026-08-12: bring every first-party trait family up to
+the authoring format refactor now demonstrates (contract: task 0102;
+refactor is the reference — task 0183 describes the target layout).
+
+research is in the old style: three variants (quick, default, deep) as
+flat source/variants/*.ts files, `variant({...})` default exports
+wrapping `procedure.from(...)`, one shared source/data.ts holding
+slots, ports, resources AND the deterministic derive steps
+(deriveTopicSlugStep, deriveReportPathStep), family constants in
+source/core.ts. Roles and the park/commit machinery (reviewerRole,
+workerRole, scribeRole, deriveParkReportStep, familyCommitTail) come
+from @ctx-traits/agents.
+
+The three variants are depth tiers over the same shape — scope the
+topic, bounded worker research pass(es), reviewer grind loop until
+approved, commit brief.md and sources.md — the same shared-stage
+economics as plan.
+
+"""
+scope = """
+## Decisions
+
+- Format-only migration: no prompt rewording, no flow changes.
+  Generated canonicals are the proof (see Done when).
+- Target layout: source/shared/{agent,data,intent,metadata,resource}.ts
+  split from today's data.ts + core.ts, shared/stage modules for the
+  common pipeline (topic-slug/report-path derivation, scope, research
+  pass, review loop, commit tail), source/variant/<vid>/index.ts hook
+  bodies, `#trait/*` alias imports, barrels per refactor.
+- @ctx-traits/agents stays the home of the role helpers and
+  park/commit machinery — research is precisely the second consumer
+  that justifies the package split; do not inline copies into the
+  trait.
+- The research doctrine resources (researchStandards,
+  sourceQualityGuide, citationStyle) stay resources of this trait.
+
+## Watch
+
+- deriveTopicSlugStep / deriveReportPathStep are deterministic
+  zero-prompt steps — they must stay deterministic steps with their
+  existing ids, not become agent prompts.
+- The 0047 park-report triad stays a `step.project`; the reviewer loop
+  parks honestly (typed park report) on exhaustion — port the
+  onExhausted behavior exactly.
+- Landing recipe: `just ts-build` FIRST, then `ctx traits build`, then
+  `ctx traits export research --update-skill-lock`.
+
+"""
+validation = """
+## Done when
+
+`just ts-build` green; `ctx traits build` regenerates all three
+generated/<vid>/index.toml; whitespace-normalized diff of each against
+its pre-migration state shows no semantic drift (ids, argv, prompt
+bodies — rule-6 wrap sanctioned per 0046), surviving hunks explained
+in the commit message; `ctx traits export research
+--update-skill-lock` refreshes the projection lock; `ctx traits check`
+green; `just test` green. No frozen-inventory or golden tests added.
+"""

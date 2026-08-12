@@ -1,0 +1,66 @@
+schema-version = "0.2"
+key = "0184"
+title = "optimize: converge the already-hook-based sources on refactor's conventions"
+status = "ready"
+raised = "2026-08-12"
+content = """
+
+Owner directive 2026-08-12: bring every first-party trait family up to
+the authoring format refactor now demonstrates (contract: task 0102;
+refactor is the reference implementation).
+
+optimize is ALREADY structurally there — defineVariant hooks,
+source/shared/stage/*.ts, source/variant/{benchmark,experiment}/ with
+per-variant stage/ dirs — it was the other early adopter. What remains
+is convention drift against refactor, so this is the smallest task of
+the sweep: a true-up, not a migration.
+
+Observed drift (2026-08-12 reading):
+
+- Imports are deep relative paths (`../../shared/data.ts`) even though
+  package.json already maps `#trait/*` — refactor imports via the alias
+  everywhere.
+- No barrel modules: refactor has shared/index.ts + shared/stage/index.ts
+  + variant/<vid>/stage/index.ts and variant bodies read as
+  `shared.stage.implement.apply("...")` / `stage.git.status("...")`
+  namespace calls; optimize imports each stage symbol individually.
+- shared/ splits only {agent,data,schema} — refactor also separates
+  intent.ts, metadata.ts, resource.ts. Split only what optimize
+  actually has content for; do not manufacture empty modules.
+
+"""
+scope = """
+## Decisions
+
+- Format-only: no prompt, flow, or knob changes. Generated canonicals
+  are the proof (see Done when).
+- Adopt the `#trait/*` alias for every cross-directory import; add the
+  barrel index.ts files; convert variant bodies to the namespace call
+  style so they read like refactor/quick's index.ts.
+- Keep optimize's own stage vocabulary (baseline/measure/decide/
+  summary) — convergence is about module shape and import idiom, not
+  renaming domain concepts to refactor's.
+
+## Watch
+
+- Landing recipe: `just ts-build` FIRST, then `ctx traits build`, then
+  `ctx traits export optimize --update-skill-lock` — a stale CDK dist
+  silently drops intent tables.
+- Hand-chosen ids and the deterministic guard machinery
+  (decideCandidate, the N-run aggregation) must emerge byte-identical
+  in the canonicals; the keep/discard guard is the variant's whole
+  thesis.
+
+"""
+validation = """
+## Done when
+
+`just ts-build` green; `ctx traits build` regenerates
+generated/{benchmark,experiment}/index.toml; a whitespace-normalized
+diff of each against its pre-migration state shows no semantic drift
+(step ids, argv, prompt bodies — rule-6 wrap drift sanctioned per
+0046), any surviving hunk explained in the commit message;
+`ctx traits export optimize --update-skill-lock` refreshes the
+projection lock; `ctx traits check` green; `just test` green. No
+frozen-inventory or golden tests added.
+"""
