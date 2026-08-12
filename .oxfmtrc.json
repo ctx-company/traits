@@ -8,6 +8,7 @@
     "packages/cdk/src/generated.ts",
     "packages/config/src/generated.ts",
     ".ctx/traits/vendored/**",
-    ".ctx/traits/worktrees/**"
+    ".ctx/traits/worktrees/**",
+    "packages/*/test/fixtures/**"
   ]
 }
