@@ -21,13 +21,13 @@
   },
   "prompt:build-the-checklist": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 16,
-    "end": 16
+    "start": 15,
+    "end": 15
   },
   "prompt:implement-the-checklist": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 20,
-    "end": 20
+    "start": 19,
+    "end": 19
   },
   "prompt:review-the-implementation": {
     "file": ".ctx/traits/packages/refactor/source/shared/stage/review.ts",
@@ -36,8 +36,8 @@
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 26,
+    "end": 26
   },
   "resource:architecture-dialect": {
     "file": ".ctx/traits/packages/refactor/source/shared/resource.ts",
@@ -86,58 +86,58 @@
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-refactor": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 29,
-    "end": 29
-  },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
-    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
     "start": 28,
     "end": 28
   },
-  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
     "start": 27,
     "end": 27
   },
-  "sequence:procedure/build-the-checklist": {
-    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 16,
-    "end": 16
-  },
-  "sequence:procedure/check-working-tree-status": {
-    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 25,
-    "end": 25
-  },
-  "sequence:procedure/collect-annotations-ctx-annotate": {
-    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 15,
-    "end": 15
-  },
-  "sequence:procedure/maybe-commit": {
+  "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
     "start": 26,
     "end": 26
   },
+  "sequence:procedure/build-the-checklist": {
+    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
+    "start": 15,
+    "end": 15
+  },
+  "sequence:procedure/check-working-tree-status": {
+    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "sequence:procedure/collect-annotations-ctx-annotate": {
+    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
+    "start": 14,
+    "end": 14
+  },
+  "sequence:procedure/maybe-commit": {
+    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
+    "start": 25,
+    "end": 25
+  },
   "sequence:procedure/reviewed-refinement": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 17,
+    "end": 17
   },
   "sequence:reviewed-refinement-body/implement-the-checklist": {
+    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
+    "start": 19,
+    "end": 19
+  },
+  "sequence:reviewed-refinement-body/review-the-implementation": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
     "start": 20,
     "end": 20
   },
-  "sequence:reviewed-refinement-body/review-the-implementation": {
-    "file": ".ctx/traits/packages/refactor/source/variant/guided/index.ts",
-    "start": 21,
-    "end": 21
-  },
   "slot:annotations": {
     "file": ".ctx/traits/packages/refactor/source/variant/guided/data.ts",
-    "start": 6,
-    "end": 6
+    "start": 5,
+    "end": 5
   },
   "slot:commit-message": {
     "file": ".ctx/traits/packages/refactor/source/shared/data.ts",
@@ -186,7 +186,7 @@
   },
   "trait:refactor": {
     "file": "[eval1]",
-    "start": 47,
-    "end": 47
+    "start": 116,
+    "end": 116
   }
 }

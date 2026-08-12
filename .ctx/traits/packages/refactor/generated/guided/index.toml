@@ -12,7 +12,6 @@ tag = [
     "refactoring",
     "review",
     "multi-agent",
-    "annotations",
 ]
 
 [[intent.require]]

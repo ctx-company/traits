@@ -1,5 +1,0 @@
-max-frames = 20
-frame-seconds = 1200
-total-seconds = 3600
-max-retries = 3
-idle-seconds = 1200

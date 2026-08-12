@@ -310,13 +310,13 @@ output = ["slot:plan"]
 [prompt.frame-the-problem]
 text = """
 
-    From the survey {slot:survey} of {port:target}.
-    Verify the selection against the actual code with your tools.
+        From the survey {slot:survey} of {port:target}.
+        Verify the selection against the actual code with your tools.
+    
 
 
-
-    Return the problem framing (slot:refactor-frame).
-"""
+        Return the problem framing (slot:refactor-frame).
+    """
 input = [
     "slot:survey",
     "port:target",
