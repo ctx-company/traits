@@ -56,6 +56,15 @@ pub enum Error {
     #[error("step '{reader}' reads {ref_text}, never produced by any step")]
     SlotNeverProduced { reader: String, ref_text: String },
 
+    #[error(
+        "step '{reader}' reads {ref_text}, which is only produced inside a conditional branch that may not run (first producer: '{producer}'); a branch guard may read it, a step input may not"
+    )]
+    SlotConditionallyProduced {
+        reader: String,
+        ref_text: String,
+        producer: String,
+    },
+
     #[error("step '{reader}' reads {ref_text}, first produced by later step '{producer}'")]
     SlotProducedLater {
         reader: String,
@@ -78,6 +87,7 @@ impl Error {
             | Self::QualifiedComponentInvalid { ref_text }
             | Self::Unresolved { ref_text }
             | Self::SlotNeverProduced { ref_text, .. }
+            | Self::SlotConditionallyProduced { ref_text, .. }
             | Self::SlotProducedLater { ref_text, .. } => ref_text,
         }
     }

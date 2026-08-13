@@ -620,13 +620,22 @@ fn evaluate_guard_predicate(
                 serde_json::Value::String(text) => text.is_empty(),
                 _ => false,
             });
+        // Absent is not empty and not non-empty — it is unmeasured. Emitting
+        // `NotMatched` here made `not(empty(absent))` route TRUE, firing
+        // "did something get produced?" rungs on runs where the producer
+        // never ran at all.
+        let outcome = if accepted.is_none() {
+            GuardOutcome::Unmeasurable
+        } else {
+            GuardOutcome::from_bool(matched)
+        };
         return Ok((
-            GuardOutcome::from_bool(matched),
-            vec![condition_evaluation(
+            outcome,
+            vec![condition_evaluation_outcome(
                 &format!("empty({slot_ref})"),
                 Some(slot_ref.to_string()),
                 loop_context,
-                matched,
+                outcome,
                 slot_list_reason(stale, accepted.is_some(), matched),
             )],
         ));
@@ -710,15 +719,27 @@ fn evaluate_guard_predicate(
                 expected,
             )
         });
-        let matched = if comparison.is_some() {
-            !stale
-                && comparison_evidence
-                    .as_ref()
-                    .is_some_and(|evidence| evidence.result)
+        // A never-accepted slot is missing EVIDENCE, not a false fact:
+        // `Unmeasurable`, which `negate()` preserves and `routes_true()`
+        // treats as false — so `not(empty(...))`, `not(equals(...))`, and
+        // friends over absent evidence route false instead of firing. The
+        // linearized sibling `flow.when` ladder depends on this: a rung
+        // whose predecessor never produced its evidence must not fire, in
+        // either guard polarity. Stale evidence stays `NotMatched` — it is a
+        // measured "no", deliberately (superseded loop-iteration values).
+        let outcome = if accepted.is_none() {
+            GuardOutcome::Unmeasurable
+        } else if comparison.is_some() {
+            GuardOutcome::from_bool(
+                !stale
+                    && comparison_evidence
+                        .as_ref()
+                        .is_some_and(|evidence| evidence.result),
+            )
         } else {
-            !stale && accepted.is_some()
+            GuardOutcome::from_bool(!stale)
         };
-        let mut evaluation = condition_evaluation(
+        let mut evaluation = condition_evaluation_outcome(
             &comparison.map_or_else(
                 || {
                     slot_predicate_label(
@@ -738,17 +759,19 @@ fn evaluate_guard_predicate(
             ),
             Some(slot_ref.to_string()),
             loop_context,
-            matched,
-            if stale {
+            outcome,
+            if accepted.is_none() {
+                "no accepted value for this slot — unmeasurable, routes false"
+            } else if stale {
                 "accepted slot evidence is stale (written in an earlier iteration of this loop)"
-            } else if matched {
+            } else if outcome.routes_true() {
                 "accepted slot evidence matched"
             } else {
                 "accepted slot evidence did not match"
             },
         );
         evaluation.comparison_evidence = comparison_evidence;
-        return Ok((GuardOutcome::from_bool(matched), vec![evaluation]));
+        return Ok((outcome, vec![evaluation]));
     }
     if let Some(output_ref) = predicate.output.as_deref() {
         let accepted = evidence.current_outputs.iter().find(|value| {
@@ -1891,13 +1914,157 @@ mod p434_keep_guard_tests {
             &mut BTreeSet::new(),
         )
         .expect("keep guard evaluates");
-        assert_eq!(outcome, GuardOutcome::NotMatched);
+        // Absent evidence propagates as Unmeasurable through the whole guard
+        // (strong-Kleene) rather than collapsing to a measured "no" at the
+        // leaf; what P434 requires is only that it never routes true.
+        assert_eq!(outcome, GuardOutcome::Unmeasurable);
         assert!(!outcome.routes_true());
         let inner_present = evaluations
             .iter()
             .find(|evaluation| evaluation.predicate == "present(slot:evaluator-result).cost-microusd")
             .expect("inner present leaf evidence recorded");
         assert_eq!(inner_present.outcome, Some(GuardOutcome::Unmeasurable));
+    }
+}
+
+/// A never-accepted slot is missing evidence, not a false fact: every slot
+/// predicate over it is `Unmeasurable`, which `negate()` preserves — so
+/// both guard polarities route false. Before this, `empty(absent)` was
+/// `NotMatched` and `not(empty(absent))` routed TRUE, firing "did something
+/// get produced?" rungs on runs whose producer never ran — the exact hazard
+/// of the linearized sibling `flow.when` ladder this exists to make safe.
+#[cfg(test)]
+mod absent_evidence_guard_tests {
+    use super::*;
+
+    const ABSENT_EVIDENCE_TRAIT_JSON: &str = r#"{
+        "id": "absent-evidence-fixture",
+        "schema-version": "0.4",
+        "version": "0.1.0",
+        "name": "Absent evidence fixture",
+        "description": "Guards over never-accepted slots are unmeasurable and route false in both polarities.",
+        "slot": [
+            { "id": "commit-output", "schema": "schema:text" }
+        ],
+        "condition": {
+            "tagged": { "not": { "empty": "slot:commit-output" } },
+            "approved": { "slot": "slot:commit-output", "equals": "yes" }
+        }
+    }"#;
+
+    fn accepted_slot(ref_text: &str, value: JsonValue) -> Value {
+        Value {
+            ref_text: ref_text.to_string(),
+            value_digest: crate::digest::canonical_digest(&value).expect("digest"),
+            value,
+            schema_ref: None,
+            source: ValueSource::HostInput,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+            producer_check_verdict: false,
+            acceptance: AcceptanceStatus::Accepted,
+            schema_validation: Vec::new(),
+        }
+    }
+
+    fn state(slots: Vec<Value>) -> State {
+        State {
+            run_id: Id::new("run-absent-evidence-test").expect("id"),
+            trait_id: "absent-evidence-fixture".to_string(),
+            strict_loops: false,
+            source_digest: None,
+            canonical_digest: None,
+            current_run_index: 0,
+            sequence_statuses: Vec::new(),
+            accepted_port_values: Vec::new(),
+            accepted_slot_values: slots,
+            accepted_output_port_values: Vec::new(),
+            slot_revisions: Vec::new(),
+            resource_evidence: Vec::new(),
+            emitted_signals: Vec::new(),
+            rejected_attempts: Vec::new(),
+            provider_capability_reports: Vec::new(),
+            output_ports: Vec::new(),
+            resolved_settings: Vec::new(),
+            resolved_budgets: Vec::new(),
+            active_path: Vec::new(),
+            control_stack: Vec::new(),
+            branch_decisions: Vec::new(),
+            conditional_input_decisions: Vec::new(),
+            ask_decisions: Vec::new(),
+            failure_routes: Vec::new(),
+            guard_evaluations: Vec::new(),
+            parallel_panel_records: Vec::new(),
+            stop_reason: None,
+            elapsed_seconds: 0,
+            final_state: FinalState::Running,
+        }
+    }
+
+    fn evaluate(condition_id: &str, run_state: &State) -> GuardOutcome {
+        let trait_ref = crate::encoding::decode_trait(
+            crate::encoding::Encoding::Json,
+            ABSENT_EVIDENCE_TRAIT_JSON,
+        )
+        .expect("fixture decodes");
+        let guard = trait_ref
+            .conditions
+            .get(condition_id)
+            .expect("condition declared")
+            .as_guard();
+        let evidence = GuardEvidence {
+            repeated_scope: &[],
+            current_outputs: &[],
+        };
+        let (outcome, _) = evaluate_guard_expr_with_seen(
+            &trait_ref,
+            run_state,
+            &guard,
+            &LoopContext {
+                loop_id: String::new(),
+                sequence_id: None,
+                iteration_index: 0,
+                max_iterations: 1,
+            },
+            &evidence,
+            0,
+            &mut BTreeSet::new(),
+        )
+        .expect("guard evaluates");
+        outcome
+    }
+
+    #[test]
+    fn not_empty_over_absent_slot_is_unmeasurable_and_routes_false() {
+        let outcome = evaluate("tagged", &state(Vec::new()));
+        assert_eq!(outcome, GuardOutcome::Unmeasurable);
+        assert!(!outcome.routes_true());
+    }
+
+    #[test]
+    fn not_empty_still_measures_accepted_evidence() {
+        let outcome = evaluate(
+            "tagged",
+            &state(vec![accepted_slot(
+                "slot:commit-output",
+                JsonValue::from("abc123 committed"),
+            )]),
+        );
+        assert_eq!(outcome, GuardOutcome::Matched);
+        let outcome = evaluate(
+            "tagged",
+            &state(vec![accepted_slot("slot:commit-output", JsonValue::from(""))]),
+        );
+        assert_eq!(outcome, GuardOutcome::NotMatched);
+    }
+
+    #[test]
+    fn equals_over_absent_slot_is_unmeasurable_and_routes_false() {
+        let outcome = evaluate("approved", &state(Vec::new()));
+        assert_eq!(outcome, GuardOutcome::Unmeasurable);
+        assert!(!outcome.routes_true());
     }
 }
 

@@ -212,6 +212,17 @@ impl ResponseError {
                     .with_detail("reader", reader.clone())
                     .with_detail("ref", ref_text.clone())
                     .with_detail("producer", producer.clone()),
+                crate::reference::Error::SlotConditionallyProduced {
+                    reader,
+                    ref_text,
+                    producer,
+                } => Self::new(
+                    "core.slot-conditionally-produced",
+                    "slot read outside its producing branch",
+                )
+                .with_detail("reader", reader.clone())
+                .with_detail("ref", ref_text.clone())
+                .with_detail("producer", producer.clone()),
                 crate::reference::Error::MissingSeparator { .. }
                 | crate::reference::Error::EmptyKind { .. }
                 | crate::reference::Error::ColonInPath { .. }

@@ -2854,6 +2854,7 @@ fn validate_produced_before_read(trait_ref: &Trait) -> crate::Result<()> {
         return Ok(());
     };
     let mut produced = BTreeSet::new();
+    let mut possible = BTreeSet::new();
     let mut stack = BTreeSet::new();
     let mut memo = BTreeMap::new();
     let first_producers = first_slot_producers(trait_ref, procedure)?;
@@ -2861,6 +2862,7 @@ fn validate_produced_before_read(trait_ref: &Trait) -> crate::Result<()> {
         trait_ref,
         ordered_procedure_items(procedure)?.into_iter(),
         &mut produced,
+        &mut possible,
         &mut stack,
         &mut memo,
         &first_producers,
@@ -3253,44 +3255,65 @@ fn validate_produced_before_read_in_sequence(
     trait_ref: &Trait,
     sequence_id: &str,
     produced: &BTreeSet<String>,
+    possible: &BTreeSet<String>,
     stack: &mut BTreeSet<String>,
-    memo: &mut BTreeMap<(String, Vec<String>), BTreeSet<String>>,
+    memo: &mut ProducedBeforeReadMemo,
     first_producers: &BTreeMap<String, String>,
-) -> crate::Result<BTreeSet<String>> {
+) -> crate::Result<(BTreeSet<String>, BTreeSet<String>)> {
     let key = (
         sequence_id.to_string(),
         produced.iter().cloned().collect::<Vec<_>>(),
+        possible.iter().cloned().collect::<Vec<_>>(),
     );
     if let Some(cached) = memo.get(&key) {
         return Ok(cached.clone());
     }
     if !stack.insert(sequence_id.to_string()) {
-        return Ok(produced.clone());
+        return Ok((produced.clone(), possible.clone()));
     }
     let Some(sequence) = trait_ref.sequences.get(sequence_id) else {
         stack.remove(sequence_id);
-        return Ok(produced.clone());
+        return Ok((produced.clone(), possible.clone()));
     };
     let mut current = produced.clone();
+    let mut current_possible = possible.clone();
     validate_produced_before_read_in_items(
         trait_ref,
         sequence.sequence.iter().enumerate(),
         &mut current,
+        &mut current_possible,
         stack,
         memo,
         first_producers,
     )?;
     stack.remove(sequence_id);
-    memo.insert(key, current.clone());
-    Ok(current)
+    memo.insert(key, (current.clone(), current_possible.clone()));
+    Ok((current, current_possible))
 }
 
+/// Memo for [`validate_produced_before_read_in_sequence`]: keyed by the
+/// sequence plus BOTH entry sets (results depend on each), holding the
+/// guaranteed and possible output sets.
+type ProducedBeforeReadMemo =
+    BTreeMap<(String, Vec<String>, Vec<String>), (BTreeSet<String>, BTreeSet<String>)>;
+
+/// The produced-before-read walk, tracking two sets: `produced` — slots
+/// guaranteed written on EVERY path reaching the current item — and
+/// `possible` — slots written on AT LEAST ONE such path. Step inputs (and
+/// `for-each over`) must be in `produced`: a step that runs cannot read
+/// evidence its own path never wrote. Branch `when` guards only need
+/// `possible`: at runtime a guard over a never-accepted slot is
+/// `Unmeasurable` and routes false, so a rung whose predecessor never
+/// produced its evidence simply does not fire — the linearized maybe-ladder
+/// idiom (sibling `flow.when` chains). Reads of slots on NO path reaching
+/// the reader stay refused everywhere.
 fn validate_produced_before_read_in_items<'a>(
     trait_ref: &Trait,
     items: impl Iterator<Item = (usize, &'a SequenceItem)>,
     produced: &mut BTreeSet<String>,
+    possible: &mut BTreeSet<String>,
     stack: &mut BTreeSet<String>,
-    memo: &mut BTreeMap<(String, Vec<String>), BTreeSet<String>>,
+    memo: &mut ProducedBeforeReadMemo,
     first_producers: &BTreeMap<String, String>,
 ) -> crate::Result<()> {
     for (index, item) in items {
@@ -3314,16 +3337,24 @@ fn validate_produced_before_read_in_items<'a>(
                 && !reference.is_qualified()
                 && !produced.contains(input)
             {
-                let error = match first_producers.get(input) {
-                    Some(producer) => crate::reference::Error::SlotProducedLater {
+                let error = if possible.contains(input) {
+                    crate::reference::Error::SlotConditionallyProduced {
                         reader: reader.clone(),
                         ref_text: input.to_string(),
-                        producer: producer.clone(),
-                    },
-                    None => crate::reference::Error::SlotNeverProduced {
-                        reader: reader.clone(),
-                        ref_text: input.to_string(),
-                    },
+                        producer: first_producers.get(input).cloned().unwrap_or_default(),
+                    }
+                } else {
+                    match first_producers.get(input) {
+                        Some(producer) => crate::reference::Error::SlotProducedLater {
+                            reader: reader.clone(),
+                            ref_text: input.to_string(),
+                            producer: producer.clone(),
+                        },
+                        None => crate::reference::Error::SlotNeverProduced {
+                            reader: reader.clone(),
+                            ref_text: input.to_string(),
+                        },
+                    }
                 };
                 return Err(error.into());
             }
@@ -3340,7 +3371,7 @@ fn validate_produced_before_read_in_items<'a>(
                 }
         if item.effective_kind() == SequenceKind::Branch
             && let Some(when) = item.when.as_ref() {
-                validate_guard_slots_produced(trait_ref, when, produced, &reader, first_producers)?;
+                validate_guard_slots_produced(trait_ref, when, possible, &reader, first_producers)?;
             }
         if matches!(
             item.effective_kind(),
@@ -3350,72 +3381,95 @@ fn validate_produced_before_read_in_items<'a>(
                 // The for-each item is a runtime-bound local value for its body,
                 // not an output that escapes to subsequent procedure items.
                 let mut body_produced = produced.clone();
+                let mut body_possible_base = possible.clone();
                 let item_slot = item.item.clone();
                 if let Some(item_slot) = item_slot.as_deref() {
                     body_produced.insert(item_slot.to_string());
+                    body_possible_base.insert(item_slot.to_string());
                 }
-                let mut body_outputs = validate_produced_before_read_in_sequence(
-                    trait_ref,
-                    &sequence_id,
-                    &body_produced,
-                    stack,
-                    memo,
-                    first_producers,
-                )?;
+                let (mut body_outputs, mut body_possible) =
+                    validate_produced_before_read_in_sequence(
+                        trait_ref,
+                        &sequence_id,
+                        &body_produced,
+                        &body_possible_base,
+                        stack,
+                        memo,
+                        first_producers,
+                    )?;
                 if let Some(item_slot) = item_slot.filter(|item_slot| {
                     !produced.contains(item_slot)
                         && !sequence_explicitly_produces_slot(trait_ref, &sequence_id, item_slot)
                 }) {
                     body_outputs.remove(&item_slot);
+                    body_possible.remove(&item_slot);
                 }
                 if item.effective_kind() != SequenceKind::ForEach {
                     *produced = body_outputs;
+                    *possible = body_possible;
+                } else {
+                    // A for-each may run zero times: nothing new is
+                    // guaranteed, but everything its body can write is
+                    // possible afterward.
+                    possible.extend(body_possible);
                 }
             }
         if item.effective_kind() == SequenceKind::Branch {
-            let then_outputs = match local_sequence_id(item.sequence.as_deref()) {
+            let (then_outputs, then_possible) = match local_sequence_id(item.sequence.as_deref()) {
                 Some(sequence_id) => validate_produced_before_read_in_sequence(
                     trait_ref,
                     &sequence_id,
                     produced,
+                    possible,
                     stack,
                     memo,
                     first_producers,
                 )?,
-                None => produced.clone(),
+                None => (produced.clone(), possible.clone()),
             };
-            let otherwise_outputs = match local_sequence_id(item.otherwise.as_deref()) {
-                Some(sequence_id) => validate_produced_before_read_in_sequence(
-                    trait_ref,
-                    &sequence_id,
-                    produced,
-                    stack,
-                    memo,
-                    first_producers,
-                )?,
-                None => produced.clone(),
-            };
+            let (otherwise_outputs, otherwise_possible) =
+                match local_sequence_id(item.otherwise.as_deref()) {
+                    Some(sequence_id) => validate_produced_before_read_in_sequence(
+                        trait_ref,
+                        &sequence_id,
+                        produced,
+                        possible,
+                        stack,
+                        memo,
+                        first_producers,
+                    )?,
+                    None => (produced.clone(), possible.clone()),
+                };
             *produced = then_outputs
                 .intersection(&otherwise_outputs)
                 .cloned()
                 .collect();
+            // Either arm's writes are possible downstream, though only one
+            // arm runs. Each arm was seeded with the PRE-branch possible
+            // set, so a then-arm slot is never possible inside its own
+            // otherwise arm — mutually exclusive arms stay strict.
+            possible.extend(then_possible);
+            possible.extend(otherwise_possible);
         }
         if item.effective_kind() == SequenceKind::Parallel {
             // Validate every branch against the same pre-panel produced set; the
             // union of non-skippable branch outputs is available after the panel.
             let mut union = produced.clone();
+            let mut possible_union = possible.clone();
             for branch_ref in item.branches.iter() {
                 let Some(sequence_id) = local_sequence_id(Some(branch_ref)) else {
                     continue;
                 };
-                let branch_outputs = validate_produced_before_read_in_sequence(
-                    trait_ref,
-                    &sequence_id,
-                    produced,
-                    stack,
-                    memo,
-                    first_producers,
-                )?;
+                let (branch_outputs, branch_possible) =
+                    validate_produced_before_read_in_sequence(
+                        trait_ref,
+                        &sequence_id,
+                        produced,
+                        possible,
+                        stack,
+                        memo,
+                        first_producers,
+                    )?;
                 let can_skip = item.branch_failure.iter().any(|entry| {
                     entry.branch == *branch_ref
                         && entry.on_failure == BranchFailurePolicy::Skip
@@ -3423,27 +3477,35 @@ fn validate_produced_before_read_in_items<'a>(
                 if !can_skip {
                     union.extend(branch_outputs);
                 }
+                possible_union.extend(branch_possible);
             }
             *produced = union;
+            *possible = possible_union;
         }
         if item.effective_kind() != SequenceKind::Branch {
             collect_local_slot_outputs(item, produced);
+            collect_local_slot_outputs(item, possible);
         }
     }
     Ok(())
 }
 
+/// Validate a branch `when` guard's slot reads against `available` — the
+/// POSSIBLE set, not the guaranteed one: a guard over conditionally-produced
+/// evidence is legal (absent at runtime means `Unmeasurable`, routing the
+/// branch false), so only slots produced on NO path reaching the guard are
+/// refused here.
 fn validate_guard_slots_produced(
     trait_ref: &Trait,
     guard: &GuardExpr,
-    produced: &BTreeSet<String>,
+    available: &BTreeSet<String>,
     reader: &str,
     first_producers: &BTreeMap<String, String>,
 ) -> crate::Result<()> {
     let mut slots = Vec::new();
     collect_guard_slot_refs(trait_ref, guard, &mut slots, &mut BTreeSet::new());
     for slot in slots {
-        if produced.contains(&slot) {
+        if available.contains(&slot) {
             continue;
         }
         let error = match first_producers.get(&slot) {
@@ -4579,6 +4641,156 @@ schema = "[schema:checklist-item]"
         assert!(
             format!("{error}").contains("schema:checklist-item"),
             "error must name the gated builtin: {error}"
+        );
+    }
+
+    /// The sibling `flow.when` ladder fixture: `rung-one` produces
+    /// `first-out` only inside its arm, and `rung-two` — a SIBLING, not a
+    /// nested block — reads it. `extra` splices per-test variations in.
+    fn sibling_ladder_toml(rung_two_when: &str, extra: &str) -> String {
+        format!(
+            r#"
+id = "sibling-when-fixture"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Sibling when fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "zero-out"
+schema = "schema:text"
+
+[[slot]]
+id = "first-out"
+schema = "schema:text"
+
+[[slot]]
+id = "second-out"
+schema = "schema:text"
+
+[[slot]]
+id = "ghost"
+schema = "schema:text"
+
+[[slot]]
+id = "late-out"
+schema = "schema:text"
+
+[[sequence.arm-one.sequence]]
+id = "produce-first"
+title = "Produce first"
+output = ["slot:first-out"]
+command = {{ argv = ["printf", "first"] }}
+
+[[sequence.arm-two.sequence]]
+id = "produce-second"
+title = "Produce second"
+output = ["slot:second-out"]
+command = {{ argv = ["printf", "second"] }}
+{extra}
+[procedure]
+description = "Sibling when ladder."
+
+[[procedure.sequence]]
+id = "step-zero"
+title = "Step zero"
+output = ["slot:zero-out"]
+command = {{ argv = ["git", "status", "--porcelain"] }}
+
+[[procedure.sequence]]
+id = "rung-one"
+title = "Rung one"
+kind = "branch"
+sequence = "sequence:arm-one"
+when = {{ empty = "slot:zero-out" }}
+
+[[procedure.sequence]]
+id = "rung-two"
+title = "Rung two"
+kind = "branch"
+sequence = "sequence:arm-two"
+when = {rung_two_when}
+
+[[procedure.sequence]]
+id = "produce-late"
+title = "Produce late"
+output = ["slot:late-out"]
+command = {{ argv = ["printf", "late"] }}
+"#
+        )
+    }
+
+    #[test]
+    fn sibling_branch_guard_may_read_conditionally_produced_slot() {
+        let toml_src =
+            sibling_ladder_toml(r#"{ slot = "slot:first-out", equals = "first" }"#, "");
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src).expect(
+            "a sibling branch guard over a conditionally-produced slot is the linearized \
+             maybe-ladder idiom and must validate",
+        );
+    }
+
+    #[test]
+    fn step_input_reading_conditionally_produced_slot_is_refused() {
+        let toml_src = sibling_ladder_toml(
+            r#"{ slot = "slot:first-out", equals = "first" }"#,
+            "input = [\"slot:first-out\"]\n",
+        );
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("a step INPUT over a conditionally-produced slot stays refused");
+        assert!(
+            format!("{error}").contains("only produced inside a conditional branch"),
+            "error must name the conditional production, not claim a later producer: {error}"
+        );
+    }
+
+    #[test]
+    fn guard_reading_slot_produced_only_later_stays_refused() {
+        let toml_src = sibling_ladder_toml(r#"{ slot = "slot:late-out", equals = "late" }"#, "");
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("a guard over a slot produced only later stays refused");
+        assert!(
+            format!("{error}").contains("first produced by later step 'produce-late'"),
+            "error must name the later producer: {error}"
+        );
+    }
+
+    #[test]
+    fn guard_reading_never_produced_slot_stays_refused() {
+        let toml_src = sibling_ladder_toml(r#"{ slot = "slot:ghost", equals = "boo" }"#, "");
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("a guard over a never-produced slot stays refused");
+        assert!(
+            format!("{error}").contains("never produced by any step"),
+            "error must say the slot has no producer at all: {error}"
+        );
+    }
+
+    #[test]
+    fn guard_in_otherwise_arm_cannot_read_then_arm_slot() {
+        // The otherwise arm holds a nested branch whose guard reads the THEN
+        // arm's output — mutually exclusive arms, so the slot is possible on
+        // no path reaching that guard; the relaxation must not legalize it.
+        let toml_src = sibling_ladder_toml(
+            r#"{ slot = "slot:zero-out", equals = "x" }"#,
+            r#"
+[[sequence.arm-reader.sequence]]
+id = "nested-rung"
+title = "Nested rung"
+kind = "branch"
+sequence = "sequence:arm-two"
+when = { slot = "slot:first-out", equals = "first" }
+"#,
+        )
+        .replace(
+            "when = { empty = \"slot:zero-out\" }",
+            "when = { empty = \"slot:zero-out\" }\notherwise = \"sequence:arm-reader\"",
+        );
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("a guard in the otherwise arm reading the then arm's slot stays refused");
+        assert!(
+            format!("{error}").contains("first produced by later step 'produce-first'"),
+            "the arms are exclusive, so the read must stay refused: {error}"
         );
     }
 
