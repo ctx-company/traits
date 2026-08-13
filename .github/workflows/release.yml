@@ -276,6 +276,10 @@ jobs:
               echo "${name}@${version} is already published — nothing to do"
               continue
             fi
-            pnpm --filter "${name}" pack --pack-destination "${stage}"
+            # --dir, not --filter: --filter switches pnpm into recursive mode,
+            # which `pack` does not support ("Unknown option: 'recursive'",
+            # observed v0.1.1). --dir packs the one package and still
+            # rewrites workspace:^ ranges to real versions.
+            pnpm --dir "packages/${package}" pack --pack-destination "${stage}"
             npm publish "${stage}/ctx-traits-${package}-${version}.tgz" --access public
           done
