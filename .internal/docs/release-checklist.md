@@ -31,7 +31,7 @@ virgin-repo consume → upstream update → pull-update loop.
 - [x] 2.1 Build matrix covers darwin arm64/x86_64 + linux x86_64/arm64.
 - [x] 2.2 npm wrapper for `ctx`: DEFERRED (owner ruling 2026-08-13) — filed
       as task 0190.
-- [ ] 2.3 Hand-cut the release: workspace at 0.1.0 (done), CHANGELOG.md drafted
+- [x] 2.3 Hand-cut the release: workspace at 0.1.0 (done), CHANGELOG.md drafted
       (done) — remaining: OWNER runs `git tag v0.1.0 && git push origin v0.1.0`.
 - [ ] 2.4 Actions run green end-to-end: archives, formula in tap, npm ×4, no
       skip-warnings.

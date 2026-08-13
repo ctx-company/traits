@@ -37,7 +37,7 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-15-intel
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
@@ -48,7 +48,7 @@ jobs:
     # GitHub's own cancellation (observed 2026-08-05).
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Same single source of truth as ci.yml: the channel comes from
       # rust-toolchain.toml, and only the per-matrix target is added here.
       - name: Install Rust (from rust-toolchain.toml)
@@ -86,7 +86,7 @@ jobs:
           tar -tzf "${{ steps.package.outputs.archive }}"
           tar -tzf "${{ steps.package.outputs.archive }}" | grep -qx 'ctx'
           cat "${{ steps.package.outputs.archive }}.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: archive-${{ matrix.target }}
           path: |
@@ -99,8 +99,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           pattern: archive-*
           path: dist
@@ -134,7 +134,7 @@ jobs:
       # exist in a checkout: Formula/ctx.rb is rendered here, not committed.
       - name: Check rendered formula parses
         run: ruby -c Formula/ctx.rb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: formula
           path: Formula/ctx.rb
@@ -148,12 +148,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: archive-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: formula
           path: dist
@@ -177,7 +177,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: formula
           path: dist
@@ -221,13 +221,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 26.5.0
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
