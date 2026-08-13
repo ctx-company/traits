@@ -13,3 +13,4 @@ debug/
 cache/
 node_modules/
 traits/worktrees/
+traits/runtime.ts

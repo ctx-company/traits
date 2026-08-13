@@ -5,6 +5,17 @@ generated-at = "not-recorded"
 
 [[trait]]
 id = "release"
+requested-version = "0.1.0"
+resolved-version = "0.1.0"
+
+[trait.digests]
+source = "sha256:de8b3fcc0f42e2e1574f4ca7813381b41010848a3d044040b7de19af2b2443c7"
+canonical = "sha256:d84fa4b2cba0ee4157132aa1050022ded341b36df957d8dddc166d95f992aa56"
+model-visible = "sha256:230bc4b9653d71b3fde5edec33b679470b55f10488ab5e27740d144df8771c97"
+resource-manifest = "sha256:ed373ec45cb51c9d20ccf85be490df47e430f55ea80622e168ceaa8750a82867"
+
+[[trait]]
+id = "release"
 variant = "default"
 requested-version = "0.1.0"
 resolved-version = "0.1.0"
