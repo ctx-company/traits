@@ -1,11 +1,15 @@
-import { trait, variant } from "@ctx-traits/cdk";
+import { defineTrait, useIntent, useResource, useVariant } from "@ctx-traits/cdk";
 
-export default trait("plan", {
-  version: "0.4.0",
-  variants: {
-    default: variant.import("./variants/default.ts").default(),
-    direct: variant.import("./variants/direct.ts"),
-    quick: variant.import("./variants/quick.ts"),
-    complex: variant.import("./variants/complex.ts"),
-  },
-});
+import * as shared from "#trait/shared/index.ts";
+import variants from "#trait/variant/index.ts";
+
+export default function () {
+  defineTrait("plan", { version: "0.4.0" });
+  useIntent(shared.intent);
+  useResource([]);
+
+  useVariant(variants.default).default();
+  useVariant(variants.direct);
+  useVariant(variants.quick);
+  useVariant(variants.complex);
+}

@@ -3,7 +3,6 @@ schema-version = "0.4"
 version = "0.4.0"
 name = "Plan (Direct)"
 description = "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement."
-summary = "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement."
 variant = "direct"
 
 [metadata]
@@ -101,7 +100,7 @@ input = ["slot:task-files"]
 output = ["slot:result"]
 
 [procedure]
-description = "Format the described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/."
+description = "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement."
 input = ["port:task"]
 output = ["port:written-files"]
 

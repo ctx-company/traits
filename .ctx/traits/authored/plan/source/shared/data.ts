@@ -16,3 +16,9 @@ export const writtenFiles = port.output.text({
   description: "Paths of the task files written under .internal/tasks/.",
   value: result,
 });
+export const grounding = slot.text({
+  id: "grounding",
+  description:
+    "Codebase grounding for the described work: the concrete files and modules it touches, the repo's validation gates (exact commands), and the invariants, rules, and constraints the task files must honor.",
+  hint: "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan.",
+});

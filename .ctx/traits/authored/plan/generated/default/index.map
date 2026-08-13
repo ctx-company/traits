@@ -1,72 +1,72 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 9,
-    "end": 9
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 4,
+    "end": 4
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 3,
+    "end": 3
   },
   "port:task": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 3,
     "end": 3
   },
   "port:written-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 14,
     "end": 14
   },
   "prompt:refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 24,
-    "end": 24
+    "file": ".ctx/traits/authored/plan/source/shared/stage/refine.ts",
+    "start": 6,
+    "end": 6
   },
   "prompt:split": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 45,
-    "end": 45
+    "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
+    "start": 7,
+    "end": 7
   },
   "prompt:write": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 61,
-    "end": 61
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "sequence:procedure/refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 21,
-    "end": 21
+    "file": ".ctx/traits/authored/plan/source/shared/stage/refine.ts",
+    "start": 6,
+    "end": 6
   },
   "sequence:procedure/split": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 42,
-    "end": 42
+    "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
+    "start": 7,
+    "end": 7
   },
   "sequence:procedure/write": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 58,
-    "end": 58
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "slot:grounding": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 14,
-    "end": 14
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 19,
+    "end": 19
   },
   "slot:result": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 13,
     "end": 13
   },
   "slot:task-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 7,
     "end": 7
   },
   "trait:plan": {
-    "file": ".ctx/traits/authored/plan/source/variants/default.ts",
-    "start": 71,
-    "end": 71
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

@@ -1,57 +1,57 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 9,
-    "end": 9
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 4,
+    "end": 4
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 3,
+    "end": 3
   },
   "port:task": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 3,
     "end": 3
   },
   "port:written-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 14,
     "end": 14
   },
   "prompt:format": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 17,
-    "end": 17
+    "file": ".ctx/traits/authored/plan/source/variant/direct/index.ts",
+    "start": 10,
+    "end": 10
   },
   "prompt:write": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 32,
-    "end": 32
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "sequence:procedure/format": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 14,
-    "end": 14
+    "file": ".ctx/traits/authored/plan/source/variant/direct/index.ts",
+    "start": 10,
+    "end": 10
   },
   "sequence:procedure/write": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 29,
-    "end": 29
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "slot:result": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 13,
     "end": 13
   },
   "slot:task-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 7,
     "end": 7
   },
   "trait:plan": {
-    "file": ".ctx/traits/authored/plan/source/variants/direct.ts",
-    "start": 42,
-    "end": 42
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }

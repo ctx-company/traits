@@ -1,97 +1,97 @@
 {
   "agent:scribe": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 10,
-    "end": 10
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 4,
+    "end": 4
   },
   "agent:smart-1": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 5,
-    "end": 5
+    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
+    "start": 3,
+    "end": 3
   },
   "port:task": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 3,
     "end": 3
   },
   "port:written-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 14,
     "end": 14
   },
   "prompt:critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 67,
-    "end": 67
+    "file": ".ctx/traits/authored/plan/source/variant/complex/index.ts",
+    "start": 13,
+    "end": 13
   },
   "prompt:refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 30,
-    "end": 30
+    "file": ".ctx/traits/authored/plan/source/shared/stage/refine.ts",
+    "start": 6,
+    "end": 6
   },
   "prompt:revise": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 78,
-    "end": 78
+    "file": ".ctx/traits/authored/plan/source/variant/complex/index.ts",
+    "start": 17,
+    "end": 17
   },
   "prompt:split": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 51,
-    "end": 51
+    "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
+    "start": 7,
+    "end": 7
   },
   "prompt:write": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 88,
-    "end": 88
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "sequence:procedure/critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 64,
-    "end": 64
+    "file": ".ctx/traits/authored/plan/source/variant/complex/index.ts",
+    "start": 13,
+    "end": 13
   },
   "sequence:procedure/refine-task": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 27,
-    "end": 27
+    "file": ".ctx/traits/authored/plan/source/shared/stage/refine.ts",
+    "start": 6,
+    "end": 6
   },
   "sequence:procedure/revise": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 75,
-    "end": 75
+    "file": ".ctx/traits/authored/plan/source/variant/complex/index.ts",
+    "start": 17,
+    "end": 17
   },
   "sequence:procedure/split": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 48,
-    "end": 48
+    "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
+    "start": 7,
+    "end": 7
   },
   "sequence:procedure/write": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 85,
-    "end": 85
+    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
+    "start": 6,
+    "end": 6
   },
   "slot:critique": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 21,
-    "end": 21
+    "file": ".ctx/traits/authored/plan/source/variant/complex/index.ts",
+    "start": 10,
+    "end": 10
   },
   "slot:grounding": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 15,
-    "end": 15
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 19,
+    "end": 19
   },
   "slot:result": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 13,
     "end": 13
   },
   "slot:task-files": {
-    "file": ".ctx/traits/authored/plan/source/data.ts",
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 7,
     "end": 7
   },
   "trait:plan": {
-    "file": ".ctx/traits/authored/plan/source/variants/complex.ts",
-    "start": 98,
-    "end": 98
+    "file": "[eval1]",
+    "start": 116,
+    "end": 116
   }
 }
