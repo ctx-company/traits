@@ -100,7 +100,18 @@ export async function install({ version, platform = process.platform, arch = pro
 
     const extract = join(temporary, 'extract');
     await mkdir(extract);
-    await tar.x({ file: downloaded, cwd: extract, strict: true, filter: (path) => path === 'ctx' });
+    let invalidEntry = false;
+    await tar.x({
+      file: downloaded,
+      cwd: extract,
+      strict: true,
+      filter: (path, entry) => {
+        if (path !== 'ctx') return false;
+        if (entry.type !== 'File') invalidEntry = true;
+        return true;
+      },
+    });
+    if (invalidEntry) throw new Error('Archive ctx entry must be a regular file');
     const extracted = join(extract, 'ctx');
     await chmod(extracted, 0o755);
     await mkdir(binaryDir, { recursive: true });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -23,19 +23,28 @@ test('requires a matching checksum filename', () => {
   assert.throws(() => checksumFrom('f'.repeat(64) + '  other.tar.gz\n', 'ctx.tar.gz'), /Invalid checksum/);
 });
 
-async function fixture(checksum) {
+async function fixture({ checksum = false, symlinkEntry = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ctx-test-'));
   const stage = join(root, 'stage');
   await (await import('node:fs/promises')).mkdir(stage);
-  await writeFile(join(stage, 'ctx'), '#!/bin/sh\nprintf fixture\n');
-  await chmod(join(stage, 'ctx'), 0o755);
+  if (symlinkEntry) {
+    await writeFile(join(stage, 'target'), '#!/bin/sh\nprintf fixture\n');
+    await symlink('target', join(stage, 'ctx'));
+  } else {
+    await writeFile(join(stage, 'ctx'), '#!/bin/sh\nprintf fixture\n');
+    await chmod(join(stage, 'ctx'), 0o755);
+  }
   const name = assetName('1.2.3', 'x86_64-unknown-linux-gnu');
   const archive = join(root, name);
   await tar.c({ gzip: true, file: archive, cwd: stage }, ['ctx']);
   const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
   const server = createServer(async (request, response) => {
-    if (request.url?.endsWith('.sha256')) response.end(`${checksum ? '0'.repeat(64) : digest}  ${name}\n`);
-    else response.end(await readFile(archive));
+    try {
+      if (request.url?.endsWith('.sha256')) response.end(`${checksum ? '0'.repeat(64) : digest}  ${name}\n`);
+      else response.end(await readFile(archive));
+    } catch (error) {
+      response.destroy(error);
+    }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -43,7 +52,7 @@ async function fixture(checksum) {
 }
 
 test('installs only a checksum-verified ctx binary', async () => {
-  const data = await fixture(false);
+  const data = await fixture();
   const packageDir = join(data.root, 'package', 'scripts');
   await (await import('node:fs/promises')).mkdir(packageDir, { recursive: true });
   try {
@@ -53,11 +62,22 @@ test('installs only a checksum-verified ctx binary', async () => {
 });
 
 test('rejects an archive with a mismatched checksum', async () => {
-  const data = await fixture(true);
+  const data = await fixture({ checksum: true });
   const packageDir = join(data.root, 'package', 'scripts');
   await (await import('node:fs/promises')).mkdir(packageDir, { recursive: true });
   try {
     await assert.rejects(install({ version: '1.2.3', platform: 'linux', arch: 'x64', packageDir, releaseBase: data.base }), /Checksum verification failed/);
+  } finally { await data.close(); }
+});
+
+test('rejects a checksum-valid symbolic-link ctx entry without installing a binary', async () => {
+  const data = await fixture({ symlinkEntry: true });
+  const packageDir = join(data.root, 'package', 'scripts');
+  const binary = join(data.root, 'package', 'binary', 'ctx');
+  await mkdir(packageDir, { recursive: true });
+  try {
+    await assert.rejects(install({ version: '1.2.3', platform: 'linux', arch: 'x64', packageDir, releaseBase: data.base }), /regular file/);
+    await assert.rejects(stat(binary), { code: 'ENOENT' });
   } finally { await data.close(); }
 });
 
