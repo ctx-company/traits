@@ -28,11 +28,11 @@ virgin-repo consume → upstream update → pull-update loop.
 
 ## Phase 2 — ctx binary channels
 
-- [ ] 2.1 Build matrix covers darwin arm64/x86_64 + linux x86_64 (confirm arm64).
-- [ ] 2.2 npm wrapper for `ctx` (`@ctx-traits/cli`, postinstall fetch by the
-      binstall naming contract): DEFERRED to fast-follow (owner call pending).
-- [ ] 2.3 Hand-cut the release: workspace version → 0.1.0, first CHANGELOG.md
-      entry, commit, `git tag v0.1.0`, push tag.
+- [x] 2.1 Build matrix covers darwin arm64/x86_64 + linux x86_64/arm64.
+- [x] 2.2 npm wrapper for `ctx`: DEFERRED (owner ruling 2026-08-13) — filed
+      as task 0190.
+- [ ] 2.3 Hand-cut the release: workspace at 0.1.0 (done), CHANGELOG.md drafted
+      (done) — remaining: OWNER runs `git tag v0.1.0 && git push origin v0.1.0`.
 - [ ] 2.4 Actions run green end-to-end: archives, formula in tap, npm ×4, no
       skip-warnings.
 - [ ] 2.5 Verify from a clean machine: README curl one-liner;

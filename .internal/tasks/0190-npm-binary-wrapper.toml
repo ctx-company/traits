@@ -1,0 +1,53 @@
+schema-version = "0.2"
+key = "0190"
+title = "npm channel for the ctx binary: @ctx-traits/cli postinstall wrapper"
+status = "ready"
+raised = "2026-08-13"
+content = """
+
+Deferred from the 0.1.0 release (owner ruling 2026-08-13): `ctx` ships
+via curl (GitHub release archives) and Homebrew (ctx-company/tap), but
+not npm. A `npm i -g @ctx-traits/cli` channel wants a small wrapper
+package: `bin: ctx`, a postinstall that downloads the platform archive
+from the GitHub release using the binstall naming contract already
+fixed in modules/cli/Cargo.toml ([package.metadata.binstall] —
+ctx-v{version}-{target}.tar.gz), verifies its sha256 against the
+release's published checksums, and unpacks the binary.
+
+"""
+scope = """
+## Decisions
+
+- Wrapper version tracks the workspace version exactly; release.yml's
+  npm job publishes it LAST (after the four authoring packages), only
+  when the binary archives for that tag are already uploaded — the
+  wrapper is useless before its download targets exist.
+- Platform coverage mirrors the build matrix (darwin arm64/x86_64,
+  linux arm64/x86_64); unsupported platforms fail the install with a
+  message pointing at the curl and brew channels.
+- Prefer per-platform optionalDependencies over a bare postinstall
+  fetch IF the release flow can also publish four tiny platform
+  packages; otherwise postinstall-fetch with checksum verification is
+  acceptable for v1 of the channel. Decide during implementation and
+  record why.
+
+## Watch
+
+- npm lifecycle scripts are disabled in some CI setups
+  (--ignore-scripts): the wrapper's bin shim should detect the missing
+  binary at first run and print the fetch instruction instead of
+  failing opaquely.
+- The wrapper must never shadow a brew/curl-installed ctx confusingly:
+  same binary, same --version output.
+
+"""
+validation = """
+## Done when
+
+On a machine with only Node: `npm i -g @ctx-traits/cli` yields a
+working `ctx --version` matching the release tag, on darwin arm64 and
+linux x86_64 at minimum; checksum mismatch aborts the install;
+unsupported platform prints the curl/brew pointer; release.yml
+publishes the wrapper after archives and authoring packages; a
+retagged release stays idempotent.
+"""
