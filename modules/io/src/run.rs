@@ -3263,11 +3263,14 @@ fn repo_authored_precheck(
     }
     // A local package directory exists but has no manifest at the expected
     // path: this id is malformed/unreadable, not absent, so it must not be
-    // treated as a fallback opportunity.
+    // treated as a fallback opportunity. The most common way here is a
+    // package whose canonical was never built (or whose format is
+    // mid-migration) — and `build` resolves sources, not canonicals, so it
+    // is the way OUT, never circular.
     Err(invalid_request_error(
         "trait-id",
         format!(
-            "trait ID {id:?} has a local package at {local_package_root} but no manifest at {path}; fix or remove it before retrying"
+            "trait ID {id:?} has a local package at {local_package_root} but no manifest at {path}; if the package has authoring sources, `ctx traits build {id}` regenerates it (a family package also needs its [family] table in trait.toml); otherwise fix or remove the package before retrying"
         ),
     ))
 }

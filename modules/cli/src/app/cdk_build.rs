@@ -146,6 +146,72 @@ pub(crate) fn family_variant_aliases(family_id: &str, name: &str) -> Vec<String>
     vec![format!("{family_id}-{name}")]
 }
 
+/// After a successful publish, make `generated/` contain EXACTLY the new
+/// topology's artifacts — `generated/` is machine-owned (0179: location
+/// states authority), so anything stale in it is the previous format's
+/// leftover, not authored content. A family publish
+/// (`keep_variants = Some(names)`) prunes variant directories the source no
+/// longer declares plus any single-era top-level `index.*` canonical; a
+/// single-trait publish (`keep_variants = None`) prunes every variant
+/// directory. Without this, a package migrating between the family and
+/// single-trait shapes (either direction) leaves an orphaned canonical
+/// beside the real one, and resolution/locks trip over whichever they find
+/// first. Runs only after every new artifact is written — a failed build
+/// never prunes.
+pub(crate) fn reconcile_generated_layout(
+    generated: &Utf8Path,
+    keep_variants: Option<&[String]>,
+) -> crate::Result<()> {
+    let entries = match std::fs::read_dir(generated.as_std_path()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(crate::Error::from(ctx_traits_io::Error::from(
+                ctx_traits_io::environment::Error::Filesystem {
+                    path: generated.to_string(),
+                    source,
+                },
+            )));
+        }
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let path = entry.path();
+        let remove: bool = if path.is_dir() {
+            match keep_variants {
+                Some(names) => !names.iter().any(|kept| kept == name),
+                None => true,
+            }
+        } else {
+            // Single-era canonical artifacts at the generated/ top level are
+            // stale exactly when the package now publishes variants.
+            keep_variants.is_some()
+                && matches!(
+                    name,
+                    "index.toml" | "index.json" | "index.yaml" | "index.map"
+                )
+        };
+        if !remove {
+            continue;
+        }
+        let outcome = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(source) = outcome {
+            return Err(crate::Error::from(ctx_traits_io::Error::from(
+                ctx_traits_io::environment::Error::Filesystem {
+                    path: generated.join(name).to_string(),
+                    source,
+                },
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Either shape a CDK build source can emit: an ordinary single-trait draft,
 /// or a native family's resolved variants.
 pub(crate) enum CdkSynthResult {
@@ -410,6 +476,11 @@ pub(crate) fn publish_cdk_family(
             aliases,
         });
     }
+    let variant_names = variants
+        .iter()
+        .map(|variant| variant.name.clone())
+        .collect::<Vec<_>>();
+    reconcile_generated_layout(&generated, Some(&variant_names))?;
     let manifest_path = ctx_traits_io::layout::package_manifest_path(&package_root);
     let manifest_entries = variants
         .iter()

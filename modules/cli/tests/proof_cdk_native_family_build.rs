@@ -573,3 +573,117 @@ fn build_generates_and_owns_package_json() {
     fs::write(&package_json_path, &generated_text).unwrap();
     assert_family_check(&proj, &home, true, "restored package.json");
 }
+
+/// The bootstrap-and-transition contract: `ctx traits build <id>` resolves
+/// the package's authoring SOURCE, never its generated canonical — so it
+/// works with `generated/` missing entirely (requiring the canonical there
+/// is circular: the first build is what produces it), and a rebuild across
+/// a format change — single-trait to family or back — leaves `generated/`
+/// and the `[family]` table exactly matching the new shape, with the
+/// previous format's artifacts pruned rather than orphaned beside the real
+/// ones.
+#[test]
+fn by_id_build_bootstraps_and_reconciles_format_transitions() {
+    let scratch = ScratchRoot::new("cdk-build-bootstrap-transitions");
+    let home = scratch.home();
+    let proj = home.join("repo");
+    fs::create_dir_all(&proj).unwrap();
+    git_init(&proj);
+    symlink_node_modules(&proj);
+
+    let trait_id = "shape-shifter";
+    assert!(
+        run_ctx(&["traits", "init", trait_id], &proj, &home)
+            .status
+            .success()
+    );
+    let package_root = proj.join(format!(".ctx/traits/authored/{trait_id}"));
+    let source_path = package_root.join("source/index.ts");
+    let single_source = fs::read_to_string(&source_path).unwrap();
+    let generated = package_root.join("generated");
+
+    // Bootstrap: wipe generated/ wholesale, then build BY ID.
+    if generated.exists() {
+        fs::remove_dir_all(&generated).unwrap();
+    }
+    let bootstrap = run_ctx(&["traits", "build", trait_id], &proj, &home);
+    let (stdout, stderr) = utf8(&bootstrap);
+    assert!(
+        bootstrap.status.success(),
+        "by-id build must bootstrap a package with no generated canonical\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        generated.join("index.toml").is_file() && generated.join("index.map").is_file(),
+        "bootstrap build must write the single-trait canonical + map"
+    );
+    let manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(package_root.join("trait.toml")).unwrap()).unwrap();
+    assert!(
+        manifest.get("family").is_none(),
+        "a single-trait publish must not leave a [family] table"
+    );
+
+    // Single -> family: same by-id invocation across the format change.
+    fs::write(
+        &source_path,
+        family_fixture_source().replace("family-fixture", trait_id),
+    )
+    .unwrap();
+    let to_family = run_ctx(&["traits", "build", trait_id], &proj, &home);
+    let (stdout, stderr) = utf8(&to_family);
+    assert!(
+        to_family.status.success(),
+        "by-id build must rebuild across single->family\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    for variant_name in ["default", "quick"] {
+        assert!(
+            generated.join(variant_name).join("index.toml").is_file(),
+            "family publish must write generated/{variant_name}/index.toml"
+        );
+    }
+    assert!(
+        !generated.join("index.toml").exists() && !generated.join("index.map").exists(),
+        "the single-era top-level canonical must be pruned on a family publish"
+    );
+    let manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(package_root.join("trait.toml")).unwrap()).unwrap();
+    assert_eq!(
+        manifest
+            .get("family")
+            .and_then(|family| family.get("default"))
+            .and_then(toml::Value::as_str),
+        Some("default"),
+        "family publish must write the [family] table"
+    );
+
+    // Family -> single: variant dirs pruned, [family] removed, canonical back.
+    fs::write(&source_path, &single_source).unwrap();
+    let to_single = run_ctx(&["traits", "build", trait_id], &proj, &home);
+    let (stdout, stderr) = utf8(&to_single);
+    assert!(
+        to_single.status.success(),
+        "by-id build must rebuild across family->single\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        generated.join("index.toml").is_file(),
+        "single publish must restore the top-level canonical"
+    );
+    assert!(
+        !generated.join("default").exists() && !generated.join("quick").exists(),
+        "family-era variant directories must be pruned on a single publish"
+    );
+    let manifest_text = fs::read_to_string(package_root.join("trait.toml")).unwrap();
+    let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
+    assert!(
+        manifest.get("family").is_none(),
+        "the [family] table must be removed on a single publish: {manifest_text}"
+    );
+    assert_eq!(
+        manifest
+            .get("package")
+            .and_then(|package| package.get("id"))
+            .and_then(toml::Value::as_str),
+        Some(trait_id),
+        "[package] identity must survive reconciliation: {manifest_text}"
+    );
+}

@@ -190,6 +190,34 @@ fn finish_cdk_package_build(
         .map_err(|e| crate::Error::json("serialize CDK source map", e))?;
     ctx_traits_io::write::write_build_output(&map_path, &map_json)?;
 
+    // A single-trait publish into a package's `generated/` reconciles the
+    // family era away: variant directories are the previous format's
+    // leftovers, and a lingering `[family]` table would keep resolution
+    // pointed at canonicals that no longer get rebuilt. Guarded to the
+    // canonical in-package target (`generated/index.*`) so `--out`
+    // redirects, legacy adjacent-sidecar builds, and built-in template
+    // packages are untouched.
+    if out.is_none()
+        && target_path.parent().is_some_and(|parent| {
+            parent.file_name() == Some(ctx_traits_io::layout::GENERATED)
+                && parent
+                    .parent()
+                    .is_some_and(ctx_traits_io::layout::is_canonical_package_root)
+        })
+    {
+        let package_root = target_path
+            .parent()
+            .and_then(camino::Utf8Path::parent)
+            .expect("guard above proved generated/ has a package root parent");
+        ctx_traits_io::family_manifest::remove_family_table(
+            &ctx_traits_io::layout::package_manifest_path(package_root),
+        )?;
+        crate::app::cdk_build::reconcile_generated_layout(
+            &package_root.join(ctx_traits_io::layout::GENERATED),
+            None,
+        )?;
+    }
+
     Ok(BuildEvidence {
         target_path,
         map_path,
@@ -290,6 +318,19 @@ fn route_cdk_build(path: &str, format: &str, out: Option<&str>) -> crate::Result
     }))
 }
 
+/// The CDK authoring source for a repo-authored `.ctx/traits` package whose
+/// directory is literally named `id` — `None` for anything else (an invalid
+/// id, no repository, no such package, a TOML-only package), so the caller
+/// falls through to the runtime resolver. Resolution failures here are
+/// deliberately swallowed: this is a fast path for the one unambiguous
+/// case, never the authority on what `id` means.
+fn authored_package_source(id: &str) -> Option<camino::Utf8PathBuf> {
+    let repo_root = ctx_traits_io::state::repo_root_for_relative_paths().ok()?;
+    ctx_traits_io::layout::trait_cdk_source_path(&repo_root, id)
+        .ok()
+        .flatten()
+}
+
 /// P566: record the just-built canonical digests in the package's
 /// `trait.lock`.
 ///
@@ -333,6 +374,18 @@ pub(crate) fn handle_build(
 ) -> crate::Result<CommandOutput<()>> {
     let source_path = if matches!(camino::Utf8Path::new(path).extension(), Some("ts" | "mjs")) {
         camino::Utf8PathBuf::from(path)
+    } else if let Some(authored_source) = authored_package_source(path) {
+        // Authored-package-first: `build` is a source-first command, so a
+        // repo-authored package named `path` with a CDK source builds from
+        // that source directly — no generated canonical required (the
+        // bootstrap case: the runtime resolver below demands the very
+        // artifact a first build exists to produce) and no assumption about
+        // the package's CURRENT output format (a family migrating to the
+        // single-trait shape, or back, must still rebuild by id mid-way).
+        // Anything that is not an authored package directory — a variant
+        // alias, a `family:variant` selector, a vendored or built-in id —
+        // falls through to the runtime resolver unchanged.
+        authored_source
     } else {
         let (trait_path, _) = ctx_traits_io::run::resolve_trait_path(None, Some(path), "build")?;
         crate::app::cdk_build::package_cdk_source(&trait_path)?.ok_or_else(|| {

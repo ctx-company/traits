@@ -203,6 +203,29 @@ fn validate_relative_path(
 /// precedent as `[family.leaf]`. A publish consolidates an existing
 /// declaration into `runtime.toml` before calling this, so dropping it here
 /// never orphans an authored budget.
+/// The publish-side inverse of [`write_family_table`], for a package whose
+/// source stopped declaring variants (a family migrating to the single-trait
+/// shape): removes the `[family]` table so resolution goes back to the
+/// single-trait `generated/index.toml` layout. A missing manifest or an
+/// absent table is a no-op, not an error — every single-trait publish calls
+/// this unconditionally.
+pub fn remove_family_table(manifest_path: &Utf8Path) -> crate::Result<()> {
+    let Some(text) = crate::read::read_optional_text(manifest_path)? else {
+        return Ok(());
+    };
+    let mut document = text.parse::<toml_edit::DocumentMut>().map_err(|source| {
+        crate::parse::Error::TomlEditDecode {
+            context: format!("parse {manifest_path} for family-table removal"),
+            source: Box::new(source),
+        }
+    })?;
+    if document.remove("family").is_none() {
+        return Ok(());
+    }
+    crate::write::write_text(manifest_path, &document.to_string())?;
+    Ok(())
+}
+
 pub fn write_family_table(
     manifest_path: &Utf8Path,
     default_name: &str,
