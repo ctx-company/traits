@@ -2,6 +2,11 @@ name: CI
 
 "on":
   push:
+    # Branches only: a tag push runs the Release workflow, whose build
+    # matrix is the real release gate — a bare `push:` also fired CI for
+    # every tag, doubling the work for no extra signal.
+    branches:
+      - "**"
   pull_request:
 
 jobs:
