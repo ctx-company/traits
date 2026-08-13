@@ -1,90 +1,149 @@
 schema-version = "0.2"
 key = "0191"
-title = "nested trait collections: owner/repo/trait addressing over git and npm"
+title = "git-first trait sharing: skills.sh-grade DX for nested collections"
 status = "ready"
 raised = "2026-08-13"
 content = """
 
-Owner direction 2026-08-13, from the 0.1.1 release work: per-trait npm
-names (@ctx-traits/refactor) collide with the authoring libraries in
-the same scope and read like utility packages. The model wanted is
-what skills.sh ships (vercel-labs/skills/find-skills): ONE repo or
-package carries many traits, and a consumer addresses a nested entry —
-`ctx traits dependency add ctx-company/traits/refactor`.
+Owner rulings 2026-08-13 (0.1.1 release work):
 
-The foundation already exists and is deliberately parked: the source
-model carries `package_path` on BOTH transports (Source::Git { url,
-requested_ref, package_path } and Source::Npm { package,
-package_path }), and `dependency add` explicitly recognizes `git+...`
-specs and rejects them as "not yet supported on this surface". This
-task wires the UX to the model.
+- Traits share GIT-FIRST. Pushing a repo IS publishing — no npm names
+  to defend, no OTP/2FA ceremony, no registry account for trait
+  authors. The four authoring libraries (config/cdk/toolkit/agents)
+  stay ordinary npm packages; npm remains a SECONDARY, optional trait
+  transport (nested catalog), never the primary.
+- The DX bar is skills.sh: `npx skills add
+  https://github.com/vercel-labs/skills --skill find-skills` — one
+  command, a URL, a name; and per-trait npm names like
+  @ctx-traits/refactor are rejected (they collide with the libraries
+  in-scope and read as utility packages).
+
+The foundation exists and is deliberately parked: the source model
+carries `package_path` on BOTH transports (Source::Git { url,
+requested_ref, package_path }, Source::Npm { package, package_path }),
+and `dependency add` recognizes `git+...` specs and refuses them as
+"not yet supported on this surface". This task wires the UX to the
+model.
 
 """
 scope = """
-## Decisions
+## Spec grammar (dependency add)
 
-- `dependency add` accepts three new spec shapes:
-  1. skills.sh shorthand `owner/repo/trait` — expands to the git
-     transport with host defaulting to github.com, url
-     https://github.com/owner/repo, and the trait resolved by the
-     collection-layout convention below;
-  2. explicit git specs `git+https://...#ref=<tag-or-rev>&path=<sub>`
-     (the shape add already recognizes-and-refuses);
-  3. nested npm `@scope/name/<sub>` — one catalog package shipping many
-     trait packages, Source::Npm with package_path.
-- Collection layout convention, tried in order for `<trait>`:
-  `<trait>` verbatim, `traits/<trait>`, `.ctx/traits/authored/<trait>`
-  — the third makes THIS repository a consumable collection with zero
-  restructuring. A directory qualifies iff it ships trait.toml (the
-  P0170 classifier), never by name alone.
-- Pinning and evidence mirror the existing transports: git locks the
-  commit sha plus the subtree's per-trait digest evidence (the P535
-  path: precedent — a source rebuild never propagates on ordinary
-  reconciliation; only `dependency update` accepts new bytes); npm
-  keeps SRI over the catalog tarball plus the subtree digests. Trust
-  stays per-trait canonical digests, unchanged.
-- `dependency outdated`/`update` for git sources compare the locked
-  rev against the remote ref (tag or branch tip); shorthand adds
-  default to the repo's default branch tip unless #ref= pins.
-- Alias defaults to the nested trait's final component (refactor), as
-  path: already does.
+All of these resolve to the same Source::Git shape:
+
+    ctx traits dependency add ctx-company/traits/refactor
+    ctx traits dependency add ctx-company/traits --trait refactor
+    ctx traits dependency add https://github.com/ctx-company/traits --trait refactor
+    ctx traits dependency add git@github.com:ctx-company/traits.git --trait refactor
+    ctx traits dependency add git+https://host/x/y#ref=v0.2.0&path=.ctx/traits/authored/refactor
+
+- Shorthand `owner/repo/trait` defaults the host to github.com. The
+  skills.sh flag form (`<repo-url> --trait <id>`, repeatable for
+  several traits from one collection) is equivalent; positional nested
+  and --trait together is a usage error.
+- Ref pinning: `@<ref>` suffix on the shorthand
+  (`ctx-company/traits/refactor@v0.2.0`) or `#ref=` on explicit specs.
+  Unpinned adds resolve the remote default branch tip and LOCK the
+  commit sha they saw.
+- Nested npm (secondary): `@scope/catalog/trait` positional ->
+  Source::Npm with package_path. Distinguished from a 3-segment git
+  shorthand by the leading `@`.
+- `--alias` keeps its meaning; default alias = the trait's final path
+  component.
+
+## Discovery is part of add (the DX centerpiece)
+
+`dependency add ctx-company/traits` with NO trait selection does not
+error: it fetches the collection, lists every contained trait (id,
+version, summary from trait.toml), and prints the exact add command
+per entry. `--all` vendors every listed trait. The wrong-trait-name
+error does the same listing instead of a bare not-found.
+
+## Collection layout + classification
+
+For `<trait>` inside a fetched tree, try in order: `<trait>` verbatim,
+`traits/<trait>`, `.ctx/traits/authored/<trait>`. A directory
+qualifies iff it ships trait.toml (the P0170 classifier), never by
+name alone — the third rule makes this repository a consumable
+collection with zero restructuring. No collection manifest in v1
+(scan-based discovery); a curated index file is a recorded later
+option, not built now.
+
+## Fetch path (the zero-toolchain guarantee extends to git)
+
+- Ref resolution: git smart-HTTP `info/refs?service=git-upload-pack` —
+  pure HTTPS, host-agnostic, no API tokens, no rate-limit cliff;
+  resolves HEAD, branches, and tags to shas.
+- Content: GitHub via codeload tarballs
+  (`codeload.github.com/<owner>/<repo>/tar.gz/<sha>`) — pure-Rust
+  HTTPS fetch + extract, mirroring the npm path (P438): no git binary,
+  no node, on the consume path.
+- Non-GitHub hosts and private repos: confined `git` CLI fallback
+  (shallow fetch of the locked sha) inheriting the user's own
+  credentials; recorded as the fallback tier, not the default.
+
+## Lock, trust, reproduction (unchanged doctrine, new evidence kind)
+
+- config.lock records: url, requested ref, RESOLVED commit sha, the
+  vendored subtree digest, and per-trait canonical digests — the P535
+  path: precedent applies verbatim: ordinary install reproduces the
+  locked snapshot bit-for-bit; upstream edits propagate only through
+  an explicit `dependency update <alias>`.
+- `dependency outdated` compares the locked sha against the remote
+  ref via info/refs; `update` re-resolves, re-vendors, re-locks.
+- Trust stays per-trait canonical digests; the trust prompt shows
+  which nested trait the digest belongs to. One collection never
+  grants blanket trust: each vendored trait is approved individually.
+
+## Publishing story (git-first means: there is none)
+
+A shareable trait = a pushed repo whose package passes `ctx traits
+check` (canonicals fresh, lock committed). Document "your repo is your
+registry" as the primary flow; `dependency init`/`publish` (npm)
+remain supported for standalone traits and the catalog, with the
+existing OTP-interactive behavior.
+
+## Phasing
+
+- (a) spec grammar + github codeload fetch + vendor/lock/trust — the
+  core loop;
+- (b) outdated/update over info/refs;
+- (c) bare-collection listing + --all + listing-on-error;
+- (d) nested npm catalog;
+- (e) git-CLI fallback for non-GitHub/private.
+(a)-(c) are the v1 dispatch target; (d)/(e) may follow separately.
 
 ## Watch
 
-- Fetching: git sources need a fetch path (shallow clone or tarball
-  codeload) that preserves the no-node guarantee on consume; prefer
-  codeload tarballs (pure HTTPS, like the npm path) over shelling to
-  git where possible, but a git fallback for private repos is
-  acceptable if confined.
-- The four authoring libraries stay ordinary npm packages — this
-  feature is for TRAIT distribution; do not blur the two kinds.
-- Per-trait npm publishing (dependency init/publish) remains supported
-  for standalone traits; the catalog is additive, not a replacement.
-- Publisher claims: the catalog's ctx.digests claim must cover nested
-  trait subtrees individually so one trait's verification does not
-  require trusting the whole catalog blindly.
-
-## Release-checklist interplay
-
-Phase 3-5 of .internal/docs/release-checklist.md pivot onto this:
-publishing "the first trait" becomes either (a) interim: per-trait npm
-under the trait- prefix convention, or (b) after this task: the main
-repo IS the collection and a virgin repo consumes
-ctx-company/traits/refactor directly, with the update-pull loop
-exercised over a git rev bump. The owner chooses the ordering.
+- The authoring libraries stay npm — never blur the two kinds; a
+  collection entry that is a JS library (package.json, no trait.toml)
+  is skipped by classification, silently in listings and loudly on
+  explicit selection.
+- Codeload tarballs by sha are content-stable; by BRANCH they are not
+  — always download by resolved sha, never by ref name.
+- Windows-safe extraction and path traversal guards on the tarball
+  walk (same hardening class as the npm extract path).
+- Release-checklist interplay: Phases 3-5 run the git-first story once
+  (a)-(c) land — virgin repo adds ctx-company/traits/refactor, owner
+  bumps the trait upstream, virgin repo updates and re-trusts only
+  what changed. Per-trait npm publishing is no longer on the critical
+  path.
 
 """
 validation = """
 ## Done when
 
-Scratch-fixture proofs: a collection repo with two trait packages
-under .ctx/traits/authored/ — `dependency add owner/repo/one` (served
-from a local fixture remote) vendors exactly trait `one` with locked
-rev + subtree digests and refuses an entry without trait.toml; nested
-npm `@scope/catalog/two` vendors trait `two` through the existing SRI
-path; `dependency update` moves the lock only when the remote ref
-moved; ordinary install reproduces the locked snapshot bit-for-bit
-after upstream edits; `git+...#ref=...&path=...` round-trips through
-config.toml/config.lock; trust prompts show per-trait digests; `just
-test` and `just test-full` green.
+Scratch-fixture proofs (a local fixture remote serving a collection
+with two trait packages plus one non-trait JS package):
+`dependency add <fixture>/one` vendors exactly trait one with locked
+sha + subtree + per-trait digests; the bare-collection form lists both
+traits (and not the JS package) with copyable add commands; `--trait`
+flag form and `@<ref>` pinning resolve identically to the shorthand;
+a wrong trait name lists what exists; ordinary install after upstream
+edits reproduces the locked snapshot bit-for-bit; `update` moves the
+lock only when the remote ref moved, and trust re-prompts only for
+changed canonical digests; `git+...#ref=...&path=...` round-trips
+through config.toml/config.lock; GitHub-shaped specs never invoke git
+or node (proven by PATH-stripped execution); `just test` and `just
+test-full` green.
 """
