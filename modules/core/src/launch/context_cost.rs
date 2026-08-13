@@ -254,6 +254,12 @@ fn sequence_item_cost_text(item: &crate::r#trait::procedure::SequenceItem) -> St
             "typed runtime parallel branches {}",
             item.branches.iter().cloned().collect::<Vec<_>>().join(" ")
         ),
+        crate::r#trait::procedure::SequenceKind::Terminal => format!(
+            "runtime authored terminal outcome={}",
+            item.outcome
+                .map(|outcome| format!("{outcome:?}"))
+                .unwrap_or_else(|| "<missing>".to_string())
+        ),
     }
 }
 

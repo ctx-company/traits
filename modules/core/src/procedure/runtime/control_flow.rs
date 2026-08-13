@@ -5,7 +5,10 @@ fn refresh_runtime_status(trait_ref: &Trait, state: &mut State) -> crate::Result
     let proc = procedure(trait_ref)?;
     let sequence = effective_sequence_items(proc)?;
     state.output_ports = finalize_outputs(trait_ref, state)?;
-    if state.final_state == FinalState::Rejected || state.final_state == FinalState::Failed {
+    if matches!(
+        state.final_state,
+        FinalState::Rejected | FinalState::Failed | FinalState::Completed
+    ) {
         sort_state(state);
         return Ok(());
     }
@@ -55,7 +58,10 @@ fn refresh_runtime_status(trait_ref: &Trait, state: &mut State) -> crate::Result
             }
             if matches!(
                 state.final_state,
-                FinalState::Blocked | FinalState::Failed | FinalState::Rejected
+                FinalState::Blocked
+                    | FinalState::Failed
+                    | FinalState::Rejected
+                    | FinalState::Completed
             ) {
                 // A control item may have committed a project write before a
                 // guard makes this run terminal. Keep the externally returned
@@ -93,6 +99,17 @@ fn refresh_runtime_status(trait_ref: &Trait, state: &mut State) -> crate::Result
     }
 
     if state.current_run_index >= sequence.len() && state.control_stack.is_empty() {
+        if crate::r#trait::procedure::trait_has_success_terminal(trait_ref) {
+            stop_with_reason(
+                state,
+                FinalState::Failed,
+                STOP_NO_EXIT_REACHED,
+                state.active_path.clone(),
+                None,
+            );
+            sort_state(state);
+            return Ok(());
+        }
         let missing_required_outputs = state
             .output_ports
             .iter()
@@ -313,7 +330,10 @@ fn control_item_progress_cost(
     if is_executable_item(item) {
         return 0;
     }
-    if item.effective_kind() == SequenceKind::Project {
+    if matches!(
+        item.effective_kind(),
+        SequenceKind::Project | SequenceKind::Terminal
+    ) {
         return 1;
     }
     let body_cost = local_sequence_id(item.sequence.as_deref()).map_or(0, |sequence_id| {
@@ -378,7 +398,8 @@ fn control_item_progress_cost(
         | SequenceKind::Ask
         | SequenceKind::Command
         | SequenceKind::Check
-        | SequenceKind::Project => 0,
+        | SequenceKind::Project
+        | SequenceKind::Terminal => 0,
     }
 }
 
@@ -426,6 +447,16 @@ fn progress_control_cursor(
             )?;
             return Ok(true);
         }
+        if item.item.effective_kind() == SequenceKind::Terminal {
+            execute_terminal_item(
+                trait_ref,
+                state,
+                item.item,
+                item.run_index,
+                item.declaration_index,
+            )?;
+            return Ok(true);
+        }
         if is_executable_item(item.item) {
             return Ok(false);
         }
@@ -461,6 +492,16 @@ fn progress_control_cursor(
     };
     if item.effective_kind() == SequenceKind::Project {
         execute_project_item(
+            trait_ref,
+            state,
+            item,
+            frame.parent_run_index,
+            frame.next_index,
+        )?;
+        return Ok(true);
+    }
+    if item.effective_kind() == SequenceKind::Terminal {
+        execute_terminal_item(
             trait_ref,
             state,
             item,
@@ -643,7 +684,8 @@ fn enter_control_frame(
         | SequenceKind::Ask
         | SequenceKind::Command
         | SequenceKind::Check
-        | SequenceKind::Project => return Ok(()),
+        | SequenceKind::Project
+        | SequenceKind::Terminal => return Ok(()),
     };
 
     if control_kind == ControlKind::ForEach {
@@ -1024,29 +1066,23 @@ mod setting_loop_bound_tests {
 /// Execute one closed projection leaf. Every source and prior destination is
 /// cloned before any write is recorded, and every candidate is schema-checked
 /// before the first commit, so callers observe all writes or none.
-fn execute_project_item(
+/// Evaluate an ordered list of `Projection` writes through the deterministic
+/// project path and record each accepted value, returning the projected
+/// values in authored order. Shared by `kind = "project"` and `kind =
+/// "terminal"` items — both are atomic, agent-free slot/port writes.
+fn write_projections(
     trait_ref: &Trait,
     state: &mut State,
     item: &crate::r#trait::procedure::SequenceItem,
-    parent_run_index: usize,
+    projections: &[Projection],
     sequence_index: usize,
-) -> crate::Result<()> {
-    let position_path = if state.control_stack.is_empty() {
-        vec![PathSegment {
-            kind: "procedure".to_string(),
-            id: item.id.clone(),
-            index: parent_run_index,
-            iteration: None,
-            item_index: None,
-        }]
-    } else {
-        path_for_nested_item(state, sequence_index, item)
-    };
+    position_path: &[PathSegment],
+) -> crate::Result<Vec<Value>> {
     let loop_context = loop_context_from_stack(&state.control_stack);
     let for_each_context = for_each_context_from_stack(&state.control_stack);
-    let mut candidates = Vec::with_capacity(item.projection.len());
+    let mut candidates = Vec::with_capacity(projections.len());
     let first_acceptance_order = next_acceptance_order(state);
-    for (index, projection) in item.projection.iter().enumerate() {
+    for (index, projection) in projections.iter().enumerate() {
         let (submitted, provenance, source_attribution) = match &projection.source {
             ProjectionSource::Slot(source_ref) => {
                 let source = accepted_value(state, source_ref).cloned().ok_or_else(|| {
@@ -1160,7 +1196,7 @@ fn execute_project_item(
             },
             SlotRevisionContext {
                 acceptance_order: first_acceptance_order.saturating_add(index),
-                position_path: &position_path,
+                position_path,
                 loop_context: loop_context.as_ref(),
                 for_each_context: for_each_context.as_ref(),
             },
@@ -1173,8 +1209,45 @@ fn execute_project_item(
         .map(|(value, _)| value.clone())
         .collect();
     for (value, revision) in candidates {
-        record_accepted_slot_value(state, value, revision);
+        // A projection destination may be a local slot:* ref (ordinary
+        // `project` items) or a terminal:* payload's port:* ref (§ terminal
+        // success/error exits bind declared output ports directly) — route
+        // each write to the store `finalize_outputs` actually reads it back
+        // from, matching the same ref-kind dispatch used for step outputs.
+        match Reference::parse(&value.ref_text).map(|parsed| parsed.kind()) {
+            Ok(Kind::Port) => record_accepted_output_port_value(state, value),
+            _ => record_accepted_slot_value(state, value, revision),
+        }
     }
+    Ok(projected_values)
+}
+
+fn execute_project_item(
+    trait_ref: &Trait,
+    state: &mut State,
+    item: &crate::r#trait::procedure::SequenceItem,
+    parent_run_index: usize,
+    sequence_index: usize,
+) -> crate::Result<()> {
+    let position_path = if state.control_stack.is_empty() {
+        vec![PathSegment {
+            kind: "procedure".to_string(),
+            id: item.id.clone(),
+            index: parent_run_index,
+            iteration: None,
+            item_index: None,
+        }]
+    } else {
+        path_for_nested_item(state, sequence_index, item)
+    };
+    let projected_values = write_projections(
+        trait_ref,
+        state,
+        item,
+        &item.projection,
+        sequence_index,
+        &position_path,
+    )?;
     if state.control_stack.is_empty() {
         set_sequence_status(
             state,
@@ -1199,6 +1272,82 @@ fn execute_project_item(
     state.active_path = position_path;
     advance_after_current_leaf(state);
     evaluate_control_guards_after_step(trait_ref, state, &projected_values)
+}
+
+/// Execute a `kind = "terminal"` item: write its payload projections through
+/// the same deterministic path as `project`, then end the run immediately —
+/// `error` outcome fails the run (the reserved error port carries the typed
+/// record), `success` outcome completes the run with declared output ports
+/// already bound by the payload writes. Never creates an agent or command
+/// frame, and — unlike `project` — never advances to a later item, inside or
+/// outside a loop.
+fn execute_terminal_item(
+    trait_ref: &Trait,
+    state: &mut State,
+    item: &crate::r#trait::procedure::SequenceItem,
+    parent_run_index: usize,
+    sequence_index: usize,
+) -> crate::Result<()> {
+    let position_path = if state.control_stack.is_empty() {
+        vec![PathSegment {
+            kind: "procedure".to_string(),
+            id: item.id.clone(),
+            index: parent_run_index,
+            iteration: None,
+            item_index: None,
+        }]
+    } else {
+        path_for_nested_item(state, sequence_index, item)
+    };
+    // The validator constrains every terminal payload destination to a bare
+    // trait output-port id (the reserved error port, or a declared success
+    // port) — never a qualified ref — so build the qualified `port:{id}` ref
+    // the runtime write path (`Reference::parse`) requires here rather than
+    // widening what the validator accepts.
+    let payload: Vec<Projection> = item
+        .payload
+        .iter()
+        .cloned()
+        .map(|mut projection| {
+            projection.destination = format!("port:{}", projection.destination);
+            projection
+        })
+        .collect();
+    write_projections(
+        trait_ref,
+        state,
+        item,
+        &payload,
+        sequence_index,
+        &position_path,
+    )?;
+    let outcome = item.outcome.unwrap_or(TerminalOutcome::Error);
+    match outcome {
+        TerminalOutcome::Error => {
+            stop_with_reason(
+                state,
+                FinalState::Failed,
+                STOP_AUTHORED_ERROR,
+                position_path,
+                None,
+            );
+            if let Some(stop_reason) = state.stop_reason.as_mut() {
+                stop_reason.message = item.message.clone();
+            }
+        }
+        TerminalOutcome::Success => {
+            state.control_stack.clear();
+            state.active_path.clear();
+            state.final_state = FinalState::Completed;
+            state.stop_reason = Some(StopReason {
+                reason: STOP_AUTHORED_SUCCESS.to_string(),
+                at: position_path,
+                last_check: None,
+                message: item.message.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Enter a `parallel` control item: push one coordinator frame whose
@@ -2173,6 +2322,7 @@ fn stop_with_reason(
         reason: reason.to_string(),
         at,
         last_check,
+        message: None,
     });
     state.active_path.clear();
 }

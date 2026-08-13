@@ -71,6 +71,7 @@ pub enum PlannedSequenceKind {
     Loop,
     ForEach,
     Parallel,
+    Terminal,
 }
 
 /// A single planned branch of a `parallel` item. Branch identity (authored

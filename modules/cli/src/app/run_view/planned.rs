@@ -172,6 +172,7 @@ fn planned_control_kind(
         | ctx_traits_core::procedure::run::PlannedSequenceKind::Command
         | ctx_traits_core::procedure::run::PlannedSequenceKind::Check
         | ctx_traits_core::procedure::run::PlannedSequenceKind::Project => "",
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Terminal => "terminal",
     }
 }
 
@@ -683,6 +684,7 @@ fn step_tags(
         ctx_traits_core::procedure::run::PlannedSequenceKind::Loop => "loop",
         ctx_traits_core::procedure::run::PlannedSequenceKind::ForEach => "for-each",
         ctx_traits_core::procedure::run::PlannedSequenceKind::Parallel => "parallel",
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Terminal => "terminal",
     };
     let mut tags = vec![kind.to_string()];
     if item.kind == ctx_traits_core::procedure::run::PlannedSequenceKind::Branch
@@ -742,7 +744,12 @@ fn step_status_text(
                 // A structured stop names the real state; "blocked" alone
                 // reads like a wait, not an ended run.
                 if let Some(stop) = session.stop_reason.as_ref() {
-                    return stop.reason.clone();
+                    return stop
+                        .message
+                        .as_deref()
+                        .filter(|message| !message.trim().is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| stop.reason.clone());
                 }
                 // In the in-process drive, a command frame at the cursor is
                 // executing right now — the derived Blocked* status names

@@ -19,6 +19,7 @@ pub fn validate(t: &Trait) -> crate::Result<()> {
     let signal_ids: BTreeSet<&str> = t.signals.iter().map(|signal| signal.id.as_str()).collect();
     let agent_ids: BTreeSet<&str> = t.agents.iter().map(|agent| agent.id.as_str()).collect();
     let resource_ids: BTreeSet<&str> = t.resources.iter().map(|r| r.id.as_str()).collect();
+    let has_success_terminal = trait_has_success_terminal(t);
     let sequence_sets = SequenceValidationSets {
         input_port_ids: &input_port_ids,
         output_port_ids: &output_port_ids,
@@ -175,6 +176,11 @@ pub fn validate(t: &Trait) -> crate::Result<()> {
                 .into());
             }
             validate_slot_backed_port_schema(t, &port_id, value_parsed.as_ref())?;
+            // Slot-backed ports are produced by ordinary sequence steps, not
+            // bound at a terminal exit (a slot-backed port cannot also be
+            // bound at an exit per the double-binding refusal above), so
+            // this whole-trait producedness check still applies even when
+            // the trait declares a success terminal.
             if !port.optional && !produced_refs.contains(&value_parsed.to_string()) {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("procedure.output[{j}]"),
@@ -187,7 +193,10 @@ pub fn validate(t: &Trait) -> crate::Result<()> {
             }
         } else {
             let direct_ref = format!("port:{port_id}");
-            if !port.optional && !produced_refs.contains(&direct_ref) {
+            if !has_success_terminal
+                && !port.optional
+                && !produced_refs.contains(&direct_ref)
+            {
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: format!("procedure.output[{j}]"),
                     message: format!(
@@ -215,6 +224,71 @@ struct SequenceValidationSets<'a> {
     signal_ids: &'a BTreeSet<&'a str>,
     agent_ids: &'a BTreeSet<&'a str>,
     resource_ids: &'a BTreeSet<&'a str>,
+}
+
+/// Whether any sequence item (including those reached only through named
+/// sequences, branches, loops, or parallel branches) is a terminal with
+/// `outcome = "success"`.
+pub(crate) fn trait_has_success_terminal(trait_ref: &Trait) -> bool {
+    let Some(ref procedure) = trait_ref.procedure else {
+        return false;
+    };
+    let mut seen = BTreeSet::new();
+    items_have_success_terminal(trait_ref, &procedure.sequence, &mut seen)
+}
+
+fn items_have_success_terminal(
+    trait_ref: &Trait,
+    items: &[SequenceItem],
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    items.iter().any(|item| item_has_success_terminal(trait_ref, item, seen))
+}
+
+fn item_has_success_terminal(
+    trait_ref: &Trait,
+    item: &SequenceItem,
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    if item.effective_kind() == SequenceKind::Terminal
+        && item.outcome == Some(TerminalOutcome::Success)
+    {
+        return true;
+    }
+    if let Some(sequence_id) = local_sequence_id(item.sequence.as_deref())
+        && sequence_contains_success_terminal(trait_ref, &sequence_id, seen)
+    {
+        return true;
+    }
+    if let Some(sequence_id) = local_sequence_id(item.otherwise.as_deref())
+        && sequence_contains_success_terminal(trait_ref, &sequence_id, seen)
+    {
+        return true;
+    }
+    for branch_ref in item.branches.iter() {
+        if let Some(sequence_id) = local_sequence_id(Some(branch_ref))
+            && sequence_contains_success_terminal(trait_ref, &sequence_id, seen)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn sequence_contains_success_terminal(
+    trait_ref: &Trait,
+    sequence_id: &str,
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    if !seen.insert(sequence_id.to_string()) {
+        return false;
+    }
+    let found = trait_ref
+        .sequences
+        .get(sequence_id)
+        .is_some_and(|sequence| items_have_success_terminal(trait_ref, &sequence.sequence, seen));
+    seen.remove(sequence_id);
+    found
 }
 
 fn validate_named_sequences(
@@ -455,6 +529,107 @@ fn validate_sequence_item_declaration(
             validate_for_each_item(trait_ref, item, base, sets.slot_ids, sets.signal_ids)?
         }
         SequenceKind::Parallel => validate_parallel_item(trait_ref, item, base, sets)?,
+        SequenceKind::Terminal => validate_terminal_item(trait_ref, item, base, sets)?,
+    }
+    Ok(())
+}
+
+/// Validate a `kind = "terminal"` item: `flow.error`/`flow.success` authored
+/// exit points. Requires `schema-version` "0.4" or newer, an `outcome`, and
+/// payload writes that either target the reserved error-record port
+/// (`error`) or name declared output ports (`success`).
+fn validate_terminal_item(
+    trait_ref: &Trait,
+    item: &SequenceItem,
+    base: &str,
+    sets: &SequenceValidationSets<'_>,
+) -> crate::Result<()> {
+    if !crate::r#trait::schema_version_at_least(trait_ref.schema_version.as_str(), "0.4") {
+        return Err(crate::manifest::Error::InvalidField {
+            field_path: base.to_string(),
+            message: "kind = \"terminal\" requires a trait declaring schema-version \"0.4\" or newer"
+                .to_string(),
+        }
+        .into());
+    }
+    let outcome = item.outcome.ok_or_else(|| crate::manifest::Error::InvalidField {
+        field_path: format!("{base}.outcome"),
+        message: "terminal sequence item must declare outcome".to_string(),
+    })?;
+
+    let mut destinations = BTreeSet::new();
+    for (index, projection) in item.payload.iter().enumerate() {
+        let projection_path = format!("{base}.payload[{index}]");
+        if !destinations.insert(projection.destination.as_str()) {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: format!("{projection_path}.destination"),
+                message: format!("duplicate terminal payload destination {:?}", projection.destination),
+            }
+            .into());
+        }
+        match outcome {
+            TerminalOutcome::Error => {
+                if projection.destination != crate::r#trait::port::TERMINAL_ERROR_PORT_ID {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("{projection_path}.destination"),
+                        message: format!(
+                            "error terminal payload destination must be the reserved {:?} port",
+                            crate::r#trait::port::TERMINAL_ERROR_PORT_ID
+                        ),
+                    }
+                    .into());
+                }
+            }
+            TerminalOutcome::Success => {
+                if !sets.output_port_ids.contains(projection.destination.as_str()) {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("{projection_path}.destination"),
+                        message: format!(
+                            "success terminal payload destination {:?} must name a declared output port",
+                            projection.destination
+                        ),
+                    }
+                    .into());
+                }
+                let matching_port = trait_ref.ports.iter().find(|port| port.id == projection.destination);
+                if matching_port.is_some_and(|port| port.value.is_some()) {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: format!("{projection_path}.destination"),
+                        message: format!(
+                            "output port {:?} already declares value and cannot also be bound at an exit",
+                            projection.destination
+                        ),
+                    }
+                    .into());
+                }
+            }
+        }
+        if let ProjectionSource::Slot(source_ref) = &projection.source {
+            validate_local_slot_ref(source_ref, &format!("{projection_path}.source"), sets.slot_ids)?;
+        }
+    }
+
+    if outcome == TerminalOutcome::Success {
+        // Value-backed (slot-backed) ports are enforced by the whole-trait
+        // producedness check in `validate` (they cannot also be bound at an
+        // exit, per the double-binding refusal above); only "direct" ports
+        // (no declared `value`) must be bound at each success exit.
+        for port in trait_ref.ports.iter().filter(|p| {
+            matches!(p.direction, crate::r#trait::PortDirection::Output)
+                && !p.optional
+                && p.value.is_none()
+        }) {
+            if !destinations.contains(port.id.as_str()) {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: base.to_string(),
+                    message: format!(
+                        "required output port {:?} is not bound at this success exit",
+                        port.id
+                    ),
+                }
+                .into());
+            }
+        }
     }
     Ok(())
 }
@@ -914,6 +1089,13 @@ fn collect_item_effects(
             && is_local_slot_ref(over) {
                 reads.insert(over.to_string());
             }
+    if item.effective_kind() == SequenceKind::Terminal {
+        for projection in &item.payload {
+            if let Some(source_ref) = projection.source.as_slot_ref() {
+                reads.insert(source_ref.to_string());
+            }
+        }
+    }
     for guard in [
         item.when.as_ref(),
         item.until.as_ref(),
@@ -964,7 +1146,8 @@ fn collect_item_effects(
         | SequenceKind::Ask
         | SequenceKind::Command
         | SequenceKind::Check
-        | SequenceKind::Project => {}
+        | SequenceKind::Project
+        | SequenceKind::Terminal => {}
     }
 }
 
@@ -1316,6 +1499,28 @@ fn validate_item_shape(item: &SequenceItem, kind: SequenceKind, base: &str) -> c
                 return Err(crate::manifest::Error::InvalidField {
                     field_path: base.to_string(),
                     message: "parallel sequence item must declare id, branches, max-branches, optional join/branch-failure/on-failure, and no prompt/command/sequence/branch/loop/for-each/input/output/on-complete/agent/format fields".to_string(),
+                }.into());
+            }
+        }
+        SequenceKind::Terminal => {
+            if has_prompt
+                || has_command
+                || has_projection
+                || has_command_options
+                || has_sequence_control
+                || !item.output.is_empty()
+                || !item.on_complete.is_empty()
+                || item.on_failure.is_some()
+                || item.format.is_some()
+                || item.agent.is_some()
+                || !item.branches.is_empty()
+                || item.max_branches.is_some()
+                || item.join.is_some()
+                || !item.branch_failure.is_empty()
+            {
+                return Err(crate::manifest::Error::InvalidField {
+                    field_path: base.to_string(),
+                    message: "terminal sequence item must declare only outcome/message/payload plus ordinary inputs, and no prompt/command/sequence/branch/loop/for-each/output/on-complete/on-failure/agent/format/parallel fields".to_string(),
                 }.into());
             }
         }
@@ -3506,10 +3711,26 @@ fn validate_produced_before_read_in_items<'a>(
                     )?,
                     None => (produced.clone(), possible.clone()),
                 };
-            *produced = then_outputs
-                .intersection(&otherwise_outputs)
-                .cloned()
-                .collect();
+            // Divergence-aware join: an arm that ends in an authored terminal
+            // (flow.error / flow.success) never reaches the code after the
+            // branch, so its produced set must not shrink the post-branch
+            // intersection. If only one arm diverges, the surviving arm's
+            // set passes through unintersected; if both diverge, the join
+            // point is unreachable and the pre-branch set is kept as a
+            // harmless placeholder.
+            let then_diverges = local_sequence_id(item.sequence.as_deref())
+                .is_some_and(|id| sequence_ends_in_terminal(trait_ref, &id, &mut BTreeSet::new()));
+            let otherwise_diverges = local_sequence_id(item.otherwise.as_deref())
+                .is_some_and(|id| sequence_ends_in_terminal(trait_ref, &id, &mut BTreeSet::new()));
+            *produced = match (then_diverges, otherwise_diverges) {
+                (true, true) => produced.clone(),
+                (true, false) => otherwise_outputs.clone(),
+                (false, true) => then_outputs.clone(),
+                (false, false) => then_outputs
+                    .intersection(&otherwise_outputs)
+                    .cloned()
+                    .collect(),
+            };
             // Either arm's writes are possible downstream, though only one
             // arm runs. Each arm was seeded with the PRE-branch possible
             // set, so a then-arm slot is never possible inside its own
@@ -3526,6 +3747,15 @@ fn validate_produced_before_read_in_items<'a>(
                 let Some(sequence_id) = local_sequence_id(Some(branch_ref)) else {
                     continue;
                 };
+                if sequence_contains_terminal(trait_ref, &sequence_id, &mut BTreeSet::new()) {
+                    return Err(crate::manifest::Error::InvalidField {
+                        field_path: sequence_item_base(trait_ref, item, index),
+                        message: format!(
+                            "parallel branch {sequence_id:?} contains an authored terminal (flow.error/flow.success); terminals are not permitted inside parallel branches"
+                        ),
+                    }
+                    .into());
+                }
                 let (branch_outputs, branch_possible) =
                     validate_produced_before_read_in_sequence(
                         trait_ref,
@@ -3945,6 +4175,87 @@ fn collect_guard_slots_measured_when(
             }
         }
     }
+}
+
+/// Whether every path through `sequence_id` ends in an authored terminal
+/// (flow.error / flow.success): the last item is a terminal, or a branch
+/// whose then AND otherwise arms both end in one. Cycle-guarded so a
+/// self-referential local-sequence id (shouldn't occur, but validation must
+/// not loop) resolves to "does not diverge" rather than hanging.
+fn sequence_ends_in_terminal(
+    trait_ref: &Trait,
+    sequence_id: &str,
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    if !seen.insert(sequence_id.to_string()) {
+        return false;
+    }
+    let result = trait_ref
+        .sequences
+        .get(sequence_id)
+        .and_then(|sequence| sequence.sequence.last())
+        .is_some_and(|item| item_ends_in_terminal(trait_ref, item, seen));
+    seen.remove(sequence_id);
+    result
+}
+
+fn item_ends_in_terminal(
+    trait_ref: &Trait,
+    item: &SequenceItem,
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    match item.effective_kind() {
+        SequenceKind::Terminal => true,
+        SequenceKind::Branch => {
+            let then_diverges = local_sequence_id(item.sequence.as_deref())
+                .is_some_and(|id| sequence_ends_in_terminal(trait_ref, &id, seen));
+            let otherwise_diverges = local_sequence_id(item.otherwise.as_deref())
+                .is_some_and(|id| sequence_ends_in_terminal(trait_ref, &id, seen));
+            then_diverges && otherwise_diverges
+        }
+        _ => false,
+    }
+}
+
+/// Whether `sequence_id`'s tree contains an authored terminal ANYWHERE —
+/// mid-sequence, on a single arm of a nested branch, or nested inside a
+/// branch/parallel item — regardless of whether that terminal is reached on
+/// every path. Terminals are not position-constrained, so a
+/// reachable-but-not-guaranteed terminal is still unsafe inside a parallel
+/// branch: runtime dispatch would end the run mid-panel with undefined
+/// barrier interaction. Cycle-guarded like `sequence_ends_in_terminal`.
+fn sequence_contains_terminal(trait_ref: &Trait, sequence_id: &str, seen: &mut BTreeSet<String>) -> bool {
+    if !seen.insert(sequence_id.to_string()) {
+        return false;
+    }
+    let result = trait_ref
+        .sequences
+        .get(sequence_id)
+        .is_some_and(|sequence| {
+            sequence
+                .sequence
+                .iter()
+                .any(|item| item_contains_terminal(trait_ref, item, seen))
+        });
+    seen.remove(sequence_id);
+    result
+}
+
+fn item_contains_terminal(trait_ref: &Trait, item: &SequenceItem, seen: &mut BTreeSet<String>) -> bool {
+    if item.effective_kind() == SequenceKind::Terminal {
+        return true;
+    }
+    let branch_hit = local_sequence_id(item.sequence.as_deref())
+        .is_some_and(|id| sequence_contains_terminal(trait_ref, &id, seen))
+        || local_sequence_id(item.otherwise.as_deref())
+            .is_some_and(|id| sequence_contains_terminal(trait_ref, &id, seen));
+    if branch_hit {
+        return true;
+    }
+    item.branches.iter().any(|branch_ref| {
+        local_sequence_id(Some(branch_ref))
+            .is_some_and(|id| sequence_contains_terminal(trait_ref, &id, seen))
+    })
 }
 
 fn sequence_explicitly_produces_slot(trait_ref: &Trait, sequence_id: &str, slot: &str) -> bool {

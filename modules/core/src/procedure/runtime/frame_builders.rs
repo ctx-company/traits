@@ -103,7 +103,8 @@ fn collect_preview_frames(
         | SequenceKind::Ask
         | SequenceKind::Command
         | SequenceKind::Check
-        | SequenceKind::Project => "sequence",
+        | SequenceKind::Project
+        | SequenceKind::Terminal => "sequence",
     };
     // A `parallel` item is itself never a dispatch target; traverse its
     // branches in authored

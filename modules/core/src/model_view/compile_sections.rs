@@ -1135,6 +1135,25 @@ fn format_procedure(
                     ));
                 }
             }
+            crate::r#trait::procedure::SequenceKind::Terminal => {
+                let outcome_label = match item.outcome {
+                    Some(crate::r#trait::procedure::TerminalOutcome::Success) => "success",
+                    Some(crate::r#trait::procedure::TerminalOutcome::Error) => "error",
+                    None => "missing",
+                };
+                lines.push(format!("  Runtime authored terminal: outcome={outcome_label}"));
+                if let Some(message) = item.message.as_deref() {
+                    lines.push(format!(
+                        "  Terminal message: {}",
+                        sanitize_model_text(
+                            message,
+                            &format!("procedure.sequence[{i}].message"),
+                            warnings,
+                            normalizations,
+                        )
+                    ));
+                }
+            }
         }
         let input_refs: Vec<String> = item.input.ref_texts().map(str::to_string).collect();
         lines.push(format_sanitized_refs(

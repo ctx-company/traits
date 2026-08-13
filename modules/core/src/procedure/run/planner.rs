@@ -371,6 +371,7 @@ pub fn plan_procedure_run(trait_ref: &Trait, run_id: Id) -> crate::Result<Plan> 
                 SequenceKind::Loop => PlannedSequenceKind::Loop,
                 SequenceKind::ForEach => PlannedSequenceKind::ForEach,
                 SequenceKind::Parallel => PlannedSequenceKind::Parallel,
+                SequenceKind::Terminal => PlannedSequenceKind::Terminal,
             },
             agent_ref: item.agent.as_deref().map(Reference::parse).transpose()?,
             // A top-level site: `seq_idx` IS the declaration index the
@@ -818,6 +819,7 @@ fn plan_nested_children(
                 SequenceKind::Loop => PlannedSequenceKind::Loop,
                 SequenceKind::ForEach => PlannedSequenceKind::ForEach,
                 SequenceKind::Parallel => PlannedSequenceKind::Parallel,
+                SequenceKind::Terminal => PlannedSequenceKind::Terminal,
             },
             agent_ref: item.agent.as_deref().map(Reference::parse).transpose()?,
             // `sequence_id` (this named body's own id) plus `index` (the

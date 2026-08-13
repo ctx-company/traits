@@ -17,8 +17,8 @@ use crate::r#trait::condition::{
 };
 use crate::r#trait::procedure::{
     BranchFailureEntry, BranchFailurePolicy, CommandPlan, ExhaustionDisposition, ExhaustionTarget,
-    FailureTarget, JoinPolicy, MAX_SEQUENCE_NESTING_DEPTH, OutputSink, ProjectionSource,
-    SequenceKind, WriteOperation, command_plan_for_item,
+    FailureTarget, JoinPolicy, MAX_SEQUENCE_NESTING_DEPTH, OutputSink, Projection,
+    ProjectionSource, SequenceKind, TerminalOutcome, WriteOperation, command_plan_for_item,
 };
 use crate::r#trait::prompt::{PromptClassification, classify_prompt, scan_interpolations};
 use crate::r#trait::{PortDirection, Trait};
@@ -46,6 +46,15 @@ const STOP_STOP_IF_MATCHED: &str = "abort-if-matched";
 const STOP_UNRESOLVED_RUNTIME_SEQUENCE: &str = "unresolved-runtime-sequence";
 const STOP_PARALLEL_QUORUM_VERDICT_FAILED: &str = "parallel-quorum-verdict-failed";
 const STOP_PARALLEL_BRANCH_PARKED: &str = "parallel-branch-parked";
+/// An authored `flow.error` terminal was reached — failure-shaped, not an
+/// infrastructure error.
+const STOP_AUTHORED_ERROR: &str = "authored-error";
+/// An authored `flow.success` terminal was reached — the run completed at
+/// this exit point rather than at the end of the sequence.
+const STOP_AUTHORED_SUCCESS: &str = "authored-success";
+/// The trait declares at least one success terminal but the run fell through
+/// to the end of the sequence without reaching one.
+const STOP_NO_EXIT_REACHED: &str = "no-exit-reached";
 const RUNTIME_STOP_REASON_TOKENS: &[&str] = &[
     STOP_CONTROL_ADVANCE_BUDGET_EXHAUSTED,
     STOP_CONTROL_INDEX_OVERFLOW,
@@ -66,6 +75,9 @@ const RUNTIME_STOP_REASON_TOKENS: &[&str] = &[
     STOP_UNRESOLVED_RUNTIME_SEQUENCE,
     STOP_PARALLEL_QUORUM_VERDICT_FAILED,
     STOP_PARALLEL_BRANCH_PARKED,
+    STOP_AUTHORED_ERROR,
+    STOP_AUTHORED_SUCCESS,
+    STOP_NO_EXIT_REACHED,
 ];
 
 fn is_false(value: &bool) -> bool {
@@ -771,6 +783,12 @@ pub struct StopReason {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_check: Option<usize>,
+    /// Authored terminal's rendered headline (`flow.error` / `flow.success`
+    /// `message`), carried verbatim onto the stop reason so reporting
+    /// surfaces can show it without re-walking the sequence. `None` for
+    /// every non-authored stop reason and for a terminal with no message.
+    #[serde(default, rename = "message", skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// Output-port completion state from accepted runtime slot values.

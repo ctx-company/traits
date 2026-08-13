@@ -136,21 +136,32 @@ fn validate_final_state_contract(
         .collect();
     match ledger.final_state {
         FinalState::Completed => {
-            if ledger.current_run_index != sequence_len {
+            // An authored success terminal completes the run at the exit
+            // item's position, not at the end of the declared sequence — the
+            // `current-run-index == sequence length` and "every recorded
+            // status is accepted" checks below assume a run that fell off
+            // the end and don't apply to an early authored exit.
+            let completed_at_authored_exit = ledger
+                .stop_reason
+                .as_ref()
+                .is_some_and(|stop| stop.reason == STOP_AUTHORED_SUCCESS);
+            if !completed_at_authored_exit && ledger.current_run_index != sequence_len {
                 diagnostics.push(format!(
                     "completed ledger current-run-index {} does not equal sequence length {}",
                     ledger.current_run_index, sequence_len
                 ));
             }
-            for status in &ledger.sequence_statuses {
-                let accepted = status.status == SequenceStatusKind::Accepted
-                    || route_authorizes_status(ledger, status)
-                    || ask_authorizes_status(ledger, status);
-                if !accepted {
-                    diagnostics.push(format!(
-                        "completed ledger has non-accepted sequence status at run index {}",
-                        status.run_index
-                    ));
+            if !completed_at_authored_exit {
+                for status in &ledger.sequence_statuses {
+                    let accepted = status.status == SequenceStatusKind::Accepted
+                        || route_authorizes_status(ledger, status)
+                        || ask_authorizes_status(ledger, status);
+                    if !accepted {
+                        diagnostics.push(format!(
+                            "completed ledger has non-accepted sequence status at run index {}",
+                            status.run_index
+                        ));
+                    }
                 }
             }
             if !missing_ports.is_empty() {

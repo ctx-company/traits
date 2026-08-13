@@ -1514,6 +1514,12 @@ fn sequence_bound_receipt(
                 ctx_traits_core::r#trait::procedure::JoinPolicy::label
             )
         ),
+        ctx_traits_core::r#trait::procedure::SequenceKind::Terminal => format!(
+            "provable=terminal-static outcome={}",
+            item.outcome
+                .map(|outcome| format!("{outcome:?}"))
+                .unwrap_or_else(|| "missing".to_string())
+        ),
     }
 }
 
@@ -1531,6 +1537,7 @@ pub(crate) fn sequence_kind_label(
         ctx_traits_core::r#trait::procedure::SequenceKind::Loop => "loop",
         ctx_traits_core::r#trait::procedure::SequenceKind::ForEach => "for-each",
         ctx_traits_core::r#trait::procedure::SequenceKind::Parallel => "parallel",
+        ctx_traits_core::r#trait::procedure::SequenceKind::Terminal => "terminal",
     }
 }
 
@@ -1617,7 +1624,8 @@ fn collect_control_bounds(
             | ctx_traits_core::r#trait::procedure::SequenceKind::Ask
             | ctx_traits_core::r#trait::procedure::SequenceKind::Command
             | ctx_traits_core::r#trait::procedure::SequenceKind::Check
-            | ctx_traits_core::r#trait::procedure::SequenceKind::Project => {}
+            | ctx_traits_core::r#trait::procedure::SequenceKind::Project
+            | ctx_traits_core::r#trait::procedure::SequenceKind::Terminal => {}
         }
         collect_control_bounds_arm(trait_ref, item.sequence.as_deref(), bounds, seen);
         if item.effective_kind() == ctx_traits_core::r#trait::procedure::SequenceKind::Branch {
@@ -1696,7 +1704,8 @@ fn collect_sequence_control_warnings(
             | ctx_traits_core::r#trait::procedure::SequenceKind::Ask
             | ctx_traits_core::r#trait::procedure::SequenceKind::Command
             | ctx_traits_core::r#trait::procedure::SequenceKind::Check
-            | ctx_traits_core::r#trait::procedure::SequenceKind::Project => None,
+            | ctx_traits_core::r#trait::procedure::SequenceKind::Project
+            | ctx_traits_core::r#trait::procedure::SequenceKind::Terminal => None,
         };
         if let Some((code, message)) = warning {
             warnings.push(ctx_traits_core::check::CheckWarning {

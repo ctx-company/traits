@@ -1863,6 +1863,7 @@ fn format_planned_sequence_kind(
         ctx_traits_core::procedure::run::PlannedSequenceKind::Loop => "loop",
         ctx_traits_core::procedure::run::PlannedSequenceKind::ForEach => "for-each",
         ctx_traits_core::procedure::run::PlannedSequenceKind::Parallel => "parallel",
+        ctx_traits_core::procedure::run::PlannedSequenceKind::Terminal => "terminal",
     }
 }
 

@@ -1927,6 +1927,7 @@ fn sequence_kind_name(kind: SequenceKind) -> &'static str {
         SequenceKind::Loop => "loop",
         SequenceKind::ForEach => "for-each",
         SequenceKind::Parallel => "parallel",
+        SequenceKind::Terminal => "terminal",
         SequenceKind::Prompt
         | SequenceKind::Ask
         | SequenceKind::Command
@@ -2032,7 +2033,8 @@ fn control_segment_is_valid(
         | SequenceKind::Ask
         | SequenceKind::Command
         | SequenceKind::Check
-        | SequenceKind::Project => false,
+        | SequenceKind::Project
+        | SequenceKind::Terminal => false,
     }
 }
 
@@ -3765,10 +3767,17 @@ fn validate_stop_reason_contract(
             stop_reason.reason
         ));
     }
+    // An authored `flow.success` terminal completes the run early, at the
+    // exit point rather than at the end of the sequence — its stop-reason is
+    // the authored record of *which* exit was taken, not a sign the run was
+    // stopped short. Every other `Completed` ledger keeps the invariant.
+    let completed_at_authored_exit = ledger.final_state == FinalState::Completed
+        && stop_reason.reason == STOP_AUTHORED_SUCCESS;
     if matches!(
         ledger.final_state,
         FinalState::Running | FinalState::Completed
-    ) {
+    ) && !completed_at_authored_exit
+    {
         diagnostics.push(format!(
             "{} ledger must not carry stop-reason",
             final_state_label(&ledger.final_state)

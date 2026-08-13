@@ -63,7 +63,10 @@ pub(crate) fn stop_reason_summary(
     session: &ctx_traits_core::procedure::session::Session,
 ) -> Option<String> {
     let stop = session.stop_reason.as_ref()?;
-    let mut summary = stop.reason.clone();
+    let mut summary = match stop.message.as_deref() {
+        Some(message) if !message.trim().is_empty() => message.to_string(),
+        _ => stop.reason.clone(),
+    };
     let iteration = stop
         .at
         .iter()

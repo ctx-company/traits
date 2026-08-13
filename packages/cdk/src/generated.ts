@@ -1586,6 +1586,11 @@ export type CanonicalSequenceItem = {
    */
   readonly "max-iterations-from"?: string | undefined;
   /**
+   * `kind = "terminal"`: rendered headline template, evaluated through
+   * the deterministic projection path (never an agent frame).
+   */
+  readonly "message"?: string | undefined;
+  /**
    * Names the signal(s) to emit when `abort-if` is the arm that halts the
    * loop, so the trait's own terminal reason (e.g.
    * `recurring-blocker-unresolved`) is distinguishable from exhaustion in
@@ -1629,6 +1634,10 @@ export type CanonicalSequenceItem = {
    */
   readonly "otherwise"?: string | undefined;
   /**
+   * `kind = "terminal"`: success or error. Required on a terminal item.
+   */
+  readonly "outcome"?: CanonicalTerminalOutcome | undefined;
+  /**
    * Output sinks (e.g. `port:finding`, `slot:result`, `schema:verdict`, or
    * `{ slot = "slot:notes", operation = "append" }`).
    */
@@ -1637,6 +1646,14 @@ export type CanonicalSequenceItem = {
    * `for-each` list slot ref.
    */
   readonly "over"?: string | undefined;
+  /**
+   * `kind = "terminal"`: ordered writes for the exit's typed record. An
+   * `error` outcome writes the reserved error-record output port; a
+   * `success` outcome binds declared output ports named by `destination`.
+   * Reuses the ordinary `Projection`/`ProjectionSource` shapes rather than
+   * a second projection encoding.
+   */
+  readonly "payload"?: readonly CanonicalProjection[] | undefined;
   /**
    * Ordered deterministic writes for `kind = "project"`. All source values
    * are read before any destination is committed.
@@ -1675,7 +1692,7 @@ export type CanonicalSequenceItem = {
 /**
  * Sequence item kind. Omitted kind infers prompt or command from authored fields.
  */
-export type CanonicalSequenceKind = "prompt" | "command" | "check" | "sequence" | "branch" | "loop" | "for-each" | "parallel" | "ask" | "project";
+export type CanonicalSequenceKind = "prompt" | "command" | "check" | "sequence" | "branch" | "loop" | "for-each" | "parallel" | "ask" | "project" | "terminal";
 
 /**
  * A `[[session]]` declaration: a named, shareable session identity.
@@ -1873,6 +1890,13 @@ export type CanonicalSuggests = {
  * rendered to the model.
  */
 export type CanonicalSummary = string;
+
+/**
+ * A `kind = "terminal"` item's outcome: `flow.success` binds declared
+ * output ports and completes the run; `flow.error` writes the reserved
+ * error-record port and fails the run.
+ */
+export type CanonicalTerminalOutcome = "success" | "error";
 
 export type CanonicalWriteOperation = WriteOperation;
 

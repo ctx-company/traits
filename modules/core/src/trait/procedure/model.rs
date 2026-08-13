@@ -716,6 +716,20 @@ pub enum SequenceKind {
     Loop,
     ForEach,
     Parallel,
+    /// Authored terminal: ends the run immediately with a success or error
+    /// outcome. Requires a trait declaring `schema-version` "0.4" or newer.
+    Terminal,
+}
+
+/// A `kind = "terminal"` item's outcome: `flow.success` binds declared
+/// output ports and completes the run; `flow.error` writes the reserved
+/// error-record port and fails the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename_all = "kebab-case")]
+pub enum TerminalOutcome {
+    Success,
+    Error,
 }
 
 /// One `procedure.sequence[].projection[].source`: either an existing local
@@ -1114,6 +1128,23 @@ pub struct SequenceItem {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub branch_failure: Vec<BranchFailureEntry>,
+
+    /// `kind = "terminal"`: success or error. Required on a terminal item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TerminalOutcome>,
+
+    /// `kind = "terminal"`: rendered headline template, evaluated through
+    /// the deterministic projection path (never an agent frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+
+    /// `kind = "terminal"`: ordered writes for the exit's typed record. An
+    /// `error` outcome writes the reserved error-record output port; a
+    /// `success` outcome binds declared output ports named by `destination`.
+    /// Reuses the ordinary `Projection`/`ProjectionSource` shapes rather than
+    /// a second projection encoding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payload: Vec<Projection>,
 }
 
 fn is_false(value: &bool) -> bool {

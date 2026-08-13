@@ -467,6 +467,7 @@ mod tests {
                 reason: reason.to_string(),
                 at: Vec::new(),
                 last_check: None,
+                message: None,
             }),
             drive_outcome_kind,
             outcome: outcome.map(str::to_string),

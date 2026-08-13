@@ -610,6 +610,7 @@ fn skill_sequence_kind(kind: crate::r#trait::procedure::SequenceKind) -> &'stati
         crate::r#trait::procedure::SequenceKind::Loop => "loop",
         crate::r#trait::procedure::SequenceKind::ForEach => "for-each",
         crate::r#trait::procedure::SequenceKind::Parallel => "parallel",
+        crate::r#trait::procedure::SequenceKind::Terminal => "terminal",
     }
 }
 

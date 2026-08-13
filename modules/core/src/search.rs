@@ -233,6 +233,12 @@ pub fn build_search_document_with_context(t: &Trait, ctx: BuildContext<'_>) -> D
                 crate::r#trait::procedure::SequenceKind::Parallel => {
                     body_parts.push("typed runtime parallel".to_string());
                 }
+                crate::r#trait::procedure::SequenceKind::Terminal => {
+                    body_parts.push("runtime authored terminal".to_string());
+                    if let Some(message) = seq.message.as_ref() {
+                        body_parts.push(message.clone());
+                    }
+                }
             }
         }
     }

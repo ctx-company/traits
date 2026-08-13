@@ -108,6 +108,11 @@ pub struct Port {
     pub default: Option<PortDefault>,
 }
 
+/// Reserved output port id for the typed error record written by a
+/// `flow.error` authored terminal. Authors must not declare a port with
+/// this id.
+pub const TERMINAL_ERROR_PORT_ID: &str = "flow-error";
+
 /// Validate a list of port declarations.
 pub fn validate_ports(ports: &[Port]) -> crate::Result<()> {
     let mut seen_ids = BTreeSet::new();
@@ -117,6 +122,16 @@ pub fn validate_ports(ports: &[Port]) -> crate::Result<()> {
         let id_path = format!("{base}.id");
 
         crate::shared::validate_slug_shape(&port.id, &id_path)?;
+        if port.id == TERMINAL_ERROR_PORT_ID {
+            return Err(crate::manifest::Error::InvalidField {
+                field_path: id_path,
+                message: format!(
+                    "port id {:?} is reserved for the authored terminal error record",
+                    TERMINAL_ERROR_PORT_ID
+                ),
+            }
+            .into());
+        }
         if !seen_ids.insert(port.id.clone()) {
             return Err(crate::manifest::Error::InvalidField {
                 field_path: id_path,
@@ -278,6 +293,9 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 concurrent: false,
                 join: None,
                 branch_failure: Vec::new(),
+                outcome: None,
+                message: None,
+                payload: Vec::new(),
             };
             let _ = crate::r#trait::procedure::command_plan_for_item(
                 &item,

@@ -589,6 +589,13 @@ fn print_stop_reason(
         render_runtime_path(&stop_reason.at),
         format_guard_check_suffix(stop_reason.last_check, evaluations)
     );
+    if let Some(message) = stop_reason
+        .message
+        .as_deref()
+        .filter(|m| !m.trim().is_empty())
+    {
+        println!("{indent}  {message}");
+    }
 }
 
 /// Prints stable blocker ids from accepted slot values escalated
