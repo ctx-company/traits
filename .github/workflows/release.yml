@@ -193,7 +193,7 @@ jobs:
       - name: Push to the tap
         env:
           TAP_TOKEN: ${{ secrets.GH_HOMEBREW_PAT_TOKEN }}
-          TAP_REPO: ctx-company/homebrew
+          TAP_REPO: ctx-company/homebrew-tap
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
