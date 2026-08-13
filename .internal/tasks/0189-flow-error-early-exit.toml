@@ -28,24 +28,45 @@ nothing-to-do) or lean on agent-level escalation prose.
 
 """
 scope = """
-## API (proposed, settle during implementation)
+## API (owner-refined 2026-08-13; naming of the render template settles
+## during implementation)
 
-- `cdk.flow.error(message, opts?)` — a step-like registrar, legal
-  anywhere a step is (typically as a when-arm body). `message` is the
-  authored human reason; `opts.include` attaches evidence refs
-  (slots/ports) the report and ledger carry alongside it. Consider the
-  fused one-liner sugar `cdk.flow.errorIf(title, condition, message,
-  opts?)` mirroring the abort-if shape, lowering to exactly
-  when+error — never a separate canonical form.
+- `cdk.flow.error(payload)` — a step-like registrar, legal anywhere a
+  step is (typically as a when-arm body). The fused one-liner is
+  `cdk.flow.errorWhen(title, condition, payload)` — reads as a sibling
+  of flow.when, lowers to exactly when+error, never a separate
+  canonical form.
+- PAYLOAD is a deterministic projection of already-accepted evidence
+  (the step.project / park-report execution model — never an agent
+  step), in three shapes:
+  1. object of refs `{ verdict: stage.version.verdict }` -> a TYPED
+     error record, landing on a reserved error output port so
+     dashboard/history/chained tooling read it structurally — the
+     failure mirror of the trait function's `return {...}` success
+     outputs;
+  2. a tagged text template for the human headline, deterministically
+     rendered from accepted values. NAMING HAZARD recorded:
+     `cdk.output.text` already exists with AGENT-facing semantics
+     (auto-declared slot + return-format instruction compiled into the
+     prompt) — do not overload it; propose `cdk.render.text` (or
+     similar) that says "rendered, not asked";
+  3. a plain string as the constant-message sugar.
+  The object form may carry a message key (template or string) for the
+  headline. No separate `include:` — the payload refs subsume it,
+  typed.
+- Payload refs are ordinary reads inside the when arm, so
+  produced-before-read and guard-implied production cover them with no
+  special-casing (in the motivating example the guard itself reads the
+  verdict).
 - Name: `error` (matches the author's mental model "early return with
   error"). `flow.Abort` stays loop-scoped machinery, untouched.
 
 ## Canonical + runtime
 
-- New sequence item kind `error` carrying the message (and optional
-  include refs). New kind => gate on schema-version "0.4" or newer via
-  `schema_version_at_least` (the recently fixed floor helper, never
-  exact equality).
+- New sequence item kind `error` carrying the rendered-message template
+  and the typed payload projection. New kind => gate on schema-version
+  "0.4" or newer via `schema_version_at_least` (the recently fixed
+  floor helper, never exact equality).
 - Reaching the item ends the run immediately: stop-reason records the
   authored kind (`authored-error`), the item id, and the message;
   final state is the failure-shaped one (align with what blocked runs
@@ -53,8 +74,9 @@ scope = """
   renders the authored message as the headline — an authored failure
   must be visually distinct from an infrastructure failure in run
   report and dashboard).
-- Optional: `opts.signal` emits a declared signal on exit, composing
-  with the existing effect/signal machinery like gate-timeout does.
+- Optional: a `signal:` key on the payload options emits a declared
+  signal on exit, composing with the existing effect/signal machinery
+  like gate-timeout does.
 
 ## Validator interplay (the interesting part)
 
@@ -85,8 +107,9 @@ validation = """
 
 Scratch-fixture proofs: a trait with `when(condition, () => flow.error(...))`
 builds (canonical carries the error item, schema-version gated 0.4+);
-a run whose guard routes true stops at the error item with the authored
-message in stop-reason and the report, nonzero exit, no later step run;
+a run whose guard routes true stops at the error item with the rendered
+headline in stop-reason and the report AND the typed error record on
+the reserved error output port, nonzero exit, no later step run;
 a run whose guard routes false proceeds past the rung untouched; a
 step AFTER the error-rung branch reading a slot produced before it
 still validates (divergence-aware join); `flow.error` outside any
