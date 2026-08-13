@@ -3,7 +3,6 @@ schema-version = "0.4"
 version = "0.24.0"
 name = "Implement (Guarded)"
 description = "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands."
-summary = "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands."
 variant = "guarded"
 
 [metadata]
@@ -504,7 +503,7 @@ slot = "slot:park-report"
 operation = "append"
 
 [procedure]
-description = "Implement one task from the task board: draft it from the task file, implement it, and repeat worker-then-review until the reviewer approves — then commit."
+description = "Quick dogfood implementation procedure, with the final commit held for the owner's approval via ctx-gate before it lands."
 input = ["port:task"]
 output = [
     "port:commit-report",

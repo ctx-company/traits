@@ -1,7 +1,4 @@
 // Cross-variant resource declaration every implement variant shares.
-// Redistributed from source/sequence/family.ts (0183); that module
-// re-exports this so unported variants keep compiling until they migrate
-// too.
 import type { ResourceHandle } from "@ctx-traits/cdk";
 import { resource } from "@ctx-traits/cdk";
 

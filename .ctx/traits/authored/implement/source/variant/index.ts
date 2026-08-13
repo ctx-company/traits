@@ -1,11 +1,18 @@
-// Hook-based (defineVariant) variants only. The rest of the family (smart,
-// strict, phase, gated, guarded) is still legacy object-style
-// `variant({...})` and is bound directly in source/index.ts — migrated one
-// at a time (0183).
+// Hook-based (defineVariant) variants: the full family (0183).
 import { default as defaultVariant } from "./default/index.ts";
+import { default as gated } from "./gated/index.ts";
+import { default as guarded } from "./guarded/index.ts";
+import { default as phase } from "./phase/index.ts";
 import { default as quick } from "./quick/index.ts";
+import { default as smart } from "./smart/index.ts";
+import { default as strict } from "./strict/index.ts";
 
 export default {
   default: defaultVariant,
+  gated,
+  guarded,
+  phase,
   quick,
+  smart,
+  strict,
 };

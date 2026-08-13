@@ -3,7 +3,6 @@ schema-version = "0.4"
 version = "0.24.0"
 name = "Implement (Strict)"
 description = "Verbatim dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement the draft exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
-summary = "Verbatim dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement the draft exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
 variant = "strict"
 
 [metadata]
@@ -908,7 +907,7 @@ input = [
 output = ["slot:planning-verdict"]
 
 [procedure]
-description = "Implement one task from the task board end to end with verbatim draft execution: extract its contract, draft the approach, implement it exactly as written with a typed deviation record, refine against two independent reviewers, commit — blocking rather than adapting when the draft is unsatisfiable."
+description = "Verbatim dogfood implementation procedure: extract the task contract from the task board, draft the approach, implement the draft exactly as written, refine against two independent reviewers with a typed deviation record, and commit only once both approve."
 input = ["port:task"]
 output = [
     "port:commit-report",

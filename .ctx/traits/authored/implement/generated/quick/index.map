@@ -51,8 +51,8 @@
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
-    "start": 16,
-    "end": 16
+    "start": 13,
+    "end": 13
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -66,8 +66,8 @@
   },
   "schema:repo-gates-result": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 136,
-    "end": 136
+    "start": 134,
+    "end": 134
   },
   "schema:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/schema.ts",
@@ -151,8 +151,8 @@
   },
   "signal:gate-timed-out": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 174,
-    "end": 174
+    "start": 172,
+    "end": 172
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",
@@ -171,13 +171,13 @@
   },
   "slot:repo-gates-passed": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 132,
-    "end": 132
+    "start": 130,
+    "end": 130
   },
   "slot:review-diff": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 119,
-    "end": 119
+    "start": 117,
+    "end": 117
   },
   "slot:review-verdict": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/data.ts",

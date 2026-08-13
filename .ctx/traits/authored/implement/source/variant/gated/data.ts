@@ -1,10 +1,17 @@
-import { schema, slot } from "@ctx-traits/cdk";
+import { port, schema, slot } from "@ctx-traits/cdk";
+
 import {
   brief as briefSchema,
   ownerDecision as ownerDecisionSchema,
   planDecision as planDecisionSchema,
   reviewVerdict,
 } from "./schema.ts";
+
+export const task = port.input.text({
+  id: "task",
+  description:
+    'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
+});
 
 export const preflightOutput = slot.text({
   id: "preflight-output",
@@ -43,6 +50,15 @@ export const parkReport = slot({
   schema: schema.list(reviewVerdict),
   description:
     "This round's typed park record (P414): empty when the round's verdict is approved, exactly one entry — the round's own verdict, copied unchanged — when it is revise. Written each round by a deterministic project step (deriveParkReportStep), never model-authored, so it can never disagree with the verdict it comes from.",
+});
+export const parkReportPort = port.output.of(schema.list(reviewVerdict), {
+  id: "park-report",
+  title: "Park Report",
+  description:
+    "Typed park record for an unapproved run (P414): the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the refinement loop exhausted without approval — the run parks and no commit is created. A run that exhausts on owner denials alone (reviewer approved every round) parks with this empty; slot:owner-decision is the evidence in that case.",
+  optional: true,
+  value: parkReport,
+  format: ["structured", "table"],
 });
 
 export const ownerBriefing = slot.text({
@@ -103,4 +119,21 @@ export const unstageOutput = slot.text({
 export const commitOutput = slot.text({
   id: "commit-output",
   description: "Output evidence from the git commit command step: committed hash and subject.",
+});
+export const commitReport = port.output.text({
+  id: "commit-report",
+  description:
+    "Final commit evidence from the git commit command step. Absent when the clean-tree gate skipped the commit tail entirely — a clean working tree at gate time means nothing to commit.",
+  optional: true,
+  value: commitOutput,
+});
+
+export const briefReport = port.output.text({
+  id: "brief-report",
+  title: "Brief",
+  description:
+    "The tracked brief written to .internal/briefs/<slug>.md. Absent when the clean-tree gate skipped the commit tail.",
+  optional: true,
+  value: briefMarkdown,
+  format: ["text"],
 });

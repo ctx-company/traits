@@ -1,7 +1,5 @@
 // Cross-variant agent roles every implement variant's build loop shares
-// unchanged. Redistributed from source/sequence/family.ts (0183); that
-// module re-exports these so unported variants keep compiling until they
-// migrate too.
+// unchanged.
 import { clerkRole, reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
 import type { AgentHandle } from "@ctx-traits/cdk";
 

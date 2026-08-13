@@ -61,3 +61,9 @@ idle-seconds = 600
 frame-seconds = 1800
 total-seconds = 86400
 idle-seconds = 600
+
+# The guarded commit waits on the owner's ctx-gate approval (up to 8h,
+# declared as the step's own timeout-ms); the run's total budget must
+# survive the owner being away.
+[variant.guarded.budget]
+total-seconds = 86400

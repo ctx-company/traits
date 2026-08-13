@@ -3,7 +3,6 @@ schema-version = "0.4"
 version = "0.24.0"
 name = "Implement (Smart)"
 description = "Research-informed dogfood implementation procedure: research prior art, extract the task contract from the task board, draft the approach, implement it, refine against two independent reviewers who may amend the draft, and commit."
-summary = "Research-informed dogfood implementation procedure: research prior art, extract the task contract from the task board, draft the approach, implement it, refine against two independent reviewers who may amend the draft, and commit."
 variant = "smart"
 
 [metadata]
@@ -628,8 +627,7 @@ output = ["slot:planning-verdict"]
 
 [prompt.research]
 text = """
-
-        Before drafting for {port:task}, research prior art: how comparable tasks in this codebase's history solved a similar problem, and any external precedent worth grounding the draft in. Use web-capable tools if available.
+Before drafting for {port:task}, research prior art: how comparable tasks in this codebase's history solved a similar problem, and any external precedent worth grounding the draft in. Use web-capable tools if available.
         Keep this to one pass — the loop budget is unchanged from the default flow; smart means a better-informed draft, not more rounds.
         Return your research notes: what you found, its relevance, and anything that should constrain the coming draft."""
 input = ["port:task"]
@@ -906,7 +904,7 @@ input = [
 output = ["slot:planning-verdict"]
 
 [procedure]
-description = "Implement one task from the task board end to end with a research-informed draft: research, extract its contract, draft the approach, implement it, refine against two independent reviewers with typed amendments, then summarize and commit."
+description = "Research-informed dogfood implementation procedure: research prior art, extract the task contract from the task board, draft the approach, implement it, refine against two independent reviewers who may amend the draft, and commit."
 input = ["port:task"]
 output = [
     "port:commit-report",
