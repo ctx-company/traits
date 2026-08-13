@@ -1,0 +1,95 @@
+schema-version = "0.2"
+key = "0189"
+title = "flow.error: authored early exit — the failure inverse of the maybe-ladder"
+status = "ready"
+raised = "2026-08-13"
+content = """
+
+Owner request 2026-08-13, from authoring the release ladder: the sibling
+flow.when style routes on SUCCESS evidence — each rung fires when its
+predecessor's verdict is good, and a run with nothing left parks by
+doing nothing. What is missing is the inverse: routing on FAILURE
+evidence into an explicit early exit, the procedure-level equivalent of
+an early return with an error:
+
+    cdk.flow.when("Version Bump Failed",
+      cdk.condition.equals(stage.version.verdict.status, "revise"), () => {
+        cdk.flow.error("Version bump rejected by review", {
+          include: [stage.version.verdict],
+        });
+      });
+
+Today the only early terminations are loop-scoped (flow.Abort lowers to
+a loop abort-if arm and REFUSES outside a flow.loop; onExhausted:
+"abort") or infrastructure-shaped (budget kills, gate timeouts). An
+authored "this run has failed, here is why" does not exist — authors
+either let the run park silently (indistinguishable from success-shaped
+nothing-to-do) or lean on agent-level escalation prose.
+
+"""
+scope = """
+## API (proposed, settle during implementation)
+
+- `cdk.flow.error(message, opts?)` — a step-like registrar, legal
+  anywhere a step is (typically as a when-arm body). `message` is the
+  authored human reason; `opts.include` attaches evidence refs
+  (slots/ports) the report and ledger carry alongside it. Consider the
+  fused one-liner sugar `cdk.flow.errorIf(title, condition, message,
+  opts?)` mirroring the abort-if shape, lowering to exactly
+  when+error — never a separate canonical form.
+- Name: `error` (matches the author's mental model "early return with
+  error"). `flow.Abort` stays loop-scoped machinery, untouched.
+
+## Canonical + runtime
+
+- New sequence item kind `error` carrying the message (and optional
+  include refs). New kind => gate on schema-version "0.4" or newer via
+  `schema_version_at_least` (the recently fixed floor helper, never
+  exact equality).
+- Reaching the item ends the run immediately: stop-reason records the
+  authored kind (`authored-error`), the item id, and the message;
+  final state is the failure-shaped one (align with what blocked runs
+  do today: nonzero exit, worktree and branch preserved, report
+  renders the authored message as the headline — an authored failure
+  must be visually distinct from an infrastructure failure in run
+  report and dashboard).
+- Optional: `opts.signal` emits a declared signal on exit, composing
+  with the existing effect/signal machinery like gate-timeout does.
+
+## Validator interplay (the interesting part)
+
+- An error arm DIVERGES — it never rejoins the fall-through path. The
+  produced-before-read branch join must exclude diverging arms from
+  the intersection (divergence-aware join, the `!`-type analog): after
+  `when(revise, error)`, the surviving path still carries everything
+  produced before the branch, and the inverted ladder style validates
+  without weakening any guarantee.
+- Possible follow-up, not required now: on the fall-through path the
+  guard is known to have routed false — a dual of guard-implied
+  production ("verdict measured and NOT revise" after an error rung).
+  Record the idea; implement only the divergence-aware join.
+
+## Watch
+
+- Park semantics stay honest: a run that ends by having nothing left
+  is NOT an error; flow.error is for authored failure only. Do not
+  reroute the existing maybe-ladder parks through it.
+- Loop bodies: flow.error inside a loop still ends the RUN (it is not
+  a loop abort); state the distinction in the registrar doc.
+- Ledger replay: the new stop-reason kind must round-trip resume and
+  history rendering; check the run summary/dashboard status mapping.
+
+"""
+validation = """
+## Done when
+
+Scratch-fixture proofs: a trait with `when(condition, () => flow.error(...))`
+builds (canonical carries the error item, schema-version gated 0.4+);
+a run whose guard routes true stops at the error item with the authored
+message in stop-reason and the report, nonzero exit, no later step run;
+a run whose guard routes false proceeds past the rung untouched; a
+step AFTER the error-rung branch reading a slot produced before it
+still validates (divergence-aware join); `flow.error` outside any
+when/loop and `flow.Abort` outside a loop keep their existing
+refusals; `just test` and `just test-full` green.
+"""
