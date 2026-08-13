@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0191"
 title = "git-first trait sharing: skills.sh-grade DX for nested collections"
-status = "ready"
+status = "done"
 raised = "2026-08-13"
 content = """
 

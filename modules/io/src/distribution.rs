@@ -909,7 +909,11 @@ fn resolve_and_fetch_git(
 ) -> crate::Result<(String, String, String, Utf8PathBuf, TempStagingGuard)> {
     let (owner, repo) = github_owner_repo(&spec.url)?;
 
-    let refs = crate::git_fetch::resolve_refs(&spec.url)
+    // Ref resolution goes through the remote-base seam (default
+    // github.com), so proofs can serve info/refs from a local fixture the
+    // same way CTX_TRAITS_GIT_CODELOAD_BASE redirects tarballs.
+    let refs_url = format!("{}/{owner}/{repo}", crate::git_fetch::resolve_remote_base());
+    let refs = crate::git_fetch::resolve_refs(&refs_url)
         .map_err(|source| github_request_failure(&spec.url, "resolve refs for", source))?;
     let Some(sha) = refs.resolve(spec.requested_ref.as_deref()) else {
         return Err(crate::environment::Error::Filesystem {
@@ -969,6 +973,8 @@ fn github_request_failure(
 /// One trait package found inside a git collection: its selector path
 /// (usable verbatim as `owner/repo/<trait_path>`), id, version, summary, and
 /// the exact copyable `dependency add` command for it (task 0191 phase c).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct CollectionEntry {
     pub trait_path: String,
     pub id: String,
@@ -977,6 +983,8 @@ pub struct CollectionEntry {
     pub add_command: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct CollectionListing {
     pub url: String,
     pub resolved_commit: String,

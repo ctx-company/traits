@@ -97,6 +97,24 @@ fn request_error(url: &str, source: &ureq::Error) -> Error {
     }
 }
 
+/// Default git remote host the shorthand and refs resolution target.
+pub const DEFAULT_REMOTE_BASE: &str = "https://github.com";
+
+/// Resolve the effective git remote base URL for smart-HTTP ref resolution:
+/// `CTX_TRAITS_GIT_REMOTE_BASE` when set and non-empty, else
+/// [`DEFAULT_REMOTE_BASE`]. The test-fixture override seam for the
+/// `info/refs` endpoint, mirroring `CTX_TRAITS_GIT_CODELOAD_BASE` for
+/// tarballs — without it a github.com spec would hit the real host from
+/// inside a proof.
+pub fn resolve_remote_base() -> String {
+    if let Ok(base) = std::env::var("CTX_TRAITS_GIT_REMOTE_BASE")
+        && !base.is_empty()
+    {
+        return base;
+    }
+    DEFAULT_REMOTE_BASE.to_string()
+}
+
 /// Resolve the effective GitHub codeload base URL: `CTX_TRAITS_GIT_CODELOAD_BASE`
 /// when set and non-empty, else [`DEFAULT_CODELOAD_BASE`].
 pub fn resolve_codeload_base() -> String {
@@ -361,8 +379,10 @@ mod tests {
 
     #[test]
     fn resolve_prefers_heads_then_tags_then_literal() {
-        let mut refs = GitRefs::default();
-        refs.head_sha = Some("h".repeat(40));
+        let mut refs = GitRefs {
+            head_sha: Some("h".repeat(40)),
+            ..GitRefs::default()
+        };
         refs.refs
             .insert("refs/heads/feature".to_string(), "f".repeat(40));
         refs.refs
@@ -375,8 +395,10 @@ mod tests {
 
     #[test]
     fn resolve_accepts_a_raw_full_sha_absent_from_advertised_refs() {
-        let mut refs = GitRefs::default();
-        refs.head_sha = Some("h".repeat(40));
+        let mut refs = GitRefs {
+            head_sha: Some("h".repeat(40)),
+            ..GitRefs::default()
+        };
         refs.refs
             .insert("refs/heads/main".to_string(), "m".repeat(40));
 
@@ -418,8 +440,9 @@ mod tests {
 
     #[test]
     fn fetch_codeload_snapshot_skips_http_when_the_sha_is_already_cached() {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let unique = format!(
             "ctx-traits-git-fetch-test-{}",
@@ -467,11 +490,16 @@ mod tests {
         result.expect("cached fetch succeeds without contacting the (unreachable) codeload base");
     }
 
+    /// ONE lock for every env-mutating test in this module: a fn-local
+    /// static in one test and temp_env's own lock in another serialized
+    /// nothing against each other — the exact race the run's reviewer
+    /// flagged.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn temp_env(key: &str, value: Option<&str>, body: impl FnOnce()) {
-        // Serialized via a process-wide mutex so parallel tests in this
-        // module never race on the same env var.
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = std::env::var(key).ok();
         match value {
             Some(v) => unsafe { std::env::set_var(key, v) },

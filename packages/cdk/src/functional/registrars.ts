@@ -521,8 +521,7 @@ function flowError(title: string, opts: FlowErrorOptions = {}): SequenceHandle {
     title,
     outcome: "error",
     message: opts.message ?? title,
-    payload:
-      opts.evidence === undefined ? [] : [{ destination: FLOW_ERROR_PORT_ID, source: opts.evidence }],
+    payload: opts.evidence === undefined ? [] : [{ destination: FLOW_ERROR_PORT_ID, source: opts.evidence }],
   });
   registerItem(`flow.error(${JSON.stringify(title)})`, item, title);
   return item;

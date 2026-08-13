@@ -1326,10 +1326,10 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
                       .filter((source): source is string => typeof source === "string");
                     return slotSources.length === 0 ? undefined : uniqueInOrder(slotSources);
                   })()
-              : (() => {
-                  const list = normalizeSequenceInputList(mergeCommandDeps(fields.input, rawFields.include));
-                  return list.length === 0 ? undefined : list;
-                })();
+                : (() => {
+                    const list = normalizeSequenceInputList(mergeCommandDeps(fields.input, rawFields.include));
+                    return list.length === 0 ? undefined : list;
+                  })();
   const implicitPrompt =
     kind === "prompt" || kind === "ask"
       ? promptDeclaration(

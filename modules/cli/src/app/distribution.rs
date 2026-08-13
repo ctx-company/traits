@@ -197,6 +197,26 @@ pub(crate) fn handle_install(
         return Ok(CommandOutput::new(()));
     }
 
+    // A bare git collection spec with no selection is DISCOVERY, not an
+    // error (0191 DX centerpiece): list the contained traits with copyable
+    // add commands and exit 0. Only explicit selections vendor anything.
+    if let Some(git_spec) = &git_spec
+        && git_spec.trait_selector.is_none()
+    {
+        let listing = distribution::list_git_collection(git_spec)?;
+        if json {
+            print_json_report(&listing, "collection listing")?;
+        } else {
+            println!(
+                "collection {} @ {} — pass one of its traits (or --all):\n{}",
+                git_spec.url,
+                listing.resolved_commit,
+                listing.render()
+            );
+        }
+        return Ok(CommandOutput::new(()));
+    }
+
     let report = distribution::install(&scope, spec, alias, registry)?;
     emit_install_report(&report, json)?;
     Ok(CommandOutput::new(()))

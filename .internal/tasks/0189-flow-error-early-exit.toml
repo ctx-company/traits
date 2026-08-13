@@ -1,7 +1,7 @@
 schema-version = "0.2"
 key = "0189"
 title = "authored terminals: flow.success / flow.error — exit-point completion"
-status = "ready"
+status = "done"
 raised = "2026-08-13"
 content = """
 

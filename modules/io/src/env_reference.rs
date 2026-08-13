@@ -175,6 +175,21 @@ fn base_env_reference() -> Vec<EnvVarDoc> {
             kind: EnvVarKind::UserFacing,
         },
         EnvVarDoc {
+            name: "CTX_TRAITS_GIT_REMOTE_BASE",
+            contract: "Overrides the git remote base (default https://github.com) used for smart-HTTP ref resolution of git-transport dependency specs; primarily a test-fixture seam.",
+            kind: EnvVarKind::UserFacing,
+        },
+        EnvVarDoc {
+            name: "CTX_TRAITS_GIT_CODELOAD_BASE",
+            contract: "Overrides the GitHub codeload base (default https://codeload.github.com) git-transport snapshots download from; primarily a test-fixture seam.",
+            kind: EnvVarKind::UserFacing,
+        },
+        EnvVarDoc {
+            name: "CTX_TRAITS_GIT_CACHE_ROOT",
+            contract: "Overrides the sha-keyed git snapshot cache root; test isolation for the git-transport fetch path.",
+            kind: EnvVarKind::Internal,
+        },
+        EnvVarDoc {
             name: "CTX_TRAITS_ELAPSED_SECONDS_BASELINE",
             contract: "Internal parent→child only: the cumulative active-drive elapsed seconds a drive loop injects into the MCP server subprocess it spawns. A bare `ctx traits mcp` honors it if set. Unparsable or absent is always treated as absent — a malformed baseline never silently starts the clock at zero.",
             kind: EnvVarKind::Internal,

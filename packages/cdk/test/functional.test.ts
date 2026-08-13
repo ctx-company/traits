@@ -328,7 +328,18 @@ describe("functional layer build rules (0106)", () => {
     ) as {
       procedure: { sequence: readonly { id: string; kind: string; when?: unknown; sequence?: string }[] };
       sequence?: Readonly<
-        Record<string, { sequence: readonly { id: string; kind: string; outcome?: string; message?: string; payload?: readonly { destination: string; source: string }[] }[] }>
+        Record<
+          string,
+          {
+            sequence: readonly {
+              id: string;
+              kind: string;
+              outcome?: string;
+              message?: string;
+              payload?: readonly { destination: string; source: string }[];
+            }[];
+          }
+        >
       >;
     };
     const branch = built.procedure.sequence.find((item) => item.id === "version-bump-failed");

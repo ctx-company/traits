@@ -48,7 +48,11 @@ fn init_fixture(repo: &Path, home: &Path, canonical: &str) {
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init_on_branch(repo, "main");
     fs::write(repo.join(".gitignore"), ".ctx/traits/worktrees/\n").unwrap();
-    fs::write(repo.join(".ctx/traits/demo/generated/index.toml"), canonical).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        canonical,
+    )
+    .unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/trait.toml"),
         "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
@@ -140,7 +144,11 @@ fn error_terminal_fails_the_run_with_authored_reason_and_typed_record() {
     let scratch = ScratchRoot::new("terminal-error-guard-true");
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
-    init_fixture(&repo, &scratch.home(), &error_ladder_canonical("printf revise"));
+    init_fixture(
+        &repo,
+        &scratch.home(),
+        &error_ladder_canonical("printf revise"),
+    );
 
     let (combined, success) = run_demo(&repo, &scratch.home());
     assert!(
@@ -172,7 +180,11 @@ fn error_terminal_guard_false_proceeds_untouched() {
     let scratch = ScratchRoot::new("terminal-error-guard-false");
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
-    init_fixture(&repo, &scratch.home(), &error_ladder_canonical("printf approved"));
+    init_fixture(
+        &repo,
+        &scratch.home(),
+        &error_ladder_canonical("printf approved"),
+    );
 
     let (combined, success) = run_demo(&repo, &scratch.home());
     assert!(
@@ -273,7 +285,11 @@ fn fall_through_past_every_success_exit_is_an_authored_failure() {
     let scratch = ScratchRoot::new("terminal-no-exit-reached");
     let repo = scratch.home().join("repo");
     fs::create_dir_all(&repo).unwrap();
-    init_fixture(&repo, &scratch.home(), &success_exit_canonical("printf meh"));
+    init_fixture(
+        &repo,
+        &scratch.home(),
+        &success_exit_canonical("printf meh"),
+    );
 
     let (combined, success) = run_demo(&repo, &scratch.home());
     assert!(
@@ -378,7 +394,11 @@ fn decode_refusal(canonical: &str, scratch_name: &str) -> String {
     let repo = scratch.home().join("repo");
     fs::create_dir_all(repo.join(".ctx/traits/demo/generated")).unwrap();
     git_init_on_branch(&repo, "main");
-    fs::write(repo.join(".ctx/traits/demo/generated/index.toml"), canonical).unwrap();
+    fs::write(
+        repo.join(".ctx/traits/demo/generated/index.toml"),
+        canonical,
+    )
+    .unwrap();
     fs::write(
         repo.join(".ctx/traits/demo/trait.toml"),
         "[package]\nid = \"demo\"\nversion = \"0.1.0\"\nname = \"Demo\"\nstatus = \"draft\"\n",
@@ -408,10 +428,8 @@ fn decode_refusal(canonical: &str, scratch_name: &str) -> String {
 
 #[test]
 fn terminal_below_schema_version_0_4_is_refused() {
-    let canonical = error_ladder_canonical("printf revise").replace(
-        "schema-version = \"0.4\"",
-        "schema-version = \"0.3\"",
-    );
+    let canonical = error_ladder_canonical("printf revise")
+        .replace("schema-version = \"0.4\"", "schema-version = \"0.3\"");
     let combined = decode_refusal(&canonical, "terminal-schema-floor");
     assert!(
         combined.contains("0.4"),
@@ -421,8 +439,10 @@ fn terminal_below_schema_version_0_4_is_refused() {
 
 #[test]
 fn error_payload_must_target_the_reserved_port() {
-    let canonical = error_ladder_canonical("printf revise")
-        .replace("destination = \"flow-error\"", "destination = \"somewhere-else\"");
+    let canonical = error_ladder_canonical("printf revise").replace(
+        "destination = \"flow-error\"",
+        "destination = \"somewhere-else\"",
+    );
     let combined = decode_refusal(&canonical, "terminal-wrong-error-port");
     assert!(
         combined.contains("reserved"),
