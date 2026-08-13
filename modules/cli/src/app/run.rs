@@ -795,6 +795,24 @@ impl CompletionOutcome {
             .unwrap_or_default();
         match self.disposition {
             CompletionDisposition::NoIntent | CompletionDisposition::Merged => {
+                // 0189: a session can complete its DRIVE and still declare
+                // itself failed (an authored flow.error terminal, or
+                // no-exit-reached past every success exit). With no merge in
+                // play nothing downstream would surface that — the process
+                // exit must.
+                if self.session.status == ctx_traits_core::procedure::session::Status::Failed {
+                    let reason = self
+                        .session
+                        .stop_reason
+                        .as_ref()
+                        .and_then(|stop| stop.message.clone().or_else(|| Some(stop.reason.clone())))
+                        .map(|reason| format!(": {reason}"))
+                        .unwrap_or_default();
+                    return Err(crate::Error::AlreadyReported {
+                        message: format!("run {run_id:?} failed{reason}"),
+                        exit_code: crate::app::error::EXIT_RUN_FAILED,
+                    });
+                }
                 Ok(CommandOutput::new(()))
             }
             CompletionDisposition::DriveNotCompleted => Err(crate::Error::AlreadyReported {

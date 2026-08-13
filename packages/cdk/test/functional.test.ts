@@ -314,6 +314,66 @@ describe("functional layer build rules (0106)", () => {
     expect(built.procedure.sequence).toMatchObject([{ id: "park-report-clear", kind: "project" }]);
   });
 
+  it("flow.errorWhen lowers to when + an error terminal on the reserved flow-error port (0189)", () => {
+    const verdict = slot.text("terminal-verdict");
+    const proc = procedure.from({ description: "d" }, () => {
+      step.command("Review", { cmd: "echo revise", output: verdict });
+      flow.errorWhen("Version Bump Failed", condition.equals(verdict, "revise"), {
+        message: "Version bump rejected by review",
+        evidence: verdict,
+      });
+    });
+    const built = toDraftJson(
+      trait("terminal-error-smoke", { name: "Terminal Error Smoke", summary: "s", procedure: proc }),
+    ) as {
+      procedure: { sequence: readonly { id: string; kind: string; when?: unknown; sequence?: string }[] };
+      sequence?: Readonly<
+        Record<string, { sequence: readonly { id: string; kind: string; outcome?: string; message?: string; payload?: readonly { destination: string; source: string }[] }[] }>
+      >;
+    };
+    const branch = built.procedure.sequence.find((item) => item.id === "version-bump-failed");
+    expect(branch).toMatchObject({ kind: "branch", when: { slot: "slot:terminal-verdict", equals: "revise" } });
+    const armId = (branch?.sequence ?? "").replace("sequence:", "");
+    const arm = built.sequence?.[armId]?.sequence ?? [];
+    expect(arm).toMatchObject([
+      {
+        id: "version-bump-failed-exit",
+        kind: "terminal",
+        outcome: "error",
+        message: "Version bump rejected by review",
+        payload: [{ destination: "flow-error", source: "slot:terminal-verdict" }],
+      },
+    ]);
+  });
+
+  it("flow.success binds declared output ports at the exit and defaults its message to the title (0189)", () => {
+    const summary = slot.text("terminal-summary");
+    const proc = procedure.from({ description: "d" }, () => {
+      step.command("Do the work", { cmd: "echo done", output: summary });
+      flow.success("Released", { bind: { "release-report": summary } });
+    });
+    const built = toDraftJson(
+      trait("terminal-success-smoke", { name: "Terminal Success Smoke", summary: "s", procedure: proc }),
+    ) as {
+      procedure: {
+        sequence: readonly {
+          id: string;
+          kind: string;
+          outcome?: string;
+          message?: string;
+          payload?: readonly { destination: string; source: string }[];
+        }[];
+      };
+    };
+    expect(built.procedure.sequence[1]).toMatchObject({
+      id: "released",
+      kind: "terminal",
+      outcome: "success",
+      message: "Released",
+      payload: [{ destination: "release-report", source: "slot:terminal-summary" }],
+    });
+  });
+
   it("step.project registered after flow.until in its own loop is a build error", () => {
     const gate = slot.text("project-until-gate");
     const target = slot.text("project-until-target");

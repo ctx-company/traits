@@ -51,6 +51,12 @@ pub const EXIT_MERGE_FAILED: u8 = 5;
 /// failure). Outside the 3/4/5 run/merge range and distinct from clap's own
 /// usage-error exit 2.
 pub const EXIT_FINDINGS: u8 = 6;
+/// A run session that ended `Failed` — an authored `flow.error` terminal, a
+/// `no-exit-reached` fall-through past every declared success exit, or any
+/// other failure-shaped final state — on a run with no merge intent (0189).
+/// Distinct from `EXIT_RUN_NOT_COMPLETED`: the drive completed; the RUN
+/// declared itself failed.
+pub const EXIT_RUN_FAILED: u8 = 7;
 
 impl From<ctx_traits_core::Error> for Error {
     fn from(error: ctx_traits_core::Error) -> Self {

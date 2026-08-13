@@ -292,6 +292,55 @@ export type ProjectSequenceFields = {
   readonly onFailure?: never;
 };
 
+/**
+ * One exit-payload write of an authored terminal (0189). `destination` is a
+ * BARE output-port id — the reserved `flow-error` port for an error
+ * terminal, a declared output port for a success terminal — never a
+ * qualified ref (the runtime qualifies it). `source` is a local slot handle
+ * or `operation.literal(...)`, exactly the project-step source shapes.
+ */
+export type TerminalBinding = {
+  readonly destination: string;
+  readonly source: SlotHandle | LiteralProjectionSource;
+};
+/**
+ * A `kind = "terminal"` item (0189 authored terminals): ends the run
+ * immediately — `outcome: "error"` fails it (typed record on the reserved
+ * `flow-error` port, message as the report headline), `outcome: "success"`
+ * completes it (binding declared output ports at the exit). Requires
+ * schema-version "0.4" or newer; declaring any success terminal opts the
+ * trait into exit-point completion (fall-through past every exit is an
+ * authored `no-exit-reached` failure).
+ */
+export type TerminalSequenceFields = {
+  readonly kind: "terminal";
+  readonly id: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly outcome: "success" | "error";
+  /** Stored verbatim into the stop reason and rendered as the report
+   * headline. A literal string — interpolated headline templates are
+   * deferred until the runtime renders them. */
+  readonly message?: string;
+  readonly payload?: readonly TerminalBinding[];
+  readonly prompt?: never;
+  readonly text?: never;
+  readonly cmd?: never;
+  readonly argv?: never;
+  readonly argvFrom?: never;
+  readonly sequence?: never;
+  readonly agent?: never;
+  readonly input?: never;
+  readonly output?: never;
+  readonly timeoutMs?: never;
+  readonly idleTimeoutMs?: never;
+  readonly timeout?: never;
+  readonly successExitCode?: never;
+  readonly format?: never;
+  readonly onComplete?: never;
+  readonly onFailure?: never;
+};
+
 /** Options for the composed human approval gate. The gate is lowered entirely
  * to ask, branch, loop, and project items; it introduces no runtime kind. */
 export type GateOptions = {
@@ -536,6 +585,7 @@ export type SequenceFields =
   | CommandSequenceFields
   | CheckSequenceFields
   | ProjectSequenceFields
+  | TerminalSequenceFields
   | LinearSequenceFields
   | LoopSequenceFields
   | ForEachSequenceFields
@@ -685,6 +735,15 @@ export interface SequenceFunction {
    * @example `sequence.project("keep-best", { projections: [{ source: candidate, field: "metric", destination: bestMetric }] })`
    */
   project(id: string, fields: Omit<ProjectSequenceFields, "id" | "kind">): SequenceHandle;
+  /**
+   * Declares an authored terminal (0189): the run ends HERE — `outcome:
+   * "error"` fails it with the message as the report headline and the
+   * payload written to the reserved `flow-error` output port; `outcome:
+   * "success"` completes it, binding declared output ports at the exit.
+   * Typically registered through `flow.error`/`flow.success` inside a
+   * `flow.when` arm rather than called directly.
+   */
+  terminal(id: string, fields: Omit<TerminalSequenceFields, "id" | "kind">): SequenceHandle;
   /**
    * Declares a bounded loop: repeats a `sequence.linear` body up to a fixed
    * iteration budget, checking an exit condition after each round.
@@ -1037,6 +1096,8 @@ export const sequence: SequenceFunction = {
   gate: sequenceGate,
   project: (id: string, fields: Omit<ProjectSequenceFields, "id" | "kind">): SequenceHandle =>
     sequenceOf({ ...fields, id, kind: "project" }),
+  terminal: (id: string, fields: Omit<TerminalSequenceFields, "id" | "kind">): SequenceHandle =>
+    sequenceOf({ ...fields, id, kind: "terminal" }),
   loop: (id: string, fields: Omit<LoopSequenceFields, "id" | "kind">): SequenceHandle => {
     const until = fields.until === undefined ? undefined : lowerCheckGuard(fields.until, `sequence.${id}.until`);
     const abortIf =
@@ -1213,6 +1274,8 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
   }
   const project = isSequenceKind(fields, kind, "project") ? fields : undefined;
   const projections = project === undefined ? undefined : normalizeProjectProjections(project);
+  const terminal = isSequenceKind(fields, kind, "terminal") ? fields : undefined;
+  const terminalPayload = terminal === undefined ? undefined : normalizeTerminalPayload(terminal);
   const agentRef = fields.agent === undefined ? undefined : refText(fields.agent, `sequence.${fields.id}.agent`);
   const instructionOutputRender = attachInstructionOutputs(fields.id, kind, fields.output);
   const promptWithInstructionOutputs =
@@ -1253,6 +1316,16 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
                     .filter((source): source is string => typeof source === "string");
                   return slotSources.length === 0 ? undefined : uniqueInOrder(slotSources);
                 })()
+              : kind === "terminal"
+                ? (() => {
+                    // Slot-backed payload sources are the terminal's reads —
+                    // declared as inputs so declaration collection and the
+                    // produced-before-read walk both see them.
+                    const slotSources = (terminalPayload ?? [])
+                      .map((entry) => entry.source)
+                      .filter((source): source is string => typeof source === "string");
+                    return slotSources.length === 0 ? undefined : uniqueInOrder(slotSources);
+                  })()
               : (() => {
                   const list = normalizeSequenceInputList(mergeCommandDeps(fields.input, rawFields.include));
                   return list.length === 0 ? undefined : list;
@@ -1353,6 +1426,22 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
         operation: entry.operation === "replace" ? undefined : entry.operation,
       }),
     );
+  }
+  if (kind === "terminal") {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- kind === "terminal" implies terminal/terminalPayload were built above
+    const exit = terminal!;
+    canonical.outcome = exit.outcome;
+    canonical.message = exit.message;
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
+    if (terminalPayload!.length > 0) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- see above
+      canonical.payload = terminalPayload!.map((entry) =>
+        compactAs<CanonicalProjection>({
+          source: entry.source,
+          destination: entry.destination,
+        }),
+      );
+    }
   }
   if (kind === "sequence" || kind === "loop" || kind === "for-each") {
     canonical.sequence =
@@ -1977,6 +2066,28 @@ interface NormalizedProjectProjection {
   readonly destination: string;
   readonly operation: ProjectWriteOperation;
   readonly output: CanonicalOutputSink;
+}
+
+/** A normalized terminal-payload write: canonical source shape plus the bare
+ * output-port destination the runtime qualifies (`port:<id>`). */
+type NormalizedTerminalBinding = {
+  readonly source: string | { readonly literal: JsonValue };
+  readonly destination: string;
+};
+
+function normalizeTerminalPayload(fields: TerminalSequenceFields): NormalizedTerminalBinding[] {
+  return (fields.payload ?? []).map((binding, index) => {
+    const path = `sequence.${fields.id}.payload[${index}]`;
+    validateSlug(binding.destination, `${path}.destination`);
+    const isLiteral = isLiteralProjectionSource(binding.source);
+    const source: string | { readonly literal: JsonValue } = isLiteral
+      ? { literal: (binding.source as LiteralProjectionSource).literal }
+      : refText(binding.source as SlotHandle, `${path}.source`);
+    if (!isLiteral && !(source as string).startsWith("slot:")) {
+      throw new Error(`${path}: terminal payload source must be a local slot handle or operation.literal(...)`);
+    }
+    return { source, destination: binding.destination };
+  });
 }
 
 function normalizeProjectProjections(fields: ProjectSequenceFields): NormalizedProjectProjection[] {

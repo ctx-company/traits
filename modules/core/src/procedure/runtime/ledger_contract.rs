@@ -1635,6 +1635,22 @@ fn revision_matches_for_each_binding(
 }
 
 fn outer_run_was_reached(ledger: &State, run_index: usize) -> bool {
+    // An authored terminal (0189) ends the run INSIDE the entered branch:
+    // the success arm clears the control stack and the error arm stops in
+    // place, so neither leaves the ordinary entered-branch evidence. The
+    // stop reason's own position path is that evidence — its first segment
+    // carries the branch item's run index.
+    if ledger.stop_reason.as_ref().is_some_and(|stop| {
+        matches!(
+            stop.reason.as_str(),
+            STOP_AUTHORED_SUCCESS | STOP_AUTHORED_ERROR
+        ) && stop
+            .at
+            .first()
+            .is_some_and(|segment| segment.index == run_index)
+    }) {
+        return true;
+    }
     let status = ledger.sequence_statuses.iter().find(|status| {
         status.position_path.is_empty() && status.run_index == run_index
     });

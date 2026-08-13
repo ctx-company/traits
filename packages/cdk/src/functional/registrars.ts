@@ -29,6 +29,7 @@ import type {
   SignalOutputValue,
 } from "../sequence.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
+import type { TerminalBinding } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
 import { slot } from "../slot.js";
 import type { AuthorFrame, RegisteredItem, Scope } from "./context.js";
@@ -484,9 +485,91 @@ function flowUntilAny(guards: readonly GuardValue[]): void {
   flowUntil(condition.any(guards));
 }
 
+/** Payload value for an authored terminal exit: a local slot handle or `operation.literal(...)`. */
+type TerminalPayloadValue = TerminalBinding["source"];
+
+/** Reserved output-port id the error terminal's typed record lands on (mirrors the Rust `TERMINAL_ERROR_PORT_ID`). */
+const FLOW_ERROR_PORT_ID = "flow-error";
+
+export interface FlowErrorOptions extends IdOverride {
+  /** Report headline; defaults to the title. */
+  readonly message?: string;
+  /** Evidence written to the reserved `flow-error` output port as the exit's typed error record. */
+  readonly evidence?: TerminalPayloadValue;
+}
+
+export interface FlowSuccessOptions extends IdOverride {
+  /** Report headline; defaults to the title. */
+  readonly message?: string;
+  /** Exit bindings: declared output-port id -> slot handle or `operation.literal(...)`. */
+  readonly bind?: Readonly<Record<string, TerminalPayloadValue>>;
+}
+
+/**
+ * Authored ERROR terminal (0189): the run ends HERE, failure-shaped — the
+ * message becomes the report headline and stop reason, the evidence (if
+ * given) the typed record on the reserved `flow-error` output port. Inside a
+ * `flow.loop` this still ends the RUN, never just the loop — loop-scoped
+ * aborts remain `flow.Abort`.
+ */
+function flowError(title: string, opts: FlowErrorOptions = {}): SequenceHandle {
+  requireBuild(`flow.error(${JSON.stringify(title)})`);
+  const frame = captureAuthorFrame();
+  forbidPositionalUntil(title, "flow.error", frame);
+  const id = opts.id ?? mintId(title);
+  const item = sequence.terminal(id, {
+    title,
+    outcome: "error",
+    message: opts.message ?? title,
+    payload:
+      opts.evidence === undefined ? [] : [{ destination: FLOW_ERROR_PORT_ID, source: opts.evidence }],
+  });
+  registerItem(`flow.error(${JSON.stringify(title)})`, item, title);
+  return item;
+}
+
+/**
+ * Authored SUCCESS terminal (0189): the run completes HERE, binding declared
+ * output ports through `bind`. Declaring any success terminal opts the trait
+ * into exit-point completion: falling through every exit becomes an authored
+ * `no-exit-reached` failure instead of quiet completion.
+ */
+function flowSuccess(title: string, opts: FlowSuccessOptions = {}): SequenceHandle {
+  requireBuild(`flow.success(${JSON.stringify(title)})`);
+  const frame = captureAuthorFrame();
+  forbidPositionalUntil(title, "flow.success", frame);
+  const id = opts.id ?? mintId(title);
+  const item = sequence.terminal(id, {
+    title,
+    outcome: "success",
+    message: opts.message ?? title,
+    payload: Object.entries(opts.bind ?? {}).map(([destination, source]) => ({ destination, source })),
+  });
+  registerItem(`flow.success(${JSON.stringify(title)})`, item, title);
+  return item;
+}
+
+/** Fused `when` + error terminal — lowers to exactly flow.when(title, condition, () => flow.error(...)), never a separate canonical form. */
+function flowErrorWhen(title: string, cond: BranchCheckValue, opts: FlowErrorOptions = {}): SequenceHandle {
+  return flowWhen(title, cond, () => {
+    flowError(title, { ...opts, id: opts.id ?? `${idFromTitle(title)}-exit` });
+  });
+}
+
+/** Fused `when` + success terminal — lowers to exactly flow.when(title, condition, () => flow.success(...)), never a separate canonical form. */
+function flowSuccessWhen(title: string, cond: BranchCheckValue, opts: FlowSuccessOptions = {}): SequenceHandle {
+  return flowWhen(title, cond, () => {
+    flowSuccess(title, { ...opts, id: opts.id ?? `${idFromTitle(title)}-exit` });
+  });
+}
+
 export const flow = {
   loop: flowLoop,
   when: flowWhen,
+  error: flowError,
+  success: flowSuccess,
+  errorWhen: flowErrorWhen,
+  successWhen: flowSuccessWhen,
   until: flowUntil,
   untilAll: flowUntilAll,
   untilAny: flowUntilAny,

@@ -348,6 +348,14 @@ fn collect_runtime_produced_refs_from_items(
             && let Some(item_slot) = item.item.as_ref() {
                 produced.insert(item_slot.clone());
             }
+        // Terminal payload writes land on output ports directly (0189): the
+        // reserved error record and success-exit bindings are produced
+        // values exactly like a declared output sink's.
+        if item.effective_kind() == SequenceKind::Terminal {
+            for projection in &item.payload {
+                produced.insert(format!("port:{}", projection.destination));
+            }
+        }
         for sequence_id in [
             local_sequence_id(item.sequence.as_deref()),
             local_sequence_id(item.otherwise.as_deref()),
@@ -454,6 +462,13 @@ fn validate_accepted_output_port_value_collection(
                 "{context} value {} must be a local port:* ref",
                 value.ref_text
             ));
+            continue;
+        }
+        // The reserved error-record port (0189 authored terminals) is
+        // deliberately NEVER declared — authors are refused from declaring
+        // it — so its accepted value has no declared schema to check against
+        // and passes on the reserved id alone.
+        if parsed.id() == crate::r#trait::port::TERMINAL_ERROR_PORT_ID {
             continue;
         }
         let Some(port) = trait_ref
