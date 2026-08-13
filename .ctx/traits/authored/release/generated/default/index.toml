@@ -148,9 +148,8 @@ description = "Reviewer's verdict on the version bump."
 
 [[resource]]
 id = "release-manifest"
-path = ".internal/release.toml"
-root = "repo"
-hint = "Repo-declared release contract: the version-file locations to bump, the changelog file path, and the release branch name. Agents read it with their own tools; the trait never hardcodes any of it."
+path = "resources/release.toml"
+hint = "The release contract: the version-file locations to bump, the changelog file path, the release branch name, and the bump rule. Agents read it with their own tools; the trait's steps never hardcode any of it."
 trigger = "on-activation"
 
 [[schema]]

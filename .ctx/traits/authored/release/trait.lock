@@ -10,15 +10,15 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:8bc4ec2419a8bad4dd0be318f6e6aba5b4ab0e566b4797bce18f0a9e3161a914"
-canonical = "sha256:2e68bffe1341b864690dcd6b9e93d451c40709a89138e9912dba9376669a0af0"
-model-visible = "sha256:76ee937ef7388f7ddb7e2fa4dbf92337f6b2f98aa2f02f7e81b8e2cb6027b311"
-resource-manifest = "sha256:d86f894b483f1bbc7740594e09b4ad4f5669d2fb12e0e5271120b3f03ed1c577"
+source = "sha256:5a8b0c3bcf860fdad57176d53e82e550333daf5ca84e616762b02d56582c09f5"
+canonical = "sha256:871145ad1a37bf26198ec89c9f645d3fa9adb2682919e19bea123eae4a05e348"
+model-visible = "sha256:b9fa48ba1574bcec0552b073daabeb5214b8b047343e8da67fdfda2118e1db05"
+resource-manifest = "sha256:fd9005a35915879b2c8c62e0e0eb5d55f365b3a54ccbd2dd3373aa6dc519b61c"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/release-default/SKILL.md"
-digest = "sha256:d094dd378e2de3ab056a7d859eae19eed5a8bd873bd2ee288c32847e118a90f8"
+digest = "sha256:629d278ddfe327999cefc68279205dd39d89faa6ac626d2e91f17d6924783af1"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -26,11 +26,11 @@ renderer-version = "0.1.0-alpha.1"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:8bc4ec2419a8bad4dd0be318f6e6aba5b4ab0e566b4797bce18f0a9e3161a914"
-canonical = "sha256:2e68bffe1341b864690dcd6b9e93d451c40709a89138e9912dba9376669a0af0"
-model-visible = "sha256:76ee937ef7388f7ddb7e2fa4dbf92337f6b2f98aa2f02f7e81b8e2cb6027b311"
-render = "sha256:eaebd36cd1fb0c53e2f8e655d8e1f5e03f3d7e7ab6399a40340fb34ca0d6b86b"
-generated-markdown = "sha256:d094dd378e2de3ab056a7d859eae19eed5a8bd873bd2ee288c32847e118a90f8"
+source = "sha256:5a8b0c3bcf860fdad57176d53e82e550333daf5ca84e616762b02d56582c09f5"
+canonical = "sha256:871145ad1a37bf26198ec89c9f645d3fa9adb2682919e19bea123eae4a05e348"
+model-visible = "sha256:b9fa48ba1574bcec0552b073daabeb5214b8b047343e8da67fdfda2118e1db05"
+render = "sha256:1197d2edd6cc1bde4b6a1eee260e53c615d6aea18b589a94d9b060f9f91e3b55"
+generated-markdown = "sha256:629d278ddfe327999cefc68279205dd39d89faa6ac626d2e91f17d6924783af1"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]

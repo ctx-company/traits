@@ -1,0 +1,28 @@
+# Release contract read by the release trait's agents — the trait itself
+# hardcodes none of these facts, it only points its agents here. For now the
+# trait package ships this file (dogfood: it describes THIS repository); a
+# consumer-authored repo-side manifest supersedes it later, at which point
+# the resource declaration moves back to root = "repo".
+
+release-branch = "main"
+
+# The changelog file the approved entry is inserted into, repo-relative.
+# Created on the first release if it does not exist yet.
+changelog = "CHANGELOG.md"
+
+# How to derive the next version from the commit log since the last tag when
+# no explicit version override is given: conventional-commit prefixes, with
+# the pre-1.0 mapping (breaking -> minor, feat/fix -> patch).
+bump-rule = "conventional-commits-pre-1.0"
+
+# Tag name for a released version, with {version} substituted. No tags exist
+# yet; the first release creates the first one.
+tag-format = "v{version}"
+
+# Every file carrying the version string, bumped in lockstep. The workspace
+# Cargo.toml is the single authority today — module crates inherit it via
+# version.workspace = true, and the npm packages under packages/ version
+# independently and are NOT part of this contract.
+[[version-file]]
+path = "Cargo.toml"
+locator = '[workspace.package] version = "<current>"'

@@ -61,8 +61,8 @@
   },
   "resource:release-manifest": {
     "file": ".ctx/traits/authored/release/source/shared/resource.ts",
-    "start": 9,
-    "end": 9
+    "start": 14,
+    "end": 14
   },
   "schema:decision": {
     "file": "packages/toolkit/src/schema.ts",
