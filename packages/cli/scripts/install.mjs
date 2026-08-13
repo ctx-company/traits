@@ -107,7 +107,10 @@ export async function install({ version, platform = process.platform, arch = pro
       strict: true,
       filter: (path, entry) => {
         if (path !== 'ctx') return false;
-        if (entry.type !== 'File') invalidEntry = true;
+        if (entry.type !== 'File') {
+          invalidEntry = true;
+          return false;
+        }
         return true;
       },
     });
