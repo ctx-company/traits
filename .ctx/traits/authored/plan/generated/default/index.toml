@@ -129,7 +129,7 @@ input = ["slot:task-files"]
 output = ["slot:result"]
 
 [procedure]
-description = "Turn a described task into codebase-grounded, house-format task files in .internal/tasks/ — the board the implement family runs from in any repo."
+description = "Refine the described task against the codebase, split it into small task files, and write them to .internal/tasks/ so the implement family can run."
 input = ["port:task"]
 output = ["port:written-files"]
 

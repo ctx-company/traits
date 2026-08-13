@@ -2,7 +2,7 @@ import { defineVariant, input, useBehavior, useIntent } from "@ctx-traits/cdk";
 import * as shared from "#trait/shared/index.ts";
 
 export default function () {
-  defineVariant("Direct", { name: "Plan (Direct)", summary: "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement.", metadata: { tag: shared.metadata.tag }, description: "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement." });
+  defineVariant("Direct", { name: "Plan (Direct)", summary: "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement.", metadata: { tag: shared.metadata.tag }, description: "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement.", procedureDescription: "Format the described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/." });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
   const smart1 = shared.agent.smart1("Formats the task text into one well-formed task file, near-verbatim.", "Format role.");

@@ -131,17 +131,19 @@ export function defineTrait(name: string, fields: DefineTraitFields = {}): void 
   frame.fields = fields.name === undefined && name !== slug ? { ...fields, name } : { ...fields };
 }
 
-/** `defineVariant`'s own fields: metadata only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
+/** `defineVariant`'s own fields: metadata and descriptions only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
 export interface DefineVariantFields {
   readonly name?: string;
-  /** The required agent+user prose. Also supplies the procedure's internal description when the variant registers steps. */
+  /** The required agent+user prose. */
   readonly description?: string;
+  /** Optional internal procedure description, defaulting to `description`. */
+  readonly procedureDescription?: string;
   /** Optional user-only override, defaulting to `description` when absent. */
   readonly summary?: string;
   readonly metadata?: TraitMetadata;
 }
 
-const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "description", "summary", "metadata"];
+const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "description", "procedureDescription", "summary", "metadata"];
 
 /**
  * Declares a hook-style variant module's identity — exactly once, inside a
@@ -585,7 +587,7 @@ function assembleVariantFields(evaluated: EvaluatedFrame): Record<string, unknow
 
   let procedureHandle: TraitFields["procedure"];
   if (items.length > 0) {
-    const description = traitFrame.fields?.description;
+    const description = traitFrame.fields?.procedureDescription ?? traitFrame.fields?.description;
     if (typeof description !== "string" || description.trim() === "") {
       throw new Error(
         'defineVariant: a procedural variant (one that registers steps) requires defineVariant(slug, { description: "..." }) — a text description of the variant',

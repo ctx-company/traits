@@ -2,7 +2,7 @@ import { defineVariant, input, slot, useBehavior, useIntent } from "@ctx-traits/
 import * as shared from "#trait/shared/index.ts";
 
 export default function () {
-  defineVariant("Complex", { name: "Plan (Complex)", summary: "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/.", metadata: { tag: [...shared.metadata.tag, "review"] }, description: "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/." });
+  defineVariant("Complex", { name: "Plan (Complex)", summary: "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/.", metadata: { tag: [...shared.metadata.tag, "review"] }, description: "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/.", procedureDescription: "Refine the described task against the codebase, split it into small task files, independently critique them, apply one bounded revise pass, and write them to .internal/tasks/ so the implement family can run." });
   useBehavior(shared.metadata.behavior);
   useIntent(shared.intent);
   const smart1 = shared.agent.smart1("Strong model: refines the task, grounds it in the codebase, splits it into task files, and critiques both artifacts.", "Refinement + grounding + critique role.");

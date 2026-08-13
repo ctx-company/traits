@@ -158,7 +158,7 @@ input = ["slot:task-files"]
 output = ["slot:result"]
 
 [procedure]
-description = "Turn a described task into codebase-grounded, house-format task files, then independently critique and revise them once before writing to .internal/tasks/."
+description = "Refine the described task against the codebase, split it into small task files, independently critique them, apply one bounded revise pass, and write them to .internal/tasks/ so the implement family can run."
 input = ["port:task"]
 output = ["port:written-files"]
 
