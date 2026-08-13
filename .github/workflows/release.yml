@@ -163,10 +163,19 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "${tag}" dist/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${tag}" \
-            --generate-notes
+          # Idempotent across re-tags: a partially failed run (tap or npm)
+          # leaves the release existing with assets — re-create fails, so
+          # view-then-upload with --clobber replaces assets in place.
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${tag}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${tag}" \
+              --generate-notes
+          fi
 
   # The formula only becomes `brew install` once it lives in a tap. Kept as a
   # separate job from `publish` so a tap failure can never leave the release
@@ -184,7 +193,7 @@ jobs:
       - name: Push to the tap
         env:
           TAP_TOKEN: ${{ secrets.GH_HOMEBREW_PAT_TOKEN }}
-          TAP_REPO: ctx-company/homebrew-tap
+          TAP_REPO: ctx-company/homebrew
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"

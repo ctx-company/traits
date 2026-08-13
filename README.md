@@ -13,7 +13,8 @@ How ctx compares → [docs/comparison.md](docs/comparison.md)
 ### Homebrew (macOS and Linux)
 
 ```sh
-brew install ctx-company/tap/ctx
+brew tap ctx-company/tap https://github.com/ctx-company/homebrew
+brew install ctx
 ```
 
 ### Direct download
