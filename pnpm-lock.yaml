@@ -27,10 +27,10 @@ importers:
   packages/agents:
     dependencies:
       '@ctx-traits/cdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../cdk
       '@ctx-traits/toolkit':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../toolkit
     devDependencies:
       '@types/node':
@@ -49,7 +49,7 @@ importers:
   packages/cdk:
     dependencies:
       '@ctx-traits/config':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../config
     devDependencies:
       '@types/node':
@@ -132,7 +132,7 @@ importers:
   packages/toolkit:
     dependencies:
       '@ctx-traits/cdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../cdk
     devDependencies:
       '@types/node':

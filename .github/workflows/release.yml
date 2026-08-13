@@ -179,7 +179,7 @@ jobs:
           path: dist
       - name: Push to the tap
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_TOKEN: ${{ secrets.GH_HOMEBREW_PAT_TOKEN }}
           TAP_REPO: ctx-company/homebrew-tap
         run: |
           set -euo pipefail
@@ -189,7 +189,7 @@ jobs:
           # already published must not be reported as failed because a
           # follow-on pointer could not be written.
           if [[ -z "${TAP_TOKEN:-}" ]]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN is not set — skipping the tap push."
+            echo "::warning::GH_HOMEBREW_PAT_TOKEN is not set — skipping the tap push."
             echo "::warning::Install this release directly with: brew install --formula https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/ctx.rb"
             exit 0
           fi
@@ -212,7 +212,7 @@ jobs:
   # is the package's own, NOT the tag: the binary and the authoring SDK are
   # separately versioned artifacts that happen to release together.
   npm:
-    name: publish @ctx-traits/cdk
+    name: publish npm packages
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -228,22 +228,32 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @ctx-traits/cdk run build
+      # Only the four published packages — pnpm orders the filtered set
+      # topologically, and the private bindings/harness packages must not be
+      # built (or published) here.
+      - run: >-
+          pnpm --filter @ctx-traits/config --filter @ctx-traits/cdk
+          --filter @ctx-traits/toolkit --filter @ctx-traits/agents run build
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "::warning::NPM_TOKEN is not set — skipping the CDK publish."
+            echo "::warning::NPM_TOKEN is not set — skipping the npm publishes."
             exit 0
           fi
-          cd packages/cdk
-          version=$(node -p "require('./package.json').version")
-          # Republishing an existing version is an npm error, and a retagged
-          # release must stay idempotent.
-          if npm view "@ctx-traits/cdk@${version}" version >/dev/null 2>&1; then
-            echo "@ctx-traits/cdk@${version} is already published — nothing to do"
-            exit 0
-          fi
-          npm publish
+          # Dependency order: config -> cdk -> toolkit -> agents. `pnpm
+          # publish` (never bare `npm publish`) so workspace:^ ranges are
+          # rewritten to real versions in the published manifests.
+          for package in config cdk toolkit agents; do
+            name="@ctx-traits/${package}"
+            version=$(node -p "require('./packages/${package}/package.json').version")
+            # Republishing an existing version is an npm error, and a
+            # retagged release must stay idempotent.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} is already published — nothing to do"
+              continue
+            fi
+            pnpm --filter "${name}" publish --access public --no-git-checks
+          done

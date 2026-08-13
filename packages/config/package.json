@@ -1,7 +1,7 @@
 {
   "name": "@ctx-traits/config",
-  "version": "0.1.0-alpha.0",
-  "description": "Configuration vocabulary for ctx.traits: declare operator knobs and config.ts authoring tables, resolved from config layers at activation — never at build time.",
+  "version": "0.1.0",
+  "description": "Configuration vocabulary for ctx.traits: declare operator knobs and config.ts authoring tables, resolved from config layers at activation \u2014 never at build time.",
   "keywords": [
     "config",
     "ctx",
@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
   "main": "dist/index.js",
@@ -38,7 +39,7 @@
         "import": "./dist/index.js"
       }
     },
-    "access": "restricted"
+    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
