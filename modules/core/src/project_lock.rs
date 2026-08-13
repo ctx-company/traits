@@ -97,6 +97,10 @@ pub enum PackageTransport {
     /// version, no tarball integrity — only an authored relative path and
     /// the vendored tree's digest evidence.
     Path,
+    /// A git-transport source (0191): no registry, no npm SRI integrity —
+    /// only a resolved repository URL, requested ref, and resolved commit
+    /// sha, plus the vendored tree's digest evidence.
+    Git,
 }
 
 /// One locked package: exact registry evidence for an npm-transport entry
@@ -144,6 +148,18 @@ pub struct PackageLockEntry {
     /// for an npm-transport entry.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub path: String,
+    /// Resolved git repository URL (0191). Empty for a non-git entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    /// The ref (branch, tag, or explicit sha) authored/requested at lock
+    /// time (0191). Empty for a non-git entry, and for an unpinned git entry
+    /// that resolved from the default branch.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub requested_ref: String,
+    /// The exact commit sha the requested ref resolved to (0191). Empty for
+    /// a non-git entry.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub resolved_commit: String,
     /// Vendor directory path relative to the repo root
     /// (`.ctx/traits/vendored/<alias>`).
     pub vendored_path: String,
@@ -181,13 +197,21 @@ impl PackageTransport {
 
 impl PackageLockEntry {
     /// The unambiguous source identity for this locked entry: the npm
-    /// package identifier, or `"path:<path>"` for a path-transport entry —
-    /// the same shape [`crate::manifest::ProjectPackageDependency::identity`]
-    /// produces from the manifest side, so the two are directly comparable.
+    /// package identifier, `"path:<path>"` for a path-transport entry, or
+    /// `"git+<url>#path=<p>"` for a git-transport entry — the same shape
+    /// [`crate::manifest::ProjectPackageDependency::identity`] produces from
+    /// the manifest side, so the two are directly comparable.
     pub fn identity(&self) -> String {
         match self.transport {
             PackageTransport::Npm => self.package.clone(),
             PackageTransport::Path => format!("path:{}", self.path),
+            PackageTransport::Git => {
+                if self.path.is_empty() {
+                    format!("git+{}", self.url)
+                } else {
+                    format!("git+{}#path={}", self.url, self.path)
+                }
+            }
         }
     }
 }
@@ -305,5 +329,69 @@ tree-digest = "sha256:deadbeef"
         assert_eq!(decoded.transport, PackageTransport::Path);
         assert_eq!(decoded.identity(), "path:.ctx/traits/authored/implement");
         assert_eq!(decoded.path, entry.path);
+    }
+
+    #[test]
+    fn git_entry_round_trips_without_npm_fields() {
+        let entry = PackageLockEntry {
+            alias: "refactor".to_string(),
+            transport: PackageTransport::Git,
+            url: "https://github.com/o/r.git".to_string(),
+            requested_ref: "v1.0.0".to_string(),
+            resolved_commit: "abc123".to_string(),
+            path: "traits/refactor".to_string(),
+            vendored_path: ".ctx/traits/vendored/refactor".to_string(),
+            tree_digest: "sha256:cafebabe".to_string(),
+            ..Default::default()
+        };
+        let text = toml::to_string_pretty(&entry).unwrap();
+        assert!(
+            !text.contains("integrity") && !text.contains("resolved-version"),
+            "git entry must not fabricate npm SRI/registry evidence: {text}"
+        );
+        let decoded: PackageLockEntry = toml::from_str(&text).unwrap();
+        assert_eq!(decoded.transport, PackageTransport::Git);
+        assert_eq!(
+            decoded.identity(),
+            "git+https://github.com/o/r.git#path=traits/refactor"
+        );
+        assert_eq!(decoded.url, entry.url);
+        assert_eq!(decoded.resolved_commit, entry.resolved_commit);
+    }
+
+    /// Guard against lock byte-compat regression: a pre-0191 npm+path lock
+    /// document must decode/encode byte-identically now that the git fields
+    /// exist, since they are all skip-if-empty.
+    #[test]
+    fn pre_git_lock_document_stays_byte_identical() {
+        let npm = PackageLockEntry {
+            alias: "demo".to_string(),
+            package: "@scope/demo".to_string(),
+            requested: "^1.0.0".to_string(),
+            resolved_version: "1.2.0".to_string(),
+            integrity: "sha512-abc".to_string(),
+            vendored_path: ".ctx/traits/vendored/demo".to_string(),
+            tree_digest: "sha256:deadbeef".to_string(),
+            ..Default::default()
+        };
+        let path = PackageLockEntry {
+            alias: "implement".to_string(),
+            transport: PackageTransport::Path,
+            path: ".ctx/traits/authored/implement".to_string(),
+            vendored_path: ".ctx/traits/vendored/implement".to_string(),
+            tree_digest: "sha256:cafebabe".to_string(),
+            ..Default::default()
+        };
+        let mut lock = ProjectLock::new(Metadata::default());
+        lock.upsert_package(npm);
+        lock.upsert_package(path);
+        lock.sort_for_output();
+        let first = lock.to_json().unwrap();
+        let decoded: ProjectLock = serde_json::from_str(&first).unwrap();
+        let second = decoded.to_json().unwrap();
+        assert_eq!(first, second);
+        assert!(!first.contains("\"url\""));
+        assert!(!first.contains("\"requested-ref\""));
+        assert!(!first.contains("\"resolved-commit\""));
     }
 }

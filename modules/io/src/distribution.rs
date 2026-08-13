@@ -350,8 +350,23 @@ const CLAIM_NOT_APPLICABLE_PATH: &str = "not applicable (path installs have no p
 /// rather than duplicating its transaction for a second transport.
 #[derive(Debug, Clone)]
 enum PackageIdentity {
-    Npm { package: String, requested: String },
-    Path { path: String },
+    Npm {
+        package: String,
+        requested: String,
+    },
+    Path {
+        path: String,
+    },
+    /// A git-transport source (0191): `path` is always the *resolved*
+    /// repo-relative package path (never the raw shorthand selector name),
+    /// so a shorthand add and its equivalent `--trait`/`git+...#path=...`
+    /// form persist byte-identical manifest/lock text.
+    Git {
+        url: String,
+        requested_ref: Option<String>,
+        resolved_commit: String,
+        path: String,
+    },
 }
 
 impl PackageIdentity {
@@ -363,6 +378,7 @@ impl PackageIdentity {
         match self {
             Self::Npm { package, .. } => package.clone(),
             Self::Path { path } => format!("path:{path}"),
+            Self::Git { url, path, .. } => format!("git+{url}#path={path}"),
         }
     }
 
@@ -370,16 +386,18 @@ impl PackageIdentity {
         match self {
             Self::Npm { .. } => PackageTransport::Npm,
             Self::Path { .. } => PackageTransport::Path,
+            Self::Git { .. } => PackageTransport::Git,
         }
     }
 
     /// The `requested` selector text recorded in the audit journal: the
-    /// authored npm version selector, or empty for a path source, which has
-    /// none.
+    /// authored npm version selector, the requested git ref, or empty for a
+    /// path source, which has none.
     fn requested_display(&self) -> String {
         match self {
             Self::Npm { requested, .. } => requested.clone(),
             Self::Path { .. } => String::new(),
+            Self::Git { requested_ref, .. } => requested_ref.clone().unwrap_or_default(),
         }
     }
 }
@@ -579,6 +597,19 @@ fn install_internal(
                 allow_ownership_transition,
                 force_path_update,
             )
+        }
+        InstallSpec::Git(spec) => {
+            if inherited {
+                return Err(crate::environment::Error::Filesystem {
+                    path: spec.url.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "git: dependencies cannot be inherited through extends; only npm dependencies may be inherited",
+                    ),
+                }
+                .into());
+            }
+            install_git_internal(scope, spec, alias_override, allow_ownership_transition)
         }
     }
 }
@@ -795,6 +826,355 @@ fn install_path_internal(
         claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
         review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
     })
+}
+
+/// Install (or re-install, for `update`) one project- or global-scoped git
+/// package (task 0191, phase a/b IO wiring): resolve the requested ref to a
+/// commit sha over `info/refs`, fetch the codeload snapshot at that sha,
+/// locate the selected trait by probe order, and publish it through the
+/// same staged transaction npm/path installs use. `spec.trait_selector ==
+/// None` (a bare collection spec) is refused here with the rendered
+/// collection listing (see [`stage_git_package`]) rather than vendored.
+fn install_git_internal(
+    scope: &DistributionScope,
+    spec: core_distribution::GitSpec,
+    alias_override: Option<&str>,
+    allow_ownership_transition: bool,
+) -> crate::Result<InstallReport> {
+    let alias = alias_override.unwrap_or(&spec.default_alias).to_string();
+    let staged_git = stage_git_package(&spec)?;
+    let identity = PackageIdentity::Git {
+        url: spec.url.clone(),
+        requested_ref: spec.requested_ref.clone(),
+        resolved_commit: staged_git.resolved_commit.clone(),
+        path: staged_git.resolved_path.clone(),
+    };
+    let tree_digest = publish_staged_package(
+        scope,
+        &alias,
+        &identity,
+        &staged_git.staged,
+        PackageOwnership {
+            inherited: false,
+            allow_transition: allow_ownership_transition,
+        },
+        Some(crate::audit_journal::AuditAction::Install),
+    )?;
+
+    let traits = staged_git
+        .staged
+        .traits
+        .iter()
+        .map(|t| StagedTraitReport {
+            id: t.id.clone(),
+            canonical_path: t.canonical_path.clone(),
+            canonical_digest: t.canonical_digest.clone(),
+            schema_version: t.schema_version.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(InstallReport {
+        alias: alias.clone(),
+        transport: "git".to_string(),
+        package: Some(spec.url.clone()),
+        path: Some(staged_git.resolved_path.clone()),
+        requested: spec.requested_ref.clone(),
+        resolved_version: Some(staged_git.resolved_commit.clone()),
+        integrity: None,
+        tree_digest,
+        vendored_path: scope.vendor_root().join(&alias).to_string(),
+        traits,
+        inherited: false,
+        claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
+        review_hint: "run `ctx traits trust approve <trait>` for each canonical digest above before running it".to_string(),
+    })
+}
+
+/// A staged git-transport trait: the single selected trait's subtree,
+/// copied out of the full codeload snapshot (never the whole collection),
+/// plus the resolved commit sha and repo-relative package path the caller
+/// persists into the manifest/lock (task 0191).
+struct StagedGitPackage {
+    staged: StagedPackage,
+    resolved_commit: String,
+    resolved_path: String,
+    _cleanup: TempStagingGuard,
+}
+
+/// Resolve `spec`'s ref to a commit sha and fetch the codeload snapshot,
+/// shared by [`stage_git_package`] and [`list_git_collection`] so both pay
+/// exactly one `info/refs` round-trip and one tarball fetch per call.
+fn resolve_and_fetch_git(
+    spec: &core_distribution::GitSpec,
+) -> crate::Result<(String, String, String, Utf8PathBuf, TempStagingGuard)> {
+    let (owner, repo) = github_owner_repo(&spec.url)?;
+
+    let refs = crate::git_fetch::resolve_refs(&spec.url)
+        .map_err(|source| github_request_failure(&spec.url, "resolve refs for", source))?;
+    let Some(sha) = refs.resolve(spec.requested_ref.as_deref()) else {
+        return Err(crate::environment::Error::Filesystem {
+            path: spec.url.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "git: {} has no ref {:?}",
+                    spec.url,
+                    spec.requested_ref.as_deref().unwrap_or("HEAD")
+                ),
+            ),
+        }
+        .into());
+    };
+    let sha = sha.to_string();
+
+    let fetch_root = local_staging_path();
+    crate::git_fetch::fetch_codeload_snapshot(&owner, &repo, &sha, &fetch_root).map_err(
+        |source| github_request_failure(&spec.url, "fetch a codeload snapshot for", source),
+    )?;
+    let fetch_guard = TempStagingGuard(fetch_root.clone());
+    Ok((owner, repo, sha, fetch_root, fetch_guard))
+}
+
+/// Map a [`crate::git_fetch::Error::Request`] against a `github.com` URL
+/// (only such URLs reach this transport — [`github_owner_repo`] already
+/// refused everything else) to an actionable message: a non-success HTTP
+/// status from GitHub's own hosts almost always means the repo is private
+/// or doesn't exist, and this transport has no credentials and no git-CLI
+/// fallback yet, so say so instead of surfacing the bare `HTTP <status>`.
+/// Every other git-transport error (malformed refs, no HEAD, ref not found,
+/// archive extraction) passes through unchanged.
+fn github_request_failure(
+    url: &str,
+    action: &str,
+    source: crate::git_fetch::Error,
+) -> crate::Error {
+    let crate::git_fetch::Error::Request {
+        url: request_url,
+        message,
+    } = &source
+    else {
+        return source.into();
+    };
+    crate::environment::Error::Filesystem {
+        path: request_url.clone(),
+        source: std::io::Error::other(format!(
+            "git: failed to {action} {url} ({message}); the repository may be private or \
+             may not exist — this build has no credentials and cannot fall back to a `git` \
+             CLI checkout (task 0191 phase e, not yet implemented)",
+        )),
+    }
+    .into()
+}
+
+/// One trait package found inside a git collection: its selector path
+/// (usable verbatim as `owner/repo/<trait_path>`), id, version, summary, and
+/// the exact copyable `dependency add` command for it (task 0191 phase c).
+pub struct CollectionEntry {
+    pub trait_path: String,
+    pub id: String,
+    pub version: String,
+    pub summary: String,
+    pub add_command: String,
+}
+
+pub struct CollectionListing {
+    pub url: String,
+    pub resolved_commit: String,
+    pub entries: Vec<CollectionEntry>,
+}
+
+impl CollectionListing {
+    /// Plain-text rendering used both by CLI listing output and by the
+    /// wrong-trait-name / bare-collection error messages, so a spec that
+    /// can't be resolved to one trait always shows what's actually there.
+    pub fn render(&self) -> String {
+        if self.entries.is_empty() {
+            return format!(
+                "(no trait packages found in {}@{})",
+                self.url, self.resolved_commit
+            );
+        }
+        self.entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "  {} ({} v{}) — {}\n    {}",
+                    entry.trait_path, entry.id, entry.version, entry.summary, entry.add_command
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Scan a git collection spec (task 0191 phase c) for contained trait
+/// packages, skipping any `package.json`-only entry that has no `trait.toml`
+/// (an authoring library, not a trait) — the same
+/// [`crate::registry::discover_trait_packages`] classifier `stage_git_package`
+/// uses for a single-trait select, so listing and selection never disagree
+/// on what counts as a trait.
+pub fn list_git_collection(spec: &core_distribution::GitSpec) -> crate::Result<CollectionListing> {
+    let (_owner, _repo, sha, fetch_root, _guard) = resolve_and_fetch_git(spec)?;
+    let discovered = crate::registry::discover_trait_packages(&fetch_root)?;
+    collection_listing_from_discovered(spec, &sha, &discovered)
+}
+
+fn collection_listing_from_discovered(
+    spec: &core_distribution::GitSpec,
+    sha: &str,
+    discovered: &[crate::registry::DiscoveredPackage],
+) -> crate::Result<CollectionListing> {
+    let mut entries = Vec::new();
+    for package in discovered {
+        let inspection = inspect_local_package(&package.absolute_root)?;
+        for local_package in &inspection.packages {
+            let trait_path = package.relative_root.as_str().trim_matches('/').to_string();
+            let trait_ref = &local_package.loaded.trait_ref;
+            let summary = trait_ref
+                .summary
+                .as_ref()
+                .map(|s| s.as_str().to_string())
+                .unwrap_or_else(|| trait_ref.description.as_str().to_string());
+            entries.push(CollectionEntry {
+                add_command: format!(
+                    "ctx traits dependency add {}/{}@{}",
+                    spec.url
+                        .trim_start_matches("https://github.com/")
+                        .trim_start_matches("http://github.com/")
+                        .trim_end_matches(".git"),
+                    trait_path,
+                    sha
+                ),
+                trait_path,
+                id: local_package.loaded.id.clone(),
+                version: local_package.loaded.version.clone(),
+                summary,
+            });
+        }
+    }
+    entries.sort_by(|left, right| left.trait_path.cmp(&right.trait_path));
+    Ok(CollectionListing {
+        url: spec.url.clone(),
+        resolved_commit: sha.to_string(),
+        entries,
+    })
+}
+
+fn stage_git_package(spec: &core_distribution::GitSpec) -> crate::Result<StagedGitPackage> {
+    let Some(selector) = spec.trait_selector.as_deref() else {
+        let listing = list_git_collection(spec)?;
+        return Err(crate::environment::Error::Filesystem {
+            path: spec.url.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "git: this spec names a collection, not a trait; pass one of the traits below\n{}",
+                    listing.render()
+                ),
+            ),
+        }
+        .into());
+    };
+
+    let (owner, repo, sha, fetch_root, fetch_guard) = resolve_and_fetch_git(spec)?;
+
+    let discovered = crate::registry::discover_trait_packages(&fetch_root)?;
+    let candidates = [
+        selector.to_string(),
+        format!("traits/{selector}"),
+        format!(".ctx/traits/authored/{selector}"),
+    ];
+    let matched = candidates.iter().find_map(|candidate| {
+        let candidate = candidate.trim_matches('/');
+        discovered
+            .iter()
+            .find(|package| package.relative_root.as_str().trim_matches('/') == candidate)
+    });
+    let Some(matched) = matched else {
+        let listing = collection_listing_from_discovered(spec, &sha, &discovered)?;
+        return Err(crate::environment::Error::Filesystem {
+            path: spec.url.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "git: no trait package named {selector:?} in {owner}/{repo}@{sha}; available traits below\n{}",
+                    listing.render()
+                ),
+            ),
+        }
+        .into());
+    };
+    let resolved_path = matched.relative_root.as_str().trim_matches('/').to_string();
+    let matched_absolute_root = matched.absolute_root.clone();
+
+    let staging_root = local_staging_path();
+    let excludes = crate::harness_config::resolve_pack_excludes(&matched_absolute_root);
+    crate::publish::copy_safe(&matched_absolute_root, &staging_root, &excludes)?;
+    let staging_guard = TempStagingGuard(staging_root.clone());
+    drop(fetch_guard);
+
+    let inspection = inspect_local_package(&staging_root)?;
+    if inspection.packages.is_empty() {
+        return Err(crate::environment::Error::Filesystem {
+            path: matched_absolute_root.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "git: {resolved_path} does not contain a trait package (no {} declaring a canonical trait)",
+                    crate::layout::PACKAGE_MANIFEST
+                ),
+            ),
+        }
+        .into());
+    }
+    let (traits, _computed_digests) = staged_traits_from_inspection(&inspection, &staging_root)?;
+
+    Ok(StagedGitPackage {
+        staged: StagedPackage {
+            resolved_version: String::new(),
+            integrity: String::new(),
+            staging_root,
+            traits,
+            claim_verdict: core_distribution::ClaimVerification::Absent,
+        },
+        resolved_commit: sha,
+        resolved_path,
+        _cleanup: staging_guard,
+    })
+}
+
+/// Extract `(owner, repo)` from a GitHub HTTPS URL. Any other host (a
+/// private GitHub Enterprise instance, GitLab, a bare SSH remote, ...) has
+/// no codeload equivalent this transport can reach; refused with a message
+/// naming the not-yet-implemented git-CLI fallback (task 0191 phase e)
+/// rather than a bare HTTP error.
+fn github_owner_repo(url: &str) -> crate::Result<(String, String)> {
+    let invalid = || {
+        crate::environment::Error::Filesystem {
+            path: url.to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "git: only https://github.com/<owner>/<repo> sources are supported in this build; other git hosts require the git-CLI fallback (task 0191 phase e, not yet implemented)",
+            ),
+        }
+        .into()
+    };
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .ok_or_else(invalid)?;
+    let rest = rest.trim_end_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let mut segments = rest.split('/');
+    let owner = segments.next().filter(|s| !s.is_empty());
+    let repo = segments.next().filter(|s| !s.is_empty());
+    let (Some(owner), Some(repo)) = (owner, repo) else {
+        return Err(invalid());
+    };
+    if segments.next().is_some() {
+        return Err(invalid());
+    }
+    Ok((owner.to_string(), repo.to_string()))
 }
 
 /// Normalize a `remove`/`update` operand's source identity exactly as the
@@ -1127,14 +1507,12 @@ pub fn outdated(
                     drift: None,
                 });
             }
-            None => {
+            None if dependency.as_path().is_some() => {
                 // A path-transport dependency (P535) has no registry range
                 // to be "outdated" against: its drift concept is the locked
                 // full-tree digest versus a fresh restage of the current
                 // source, computed read-only here (no vendor/lock write).
-                let Some(relative_path) = dependency.as_path() else {
-                    continue;
-                };
+                let relative_path = dependency.as_path().expect("checked by guard");
                 let locked_tree_digest = lock
                     .as_ref()
                     .and_then(|lock| lock.package_entry(alias))
@@ -1162,6 +1540,37 @@ pub fn outdated(
                     drift,
                 });
             }
+            None if dependency.as_git().is_some() => {
+                // A git-transport dependency's "outdated" concept is the
+                // locked commit sha versus the remote ref's current tip,
+                // resolved read-only over `info/refs` (no tarball fetch —
+                // task 0191 phase b explicitly avoids the codeload download
+                // just to check staleness).
+                let (git_url, git_ref, _git_path) = dependency.as_git().expect("checked by guard");
+                let locked_entry = lock.as_ref().and_then(|lock| lock.package_entry(alias));
+                let current = locked_entry
+                    .map(|entry| entry.resolved_commit.clone())
+                    .unwrap_or_else(|| "unlocked".to_string());
+                let latest = crate::git_fetch::resolve_refs(git_url)
+                    .ok()
+                    .and_then(|refs| refs.resolve(git_ref).map(str::to_string));
+                let drift = latest.as_ref().map(|latest| {
+                    Some(latest.as_str()) != locked_entry.map(|e| e.resolved_commit.as_str())
+                });
+                rows.push(OutdatedRow {
+                    alias: alias.clone(),
+                    transport: "git".to_string(),
+                    package: Some(git_url.to_string()),
+                    path: None,
+                    current: Some(current),
+                    wanted: latest.clone(),
+                    latest,
+                    locked_tree_digest: None,
+                    current_tree_digest: None,
+                    drift,
+                });
+            }
+            None => continue,
         }
     }
     Ok(rows)
@@ -1201,6 +1610,17 @@ pub fn info(
                 resolved_version: None,
                 claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
                 traits: trait_info_from_staged(&local.staged),
+            })
+        }
+        InstallSpec::Git(spec) => {
+            let staged_git = stage_git_package(&spec)?;
+            Ok(InfoReport {
+                transport: "git".to_string(),
+                package: Some(spec.url.clone()),
+                path: Some(staged_git.resolved_path.clone()),
+                resolved_version: Some(staged_git.resolved_commit.clone()),
+                claim: CLAIM_NOT_APPLICABLE_PATH.to_string(),
+                traits: trait_info_from_staged(&staged_git.staged),
             })
         }
     }
@@ -2232,12 +2652,24 @@ fn publish_staged_package(
     }
     let vendored_path = scope.vendored_path_string(alias);
     let tree_digest = crate::registry::compute_tree_digest(&staged.staging_root)?;
-    let (package, requested, resolved_version, integrity, path) = match identity {
+    let (
+        package,
+        requested,
+        resolved_version,
+        integrity,
+        path,
+        url,
+        requested_ref,
+        resolved_commit,
+    ) = match identity {
         PackageIdentity::Npm { package, requested } => (
             package.clone(),
             requested.clone(),
             staged.resolved_version.clone(),
             staged.integrity.clone(),
+            String::new(),
+            String::new(),
+            String::new(),
             String::new(),
         ),
         PackageIdentity::Path { path } => (
@@ -2246,6 +2678,24 @@ fn publish_staged_package(
             String::new(),
             String::new(),
             path.clone(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+        PackageIdentity::Git {
+            url,
+            requested_ref,
+            resolved_commit,
+            path,
+        } => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            path.clone(),
+            url.clone(),
+            requested_ref.clone().unwrap_or_default(),
+            resolved_commit.clone(),
         ),
     };
     lock.upsert_package(PackageLockEntry {
@@ -2256,6 +2706,9 @@ fn publish_staged_package(
         resolved_version,
         integrity,
         path,
+        url,
+        requested_ref,
+        resolved_commit,
         vendored_path,
         tree_digest: tree_digest.clone(),
         inherited: ownership.inherited,
@@ -2605,6 +3058,18 @@ fn prepare_manifest_dependency_text(
         PackageIdentity::Path { path } => {
             entry.insert("path", toml_edit::Value::from(path.as_str()));
         }
+        PackageIdentity::Git {
+            url,
+            requested_ref,
+            path,
+            ..
+        } => {
+            entry.insert("git", toml_edit::Value::from(url.as_str()));
+            if let Some(git_ref) = requested_ref {
+                entry.insert("ref", toml_edit::Value::from(git_ref.as_str()));
+            }
+            entry.insert("path", toml_edit::Value::from(path.as_str()));
+        }
     }
     deps.insert(
         alias,
@@ -2831,6 +3296,7 @@ pub fn reconcile_project_dependencies(
             match entry.transport {
                 PackageTransport::Npm => replay_locked_package(repo_root, alias, entry, registry)?,
                 PackageTransport::Path => replay_locked_path_package(repo_root, alias, entry)?,
+                PackageTransport::Git => replay_locked_git_package(repo_root, alias, entry)?,
             }
             continue;
         }
@@ -2891,6 +3357,11 @@ fn entry_matches_declared(entry: &PackageLockEntry, dependency: &ProjectPackageD
             &entry.package == npm && &entry.requested == version
         }
         (PackageTransport::Path, ProjectPackageDependency::Path { path }) => &entry.path == path,
+        (PackageTransport::Git, ProjectPackageDependency::Git { git, git_ref, path }) => {
+            &entry.url == git
+                && entry.requested_ref == git_ref.clone().unwrap_or_default()
+                && entry.path == path.as_deref().unwrap_or("")
+        }
         _ => false,
     }
 }
@@ -3050,6 +3521,76 @@ fn replay_locked_path_package(
         None,
     )
     .map(|_tree_digest| ())
+}
+
+/// Restage a locked git-transport package by refetching the codeload
+/// snapshot at its *locked* resolved commit sha (never by re-resolving the
+/// ref) and republish only when the freshly staged tree digest still matches
+/// the locked evidence exactly — the git sibling of
+/// [`replay_locked_path_package`]'s reproduce-bit-for-bit rule. `ctx traits
+/// dependency update <alias>` is the only operation that re-resolves the ref
+/// and accepts a moved commit.
+fn replay_locked_git_package(
+    repo_root: &Utf8Path,
+    alias: &str,
+    entry: &PackageLockEntry,
+) -> crate::Result<()> {
+    let (owner, repo) = github_owner_repo(&entry.url)?;
+    let fetch_root = local_staging_path();
+    crate::git_fetch::fetch_codeload_snapshot(&owner, &repo, &entry.resolved_commit, &fetch_root)?;
+    let fetch_guard = TempStagingGuard(fetch_root.clone());
+
+    let matched_absolute_root = fetch_root.join(&entry.path);
+    let staging_root = local_staging_path();
+    let excludes = crate::harness_config::resolve_pack_excludes(&matched_absolute_root);
+    crate::publish::copy_safe(&matched_absolute_root, &staging_root, &excludes)?;
+    let staging_guard = TempStagingGuard(staging_root.clone());
+    drop(fetch_guard);
+
+    let tree_digest = crate::registry::compute_tree_digest(&staging_root)?;
+    if tree_digest != entry.tree_digest {
+        return Err(crate::environment::Error::Filesystem {
+            path: entry.url.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "git source for {alias:?} ({}@{}) no longer matches the locked snapshot; run `ctx traits dependency update {alias}` to accept the change",
+                    entry.url, entry.resolved_commit
+                ),
+            ),
+        }
+        .into());
+    }
+
+    let inspection = inspect_local_package(&staging_root)?;
+    let (traits, _computed_digests) = staged_traits_from_inspection(&inspection, &staging_root)?;
+    let staged = StagedPackage {
+        resolved_version: String::new(),
+        integrity: String::new(),
+        staging_root,
+        traits,
+        claim_verdict: core_distribution::ClaimVerification::Absent,
+    };
+
+    let result = publish_staged_package(
+        &DistributionScope::project(repo_root),
+        alias,
+        &PackageIdentity::Git {
+            url: entry.url.clone(),
+            requested_ref: (!entry.requested_ref.is_empty()).then(|| entry.requested_ref.clone()),
+            resolved_commit: entry.resolved_commit.clone(),
+            path: entry.path.clone(),
+        },
+        &staged,
+        PackageOwnership {
+            inherited: entry.inherited,
+            allow_transition: false,
+        },
+        None,
+    )
+    .map(|_tree_digest| ());
+    drop(staging_guard);
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -3428,6 +3969,9 @@ pub fn resolve_vendored_trait_variant(
             // arm here is unreachable in practice, but is handled rather
             // than panicking should a lock ever carry one.
             (_, PackageTransport::Path) => format!("path:{}", package.path),
+            (_, PackageTransport::Git) => {
+                format!("git:{}#{}", package.url, package.resolved_commit)
+            }
         };
         return Ok(Some((path, origin)));
     }
@@ -3488,6 +4032,9 @@ pub fn resolve_vendored_trait_alias(
                 )
             }
             (_, PackageTransport::Path) => format!("path:{}", package.path),
+            (_, PackageTransport::Git) => {
+                format!("git:{}#{}", package.url, package.resolved_commit)
+            }
         };
         return Ok(Some((path, origin)));
     }
@@ -4242,5 +4789,107 @@ aliases = ["family-demo-quick"]
             .expect("remove must resolve the unnormalized path operand");
         assert!(!scope.read_manifest().unwrap().packages.contains_key("demo"));
         let _ = updated_digest;
+    }
+
+    /// `collection_listing_from_discovered` (task 0191 phase c) must list
+    /// every discovered trait package with its id/version/summary and a
+    /// copyable add command, and must silently skip a package.json-only
+    /// entry that has no trait.toml — the same trait.toml classifier
+    /// `stage_git_package` uses for single-trait selection, so listing and
+    /// selection never disagree on what counts as a trait.
+    #[test]
+    fn collection_listing_skips_non_trait_packages_and_lists_the_rest() {
+        let root = scratch_root("collection-listing");
+        write_single_trait_package(&root.join("traits/one"), "collection-one", "First trait");
+        write_single_trait_package(&root.join("traits/two"), "collection-two", "Second trait");
+        std::fs::create_dir_all(root.join("packages/js-lib").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("packages/js-lib/package.json").as_std_path(),
+            "{\"name\": \"js-lib\"}",
+        )
+        .unwrap();
+
+        let discovered = crate::registry::discover_trait_packages(&root).expect("discover");
+        let spec = core_distribution::GitSpec {
+            url: "https://github.com/acme/collection".to_string(),
+            requested_ref: None,
+            trait_selector: None,
+            default_alias: "collection".to_string(),
+        };
+        let listing =
+            collection_listing_from_discovered(&spec, "deadbeef", &discovered).expect("listing");
+
+        assert_eq!(
+            listing.entries.len(),
+            2,
+            "js-lib must be skipped: {:?}",
+            listing
+                .entries
+                .iter()
+                .map(|e| &e.trait_path)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(listing.entries[0].id, "collection-one");
+        assert_eq!(listing.entries[0].trait_path, "traits/one");
+        assert_eq!(listing.entries[0].summary, "First trait");
+        assert_eq!(
+            listing.entries[0].add_command,
+            "ctx traits dependency add acme/collection/traits/one@deadbeef"
+        );
+        assert_eq!(listing.entries[1].id, "collection-two");
+
+        let rendered = listing.render();
+        assert!(rendered.contains("collection-one"));
+        assert!(rendered.contains("collection-two"));
+        assert!(!rendered.contains("js-lib"));
+    }
+
+    /// A non-success HTTP status against a `github.com` URL (private or
+    /// nonexistent repo — the only host this transport's `Request` error can
+    /// name, since [`github_owner_repo`] refuses every other host earlier)
+    /// must surface guidance naming the phase-(e) git-CLI fallback instead
+    /// of the bare `HTTP <status>` git_fetch produces.
+    #[test]
+    fn github_request_failure_names_phase_e_fallback_not_bare_http_status() {
+        let source = crate::git_fetch::Error::Request {
+            url: "https://github.com/acme/private/info/refs?service=git-upload-pack".to_string(),
+            message: "HTTP 404".to_string(),
+        };
+        let mapped = github_request_failure(
+            "https://github.com/acme/private",
+            "resolve refs for",
+            source,
+        );
+        let message = mapped.to_string();
+        assert!(
+            message.contains("phase e"),
+            "must name the phase-(e) fallback: {message}"
+        );
+        assert!(
+            message.contains("private or") && message.contains("not exist"),
+            "must explain the likely cause: {message}"
+        );
+    }
+
+    /// Non-`Request` git-transport errors (malformed refs, ref not found,
+    /// archive extraction) must pass through unchanged — only a bare HTTP
+    /// status gets the phase-(e) guidance grafted on.
+    #[test]
+    fn github_request_failure_passes_through_non_request_errors() {
+        let source = crate::git_fetch::Error::RefNotFound {
+            url: "https://github.com/acme/repo".to_string(),
+            requested_ref: "missing".to_string(),
+        };
+        let mapped =
+            github_request_failure("https://github.com/acme/repo", "resolve refs for", source);
+        let message = mapped.to_string();
+        assert!(
+            !message.contains("phase e"),
+            "unexpected rewrite: {message}"
+        );
+        assert!(
+            message.contains("has no ref"),
+            "expected original message: {message}"
+        );
     }
 }

@@ -117,36 +117,109 @@ fn report_headline(report: &InstallReport) -> String {
     }
 }
 
+/// `ctx traits dependency add`: an npm/`path:` spec, a single git spec
+/// (`owner/repo/trait[@ref]` shorthand or explicit form), or a git
+/// collection spec combined with `--trait <id>` (repeatable) / `--all`
+/// (task 0191 CLI surface). `trait_ids`/`all` only apply to a git spec that
+/// does not already name a trait; usage conflicts are refused locally
+/// before any network call.
 pub(crate) fn handle_install(
     spec: &str,
     alias: Option<&str>,
     global: bool,
+    trait_ids: &[String],
+    all: bool,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
+    if all && !trait_ids.is_empty() {
+        return Err(crate::Error::Command {
+            message: "--all cannot be combined with --trait".to_string(),
+        });
+    }
+    if alias.is_some() && trait_ids.len() > 1 {
+        return Err(crate::Error::Command {
+            message: "--alias cannot be combined with more than one --trait".to_string(),
+        });
+    }
+
+    let parsed = ctx_traits_core::distribution::parse_install_spec(spec)
+        .map_err(ctx_traits_core::Error::from)?;
+    let names_a_trait = matches!(
+        &parsed,
+        ctx_traits_core::distribution::InstallSpec::Git(git_spec)
+            if git_spec.trait_selector.is_some()
+    );
+    if names_a_trait && (!trait_ids.is_empty() || all) {
+        return Err(crate::Error::Command {
+            message:
+                "spec already names a trait; --trait/--all only apply to a bare git collection spec"
+                    .to_string(),
+        });
+    }
+    let git_spec = match &parsed {
+        ctx_traits_core::distribution::InstallSpec::Git(git_spec) => Some(git_spec.clone()),
+        _ => None,
+    };
+    if git_spec.is_none() && (!trait_ids.is_empty() || all) {
+        return Err(crate::Error::Command {
+            message: "--trait/--all only apply to a git collection spec".to_string(),
+        });
+    }
+
     let scope = resolve_scope(global)?;
-    let report = distribution::install(
-        &scope,
-        spec,
-        alias,
-        distribution::resolve_registry_options(scope.boundary()),
-    )?;
+    let registry = distribution::resolve_registry_options(scope.boundary());
+
+    if all {
+        let git_spec = git_spec.expect("checked above");
+        let listing = distribution::list_git_collection(&git_spec)?;
+        for entry in &listing.entries {
+            let entry_spec = format!(
+                "git+{}#ref={}&path={}",
+                git_spec.url, listing.resolved_commit, entry.trait_path
+            );
+            let report = distribution::install(&scope, &entry_spec, None, registry)?;
+            emit_install_report(&report, json)?;
+        }
+        return Ok(CommandOutput::new(()));
+    }
+
+    if !trait_ids.is_empty() {
+        let git_spec = git_spec.expect("checked above");
+        for trait_id in trait_ids {
+            let entry_spec = match &git_spec.requested_ref {
+                Some(git_ref) => format!("git+{}#ref={}&path={}", git_spec.url, git_ref, trait_id),
+                None => format!("git+{}#path={}", git_spec.url, trait_id),
+            };
+            let entry_alias = if trait_ids.len() == 1 { alias } else { None };
+            let report = distribution::install(&scope, &entry_spec, entry_alias, registry)?;
+            emit_install_report(&report, json)?;
+        }
+        return Ok(CommandOutput::new(()));
+    }
+
+    let report = distribution::install(&scope, spec, alias, registry)?;
+    emit_install_report(&report, json)?;
+    Ok(CommandOutput::new(()))
+}
+
+fn emit_install_report(report: &InstallReport, json: bool) -> crate::Result<()> {
     match OutputMode::select(json, false) {
         OutputMode::Json => {
-            print_json_report(&report, "install report")?;
+            print_json_report(report, "install report")?;
         }
         OutputMode::Human(mode) => {
             let mut panel = Panel::new(
                 "ctx",
-                format!("dependency add {}", report_headline(&report)),
+                format!("dependency add {}", report_headline(report)),
                 PanelStatus::Passed("passed".to_string()),
             );
-            for row in install_report_rows(&report) {
+            for row in install_report_rows(report) {
                 panel = panel.row(row);
             }
             emit_human(false, &panel, mode, || Ok(()))?;
         }
     }
-    Ok(CommandOutput::new(()))
+    Ok(())
 }
 
 pub(crate) fn handle_remove(

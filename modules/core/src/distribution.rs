@@ -187,22 +187,45 @@ pub struct PathSpec {
     pub default_alias: String,
 }
 
+/// A parsed git-transport install spec (task 0191, phase a). Normalizes every
+/// authoring form (shorthand, full URL, `git+` explicit) to the same shape
+/// consumed by [`crate::manifest::source::TraitSource::Git`] at the IO
+/// boundary: a URL, an optional pinned ref, and an optional trait selector
+/// within the fetched collection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitSpec {
+    /// Full Git repository URL (never GitHub shorthand — that is expanded to
+    /// this field's value by the parser below).
+    pub url: String,
+    /// Requested tag, branch, or revision. `None` resolves the remote
+    /// default branch tip at IO time.
+    pub requested_ref: Option<String>,
+    /// The trait name/path selected within the collection. `None` means the
+    /// spec named only a collection (bare `owner/repo`), which the IO layer
+    /// resolves by listing rather than vendoring.
+    pub trait_selector: Option<String>,
+    /// Default vendor alias: the selector's final path component, or the
+    /// repo's final path component when no selector was given.
+    pub default_alias: String,
+}
+
 /// The union of transports a project-scoped install spec may name: an npm
-/// registry package, or a local `path:` source (P535). Distinct from
-/// [`PackageSpec`]/[`parse_spec`], which remain npm-only and byte-compatible
-/// with every pre-P535 caller.
+/// registry package, a local `path:` source (P535), or a git-transport
+/// source (task 0191). Distinct from [`PackageSpec`]/[`parse_spec`], which
+/// remain npm-only and byte-compatible with every pre-P535 caller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", tag = "transport")]
 pub enum InstallSpec {
     Npm(PackageSpec),
     Path(PathSpec),
+    Git(GitSpec),
 }
 
-/// Parse a project-scoped install spec: `path:<relative-path>` (P535) or any
-/// npm spec `parse_spec` accepts. The one entry point that recognizes
-/// `path:`; `parse_spec` itself keeps refusing it with
-/// [`Error::NotYetSupported`] for every caller that has not opted into local
-/// path installs.
+/// Parse a project-scoped install spec: `path:<relative-path>` (P535), a git
+/// shorthand/URL form (task 0191), or any npm spec `parse_spec` accepts. The
+/// one entry point that recognizes `path:` and git forms; `parse_spec` itself
+/// keeps refusing them with [`Error::NotYetSupported`] for every caller that
+/// has not opted into these transports.
 pub fn parse_install_spec(input: &str) -> Result<InstallSpec, Error> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -211,7 +234,202 @@ pub fn parse_install_spec(input: &str) -> Result<InstallSpec, Error> {
     if let Some(rest) = trimmed.strip_prefix("path:") {
         return parse_path_spec(rest, trimmed).map(InstallSpec::Path);
     }
+    if let Some(spec) = try_parse_git_spec(trimmed)? {
+        return Ok(InstallSpec::Git(spec));
+    }
     parse_spec(trimmed).map(InstallSpec::Npm)
+}
+
+/// Recognize and parse the git-transport forms (task 0191, phase a):
+/// `owner/repo[/trait][@ref]` shorthand, full `https://`/`git@host:` URLs
+/// (with an optional bare `@ref` suffix — only meaningful on the shorthand
+/// form; explicit URLs pin via `--trait`/`#ref=` at the caller), and the
+/// explicit `git+<url>#ref=...&path=...` round-trip form. Returns `Ok(None)`
+/// for input that names none of these forms (npm bare/scoped names), so the
+/// caller falls through to `parse_spec`.
+///
+/// A leading `@` with exactly three shorthand segments (`@scope/catalog/x`)
+/// is the phase-(d) nested npm catalog form: rejected here with a message
+/// naming that phase rather than falling through to a misleading
+/// invalid-name-segment error from `parse_spec`.
+fn try_parse_git_spec(trimmed: &str) -> Result<Option<GitSpec>, Error> {
+    if let Some(rest) = trimmed.strip_prefix("git+") {
+        return parse_explicit_git_url_spec(rest, trimmed).map(Some);
+    }
+    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        return parse_bare_git_url_spec(trimmed).map(Some);
+    }
+    if trimmed.starts_with("git@") && trimmed.contains(':') {
+        return parse_bare_git_url_spec(trimmed).map(Some);
+    }
+    if trimmed.starts_with('@') {
+        let segments: Vec<&str> = trimmed.split('/').collect();
+        if segments.len() == 3 {
+            return Err(Error::NotYetSupported {
+                form: "npm-nested (phase d: nested npm catalog)",
+                spec: trimmed.to_string(),
+            });
+        }
+        return Ok(None);
+    }
+    if trimmed.contains('/') {
+        return parse_shorthand_git_spec(trimmed).map(Some);
+    }
+    Ok(None)
+}
+
+/// `owner/repo[/trait][@ref]`: 2 segments name a bare collection (no
+/// selector — the IO layer lists it), 3 segments select a trait *name*
+/// within it (resolved by probe order at IO time, never treated as a literal
+/// path here).
+fn parse_shorthand_git_spec(trimmed: &str) -> Result<GitSpec, Error> {
+    let (path_part, ref_part) = split_trailing_ref(trimmed);
+    let segments: Vec<&str> = path_part.split('/').collect();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Err(Error::InvalidSpec {
+            spec: trimmed.to_string(),
+            message: "git shorthand must be owner/repo or owner/repo/trait, with no empty segments"
+                .to_string(),
+        });
+    }
+    match segments.as_slice() {
+        [owner, repo] => {
+            let url = format!("https://github.com/{owner}/{repo}");
+            Ok(GitSpec {
+                default_alias: (*repo).to_string(),
+                url,
+                requested_ref: ref_part.map(str::to_string),
+                trait_selector: None,
+            })
+        }
+        [owner, repo, trait_name] => {
+            let url = format!("https://github.com/{owner}/{repo}");
+            Ok(GitSpec {
+                default_alias: (*trait_name).to_string(),
+                url,
+                requested_ref: ref_part.map(str::to_string),
+                trait_selector: Some((*trait_name).to_string()),
+            })
+        }
+        _ => Err(Error::InvalidSpec {
+            spec: trimmed.to_string(),
+            message: "git shorthand must be owner/repo or owner/repo/trait".to_string(),
+        }),
+    }
+}
+
+/// A full `https://`/`git@host:` URL with an optional trailing `@ref`
+/// (mirroring the shorthand's pin syntax). No trait selector: the caller
+/// supplies one via `--trait` at the CLI edge, or the spec names a bare
+/// collection to list.
+fn parse_bare_git_url_spec(trimmed: &str) -> Result<GitSpec, Error> {
+    let (url_part, ref_part) = split_trailing_ref(trimmed);
+    if url_part.is_empty() {
+        return Err(Error::InvalidSpec {
+            spec: trimmed.to_string(),
+            message: "empty git URL".to_string(),
+        });
+    }
+    let default_alias = url_repo_basename(url_part).unwrap_or_else(|| "repo".to_string());
+    Ok(GitSpec {
+        url: url_part.to_string(),
+        requested_ref: ref_part.map(str::to_string),
+        trait_selector: None,
+        default_alias,
+    })
+}
+
+/// `git+<url>#ref=<ref>&path=<package_path>`: the canonical round-trip form
+/// written back by `spec_input()` / read back from `config.toml`. `path`
+/// here is the trait's package path within the repo, carried straight
+/// through as `trait_selector` (already resolved, not probed).
+fn parse_explicit_git_url_spec(rest: &str, full_spec: &str) -> Result<GitSpec, Error> {
+    let (url_part, fragment) = match rest.split_once('#') {
+        Some((url, fragment)) => (url, Some(fragment)),
+        None => (rest, None),
+    };
+    if url_part.is_empty() {
+        return Err(Error::InvalidSpec {
+            spec: full_spec.to_string(),
+            message: "empty git URL".to_string(),
+        });
+    }
+    let mut requested_ref = None;
+    let mut trait_selector = None;
+    if let Some(fragment) = fragment {
+        for pair in fragment.split('&') {
+            if pair.is_empty() {
+                continue;
+            }
+            match pair.split_once('=') {
+                Some(("ref", value)) if !value.is_empty() => {
+                    requested_ref = Some(value.to_string());
+                }
+                Some(("path", value)) if !value.is_empty() => {
+                    trait_selector = Some(value.to_string());
+                }
+                _ => {
+                    return Err(Error::InvalidSpec {
+                        spec: full_spec.to_string(),
+                        message: format!("unrecognized git+ fragment segment {pair:?}"),
+                    });
+                }
+            }
+        }
+    }
+    let default_alias = trait_selector
+        .as_deref()
+        .and_then(|selector| selector.rsplit('/').find(|part| !part.is_empty()))
+        .map(str::to_string)
+        .or_else(|| url_repo_basename(url_part))
+        .unwrap_or_else(|| "repo".to_string());
+    Ok(GitSpec {
+        url: url_part.to_string(),
+        requested_ref,
+        trait_selector,
+        default_alias,
+    })
+}
+
+/// Split a trailing `@<ref>` pin suffix from a shorthand or bare-URL spec.
+/// Only the *last* `@` counts, and only when it comes after the last `/` (so
+/// `git@github.com:owner/repo` is not misread as a ref pin on the host part)
+/// and after any `://` scheme separator.
+fn split_trailing_ref(spec: &str) -> (&str, Option<&str>) {
+    let scheme_end = spec.find("://").map(|idx| idx + 3).unwrap_or(0);
+    let search_from = &spec[scheme_end..];
+    let last_slash = search_from.rfind('/');
+    let Some(at) = search_from.rfind('@') else {
+        return (spec, None);
+    };
+    if let Some(slash) = last_slash {
+        if at < slash {
+            return (spec, None);
+        }
+    } else if scheme_end == 0 {
+        // No scheme and no slash after the search window means this is a
+        // bare `git@host:` SSH form's own `@`, not a ref pin — never split.
+        return (spec, None);
+    }
+    let absolute_at = scheme_end + at;
+    let ref_value = &spec[absolute_at + 1..];
+    if ref_value.is_empty() {
+        return (spec, None);
+    }
+    (&spec[..absolute_at], Some(ref_value))
+}
+
+/// Best-effort repo basename for a default alias: the last non-empty
+/// `/`-separated segment, with a trailing `.git` stripped.
+fn url_repo_basename(url: &str) -> Option<String> {
+    let trimmed = url.trim_end_matches('/');
+    let last = trimmed.rsplit('/').find(|part| !part.is_empty())?;
+    let without_git = last.strip_suffix(".git").unwrap_or(last);
+    if without_git.is_empty() {
+        None
+    } else {
+        Some(without_git.to_string())
+    }
 }
 
 /// Validate and normalize a manifest-authored `path` source value (P535),
@@ -750,5 +968,157 @@ mod install_spec_tests {
             spec.relative_path,
             "../sibling-repo/.ctx/traits/authored/implement"
         );
+    }
+
+    #[test]
+    fn git_shorthand_two_segments_is_a_bare_collection() {
+        let InstallSpec::Git(spec) = parse_install_spec("ctx-company/traits").unwrap() else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://github.com/ctx-company/traits");
+        assert_eq!(spec.requested_ref, None);
+        assert_eq!(spec.trait_selector, None);
+        assert_eq!(spec.default_alias, "traits");
+    }
+
+    #[test]
+    fn git_shorthand_three_segments_selects_a_trait() {
+        let InstallSpec::Git(spec) = parse_install_spec("ctx-company/traits/refactor").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://github.com/ctx-company/traits");
+        assert_eq!(spec.requested_ref, None);
+        assert_eq!(spec.trait_selector.as_deref(), Some("refactor"));
+        assert_eq!(spec.default_alias, "refactor");
+    }
+
+    #[test]
+    fn git_shorthand_pins_a_trailing_ref() {
+        let InstallSpec::Git(spec) =
+            parse_install_spec("ctx-company/traits/refactor@v0.2.0").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.requested_ref.as_deref(), Some("v0.2.0"));
+        assert_eq!(spec.trait_selector.as_deref(), Some("refactor"));
+    }
+
+    #[test]
+    fn git_shorthand_rejects_empty_segments() {
+        assert!(matches!(
+            parse_install_spec("ctx-company//refactor"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn git_bare_https_url_has_no_selector() {
+        let InstallSpec::Git(spec) =
+            parse_install_spec("https://github.com/ctx-company/traits").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://github.com/ctx-company/traits");
+        assert_eq!(spec.trait_selector, None);
+        assert_eq!(spec.default_alias, "traits");
+    }
+
+    #[test]
+    fn git_bare_https_url_pins_a_trailing_ref() {
+        let InstallSpec::Git(spec) =
+            parse_install_spec("https://github.com/ctx-company/traits@v0.2.0").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://github.com/ctx-company/traits");
+        assert_eq!(spec.requested_ref.as_deref(), Some("v0.2.0"));
+    }
+
+    #[test]
+    fn git_ssh_shorthand_url_is_not_misread_as_ref_pinned() {
+        let InstallSpec::Git(spec) =
+            parse_install_spec("git@github.com:ctx-company/traits.git").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "git@github.com:ctx-company/traits.git");
+        assert_eq!(spec.requested_ref, None);
+        assert_eq!(spec.default_alias, "traits");
+    }
+
+    #[test]
+    fn git_explicit_url_round_trips_ref_and_path_fragment() {
+        let InstallSpec::Git(spec) = parse_install_spec(
+            "git+https://example.com/x/y#ref=v0.2.0&path=.ctx/traits/authored/refactor",
+        )
+        .unwrap() else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://example.com/x/y");
+        assert_eq!(spec.requested_ref.as_deref(), Some("v0.2.0"));
+        assert_eq!(
+            spec.trait_selector.as_deref(),
+            Some(".ctx/traits/authored/refactor")
+        );
+        assert_eq!(spec.default_alias, "refactor");
+    }
+
+    #[test]
+    fn git_explicit_url_without_fragment_has_no_selector() {
+        let InstallSpec::Git(spec) = parse_install_spec("git+https://example.com/x/y").unwrap()
+        else {
+            panic!("expected git variant");
+        };
+        assert_eq!(spec.url, "https://example.com/x/y");
+        assert_eq!(spec.requested_ref, None);
+        assert_eq!(spec.trait_selector, None);
+    }
+
+    #[test]
+    fn git_explicit_url_rejects_unrecognized_fragment_keys() {
+        assert!(matches!(
+            parse_install_spec("git+https://example.com/x/y#bogus=1"),
+            Err(Error::InvalidSpec { .. })
+        ));
+    }
+
+    #[test]
+    fn scoped_nested_npm_catalog_form_names_phase_d_not_yet_supported() {
+        let err = parse_install_spec("@scope/catalog/trait").unwrap_err();
+        assert!(matches!(
+            err,
+            Error::NotYetSupported {
+                form: "npm-nested (phase d: nested npm catalog)",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn scoped_npm_two_segment_names_still_parse_as_npm() {
+        let InstallSpec::Npm(spec) = parse_install_spec("@scope/name@^1.2.0").unwrap() else {
+            panic!("expected npm variant");
+        };
+        assert_eq!(spec.package.full(), "@scope/name");
+    }
+
+    #[test]
+    fn unscoped_npm_names_still_parse_as_npm_not_git() {
+        let InstallSpec::Npm(spec) = parse_install_spec("refactor").unwrap() else {
+            panic!("expected npm variant");
+        };
+        assert_eq!(spec.package.full(), "refactor");
+    }
+
+    #[test]
+    fn parse_spec_npm_only_stays_byte_compatible_with_git_shorthand_input() {
+        // `parse_spec` (npm-only) must still refuse anything git+-prefixed;
+        // bare shorthand like `owner/repo` was never valid npm input either
+        // way, so this only pins the explicit-prefix contract.
+        assert!(matches!(
+            parse_spec("git+https://example.com/x"),
+            Err(Error::NotYetSupported { form: "git", .. })
+        ));
     }
 }

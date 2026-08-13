@@ -84,6 +84,17 @@ pub enum ProjectPackageDependency {
     /// absolute path, and never resolved or persisted machine-specifically —
     /// only this authored text is committed.
     Path { path: String },
+    /// A git-transport source (0191): full repo URL plus an optional pinned
+    /// ref and an optional path to the trait package within the repo. Kebab
+    /// keys match `TraitSource::Git`'s authored `source = { git, ref, path }`
+    /// shape.
+    Git {
+        git: String,
+        #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+        git_ref: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
 }
 
 impl<'de> Deserialize<'de> for ProjectPackageDependency {
@@ -103,10 +114,20 @@ impl<'de> Deserialize<'de> for ProjectPackageDependency {
             path: String,
         }
         #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+        struct RawGit {
+            git: String,
+            #[serde(rename = "ref", default)]
+            git_ref: Option<String>,
+            #[serde(default)]
+            path: Option<String>,
+        }
+        #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
             Npm(RawNpm),
             Path(RawPath),
+            Git(RawGit),
         }
         match Raw::deserialize(deserializer)? {
             Raw::Npm(RawNpm { npm, version }) => Ok(ProjectPackageDependency::Npm { npm, version }),
@@ -114,6 +135,15 @@ impl<'de> Deserialize<'de> for ProjectPackageDependency {
                 let normalized = crate::distribution::normalize_manifest_path_source(&path)
                     .map_err(serde::de::Error::custom)?;
                 Ok(ProjectPackageDependency::Path { path: normalized })
+            }
+            Raw::Git(RawGit { git, git_ref, path }) => {
+                let url = super::source::normalize_git_url(&git)
+                    .ok_or_else(|| serde::de::Error::custom("invalid git URL"))?;
+                Ok(ProjectPackageDependency::Git {
+                    git: url,
+                    git_ref,
+                    path,
+                })
             }
         }
     }
@@ -133,37 +163,75 @@ impl ProjectPackageDependency {
         }
     }
 
+    pub fn git(url: impl Into<String>, git_ref: Option<String>, path: Option<String>) -> Self {
+        Self::Git {
+            git: url.into(),
+            git_ref,
+            path,
+        }
+    }
+
     /// The install spec string this entry decodes back into:
-    /// `"<npm>@<version>"` or `"path:<path>"`.
+    /// `"<npm>@<version>"`, `"path:<path>"`, or
+    /// `"git+<url>#ref=...&path=..."`.
     pub fn spec_input(&self) -> String {
         match self {
             Self::Npm { npm, version } => format!("{npm}@{version}"),
             Self::Path { path } => format!("path:{path}"),
+            Self::Git { git, git_ref, path } => {
+                let mut spec = format!("git+{git}");
+                let mut params = Vec::new();
+                if let Some(git_ref) = git_ref {
+                    params.push(format!("ref={git_ref}"));
+                }
+                if let Some(path) = path {
+                    params.push(format!("path={path}"));
+                }
+                if !params.is_empty() {
+                    spec.push('#');
+                    spec.push_str(&params.join("&"));
+                }
+                spec
+            }
         }
     }
 
     /// The unambiguous source identity used for alias-collision and
-    /// lock-compatibility comparisons: the full npm package identifier, or
-    /// `"path:<path>"` for a local source. Never confusable with an npm
-    /// identity, since npm package names cannot contain `:`.
+    /// lock-compatibility comparisons: the full npm package identifier,
+    /// `"path:<path>"` for a local source, or `"git+<url>#path=<p>"` for a
+    /// git source. Never confusable with an npm identity, since npm package
+    /// names cannot contain `:`.
     pub fn identity(&self) -> String {
         match self {
             Self::Npm { npm, .. } => npm.clone(),
             Self::Path { path } => format!("path:{path}"),
+            Self::Git { git, path, .. } => match path {
+                Some(path) => format!("git+{git}#path={path}"),
+                None => format!("git+{git}"),
+            },
         }
     }
 
     pub fn as_npm(&self) -> Option<(&str, &str)> {
         match self {
             Self::Npm { npm, version } => Some((npm.as_str(), version.as_str())),
-            Self::Path { .. } => None,
+            Self::Path { .. } | Self::Git { .. } => None,
         }
     }
 
     pub fn as_path(&self) -> Option<&str> {
         match self {
             Self::Path { path } => Some(path.as_str()),
-            Self::Npm { .. } => None,
+            Self::Npm { .. } | Self::Git { .. } => None,
+        }
+    }
+
+    pub fn as_git(&self) -> Option<(&str, Option<&str>, Option<&str>)> {
+        match self {
+            Self::Git { git, git_ref, path } => {
+                Some((git.as_str(), git_ref.as_deref(), path.as_deref()))
+            }
+            Self::Npm { .. } | Self::Path { .. } => None,
         }
     }
 }
@@ -275,5 +343,69 @@ path = "../sibling""#,
         let path = ProjectPackageDependency::path("packages/agents");
         assert_eq!(path.spec_input(), "path:packages/agents");
         assert_eq!(path.identity(), "path:packages/agents");
+    }
+
+    #[test]
+    fn decodes_git_shape() {
+        let dep = decode(
+            r#"git = "https://github.com/ctx-company/traits.git"
+ref = "v1.0.0"
+path = "refactor""#,
+        )
+        .unwrap();
+        assert_eq!(
+            dep,
+            ProjectPackageDependency::git(
+                "https://github.com/ctx-company/traits.git",
+                Some("v1.0.0".to_string()),
+                Some("refactor".to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_git_shape_with_shorthand_url() {
+        decode(r#"git = "ctx-company/traits""#).unwrap_err();
+    }
+
+    #[test]
+    fn rejects_git_shape_with_unknown_field() {
+        decode(
+            r#"git = "https://github.com/ctx-company/traits.git"
+bogus = "x""#,
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn git_spec_input_and_identity_round_trip_optional_fields() {
+        let bare = ProjectPackageDependency::git("https://github.com/o/r.git", None, None);
+        assert_eq!(bare.spec_input(), "git+https://github.com/o/r.git");
+        assert_eq!(bare.identity(), "git+https://github.com/o/r.git");
+
+        let full = ProjectPackageDependency::git(
+            "https://github.com/o/r.git",
+            Some("main".to_string()),
+            Some("trait-a".to_string()),
+        );
+        assert_eq!(
+            full.spec_input(),
+            "git+https://github.com/o/r.git#ref=main&path=trait-a"
+        );
+        assert_eq!(
+            full.identity(),
+            "git+https://github.com/o/r.git#path=trait-a"
+        );
+    }
+
+    #[test]
+    fn round_trips_git_through_serialize() {
+        let git = ProjectPackageDependency::git(
+            "https://github.com/o/r.git",
+            Some("main".to_string()),
+            Some("trait-a".to_string()),
+        );
+        let text = toml::to_string(&git).unwrap();
+        assert_eq!(decode(&text).unwrap(), git);
     }
 }

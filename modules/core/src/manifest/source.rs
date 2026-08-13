@@ -306,7 +306,7 @@ impl Serialize for TraitSource {
     }
 }
 
-fn normalize_git_url(url: &str) -> Option<String> {
+pub(crate) fn normalize_git_url(url: &str) -> Option<String> {
     let url = url.trim();
     if url.is_empty() || url.chars().any(char::is_whitespace) {
         return None;

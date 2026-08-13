@@ -36,6 +36,9 @@ pub enum Error {
     Registry(#[from] crate::registry::Error),
 
     #[error(transparent)]
+    GitFetch(#[from] crate::git_fetch::Error),
+
+    #[error(transparent)]
     Publish(#[from] crate::publish::Error),
 
     /// A genuine usage error: not a filesystem/process/parse effect, just a

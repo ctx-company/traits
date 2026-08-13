@@ -262,6 +262,23 @@ pub fn extract_verified_tarball(
     bytes: &[u8],
     dest: &Utf8Path,
 ) -> Result<(), Error> {
+    extract_verified_tarball_with_prefix(package, version, bytes, dest, "package/")
+}
+
+/// Extract a verified tarball into a fresh staging directory, stripping
+/// `strip_prefix` (rather than the npm-conventional `package/`) from every
+/// entry path. Shared by the npm registry client
+/// ([`extract_verified_tarball`], prefix `package/`) and
+/// [`crate::git_fetch::fetch_codeload_snapshot`] (prefix
+/// `<repo>-<sha>/`, GitHub codeload's tarball layout) so the two content
+/// sources never diverge on the safety checks below.
+pub fn extract_verified_tarball_with_prefix(
+    package: &str,
+    version: &str,
+    bytes: &[u8],
+    dest: &Utf8Path,
+    strip_prefix: &str,
+) -> Result<(), Error> {
     std::fs::create_dir_all(dest).map_err(|source| Error::InvalidArchive {
         package: package.to_string(),
         version: version.to_string(),
@@ -303,10 +320,20 @@ pub fn extract_verified_tarball(
         })?;
         let raw_path_str = raw_path.to_string_lossy().replace('\\', "/");
         let stripped = raw_path_str
-            .strip_prefix("package/")
+            .strip_prefix(strip_prefix)
             .unwrap_or(&raw_path_str);
 
         let entry_type = entry.header().entry_type();
+        if entry_type.is_pax_global_extensions() {
+            // `git archive` (and therefore GitHub codeload) always emits a
+            // leading `pax_global_header` ('g') entry carrying the commit
+            // sha as a pax extension; tar-rs's non-raw entries iterator
+            // already consumes GNU longname/longlink and pax *local* ('x')
+            // headers on the caller's behalf but passes this one through
+            // unconsumed, so every real codeload tarball hit `UnsafeEntry`
+            // here without this arm. It carries no file content to extract.
+            continue;
+        }
         if entry_type.is_dir() {
             if stripped.is_empty() {
                 continue;

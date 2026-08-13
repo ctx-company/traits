@@ -2723,17 +2723,25 @@ pub enum DependencyCommand {
     /// digest evidence instead of npm registry evidence — a source rebuild
     /// never propagates during ordinary reconciliation, only an explicit
     /// `ctx traits dependency update <alias>` accepts new source bytes.
-    /// `git+...` specs are recognized and rejected as not yet supported on
-    /// this surface. Never writes trust state: run `ctx traits trust approve
-    /// <trait>` for each printed canonical digest before running an
+    /// A git-transport spec (task 0191) is also accepted: `owner/repo/trait[@ref]`
+    /// shorthand, a bare `owner/repo`/full URL collection combined with
+    /// repeatable `--trait <id>` or `--all`, or the explicit
+    /// `git+<url>#ref=...&path=...` round-trip form. GitHub codeload is
+    /// fetched entirely in Rust (no `git`/`node` on this path); a bare
+    /// collection spec, or a trait name not found in one, prints the
+    /// collection's contents with copyable add commands instead of a bare
+    /// not-found error. Never writes trust state: run `ctx traits trust
+    /// approve <trait>` for each printed canonical digest before running an
     /// installed trait.
     Add {
         /// npm package spec (`name`, `@scope/name`, `name@<range-or-tag>`,
-        /// etc.) or `path:<relative-path>` (P535, project-scoped only).
+        /// etc.), `path:<relative-path>` (P535, project-scoped only), or a
+        /// git-transport spec (task 0191).
         spec: String,
 
         /// Vendor directory / manifest alias. Defaults to the npm basename,
-        /// or the path's final named component for `path:`.
+        /// or the path's final named component for `path:`/git. Only valid
+        /// with at most one `--trait`.
         #[arg(long)]
         alias: Option<String>,
 
@@ -2743,6 +2751,17 @@ pub enum DependencyCommand {
         /// outside any repository) whenever no nearer-tier trait shadows it.
         #[arg(short = 'g', long = "global")]
         global: bool,
+
+        /// Select a trait by id from a bare git collection spec (repeatable).
+        /// Conflicts with a spec that already names a trait
+        /// (`owner/repo/trait`) and with `--all`.
+        #[arg(long = "trait", value_name = "ID")]
+        trait_ids: Vec<String>,
+
+        /// Add every trait found in a git collection spec instead of one.
+        /// Conflicts with `--trait` and a spec that already names a trait.
+        #[arg(long)]
+        all: bool,
 
         /// Emit structured JSON.
         #[arg(long)]

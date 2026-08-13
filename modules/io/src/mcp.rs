@@ -613,6 +613,8 @@ fn mcp_error_envelope<T>(error: &crate::Error, call_payload: bool) -> Envelope<T
             .with_detail("message", export.to_string()),
         crate::Error::Registry(registry) => ResponseError::new("io.registry", "registry error")
             .with_detail("message", registry.to_string()),
+        crate::Error::GitFetch(git_fetch) => ResponseError::new("io.git-fetch", "git error")
+            .with_detail("message", git_fetch.to_string()),
         crate::Error::Publish(publish) => ResponseError::new("io.publish", "publish error")
             .with_detail("message", publish.to_string()),
         crate::Error::Usage { message } => {
