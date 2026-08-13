@@ -2849,23 +2849,42 @@ fn validate_sequence_depth(
     Ok(depth)
 }
 
+/// Shared mutable state of one produced-before-read walk: the static
+/// producer facts computed up front, the recursion guard and memo, and
+/// `co_produced` — for each slot, a snapshot of the guaranteed-produced set
+/// at its FIRST producing step's completion. The snapshot is what makes
+/// guard-implied production transitive: a branch guard that must have
+/// measured slot X to route true proves X's producer ran, and therefore
+/// everything guaranteed at that producer's completion — provided X has
+/// exactly one producing step ([`Self::producer_counts`]), else no producer
+/// is identifiable and nothing is implied.
+struct ProducedBeforeReadWalk {
+    first_producers: BTreeMap<String, String>,
+    producer_counts: BTreeMap<String, usize>,
+    stack: BTreeSet<String>,
+    memo: ProducedBeforeReadMemo,
+    co_produced: BTreeMap<String, BTreeSet<String>>,
+}
+
 fn validate_produced_before_read(trait_ref: &Trait) -> crate::Result<()> {
     let Some(procedure) = trait_ref.procedure.as_ref() else {
         return Ok(());
     };
     let mut produced = BTreeSet::new();
     let mut possible = BTreeSet::new();
-    let mut stack = BTreeSet::new();
-    let mut memo = BTreeMap::new();
-    let first_producers = first_slot_producers(trait_ref, procedure)?;
+    let mut walk = ProducedBeforeReadWalk {
+        first_producers: first_slot_producers(trait_ref, procedure)?,
+        producer_counts: slot_producer_counts(trait_ref, procedure)?,
+        stack: BTreeSet::new(),
+        memo: BTreeMap::new(),
+        co_produced: BTreeMap::new(),
+    };
     validate_produced_before_read_in_items(
         trait_ref,
         ordered_procedure_items(procedure)?.into_iter(),
         &mut produced,
         &mut possible,
-        &mut stack,
-        &mut memo,
-        &first_producers,
+        &mut walk,
     )?;
     Ok(())
 }
@@ -3256,25 +3275,29 @@ fn validate_produced_before_read_in_sequence(
     sequence_id: &str,
     produced: &BTreeSet<String>,
     possible: &BTreeSet<String>,
-    stack: &mut BTreeSet<String>,
-    memo: &mut ProducedBeforeReadMemo,
-    first_producers: &BTreeMap<String, String>,
+    walk: &mut ProducedBeforeReadWalk,
 ) -> crate::Result<(BTreeSet<String>, BTreeSet<String>)> {
     let key = (
         sequence_id.to_string(),
         produced.iter().cloned().collect::<Vec<_>>(),
         possible.iter().cloned().collect::<Vec<_>>(),
     );
-    if let Some(cached) = memo.get(&key) {
-        return Ok(cached.clone());
+    if let Some((outputs, possible_outputs, co_delta)) = walk.memo.get(&key).cloned() {
+        // Replay the co-produced snapshots this walk recorded, so a cache
+        // hit leaves the same guard-implication facts a fresh walk would.
+        for (slot, snapshot) in co_delta {
+            walk.co_produced.entry(slot).or_insert(snapshot);
+        }
+        return Ok((outputs, possible_outputs));
     }
-    if !stack.insert(sequence_id.to_string()) {
+    if !walk.stack.insert(sequence_id.to_string()) {
         return Ok((produced.clone(), possible.clone()));
     }
     let Some(sequence) = trait_ref.sequences.get(sequence_id) else {
-        stack.remove(sequence_id);
+        walk.stack.remove(sequence_id);
         return Ok((produced.clone(), possible.clone()));
     };
+    let co_keys_before: BTreeSet<String> = walk.co_produced.keys().cloned().collect();
     let mut current = produced.clone();
     let mut current_possible = possible.clone();
     validate_produced_before_read_in_items(
@@ -3282,20 +3305,34 @@ fn validate_produced_before_read_in_sequence(
         sequence.sequence.iter().enumerate(),
         &mut current,
         &mut current_possible,
-        stack,
-        memo,
-        first_producers,
+        walk,
     )?;
-    stack.remove(sequence_id);
-    memo.insert(key, (current.clone(), current_possible.clone()));
+    walk.stack.remove(sequence_id);
+    let co_delta: BTreeMap<String, BTreeSet<String>> = walk
+        .co_produced
+        .iter()
+        .filter(|(slot, _)| !co_keys_before.contains(*slot))
+        .map(|(slot, snapshot)| (slot.clone(), snapshot.clone()))
+        .collect();
+    walk.memo.insert(
+        key,
+        (current.clone(), current_possible.clone(), co_delta),
+    );
     Ok((current, current_possible))
 }
 
 /// Memo for [`validate_produced_before_read_in_sequence`]: keyed by the
 /// sequence plus BOTH entry sets (results depend on each), holding the
-/// guaranteed and possible output sets.
-type ProducedBeforeReadMemo =
-    BTreeMap<(String, Vec<String>, Vec<String>), (BTreeSet<String>, BTreeSet<String>)>;
+/// guaranteed and possible output sets plus the co-produced snapshots first
+/// recorded inside that walk.
+type ProducedBeforeReadMemo = BTreeMap<
+    (String, Vec<String>, Vec<String>),
+    (
+        BTreeSet<String>,
+        BTreeSet<String>,
+        BTreeMap<String, BTreeSet<String>>,
+    ),
+>;
 
 /// The produced-before-read walk, tracking two sets: `produced` — slots
 /// guaranteed written on EVERY path reaching the current item — and
@@ -3312,9 +3349,7 @@ fn validate_produced_before_read_in_items<'a>(
     items: impl Iterator<Item = (usize, &'a SequenceItem)>,
     produced: &mut BTreeSet<String>,
     possible: &mut BTreeSet<String>,
-    stack: &mut BTreeSet<String>,
-    memo: &mut ProducedBeforeReadMemo,
-    first_producers: &BTreeMap<String, String>,
+    walk: &mut ProducedBeforeReadWalk,
 ) -> crate::Result<()> {
     for (index, item) in items {
         let base = sequence_item_base(trait_ref, item, index);
@@ -3341,10 +3376,10 @@ fn validate_produced_before_read_in_items<'a>(
                     crate::reference::Error::SlotConditionallyProduced {
                         reader: reader.clone(),
                         ref_text: input.to_string(),
-                        producer: first_producers.get(input).cloned().unwrap_or_default(),
+                        producer: walk.first_producers.get(input).cloned().unwrap_or_default(),
                     }
                 } else {
-                    match first_producers.get(input) {
+                    match walk.first_producers.get(input) {
                         Some(producer) => crate::reference::Error::SlotProducedLater {
                             reader: reader.clone(),
                             ref_text: input.to_string(),
@@ -3371,7 +3406,13 @@ fn validate_produced_before_read_in_items<'a>(
                 }
         if item.effective_kind() == SequenceKind::Branch
             && let Some(when) = item.when.as_ref() {
-                validate_guard_slots_produced(trait_ref, when, possible, &reader, first_producers)?;
+                validate_guard_slots_produced(
+                    trait_ref,
+                    when,
+                    possible,
+                    &reader,
+                    &walk.first_producers,
+                )?;
             }
         if matches!(
             item.effective_kind(),
@@ -3393,9 +3434,7 @@ fn validate_produced_before_read_in_items<'a>(
                         &sequence_id,
                         &body_produced,
                         &body_possible_base,
-                        stack,
-                        memo,
-                        first_producers,
+                        walk,
                     )?;
                 if let Some(item_slot) = item_slot.filter(|item_slot| {
                     !produced.contains(item_slot)
@@ -3415,17 +3454,46 @@ fn validate_produced_before_read_in_items<'a>(
                 }
             }
         if item.effective_kind() == SequenceKind::Branch {
+            // Guard-implied production: the then arm only runs when the
+            // guard routed TRUE, which requires every slot in the guard's
+            // measured-when-true set to hold accepted evidence — proving
+            // that slot's one producing step ran, and with it everything
+            // guaranteed at that step's completion (the co-produced
+            // snapshot). "The verdict is approved" thereby implies the
+            // whole arm that produced the verdict, transitively down a
+            // sibling ladder. Slots with several producing steps imply
+            // nothing (no single producer to pin), and the otherwise arm
+            // gets no enrichment: it also runs on Unmeasurable, which
+            // guarantees no measurement at all.
+            let mut then_base = produced.clone();
+            if let Some(when) = item.when.as_ref() {
+                let mut measured = Vec::new();
+                collect_guard_slots_measured_when(
+                    trait_ref,
+                    when,
+                    true,
+                    &mut measured,
+                    &mut BTreeSet::new(),
+                );
+                for slot in measured {
+                    if walk.producer_counts.get(&slot).copied() == Some(1)
+                        && let Some(snapshot) = walk.co_produced.get(&slot)
+                    {
+                        then_base.extend(snapshot.iter().cloned());
+                    }
+                }
+            }
+            let mut then_possible_base = possible.clone();
+            then_possible_base.extend(then_base.iter().cloned());
             let (then_outputs, then_possible) = match local_sequence_id(item.sequence.as_deref()) {
                 Some(sequence_id) => validate_produced_before_read_in_sequence(
                     trait_ref,
                     &sequence_id,
-                    produced,
-                    possible,
-                    stack,
-                    memo,
-                    first_producers,
+                    &then_base,
+                    &then_possible_base,
+                    walk,
                 )?,
-                None => (produced.clone(), possible.clone()),
+                None => (then_base.clone(), then_possible_base.clone()),
             };
             let (otherwise_outputs, otherwise_possible) =
                 match local_sequence_id(item.otherwise.as_deref()) {
@@ -3434,9 +3502,7 @@ fn validate_produced_before_read_in_items<'a>(
                         &sequence_id,
                         produced,
                         possible,
-                        stack,
-                        memo,
-                        first_producers,
+                        walk,
                     )?,
                     None => (produced.clone(), possible.clone()),
                 };
@@ -3466,9 +3532,7 @@ fn validate_produced_before_read_in_items<'a>(
                         &sequence_id,
                         produced,
                         possible,
-                        stack,
-                        memo,
-                        first_producers,
+                        walk,
                     )?;
                 let can_skip = item.branch_failure.iter().any(|entry| {
                     entry.branch == *branch_ref
@@ -3485,6 +3549,18 @@ fn validate_produced_before_read_in_items<'a>(
         if item.effective_kind() != SequenceKind::Branch {
             collect_local_slot_outputs(item, produced);
             collect_local_slot_outputs(item, possible);
+            // Record each slot's first-producer snapshot: the guaranteed set
+            // at this step's completion, the fact guard-implied production
+            // replays inside then arms.
+            for output in item.output.ref_texts() {
+                if Reference::parse(output).is_ok_and(|parsed| {
+                    parsed.kind() == Kind::Slot && !parsed.is_qualified()
+                }) {
+                    walk.co_produced
+                        .entry(output.to_string())
+                        .or_insert_with(|| produced.clone());
+                }
+            }
         }
     }
     Ok(())
@@ -3654,6 +3730,218 @@ fn collect_first_slot_producers<'a>(
                 producers
                     .entry(output.to_string())
                     .or_insert_with(|| label.clone());
+            }
+        }
+    }
+}
+
+/// How many distinct sequence items produce each slot, across the whole
+/// procedure. Guard-implied production only fires for count == 1: with one
+/// producing step, accepted evidence pins exactly which step ran; with
+/// several, no snapshot is identifiable. Shared sub-sequences are visited
+/// once (a sequence reachable from two branch items still holds the same
+/// producing steps).
+fn slot_producer_counts(
+    trait_ref: &Trait,
+    procedure: &Model,
+) -> crate::Result<BTreeMap<String, usize>> {
+    fn collect<'a>(
+        trait_ref: &Trait,
+        items: impl Iterator<Item = (usize, &'a SequenceItem)>,
+        counts: &mut BTreeMap<String, usize>,
+        visited: &mut BTreeSet<String>,
+    ) {
+        for (_, item) in items {
+            let mut child_refs: Vec<&str> = item
+                .sequence
+                .as_deref()
+                .into_iter()
+                .chain(item.otherwise.as_deref())
+                .collect();
+            if item.effective_kind() == SequenceKind::Parallel {
+                child_refs = item.branches.iter().map(String::as_str).collect();
+            }
+            for child_ref in child_refs {
+                if let Some(sequence_id) = local_sequence_id(Some(child_ref))
+                    && visited.insert(sequence_id.clone())
+                    && let Some(sequence) = trait_ref.sequences.get(&sequence_id)
+                {
+                    collect(trait_ref, sequence.sequence.iter().enumerate(), counts, visited);
+                }
+            }
+            for output in item.output.ref_texts() {
+                if Reference::parse(output).is_ok_and(|reference| {
+                    reference.kind() == Kind::Slot && !reference.is_qualified()
+                }) {
+                    *counts.entry(output.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut counts = BTreeMap::new();
+    let mut visited = BTreeSet::new();
+    collect(
+        trait_ref,
+        ordered_procedure_items(procedure)?.into_iter(),
+        &mut counts,
+        &mut visited,
+    );
+    Ok(counts)
+}
+
+/// The slots a guard must hold ACCEPTED evidence for whenever it routes the
+/// way `routes_true` says — an under-approximation (missing a slot is
+/// always sound; the caller just implies less). Polarity matters because
+/// absent evidence is `Unmeasurable`, which never routes true and which
+/// `not` preserves: a leaf routing true or measured-false proves its slot
+/// accepted, `not` swaps the polarities, strong-Kleene `all` needs every
+/// child true (union) but only SOME child false (intersection), and `any`
+/// mirrors it. Leaves with version-dependent or tri-state absent semantics
+/// (`count`, `present`-when-false, comparison right-hand sides) contribute
+/// nothing rather than risk overclaiming.
+fn collect_guard_slots_measured_when(
+    trait_ref: &Trait,
+    guard: &GuardExpr,
+    routes_true: bool,
+    slots: &mut Vec<String>,
+    seen_conditions: &mut BTreeSet<String>,
+) {
+    fn child_sets(
+        trait_ref: &Trait,
+        items: &[GuardExpr],
+        child_polarity: bool,
+        seen_conditions: &mut BTreeSet<String>,
+    ) -> Vec<BTreeSet<String>> {
+        items
+            .iter()
+            .map(|item| {
+                let mut child = Vec::new();
+                collect_guard_slots_measured_when(
+                    trait_ref,
+                    item,
+                    child_polarity,
+                    &mut child,
+                    seen_conditions,
+                );
+                child.into_iter().collect()
+            })
+            .collect()
+    }
+    fn extend_union(slots: &mut Vec<String>, sets: Vec<BTreeSet<String>>) {
+        for set in sets {
+            slots.extend(set);
+        }
+    }
+    fn extend_intersection(slots: &mut Vec<String>, sets: Vec<BTreeSet<String>>) {
+        let Some((first, rest)) = sets.split_first() else {
+            return;
+        };
+        for slot in first {
+            if rest.iter().all(|set| set.contains(slot)) {
+                slots.push(slot.clone());
+            }
+        }
+    }
+    match guard {
+        GuardExpr::Ref(reference) => {
+            if let Ok(reference) = Reference::parse(reference)
+                && reference.kind() == Kind::Condition
+                && seen_conditions.insert(reference.id().to_string())
+            {
+                if let Some(condition) = trait_ref.conditions.get(reference.id()) {
+                    collect_guard_slots_measured_when(
+                        trait_ref,
+                        &condition.as_guard(),
+                        routes_true,
+                        slots,
+                        seen_conditions,
+                    );
+                }
+                seen_conditions.remove(reference.id());
+            }
+        }
+        // A bare array is `any` semantics: true needs only one child true
+        // (intersection of guarantees), false needs every child false
+        // (union).
+        GuardExpr::Any(items) => {
+            let sets = child_sets(trait_ref, items, routes_true, seen_conditions);
+            if routes_true {
+                extend_intersection(slots, sets);
+            } else {
+                extend_union(slots, sets);
+            }
+        }
+        GuardExpr::Predicate(predicate) => {
+            if let Some(not) = predicate.not.as_deref() {
+                collect_guard_slots_measured_when(
+                    trait_ref,
+                    not,
+                    !routes_true,
+                    slots,
+                    seen_conditions,
+                );
+                return;
+            }
+            if !predicate.all.is_empty() {
+                let sets = child_sets(trait_ref, &predicate.all, routes_true, seen_conditions);
+                if routes_true {
+                    extend_union(slots, sets);
+                } else {
+                    extend_intersection(slots, sets);
+                }
+                return;
+            }
+            if !predicate.any.is_empty() {
+                let sets = child_sets(trait_ref, &predicate.any, routes_true, seen_conditions);
+                if routes_true {
+                    extend_intersection(slots, sets);
+                } else {
+                    extend_union(slots, sets);
+                }
+                return;
+            }
+            if let Some(condition) = predicate.condition.as_deref() {
+                collect_guard_slots_measured_when(
+                    trait_ref,
+                    &GuardExpr::Ref(condition.to_string()),
+                    routes_true,
+                    slots,
+                    seen_conditions,
+                );
+                return;
+            }
+            // Slot-value and emptiness leaves measure their slot in BOTH
+            // routed outcomes: Matched and NotMatched each require accepted
+            // evidence (stale evidence is accepted too); only Unmeasurable
+            // — which routes neither way through `not` — means unmeasured.
+            for slot in [predicate.slot.as_deref(), predicate.empty.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                if Reference::parse(slot).is_ok_and(|reference| {
+                    reference.kind() == Kind::Slot && !reference.is_qualified()
+                }) {
+                    slots.push(slot.to_string());
+                }
+            }
+            // `present` proves its slot subject accepted only when it routes
+            // true; `count` absent-behavior is schema-version-dependent —
+            // both contribute only on the safe side.
+            if routes_true
+                && let Some(subject) = predicate.present.as_deref()
+                && Reference::parse(subject).is_ok_and(|reference| {
+                    reference.kind() == Kind::Slot && !reference.is_qualified()
+                })
+            {
+                slots.push(subject.to_string());
+            }
+            if routes_true
+                && let Some(count) = predicate.count.as_deref()
+                && Reference::parse(count).is_ok_and(|reference| {
+                    reference.kind() == Kind::Slot && !reference.is_qualified()
+                })
+            {
+                slots.push(count.to_string());
             }
         }
     }
@@ -4732,12 +5020,17 @@ command = {{ argv = ["printf", "late"] }}
 
     #[test]
     fn step_input_reading_conditionally_produced_slot_is_refused() {
+        // The guard reads only zero-out (produced unconditionally), so it
+        // implies nothing about first-out — the arm step's read of it stays
+        // a conditional-production refusal. (A guard reading first-out
+        // itself WOULD legalize the read — that is guard-implied
+        // production, proven separately below.)
         let toml_src = sibling_ladder_toml(
-            r#"{ slot = "slot:first-out", equals = "first" }"#,
+            r#"{ slot = "slot:zero-out", equals = "clean" }"#,
             "input = [\"slot:first-out\"]\n",
         );
         let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
-            .expect_err("a step INPUT over a conditionally-produced slot stays refused");
+            .expect_err("a step INPUT over an unimplied conditionally-produced slot stays refused");
         assert!(
             format!("{error}").contains("only produced inside a conditional branch"),
             "error must name the conditional production, not claim a later producer: {error}"
@@ -4791,6 +5084,136 @@ when = { slot = "slot:first-out", equals = "first" }
         assert!(
             format!("{error}").contains("first produced by later step 'produce-first'"),
             "the arms are exclusive, so the read must stay refused: {error}"
+        );
+    }
+
+    /// Three-rung ladder for guard-implied production: the version arm
+    /// produces `new-version`, then the `verdict`, then `post-out`; the
+    /// changelog rung guards on the verdict and its arm step reads
+    /// `reader_input`.
+    fn verdict_ladder_toml(reader_input: &str, extra: &str) -> String {
+        format!(
+            r#"
+id = "verdict-ladder-fixture"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Verdict ladder fixture"
+description = "Test fixture."
+
+[[slot]]
+id = "zero-out"
+schema = "schema:text"
+
+[[slot]]
+id = "new-version"
+schema = "schema:text"
+
+[[slot]]
+id = "verdict"
+schema = "schema:text"
+
+[[slot]]
+id = "post-out"
+schema = "schema:text"
+
+[[slot]]
+id = "changelog-out"
+schema = "schema:text"
+
+[[sequence.arm-version.sequence]]
+id = "bump-the-declared-version-files"
+title = "Bump the declared version files"
+output = ["slot:new-version"]
+command = {{ argv = ["printf", "1.2.3"] }}
+
+[[sequence.arm-version.sequence]]
+id = "review-the-version-bump"
+title = "Review the version bump"
+input = ["slot:new-version"]
+output = ["slot:verdict"]
+command = {{ argv = ["printf", "approved"] }}
+
+[[sequence.arm-version.sequence]]
+id = "after-the-verdict"
+title = "After the verdict"
+output = ["slot:post-out"]
+command = {{ argv = ["printf", "late"] }}
+
+[[sequence.arm-changelog.sequence]]
+id = "draft-the-changelog-entry"
+title = "Draft the changelog entry"
+input = ["{reader_input}"]
+output = ["slot:changelog-out"]
+command = {{ argv = ["printf", "entry"] }}
+{extra}
+[procedure]
+description = "Verdict ladder."
+
+[[procedure.sequence]]
+id = "step-zero"
+title = "Step zero"
+output = ["slot:zero-out"]
+command = {{ argv = ["git", "status", "--porcelain"] }}
+
+[[procedure.sequence]]
+id = "rung-version"
+title = "Rung version"
+kind = "branch"
+sequence = "sequence:arm-version"
+when = {{ empty = "slot:zero-out" }}
+
+[[procedure.sequence]]
+id = "rung-changelog"
+title = "Rung changelog"
+kind = "branch"
+sequence = "sequence:arm-changelog"
+when = {{ slot = "slot:verdict", equals = "approved" }}
+"#
+        )
+    }
+
+    #[test]
+    fn sibling_rung_step_input_may_read_slots_implied_by_the_guarded_verdict() {
+        // "The verdict is approved" proves the version arm ran through the
+        // verdict's producer — so a LATER sibling rung's step may read
+        // new-version, produced in that arm before the verdict.
+        let toml_src = verdict_ladder_toml("slot:new-version", "");
+        crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect("guard-implied production must admit reads of the verdict's co-produced slots");
+    }
+
+    #[test]
+    fn guard_implication_stops_at_the_guarded_slots_producer() {
+        // post-out is produced AFTER the verdict in the same arm: verdict
+        // evidence proves nothing about it, so the read stays refused.
+        let toml_src = verdict_ladder_toml("slot:post-out", "");
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("slots produced after the guarded slot are not implied");
+        assert!(
+            format!("{error}").contains("only produced inside a conditional branch"),
+            "the refusal must stay the conditional-production one: {error}"
+        );
+    }
+
+    #[test]
+    fn guard_implication_requires_a_single_producer() {
+        // A second producer of the verdict means accepted evidence no
+        // longer pins WHICH producer ran — no snapshot is implied.
+        let toml_src = verdict_ladder_toml(
+            "slot:new-version",
+            r#"
+[[sequence.arm-changelog.sequence]]
+id = "another-verdict-writer"
+title = "Another verdict writer"
+output = ["slot:verdict"]
+command = { argv = ["printf", "approved"] }
+"#,
+        );
+        let error = crate::encoding::decode_trait(crate::encoding::Encoding::Toml, &toml_src)
+            .expect_err("a multi-producer guarded slot implies nothing");
+        assert!(
+            format!("{error}").contains("only produced inside a conditional branch"),
+            "the read must stay refused when the producer is ambiguous: {error}"
         );
     }
 
