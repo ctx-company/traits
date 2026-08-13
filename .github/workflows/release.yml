@@ -229,6 +229,17 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # OIDC trusted publishing (npm deprecated granular-token 2FA bypass,
+    # 2026-07): each @ctx-traits package lists this repo+workflow as its
+    # trusted publisher on npmjs.com, and `npm publish` exchanges the
+    # Actions OIDC token for publish rights — no NPM_TOKEN secret at all.
+    # First-time publishes cannot use this path: a package's trusted
+    # publisher is configured on an EXISTING package, so version 0.1.0 of
+    # each package is published once from a maintainer machine (interactive
+    # 2FA), after which this job takes over.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -248,17 +259,14 @@ jobs:
           pnpm --filter @ctx-traits/config --filter @ctx-traits/cdk
           --filter @ctx-traits/toolkit --filter @ctx-traits/agents run build
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "::warning::NPM_TOKEN is not set — skipping the npm publishes."
-            exit 0
-          fi
-          # Dependency order: config -> cdk -> toolkit -> agents. `pnpm
-          # publish` (never bare `npm publish`) so workspace:^ ranges are
-          # rewritten to real versions in the published manifests.
+          # Dependency order: config -> cdk -> toolkit -> agents. Two tools
+          # on purpose: `pnpm pack` rewrites workspace:^ ranges into real
+          # versions in the packed manifest, and `npm publish <tarball>`
+          # performs the OIDC trusted-publishing exchange (pnpm's own
+          # publish does not).
+          stage=$(mktemp -d)
           for package in config cdk toolkit agents; do
             name="@ctx-traits/${package}"
             version=$(node -p "require('./packages/${package}/package.json').version")
@@ -268,5 +276,6 @@ jobs:
               echo "${name}@${version} is already published — nothing to do"
               continue
             fi
-            pnpm --filter "${name}" publish --access public --no-git-checks
+            pnpm --filter "${name}" pack --pack-destination "${stage}"
+            npm publish "${stage}/ctx-traits-${package}-${version}.tgz" --access public
           done
