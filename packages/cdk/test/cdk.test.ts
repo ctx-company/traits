@@ -2750,6 +2750,16 @@ describe("guards are handles, not JsonObjects (P483)", () => {
       not: { present: "slot:cap-report", field: "cost-report" },
     });
   });
+
+  it("condition.isTrue/isFalse/notEmpty lower to their composed forms, never separate canonical forms", () => {
+    expect(condition.isTrue("slot:approved")).toEqual(condition.equals("slot:approved", true));
+    expect(condition.isFalse("slot:approved")).toEqual(condition.equals("slot:approved", false));
+    const gatePassed = checkVerdictSlot("sugar-gate");
+    expect(condition.isTrue(gatePassed.ok)).toEqual(condition.equals(gatePassed.ok, true));
+    expect(condition.isTrue(gatePassed.ok)).toEqual({ slot: "slot:sugar-gate", field: "ok", equals: true });
+    expect(condition.notEmpty("slot:git-status")).toEqual(condition.not(condition.empty("slot:git-status")));
+    expect(condition.notEmpty("slot:git-status")).toEqual({ not: { empty: "slot:git-status" } });
+  });
 });
 
 describe("value-type preservation, handle assignability, resource field lockdown (P484)", () => {

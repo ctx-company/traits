@@ -107,6 +107,20 @@ export interface ConditionFunction {
     value: NoInfer<Value>,
   ): GuardHandle;
   /**
+   * Guards that a boolean value is true — sugar for
+   * `condition.equals(target, true)`, the everyday read of a check verdict's
+   * `ok` field. Lowers to exactly the same canonical guard, never a separate
+   * form.
+   * @example `condition.isTrue(gatePassed.ok)`
+   */
+  isTrue(target: string | RefHandle<RefKind, boolean> | FieldRef<boolean>): GuardHandle;
+  /**
+   * Negated {@link ConditionFunction.isTrue} — sugar for
+   * `condition.equals(target, false)`.
+   * @example `condition.isFalse(gatePassed.ok)`
+   */
+  isFalse(target: string | RefHandle<RefKind, boolean> | FieldRef<boolean>): GuardHandle;
+  /**
    * Guards that one *field* of a slot's object value equals `value`, without
    * reading the whole object out first. `field` is a plain string with no
    * static check against the slot's declared schema.
@@ -126,6 +140,13 @@ export interface ConditionFunction {
    * @example `condition.empty(findings)`
    */
   empty(slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle;
+  /**
+   * Negated {@link ConditionFunction.empty} — lowers to
+   * `condition.not(condition.empty(...))`, never a separate canonical form.
+   * The everyday maybe-commit guard.
+   * @example `condition.notEmpty(gitStatus)`
+   */
+  notEmpty(slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle;
   /**
    * Starts a count guard over a list-valued slot: chain `.where(...)` to
    * filter which elements count, then `.equals`/`.atLeast` to state the
@@ -356,6 +377,10 @@ export const condition: ConditionFunction = {
       },
     );
   },
+  isTrue: (target: string | RefHandle<RefKind, boolean> | FieldRef<boolean>): GuardHandle =>
+    condition.equals(target, true),
+  isFalse: (target: string | RefHandle<RefKind, boolean> | FieldRef<boolean>): GuardHandle =>
+    condition.equals(target, false),
   fieldEquals: (
     slotRef: string | SlotHandle | SettingHandle | RefHandle,
     field: string,
@@ -383,6 +408,8 @@ export const condition: ConditionFunction = {
       },
     ),
   count: (slotRef: string | SlotHandle | SettingHandle | RefHandle): ConditionCountFunction => countFunction(slotRef),
+  notEmpty: (slotRef: string | SlotHandle | SettingHandle | RefHandle): GuardHandle =>
+    condition.not(condition.empty(slotRef)),
   present: (
     subjectRef: string | PortHandle | SlotHandle | SettingHandle | RefHandle,
     options?: { readonly field?: string },
