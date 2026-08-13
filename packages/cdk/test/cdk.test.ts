@@ -69,6 +69,18 @@ import { prRiskTriage } from "./fixtures/readme-draft.js";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 
+// P565: a check's output slot is the two-field verdict record — `ok`
+// (schema:boolean) plus `argv` (list of schema:text) — never a bare
+// boolean. Every check fixture below declares the minimum record shape.
+const checkVerdictSlot = (id: string) =>
+  slot({
+    id,
+    schema: schema.object(`${id}-result`, {
+      ok: schema.field(schema.boolean()),
+      argv: schema.field(schema.list(schema.text())),
+    }),
+  });
+
 describe("draft synthesis", () => {
   it("lowers a static input port default through the existing port builder", () => {
     const plan = port.input.text({
@@ -1333,7 +1345,7 @@ describe("sequence.command / sequence.check include", () => {
           sequence: [
             sequence.check("verify", {
               cmd: "git diff --quiet",
-              output: slot.boolean("clean"),
+              output: checkVerdictSlot("clean"),
               include: scope,
             }),
           ],
@@ -1416,7 +1428,7 @@ describe("sequence.command / sequence.check include", () => {
           sequence: [
             sequence.check("verify", {
               cmd: "git diff --quiet",
-              output: slot.boolean("clean"),
+              output: checkVerdictSlot("clean"),
               include: input.optional(scope),
             }),
           ],
@@ -1734,7 +1746,7 @@ describe("optional outputs, output templates, uniform include (0105)", () => {
     const marker = slot.text("branch-include-marker");
     const gate = sequence.check("branch-include-gate", {
       cmd: "true",
-      output: slot.boolean("branch-include-pass"),
+      output: checkVerdictSlot("branch-include-pass"),
     });
     const success = sequence.command({ id: "branch-include-success", cmd: "printf ok", output: marker });
     const draft = toDraftJson(
@@ -1900,7 +1912,7 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
   });
 
   it("lowers sequence.branch's gate-step check to [check-step, branch] with the check emitted exactly once", () => {
-    const ready = slot.boolean("ready");
+    const ready = checkVerdictSlot("ready");
     const gate = sequence.check("gate", { cmd: "test -f ready", output: ready });
     const mergeStep = sequence.command("merge", { cmd: "git merge --no-ff" });
     const draft = toDraftJson(
@@ -1921,11 +1933,11 @@ describe("CDK grammar v2 shape (P458 S1)", () => {
     expect(items[0]?.kind).toBe("check");
     expect(items[1]?.id).toBe("route");
     expect(items[1]?.kind).toBe("branch");
-    expect(items[1]?.when).toEqual({ slot: "slot:ready", equals: true });
+    expect(items[1]?.when).toEqual({ slot: "slot:ready", field: "ok", equals: true });
   });
 
   it("does not leak sequence.check's .pass convenience field into the built canonical", () => {
-    const ready = slot.boolean("ready");
+    const ready = checkVerdictSlot("ready");
     const gate = sequence.check("gate", { cmd: "test -f ready", output: ready });
     expect(gate.pass).toBe(ready);
     expect(Object.keys(gate)).not.toContain("pass");

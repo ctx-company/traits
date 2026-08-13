@@ -17,6 +17,7 @@ import type {
 } from "./generated.js";
 import type {
   AgentHandle,
+  CheckResultValue,
   InstructionOutputHandle,
   OptionalSlotRead,
   OutputSinkHandle,
@@ -301,11 +302,12 @@ export type GateOptions = {
   readonly editStep?: SequenceHandle;
 };
 /**
- * A `check` step: like `command`, but its single declared output is a
- * `schema:boolean` slot that always receives a verdict — `true` on a
- * successful exit, `false` on a non-success exit or timeout. A failing check
- * never routes through ordinary command failure handling: the loop simply
- * continues and re-evaluates its `until` guard against the latest verdict.
+ * A `check` step: like `command`, but its single declared output always
+ * receives a verdict record (P565, {@link CheckResultValue}) — `ok` true on
+ * a successful exit, false on a non-success exit or timeout, plus the exact
+ * `argv` that decided it. A failing check never routes through ordinary
+ * command failure handling: the loop simply continues and re-evaluates its
+ * `until` guard against the latest verdict.
  */
 export type CheckSequenceFields = Omit<SequenceCommonFields, "format" | "output" | "onFailure" | "input"> & {
   readonly kind: "check";
@@ -313,7 +315,7 @@ export type CheckSequenceFields = Omit<SequenceCommonFields, "format" | "output"
   readonly text?: never;
   readonly sequence?: never;
   readonly format?: never;
-  readonly output: SlotHandle<boolean>;
+  readonly output: SlotHandle<CheckResultValue>;
   /** See {@link CommandSequenceFields.include}. */
   readonly include?: SequenceInputValue | readonly SequenceInputValue[];
   /** A check's false verdict is a normal accepted value, never a
@@ -636,14 +638,21 @@ export interface SequenceFunction {
   command(fields: CommandSequenceFields): SequenceHandle;
   /**
    * Declares a check step: runs `cmd`/`argv` like `sequence.command`, but
-   * writes a pass/fail boolean verdict to `output` instead of the command's
-   * raw result — `true` on a successful exit, `false` on a non-success exit
-   * or timeout. Meant to sit inside a `sequence.loop`'s `until` guard: a
-   * failing check does not stop the loop, it just means `until` stays false
-   * for another round.
+   * writes a verdict record to `output` instead of the command's raw result
+   * — `ok` true on a successful exit, false on a non-success exit or
+   * timeout, plus the exact `argv` that decided it (P565: the output slot
+   * declares at least `ok` schema:boolean and `argv` list-of-text). Meant
+   * to sit inside a `sequence.loop`'s `until` guard: a failing check does
+   * not stop the loop, it just means `until` stays false for another round.
    * @example
    * ```ts
-   * const markerReady = slot.boolean("marker-ready");
+   * const markerReady = slot({
+   *   id: "marker-ready",
+   *   schema: schema.object("marker-ready-result", {
+   *     ok: schema.field(schema.boolean()),
+   *     argv: schema.field(schema.list(schema.text())),
+   *   }),
+   * });
    * const checkStep = sequence.check("check-marker", { cmd: "test -f marker", output: markerReady });
    * ```
    * The returned handle also exposes its declared verdict slot as `.pass`,
@@ -653,7 +662,7 @@ export interface SequenceFunction {
   check(
     id: string,
     fields: Omit<CheckSequenceFields, "id" | "kind">,
-  ): SequenceHandle & { readonly pass: SlotHandle<boolean> };
+  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> };
   /** Declares a signal-gated question that is answered by a human through the
    * normal current-frame submission path. */
   ask(id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle;
@@ -1021,7 +1030,7 @@ export const sequence: SequenceFunction = {
   check: (
     id: string,
     fields: Omit<CheckSequenceFields, "id" | "kind">,
-  ): SequenceHandle & { readonly pass: SlotHandle<boolean> } =>
+  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> } =>
     withHiddenField(sequenceOf({ ...fields, id, kind: "check" } as CheckSequenceFields), "pass", fields.output),
   ask: (id: string, fields: Omit<AskSequenceFields, "id" | "kind">): SequenceHandle =>
     sequenceOf({ ...fields, id, kind: "ask" } as AskSequenceFields),

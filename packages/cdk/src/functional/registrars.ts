@@ -9,7 +9,14 @@
 import type { BranchCheckValue, GuardValue } from "../condition.js";
 import { condition, lowerCheckGuard } from "../condition.js";
 import type { JsonValue } from "../generated.js";
-import type { FieldRef, SequenceHandle, SequenceLinearHandle, SettingHandle, SlotHandle } from "../handles.js";
+import type {
+  CheckResultValue,
+  FieldRef,
+  SequenceHandle,
+  SequenceLinearHandle,
+  SettingHandle,
+  SlotHandle,
+} from "../handles.js";
 import type {
   CheckSequenceFields,
   CommandSequenceFields,
@@ -126,7 +133,7 @@ export const step = {
   check(
     title: string,
     opts: Omit<CheckSequenceFields, "id" | "kind" | "title"> & IdOverride,
-  ): SequenceHandle & { readonly pass: SlotHandle<boolean> } {
+  ): SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> } {
     requireBuild(`step.check(${JSON.stringify(title)})`);
     const id = opts.id ?? mintId(title);
     const fields = withPositionalWhen({ ...opts, title });

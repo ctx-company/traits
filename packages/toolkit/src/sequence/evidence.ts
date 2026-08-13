@@ -1,9 +1,9 @@
-import type { SlotHandle } from "@ctx-traits/cdk";
+import type { CheckResultValue, SlotHandle } from "@ctx-traits/cdk";
 import { step } from "@ctx-traits/cdk";
 
 export type GateAndDiffEvidenceOptions = {
-  /** Output slot the repository gate chain's pass/fail check lands in. */
-  readonly gatePassed: SlotHandle<boolean>;
+  /** Output slot the repository gate chain's verdict record (P565: `ok` plus the deciding `argv`) lands in. */
+  readonly gatePassed: SlotHandle<CheckResultValue>;
   /** Output slot the scoped changed-file inventory lands in. */
   readonly diff: SlotHandle<string>;
   /** Overrides the default `["just", "test"]` gate invocation. */

@@ -95,6 +95,16 @@ export type DeclaredSlotWithFields<Value = unknown> = DeclaredSlotHandle<Value> 
 export type SlotWithFields<Value = unknown> = SlotHandle<Value> &
   // `unknown` here is the intersection identity — a list or scalar value adds no field-ref surface.
   (Value extends readonly unknown[] ? unknown : Value extends object ? ObjectFieldRefs<Value> : unknown);
+/**
+ * The check-step verdict record (P565): a check's output slot declares at
+ * least `ok` (schema:boolean) and `argv` (a list of schema:text) — the argv
+ * makes the gate self-describing, so a bare `false` can never send a
+ * consumer re-validating with whatever command the surrounding prose names.
+ * Extra declared fields are fine; the runtime validates the minimum. Lives
+ * here (not sequence.ts) so condition.ts can name it without a module
+ * cycle.
+ */
+export type CheckResultValue = { readonly ok: boolean; readonly argv: readonly string[] };
 export type PortHandle<Value = unknown> = Handle<"port", Value>;
 /**
  * A typed operator knob: declared via `@ctx-traits/config`'s `setting.*`

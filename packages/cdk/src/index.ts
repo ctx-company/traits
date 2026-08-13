@@ -154,6 +154,7 @@ export { agentTemplates } from "./generated.js";
 export type {
   AgentHandle,
   Brand,
+  CheckResultValue,
   ConditionHandle,
   FieldRef,
   GuardHandle,

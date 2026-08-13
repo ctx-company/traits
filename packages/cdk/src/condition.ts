@@ -2,6 +2,7 @@ import type { CanonicalGuardExpr, CanonicalGuardPredicate, JsonObject, JsonValue
 import type {
   ConditionHandle,
   FieldRef,
+  CheckResultValue,
   GuardHandle,
   PortHandle,
   RefHandle,
@@ -27,11 +28,12 @@ export type GuardValue = string | RefHandle<"signal" | "condition"> | GuardHandl
 /**
  * The check-position value `sequence.branch`'s `check` field accepts: an
  * ordinary guard, or an as-yet-unplaced `sequence.check(...)` step handle
- * used as a one-shot gate. In the latter case the step's declared boolean
- * `pass` output becomes the guard, and the step itself must run immediately
- * before the branch evaluates it (see {@link lowerCheckGuard}).
+ * used as a one-shot gate. In the latter case the `ok` field of the step's
+ * declared verdict-record `pass` output becomes the guard, and the step
+ * itself must run immediately before the branch evaluates it (see
+ * {@link lowerCheckGuard}).
  */
-export type BranchCheckValue = GuardValue | (SequenceHandle & { readonly pass: SlotHandle<boolean> });
+export type BranchCheckValue = GuardValue | (SequenceHandle & { readonly pass: SlotHandle<CheckResultValue> });
 /** Literal or accepted local numeric value used as an ordered-comparison RHS. */
 export type NumericComparisonValue = number | SlotHandle<number> | PortHandle<number> | SettingHandle<number>;
 
@@ -464,13 +466,15 @@ export function lowerCheckGuard(
   path: string,
 ): { readonly guard: GuardValue; readonly gateStep?: SequenceHandle } {
   if (metaOf(value)?.kind === "sequence-step") {
-    const pass = (value as { readonly pass?: SlotHandle<boolean> }).pass;
+    const pass = (value as { readonly pass?: SlotHandle<CheckResultValue> }).pass;
     if (pass === undefined) {
       throw new Error(
-        `${path}: a sequence step used as a check must declare a boolean pass output (see sequence.check)`,
+        `${path}: a sequence step used as a check must declare a verdict-record pass output (see sequence.check)`,
       );
     }
-    return { guard: condition.equals(pass, true), gateStep: value as SequenceHandle };
+    // P565: the verdict is the `ok` field of the check's record output, not
+    // the record itself — `equals(record, true)` can never route true.
+    return { guard: condition.fieldEquals(pass, "ok", true), gateStep: value as SequenceHandle };
   }
   return { guard: value as GuardValue };
 }
