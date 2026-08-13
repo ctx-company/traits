@@ -2457,13 +2457,13 @@ fn validate_checklist_item_schema_version(t: &Trait) -> crate::Result<()> {
     let Some((kind, id, _)) = uses_checklist_item else {
         return Ok(());
     };
-    if matches!(t.schema_version.as_str(), "0.3" | "0.4") {
+    if crate::r#trait::schema_version_at_least(t.schema_version.as_str(), "0.3") {
         return Ok(());
     }
     Err(crate::manifest::Error::InvalidField {
         field_path: format!("{kind}.{id}.schema"),
         message: format!(
-            "{kind}:{id} declares schema:checklist-item, which requires a trait declaring schema-version \"0.3\" or \"0.4\", got {:?}",
+            "{kind}:{id} declares schema:checklist-item, which requires a trait declaring schema-version \"0.3\" or newer, got {:?}",
             t.schema_version.as_str()
         ),
     }

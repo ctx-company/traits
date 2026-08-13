@@ -136,7 +136,7 @@ export interface ConditionFunction {
    * with `field`, whether a declared optional field of a `port:*`/`slot:*`
    * object container is present on it. Tri-state under the hood
    * (`present`/`absent`/unmeasurable) but the routed guard is always a plain
-   * boolean; requires the trait to declare `schema-version = "0.3"`.
+   * boolean; requires the trait to declare `schema-version = "0.3"` or newer.
    * @example `condition.present(costCap)`
    * @example `condition.present(capReport, { field: "cost-report" })`
    */

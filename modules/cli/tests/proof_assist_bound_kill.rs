@@ -201,6 +201,34 @@ fn command_bound_kill_names_the_bound_and_preserves_the_candidate() {
         stray_sessions.is_empty(),
         "no session ledger may survive a bound kill; found: {stray_sessions:?}"
     );
+
+    // The bound kill must take the whole process GROUP: the killed round's
+    // CDK build had already spawned a `node --eval` grandchild evaluating the
+    // `while (true) {}` candidate, and a leader-only kill orphans it to spin
+    // forever (forty of them accumulated by 2026-08-13, starving real CDK
+    // builds past their ceiling). The candidate path is unique to this
+    // scratch root, so any live process whose argv still names it is this
+    // run's leak — swept here so a red assertion does not itself re-leak.
+    #[cfg(unix)]
+    {
+        let pattern = scratch_package.to_string_lossy();
+        let survivors = std::process::Command::new("pgrep")
+            .args(["-f", pattern.as_ref()])
+            .output()
+            .expect("pgrep runs");
+        let survivor_pids = String::from_utf8_lossy(&survivors.stdout)
+            .trim()
+            .to_string();
+        for pid in survivor_pids.split_whitespace() {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", pid])
+                .status();
+        }
+        assert!(
+            survivor_pids.is_empty(),
+            "the bound kill must not leak group members; survivors (killed): {survivor_pids}"
+        );
+    }
 }
 
 /// The frame-bound leg: the loop's own `produce-first` frame dispatch sleeps

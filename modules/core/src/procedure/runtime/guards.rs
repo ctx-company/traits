@@ -666,7 +666,9 @@ fn evaluate_guard_predicate(
         } else {
             (format!("count({counted})"), GuardOutcome::NotMatched)
         };
-        let outcome = if (stale || count.is_none()) && trait_ref.schema_version.as_str() == "0.3" {
+        let outcome = if (stale || count.is_none())
+            && crate::r#trait::schema_version_at_least(trait_ref.schema_version.as_str(), "0.3")
+        {
             GuardOutcome::Unmeasurable
         } else if stale || count.is_none() {
             GuardOutcome::NotMatched

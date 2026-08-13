@@ -464,6 +464,25 @@ fn spawn_piped(
     })
 }
 
+/// SIGKILL the child's whole process group, not just the leader.
+/// `spawn_piped` makes every command child a session leader (`setsid`,
+/// directly or via the detach shim), so its descendants — a shell wrapper,
+/// a package manager, the CDK build's `node` — share its group and survive
+/// a leader-only `Child::kill`: every bound kill of a round whose CDK eval
+/// was spinning left an orphaned `while (true) {}` node behind, and forty
+/// of them starved real builds past their ceiling (2026-08-13). The
+/// follow-up `Child::kill` covers a child that failed or hasn't yet reached
+/// `setsid` (and is the whole kill on non-Unix).
+fn kill_command_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    // SAFETY: `kill(2)` with a negative pid signals the process group; a
+    // group already gone yields ESRCH, ignored here.
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.kill();
+}
+
 /// The one spawn/wait/timeout/capture engine every command edge routes
 /// through. Stdout and stderr are drained concurrently on dedicated threads
 /// while the main thread polls `try_wait`, so a child that writes more than
@@ -528,13 +547,13 @@ fn run_raw(
             None if quiet_for >= idle_limit => {
                 timed_out = true;
                 timeout_kind = Some(TimeoutKind::Idle);
-                let _ = child.kill();
+                kill_command_group(&mut child);
                 break;
             }
             None if elapsed >= wall => {
                 timed_out = true;
                 timeout_kind = Some(TimeoutKind::Wall);
-                let _ = child.kill();
+                kill_command_group(&mut child);
                 break;
             }
             None => {

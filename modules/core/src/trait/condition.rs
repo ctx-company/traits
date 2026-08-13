@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::digest::Digest;
 use crate::reference::{Kind, Reference};
-use crate::r#trait::Trait;
+use crate::r#trait::{Trait, schema_version_at_least};
 
 const MAX_CONDITION_NESTING_DEPTH: usize = 32;
 
@@ -1192,10 +1192,11 @@ fn validate_present_predicate(
     field_path: &str,
     slot_ids: &BTreeSet<&str>,
 ) -> crate::Result<()> {
-    if trait_ref.schema_version.as_str() != "0.3" {
+    if !schema_version_at_least(trait_ref.schema_version.as_str(), "0.3") {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{field_path}.present"),
-            message: "present requires a trait declaring schema-version \"0.3\"".to_string(),
+            message: "present requires a trait declaring schema-version \"0.3\" or newer"
+                .to_string(),
         }
         .into());
     }
@@ -1463,11 +1464,12 @@ fn validate_count_threshold(
     if threshold.as_u64().is_some() {
         return Ok(());
     }
-    if trait_ref.schema_version.as_str() != "0.3" {
+    if !schema_version_at_least(trait_ref.schema_version.as_str(), "0.3") {
         return Err(crate::manifest::Error::InvalidField {
             field_path: format!("{field_path}.{name}"),
-            message: "count-to-count comparisons require a trait declaring schema-version \"0.3\""
-                .to_string(),
+            message:
+                "count-to-count comparisons require a trait declaring schema-version \"0.3\" or newer"
+                    .to_string(),
         }
         .into());
     }

@@ -172,6 +172,26 @@ pub fn is_schema_version_supported(schema_version: &str) -> bool {
     SUPPORTED_SCHEMA_VERSIONS.contains(&schema_version)
 }
 
+/// Whether `schema_version` is `floor` or newer, ranked by position in
+/// [`SUPPORTED_SCHEMA_VERSIONS`] (oldest first, the order `MIGRATION_STEPS`
+/// walks). Version-gated features are additive and carried forward by
+/// migration, so every gate on "the version that introduced X" must accept
+/// all later versions too — an exact-equality gate on "0.3" broke every
+/// `present` trait the day the CDK default became "0.4". Never rank by
+/// parsing the string as semver; the string is opaque and order lives only
+/// in the registries (see migrate.rs).
+pub fn schema_version_at_least(schema_version: &str, floor: &str) -> bool {
+    let position = |version: &str| {
+        SUPPORTED_SCHEMA_VERSIONS
+            .iter()
+            .position(|supported| *supported == version)
+    };
+    match (position(schema_version), position(floor)) {
+        (Some(actual), Some(floor)) => actual >= floor,
+        _ => false,
+    }
+}
+
 /// Semantic version text (e.g. "0.1.0").
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
