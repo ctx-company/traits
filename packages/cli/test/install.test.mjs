@@ -1,0 +1,74 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { chmod, copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import * as tar from 'tar';
+import test from 'node:test';
+import { assetName, checksumFrom, install, targetFor } from '../scripts/install.mjs';
+
+test('maps release targets and rejects unsupported platforms', () => {
+  assert.equal(targetFor('darwin', 'arm64'), 'aarch64-apple-darwin');
+  assert.equal(targetFor('darwin', 'x64'), 'x86_64-apple-darwin');
+  assert.equal(targetFor('linux', 'arm64'), 'aarch64-unknown-linux-gnu');
+  assert.equal(targetFor('linux', 'x64'), 'x86_64-unknown-linux-gnu');
+  assert.throws(() => targetFor('win32', 'x64'), /curl.*Homebrew/);
+});
+
+test('requires a matching checksum filename', () => {
+  assert.throws(() => checksumFrom('f'.repeat(64) + '  other.tar.gz\n', 'ctx.tar.gz'), /Invalid checksum/);
+});
+
+async function fixture(checksum) {
+  const root = await mkdtemp(join(tmpdir(), 'ctx-test-'));
+  const stage = join(root, 'stage');
+  await (await import('node:fs/promises')).mkdir(stage);
+  await writeFile(join(stage, 'ctx'), '#!/bin/sh\nprintf fixture\n');
+  await chmod(join(stage, 'ctx'), 0o755);
+  const name = assetName('1.2.3', 'x86_64-unknown-linux-gnu');
+  const archive = join(root, name);
+  await tar.c({ gzip: true, file: archive, cwd: stage }, ['ctx']);
+  const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
+  const server = createServer(async (request, response) => {
+    if (request.url?.endsWith('.sha256')) response.end(`${checksum ? '0'.repeat(64) : digest}  ${name}\n`);
+    else response.end(await readFile(archive));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  return { root, server, base: `http://127.0.0.1:${port}`, close: async () => { await new Promise((resolve) => server.close(resolve)); await rm(root, { recursive: true, force: true }); } };
+}
+
+test('installs only a checksum-verified ctx binary', async () => {
+  const data = await fixture(false);
+  const packageDir = join(data.root, 'package', 'scripts');
+  await (await import('node:fs/promises')).mkdir(packageDir, { recursive: true });
+  try {
+    await install({ version: '1.2.3', platform: 'linux', arch: 'x64', packageDir, releaseBase: data.base });
+    assert.equal(spawnSync(join(data.root, 'package', 'binary', 'ctx')).stdout.toString(), 'fixture');
+  } finally { await data.close(); }
+});
+
+test('rejects an archive with a mismatched checksum', async () => {
+  const data = await fixture(true);
+  const packageDir = join(data.root, 'package', 'scripts');
+  await (await import('node:fs/promises')).mkdir(packageDir, { recursive: true });
+  try {
+    await assert.rejects(install({ version: '1.2.3', platform: 'linux', arch: 'x64', packageDir, releaseBase: data.base }), /Checksum verification failed/);
+  } finally { await data.close(); }
+});
+
+test('shim gives recovery instructions when binary is absent', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ctx-shim-test-'));
+  await mkdir(join(root, 'bin'));
+  await copyFile(fileURLToPath(new URL('../bin/ctx.mjs', import.meta.url)), join(root, 'bin', 'ctx.mjs'));
+  try {
+    const result = spawnSync(process.execPath, [join(root, 'bin', 'ctx.mjs')], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--ignore-scripts.*curl.*Homebrew/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

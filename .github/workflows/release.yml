@@ -232,7 +232,7 @@ jobs:
   # separately versioned artifacts that happen to release together.
   npm:
     name: publish npm packages
-    needs: build
+    needs: [build, publish]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     # OIDC trusted publishing (npm deprecated granular-token 2FA bypass,
@@ -258,9 +258,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      # Only the four published packages — pnpm orders the filtered set
-      # topologically, and the private bindings/harness packages must not be
-      # built (or published) here.
+      # Only the four authoring packages — the private bindings/harness
+      # packages and binary wrapper must not be built here.
       - run: >-
           pnpm --filter @ctx-traits/config --filter @ctx-traits/cdk
           --filter @ctx-traits/toolkit --filter @ctx-traits/agents run build
@@ -289,3 +288,16 @@ jobs:
             pnpm --dir "packages/${package}" pack --pack-destination "${stage}"
             npm publish "${stage}/ctx-traits-${package}-${version}.tgz" --access public
           done
+          cli_version=$(node -p "require('./packages/cli/package.json').version")
+          release_version="${{ needs.build.outputs.version }}"
+          if [[ "${cli_version}" != "${release_version}" ]]; then
+            echo "::error::@ctx-traits/cli version ${cli_version} does not match release version ${release_version}"
+            exit 1
+          fi
+          name="@ctx-traits/cli"
+          if npm view "${name}@${cli_version}" version >/dev/null 2>&1; then
+            echo "${name}@${cli_version} is already published — nothing to do"
+            exit 0
+          fi
+          pnpm --dir packages/cli pack --pack-destination "${stage}"
+          npm publish "${stage}/ctx-traits-cli-${cli_version}.tgz" --access public

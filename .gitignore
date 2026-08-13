@@ -14,3 +14,7 @@ packages/harness-client/dist/
 # trait on demand and re-derivable from it, so the tree is a build artifact,
 # not source — and publish stages it from the package, not from here.
 .agents/
+
+# Downloaded by @ctx-traits/cli during postinstall; release archives remain
+# the canonical binary artifacts.
+packages/cli/binary/

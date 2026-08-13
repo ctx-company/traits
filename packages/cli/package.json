@@ -1,0 +1,41 @@
+{
+  "name": "@ctx-traits/cli",
+  "version": "0.1.1",
+  "description": "ctx command-line interface",
+  "keywords": [
+    "ctx",
+    "ctx-traits",
+    "cli"
+  ],
+  "homepage": "https://github.com/ctx-company/traits/tree/main/packages/cli",
+  "license": "Apache-2.0",
+  "author": "Oskar Cieslik",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ctx-company/traits.git",
+    "directory": "packages/cli"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "bin": {
+    "ctx": "bin/ctx.mjs"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "tar": "7.5.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
