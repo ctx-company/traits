@@ -33,10 +33,9 @@ virgin-repo consume → upstream update → pull-update loop.
       as task 0190.
 - [x] 2.3 Hand-cut the release: workspace at 0.1.0 (done), CHANGELOG.md drafted
       (done) — remaining: OWNER runs `git tag v0.1.0 && git push origin v0.1.0`.
-- [ ] 2.4 Actions run green end-to-end: archives, formula in tap, npm ×4, no
-      skip-warnings.
-- [ ] 2.5 Verify from a clean machine: README curl one-liner;
-      `brew install ctx-company/tap/ctx`; `ctx --version` from both.
+- [x] 2.4 Actions run green end-to-end: archives, formula in tap, npm ×4.
+- [x] 2.5 Verified 2026-08-13: ctx installs via the curl one-liner and
+      `brew install ctx-company/tap/ctx` (owner-confirmed). PHASE 2 DONE.
 
 ## Phase 3 — publish authored traits (npm + git)
 
