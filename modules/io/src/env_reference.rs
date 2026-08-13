@@ -151,11 +151,15 @@ fn testhook_env_reference() -> [EnvVarDoc; 7] {
 /// Resolves a config-declared environment-variable *reference* by name
 /// (0069's channel-secrets doctrine, reused by 0079's `api-key-env`): config
 /// stores the variable's NAME only, and this is the one place its VALUE is
-/// ever read — never serialized, logged, or echoed back. An unset or
-/// empty-string variable resolves to `None`, the same "absent" the caller
-/// degrades on either way.
-pub fn resolve_env_var_reference(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
+/// ever read. The value comes back as a [`crate::secret::Secret`], so
+/// "never serialized, logged, or echoed back" is the type's guarantee, not
+/// this comment's. An unset or empty-string variable resolves to `None`,
+/// the same "absent" the caller degrades on either way.
+pub fn resolve_env_var_reference(name: &str) -> Option<crate::secret::Secret> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(crate::secret::Secret::new)
 }
 
 fn base_env_reference() -> Vec<EnvVarDoc> {

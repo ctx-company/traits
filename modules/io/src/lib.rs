@@ -76,6 +76,7 @@ pub mod run_session;
 pub mod run_summary;
 pub mod runtime_acceptance;
 pub mod runtime_source;
+pub mod secret;
 pub mod state;
 pub mod target_slot;
 pub mod task_board_cache;

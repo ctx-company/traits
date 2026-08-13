@@ -34,10 +34,11 @@ pub struct ProviderRequest<'a> {
     pub base_url: &'a str,
     pub wire: ProviderWire,
     pub model: &'a str,
-    /// The resolved credential VALUE — never logged, never echoed. Callers
-    /// resolve this once via [`crate::env_reference::resolve_env_var_reference`]
-    /// and pass it straight through.
-    pub api_key: &'a str,
+    /// The resolved credential — redaction-wrapped, so this struct's `Debug`
+    /// derive stays safe. Callers resolve it once via
+    /// [`crate::env_reference::resolve_env_var_reference`] and pass it
+    /// straight through; only the header construction below exposes it.
+    pub api_key: &'a crate::secret::Secret,
     pub system: Option<&'a str>,
     pub user: &'a str,
     pub max_tokens: u32,
@@ -181,7 +182,10 @@ fn dispatch_openai_compat(request: &ProviderRequest<'_>) -> Result<ProviderRespo
     let response = agent
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("Authorization", &format!("Bearer {}", request.api_key))
+        .header(
+            "Authorization",
+            &format!("Bearer {}", request.api_key.expose()),
+        )
         .header("User-Agent", &user_agent())
         .send(&body)
         .map_err(|source| request_error(&url, &source))?;
@@ -249,7 +253,7 @@ fn dispatch_anthropic(request: &ProviderRequest<'_>) -> Result<ProviderResponse,
     let response = agent
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", request.api_key)
+        .header("x-api-key", request.api_key.expose())
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("User-Agent", &user_agent())
         .send(&body)
@@ -294,7 +298,11 @@ fn parse_anthropic_response(
 mod tests {
     use super::*;
 
-    fn request<'a>(wire: ProviderWire, api_key: &'a str) -> ProviderRequest<'a> {
+    fn test_key() -> crate::secret::Secret {
+        crate::secret::Secret::new("key".to_string())
+    }
+
+    fn request<'a>(wire: ProviderWire, api_key: &'a crate::secret::Secret) -> ProviderRequest<'a> {
         ProviderRequest {
             base_url: "https://example.invalid",
             wire,
@@ -311,7 +319,7 @@ mod tests {
 
     #[test]
     fn openai_compat_request_body_carries_system_and_user() {
-        let body = openai_compat_request_body(&request(ProviderWire::OpenaiCompat, "key"));
+        let body = openai_compat_request_body(&request(ProviderWire::OpenaiCompat, &test_key()));
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
         assert_eq!(body["messages"][0]["role"], "system");
@@ -322,7 +330,8 @@ mod tests {
 
     #[test]
     fn openai_compat_request_body_omits_system_when_absent() {
-        let mut req = request(ProviderWire::OpenaiCompat, "key");
+        let key = test_key();
+        let mut req = request(ProviderWire::OpenaiCompat, &key);
         req.system = None;
         let body = openai_compat_request_body(&req);
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
@@ -379,7 +388,7 @@ mod tests {
 
     #[test]
     fn anthropic_request_body_carries_system_separately() {
-        let body = anthropic_request_body(&request(ProviderWire::Anthropic, "key"));
+        let body = anthropic_request_body(&request(ProviderWire::Anthropic, &test_key()));
         assert_eq!(body["model"], "test-model");
         assert_eq!(body["system"], "system prompt");
         assert_eq!(body["messages"][0]["role"], "user");
@@ -461,7 +470,7 @@ mod tests {
             base_url: "http://127.0.0.1:1",
             wire: ProviderWire::OpenaiCompat,
             model: "m",
-            api_key: "k",
+            api_key: &test_key(),
             system: None,
             user: "hi",
             max_tokens: 16,

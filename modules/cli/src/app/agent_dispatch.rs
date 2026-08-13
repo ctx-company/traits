@@ -349,9 +349,10 @@ pub(crate) struct ApiSeatRequest {
     pub(crate) base_url: String,
     pub(crate) wire: ProviderWire,
     pub(crate) model: String,
-    /// The resolved credential VALUE. Held only for the duration of the one
-    /// call this is built for — never logged, serialized, or echoed.
-    pub(crate) api_key: String,
+    /// The resolved credential VALUE, redaction-wrapped: `{:?}`/`{}`/serde
+    /// all render `[REDACTED]`; only the provider client's header
+    /// construction calls `.expose()`.
+    pub(crate) api_key: ctx_traits_io::secret::Secret,
     pub(crate) connect_timeout_ms: u64,
     pub(crate) read_timeout_ms: u64,
     pub(crate) retries: u32,

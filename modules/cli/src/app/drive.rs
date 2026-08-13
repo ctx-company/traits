@@ -11027,7 +11027,7 @@ mod narrator_seat_dispatch_tests {
             base_url: "https://example.invalid".to_string(),
             wire: ctx_traits_io::harness_config::ProviderWire::OpenaiCompat,
             model: "gpt-4o-mini".to_string(),
-            api_key: "test-key".to_string(),
+            api_key: ctx_traits_io::secret::Secret::new("test-key".to_string()),
             connect_timeout_ms: ctx_traits_io::provider_client::DEFAULT_CONNECT_TIMEOUT_MS,
             read_timeout_ms: ctx_traits_io::provider_client::DEFAULT_READ_TIMEOUT_MS,
             retries: ctx_traits_io::provider_client::DEFAULT_RETRIES,
