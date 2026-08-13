@@ -1,61 +1,51 @@
-import { condition, defineVariant, flow, intent, method, useBehavior, useIntent } from "@ctx-traits/cdk";
+import { condition, defineVariant, flow, method, useBehavior, useIntent } from "@ctx-traits/cdk";
 
-import { baselineResult, candidateResult, readinessSlot, summaryPort } from "../../shared/data.ts";
-import { measureBaselineStage, seedBestStage } from "../../shared/stage/baseline.ts";
-import { decideCandidate } from "../../shared/stage/decide.ts";
-import * as git from "../../shared/stage/git.ts";
-import { measureAggregateStage } from "../../shared/stage/measure.ts";
-import { abortSummaryStage, baselineFailureSummaryStage, deriveSummaryStage } from "../../shared/stage/summary.ts";
+import * as shared from "#trait/shared/index.ts";
 import { experimentCommand } from "./data.ts";
-import { applyStage } from "./stage/apply.ts";
-import { proposeStage } from "./stage/propose.ts";
-import { setupStage } from "./stage/setup.ts";
+import * as stage from "./stage/index.ts";
 
 export default function () {
   defineVariant("Experiment", {
     summary:
       "Runs bounded experiments whose keep/discard decision is a deterministic guard over typed, N-run-aggregated command output.",
-    metadata: { tag: ["first-party", "optimize", "experiments", "provenance"] },
+    metadata: { tag: shared.metadata.experimentTag },
     description:
       "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements.",
   });
-  useIntent({
-    require: [intent.focus.Correctness, intent.require.GatesGreenBeforeCommit],
-    avoid: [intent.avoid.RubberStampReview],
-  });
+  useIntent(shared.intent.experiment);
   useBehavior({ method: [method.EvidenceFirst] });
 
-  setupStage("Prepare and verify the isolated workbench");
+  stage.setup.setupStage("Prepare and verify the isolated workbench");
 
-  flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(readinessSlot, "status", "ready"), {
+  flow.match("Gate mutation on isolated-worktree readiness", condition.fieldEquals(shared.data.readinessSlot, "status", "ready"), {
     [flow.True]: () => {
-      git.captureInitialRef("Capture the immutable baseline commit");
-      git.captureBestRef("Capture the fixed reset ref");
-      measureBaselineStage("Measure the baseline", experimentCommand);
+      shared.stage.git.captureInitialRef("Capture the immutable baseline commit");
+      shared.stage.git.captureBestRef("Capture the fixed reset ref");
+      shared.stage.baseline.measureBaselineStage("Measure the baseline", experimentCommand);
 
-      flow.match("Require a usable trusted baseline", condition.fieldEquals(baselineResult, "status", "ok"), {
+      flow.match("Require a usable trusted baseline", condition.fieldEquals(shared.data.baselineResult, "status", "ok"), {
         [flow.True]: () => {
-          seedBestStage("Seed trusted best state and history");
+          shared.stage.baseline.seedBestStage("Seed trusted best state and history");
 
           flow.loop("Run the iteration-capped experiment budget", (loop) => {
             loop.maxIterations(20, { onExhausted: "continue" });
-            proposeStage("Propose one fresh bounded experiment");
-            applyStage("Apply the proposed candidate");
-            measureAggregateStage("Measure the candidate", experimentCommand, candidateResult);
-            decideCandidate();
+            stage.propose.proposeStage("Propose one fresh bounded experiment");
+            stage.apply.applyStage("Apply the proposed candidate");
+            shared.stage.measure.measureAggregateStage("Measure the candidate", experimentCommand, shared.data.candidateResult);
+            shared.stage.decide.decideCandidate();
           });
 
-          deriveSummaryStage("Derive the typed experiment summary", "iteration-limit-reached");
+          shared.stage.summary.deriveSummaryStage("Derive the typed experiment summary", "iteration-limit-reached");
         },
         [flow.False]: () => {
-          baselineFailureSummaryStage("Report the unusable baseline");
+          shared.stage.summary.baselineFailureSummaryStage("Report the unusable baseline");
         },
       });
     },
     [flow.False]: () => {
-      abortSummaryStage("Report the preflight abort");
+      shared.stage.summary.abortSummaryStage("Report the preflight abort");
     },
   });
 
-  return { summary: summaryPort };
+  return { summary: shared.data.summaryPort };
 }

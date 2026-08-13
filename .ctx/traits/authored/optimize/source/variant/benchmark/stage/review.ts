@@ -1,9 +1,9 @@
 import { CODE_INTEGRITY_DOCTRINE, QUICK_VARIANT_DOCTRINE } from "@ctx-traits/agents";
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1 } from "../../../shared/agent.ts";
-import { implementReceipt } from "../../../shared/data.ts";
-import { draftSlot } from "../../../shared/data.ts";
+import { smart1 } from "#trait/shared/agent.ts";
+import { implementReceipt } from "#trait/shared/data.ts";
+import { draftSlot } from "#trait/shared/data.ts";
 import { reviewVerdictSlot, target } from "../data.ts";
 
 export const reviewStage = cdk.stage({

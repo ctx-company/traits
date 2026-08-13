@@ -1,6 +1,6 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { benchmarkRuns } from "../data.ts";
+import { benchmarkRuns } from "#trait/shared/data.ts";
 
 // A `benchmark-runs` value is a runtime-resolved port, not a compile-time
 // literal, so it cannot drive `flow.loop`'s `maxIterations` (which only

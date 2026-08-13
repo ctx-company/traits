@@ -1,12 +1,18 @@
 id = "optimize"
-schema-version = "0.3"
+schema-version = "0.4"
 version = "0.1.0"
 name = "Experiment"
+description = "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements."
 summary = "Runs bounded experiments whose keep/discard decision is a deterministic guard over typed, N-run-aggregated command output."
 variant = "experiment"
 
 [metadata]
-tag = ["first-party", "optimize", "experiments", "provenance"]
+tag = [
+    "first-party",
+    "optimize",
+    "experiments",
+    "provenance",
+]
 
 [[intent.require]]
 id = "correctness"
@@ -161,7 +167,12 @@ description = "Ok only when every one of the benchmark-runs invocations reported
 [[schema]]
 id = "optimize-decision-status"
 schema = "schema:text"
-allowed = ["baseline", "kept", "discarded", "review-rejected"]
+allowed = [
+    "baseline",
+    "kept",
+    "discarded",
+    "review-rejected",
+]
 description = "Deterministic disposition of one round. review-rejected is benchmark-only — experiment rounds never reach it."
 
 [[schema]]
@@ -209,13 +220,19 @@ description = "Ready only for a clean, isolated Git worktree."
 [[schema]]
 id = "optimize-readiness-status"
 schema = "schema:text"
-allowed = ["ready", "abort"]
+allowed = [
+    "ready",
+    "abort",
+]
 description = "Whether the isolated workbench is safe to mutate."
 
 [[schema]]
 id = "optimize-result-status"
 schema = "schema:text"
-allowed = ["ok", "error"]
+allowed = [
+    "ok",
+    "error",
+]
 description = "Ok only when every run in the aggregate produced a usable measurement."
 
 [[schema]]
@@ -259,7 +276,11 @@ description = "Completed once the target is reached or the iteration cap is exha
 [[schema]]
 id = "optimize-summary-reason"
 schema = "schema:text"
-allowed = ["target-reached", "iteration-limit-reached", "aborted"]
+allowed = [
+    "target-reached",
+    "iteration-limit-reached",
+    "aborted",
+]
 description = "Which declared stop condition ended the run. aborted is set only alongside status aborted."
 
 [[schema]]
@@ -278,7 +299,10 @@ description = "The trusted N-run aggregate measurement; absent for a review-reje
 [[schema]]
 id = "optimize-summary-status"
 schema = "schema:text"
-allowed = ["completed", "aborted"]
+allowed = [
+    "completed",
+    "aborted",
+]
 description = "Terminal run outcome."
 
 [[agent]]
@@ -298,7 +322,10 @@ text = """
         Inspect the current files first, preserve unrelated work, and do not run or report the experiment metric. The runtime executes the trusted measurement command next.
         Return a concise receipt naming the files changed.
     """
-input = ["slot:proposal", "port:objective"]
+input = [
+    "slot:proposal",
+    "port:objective",
+]
 output = ["slot:apply-receipt"]
 
 [prompt.prepare-and-verify-the-isolated-workbench]
@@ -320,7 +347,12 @@ text = """
         Use only this typed handoff. Do not infer hidden conversation, claim a result, or decide keep/discard.
         Return a title, hypothesis, and exact bounded change.
     """
-input = ["port:objective", "port:metric-field", "slot:best-metric", "slot:history"]
+input = [
+    "port:objective",
+    "port:metric-field",
+    "slot:best-metric",
+    "slot:history",
+]
 output = ["slot:proposal"]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence]]
@@ -330,7 +362,11 @@ input = ["slot:readiness"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-otherwise.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [readinessText] = process.argv.slice(1);
 const readiness = JSON.parse(readinessText);
 process.stdout.write(JSON.stringify({
@@ -340,7 +376,9 @@ process.stdout.write(JSON.stringify({
     kept: 0,
     rows: [],
     detail: readiness.detail,
-}));""", "{slot:readiness}"]
+}));""",
+    "{slot:readiness}",
+]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "capture-initial-ref"
@@ -348,7 +386,11 @@ title = "Capture the immutable baseline commit"
 output = ["slot:captured-ref"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 import { spawnSync } from "node:child_process";
 const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
     cwd: process.cwd(),
@@ -359,7 +401,8 @@ if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
     process.stderr.write(result.stderr ?? "could not capture HEAD commit");
     process.exit(1);
 }
-process.stdout.write(JSON.stringify({ sha }));"""]
+process.stdout.write(JSON.stringify({ sha }));""",
+]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "capture-best-ref"
@@ -376,11 +419,18 @@ destination = "slot:best-ref"
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "measure-the-baseline"
 title = "Measure the baseline"
-input = ["port:experiment-command", "port:benchmark-runs"]
+input = [
+    "port:experiment-command",
+    "port:benchmark-runs",
+]
 output = ["slot:baseline-result"]
 
 [sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 import { spawnSync } from "node:child_process";
 const [argvText, runsText] = process.argv.slice(1);
 const argv = JSON.parse(argvText);
@@ -422,7 +472,10 @@ const output = {
 if (median && median.deltaLines !== undefined) {
     output["delta-lines"] = median.deltaLines;
 }
-process.stdout.write(JSON.stringify(output));""", "{port:experiment-command}", "{port:benchmark-runs}"]
+process.stdout.write(JSON.stringify(output));""",
+    "{port:experiment-command}",
+    "{port:benchmark-runs}",
+]
 
 [[sequence.ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then.sequence]]
 id = "require-a-usable-trusted-baseline"
@@ -443,7 +496,12 @@ input = ["slot:best-ref"]
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
-argv = ["git", "reset", "--hard", "{slot:best-ref}"]
+argv = [
+    "git",
+    "reset",
+    "--hard",
+    "{slot:best-ref}",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
 id = "clean-candidate"
@@ -451,7 +509,11 @@ title = "Remove untracked candidate files"
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence.command]
-argv = ["git", "clean", "-fd"]
+argv = [
+    "git",
+    "clean",
+    "-fd",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-otherwise.sequence]]
 id = "record-discarded-candidate"
@@ -493,18 +555,30 @@ operation = "append"
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "derive-commit-message"
 title = "Derive the kept-candidate commit message"
-input = ["slot:best-metric", "slot:candidate-result", "port:benchmark-runs"]
+input = [
+    "slot:best-metric",
+    "slot:candidate-result",
+    "port:benchmark-runs",
+]
 output = ["slot:commit-message"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [beforeText, candidateText, runsText] = process.argv.slice(1);
 const before = Number(beforeText);
 const candidate = JSON.parse(candidateText);
 const runs = Number(runsText);
 process.stdout.write(
     "optimize: keep improved candidate (" + before + " -> " + candidate.metric + ", median of " + runs + " runs)",
-);""", "{slot:best-metric}", "{slot:candidate-result}", "{port:benchmark-runs}"]
+);""",
+    "{slot:best-metric}",
+    "{slot:candidate-result}",
+    "{port:benchmark-runs}",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "stage-candidate"
@@ -512,7 +586,11 @@ title = "Stage the kept candidate"
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = ["git", "add", "-A"]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "commit-candidate"
@@ -521,7 +599,12 @@ input = ["slot:commit-message"]
 output = ["slot:command-receipt"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = ["git", "commit", "-m", "{slot:commit-message}"]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "capture-committed-ref"
@@ -529,7 +612,11 @@ title = "Capture the kept commit SHA"
 output = ["slot:captured-ref"]
 
 [sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 import { spawnSync } from "node:child_process";
 const result = spawnSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
     cwd: process.cwd(),
@@ -540,14 +627,21 @@ if (result.status !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
     process.stderr.write(result.stderr ?? "could not capture HEAD commit");
     process.exit(1);
 }
-process.stdout.write(JSON.stringify({ sha }));"""]
+process.stdout.write(JSON.stringify({ sha }));""",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence]]
 id = "advance-best"
 title = "Advance trusted best state after commit"
 kind = "project"
-input = ["slot:candidate-result", "slot:captured-ref"]
-output = ["slot:best-metric", "slot:best-ref"]
+input = [
+    "slot:candidate-result",
+    "slot:captured-ref",
+]
+output = [
+    "slot:best-metric",
+    "slot:best-ref",
+]
 
 [[sequence.ctx-branch-arm-s-47-run-the-iteration-capped-experiment-budget-body-40-apply-the-declared-keep-discard-decision-then.sequence.projection]]
 source = "slot:candidate-result"
@@ -614,7 +708,11 @@ input = ["slot:baseline-result"]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-otherwise.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [baselineText] = process.argv.slice(1);
 const baseline = JSON.parse(baselineText);
 process.stdout.write(JSON.stringify({
@@ -624,7 +722,9 @@ process.stdout.write(JSON.stringify({
     kept: 0,
     rows: [{ measurement: baseline, decision: "baseline" }],
     detail: "trusted baseline command did not return status ok: " + JSON.stringify(baseline),
-}));""", "{slot:baseline-result}"]
+}));""",
+    "{slot:baseline-result}",
+]
 
 [[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
 id = "seed-best"
@@ -632,11 +732,11 @@ title = "Seed trusted best state and history"
 kind = "project"
 input = ["slot:baseline-result"]
 output = [
-  "slot:best-metric",
-  { slot = "slot:history", operation = "append" },
-  "slot:round-count",
-  "slot:kept-count",
-  { slot = "slot:decisions", operation = "append" },
+    "slot:best-metric",
+    { slot = "slot:history", operation = "append" },
+    "slot:round-count",
+    "slot:kept-count",
+    { slot = "slot:decisions", operation = "append" },
 ]
 
 [[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.projection]]
@@ -679,15 +779,21 @@ on-exhausted = "continue"
 [[sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence]]
 id = "derive-summary-iteration-limit-reached"
 title = "Derive the typed experiment summary"
-input = ["slot:round-count", "slot:kept-count", "slot:best-metric", "slot:decisions", "slot:history"]
+input = [
+    "slot:round-count",
+    "slot:kept-count",
+    "slot:best-metric",
+    "slot:decisions",
+    "slot:history",
+]
 output = ["slot:summary"]
 
 [sequence.ctx-branch-arm-s-69-ctx-branch-arm-p-44-gate-mutation-on-isolated-worktree-readiness-then-33-require-a-usable-trusted-baseline-then.sequence.command]
 argv = [
-  "node",
-  "--input-type=module",
-  "--eval",
-  """
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 const [reason, roundsText, keptText, bestText, decisionsText, measurementsText, reviewsText] = process.argv.slice(1);
 const rounds = Number(roundsText);
 const kept = Number(keptText);
@@ -726,12 +832,12 @@ process.stdout.write(JSON.stringify({
     rows,
     detail,
 }));""",
-  "iteration-limit-reached",
-  "{slot:round-count}",
-  "{slot:kept-count}",
-  "{slot:best-metric}",
-  "{slot:decisions}",
-  "{slot:history}",
+    "iteration-limit-reached",
+    "{slot:round-count}",
+    "{slot:kept-count}",
+    "{slot:best-metric}",
+    "{slot:decisions}",
+    "{slot:history}",
 ]
 
 [[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
@@ -739,7 +845,12 @@ id = "propose-one-fresh-bounded-experiment"
 title = "Propose one fresh bounded experiment"
 agent = "agent:proposer"
 prompt = "prompt:propose-one-fresh-bounded-experiment"
-input = ["port:objective", "port:metric-field", "slot:best-metric", "slot:history"]
+input = [
+    "port:objective",
+    "port:metric-field",
+    "slot:best-metric",
+    "slot:history",
+]
 output = ["slot:proposal"]
 
 [[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
@@ -747,17 +858,27 @@ id = "apply-the-proposed-candidate"
 title = "Apply the proposed candidate"
 agent = "agent:worker"
 prompt = "prompt:apply-the-proposed-candidate"
-input = ["slot:proposal", "port:objective"]
+input = [
+    "slot:proposal",
+    "port:objective",
+]
 output = ["slot:apply-receipt"]
 
 [[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
 id = "measure-the-candidate"
 title = "Measure the candidate"
-input = ["port:experiment-command", "port:benchmark-runs"]
+input = [
+    "port:experiment-command",
+    "port:benchmark-runs",
+]
 output = ["slot:candidate-result"]
 
 [sequence.run-the-iteration-capped-experiment-budget-body.sequence.command]
-argv = ["node", "--input-type=module", "--eval", """
+argv = [
+    "node",
+    "--input-type=module",
+    "--eval",
+    """
 import { spawnSync } from "node:child_process";
 const [argvText, runsText] = process.argv.slice(1);
 const argv = JSON.parse(argvText);
@@ -799,7 +920,10 @@ const output = {
 if (median && median.deltaLines !== undefined) {
     output["delta-lines"] = median.deltaLines;
 }
-process.stdout.write(JSON.stringify(output));""", "{port:experiment-command}", "{port:benchmark-runs}"]
+process.stdout.write(JSON.stringify(output));""",
+    "{port:experiment-command}",
+    "{port:benchmark-runs}",
+]
 
 [[sequence.run-the-iteration-capped-experiment-budget-body.sequence]]
 id = "apply-the-declared-keep-discard-decision"
@@ -846,11 +970,11 @@ ref = "port:max-delta-lines"
 [procedure]
 description = "Verify an isolated worktree, seed a trusted baseline, run an iteration-capped fresh-proposal experiment loop, and deterministically keep only command-measured improvements."
 input = [
-  "port:benchmark-runs",
-  "port:experiment-command",
-  "port:max-delta-lines",
-  "port:metric-field",
-  "port:objective",
+    "port:benchmark-runs",
+    "port:experiment-command",
+    "port:max-delta-lines",
+    "port:metric-field",
+    "port:objective",
 ]
 output = ["port:summary"]
 

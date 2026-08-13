@@ -1,8 +1,8 @@
 import * as cdk from "@ctx-traits/cdk";
 import { condition, flow } from "@ctx-traits/cdk";
 
-import { bestMetric, candidateResult, decisions, history, keptCount, maxDelta, roundCount } from "../data.ts";
-import * as git from "./git.ts";
+import { bestMetric, candidateResult, decisions, history, keptCount, maxDelta, roundCount } from "#trait/shared/data.ts";
+import * as git from "#trait/shared/stage/git.ts";
 
 // Each optional cap contributes one composed arm: absent -> passes
 // automatically; present -> the candidate must also report the capped

@@ -1,5 +1,5 @@
 import { defineTrait, useVariant } from "@ctx-traits/cdk";
-import { default as variants } from "./variant/index.ts";
+import { default as variants } from "#trait/variant/index.ts";
 
 export default function () {
   defineTrait("Optimize", { version: "0.1.0" });

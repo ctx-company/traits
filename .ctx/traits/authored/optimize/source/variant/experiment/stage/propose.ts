@@ -1,7 +1,7 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { proposer } from "../../../shared/agent.ts";
-import { bestMetric, history, proposal } from "../../../shared/data.ts";
+import { proposer } from "#trait/shared/agent.ts";
+import { bestMetric, history, proposal } from "#trait/shared/data.ts";
 import { metricField, objective } from "../data.ts";
 
 export const proposeStage = cdk.stage({

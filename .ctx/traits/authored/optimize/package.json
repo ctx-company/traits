@@ -1,7 +1,16 @@
 {
-  "name": "@ctx-traits/optimize",
-  "version": "0.1.0",
+  "dependencies": {},
+  "files": [
+    "trait.toml",
+    "trait.lock",
+    "generated",
+    "resources",
+    "source"
+  ],
   "imports": {
     "#trait/*": "./source/*"
-  }
+  },
+  "name": "@ctx-traits/optimize",
+  "type": "module",
+  "version": "0.1.0"
 }

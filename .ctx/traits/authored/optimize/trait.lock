@@ -10,9 +10,9 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:95cc9e6a2cbc2114991d68e36c1b565498071ececf93e6afd597ddeb24372461"
-canonical = "sha256:f10b2a93e40884e706accd8e4cc81d4465a1daefb6ba1ca3415f1976441899b5"
-model-visible = "sha256:622a44ce9dd4fe3d162933d2d05f600480f055299ca7045665272ff6e8baf2f0"
+source = "sha256:29d8dd4946d57a6be321a3ec959b493234903e0765362452f38254ab88d84862"
+canonical = "sha256:0964966b2bfbcc7df439493f8bdbfc3f28ba5112d5a17fdf23362055be84b448"
+model-visible = "sha256:64acf3c9b0b93409ef451e0ea3954af1513880890d0b4cb3f0a824d631fff8c6"
 resource-manifest = "sha256:a29a69880212df51502dcbbe1fcb320822236206578f3155e792418f4df7ba44"
 
 [[trait.export]]
@@ -51,15 +51,15 @@ requested-version = "0.1.0"
 resolved-version = "0.1.0"
 
 [trait.digests]
-source = "sha256:06ae594bb6c0931314c451dc44a9ea961fd0c9ce84d330c452896072e43534f3"
-canonical = "sha256:eaf591f8644f8cf26d0a012d549a77b1eaebb368bcd25f8a04edd681a2d19396"
-model-visible = "sha256:545e2e570511604593646e7dc3f033d9da071bbeb73191c9fcc390fc5dd8f738"
+source = "sha256:64389bcc1ca1b8174ea2e1e3acaaebbbdb6454d95966235a4ea37349a51e18f9"
+canonical = "sha256:b7a72cb04216e74488cdeee4a9f7fa55f57af7a3d0a6cb9e3da8dd70a58a4ac1"
+model-visible = "sha256:4010196ec3d9b64f4d30d1f4ff28f36b0434cb95e79df643fa83168791b6dc43"
 resource-manifest = "sha256:a29a69880212df51502dcbbe1fcb320822236206578f3155e792418f4df7ba44"
 
 [[trait.export]]
 target = "agent-skills"
 path = ".agents/skills/optimize-experiment/SKILL.md"
-digest = "sha256:59d53c9748c3c25edd8995419da7e4cff2a177bd6d8862aafcd826ce6f1d77b7"
+digest = "sha256:a4ad0f7183096da8490b7eb979cbf775bc73bc108e23ea1b7e8b59edcc0e6b1e"
 
 [[trait.projection]]
 target-profile = "agent-skills"
@@ -67,11 +67,11 @@ renderer-version = "0.1.0-alpha.1"
 profile-version = "agent-skills"
 
 [trait.projection.digests]
-source = "sha256:e059975b80c1b3cb82eb09b20e09b5da982e7c7867154cad970f2958e28ebbfa"
-canonical = "sha256:30bb1adee23e253a2c81f1d2937f739f65e8b82d818182ac3a89b0348cb3d829"
-model-visible = "sha256:7db451641ffa2d25f4dd606618aede0eb4682c35917bc16e890fedfa6cd1772e"
-render = "sha256:7af6f7b75f5fae7003a781a049a176bea94a14fc06b7a203c317713e03caed63"
-generated-markdown = "sha256:59d53c9748c3c25edd8995419da7e4cff2a177bd6d8862aafcd826ce6f1d77b7"
+source = "sha256:64389bcc1ca1b8174ea2e1e3acaaebbbdb6454d95966235a4ea37349a51e18f9"
+canonical = "sha256:b7a72cb04216e74488cdeee4a9f7fa55f57af7a3d0a6cb9e3da8dd70a58a4ac1"
+model-visible = "sha256:4010196ec3d9b64f4d30d1f4ff28f36b0434cb95e79df643fa83168791b6dc43"
+render = "sha256:159061bf749722cc4012389901b7c477194a5ef7fa568dcc90f34ad480f8f567"
+generated-markdown = "sha256:a4ad0f7183096da8490b7eb979cbf775bc73bc108e23ea1b7e8b59edcc0e6b1e"
 
 [trait.projection.warnings]
 semantic-loss = ["agent: agent-skills static render cannot enforce multi-agent frame routing; ctx runtime assignments and caller identity are required"]

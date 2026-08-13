@@ -1,9 +1,9 @@
 import * as cdk from "@ctx-traits/cdk";
 import { condition } from "@ctx-traits/cdk";
 
-import { bestMetric, candidateResult, decisions, roundCount } from "../../../shared/data.ts";
-import { decideCandidate } from "../../../shared/stage/decide.ts";
-import * as git from "../../../shared/stage/git.ts";
+import { bestMetric, candidateResult, decisions, roundCount } from "#trait/shared/data.ts";
+import { decideCandidate } from "#trait/shared/stage/decide.ts";
+import * as git from "#trait/shared/stage/git.ts";
 import { marginResult, noiseThreshold, reviewVerdictSlot, roundComplete, reviews } from "../data.ts";
 
 const deriveMarginScript = `

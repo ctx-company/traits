@@ -1,7 +1,7 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { smart1 } from "../../../shared/agent.ts";
-import { draftSlot, scopeSlot } from "../../../shared/data.ts";
+import { smart1 } from "#trait/shared/agent.ts";
+import { draftSlot, scopeSlot } from "#trait/shared/data.ts";
 import { target } from "../data.ts";
 
 export const draftStage = cdk.stage({

@@ -8,7 +8,7 @@ import {
   capturedRef,
   commandReceipt,
   commitMessage,
-} from "../data.ts";
+} from "#trait/shared/data.ts";
 
 // Kept inline (not extracted to a resource) matching the recovered
 // auto-research port shape: this is a fresh package, so a resource file

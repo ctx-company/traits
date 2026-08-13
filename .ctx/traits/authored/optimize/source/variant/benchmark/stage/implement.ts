@@ -1,7 +1,7 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { worker } from "../../../shared/agent.ts";
-import { draftSlot, implementReceipt } from "../../../shared/data.ts";
+import { worker } from "#trait/shared/agent.ts";
+import { draftSlot, implementReceipt } from "#trait/shared/data.ts";
 import { target } from "../data.ts";
 
 export const implementStage = cdk.stage({

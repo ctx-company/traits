@@ -1,6 +1,6 @@
 import { port, schema, slot } from "@ctx-traits/cdk";
 
-import { aggregateResult, decisionStatus, gitRefSchema, proposalSchema, readiness, summarySchema } from "./schema.ts";
+import { aggregateResult, decisionStatus, gitRefSchema, proposalSchema, readiness, summarySchema } from "#trait/shared/schema.ts";
 
 export const maxDelta = port.input.of(schema.integer(), {
   id: "max-delta-lines",

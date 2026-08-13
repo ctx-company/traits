@@ -1,7 +1,7 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { baselineResult, bestMetric, decisions, history, keptCount, roundCount } from "../data.ts";
-import { measureAggregateStage } from "./measure.ts";
+import { baselineResult, bestMetric, decisions, history, keptCount, roundCount } from "#trait/shared/data.ts";
+import { measureAggregateStage } from "#trait/shared/stage/measure.ts";
 
 export function measureBaselineStage(title: string, commandPort: cdk.PortHandle<string[]>) {
   return measureAggregateStage(title, commandPort, baselineResult);

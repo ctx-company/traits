@@ -9,7 +9,7 @@ import {
   readinessSlot,
   roundCount,
   summary,
-} from "../data.ts";
+} from "#trait/shared/data.ts";
 
 // Neither preflight nor baseline gating has a "rounds"/"kept" story yet
 // (seed-best has not run), so these are typed deterministic command steps —

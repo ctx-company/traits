@@ -1,6 +1,6 @@
 import { port, schema, slot } from "@ctx-traits/cdk";
 
-import { reviewStatusSchema, reviewVerdictSchema } from "../../shared/schema.ts";
+import { reviewStatusSchema, reviewVerdictSchema } from "#trait/shared/schema.ts";
 
 export const target = port.input.text({
   id: "target",
