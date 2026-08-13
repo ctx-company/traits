@@ -1,6 +1,6 @@
 schema-version = "0.2"
 key = "0189"
-title = "flow.error: authored early exit — the failure inverse of the maybe-ladder"
+title = "authored terminals: flow.success / flow.error — exit-point completion"
 status = "ready"
 raised = "2026-08-13"
 content = """
@@ -25,6 +25,21 @@ a loop abort-if arm and REFUSES outside a flow.loop; onExhausted:
 authored "this run has failed, here is why" does not exist — authors
 either let the run park silently (indistinguishable from success-shaped
 nothing-to-do) or lean on agent-level escalation prose.
+
+Owner extension 2026-08-13: the same mechanism, success-shaped —
+EXIT-POINT COMPLETION. Multiple authored success terminals, each with
+its own rendered payload, and fall-through-as-failure:
+
+    cdk.flow.when("A", ..., () => {
+      cdk.flow.success("...", cdk.render.of({ ... }));
+    });
+    cdk.flow.when("B", ..., () => {
+      cdk.flow.success("...", cdk.render.of({ ... }));
+    });
+    cdk.flow.success("...", cdk.render.of({ ... }));  // the default exit
+
+flow.success and flow.error are ONE feature — authored terminals — with
+opposite outcomes; both diverge identically in the validator.
 
 """
 scope = """
@@ -60,6 +75,27 @@ scope = """
   verdict).
 - Name: `error` (matches the author's mental model "early return with
   error"). `flow.Abort` stays loop-scoped machinery, untouched.
+- `cdk.flow.success(message?, payload?)` and the fused
+  `cdk.flow.successWhen(title, condition, message?, payload?)` mirror
+  the error forms exactly; outcome Completed instead of failure.
+- EXIT-POINT MODE RULE: a trait declaring at least one flow.success
+  terminal opts into exit-point completion — reaching the end of the
+  sequence without hitting a terminal is an AUTHORED FAILURE
+  ("no-exit-reached"), because explicit success makes implicit
+  completion a bug. Traits with no success terminals keep today's
+  semantics unchanged (complete at end, required-output check,
+  maybe-ladder parks); error-only traits too — their error rungs are
+  point failures in an otherwise declaration-mode trait. No mode
+  flags: the presence of a success terminal IS the declaration.
+- CONTRACT/BINDING SPLIT: the trait function's `return {...}` (the
+  output-port declarations) stays the single TYPE authority — the
+  superset of what the trait can yield. A success payload BINDS
+  declared ports at its exit: `render.of({...})` keys must name
+  declared output ports, and each port takes its value from exactly
+  one authority — declaration-site `value:` or exit-site binding,
+  never both (build-time refusal on double-binding). Branched VALUES,
+  one declared SHAPE. Required-port enforcement runs at each success
+  exit; ports unbound at the taken exit resolve absent iff optional.
 
 ## Canonical + runtime
 
@@ -80,12 +116,13 @@ scope = """
 
 ## Validator interplay (the interesting part)
 
-- An error arm DIVERGES — it never rejoins the fall-through path. The
-  produced-before-read branch join must exclude diverging arms from
-  the intersection (divergence-aware join, the `!`-type analog): after
-  `when(revise, error)`, the surviving path still carries everything
-  produced before the branch, and the inverted ladder style validates
-  without weakening any guarantee.
+- A TERMINAL arm (success or error alike) DIVERGES — it never rejoins
+  the fall-through path. The produced-before-read branch join must
+  exclude diverging arms from the intersection (divergence-aware join,
+  the `!`-type analog): after `when(cond, terminal)`, the surviving
+  path still carries everything produced before the branch, and both
+  the inverted ladder and the multi-exit style validate without
+  weakening any guarantee.
 - Possible follow-up, not required now: on the fall-through path the
   guard is known to have routed false — a dual of guard-implied
   production ("verdict measured and NOT revise" after an error rung).
@@ -111,8 +148,13 @@ a run whose guard routes true stops at the error item with the rendered
 headline in stop-reason and the report AND the typed error record on
 the reserved error output port, nonzero exit, no later step run;
 a run whose guard routes false proceeds past the rung untouched; a
-step AFTER the error-rung branch reading a slot produced before it
-still validates (divergence-aware join); `flow.error` outside any
-when/loop and `flow.Abort` outside a loop keep their existing
-refusals; `just test` and `just test-full` green.
+multi-exit trait completes at whichever success terminal its guards
+select, with that exit's bindings on the declared output ports; a
+success-terminal trait that falls through every exit ends as the
+authored no-exit-reached failure; a port bound both at declaration and
+at an exit is a build-time refusal; a step AFTER a terminal-rung branch
+reading a slot produced before it still validates (divergence-aware
+join); `flow.error` outside any when/loop and `flow.Abort` outside a
+loop keep their existing refusals; a trait with NO terminals behaves
+byte-identically to today; `just test` and `just test-full` green.
 """
