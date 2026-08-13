@@ -4,6 +4,22 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.1.1 — 2026-08-13
+
+Release-infrastructure hardening, following the first 0.1.0 cut.
+
+- npm: all four authoring packages publish from CI via OIDC trusted
+  publishing (no registry tokens anywhere); `@ctx-traits/toolkit` and
+  `@ctx-traits/agents` are public for the first time alongside
+  `@ctx-traits/cdk` and `@ctx-traits/config`.
+- Homebrew: the tap lives at `ctx-company/homebrew-tap` —
+  `brew install ctx-company/tap/ctx` is a one-liner.
+- New `install.sh`: platform detection, sha256 verification against the
+  release's published checksums, sudo-free install to `~/.local/bin`.
+- Release builds move to current runners (`macos-15-intel` replaces the
+  retired `macos-13`) and node24-generation Actions; re-tagging a release is
+  idempotent end to end; tags run only the Release workflow.
+
 ## v0.1.0 — 2026-08-13
 
 First public release.
