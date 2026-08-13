@@ -170,6 +170,12 @@ jobs:
             gh release upload "${tag}" dist/* \
               --repo "${GITHUB_REPOSITORY}" \
               --clobber
+            # Deleting a tag (the re-cut dance) demotes its published
+            # release to a DRAFT, and uploading assets does not restore it —
+            # finish the job: publish and mark latest.
+            gh release edit "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft=false --latest
           else
             gh release create "${tag}" dist/* \
               --repo "${GITHUB_REPOSITORY}" \
