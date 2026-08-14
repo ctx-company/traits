@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0183"
 title = "implement: port all seven variants to the hook-based functional format"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-b257df0eb9c8f2bc14fcad69f5cf4834c6e66ceaa457fbca84660a09b3f440a8 merged as c4fbca495d01544d64c542b27d8f6d13b0615f8c"
 content = """
 
 Owner directive 2026-08-12: bring every first-party trait family up to

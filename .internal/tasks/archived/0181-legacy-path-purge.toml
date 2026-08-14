@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0181"
 title = "legacy path purge: every dual-read tail in layout dies"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-244f37e047a72a4852c86c718f6bfecb80acc1a98ad099fc4f975fa0774cce66 merged as f05a7a48d9c3dfcc63e40df6cf34a32719f830c7"
 content = """
 
 Owner ruling 2026-08-12: "no legacy stuff please, we're not out yet,

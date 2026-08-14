@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0182"
 title = "dashboard: done tasks are invisible — the done group renders empty"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-93829d385cca944f15e2fe88a57c4fa0871d72fa8e4d607489a9de6163bb3dd2 merged as e83db164a2583efec5a8ac80dd0971506ec49675"
 content = """
 
 Observed 2026-08-12: tasks 0170-0176 and 0179 were set status = "done"

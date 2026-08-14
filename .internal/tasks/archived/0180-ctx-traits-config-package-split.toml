@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0180"
 title = "@ctx-traits/config: split configuring (declare) from using (cdk)"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-d7ebc456a63ebb54ccf5ee7f1c154648fc2dbd37dc73e21e07e1502273e8f187 merged as 2afb288250ee8668b585e0afc480fc20e574ce8a"
 content = """
 
 Owner rulings 2026-08-12:

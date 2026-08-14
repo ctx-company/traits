@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0188"
 title = "review: stage-module decomposition, read-only doctrine intact"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-1538e0f4bfcf560db6fddeaf3d75bcd58644cc92c860dd98e284dddd6ec11e2a merged as 5b48934f63233b9d331a28b50a344c96db586722"
 content = """
 
 Owner directive 2026-08-12: bring every first-party trait family up to

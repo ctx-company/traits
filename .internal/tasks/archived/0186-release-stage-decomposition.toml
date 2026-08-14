@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0186"
 title = "release: decompose the flat hook file into shared stage modules"
-status = "ready"
+status = "done"
 raised = "2026-08-12"
+closed = "2026-08-13"
+origin = "run run-801c938a130ceb48748ee72303083c1c441e6900d8aaf238d0cbd074da978d1c merged as ea3631002c7285b9fe13989eb0a39dc84bb05e86"
 content = """
 
 Owner directive 2026-08-12: bring every first-party trait family up to
