@@ -4,6 +4,15 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.2.2 — 2026-08-14
+
+Completes the 0.2 release line: `@ctx-traits/cli` (the npm binary wrapper)
+joins the aligned version — the v0.2.1 npm job published the four authoring
+packages and then failed its cli version guard, leaving the wrapper behind.
+The release workflow's tag guard now discovers every public package under
+`packages/` instead of naming them, so a newly added package can never be
+missed by a version sweep again.
+
 ## v0.2.1 — 2026-08-14
 
 Release-pipeline patch: the v0.2.0 tag was cut against a tree whose npm

@@ -70,10 +70,17 @@ jobs:
               echo "::error::tag v${version} but the workspace Cargo version is ${cargo_version} — retag on a tree whose versions match"
               exit 1
             fi
-            for package in config cdk toolkit agents; do
-              npm_version=$(jq -r .version "packages/${package}/package.json")
+            # DISCOVERED, not enumerated: a hardcoded list is how the
+            # @ctx-traits/cli wrapper was missed by the 0.2.1 sweep. Every
+            # non-private package under packages/ must equal the tag.
+            for manifest in packages/*/package.json; do
+              if [[ "$(jq -r '.private // false' "${manifest}")" == "true" ]]; then
+                continue
+              fi
+              npm_name=$(jq -r .name "${manifest}")
+              npm_version=$(jq -r .version "${manifest}")
               if [[ "${npm_version}" != "${version}" ]]; then
-                echo "::error::tag v${version} but @ctx-traits/${package} is ${npm_version} — retag on a tree whose versions match"
+                echo "::error::tag v${version} but ${npm_name} is ${npm_version} — retag on a tree whose versions match"
                 exit 1
               fi
             done
