@@ -4,6 +4,40 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.2.0 — 2026-08-14
+
+Two features and a validator overhaul.
+
+- **Authored terminals**: `flow.error` / `flow.success` (and the fused
+  `flow.errorWhen` / `flow.successWhen`) end a run at the exit point — an
+  error terminal fails the run with an authored headline and a typed record
+  on the reserved `flow-error` output port; a success terminal completes it,
+  binding declared output ports at the exit. Declaring any success terminal
+  opts the trait into exit-point completion (falling through every exit is
+  an authored `no-exit-reached` failure). Failed runs now exit nonzero
+  (`EXIT_RUN_FAILED`, 7) even without a merge in play.
+- **Git-first trait sharing**: `ctx traits dependency add owner/repo/trait`
+  (or a repo URL with repeatable `--trait`, or `--all`) vendors a trait
+  straight from a GitHub repository — smart-HTTP ref resolution, tarball
+  fetch by resolved commit, sha-pinned lock, per-trait trust digests, and
+  zero toolchain on the consume path (no git, no node). A bare collection
+  spec lists the contained traits with copyable add commands.
+- **Validator**: sibling `flow.when` ladders are legal — produced-before-read
+  tracks guaranteed and possible sets separately, branch guards may read
+  conditionally produced evidence, guard-implied production carries a
+  guarded verdict's whole arm forward, and terminal arms diverge out of the
+  branch join. Guards over never-accepted slots are `Unmeasurable` under a
+  strong-Kleene algebra, so both polarities route false on absent evidence.
+- Authoring ergonomics: `condition.isTrue`/`isFalse`/`notEmpty`; check steps
+  type their verdict record (`CheckResultValue`) instead of a bare boolean.
+- `ctx traits build <id>` is source-first: it bootstraps a package with no
+  generated canonical and reconciles single-trait/family format transitions
+  in either direction.
+- Hardening: API credentials live in a `Secret` type that redacts every
+  incidental surface; command bound-kills take the whole process group;
+  schema-version feature gates accept "0.3 or newer" instead of exact
+  versions; the release trait ships its release-manifest resource.
+
 ## v0.1.1 — 2026-08-13
 
 Release-infrastructure hardening, following the first 0.1.0 cut.

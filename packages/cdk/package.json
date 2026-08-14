@@ -1,6 +1,6 @@
 {
   "name": "@ctx-traits/cdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Authoring SDK for ctx.traits: build typed, digest-locked agent procedures in TypeScript and compile them with `ctx traits build`.",
   "keywords": [
     "agents",
