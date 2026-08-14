@@ -300,11 +300,11 @@ dependencies = [
 
 [[package]]
 name = "ctx-fixture-agent"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "ctx-traits-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.0",
  "camino",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-traits-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "camino",
  "derive_more",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-traits-io"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.0",
  "camino",
@@ -372,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-traits-wasm-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ctx-traits-core",
  "serde",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "ctx-traits-wasm-plugin"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ctx-traits-core",
  "serde",

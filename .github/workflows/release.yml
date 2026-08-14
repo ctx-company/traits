@@ -60,7 +60,24 @@ jobs:
         shell: bash
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF#refs/tags/v}"
+            # A tag whose TREE disagrees with it must refuse, not ship: the
+            # v0.2.0 cut pointed at a pre-bump tree whose package manifests
+            # still said 0.1.1, so the npm job silently skipped every
+            # publish. Every version-bearing file must equal the tag.
+            cargo_version=$(cargo metadata --no-deps --format-version 1 --manifest-path modules/cli/Cargo.toml | jq -r '.packages[] | select(.name == "ctx-traits-cli") | .version')
+            if [[ "${cargo_version}" != "${version}" ]]; then
+              echo "::error::tag v${version} but the workspace Cargo version is ${cargo_version} — retag on a tree whose versions match"
+              exit 1
+            fi
+            for package in config cdk toolkit agents; do
+              npm_version=$(jq -r .version "packages/${package}/package.json")
+              if [[ "${npm_version}" != "${version}" ]]; then
+                echo "::error::tag v${version} but @ctx-traits/${package} is ${npm_version} — retag on a tree whose versions match"
+                exit 1
+              fi
+            done
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
           else
             version=$(cargo metadata --no-deps --format-version 1 --manifest-path modules/cli/Cargo.toml | jq -r '.packages[] | select(.name == "ctx-traits-cli") | .version')
             echo "version=${version}" >> "$GITHUB_OUTPUT"
