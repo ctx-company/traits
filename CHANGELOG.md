@@ -4,6 +4,14 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.2.1 — 2026-08-14
+
+Release-pipeline patch: the v0.2.0 tag was cut against a tree whose npm
+package manifests still said 0.1.1, so the npm job skipped every publish.
+All version-bearing files are aligned at 0.2.1, and the release workflow
+now refuses a tag whose tree versions disagree with it instead of shipping
+a mismatch.
+
 ## v0.2.0 — 2026-08-14
 
 Two features and a validator overhaul.

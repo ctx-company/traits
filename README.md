@@ -33,7 +33,7 @@ and `TARGET` to one of `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`:
 
 ```sh
-VERSION=0.2.0 TARGET=aarch64-apple-darwin \
+VERSION=0.2.1 TARGET=aarch64-apple-darwin \
     sh -c 'curl -fsSL "https://github.com/ctx-company/traits/releases/download/v${VERSION}/ctx-v${VERSION}-${TARGET}.tar.gz" \
     | tar -xz -C /usr/local/bin'
 ```
