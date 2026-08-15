@@ -1,6 +1,6 @@
 {
   "name": "@ctx-traits/config",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Configuration vocabulary for ctx.traits: declare operator knobs and config.ts authoring tables, resolved from config layers at activation \u2014 never at build time.",
   "keywords": [
     "config",

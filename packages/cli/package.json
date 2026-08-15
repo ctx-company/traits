@@ -1,6 +1,6 @@
 {
   "name": "@ctx-traits/cli",
-  "version": "0.1.1",
+  "version": "0.2.3",
   "description": "ctx command-line interface",
   "keywords": [
     "ctx",
@@ -37,5 +37,6 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "private": true
 }

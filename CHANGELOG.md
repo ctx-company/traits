@@ -4,6 +4,22 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.2.3 — 2026-08-15
+
+Clean re-cut of the 0.2 line. The `@ctx-traits/cli` npm wrapper is shelved
+for now (private, out of the release pipeline; curl and Homebrew remain the
+binary channels), its postinstall became best-effort and workspace-aware so
+a monorepo `pnpm install` never downloads release binaries or races the
+release build, and the tag guard now discovers every non-private package
+under `packages/` instead of enumerating them.
+
+## v0.2.2 — 2026-08-14
+
+Version-alignment cut, partially shipped: binaries, formula, and the four
+authoring packages went out at 0.2.2; the npm job then aborted on the
+first-ever `@ctx-traits/cli` publish (trusted publishing cannot create a
+package), which led to shelving the wrapper in v0.2.3.
+
 ## v0.2.1 — 2026-08-14
 
 Release-pipeline patch: the v0.2.0 tag was cut against a tree whose npm
