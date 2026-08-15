@@ -4,6 +4,20 @@ All notable changes to ctx.traits are documented here. Versions follow the
 workspace version in `Cargo.toml`; entries derive from the commit log per the
 release contract (`.ctx/traits/authored/release/resources/release.toml`).
 
+## v0.2.4 — 2026-08-15
+
+Fix release: a plain directory with installed dependencies is a real
+project. `trust approve` and every trait-resolution surface required a
+Git repository before consulting project scope, while `dependency add`
+happily installed into a git-less directory — stranding the install
+("no installed package matches alias ... at project or global scope"
+on a package sitting right there). Project tiers now anchor on the
+machine-written install markers (`.ctx/traits/config.toml`, its
+`config.lock`, or the vendored tree) when no repository exists; a bare
+authored `.ctx/traits/<id>` directory without those markers still
+resolves nowhere, so the stray-shadow guard keeps protecting the
+leftover-directory case it was written for.
+
 ## v0.2.3 — 2026-08-15
 
 Clean re-cut of the 0.2 line. The `@ctx-traits/cli` npm wrapper is shelved
