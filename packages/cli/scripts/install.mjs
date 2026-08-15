@@ -4,7 +4,7 @@ import { chmod, mkdtemp, mkdir, rename, rm } from 'node:fs/promises';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import * as tar from 'tar';
@@ -128,9 +128,23 @@ export async function install({ version, platform = process.platform, arch = pro
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  const packageJson = JSON.parse(await (await import('node:fs/promises')).readFile(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json')));
-  install({ version: packageJson.version }).catch((error) => {
-    console.error(`ctx installation failed: ${error.message}\n${SUPPORT}`);
-    process.exitCode = 1;
-  });
+  const here = dirname(fileURLToPath(import.meta.url));
+  if (!here.split(sep).includes('node_modules')) {
+    // The workspace checkout, not an installed dependency: dev and CI
+    // installs of the monorepo must never reach for release binaries — the
+    // repo builds ctx from source, and a tag push makes `pnpm install` race
+    // the Release workflow's asset upload (observed: v0.2.2's CI leg 404ing
+    // on an archive still being built).
+    console.log('ctx wrapper: workspace checkout — skipping binary download (build ctx from source).');
+  } else {
+    const packageJson = JSON.parse(await (await import('node:fs/promises')).readFile(join(here, '..', 'package.json')));
+    install({ version: packageJson.version }).catch((error) => {
+      // Best-effort by design (0190): a failed download must not fail
+      // `npm install` — the bin shim detects the missing binary at first
+      // run and prints the same instructions actionably.
+      console.warn(`ctx binary download failed: ${error.message}`);
+      console.warn(SUPPORT);
+      console.warn('`ctx` will print install instructions until the binary is present; reinstall to retry the download.');
+    });
+  }
 }
