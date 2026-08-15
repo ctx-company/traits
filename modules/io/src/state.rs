@@ -219,6 +219,35 @@ pub fn state_repo_root() -> crate::Result<Utf8PathBuf> {
     Ok(discover_invocation_root()?.path().to_path_buf())
 }
 
+/// The root whose project tiers this invocation may consult: the Git
+/// repository root inside a repository, and outside one the literal cwd —
+/// but only when that cwd carries an explicit machine-written install
+/// marker (a `.ctx/traits/config.toml` dependency manifest, its
+/// `config.lock`, or a vendored dependency tree). `dependency add` has
+/// always been able to install into a plain non-repository directory;
+/// trust approval and trait resolution must see the same project it wrote
+/// there, so requiring Git for the read side stranded those installs. A
+/// bare authored `.ctx/traits/<id>` directory without any of those markers
+/// still leaves an ad-hoc cwd tierless — the stray-shadow guard P439
+/// introduced (a leftover directory must not shadow an installed global
+/// trait) applies to exactly that case, not to a directory something
+/// deliberately installed into.
+pub fn project_tier_root(invocation: &InvocationRoot) -> Option<&Utf8Path> {
+    match invocation {
+        InvocationRoot::Repo(root) => Some(root),
+        InvocationRoot::Adhoc(cwd) => adhoc_project_markers_present(cwd).then_some(cwd.as_path()),
+    }
+}
+
+/// Whether `cwd` carries an explicit machine-written project marker — see
+/// [`project_tier_root`]. Probes only the exact paths the dependency
+/// machinery itself writes.
+fn adhoc_project_markers_present(cwd: &Utf8Path) -> bool {
+    crate::layout::project_manifest_path(cwd, "toml").is_file()
+        || crate::project_lock::project_lock_path(cwd).is_file()
+        || crate::layout::trait_vendor_root_path(cwd).is_dir()
+}
+
 /// The project root usable for building repo-relative trait/manifest paths,
 /// expressed relative to the current working directory.
 ///

@@ -443,10 +443,9 @@ fn handle_trust_approve(
     // This must be checked before trait resolution — never after — so it is
     // never shadowed by that single-variant resolution succeeding first.
     if !operand.contains(':') {
-        let repo_root = match ctx_traits_io::state::discover_invocation_root()? {
-            ctx_traits_io::state::InvocationRoot::Repo(root) => Some(root),
-            ctx_traits_io::state::InvocationRoot::Adhoc(_) => None,
-        };
+        let invocation = ctx_traits_io::state::discover_invocation_root()?;
+        let repo_root =
+            ctx_traits_io::state::project_tier_root(&invocation).map(|root| root.to_path_buf());
         if let Some(resolved) =
             ctx_traits_io::distribution::resolve_family_package(repo_root.as_deref(), &operand)?
         {

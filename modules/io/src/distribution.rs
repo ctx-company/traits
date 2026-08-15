@@ -3614,7 +3614,8 @@ pub struct ResolvedInstalledPackage {
 
 /// Resolve `operand` (manifest/lock alias, or exact npm package name)
 /// against installed packages in binding order: project scope first (when
-/// `repo_root` is `Some`, i.e. the invocation is inside a repository), then
+/// `repo_root` is `Some`, i.e. the invocation has a project tier root —
+/// see [`crate::state::project_tier_root`]), then
 /// the global scope. Nearest-tier wins; an ambiguous match *within* one tier
 /// (two installed packages both matching by alias/name — not expected given
 /// alias uniqueness, but a lock could in principle be hand-edited) is

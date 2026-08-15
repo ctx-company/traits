@@ -8,20 +8,20 @@
 //! Consolidating the scan here is what keeps those surfaces from being able
 //! to disagree with each other about which tier wins or what it shadowed.
 //!
-//! Project tiers (repo-authored, repo-vendored) are only scanned when the
-//! invocation is inside a genuine Git repository ([`crate::state::InvocationRoot::Repo`]):
-//! an ad-hoc (non-repository) invocation omits them entirely and resolves
-//! purely against the global and built-in tiers, so a stray `.ctx/traits`
+//! Project tiers (repo-authored, repo-vendored) are scanned when the
+//! invocation has a project tier root ([`crate::state::project_tier_root`]):
+//! inside a genuine Git repository always, and in a non-repository
+//! directory exactly when that directory carries a machine-written install
+//! marker (dependency manifest, lock, or vendored tree) — the state
+//! `dependency add` writes there. An ad-hoc invocation from a directory
+//! *without* those markers omits project tiers entirely and resolves purely
+//! against the global and built-in tiers, so a stray authored `.ctx/traits`
 //! directory sitting in whatever cwd an ad-hoc invocation happens to run
-//! from can never shadow an installed global trait (P439). Project-scoped
-//! *mutation* surfaces (`install`, `sync`, ... without `-g`) are unaffected
-//! by this and still write project state relative to the literal cwd in a
-//! non-repository directory, exactly as before — only *resolving* a trait id
-//! for run/list/query purposes requires a real repository to consult that
-//! state. Project paths are built from the repository root expressed
-//! relative to the current working directory, not the literal cwd, so
-//! resolution from a *repository* subdirectory consults the actual project
-//! tiers instead of silently missing them.
+//! from can never shadow an installed global trait (P439). Project paths
+//! are built from the repository root expressed relative to the current
+//! working directory, not the literal cwd, so resolution from a
+//! *repository* subdirectory consults the actual project tiers instead of
+//! silently missing them.
 
 use std::collections::BTreeSet;
 
@@ -64,6 +64,7 @@ pub struct Resolution {
 pub struct InventoryContext {
     invocation: InvocationRoot,
     repo_root_for_paths: Utf8PathBuf,
+    project_tiers_visible: bool,
 }
 
 impl InventoryContext {
@@ -71,14 +72,24 @@ impl InventoryContext {
     pub fn discover() -> crate::Result<Self> {
         let invocation = crate::state::discover_invocation_root()?;
         let repo_root_for_paths = crate::state::repo_root_for_relative_paths_from(&invocation)?;
+        let project_tiers_visible = crate::state::project_tier_root(&invocation).is_some();
         Ok(Self {
             invocation,
             repo_root_for_paths,
+            project_tiers_visible,
         })
     }
 
     pub fn invocation(&self) -> &InvocationRoot {
         &self.invocation
+    }
+
+    /// Whether this invocation's project tiers (repo-authored,
+    /// repo-vendored) are consulted at all — see
+    /// [`crate::state::project_tier_root`]. Probed once at discovery, so a
+    /// multi-id scan never re-checks the filesystem markers per id.
+    pub fn project_tiers_visible(&self) -> bool {
+        self.project_tiers_visible
     }
 
     /// The project root usable for building repo-relative project-tier
@@ -96,12 +107,13 @@ impl InventoryContext {
         let mut candidates = Vec::new();
 
         // Project tiers (repo-authored, repo-vendored) are only consulted
-        // when this invocation is inside a genuine Git repository. An
-        // ad-hoc (non-repository) invocation must resolve purely against
+        // when this invocation has a project tier root: a Git repository,
+        // or a plain directory carrying a machine-written install marker.
+        // A marker-less ad-hoc invocation resolves purely against
         // global/built-in tiers — a stray `.ctx/traits` sitting in whatever
         // directory the invocation happens to run from is not a project and
         // must never shadow the installed global trait (P439).
-        if matches!(self.invocation, crate::state::InvocationRoot::Repo(_)) {
+        if self.project_tiers_visible {
             let repo_root = &self.repo_root_for_paths;
             if let Some(path) = repo_authored_candidate(repo_root, id)? {
                 candidates.push(Candidate {
@@ -163,11 +175,12 @@ impl InventoryContext {
     pub fn candidate_ids(&self) -> crate::Result<BTreeSet<String>> {
         let mut ids = BTreeSet::new();
 
-        // Mirrors `resolve_tiers`: project tiers are only scanned inside a
-        // genuine Git repository, so an ad-hoc invocation's candidate id set
-        // (used by `list` and query selection) never includes a stray local
-        // `.ctx/traits` package (P439).
-        if matches!(self.invocation, crate::state::InvocationRoot::Repo(_)) {
+        // Mirrors `resolve_tiers`: project tiers are only scanned when the
+        // invocation has a project tier root, so a marker-less ad-hoc
+        // invocation's candidate id set (used by `list` and query
+        // selection) never includes a stray local `.ctx/traits` package
+        // (P439).
+        if self.project_tiers_visible {
             let repo_root = &self.repo_root_for_paths;
             for package in crate::discovery::trait_packages(repo_root)? {
                 ids.insert(package.trait_id);

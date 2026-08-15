@@ -1024,7 +1024,8 @@ fn valid_npm_segment(segment: &str) -> bool {
 }
 
 /// `ctx traits trust approve <package>`: resolve `operand` against installed
-/// packages (project scope, when the invocation is inside a repository,
+/// packages (project scope, when the invocation has a project tier root —
+/// a Git repository or a plain directory something was installed into —
 /// then global) and atomically approve every current trait digest of the
 /// one matching package.
 pub(crate) fn handle_approve(
@@ -1032,10 +1033,9 @@ pub(crate) fn handle_approve(
     reason: Option<String>,
     json: bool,
 ) -> crate::Result<CommandOutput<()>> {
-    let repo_root = match ctx_traits_io::state::discover_invocation_root()? {
-        ctx_traits_io::state::InvocationRoot::Repo(root) => Some(root),
-        ctx_traits_io::state::InvocationRoot::Adhoc(_) => None,
-    };
+    let invocation = ctx_traits_io::state::discover_invocation_root()?;
+    let repo_root =
+        ctx_traits_io::state::project_tier_root(&invocation).map(|root| root.to_path_buf());
     let report = distribution::approve_package(repo_root.as_deref(), operand, reason)?;
     match OutputMode::select(json, false) {
         OutputMode::Json => {

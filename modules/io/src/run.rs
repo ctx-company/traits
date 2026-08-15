@@ -3236,15 +3236,17 @@ pub fn load_trait_source(
 /// a bad manifest, a permission error, a symlink) must surface its own error
 /// rather than silently falling through. Only a confirmed `NotFound` may
 /// consult a further tier. Mirrors `InventoryContext::resolve_tiers`: the
-/// repo-authored precheck only applies inside a genuine Git repository. An
-/// ad-hoc invocation must not treat a stray local `.ctx/traits/<id>`
-/// directory as malformed-or-shadowing; it goes straight to the shared tier
-/// scan, which itself omits project tiers for `Adhoc` (P439).
+/// repo-authored precheck only applies when the invocation has a project
+/// tier root (a Git repository, or a plain directory with machine-written
+/// install markers). A marker-less ad-hoc invocation must not treat a
+/// stray local `.ctx/traits/<id>` directory as malformed-or-shadowing; it
+/// goes straight to the shared tier scan, which itself omits project tiers
+/// there (P439).
 fn repo_authored_precheck(
     context: &crate::inventory::InventoryContext,
     id: &str,
 ) -> crate::Result<Option<(Utf8PathBuf, String)>> {
-    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+    if !context.project_tiers_visible() {
         return Ok(None);
     }
     let repo_root = context.repo_root_for_paths();
@@ -3412,7 +3414,7 @@ fn resolve_local_family_variant(
     if ctx_traits_core::shared::validate_slug_shape(family, "trait-id.family").is_err() {
         return Ok(None);
     }
-    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+    if !context.project_tiers_visible() {
         return Ok(None);
     }
     let repo_root = context.repo_root_for_paths();
@@ -3471,7 +3473,7 @@ fn merged_lower_tier_candidates(
     let family_valid =
         ctx_traits_core::shared::validate_slug_shape(family, "trait-id.family").is_ok();
     let alias_valid = !alias.contains(':');
-    let in_repo = matches!(context.invocation(), crate::state::InvocationRoot::Repo(_));
+    let in_repo = context.project_tiers_visible();
 
     if in_repo {
         let repo_root = context.repo_root_for_paths();
@@ -3547,7 +3549,7 @@ fn resolve_local_family_alias(
     if alias.contains(':') {
         return Ok(None);
     }
-    if !matches!(context.invocation(), crate::state::InvocationRoot::Repo(_)) {
+    if !context.project_tiers_visible() {
         return Ok(None);
     }
     let repo_root = context.repo_root_for_paths();

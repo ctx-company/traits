@@ -479,6 +479,74 @@ fn adhoc_run_resolves_global_tier_and_worktree_required_trait_refuses() {
 }
 
 // ---------------------------------------------------------------------------
+// 3b. A project-scoped install into a plain (non-repository) directory is a
+//     real project: `trust approve` resolves it at project scope and a run
+//     resolves the repo-vendored tier from the same directory — while a
+//     marker-less directory holding only a stray authored `.ctx/traits/<id>`
+//     stays tierless (the P439 stray-shadow guard).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn gitless_project_install_approves_and_resolves_project_tier() {
+    let scratch = ScratchRoot::new("global-tier-gitless-project");
+    let home = scratch.home();
+    let fixture = single_trait_npm_package("gitless-demo", "gitless-demo", false);
+
+    // Project-scoped install (no `-g`) into a directory that is not a Git
+    // repository — deliberately no `git_init`.
+    let cwd = home.join("gitless");
+    fs::create_dir_all(&cwd).unwrap();
+    require_success_with_env(
+        "`ctx traits dependency add gitless-demo`",
+        &["traits", "dependency", "add", "gitless-demo"],
+        &cwd,
+        &home,
+        &[("CTX_TRAITS_REGISTRY_BASE", &fixture.registry.base_url)],
+    );
+
+    // The install wrote the project markers; trust must resolve the same
+    // project it wrote, Git or no Git. This exact approve used to fail with
+    // "no installed package matches alias ... at project or global scope".
+    let approve_stdout = require_success(
+        "`ctx traits trust approve gitless-demo`",
+        &["traits", "trust", "approve", "gitless-demo"],
+        &cwd,
+        &home,
+    );
+    assert!(
+        approve_stdout.contains("project"),
+        "approval must bind at project scope, not global: {approve_stdout}"
+    );
+
+    // Resolution consults the project tier from the same plain directory.
+    let run_output = run_ctx(&["traits", "run", "gitless-demo", "--verbose"], &cwd, &home);
+    let (run_stdout, run_stderr) = utf8(&run_output);
+    assert!(
+        run_output.status.success(),
+        "run must resolve the git-less project's vendored trait\nstdout: {run_stdout}\nstderr: {run_stderr}"
+    );
+
+    // Counterexample: a directory holding only a bare authored
+    // `.ctx/traits/<id>` — no dependency manifest, no lock, no vendored
+    // tree — is still not a project, so the stray id resolves nowhere.
+    let stray = home.join("stray");
+    write_fixture_file(
+        &stray.join(".ctx/traits/stray-junk/trait.toml"),
+        "[package]\nid = \"stray-junk\"\nversion = \"0.1.0\"\nname = \"Stray\"\nstatus = \"ready\"\n",
+    );
+    let list_stdout = require_success(
+        "`ctx traits list --json`",
+        &["traits", "list", "--json"],
+        &stray,
+        &home,
+    );
+    assert!(
+        !list_stdout.contains("stray-junk"),
+        "a marker-less ad-hoc directory must not surface its stray authored trait: {list_stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 4. `trust approve <alias>` admits every current variant digest of an
 //    installed family package in one review (the P534 lineage-regression
 //    class: package-granular approval must never revoke a sibling variant).
