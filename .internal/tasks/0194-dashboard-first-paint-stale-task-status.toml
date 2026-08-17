@@ -1,0 +1,30 @@
+schema-version = "0.2"
+key = "0194"
+title = "Dashboard first paint must not show a running task as not-running"
+status = "ready"
+raised = "2026-08-17"
+content = """
+Repro: a dispatched run has been executing for minutes; open the dashboard; for the
+first few seconds its task shows a non-running status, then flips once the first sync
+lands. The initial tasks-screen paint renders board-derived status (ready/blocked from
+the TOML documents alone) before the session-link overlay that detects live runs has
+been computed.
+
+A stale-but-confident status is worse than a placeholder: the operator reads "ready"
+as "my dispatch didn't work" (this compounded the 0193 report).
+"""
+scope = """
+## Decisions
+- Either hydrate the session overlay before the first tasks paint, or render an
+  explicit syncing placeholder for status cells until the first sync completes —
+  never a board-only status presented as current.
+"""
+validation = """
+## Watch
+- Keep first paint fast: if pre-hydration is chosen it must scan only live session
+  ledgers' task ports, not full ledger bodies.
+
+## Done when
+Opening the dashboard while a task's run is live never displays that task as
+ready/not-running: it is either correct immediately or explicitly marked as syncing.
+"""

@@ -1,0 +1,39 @@
+schema-version = "0.2"
+key = "0192"
+title = "Enter submits every modal; shift+enter and alt+enter insert the newline"
+status = "ready"
+raised = "2026-08-17"
+content = """
+The TUI's modal convention is split: single-line inputs submit on Enter, multi-line
+inputs submit on ctrl-d and insert a newline on Enter (`tui_kit.rs` ~452, footer hint
+~1048). Every screen is self-consistent but the convention itself is not — dispatching
+a task (D then ctrl-d) feels arbitrary next to confirm modals (Enter), and the owner
+hit it as "there's no consistency between certain commands."
+
+Flip to the modern convention globally: Enter submits in every modal, single- or
+multi-line; a newline in a multi-line input is inserted with shift+enter or alt+enter.
+One change in tui_kit's shared input handling; every modal host inherits it.
+"""
+scope = """
+## Decisions
+- Enter submits everywhere (owner ruling 2026-08-17). shift+enter AND alt+enter both
+  insert a newline in multi-line inputs.
+- Footer hints update to match ("enter submit · alt+enter newline · esc cancel").
+- ctrl-d may remain as a hidden legacy submit alias or be removed — implementer's call,
+  but it must no longer be the only submit path anywhere.
+"""
+validation = """
+## Watch
+- shift+enter is invisible to terminals without the kitty keyboard protocol (plain
+  crossterm reports it as Enter). alt+enter is the reliable fallback — both must be
+  wired, and the hint should name alt+enter first.
+- Audit every modal host (spawn, answer/ask, delete, merge-retry, filters) — none may
+  regress to submit-on-first-Enter surprise while someone is composing a multi-line value.
+- tui_kit has focused key-handling tests (`single_line_input_submits_on_enter`, unicode
+  movement tests) — extend them rather than adding a parallel harness.
+
+## Done when
+Every modal submits on Enter; multi-line inputs insert newlines via alt+enter (and
+shift+enter where the terminal reports it); footer hints match the new keys; the
+tui_kit tests cover submit and newline paths for both input kinds.
+"""

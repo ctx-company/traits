@@ -1,0 +1,34 @@
+schema-version = "0.2"
+key = "0196"
+title = "plan: derive a checks entry from each mechanically verifiable Done-when"
+status = "ready"
+raised = "2026-08-17"
+content = """
+plan v2 tasks declare no `checks`, so the 0144 auto-close machinery has nothing to
+evaluate and every dispatched task must be closed by hand — the missing fuel for
+0195's close-on-landing step.
+
+Teach the plan family's task-format doctrine (and the writeSlices/distill prompts)
+to derive a `checks` entry per child task when its Done-when is mechanically
+checkable — a command with an expected exit (a test invocation, a build gate, a grep
+for an artifact). A Done-when that is genuinely judgment-based stays check-less and
+falls to the configured `[tasks] auto-close` policy for check-less tasks.
+"""
+scope = """
+## Decisions
+- Doctrine + prompt change in the plan trait package only; no core changes.
+- The reviewer blocker list (complex variant) gains: "a mechanically verifiable
+  Done-when without a corresponding checks entry".
+- Never fabricate a check: a wrong check that passes is worse than no check — the
+  prompt must prefer check-less over invented verification.
+"""
+validation = """
+## Watch
+- Checks run in the run worktree at close time — commands must be repo-relative and
+  gate-like (exit code only), mirroring how existing board tasks declare them.
+
+## Done when
+A plan run over a source with test-backed done criteria emits children whose checks
+name real repo gates; a judgment-based child carries no checks; the complex reviewer
+blocks a verifiable-but-checkless child; trait rebuilt, exported, and consumers updated.
+"""
