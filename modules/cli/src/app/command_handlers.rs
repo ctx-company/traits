@@ -886,7 +886,12 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     })?;
                     let merge_policy = runtime.effective_merge_policy();
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
-                    if merge_rung.is_some() && worktree.is_none() {
+                    let Some(merge_rung) = merge_rung else {
+                        return Err(crate::Error::Command {
+                            message: "--task is a merge-gated pipeline and requires an effective merge intent (add --merge, or configure [merge] auto = true)".to_string(),
+                        });
+                    };
+                    if worktree.is_none() {
                         return Err(crate::Error::Command {
                             message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
                         });
@@ -902,7 +907,6 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         queue,
                         continue_on_failure: args.continue_on_failure,
                         dispatch_trait,
-                        file: args.file.as_deref(),
                         session_store: args.session_store.as_deref(),
                         assignments: &args.assignments,
                         resource_root: args.resource_root.as_deref(),
@@ -925,7 +929,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         override_dependencies: args.override_dependencies,
                         json: args.json,
                         verbose: args.verbose,
-                        merge_rung,
+                        merge_rung: Some(merge_rung),
                         story,
                         repo_root,
                         board_dir,

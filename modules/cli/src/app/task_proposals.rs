@@ -470,6 +470,128 @@ pub fn resolve_auto_close_policy(
     document_override.or(config_default)
 }
 
+/// 0144: the effective `auto-close` policy for one task document, reading
+/// the `[tasks] auto-close` config leaf from `config_root` — its own
+/// `auto_close` override wins over the config leaf in either direction
+/// ([`resolve_auto_close_policy`]). `None` when neither is set — the
+/// pre-0144 confirm-only flow, unchanged.
+pub(crate) fn resolve_task_close_policy(
+    document: &ctx_traits_core::task::TaskDocument,
+    config_root: &camino::Utf8Path,
+) -> Option<AutoClosePolicy> {
+    let config_default = ctx_traits_io::harness_config::resolve_runtime_config(config_root)
+        .ok()
+        .and_then(|config| config.effective_auto_close());
+    resolve_auto_close_policy(document.auto_close, config_default)
+}
+
+/// Run `checks` against `sha` in a clean worktree, mapping a whole-set
+/// failure (`UnrunnableSet`) to a single `Unrunnable` record so
+/// [`close_disposition`] always has a uniform `Vec<CheckRecord>` to reason
+/// about. Only called when there is at least one declared check — the
+/// no-checks flow never reaches here.
+pub(crate) fn run_declared_checks(
+    checks: &[Check],
+    repo_root: &camino::Utf8Path,
+    sha: &str,
+) -> Vec<CheckRecord> {
+    match super::task_checks::run_checks(checks, repo_root, sha) {
+        Ok(records) => records,
+        Err(unrunnable) => vec![CheckRecord {
+            name: "(check set)".to_string(),
+            command: String::new(),
+            outcome: CheckOutcome::Unrunnable,
+            detail: unrunnable.reason,
+        }],
+    }
+}
+
+/// 0144: what a hardened `MarkDone` candidate's declared checks resolve to
+/// for one task document, against the cited `sha` — the single evaluation
+/// every close caller (dashboard modal, dashboard self-close, the `--task`
+/// queue) runs once and carries forward, so a later confirm/close never
+/// re-executes the commands. `None` when no `auto-close` policy resolves
+/// for this document at all. `Some` always carries a `Closure` (checks
+/// empty under `merge` with none declared, recording `unchecked`) alongside
+/// the disposition that decides whether human confirmation is needed.
+/// `config_root`/`repo_root` are the checkout to read `[tasks] auto-close`
+/// from and to run declared checks against — production always resolves
+/// them fresh; tests pass a scratch git repo, never the real one.
+/// The provenance evidence a close write folds into `origin` when the
+/// document has none yet (0063.8's own ruling — an already-set `origin` is
+/// left untouched, so provenance is never overwritten).
+pub(crate) struct TaskCloseOrigin<'a> {
+    pub run_id: &'a str,
+    pub sha: &'a str,
+}
+
+/// The single provider write every close caller shares — dashboard modal
+/// confirm, dashboard self-close, and the `--task` queue's landed-run
+/// auto-close: `status: done` at `digest`, folding `origin` (0063.8) when
+/// the document has none yet, plus `closure` when a 0144 policy resolved.
+/// Reused rather than re-derived so every close records the same
+/// provenance shape, including the landed run's id.
+pub(crate) fn write_task_close_core(
+    provider: &dyn ctx_traits_core::task::provider::TaskProviderMut,
+    key: &str,
+    digest: String,
+    origin: Option<TaskCloseOrigin<'_>>,
+    closure: Option<ctx_traits_core::task::Closure>,
+) -> Result<
+    ctx_traits_core::task::provider::UpdateOutcome,
+    ctx_traits_core::task::provider::WriteError,
+> {
+    let has_origin = provider
+        .get(key)
+        .ok()
+        .flatten()
+        .is_some_and(|resolved| resolved.document.origin.is_some());
+    let set_origin = match (has_origin, origin) {
+        (false, Some(origin)) => Some(Some(format!(
+            "run {} merged as {}",
+            origin.run_id, origin.sha
+        ))),
+        _ => None,
+    };
+    provider.update(
+        key,
+        ctx_traits_core::task::provider::TaskUpdate {
+            status: Some(ctx_traits_core::task::TaskStatus::Done),
+            expected_digest: Some(digest),
+            set_origin,
+            set_closure: closure,
+            ..Default::default()
+        },
+    )
+}
+
+pub(crate) fn evaluate_task_close(
+    document: &ctx_traits_core::task::TaskDocument,
+    config_root: &camino::Utf8Path,
+    repo_root: &camino::Utf8Path,
+    sha: &str,
+) -> Option<(ctx_traits_core::task::Closure, CloseDisposition)> {
+    let policy = resolve_task_close_policy(document, config_root)?;
+    let results = if document.checks.is_empty() {
+        None
+    } else {
+        Some(run_declared_checks(&document.checks, repo_root, sha))
+    };
+    let disposition = close_disposition(policy, &document.checks, results.as_deref());
+    let checks = match &disposition {
+        CloseDisposition::AutoClose { checks } => checks.clone(),
+        CloseDisposition::Proposal { .. } => results.unwrap_or_default(),
+    };
+    Some((
+        ctx_traits_core::task::Closure {
+            mode: policy,
+            commit: Some(sha.to_string()),
+            checks,
+        },
+        disposition,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

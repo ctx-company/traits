@@ -4,15 +4,16 @@
 //! [`crate::app::run::handle_task_queue_run`], which drives every queued
 //! task through [`crate::app::run::drive_session`] — the same preflight,
 //! worktree, and merge path a single `--task-dispatch` run uses. This
-//! module owns only the parts specific to a queue: turning `--task` values
-//! into a flat ordered list of task keys, and closing a landed task by
-//! reusing [`super::task_proposals::close_disposition`] and
-//! [`super::task_checks::run_checks`] — never a second implementation of
-//! either.
+//! module owns only the part specific to a queue: turning `--task` values
+//! into a flat ordered list of task keys. Closing a landed task reuses the
+//! same 0144 close assembly the dashboard's own close lane goes through —
+//! [`super::task_proposals::evaluate_task_close`] and
+//! [`super::task_proposals::write_task_close_core`] — never a second
+//! implementation of either, so the queue's close write carries the same
+//! run-id/origin provenance the dashboard's does.
 
 use camino::Utf8Path;
-use ctx_traits_core::task::provider::{TaskProvider, TaskProviderMut, TaskUpdate};
-use ctx_traits_core::task::{CheckOutcome, CheckRecord, Closure, TaskStatus};
+use ctx_traits_core::task::provider::TaskProvider;
 
 /// One `--task` value resolved into the queue it names: a bare/dotted task
 /// key stays itself; a charter (any task with children) expands to its
@@ -82,6 +83,7 @@ pub(crate) fn auto_close_landed_task(
     key: &str,
     repo_root: &Utf8Path,
     revision: Option<&str>,
+    run_id: &str,
 ) -> bool {
     let Some(sha) = revision else {
         return false;
@@ -90,61 +92,27 @@ pub(crate) fn auto_close_landed_task(
     let Ok(Some(resolved)) = provider.get(key) else {
         return false;
     };
-    let document = &resolved.document;
-    let config_default =
-        ctx_traits_io::harness_config::resolve_runtime_config(repo_root)
-            .ok()
-            .and_then(|config| config.effective_auto_close());
-    let Some(policy) =
-        super::task_proposals::resolve_auto_close_policy(document.auto_close, config_default)
+    let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) =
+        super::task_proposals::evaluate_task_close(&resolved.document, repo_root, repo_root, sha)
     else {
         return false;
     };
-    let results = if document.checks.is_empty() {
-        None
-    } else {
-        Some(
-            match super::task_checks::run_checks(&document.checks, repo_root, sha) {
-                Ok(records) => records,
-                Err(unrunnable) => vec![CheckRecord {
-                    name: "(check set)".to_string(),
-                    command: String::new(),
-                    outcome: CheckOutcome::Unrunnable,
-                    detail: unrunnable.reason,
-                }],
-            },
-        )
-    };
-    let disposition =
-        super::task_proposals::close_disposition(policy, &document.checks, results.as_deref());
-    let checks = match disposition {
-        super::task_proposals::CloseDisposition::AutoClose { checks } => checks,
-        super::task_proposals::CloseDisposition::Proposal { .. } => return false,
-    };
-    let closure = Closure {
-        mode: policy,
-        commit: Some(sha.to_string()),
-        checks,
-    };
-    provider
-        .update(
-            key,
-            TaskUpdate {
-                status: Some(TaskStatus::Done),
-                expected_digest: Some(resolved.digest),
-                set_closure: Some(closure),
-                ..Default::default()
-            },
-        )
-        .is_ok()
+    super::task_proposals::write_task_close_core(
+        &provider,
+        key,
+        resolved.digest,
+        Some(super::task_proposals::TaskCloseOrigin { run_id, sha }),
+        Some(closure),
+    )
+    .is_ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ctx_traits_core::task::provider::{ProviderError, ResolvedTask, SyncReport, TaskSummary};
-    use ctx_traits_core::task::{Relations, TaskDocument};
     use ctx_traits_core::task::graph::{DerivedStatus, ResolvedEdge, ResolvedRelations};
+    use ctx_traits_core::task::provider::{ProviderError, ResolvedTask, SyncReport, TaskSummary};
+    use ctx_traits_core::task::{Relations, TaskDocument, TaskStatus};
     use std::collections::BTreeMap;
 
     /// A minimal in-memory [`TaskProvider`] fixture — no filesystem — so
@@ -153,7 +121,10 @@ mod tests {
 
     impl TaskProvider for FixtureProvider {
         fn resolve(&self, task_value: &str) -> Result<Option<String>, ProviderError> {
-            Ok(self.0.contains_key(task_value).then(|| task_value.to_string()))
+            Ok(self
+                .0
+                .contains_key(task_value)
+                .then(|| task_value.to_string()))
         }
 
         fn get(&self, key: &str) -> Result<Option<ResolvedTask>, ProviderError> {
@@ -167,7 +138,10 @@ mod tests {
                 .map(|child| ResolvedEdge {
                     key: child.key.clone(),
                     title: child.title.clone(),
-                    status: if matches!(child.status, Some(TaskStatus::Done) | Some(TaskStatus::Cancelled)) {
+                    status: if matches!(
+                        child.status,
+                        Some(TaskStatus::Done) | Some(TaskStatus::Cancelled)
+                    ) {
                         DerivedStatus::Done
                     } else {
                         DerivedStatus::Ready
@@ -257,15 +231,25 @@ mod tests {
         // it lexicographically.
         assert_eq!(
             queue,
-            vec!["0001.2".to_string(), "0001.9".to_string(), "0001.10".to_string()]
+            vec![
+                "0001.2".to_string(),
+                "0001.9".to_string(),
+                "0001.10".to_string()
+            ]
         );
     }
 
     #[test]
     fn comma_and_repeated_entries_flatten_into_one_ordered_queue() {
         let documents = BTreeMap::from([
-            ("0001".to_string(), doc("0001", Some(TaskStatus::Ready), None)),
-            ("0002".to_string(), doc("0002", Some(TaskStatus::Ready), None)),
+            (
+                "0001".to_string(),
+                doc("0001", Some(TaskStatus::Ready), None),
+            ),
+            (
+                "0002".to_string(),
+                doc("0002", Some(TaskStatus::Ready), None),
+            ),
         ]);
         let provider = FixtureProvider(documents);
         // `--task 0001,0002` and `--task 0001 --task 0002` both normalize to
@@ -282,5 +266,56 @@ mod tests {
         let provider = FixtureProvider(BTreeMap::new());
         let error = expand_task_queue(&provider, &["9999".to_string()]).unwrap_err();
         assert!(error.contains("9999"));
+    }
+
+    /// A scratch directory unique per call — the same shape
+    /// `dashboard.rs`'s own `tasks_board_tempdir` fixture uses, duplicated
+    /// here rather than exposed cross-module for one test.
+    fn scratch_dir_buf(label: &str) -> camino::Utf8PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "task-queue-test-{label}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        camino::Utf8PathBuf::from_path_buf(dir).unwrap()
+    }
+
+    /// Proves the fix for the 0195 review blocker: a queue auto-close on a
+    /// landed revision goes through the same 0144 assembly the dashboard
+    /// uses ([`super::super::task_proposals::evaluate_task_close`],
+    /// [`super::super::task_proposals::write_task_close_core`]), so it
+    /// records the landed run's id in `origin` — never only the commit sha
+    /// — alongside the closure's mode/commit/checks.
+    #[test]
+    fn auto_close_landed_task_records_the_run_id_in_origin() {
+        let board_dir = scratch_dir_buf("board");
+        let repo_root = scratch_dir_buf("repo");
+        std::fs::write(
+            board_dir.join("0001-first.toml").as_std_path(),
+            "schema-version = \"0.2\"\nkey = \"0001\"\ntitle = \"title\"\nstatus = \"ready\"\nauto-close = \"merge\"\n",
+        )
+        .unwrap();
+
+        let closed =
+            auto_close_landed_task(&board_dir, "0001", &repo_root, Some("deadbeef"), "run-42");
+        assert!(closed, "an unchecked merge policy always auto-closes");
+
+        let provider = ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir);
+        let resolved = provider.get("0001").unwrap().expect("task still resolves");
+        assert_eq!(
+            resolved.document.status,
+            Some(ctx_traits_core::task::TaskStatus::Done)
+        );
+        assert_eq!(
+            resolved.document.origin.as_deref(),
+            Some("run run-42 merged as deadbeef")
+        );
+        let closure = resolved.document.closure.expect("closure recorded");
+        assert_eq!(closure.commit.as_deref(), Some("deadbeef"));
+        assert!(closure.checks.is_empty());
     }
 }

@@ -668,7 +668,9 @@ impl TaskQueueOutcome {
     fn halts(&self) -> bool {
         matches!(
             self,
-            TaskQueueOutcome::Parked | TaskQueueOutcome::MergeFailed | TaskQueueOutcome::Failed { .. }
+            TaskQueueOutcome::Parked
+                | TaskQueueOutcome::MergeFailed
+                | TaskQueueOutcome::Failed { .. }
         )
     }
 
@@ -689,7 +691,6 @@ pub(crate) struct TaskQueueInputs<'a> {
     pub(crate) queue: Vec<String>,
     pub(crate) continue_on_failure: bool,
     pub(crate) dispatch_trait: String,
-    pub(crate) file: Option<&'a str>,
     pub(crate) session_store: Option<&'a str>,
     pub(crate) assignments: &'a [String],
     pub(crate) resource_root: Option<&'a str>,
@@ -724,78 +725,77 @@ pub(crate) struct TaskQueueInputs<'a> {
 /// landed run is closed through the 0144 auto-close primitives
 /// ([`super::task_queue::auto_close_landed_task`]) — never a parallel close
 /// implementation.
-pub(crate) fn handle_task_queue_run(input: TaskQueueInputs<'_>) -> crate::Result<CommandOutput<()>> {
-    let (outcomes, halted) = drive_task_queue(
-        &input.queue,
-        input.continue_on_failure,
-        |key| {
-            let sets = vec![format!("task={key}")];
-            let session_inputs = SessionStartInputs {
-                trait_id: Some(input.dispatch_trait.as_str()),
-                file: input.file,
-                master: None,
-                input: None,
-                sets: &sets,
-                session_store: input.session_store,
-                assignments: input.assignments,
-                resource_root: input.resource_root,
-                out: input.out,
-                max_frames: input.max_frames,
-                frame_seconds: input.frame_seconds,
-                total_seconds: input.total_seconds,
-                max_retries: input.max_retries,
-                attach_wait_seconds: input.attach_wait_seconds,
-                idle_seconds: input.idle_seconds,
-                max_in_flight: input.max_in_flight,
-                wait: input.wait,
-                progress: input.progress,
-                worktree: input.worktree,
-                strict_loops: input.strict_loops,
-                override_dependencies: input.override_dependencies,
-                task_dispatch: true,
-                json: input.json,
-                verbose: input.verbose,
-                trait_args: &[],
-                merge_rung: input.merge_rung,
-                story: input.story,
-                startup: None,
-            };
-            match drive_session(session_inputs) {
-                Ok(completion) => {
-                    let session_failed = completion.session.status
-                        == ctx_traits_core::procedure::session::Status::Failed;
-                    if session_failed {
-                        TaskQueueOutcome::Failed {
-                            message: "run completed with status failed".to_string(),
-                        }
-                    } else {
-                        use ctx_traits_core::procedure::session::LandingState;
-                        match ctx_traits_core::procedure::session::landing_state(&completion.session) {
-                            Some(LandingState::Landed { revision }) => {
-                                let closed = super::task_queue::auto_close_landed_task(
-                                    &input.board_dir,
-                                    key,
-                                    &input.repo_root,
-                                    revision.as_deref(),
-                                );
-                                TaskQueueOutcome::Landed { closed }
-                            }
-                            Some(LandingState::Parked) => TaskQueueOutcome::Parked,
-                            Some(LandingState::MergeFailed) => TaskQueueOutcome::MergeFailed,
-                            Some(LandingState::NotMerged) => TaskQueueOutcome::NotMerged,
-                            None => TaskQueueOutcome::Completed,
-                        }
-                    }
-                }
-                Err(error) => {
-                    eprintln!("ctx run --task {key}: {error}");
+pub(crate) fn handle_task_queue_run(
+    input: TaskQueueInputs<'_>,
+) -> crate::Result<CommandOutput<()>> {
+    let (outcomes, halted) = drive_task_queue(&input.queue, input.continue_on_failure, |key| {
+        let sets = vec![format!("task={key}")];
+        let session_inputs = SessionStartInputs {
+            trait_id: Some(input.dispatch_trait.as_str()),
+            file: None,
+            master: None,
+            input: None,
+            sets: &sets,
+            session_store: input.session_store,
+            assignments: input.assignments,
+            resource_root: input.resource_root,
+            out: input.out,
+            max_frames: input.max_frames,
+            frame_seconds: input.frame_seconds,
+            total_seconds: input.total_seconds,
+            max_retries: input.max_retries,
+            attach_wait_seconds: input.attach_wait_seconds,
+            idle_seconds: input.idle_seconds,
+            max_in_flight: input.max_in_flight,
+            wait: input.wait,
+            progress: input.progress,
+            worktree: input.worktree,
+            strict_loops: input.strict_loops,
+            override_dependencies: input.override_dependencies,
+            task_dispatch: true,
+            json: input.json,
+            verbose: input.verbose,
+            trait_args: &[],
+            merge_rung: input.merge_rung,
+            story: input.story,
+            startup: None,
+        };
+        match drive_session(session_inputs) {
+            Ok(completion) => {
+                let session_failed = completion.session.status
+                    == ctx_traits_core::procedure::session::Status::Failed;
+                if session_failed {
                     TaskQueueOutcome::Failed {
-                        message: error.to_string(),
+                        message: "run completed with status failed".to_string(),
+                    }
+                } else {
+                    use ctx_traits_core::procedure::session::LandingState;
+                    match ctx_traits_core::procedure::session::landing_state(&completion.session) {
+                        Some(LandingState::Landed { revision }) => {
+                            let closed = super::task_queue::auto_close_landed_task(
+                                &input.board_dir,
+                                key,
+                                &input.repo_root,
+                                revision.as_deref(),
+                                completion.session.run_id.as_str(),
+                            );
+                            TaskQueueOutcome::Landed { closed }
+                        }
+                        Some(LandingState::Parked) => TaskQueueOutcome::Parked,
+                        Some(LandingState::MergeFailed) => TaskQueueOutcome::MergeFailed,
+                        Some(LandingState::NotMerged) => TaskQueueOutcome::NotMerged,
+                        None => TaskQueueOutcome::Completed,
                     }
                 }
             }
-        },
-    );
+            Err(error) => {
+                eprintln!("ctx run --task {key}: {error}");
+                TaskQueueOutcome::Failed {
+                    message: error.to_string(),
+                }
+            }
+        }
+    });
 
     if !input.json {
         print_task_queue_report(&outcomes, halted);
@@ -846,7 +846,11 @@ mod task_queue_drive_tests {
 
     #[test]
     fn halts_on_first_parked_merge_and_skips_remaining_tasks() {
-        let queue = vec!["0001.1".to_string(), "0001.2".to_string(), "0001.3".to_string()];
+        let queue = vec![
+            "0001.1".to_string(),
+            "0001.2".to_string(),
+            "0001.3".to_string(),
+        ];
         let (outcomes, halted) = drive_task_queue(&queue, false, |key| {
             if key == "0001.2" {
                 TaskQueueOutcome::Parked
@@ -863,7 +867,11 @@ mod task_queue_drive_tests {
 
     #[test]
     fn continue_on_failure_runs_remaining_queue_and_reports_every_outcome() {
-        let queue = vec!["0001.1".to_string(), "0001.2".to_string(), "0001.3".to_string()];
+        let queue = vec![
+            "0001.1".to_string(),
+            "0001.2".to_string(),
+            "0001.3".to_string(),
+        ];
         let (outcomes, halted) = drive_task_queue(&queue, true, |key| {
             if key == "0001.2" {
                 TaskQueueOutcome::Failed {
@@ -876,17 +884,24 @@ mod task_queue_drive_tests {
         assert!(!halted);
         assert_eq!(outcomes.len(), 3);
         assert_eq!(
-            outcomes.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>(),
+            outcomes
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
             vec!["0001.1", "0001.2", "0001.3"]
         );
         assert!(matches!(outcomes[1].1, TaskQueueOutcome::Failed { .. }));
-        assert!(matches!(outcomes[2].1, TaskQueueOutcome::Landed { closed: true }));
+        assert!(matches!(
+            outcomes[2].1,
+            TaskQueueOutcome::Landed { closed: true }
+        ));
     }
 
     #[test]
     fn non_halting_outcomes_never_stop_the_queue() {
         let queue = vec!["0001.1".to_string(), "0001.2".to_string()];
-        let (outcomes, halted) = drive_task_queue(&queue, false, |_key| TaskQueueOutcome::NotMerged);
+        let (outcomes, halted) =
+            drive_task_queue(&queue, false, |_key| TaskQueueOutcome::NotMerged);
         assert!(!halted);
         assert_eq!(outcomes.len(), 2);
     }
