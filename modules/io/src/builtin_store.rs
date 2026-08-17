@@ -62,6 +62,28 @@ pub fn resolve_builtin_manifest_path(
     repo_root: &Utf8Path,
     trait_id: &str,
 ) -> crate::Result<Option<Utf8PathBuf>> {
+    Ok(
+        resolve_builtin_package_root(repo_root, trait_id)?.map(|package_root| {
+            package_root
+                .join(crate::layout::GENERATED)
+                .join(crate::layout::CANONICAL_MANIFEST)
+        }),
+    )
+}
+
+/// Resolve a bare id to its materialized built-in *package root*
+/// (materializing/repairing the on-disk store first if needed), so callers
+/// that need more than the canonical manifest — e.g. reading the package's
+/// own authored `trait.toml` for a `[family]` table — can join onto it
+/// without duplicating the store's own read-candidate/publish policy.
+///
+/// Returns `Ok(None)` when `trait_id` is not one of the compiled-in built-in
+/// packages, so callers fall through to their existing unresolved-id error
+/// unchanged.
+pub fn resolve_builtin_package_root(
+    repo_root: &Utf8Path,
+    trait_id: &str,
+) -> crate::Result<Option<Utf8PathBuf>> {
     if builtin_trait_packages::package(trait_id).is_none() {
         return Ok(None);
     }
@@ -74,21 +96,12 @@ pub fn resolve_builtin_manifest_path(
         crate::layout::builtin_store_version_dir(repo_root, crate::layout::CLI_VERSION)?;
     if store_is_valid(&global_version_dir)? {
         crate::layout::validate_trait_id(trait_id)?;
-        let package_root = global_version_dir.join(trait_id);
-        return Ok(Some(
-            package_root
-                .join(crate::layout::GENERATED)
-                .join(crate::layout::CANONICAL_MANIFEST),
-        ));
+        return Ok(Some(global_version_dir.join(trait_id)));
     }
     ensure_store_published(repo_root)?;
     let package_root =
         crate::layout::builtin_store_package_root(repo_root, crate::layout::CLI_VERSION, trait_id)?;
-    Ok(Some(
-        package_root
-            .join(crate::layout::GENERATED)
-            .join(crate::layout::CANONICAL_MANIFEST),
-    ))
+    Ok(Some(package_root))
 }
 
 /// Materialize every embedded built-in package under the current CLI

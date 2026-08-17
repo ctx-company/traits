@@ -3419,14 +3419,32 @@ fn resolve_local_family_variant(
     }
     let repo_root = context.repo_root_for_paths();
     let local_package_root = crate::layout::trait_authoring_root_path(repo_root).join(family);
-    let root_manifest = crate::layout::package_manifest_path(&local_package_root);
+    resolve_family_variant_at_package_root(&local_package_root, family, variant)
+}
+
+/// Given a package root, resolve `variant` to its canonical file through
+/// that package's own `[family]` table (`<package_root>/trait.toml`) — the
+/// core shared by [`resolve_local_family_variant`] (a repo-authored local
+/// package root) and the built-in-tier branch of
+/// [`merged_lower_tier_candidates`] (a materialized built-in store package
+/// root). Returns `Ok(None)` when the package has no `[family]` table, or
+/// the table has no `variant` entry — the caller's signal to fall through to
+/// the next candidate kind/tier. A table that names `variant` but is missing
+/// the variant's canonical file always surfaces its own error here rather
+/// than ever being treated as absent.
+fn resolve_family_variant_at_package_root(
+    package_root: &Utf8Path,
+    family: &str,
+    variant: &str,
+) -> crate::Result<Option<(Utf8PathBuf, String)>> {
+    let root_manifest = crate::layout::package_manifest_path(package_root);
     let Some(table) = crate::family_manifest::read_family_table(&root_manifest)? else {
         return Ok(None);
     };
     let Some((_name, resolved_variant)) = table.variant(variant) else {
         return Ok(None);
     };
-    let variant_path = local_package_root.join(&resolved_variant.relative_path);
+    let variant_path = package_root.join(&resolved_variant.relative_path);
     if !variant_path.is_file() {
         return Err(crate::Error::Usage {
             message: format!(
@@ -3530,7 +3548,67 @@ fn merged_lower_tier_candidates(
         });
     }
 
+    // Built-in tier (P0193 §Part B): a built-in shipped as a native family
+    // (`[family]` table + variants) is otherwise invisible to `family:variant`
+    // references — `resolve_tiers`/`context.resolve_tiers` above only
+    // consults built-ins via an exact ordinary-id lookup
+    // (`builtin_trait_packages::package(id)`). Materializing here reuses the
+    // same self-healing store path every built-in lookup already takes; the
+    // tier sort in `try_resolve_trait_id` already guarantees any
+    // authored/vendored/global candidate above shadows it, so this never
+    // changes precedence.
+    let repo_root = context.repo_root_for_paths();
+    if family_valid
+        && let Some(package_root) =
+            crate::builtin_store::resolve_builtin_package_root(repo_root, family)?
+        && let Some((path, origin)) =
+            resolve_family_variant_at_package_root(&package_root, family, variant)?
+    {
+        candidates.push(crate::inventory::Candidate {
+            tier: crate::inventory::Tier::BuiltIn,
+            path,
+            origin: format!("built-in ({origin})"),
+        });
+    }
+    if alias_valid
+        && let Some(package_root) =
+            crate::builtin_store::resolve_builtin_package_root(repo_root, family)?
+        && let Some((path, origin)) = resolve_family_alias_at_package_root(&package_root, alias)?
+    {
+        candidates.push(crate::inventory::Candidate {
+            tier: crate::inventory::Tier::BuiltIn,
+            path,
+            origin: format!("built-in ({origin})"),
+        });
+    }
+
     Ok(candidates)
+}
+
+/// Given a package root, resolve a legacy hyphenated `alias` through that
+/// package's own `[family]` table — the built-in-tier counterpart of
+/// [`resolve_local_family_alias`]'s repo-authored directory walk, reused so
+/// `implement-quick`-shaped ids also resolve against a built-in family.
+fn resolve_family_alias_at_package_root(
+    package_root: &Utf8Path,
+    alias: &str,
+) -> crate::Result<Option<(Utf8PathBuf, String)>> {
+    let root_manifest = crate::layout::package_manifest_path(package_root);
+    let Some(table) = crate::family_manifest::read_family_table(&root_manifest)? else {
+        return Ok(None);
+    };
+    let Some((_name, variant)) = table.variant_for_alias(alias) else {
+        return Ok(None);
+    };
+    let variant_path = package_root.join(&variant.relative_path);
+    if !variant_path.is_file() {
+        return Err(crate::Error::Usage {
+            message: format!(
+                "native family alias {alias:?} declares canonical variant at {variant_path}, but that file does not exist"
+            ),
+        });
+    }
+    Ok(Some((variant_path, "trait-id".to_string())))
 }
 
 /// Resolve a legacy hyphenated selector published in a *repo-authored* local
@@ -3574,20 +3652,8 @@ fn resolve_local_family_alias(
             Ok(path) => path,
             Err(_) => continue,
         };
-        let manifest = crate::layout::package_manifest_path(&path);
-        let Some(table) = crate::family_manifest::read_family_table(&manifest)? else {
-            continue;
-        };
-        if let Some((_name, variant)) = table.variant_for_alias(alias) {
-            let variant_path = path.join(&variant.relative_path);
-            if !variant_path.is_file() {
-                return Err(crate::Error::Usage {
-                    message: format!(
-                        "native family alias {alias:?} declares canonical variant at {variant_path}, but that file does not exist"
-                    ),
-                });
-            }
-            return Ok(Some((variant_path, "trait-id".to_string())));
+        if let Some(resolved) = resolve_family_alias_at_package_root(&path, alias)? {
+            return Ok(Some(resolved));
         }
     }
     Ok(None)
@@ -3655,7 +3721,7 @@ pub fn resolve_trait_path(
             invalid_request(
                 &field_path,
                 format!(
-                    "trait ID {id:?} did not resolve to {path}; check the id for a typo, or create/build the package under {local_package_root} so {path} exists, before retrying"
+                    "trait ID {id:?} did not resolve to {path}; check the id for a typo, create/build the package under {local_package_root} so {path} exists, or add {family:?} to [vendor.dependencies] in .ctx/traits/config.toml and sync, before retrying"
                 ),
             )
         }
@@ -5419,4 +5485,169 @@ fn invalid_request_error(field_path: &str, message: impl Into<String>) -> crate:
         }
         .into(),
     )
+}
+
+#[cfg(test)]
+mod family_variant_at_package_root_tests {
+    use super::*;
+
+    fn scratch_root(tag: &str) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir()).expect("temp dir is UTF-8");
+        let dir = root.join(format!(
+            "ctx-family-variant-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(dir.as_std_path()).expect("clear stale scratch dir");
+        }
+        std::fs::create_dir_all(dir.as_std_path()).expect("create scratch dir");
+        dir
+    }
+
+    fn family_variant_trait_doc(id: &str, variant: &str) -> String {
+        format!(
+            r#"id = "{id}"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Demo"
+description = "scratch fixture"
+variant = "{variant}"
+"#
+        )
+    }
+
+    /// A package root with a `[family]` table declaring `default` and
+    /// `quick` variants, both backed by real canonical files — the
+    /// unambiguous "hit" fixture every other test in this module starts
+    /// from.
+    fn write_family_package(root: &Utf8Path) {
+        std::fs::create_dir_all(root.join("generated/quick").as_std_path()).unwrap();
+        std::fs::create_dir_all(root.join("generated/default").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("trait.toml").as_std_path(),
+            r#"[package]
+id = "family-demo"
+version = "0.1.0"
+name = "Family Demo"
+status = "ready"
+
+[family]
+default = "default"
+
+[family.variant.default]
+path = "generated/default/index.toml"
+
+[family.variant.quick]
+path = "generated/quick/index.toml"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/default/index.toml").as_std_path(),
+            family_variant_trait_doc("family-demo", "default"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/quick/index.toml").as_std_path(),
+            family_variant_trait_doc("family-demo", "quick"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolves_a_declared_variant_to_its_canonical_file() {
+        let root = scratch_root("hit");
+        write_family_package(&root);
+        let resolved = resolve_family_variant_at_package_root(&root, "family-demo", "quick")
+            .expect("resolves without error")
+            .expect("variant is declared");
+        assert_eq!(resolved.0, root.join("generated/quick/index.toml"));
+        assert_eq!(resolved.1, "trait-id");
+    }
+
+    #[test]
+    fn returns_none_for_an_undeclared_variant() {
+        let root = scratch_root("miss");
+        write_family_package(&root);
+        let resolved = resolve_family_variant_at_package_root(&root, "family-demo", "nonexistent")
+            .expect("no error for an absent variant");
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn returns_none_when_the_package_has_no_family_table() {
+        let root = scratch_root("no-family");
+        std::fs::create_dir_all(root.as_std_path()).unwrap();
+        std::fs::write(
+            root.join("trait.toml").as_std_path(),
+            r#"[package]
+id = "plain-demo"
+version = "0.1.0"
+name = "Plain Demo"
+status = "ready"
+"#,
+        )
+        .unwrap();
+        let resolved = resolve_family_variant_at_package_root(&root, "plain-demo", "default")
+            .expect("no error for a non-family package");
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn errors_when_a_declared_variant_names_a_missing_canonical_file() {
+        let root = scratch_root("dangling");
+        std::fs::create_dir_all(root.as_std_path()).unwrap();
+        std::fs::write(
+            root.join("trait.toml").as_std_path(),
+            r#"[package]
+id = "family-demo"
+version = "0.1.0"
+name = "Family Demo"
+status = "ready"
+
+[family]
+default = "quick"
+
+[family.variant.quick]
+path = "generated/quick/index.toml"
+"#,
+        )
+        .unwrap();
+        let error = resolve_family_variant_at_package_root(&root, "family-demo", "quick")
+            .expect_err("a declared-but-missing canonical file is a hard error");
+        assert!(matches!(error, crate::Error::Usage { .. }));
+    }
+
+    #[test]
+    fn resolves_a_declared_alias_to_its_canonical_file() {
+        let root = scratch_root("alias-hit");
+        std::fs::create_dir_all(root.join("generated/quick").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("trait.toml").as_std_path(),
+            r#"[package]
+id = "family-demo"
+version = "0.1.0"
+name = "Family Demo"
+status = "ready"
+
+[family]
+default = "quick"
+
+[family.variant.quick]
+path = "generated/quick/index.toml"
+aliases = ["family-demo-quick"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generated/quick/index.toml").as_std_path(),
+            family_variant_trait_doc("family-demo", "quick"),
+        )
+        .unwrap();
+        let resolved = resolve_family_alias_at_package_root(&root, "family-demo-quick")
+            .expect("resolves without error")
+            .expect("alias is declared");
+        assert_eq!(resolved.0, root.join("generated/quick/index.toml"));
+    }
 }

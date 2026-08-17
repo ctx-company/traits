@@ -65,6 +65,10 @@ mod keymap;
 mod worker;
 
 const TICK: Duration = Duration::from_millis(250);
+/// How long a dashboard-spawned child is watched for an early (dispatch-time)
+/// failure before the pending-spawn record is dropped and the regular
+/// SESSIONS/TASKS sync takes over (P0193 §Part A).
+const SPAWN_GRACE_WINDOW: Duration = Duration::from_secs(5);
 /// Bound on how long a list screen (SESSIONS/TRAITS/MERGES/TRUST) can go
 /// without an automatic reload while idle, so externally started, dashboard-
 /// spawned, or externally completed runs surface without a keypress. Also
@@ -1137,6 +1141,29 @@ struct State {
     /// Retaining this across detach permits an explicit reattach, but never
     /// leaks the originating run's context into the list or another session.
     guide_chat_session_id: Option<String>,
+    /// Monotonic counter behind each dashboard spawn's log key (`pid-<pid>-<seq>`),
+    /// so consecutive spawns from one dashboard never overwrite the previous
+    /// spawn's log before [`poll_pending_spawns`] has read it (P0193 §Part A).
+    spawn_seq: u64,
+    /// Children detached by [`apply_spawn_request`] still inside their
+    /// [`SPAWN_GRACE_WINDOW`], watched non-blockingly every tick by
+    /// [`poll_pending_spawns`] for an early failure.
+    pending_spawns: Vec<PendingSpawn>,
+    /// Task keys dispatched this session whose TASKS row should read
+    /// "dispatched" ahead of the next board/session sync, keyed to when the
+    /// entry was inserted so a silently-lost child can't pin the row forever.
+    optimistic_dispatched: HashMap<String, std::time::Instant>,
+}
+
+/// A detached dashboard-spawned child still inside its watch window
+/// (P0193 §Part A). Dropping `child` never terminates the process
+/// ([`ctx_traits_io::process::spawn_detached`]'s documented contract) —
+/// holding it here only lets [`poll_pending_spawns`] call `try_wait`.
+struct PendingSpawn {
+    child: std::process::Child,
+    log_path: camino::Utf8PathBuf,
+    task_key: Option<String>,
+    deadline: std::time::Instant,
 }
 
 /// P550 dashboard `S`-key state: a snapshot of one session's story, built
@@ -1276,6 +1303,9 @@ impl State {
             pending_keys: Vec::new(),
             guide_chat,
             guide_chat_session_id,
+            spawn_seq: 0,
+            pending_spawns: Vec::new(),
+            optimistic_dispatched: HashMap::new(),
         }
     }
 
@@ -2635,6 +2665,7 @@ fn run_with_initial_session(
             guide_chat.poll_results();
         }
         state.apply_snapshots();
+        poll_pending_spawns(&mut state);
         draw_screen(&mut pane, &mut state).map_err(|source| {
             ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
                 path: "<tty>".to_string(),
@@ -5666,14 +5697,19 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
     // No session id exists yet (minted by the child once it starts), so this
     // call site keys its log by pid instead of session id — the one place
     // the shared `resolve_spawn_exe_and_log` helper's session-keyed naming
-    // (§3.8) cannot apply.
-    let (exe, log_path) = resolve_spawn_exe_and_log(&format!("pid-{}", std::process::id()))?;
+    // (§3.8) cannot apply. A monotonic per-dashboard sequence number is
+    // appended so consecutive spawns never overwrite each other's log
+    // before `poll_pending_spawns` has read it (P0193 §Part A).
+    state.spawn_seq += 1;
+    let log_key = format!("pid-{}-{}", std::process::id(), state.spawn_seq);
+    let (exe, log_path) = resolve_spawn_exe_and_log(&log_key)?;
     let cwd = super::lifecycle_reporting::current_utf8_dir()?;
+    let task_key = task_dispatch_key(&user_args);
     let mut args: Vec<String> = vec!["traits".to_string(), "run".to_string()];
     args.extend(user_args);
     args.push("--progress".to_string());
     args.push("none".to_string());
-    let _child = ctx_traits_io::process::spawn_detached(
+    let child = ctx_traits_io::process::spawn_detached(
         &exe,
         &args,
         &cwd,
@@ -5683,9 +5719,114 @@ fn apply_spawn_request(state: &mut State, text: String) -> crate::Result<()> {
             log_path.as_str(),
         )],
     )?;
-    state.message = Some("spawn started".to_string());
+    if let Some(key) = &task_key {
+        state
+            .optimistic_dispatched
+            .insert(key.clone(), std::time::Instant::now());
+        state.message = Some(format!("dispatched {key}"));
+    } else {
+        state.message = Some("spawn started".to_string());
+    }
+    state.pending_spawns.push(PendingSpawn {
+        child,
+        log_path,
+        task_key,
+        deadline: std::time::Instant::now() + SPAWN_GRACE_WINDOW,
+    });
     state.reload();
     Ok(())
+}
+
+/// Extracts the `task=<key>` value out of a spawn request's own `--set`
+/// argv when the request also carries `--task-dispatch` (the board-dispatch
+/// seed shape at [`spawn_modal_seed`]) — a plain `--set task=...` port
+/// assignment with no `--task-dispatch` flag is not a board dispatch and
+/// yields `None`.
+fn task_dispatch_key(user_args: &[String]) -> Option<String> {
+    if !user_args.iter().any(|arg| arg == "--task-dispatch") {
+        return None;
+    }
+    user_args.iter().enumerate().find_map(|(index, arg)| {
+        if arg != "--set" {
+            return None;
+        }
+        user_args
+            .get(index + 1)
+            .and_then(|value| value.strip_prefix("task="))
+            .map(str::to_string)
+    })
+}
+
+/// Non-blocking `try_wait` sweep over every pending dashboard spawn
+/// (P0193 §Part A), called on every tick — cheap enough at 250ms cadence
+/// since `pending_spawns` is normally empty or single-element and
+/// `try_wait` never blocks.
+fn poll_pending_spawns(state: &mut State) {
+    if state.pending_spawns.is_empty() && state.optimistic_dispatched.is_empty() {
+        return;
+    }
+    let now = std::time::Instant::now();
+    // A joined session row for a still-pending task key means the regular
+    // sync already picked up the dispatch — the optimistic marker and any
+    // matching pending-spawn record are both stale.
+    let joined_keys: HashSet<String> = task_session_join(state).into_keys().collect();
+    state.optimistic_dispatched.retain(|key, inserted_at| {
+        !joined_keys.contains(key) && now < *inserted_at + SPAWN_GRACE_WINDOW
+    });
+    let mut remaining = Vec::with_capacity(state.pending_spawns.len());
+    for mut pending in std::mem::take(&mut state.pending_spawns) {
+        let joined = pending
+            .task_key
+            .as_ref()
+            .is_some_and(|key| joined_keys.contains(key));
+        if joined {
+            continue;
+        }
+        match pending.child.try_wait() {
+            Ok(Some(status)) if !status.success() => {
+                let line = first_error_line(&pending.log_path);
+                state.message = Some(match line {
+                    Some(line) => format!("dispatch failed: {line}"),
+                    None => "dispatch failed".to_string(),
+                });
+                if let Some(key) = &pending.task_key {
+                    state.optimistic_dispatched.remove(key);
+                }
+            }
+            Ok(Some(_)) => {
+                // Exited zero before any session joined — nothing ran; treat
+                // like any other early exit rather than a silent success.
+                if let Some(key) = &pending.task_key {
+                    state.optimistic_dispatched.remove(key);
+                }
+            }
+            Ok(None) => {
+                if now < pending.deadline {
+                    remaining.push(pending);
+                }
+                // Still running past the deadline: drop the record and let
+                // the regular sync take over; the row keeps showing
+                // "dispatched" only until it expires or a session joins.
+            }
+            Err(_) => {
+                // Already reaped or otherwise unobservable — nothing more to
+                // learn from this record.
+            }
+        }
+    }
+    state.pending_spawns = remaining;
+}
+
+/// The log's first non-empty line that isn't the shared `ctx run · <phase>`
+/// header — a heuristic over human-oriented output, acceptable since it
+/// only feeds a status message, never control flow.
+fn first_error_line(log_path: &camino::Utf8Path) -> Option<String> {
+    let contents = std::fs::read_to_string(log_path.as_std_path()).ok()?;
+    contents
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("ctx run"))
+        .map(str::to_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -8161,7 +8302,14 @@ fn render_tasks_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &S
         inner,
         &state.tasks_visible,
         &state.list_tasks,
-        |row| task_visible_row_label(row, summaries, &state.task_proposals),
+        |row| {
+            task_visible_row_label(
+                row,
+                summaries,
+                &state.task_proposals,
+                &state.optimistic_dispatched,
+            )
+        },
         |_| false,
     );
 }
@@ -8170,6 +8318,7 @@ fn task_visible_row_label(
     row: &TaskVisibleRow,
     summaries: &[TaskSummary],
     proposals: &HashMap<String, super::task_proposals::DoneProposal>,
+    optimistic_dispatched: &HashMap<String, std::time::Instant>,
 ) -> String {
     match row {
         TaskVisibleRow::GroupHeader {
@@ -8184,7 +8333,11 @@ fn task_visible_row_label(
             let Some(summary) = summaries.iter().find(|s| &s.key == key) else {
                 return String::new();
             };
-            task_row_label(summary, proposals.contains_key(key))
+            task_row_label(
+                summary,
+                proposals.contains_key(key),
+                optimistic_dispatched.contains_key(key),
+            )
         }
     }
 }
@@ -8192,12 +8345,20 @@ fn task_visible_row_label(
 /// The TASKS list row: `key · derived status · pending-proposal marker ·
 /// title`, padded to [`LIST_LABEL_WIDTH`] like every other list in this
 /// dashboard (0063.8: the marker column is fixed-width, so the title field
-/// is trimmed to compensate rather than growing the row).
-fn task_row_label(summary: &TaskSummary, has_proposal: bool) -> String {
+/// is trimmed to compensate rather than growing the row). `dispatched`
+/// overrides the derived status text until a joined session row lands or
+/// the pending spawn fails/expires (P0193 §Part A) — presentation only,
+/// [`task_group`]'s own group precedence is untouched.
+fn task_row_label(summary: &TaskSummary, has_proposal: bool, dispatched: bool) -> String {
+    let status_text = if dispatched {
+        "dispatched"
+    } else {
+        super::tasks::status_text(summary.derived_status)
+    };
     let label = format!(
         "{} {} {} {}",
         list_field(&summary.key, 8),
-        list_field(super::tasks::status_text(summary.derived_status), 10),
+        list_field(status_text, 10),
         list_field(if has_proposal { "!" } else { "" }, 1),
         list_field(&summary.title, 54),
     );
@@ -11426,8 +11587,8 @@ mod tests {
     #[test]
     fn task_row_label_reserves_a_fixed_width_marker_for_a_pending_proposal() {
         let summary = task_summary("0100", DerivedStatus::Ready);
-        let without = task_row_label(&summary, false);
-        let with = task_row_label(&summary, true);
+        let without = task_row_label(&summary, false, false);
+        let with = task_row_label(&summary, true, false);
         assert_eq!(tui::display_width(&without), LIST_LABEL_WIDTH);
         assert_eq!(tui::display_width(&with), LIST_LABEL_WIDTH);
         assert_ne!(without, with);
