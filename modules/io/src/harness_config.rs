@@ -7919,9 +7919,17 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                 transports: vec![RunTransport::Cli],
                 version_probe: vec!["--version".to_string()],
                 cli: Some(HarnessCliConvention {
+                    // Like approval_policy=never and agents.enabled=false,
+                    // --skip-git-repo-check disables one of codex's own
+                    // interactive-era guards: ctx's worktree/confinement
+                    // layer owns where a frame may run, so codex's
+                    // trusted-directory refusal ("Not inside a trusted
+                    // directory") must not veto a git-less project dir ctx
+                    // deliberately dispatched into.
                     argv: [
                         "exec",
                         "--json",
+                        "--skip-git-repo-check",
                         "--config",
                         "approval_policy=\"never\"",
                         "--config",
@@ -8241,6 +8249,7 @@ mod config_tests {
             [
                 "exec",
                 "--json",
+                "--skip-git-repo-check",
                 "--config",
                 "approval_policy=\"never\"",
                 "--config",
