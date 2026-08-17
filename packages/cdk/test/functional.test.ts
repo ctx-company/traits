@@ -957,3 +957,51 @@ describe("effect.session.title (0110)", () => {
     expect((envelope.draft as { readonly sink?: unknown }).sink).toBeUndefined();
   });
 });
+
+describe("items.forEach typed item slots (0153)", () => {
+  const draftSlots = (built: unknown): readonly { id: string; schema: string }[] =>
+    (built as { slot?: readonly { id: string; schema: string }[] }).slot ?? [];
+
+  it("the item slot inherits the iterated list's element schema", () => {
+    const reviewItem = schema.object("fe-review-item", { note: schema.text() });
+    const items = slot.array(reviewItem, "fe-items");
+    const out = slot.text("fe-out");
+    const proc = procedure.from({ description: "d" }, () => {
+      items.forEach("Handle each item", {}, (item) => {
+        step.command("Echo", { cmd: "echo hi", output: out });
+        void item;
+      });
+    });
+    const built = toDraftJson(trait("fe-inherit", { name: "FE Inherit", summary: "s", procedure: proc }));
+    const itemSlot = draftSlots(built).find((declared) => declared.id === "handle-each-item-item");
+    expect(itemSlot?.schema).toBe("schema:fe-review-item");
+  });
+
+  it("an explicit itemSchema override wins over inheritance", () => {
+    const items = slot.texts("fe-override-items");
+    const out = slot.text("fe-override-out");
+    const proc = procedure.from({ description: "d" }, () => {
+      items.forEach("Handle overridden", { itemSchema: schema.text() }, (item) => {
+        step.command("Echo", { cmd: "echo hi", output: out });
+        void item;
+      });
+    });
+    const built = toDraftJson(trait("fe-override", { name: "FE Override", summary: "s", procedure: proc }));
+    const itemSlot = draftSlots(built).find((declared) => declared.id === "handle-overridden-item");
+    expect(itemSlot?.schema).toBe("schema:text");
+  });
+
+  it("a non-list over slot falls back to the untyped pre-0153 item mint", () => {
+    const raw = slot.any("fe-raw");
+    const out = slot.text("fe-fallback-out");
+    const proc = procedure.from({ description: "d" }, () => {
+      raw.forEach("Handle raw", {}, (item) => {
+        step.command("Echo", { cmd: "echo hi", output: out });
+        void item;
+      });
+    });
+    const built = toDraftJson(trait("fe-fallback", { name: "FE Fallback", summary: "s", procedure: proc }));
+    const itemSlot = draftSlots(built).find((declared) => declared.id === "handle-raw-item");
+    expect(itemSlot?.schema).toBe("schema:any");
+  });
+});

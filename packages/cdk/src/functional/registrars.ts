@@ -28,6 +28,8 @@ import type {
   ProjectSequenceFields,
   SignalOutputValue,
 } from "../sequence.js";
+import { metaOf } from "../meta.js";
+import type { SchemaValue } from "../schema.js";
 import { idFromTitle, sequence, validateNoDuplicateTitles } from "../sequence.js";
 import type { TerminalBinding } from "../sequence.js";
 import type { SessionTitleSinkInput } from "../sink.js";
@@ -172,13 +174,44 @@ export interface ForEachRegistrarOptions {
   readonly maxItems?: number;
   readonly concurrent?: boolean;
   readonly onComplete?: ForEachSequenceFields["onComplete"];
+  /**
+   * Explicit item-slot schema, overriding the one inherited from the
+   * iterated list. Passing an object-schema handle also mints typed field
+   * refs on the item slot (`item.foo`), which the inherited ref string
+   * cannot.
+   */
+  readonly itemSchema?: SchemaValue;
+}
+
+/**
+ * The per-item slot for an `items.forEach` loop. The validator requires the
+ * item slot's schema to equal the iterated list's element schema exactly
+ * and refuses `schema:any` for either side, so the item slot inherits the
+ * element ref straight off the `over` slot's declared `[element]` list
+ * schema. An explicit `itemSchema` wins over inheritance. `slot.any` — the
+ * pre-0153 mint, which no canonical could ever accept — remains only as the
+ * fallback for an untyped or undeclared list, where the validator's own
+ * diagnostics name the actual problem.
+ */
+function forEachItemSlot(over: SlotHandle, loopId: string, explicit: SchemaValue | undefined): SlotHandle {
+  const declared = explicit ?? inheritedElementSchema(over);
+  const fields = { id: `${loopId}-item`, description: `Per-item value for the ${loopId} loop.` };
+  return declared === undefined ? slot.any(fields) : slot({ ...fields, schema: declared });
+}
+
+function inheritedElementSchema(over: SlotHandle): SchemaValue | undefined {
+  const schemaRef = (metaOf(over)?.declaration as { readonly schema?: unknown } | undefined)?.schema;
+  if (typeof schemaRef !== "string" || !schemaRef.startsWith("[") || !schemaRef.endsWith("]")) return undefined;
+  // A bare ref string is a valid runtime schema value (`refText` passes it
+  // through); only the static type insists on a handle.
+  return schemaRef.slice(1, -1) as unknown as SchemaValue;
 }
 
 installSlotForEachLowering((slotHandle, titleText, opts, body) => {
   requireBuild(`items.forEach(${JSON.stringify(titleText)})`);
   const id = mintId(titleText);
   const frame = captureAuthorFrame();
-  const itemSlot = slot.any({ id: `${id}-item`, description: `Per-item value for the ${id} loop.` });
+  const itemSlot = forEachItemSlot(slotHandle, id, opts?.itemSchema);
   const { scope } = runInScope("for-each", `items.forEach(${JSON.stringify(titleText)})`, () => body(itemSlot));
   checkDuplicateTitles(scope.items, `items.forEach(${JSON.stringify(titleText)})`);
   if (scope.items.length === 0) throw buildError(titleText, "items.forEach registered no steps", frame);
