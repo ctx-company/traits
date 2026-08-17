@@ -133,6 +133,8 @@ export function defineTrait(name: string, fields: DefineTraitFields = {}): void 
 
 /** `defineVariant`'s own fields: metadata and descriptions only — no `version` (the family owns it); everything else is derived from `use*` calls, steps, and the return statement, exactly like `defineTrait`. */
 export interface DefineVariantFields {
+  /** Explicit canonical variant id (kebab slug). When present, the first argument is purely the display name — `defineVariant("Implement (Quick)", { id: "quick" })` — so a composed display form never mints a composed public id. */
+  readonly id?: string;
   readonly name?: string;
   /** The required agent+user prose. */
   readonly description?: string;
@@ -143,7 +145,7 @@ export interface DefineVariantFields {
   readonly metadata?: TraitMetadata;
 }
 
-const DEFINE_VARIANT_KEYS: readonly string[] = ["name", "description", "procedureDescription", "summary", "metadata"];
+const DEFINE_VARIANT_KEYS: readonly string[] = ["id", "name", "description", "procedureDescription", "summary", "metadata"];
 
 /**
  * Declares a hook-style variant module's identity — exactly once, inside a
@@ -167,12 +169,16 @@ export function defineVariant(name: string, fields: DefineVariantFields = {}): v
   // surface (`ctx traits run family:variant`, manifest keys, generated
   // paths), so a variant is named by its own word ("Strict"), never the
   // composed display form ("Refactor (Strict)" would mint refactor-strict).
-  const slug = idFromTitle(name);
   assertKnownKeys(fields as Record<string, unknown>, DEFINE_VARIANT_KEYS, "defineVariant");
   assertJsonLiteral(fields, "defineVariant fields");
+  const { id, ...rest } = fields;
+  const slug = id ?? idFromTitle(name);
+  if (id !== undefined && id !== idFromTitle(id)) {
+    throw new Error(`defineVariant: id ${JSON.stringify(id)} is not a kebab slug`);
+  }
   frame.defineTraitCalled = true;
   frame.slug = slug;
-  frame.fields = fields.name === undefined && name !== slug ? { ...fields, name } : { ...fields };
+  frame.fields = rest.name === undefined && name !== slug ? { ...rest, name } : { ...rest };
 }
 
 /** The chain handle `useVariant` returns — `.default()` marks that binding the family default, exactly once per family. */

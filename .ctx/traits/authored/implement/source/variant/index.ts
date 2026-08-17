@@ -1,5 +1,5 @@
-import { default as complex } from "./complex/index.ts";
-import { default as defaultVariant } from "./default/index.ts";
+import { default as basic } from "./basic/index.ts";
 import { default as quick } from "./quick/index.ts";
+import { default as complex } from "./complex/index.ts";
 
-export default { complex, default: defaultVariant, quick };
+export { basic, quick, complex };

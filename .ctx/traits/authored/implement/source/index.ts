@@ -1,11 +1,16 @@
-import { defineTrait, useVariant } from "@ctx-traits/cdk";
+import * as cdk from "@ctx-traits/cdk";
 
-import { default as variants } from "./variant/index.ts";
+import * as shared from "./shared/index.ts";
+import * as variant from "./variant/index.ts";
 
 export default function () {
-  defineTrait("Implement", { version: "0.25.0" });
+  cdk.defineTrait("Implement", { version: "0.25.0" });
 
-  useVariant(variants.quick);
-  useVariant(variants.default).default();
-  useVariant(variants.complex);
+  cdk.useIntent(shared.INTENT);
+  cdk.useBehavior(shared.BEHAVIOR);
+  cdk.useResource(shared.resource.taskBoard);
+
+  cdk.useVariant(variant.basic).default();
+  cdk.useVariant(variant.quick);
+  cdk.useVariant(variant.complex);
 }

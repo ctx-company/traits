@@ -1,7 +1,30 @@
 import * as cdk from "@ctx-traits/cdk";
 
-import { task, workSummary } from "../data.ts";
+import { scribe } from "../agent.ts";
+import { slot, port } from "../data.ts";
 
-export const scribeText = cdk.input.prompt`The work for ${task} is being committed.
-    Write a concise commit message from the work summary ${workSummary}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
-    Return exactly that message. Do not run git commands and do not write files.`;
+export const status = cdk.stage({
+  input: cdk.input.command`git status --porcelain`,
+  output: slot.gitStatus,
+});
+
+export const commitStage = cdk.stage({
+  input: cdk.input.command`git add -A`,
+  output: slot.stageOutput,
+});
+
+export const commitSubmit = cdk.stage({
+  input: cdk.input.command`git commit -m ${slot.commitMessage}`,
+  output: port.commitReport,
+});
+
+export const commitMessage = cdk.stage({
+  agent: scribe,
+  input: cdk.input.prompt`
+    The work for ${port.task} is being committed.
+    Write a concise commit message from the work summary into ${slot.workSummary}.
+  `,
+  output: cdk.output.prompt`
+    Return exactly the finished commit message into (${slot.commitMessage}).
+  `,
+});

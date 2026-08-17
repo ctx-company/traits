@@ -1,0 +1,524 @@
+id = "implement"
+schema-version = "0.4"
+version = "0.25.0"
+name = "Implement (Complex)"
+description = "Reviewed implementation: implement, review, refine & commit."
+variant = "implement-complex"
+
+[metadata]
+tag = [
+    "implementation",
+    "review",
+    "multi-agent",
+]
+
+[[intent.require]]
+id = "correctness"
+
+[[intent.require]]
+id = "robustness"
+
+[[intent.require]]
+id = "leanness"
+
+[[intent.require]]
+id = "reuse-over-reimplement"
+
+[[intent.require]]
+id = "review-before-final"
+
+[[intent.require]]
+id = "bounded-refinement"
+
+[[intent.avoid]]
+id = "over-engineering"
+
+[[intent.avoid]]
+id = "duplication"
+
+[[intent.avoid]]
+id = "scope-creep"
+
+[[intent.avoid]]
+id = "unbounded-loop"
+
+[[intent.avoid]]
+id = "rubber-stamp-review"
+
+[[behavior.tone]]
+id = "direct"
+
+[[behavior.tone]]
+id = "technical"
+
+[[behavior.method]]
+id = "evidence-first"
+
+[behavior.verbosity]
+id = "brief"
+
+[[port]]
+id = "commit-report"
+direction = "output"
+schema = "schema:text"
+optional = true
+description = "Final commit evidence from the git commit command step. Absent when the clean-tree gate (P397) skipped the commit tail entirely — a clean working tree at gate time means nothing to commit."
+value = "slot:commit-output"
+
+[[port]]
+id = "task"
+direction = "input"
+schema = "schema:text"
+description = 'Task to implement, named by its file in .internal/tasks/ — the key ("0044" or "0044.2"), the full name, or the filename.'
+
+[[slot]]
+id = "changed-files"
+schema = "schema:text"
+description = "Names and change-kinds of every file changed this round — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools."
+hint = "git diff --name-status output, excluding runtime state; it omits untracked files."
+
+[[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Commit message for the completed task; injected directly into the git commit command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "smart-1's implementation draft for the task — the plan the worker implements."
+hint = "Scope (restated from the task file), files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "git-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+
+[[slot]]
+id = "review-verdict-1"
+schema = "schema:review-verdict"
+description = "First reviewer's verdict for the current work state."
+
+[[slot]]
+id = "review-verdict-2"
+schema = "schema:review-verdict"
+description = "Second, independent reviewer's verdict for the current work state."
+
+[[slot]]
+id = "stage-output"
+schema = "schema:text"
+description = "Output evidence from the git add command step."
+
+[[slot]]
+id = "work-summary"
+schema = "schema:text"
+description = "Worker's cumulative account of the implemented state, extended each round — the worker's cross-round memory."
+hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict."
+
+[[resource]]
+id = "task-board"
+path = ".internal/tasks"
+root = "repo"
+hint = "Repo-root directory for the task board: one TaskDocument TOML file per task, named <key>-kebab-slug.toml; agents read task files with their own tools and never inline them."
+trigger = "on-demand"
+
+[[schema]]
+id = "blocker"
+description = "One blocking defect: stable identity, location, root cause, the invariant an acceptable fix must establish, and the falsifiable check that clears it."
+
+[schema.fields.done-when]
+schema = "schema:text"
+required = true
+description = "A falsifiable check the reviewer will apply next round to declare this blocker fixed. Wherever the check can be a COMMAND, state it as one the worker can run itself (a grep proving a function has exactly one caller, a test invocation) — the worker iterates against build-and-test signals, and a structural requirement stated only as prose is invisible to that loop: the worker stops where its own instruments read green, honestly believing the blocker addressed."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this defect, chosen on first report and reused verbatim in every later round it survives (e.g. unrelated-change-guard-baseline)."
+
+[schema.fields.recurrence-of]
+schema = "schema:text"
+description = "id of the prior-round blocker this restates; present when the prior fix did not clear its done-when."
+
+[schema.fields.required-fix]
+schema = "schema:text"
+required = true
+description = "One or two sentences of intent: the invariant an acceptable fix establishes and why. The operational content — what to do, in what order — lives in `steps`, which is the field the worker executes and the field you maintain across rounds."
+
+[schema.fields.root-cause]
+schema = "schema:text"
+required = true
+description = "Why the code is wrong — the missing or broken invariant, not just where it shows — and how deep the wrong goes: a slip at the cited line, a missing invariant, or a structure the code must converge to. The depth tells the worker how big a change you expect; omitting it is how a structural demand gets answered with a point-patch."
+
+[schema.fields.rule-quote]
+schema = "schema:text"
+description = "The exact authoritative line(s) the cited rule quotes, verified against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.rule-source]
+schema = "schema:text"
+description = "Repo-relative path + section for the house rule this blocker cites, verified directly against the rule-authority resource. Present only when the blocker cites a standing product rule."
+
+[schema.fields.steps]
+schema = "[schema:blocker-step]"
+required = true
+description = """The fix as an ordered list of typed steps — you are the smarter model here, and this list exists to spend that intelligence on the worker's behalf (owner ruling 2026-07-30). Each step is one operation: what to create and what it owns, what must cease to exist or shrink to a delegate, which call sites to route. A destination ("replace the separate paths with one renderer") is not a step; the operations that reach it are. THIS LIST IS CUMULATIVE STATE, not a fresh derivation: when this blocker appeared in your prior verdict (attached), carry its steps forward VERBATIM — same order, same text — flipping status to done only where you verified the evidence with your own tools, and appending genuinely new findings as new steps at the end. Never renumber, reword, drop, or re-derive a carried step: a vanished step erases the worker's credit, a reworded one moves the target, and both teach the worker that completing steps is pointless — the four-day stall this field exists to end."""
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and the concrete failure it causes."
+
+[schema.fields.where]
+schema = "schema:text"
+required = true
+description = "Repo-relative files and paths involved."
+
+[[schema]]
+id = "blocker-step"
+description = "One step of a blocker's required fix, with verified progress state."
+
+[schema.fields.evidence]
+schema = "schema:text"
+description = "Why status is done: file:line, a test name, or a command and its observed result. Required in practice for every done step; absent while open."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = """"open" or "done". Flips to done only when the reviewer has verified the evidence against the working tree — never on the worker's claim alone."""
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
+
+[[schema]]
+id = "owner-item"
+description = "A checklist item outside in-run capability or authority, with verified substitute evidence and the owner action that closes it."
+
+[schema.fields.class]
+schema = "schema:text"
+required = true
+description = "Why no in-run effort can satisfy it: needs a real screen; needs money or an owner-authorized live execution; needs an owner authority call; or contradicts landed code/authoritative rule and the resolution is the owner's."
+allowed = [
+    "gui-or-visual",
+    "paid-or-live-execution",
+    "owner-decision",
+    "contract-conflict",
+]
+
+[schema.fields.close-out]
+schema = "schema:text"
+required = true
+description = "The exact command the owner runs or decision the owner makes to finish the item."
+
+[schema.fields.item]
+schema = "schema:text"
+required = true
+description = "The checklist item or Done-when clause, quoted or tightly paraphrased."
+
+[schema.fields.reason]
+schema = "schema:text"
+required = true
+description = "One sentence: why this item is outside in-run capability or authority."
+
+[schema.fields.substitute-evidence]
+schema = "schema:text"
+required = true
+description = 'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.'
+
+[[schema]]
+id = "review-verdict"
+description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if a blocking defect remains; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly."
+
+[schema.fields.advisory]
+schema = "schema:text"
+description = "Non-blocking notes: subjective style, naming, taste, optional improvements, follow-up work. Never affects status and never forces another refinement round."
+
+[schema.fields.blockers]
+schema = "[schema:blocker]"
+required = true
+description = "The blocking defects that must be fixed before merge: correctness bugs, failing validation gates, clear over-build (accretion, defensive validation for states that cannot occur, scope creep beyond the task), OR un-abstracted duplication — logic that duplicates or closely resembles code elsewhere and should be unified into a shared abstraction instead of re-implemented or copied beside. Each entry carries a stable id, root cause, the required-fix invariant, and a falsifiable done-when. Non-empty when status is revise; an empty list (never omitted — always return the key) when approved. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+
+[schema.fields.escalation]
+schema = "schema:text"
+required = true
+description = "needs-owner if and only if at least one blocker cannot be cleared by the worker from inside this run: the task file is a placeholder or lacks a falsifiable Done-when; a prerequisite task it names has not landed in this tree; the task is marked superseded or cancelled; resolving it requires an owner/authority decision; or a required gate fails for reasons outside the task's scope (tooling conflict). Escalation is RECORDED for owner triage — it does not stop the loop; refinement continues on every fixable blocker. none otherwise."
+allowed = [
+    "none",
+    "needs-owner",
+]
+
+[schema.fields.escalation-reason]
+schema = "schema:text"
+required = true
+description = "One plain sentence: WHY the flagged blocker set is outside this run's authority and what owner action would clear it. Non-empty when escalation is needs-owner; an empty string (never omitted — always return the key) otherwise. Always present so the runtime can deterministically copy it into a park report without a missing-field failure."
+
+[schema.fields.owner-items]
+schema = "[schema:owner-item]"
+description = "Checklist items of THIS task that no in-run effort can satisfy, accepted per the draft's SCOPE SPLIT (or a verified mid-run wall claim), each with its reason class, the substitute evidence you verified, and the owner close-out. Approving with this list certifies every agent-doable item is 100% implemented. Never doable work — promote any owner-only claim a shell could satisfy to a blocker; an entry with missing or unverified substitute evidence belongs in blockers, not here. Absent when every item is agent-doable."
+
+[schema.fields.remaining]
+schema = "schema:text"
+description = "Cross-task seam citations ONLY: counterpart work belonging to a DIFFERENT task on the task board, each citing that task's file name. Never in-task scope — an unimplemented item of THIS task's checklist is a blocker, and unimplemented in-task scope recorded here instead of in blockers falsifies the verdict. Absent when no cross-task seam exists."
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+description = "approved when no blocking defect remains (advisory notes may still exist); revise only when at least one blocking defect remains. Set to approved if and only if blockers is empty."
+allowed = [
+    "approved",
+    "revise",
+]
+
+[schema.fields.wall-id]
+schema = "schema:text"
+required = true
+description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
+
+[[agent]]
+id = "scribe"
+description = "Commit & Summary Writing; git staging and committing run as command steps."
+summary = "Commit-message role."
+
+[[agent]]
+id = "smart"
+description = "Plan Drafting and Review"
+summary = "Review role."
+
+[[agent]]
+id = "worker"
+description = "Implementation Work"
+summary = "Implementation role."
+
+[prompt.cross-review-the-implementation]
+text = """
+
+    Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
+    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
+    Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
+    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+    Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+  
+
+
+    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-2)
+  """
+input = [
+    "port:task",
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:review-verdict-2"]
+
+[prompt.draft-the-implementation-plan]
+text = """
+
+    Draft the implementation plan for {port:task} — its file lives in .internal/tasks/ (matched by key, name, or filename); read it and the relevant code with your tools.
+    Scope, files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation.
+"""
+input = ["port:task"]
+output = ["slot:draft"]
+
+[prompt.implement-the-task]
+text = """
+
+    Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
+    Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
+    If a reviewer verdict from the previous round is present, fix the blockers it names, largest first.
+
+
+
+    Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary
+"""
+input = [
+    "port:task",
+    "slot:draft",
+]
+output = ["slot:work-summary"]
+
+[prompt.review-the-implementation]
+text = """
+
+    Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
+    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
+    Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
+    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+    Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+  
+
+
+    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)
+  """
+input = [
+    "port:task",
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:review-verdict-1"]
+
+[prompt.write-the-commit-message]
+text = """
+
+        The work for {port:task} is being committed.
+        Write a concise commit message from the work summary {slot:work-summary}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
+    
+
+
+    Return exactly the finished commit message — the runtime injects it into the git commit step (slot:commit-message)
+"""
+input = [
+    "port:task",
+    "slot:work-summary",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "write-the-commit-message"
+title = "Write the commit message"
+agent = "agent:scribe"
+prompt = "prompt:write-the-commit-message"
+input = [
+    "port:task",
+    "slot:work-summary",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "stage-all-changes"
+title = "Stage all changes"
+output = ["slot:stage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "commit-the-work"
+title = "Commit the work"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[[sequence.doubly-reviewed-refinement-body.sequence]]
+id = "implement-the-task"
+title = "Implement the task"
+agent = "agent:worker"
+prompt = "prompt:implement-the-task"
+input = [
+    "port:task",
+    "slot:draft",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+    { slot = "slot:work-summary", optional = true },
+]
+output = ["slot:work-summary"]
+
+[[sequence.doubly-reviewed-refinement-body.sequence]]
+id = "capture-the-changed-files"
+title = "Capture the changed files"
+output = ["slot:changed-files"]
+
+[sequence.doubly-reviewed-refinement-body.sequence.command]
+argv = [
+    "git",
+    "diff",
+    "--name-status",
+    "HEAD",
+    "--",
+    ".",
+    ":(exclude).agents/runs",
+]
+
+[[sequence.doubly-reviewed-refinement-body.sequence]]
+id = "review-the-implementation"
+title = "Review the implementation"
+agent = "agent:smart"
+prompt = "prompt:review-the-implementation"
+input = [
+    "port:task",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:review-verdict-1"]
+
+[[sequence.doubly-reviewed-refinement-body.sequence]]
+id = "cross-review-the-implementation"
+title = "Cross-review the implementation"
+agent = "agent:smart"
+prompt = "prompt:cross-review-the-implementation"
+input = [
+    "port:task",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:review-verdict-2"]
+
+[procedure]
+description = "Reviewed implementation: implement, review, refine & commit."
+input = ["port:task"]
+output = ["port:commit-report"]
+
+[[procedure.sequence]]
+id = "draft-the-implementation-plan"
+title = "Draft the implementation plan"
+agent = "agent:smart"
+prompt = "prompt:draft-the-implementation-plan"
+input = ["port:task"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "doubly-reviewed-refinement"
+title = "Doubly-reviewed refinement"
+kind = "loop"
+sequence = "sequence:doubly-reviewed-refinement-body"
+max-iterations = 10
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-2"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence]]
+id = "check-working-tree-status"
+title = "Check working tree status"
+output = ["slot:git-status"]
+
+[procedure.sequence.command]
+argv = [
+    "git",
+    "status",
+    "--porcelain",
+]
+
+[[procedure.sequence]]
+id = "maybe-commit"
+title = "Maybe Commit"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-12-maybe-commit-then"
+
+[procedure.sequence.when.not]
+empty = "slot:git-status"
