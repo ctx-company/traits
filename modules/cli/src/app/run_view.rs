@@ -42,8 +42,8 @@ use projection::{apply_ledger_seed, run_view};
 use render::*;
 #[allow(unused_imports)]
 pub(crate) use render::{
-    EventRow, PaneFollow, PaneRenderState, PaneTitleRow, pane_body_area, pane_tree,
-    render_pane_body,
+    EventRow, PaneFollow, PaneRenderState, PaneTitleRow, journey_row_lines, pane_body_area,
+    pane_tree, render_pane_body,
 };
 
 use model::*;

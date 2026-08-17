@@ -996,6 +996,21 @@ pub(crate) fn not_merged_fact(
     })
 }
 
+/// `not_merged_fact` gated on `landing_state` actually being `NotMerged` —
+/// the exact check that the dashboard's Sessions, Merges, and Tasks
+/// surfaces (0197), story, and drive completion all need before they may
+/// show the fact. Extracted so those sites cannot drift on the gate.
+pub(crate) fn unmerged_fact(
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<NotMergedFact> {
+    matches!(
+        ctx_traits_core::procedure::session::landing_state(session),
+        Some(ctx_traits_core::procedure::session::LandingState::NotMerged)
+    )
+    .then(|| not_merged_fact(session))
+    .flatten()
+}
+
 pub(crate) fn disposition_for_report_status(status: &str) -> CompletionDisposition {
     match status {
         "merged" => CompletionDisposition::Merged,

@@ -279,6 +279,10 @@ struct SessionRow {
     /// re-parses the ledger to derive a proposal. `None` for an unreadable
     /// ledger or a run that has not landed.
     merged_landed: Option<String>,
+    /// [`crate::app::run::unmerged_fact`]'s result for this row's session —
+    /// `Some` only for a completed `--worktree` run whose `landing_state` is
+    /// `NotMerged` (0197). `None` for an unreadable ledger.
+    not_merged: Option<crate::app::run::NotMergedFact>,
 }
 
 #[derive(Clone)]
@@ -426,6 +430,10 @@ struct MergeRow {
     /// `None` in the default current-repository-only scope, mirroring
     /// [`SessionRow::repo_path`].
     repo_path: Option<String>,
+    /// [`crate::app::run::unmerged_fact`]'s result for this row's session — `Some`
+    /// only for a `Mergeable` row (0197); `None` otherwise, since a
+    /// terminal-frame row's `landing_state` is never `NotMerged`.
+    not_merged: Option<crate::app::run::NotMergedFact>,
 }
 
 /// The reconstructed live-view pane for one MERGES row (P472 §3.4), mirroring
@@ -456,6 +464,11 @@ struct MergePreviewFacts {
     gate_rows: Vec<merge_story::GateRow>,
     worktree_path: Option<String>,
     worktree_branch: Option<String>,
+    /// [`crate::app::run::unmerged_fact`]'s result, carried through so a
+    /// `Mergeable` row's `next:`/`branch:` lines source their strings from
+    /// the same helper Sessions and Tasks read (0197) rather than
+    /// re-deriving them from `worktree_branch`/`run_id`.
+    not_merged: Option<crate::app::run::NotMergedFact>,
 }
 
 enum MergeProduced {
@@ -573,6 +586,11 @@ struct TasksBoardSnapshot {
 enum TaskGroup {
     Syncing,
     InFlight,
+    /// A joined run completed committed-but-not-merged (0197) — distinct
+    /// from `InFlight` (nothing is running) and from `Ready`/`Blocked`
+    /// (board status), since dispatching this task again would abandon
+    /// unmerged work.
+    AwaitingMerge,
     Parked,
     Blocked,
     Ready,
@@ -580,10 +598,11 @@ enum TaskGroup {
 }
 
 impl TaskGroup {
-    fn order() -> [TaskGroup; 6] {
+    fn order() -> [TaskGroup; 7] {
         [
             TaskGroup::Syncing,
             TaskGroup::InFlight,
+            TaskGroup::AwaitingMerge,
             TaskGroup::Parked,
             TaskGroup::Blocked,
             TaskGroup::Ready,
@@ -595,6 +614,7 @@ impl TaskGroup {
         match self {
             TaskGroup::Syncing => "syncing",
             TaskGroup::InFlight => "in-flight",
+            TaskGroup::AwaitingMerge => "awaiting merge",
             TaskGroup::Parked => "parked",
             TaskGroup::Blocked => "blocked",
             TaskGroup::Ready => "ready",
@@ -1039,6 +1059,13 @@ struct State {
     /// as `tasks_visible`. Never in the draw path, discarded with `State` on
     /// exit; nothing about a proposal persists between looks.
     task_proposals: HashMap<String, super::task_proposals::DoneProposal>,
+    /// 0197: the not-merged fact backing a task's `AwaitingMerge` group,
+    /// keyed by task key — rebuilt inside `rebuild_visible_tasks` alongside
+    /// `tasks_visible`/`task_proposals`, from the same joined-row scan
+    /// [`task_group`] used to classify the task. Lets the row label and
+    /// preview render the fact's own branch/command instead of re-deriving
+    /// them.
+    task_awaiting_merge: HashMap<String, crate::app::run::NotMergedFact>,
     /// 0064: the reconcile pass's remaining proposal queue, one confirm
     /// modal at a time — `R` builds a fresh
     /// [`super::task_proposals::ReconcileReport`] and populates this;
@@ -1276,6 +1303,7 @@ impl State {
             collapsed_task_groups: HashSet::from([TaskGroup::Done]),
             task_preview: None,
             task_proposals: HashMap::new(),
+            task_awaiting_merge: HashMap::new(),
             reconcile_queue: Vec::new(),
             reconcile_ambiguous: Vec::new(),
             split_queue: Vec::new(),
@@ -2158,6 +2186,7 @@ fn sessions_from_inventory_tagged(
             title,
             task_key,
             merged_landed,
+            not_merged,
         ) = match &row.status {
             ctx_traits_io::run_session::InventoryOutcome::Readable { session, .. } => {
                 let outcome = session
@@ -2199,6 +2228,7 @@ fn sessions_from_inventory_tagged(
                     persisted_session_title(session, &row.ledger_path),
                     session.provenance.task_key.clone(),
                     super::task_proposals::merged_landed_sha(session),
+                    crate::app::run::unmerged_fact(session),
                 )
             }
             ctx_traits_io::run_session::InventoryOutcome::Unreadable { error } => (
@@ -2208,6 +2238,7 @@ fn sessions_from_inventory_tagged(
                 "-".to_string(),
                 String::new(),
                 SessionClass::Unreadable,
+                None,
                 None,
                 None,
                 None,
@@ -2231,6 +2262,7 @@ fn sessions_from_inventory_tagged(
             title,
             task_key,
             merged_landed,
+            not_merged,
         });
     }
     rows.sort_by_key(|row| {
@@ -2444,6 +2476,7 @@ fn merges_from_inventory(
         let committed =
             ctx_traits_core::procedure::session::commit_receipt(&session.ledger).is_some();
         let headline = merge_row_headline(class, last_terminal_frame, committed);
+        let not_merged = crate::app::run::unmerged_fact(&session);
         rows.push(MergeRow {
             session_id: row.session_id,
             run_id: session.run_id.as_str().to_string(),
@@ -2456,6 +2489,7 @@ fn merges_from_inventory(
             last_frame: last_terminal_frame.cloned(),
             worktree: session.provenance.worktree.clone(),
             repo_path: repo_path.map(str::to_string),
+            not_merged,
         });
     }
     rows
@@ -2985,6 +3019,10 @@ fn handle_focus_key(state: &mut State, key: &crossterm::event::KeyEvent) -> bool
             }
             true
         }
+        KeyCode::Enter if state.screen == Screen::Merges => {
+            open_merge_retry_modal(state, false);
+            true
+        }
         KeyCode::Enter => {
             focus_pane(&mut state.focus, preview_pane_id(state.screen));
             true
@@ -3409,6 +3447,7 @@ fn refresh_attached_view(view: &mut AttachedView) {
                 view.landing = run_view::landing_lines_from_frames(
                     session.status == ctx_traits_core::procedure::session::Status::Completed,
                     &session.provenance.merge_frames,
+                    crate::app::run::unmerged_fact(&session).as_ref(),
                 );
                 return;
             }
@@ -3491,6 +3530,7 @@ fn reconstruct_panes(
                 landing: run_view::landing_lines_from_frames(
                     session.status == ctx_traits_core::procedure::session::Status::Completed,
                     &session.provenance.merge_frames,
+                    crate::app::run::unmerged_fact(session).as_ref(),
                 ),
                 history: summary.history,
                 current: summary.current,
@@ -4249,6 +4289,7 @@ fn build_merge_preview(row: &MergeRow, cache_key: (String, String)) -> MergePrev
             .worktree
             .as_ref()
             .map(|worktree| worktree.branch.clone()),
+        not_merged: row.not_merged.clone(),
     };
     let lines = merge_preview_lines(&facts)
         .iter()
@@ -4364,6 +4405,14 @@ fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
         next_line.push("next: ", tui::Tone::Muted);
         next_line.push(explanation.next_action.clone(), tui::Tone::Default);
         lines.push(next_line);
+    } else if facts.class == MergeClass::Mergeable
+        && let Some(fact) = &facts.not_merged
+    {
+        lines.push(tui::Line::blank());
+        let mut next_line = tui::Line::blank();
+        next_line.push("next: ", tui::Tone::Muted);
+        next_line.push(fact.merge_command.clone(), tui::Tone::Default);
+        lines.push(next_line);
     }
 
     if !facts.gate_rows.is_empty() {
@@ -4390,10 +4439,15 @@ fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
         tui::Tone::Default,
     );
     lines.push(worktree_line);
-    if let Some(branch) = &facts.worktree_branch {
+    let branch = facts
+        .not_merged
+        .as_ref()
+        .map(|fact| fact.branch.as_str())
+        .or(facts.worktree_branch.as_deref());
+    if let Some(branch) = branch {
         let mut branch_line = tui::Line::blank();
         branch_line.push("branch: ", tui::Tone::Muted);
-        branch_line.push(branch.clone(), tui::Tone::Default);
+        branch_line.push(branch.to_string(), tui::Tone::Default);
         lines.push(branch_line);
     }
 
@@ -5859,6 +5913,9 @@ fn task_group(derived: DerivedStatus, joined: &[&SessionRow]) -> TaskGroup {
     {
         return TaskGroup::Parked;
     }
+    if joined.iter().any(|row| row.not_merged.is_some()) {
+        return TaskGroup::AwaitingMerge;
+    }
     match derived {
         DerivedStatus::Blocked => TaskGroup::Blocked,
         DerivedStatus::Ready => TaskGroup::Ready,
@@ -5939,6 +5996,7 @@ fn rebuild_visible_tasks(state: &mut State) {
         .into_iter()
         .map(|group| (group, Vec::new()))
         .collect();
+    state.task_awaiting_merge.clear();
     for summary in &summaries {
         let joined_rows: Vec<&SessionRow> = join
             .get(&summary.key)
@@ -5956,6 +6014,11 @@ fn rebuild_visible_tasks(state: &mut State) {
         } else {
             TaskGroup::Syncing
         };
+        if group == TaskGroup::AwaitingMerge
+            && let Some(fact) = joined_rows.iter().find_map(|row| row.not_merged.clone())
+        {
+            state.task_awaiting_merge.insert(summary.key.clone(), fact);
+        }
         if let Some((_, keys)) = buckets.iter_mut().find(|(g, _)| *g == group) {
             keys.push(summary.key.clone());
         }
@@ -6265,11 +6328,13 @@ fn refresh_task_preview_for_selection(state: &mut State) {
         .rect(PANE_TASKS_PREVIEW)
         .map_or(80, |rect| rect.width.saturating_sub(2));
     let proposal = state.task_proposals.get(&summary.key);
+    let fact = state.task_awaiting_merge.get(&summary.key);
     state.task_preview = Some(build_task_preview(
         &summary,
         board,
         &joined_rows,
         proposal,
+        fact,
         wrap_width,
         state.has_snapshot,
     ));
@@ -6286,6 +6351,7 @@ fn build_task_preview(
     board: &TasksBoardSnapshot,
     joined: &[&SessionRow],
     proposal: Option<&super::task_proposals::DoneProposal>,
+    fact: Option<&crate::app::run::NotMergedFact>,
     wrap_width: u16,
     has_snapshot: bool,
 ) -> TaskPreview {
@@ -6298,10 +6364,12 @@ fn build_task_preview(
     let mut status_line = tui::Line::blank();
     status_line.push("status: ", tui::Tone::Muted);
     status_line.push(
-        if has_snapshot {
-            super::tasks::status_text(summary.derived_status)
+        if !has_snapshot {
+            "syncing".to_string()
+        } else if let Some(fact) = fact {
+            format!("awaiting merge - {}", fact.branch)
         } else {
-            "syncing"
+            super::tasks::status_text(summary.derived_status).to_string()
         },
         tui::Tone::Default,
     );
@@ -7455,6 +7523,20 @@ fn dispatch_selected_task(state: &mut State) {
             Some(ctx_traits_io::dispatch_preflight::dependency_refusal_message(&key, &unmet));
         return;
     }
+    let join = task_session_join(state);
+    let awaiting_merge = join
+        .get(&key)
+        .into_iter()
+        .flatten()
+        .filter_map(|idx| state.sessions.get(*idx))
+        .find_map(|row| row.not_merged.as_ref());
+    if let Some(fact) = awaiting_merge {
+        state.message = Some(format!(
+            "awaiting merge — committed on {}; run `{}` first",
+            fact.branch, fact.merge_command
+        ));
+        return;
+    }
     let checks = resolved.document.checks.clone();
     open_spawn_modal_for_task(state, &key, &checks);
 }
@@ -7695,7 +7777,14 @@ fn sessions_preview_pane_lines(state: &State) -> (Vec<tui::Line>, Vec<run_view::
     };
     let mut progress_lines = preview.progress_lines.clone();
     push_degradation_lines(&mut progress_lines, preview);
-    (progress_lines, preview.journey_lines.clone())
+    let mut journey_lines = preview.journey_lines.clone();
+    // `AttachedView::landing` (never surfaced through a dedicated pane here,
+    // unlike the attached four-pane body) is where the ledger reconstruction
+    // path — successful or trait-degraded alike — carries the not-merged
+    // fact and merge-frame status lines; fold it into the ordinary preview's
+    // journey column so this list-visible pane never omits it.
+    journey_lines.extend(preview.landing.iter().cloned().map(run_view::journey_line));
+    (progress_lines, journey_lines)
 }
 
 /// P552 review `dashboard-attach-contract-absent`: renders BOTH
@@ -8033,8 +8122,28 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
     // session id stays separate for identity/disambiguation regardless.
     // `phase_width` here is post-borrow, so the token triplet's borrowing
     // still narrows this column rather than overflowing the row.
-    let detail_width = state_width + 1 + phase_width;
+    let mut detail_width = state_width + 1 + phase_width;
+    let mut repo_width = repo_width;
+    let mut elapsed_width = elapsed_width;
+    let mut tokens_width = tokens_width;
     let state_and_detail = session_state_label(row);
+    // A needs-merge badge names a fact the operator must act on; when the
+    // ordinary state/detail budget can't hold it, borrow from the less
+    // load-bearing columns (repo/elapsed/tokens) rather than let
+    // `list_field`'s trailing truncation silently eat the branch (0197).
+    if row.not_merged.is_some() {
+        let needed = tui::display_width(&state_and_detail);
+        let mut short = needed.saturating_sub(detail_width);
+        let borrow_repo = short.min(repo_width.saturating_sub(4));
+        repo_width -= borrow_repo;
+        short -= borrow_repo;
+        let borrow_elapsed = short.min(elapsed_width.saturating_sub(4));
+        elapsed_width -= borrow_elapsed;
+        short -= borrow_elapsed;
+        let borrow_tokens = short.min(tokens_width.saturating_sub(2));
+        tokens_width -= borrow_tokens;
+        detail_width += borrow_repo + borrow_elapsed + borrow_tokens;
+    }
     let label = format!(
         "{} {} {} {} {}",
         list_field(row.repo_key.as_deref().unwrap_or(""), repo_width),
@@ -8053,10 +8162,14 @@ fn session_row_label(row: &SessionRow, all_ids: &[String]) -> String {
 fn session_state_label(row: &SessionRow) -> String {
     let phase = normalized_session_phase(row);
     let detail = row.title.as_deref().unwrap_or(phase);
-    if detail.is_empty() || detail == row.state_text {
+    let base = if detail.is_empty() || detail == row.state_text {
         row.state_text.clone()
     } else {
         format!("{} · {detail}", row.state_text)
+    };
+    match &row.not_merged {
+        Some(fact) => format!("{base} · needs merge - {}", fact.branch),
+        None => base,
     }
 }
 
@@ -8262,6 +8375,7 @@ fn render_tasks_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &S
                 summaries,
                 &state.task_proposals,
                 &state.optimistic_dispatched,
+                &state.task_awaiting_merge,
                 state.has_snapshot,
             )
         },
@@ -8274,6 +8388,7 @@ fn task_visible_row_label(
     summaries: &[TaskSummary],
     proposals: &HashMap<String, super::task_proposals::DoneProposal>,
     optimistic_dispatched: &HashMap<String, std::time::Instant>,
+    awaiting_merge: &HashMap<String, crate::app::run::NotMergedFact>,
     has_snapshot: bool,
 ) -> String {
     match row {
@@ -8293,6 +8408,7 @@ fn task_visible_row_label(
                 summary,
                 proposals.contains_key(key),
                 optimistic_dispatched.contains_key(key),
+                awaiting_merge.get(key),
                 has_snapshot,
             )
         }
@@ -8305,26 +8421,42 @@ fn task_visible_row_label(
 /// is trimmed to compensate rather than growing the row). `dispatched`
 /// overrides the derived status text until a joined session row lands or
 /// the pending spawn fails/expires (P0193 §Part A) — presentation only,
-/// [`task_group`]'s own group precedence is untouched.
+/// [`task_group`]'s own group precedence is untouched. `fact`, when present,
+/// means [`task_group`] placed this task in `AwaitingMerge` — the row shows
+/// that instead of the board's derived status so a done-looking board never
+/// hides a committed-but-not-merged run (0197).
 fn task_row_label(
     summary: &TaskSummary,
     has_proposal: bool,
     dispatched: bool,
+    fact: Option<&crate::app::run::NotMergedFact>,
     has_snapshot: bool,
 ) -> String {
     let status_text = if dispatched {
-        "dispatched"
+        "dispatched".to_string()
     } else if !has_snapshot {
-        "syncing"
+        "syncing".to_string()
+    } else if let Some(fact) = fact {
+        format!("awaiting merge - {}", fact.branch)
     } else {
-        super::tasks::status_text(summary.derived_status)
+        super::tasks::status_text(summary.derived_status).to_string()
     };
+    // Widen the status column past its ordinary 10 cells to hold the
+    // awaiting-merge branch, borrowing from `title` (which the marker column
+    // never shares) so the total stays fixed — same posture as
+    // `session_row_label`'s badge borrowing (0197).
+    let base_status_width = 10;
+    let max_status_width = base_status_width + 54;
+    let status_width = tui::display_width(&status_text)
+        .max(base_status_width)
+        .min(max_status_width);
+    let title_width = 54usize.saturating_sub(status_width - base_status_width);
     let label = format!(
         "{} {} {} {}",
         list_field(&summary.key, 8),
-        list_field(status_text, 10),
+        list_field(&status_text, status_width),
         list_field(if has_proposal { "!" } else { "" }, 1),
-        list_field(&summary.title, 54),
+        list_field(&summary.title, title_width),
     );
     debug_assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
     label
@@ -8455,6 +8587,24 @@ mod tests {
             title: None,
             task_key: None,
             merged_landed: None,
+            not_merged: None,
+        }
+    }
+
+    fn merges_test_row(id: &str, class: MergeClass) -> MergeRow {
+        MergeRow {
+            session_id: id.to_string(),
+            run_id: format!("r-{id}"),
+            ledger_path: camino::Utf8PathBuf::from(format!("/tmp/{id}.json")),
+            class,
+            stage: None,
+            headline: String::new(),
+            phase: None,
+            trait_id: String::new(),
+            last_frame: None,
+            worktree: None,
+            repo_path: None,
+            not_merged: None,
         }
     }
 
@@ -9264,6 +9414,73 @@ mod tests {
             },
             state_digest: Digest::source("test"),
         }
+    }
+
+    /// A completed `--worktree` run with a commit receipt and no merge
+    /// frames — [`unresolvable_trait_session_fixture`] widened with the
+    /// exact shape `ctx_traits_core::procedure::session::landing_state`
+    /// resolves to `NotMerged` (core `session.rs`'s own
+    /// `completed_worktree_session` fixture), so 0197's helper actually
+    /// returns `Some` for the surfaces built on it below.
+    fn not_merged_session_fixture(
+        run_id: &str,
+        branch: &str,
+        worktree_path: Option<&str>,
+    ) -> ctx_traits_core::procedure::session::Session {
+        use ctx_traits_core::digest::Digest;
+        use ctx_traits_core::procedure::runtime::CommandExecutionEvidence;
+        use ctx_traits_core::procedure::runtime::SlotRevision;
+        use ctx_traits_core::procedure::session::DriveOutcome;
+        use ctx_traits_core::procedure::session::DriveOutcomeKind;
+        use ctx_traits_core::procedure::session::Status;
+        use ctx_traits_core::procedure::session::WorktreeProvenance;
+        use ctx_traits_core::reference::Reference;
+
+        let mut session = unresolvable_trait_session_fixture(run_id, Some(0));
+        session.status = Status::Completed;
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::Completed,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
+        });
+        session.provenance.worktree = Some(WorktreeProvenance {
+            id: format!("wt-{run_id}"),
+            branch: branch.to_string(),
+            seed_snapshots: Vec::new(),
+            path: worktree_path.map(str::to_string),
+        });
+        session.ledger.slot_revisions.push(SlotRevision {
+            slot_ref: Reference::parse("slot:commit-output").expect("slot ref parses"),
+            value_digest: Digest::source("commit"),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: Some(CommandExecutionEvidence {
+                argv: vec!["git".to_string(), "commit".to_string(), "-m".to_string()],
+                output_slot: "slot:commit-output".to_string(),
+                executable_digest: None,
+                exit_code: Some(0),
+                timed_out: false,
+                output_tail: None,
+            }),
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        });
+        session
     }
 
     fn append_activity_event(ledger_path: &camino::Utf8Path, frame_id: &str, text: &str) {
@@ -10181,6 +10398,7 @@ mod tests {
             last_frame: None,
             worktree: None,
             repo_path: None,
+            not_merged: None,
         };
         assert_eq!(
             tui::display_width(&merge_row_label(&merge, std::slice::from_ref(&id))),
@@ -11409,6 +11627,29 @@ mod tests {
         );
     }
 
+    /// Review blocker `awaiting-merge-cancelled-precedence`: a joined
+    /// `NotMergedFact` beats board-derived `Cancelled` — the task's
+    /// contract names no cancelled exception, and the run is still refused
+    /// for redispatch regardless of the board's own status.
+    #[test]
+    fn task_group_cancelled_with_unmerged_fact_is_awaiting_merge() {
+        let session = not_merged_session_fixture("r-cancelled", "ctx/run/wt-cancelled", None);
+        let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
+        let mut task_row = row_with_id("s1", SessionClass::Terminal);
+        task_row.not_merged = Some(fact);
+        assert_eq!(
+            task_group(DerivedStatus::Cancelled, &[&task_row]),
+            TaskGroup::AwaitingMerge
+        );
+
+        let plain_row = row_with_id("s1", SessionClass::Terminal);
+        assert_eq!(
+            task_group(DerivedStatus::Cancelled, &[&plain_row]),
+            TaskGroup::Done,
+            "cancelled without a fact stays Done"
+        );
+    }
+
     #[test]
     fn task_group_done_with_a_live_joined_run_is_still_in_flight() {
         let live = row_with_id("s1", SessionClass::Live);
@@ -11424,6 +11665,305 @@ mod tests {
         assert_eq!(task_group(DerivedStatus::Ready, &[]), TaskGroup::Ready);
         assert_eq!(task_group(DerivedStatus::Done, &[]), TaskGroup::Done);
         assert_eq!(task_group(DerivedStatus::Cancelled, &[]), TaskGroup::Done);
+    }
+
+    #[test]
+    fn task_group_is_awaiting_merge_for_a_completed_joined_run_carrying_the_fact() {
+        let mut row = row_with_id("s1", SessionClass::Terminal);
+        row.not_merged = Some(crate::app::run::NotMergedFact {
+            branch: "ctx/run/wt-fixture".to_string(),
+            merge_command: "ctx traits merge r-s1".to_string(),
+        });
+        assert_eq!(
+            task_group(DerivedStatus::Ready, &[&row]),
+            TaskGroup::AwaitingMerge
+        );
+        assert_eq!(
+            task_group(DerivedStatus::Blocked, &[&row]),
+            TaskGroup::AwaitingMerge
+        );
+    }
+
+    #[test]
+    fn task_group_stays_awaiting_merge_even_once_the_board_says_done() {
+        let mut row = row_with_id("s1", SessionClass::Terminal);
+        row.not_merged = Some(crate::app::run::NotMergedFact {
+            branch: "ctx/run/wt-fixture".to_string(),
+            merge_command: "ctx traits merge r-s1".to_string(),
+        });
+        assert_eq!(
+            task_group(DerivedStatus::Done, &[&row]),
+            TaskGroup::AwaitingMerge
+        );
+    }
+
+    #[test]
+    fn task_group_is_done_when_board_says_done_and_no_fact_remains() {
+        let row = row_with_id("s1", SessionClass::Terminal);
+        assert_eq!(task_group(DerivedStatus::Done, &[&row]), TaskGroup::Done);
+    }
+
+    /// Pins all three dashboard renderings (Sessions row badge, Merges
+    /// preview `next:`, Tasks grouping) to
+    /// [`crate::app::run::unmerged_fact`]'s own returned strings — never a
+    /// hard-coded branch/command literal — so the three surfaces cannot
+    /// drift apart (0197's Done-when).
+    #[test]
+    fn the_not_merged_fact_pins_sessions_merges_and_tasks_to_the_one_helper() {
+        let session = not_merged_session_fixture("r-fixture", "ctx/run/wt-fixture", None);
+        let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
+
+        let mut session_row = row_with_id("s1", SessionClass::Terminal);
+        session_row.not_merged = Some(fact.clone());
+        assert!(session_state_label(&session_row).contains(&fact.branch));
+        let session_label = session_row_label(&session_row, &["s1".to_string()]);
+        assert!(
+            session_label.contains(&fact.branch),
+            "final session row label {session_label:?} dropped the branch"
+        );
+
+        let facts = MergePreviewFacts {
+            run_id: session.run_id.as_str().to_string(),
+            phase: None,
+            trait_id: session.trait_id.clone(),
+            class: MergeClass::Mergeable,
+            stage: None,
+            produced: None,
+            explanation: None,
+            gate_rows: Vec::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            not_merged: Some(fact.clone()),
+        };
+        let rendered: Vec<String> = merge_preview_lines(&facts).iter().map(text_of).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains(&fact.merge_command))
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains(&fact.branch)),
+            "merges preview {rendered:?} dropped the branch"
+        );
+
+        let mut task_row = row_with_id("s1", SessionClass::Terminal);
+        task_row.not_merged = Some(fact.clone());
+        assert_eq!(
+            task_group(DerivedStatus::Ready, &[&task_row]),
+            TaskGroup::AwaitingMerge
+        );
+
+        let summary = TaskSummary {
+            key: "0197".to_string(),
+            title: "fixture".to_string(),
+            stored_status: None,
+            derived_status: DerivedStatus::Ready,
+            archived: false,
+        };
+        let task_label = task_row_label(&summary, false, false, Some(&fact), true);
+        assert!(
+            task_label.contains(&fact.branch),
+            "final task row label {task_label:?} dropped the branch"
+        );
+        assert!(
+            !task_label.contains("ready"),
+            "task row label {task_label:?} still reports board-derived ready"
+        );
+    }
+
+    /// Watch case: a pruned worktree path still yields the fact — no
+    /// filesystem probe backs `unmerged_fact`, it reads persisted
+    /// provenance only.
+    #[test]
+    fn unmerged_fact_survives_a_nonexistent_worktree_path() {
+        let session = not_merged_session_fixture(
+            "r-pruned",
+            "ctx/run/wt-pruned",
+            Some("/nonexistent/pruned/path"),
+        );
+        assert!(crate::app::run::unmerged_fact(&session).is_some());
+    }
+
+    /// Watch case: a terminal `Merged` frame is the authority — the fact
+    /// must not render even though the run still carries a commit receipt.
+    #[test]
+    fn unmerged_fact_is_none_once_a_merge_frame_lands() {
+        use ctx_traits_core::procedure::session::MergeFrame;
+        use ctx_traits_core::procedure::session::MergeStage;
+        use ctx_traits_core::procedure::session::MergeStatus;
+
+        let mut session = not_merged_session_fixture("r-landed", "ctx/run/wt-landed", None);
+        session.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: vec!["landed=abc123".to_string()],
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        assert!(crate::app::run::unmerged_fact(&session).is_none());
+    }
+
+    /// Review blocker `sessions-detail-merge-command`: trait resolution
+    /// failing must not swallow the not-merged fact — `reconstruct_panes`'s
+    /// fallback branch (never `render_ledger_run_view`'s journey) still owns
+    /// the Sessions preview's `landing` pane for an unresolvable trait.
+    #[test]
+    fn sessions_not_merged_detail_survives_trait_reconstruction_failure() {
+        let ledger_path = scratch_ledger_path("unresolvable-not-merged");
+        let session = not_merged_session_fixture("r-unresolvable", "ctx/run/wt-unresolvable", None);
+        let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
+
+        let reconstruction = reconstruct_panes(&session, &ledger_path);
+        reconstruction
+            .trait_degraded
+            .as_ref()
+            .expect("degraded reason — proves the fallback branch ran");
+
+        let mut view = attached_view_for("r-unresolvable");
+        view.journey_lines = reconstruction.journey.clone();
+        view.landing = reconstruction.landing.clone();
+        let mut state = State::new_without_worker();
+        state.session_preview = Some(view);
+        let (_, journey_lines) = sessions_preview_pane_lines(&state);
+        let rendered: Vec<String> = run_view::journey_row_lines(&journey_lines, 200)
+            .iter()
+            .map(text_of)
+            .collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains(&fact.branch) && line.contains(&fact.merge_command)),
+            "list-visible Sessions preview {rendered:?} dropped the not-merged fact on a \
+             trait-reconstruction failure"
+        );
+    }
+
+    /// Review blocker `sessions-detail-merge-command`: a merge frame landing
+    /// leaves `state_digest` unchanged, so the unchanged-digest refresh path
+    /// must independently re-derive the fact from the freshly re-read
+    /// ledger rather than trusting the previously cached preview.
+    #[test]
+    fn sessions_not_merged_detail_clears_after_unchanged_digest_landing_frame() {
+        use ctx_traits_core::procedure::session::MergeFrame;
+        use ctx_traits_core::procedure::session::MergeStage;
+        use ctx_traits_core::procedure::session::MergeStatus;
+
+        let ledger_path = scratch_ledger_path("unchanged-digest-not-merged");
+        let session = not_merged_session_fixture("r-unchanged", "ctx/run/wt-unchanged", None);
+        let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
+            .expect("write session");
+
+        let mut view = attached_view_for("r-unchanged");
+        view.ledger_path = ledger_path.clone();
+        view.state_digest.clear();
+        refresh_attached_view(&mut view);
+        let mut state = State::new_without_worker();
+        state.session_preview = Some(view.clone());
+        let (_, journey_lines) = sessions_preview_pane_lines(&state);
+        let rendered: Vec<String> = run_view::journey_row_lines(&journey_lines, 200)
+            .iter()
+            .map(text_of)
+            .collect();
+        assert!(
+            rendered.iter().any(|line| line.contains(&fact.branch)),
+            "initial list-visible Sessions preview {rendered:?} dropped the not-merged fact"
+        );
+
+        let mut landed = session.clone();
+        landed.provenance.merge_frames.push(MergeFrame {
+            stage: MergeStage::Landing,
+            status: MergeStatus::Merged,
+            reason: None,
+            evidence: vec!["landed=abc123".to_string()],
+            park_reason: None,
+            deep_decisions: Vec::new(),
+        });
+        assert_eq!(
+            landed.state_digest, session.state_digest,
+            "a merge frame must not move the ledger's own state_digest"
+        );
+        ctx_traits_io::run_session::write_run_session(&ledger_path, &landed)
+            .expect("write landed session");
+
+        refresh_attached_view(&mut view);
+        state.session_preview = Some(view);
+        let (_, journey_lines) = sessions_preview_pane_lines(&state);
+        let rendered: Vec<String> = run_view::journey_row_lines(&journey_lines, 200)
+            .iter()
+            .map(text_of)
+            .collect();
+        assert!(
+            !rendered.iter().any(|line| line.contains(&fact.branch)),
+            "refreshed list-visible Sessions preview {rendered:?} still shows the cleared \
+             not-merged fact"
+        );
+    }
+
+    #[test]
+    fn enter_on_a_mergeable_merges_row_opens_the_retry_modal() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Merges;
+        state
+            .merges
+            .push(merges_test_row("s1", MergeClass::Mergeable));
+        state.list_merges.set_selected(0);
+        let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(handle_focus_key(&mut state, &key));
+        assert!(state.modal_host.is_open());
+    }
+
+    #[test]
+    fn enter_on_a_landed_merges_row_refuses_without_opening_a_modal() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Merges;
+        state.merges.push(merges_test_row("s1", MergeClass::Landed));
+        state.list_merges.set_selected(0);
+        let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(handle_focus_key(&mut state, &key));
+        assert!(!state.modal_host.is_open());
+        assert!(
+            state
+                .message
+                .expect("refusal message")
+                .contains("already landed")
+        );
+    }
+
+    #[test]
+    fn dispatch_selected_task_refuses_when_the_joined_run_is_awaiting_merge() {
+        let mut state = State::new_without_worker();
+        state.has_snapshot = true;
+        let resolved = resolved_task("0002", DerivedStatus::Ready);
+        let mut resolved_map = BTreeMap::new();
+        resolved_map.insert("0002".to_string(), resolved);
+        state.tasks_board = Some(board_with(
+            vec![task_summary("0002", DerivedStatus::Ready)],
+            resolved_map,
+        ));
+        let mut row = row_with_id("s1", SessionClass::Terminal);
+        row.task_key = Some("0002".to_string());
+        row.not_merged = Some(crate::app::run::NotMergedFact {
+            branch: "ctx/run/wt-fixture".to_string(),
+            merge_command: "ctx traits merge r-s1".to_string(),
+        });
+        state.sessions = vec![row];
+        rebuild_visible_tasks(&mut state);
+        let index = state
+            .tasks_visible
+            .iter()
+            .position(|row| matches!(row, TaskVisibleRow::Task(key) if key == "0002"))
+            .expect("task row");
+        state.list_tasks.set_selected(index);
+
+        dispatch_selected_task(&mut state);
+
+        assert!(!state.modal_host.is_open());
+        let message = state.message.expect("refusal message set");
+        assert!(message.contains("awaiting merge"));
+        assert!(message.contains("ctx/run/wt-fixture"));
+        assert!(message.contains("ctx traits merge r-s1"));
     }
 
     #[test]
@@ -11456,13 +11996,21 @@ mod tests {
         );
 
         let ready_summary = task_summary("0001", DerivedStatus::Ready);
-        let row_label = task_row_label(&ready_summary, false, false, state.has_snapshot);
+        let row_label = task_row_label(&ready_summary, false, false, None, state.has_snapshot);
         assert!(
             row_label.contains("syncing"),
             "row label must not present the board-derived status pre-snapshot: {row_label}"
         );
         let board = state.tasks_board.as_ref().unwrap();
-        let preview = build_task_preview(&ready_summary, board, &[], None, 80, state.has_snapshot);
+        let preview = build_task_preview(
+            &ready_summary,
+            board,
+            &[],
+            None,
+            None,
+            80,
+            state.has_snapshot,
+        );
         let preview_texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
         let status_line = preview_texts
             .iter()
@@ -11487,13 +12035,21 @@ mod tests {
             .collect();
         assert_eq!(groups, vec![TaskGroup::Blocked, TaskGroup::Ready]);
 
-        let row_label = task_row_label(&ready_summary, false, false, state.has_snapshot);
+        let row_label = task_row_label(&ready_summary, false, false, None, state.has_snapshot);
         assert!(
             row_label.contains("ready"),
             "row label must show the true derived status once the snapshot has landed: {row_label}"
         );
         let board = state.tasks_board.as_ref().unwrap();
-        let preview = build_task_preview(&ready_summary, board, &[], None, 80, state.has_snapshot);
+        let preview = build_task_preview(
+            &ready_summary,
+            board,
+            &[],
+            None,
+            None,
+            80,
+            state.has_snapshot,
+        );
         let preview_texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
         let status_line = preview_texts
             .iter()
@@ -11523,7 +12079,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_visible_tasks_emits_five_headers_and_collapse_toggles_persist_across_a_resync() {
+    fn rebuild_visible_tasks_emits_six_headers_and_collapse_toggles_persist_across_a_resync() {
         let mut state = State::new_without_worker();
         // Post-sync grouping is under test here, not first-paint (0194
         // covers that separately) — pretend a snapshot already landed.
@@ -11536,14 +12092,14 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        // Six groups always render a header, including empty ones (0194
-        // adds `Syncing` to the fixed five); Done starts collapsed (0182),
-        // the other five start expanded.
+        // Seven groups always render a header, including empty ones (0194
+        // adds `Syncing`, 0197 adds `AwaitingMerge`, to the original five);
+        // Done starts collapsed (0182), the other six start expanded.
         assert_eq!(
             state.collapsed_task_groups,
             HashSet::from([TaskGroup::Done])
         );
-        assert_eq!(state.tasks_visible.len(), 6 + 2);
+        assert_eq!(state.tasks_visible.len(), 7 + 2);
         for group in TaskGroup::order() {
             let index = state
                 .tasks_visible
@@ -11556,21 +12112,22 @@ mod tests {
             toggle_selected_task_group(&mut state);
         }
         // Toggling every group once flips Done to expanded and the other
-        // five to collapsed.
+        // six to collapsed.
         assert_eq!(
             state.collapsed_task_groups,
             HashSet::from([
                 TaskGroup::Syncing,
                 TaskGroup::InFlight,
+                TaskGroup::AwaitingMerge,
                 TaskGroup::Parked,
                 TaskGroup::Blocked,
                 TaskGroup::Ready
             ])
         );
-        assert_eq!(state.tasks_visible.len(), 6);
+        assert_eq!(state.tasks_visible.len(), 7);
 
         // A resync (new summaries, same collapse set) keeps every group's
-        // collapse state rather than resetting it: the four toggled groups
+        // collapse state rather than resetting it: the six toggled groups
         // stay collapsed, and Done (toggled to expanded) shows its new row.
         state.tasks_board = Some(board_with(
             vec![
@@ -11581,7 +12138,7 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        assert_eq!(state.tasks_visible.len(), 6 + 1);
+        assert_eq!(state.tasks_visible.len(), 7 + 1);
         for row in &state.tasks_visible {
             if let TaskVisibleRow::GroupHeader {
                 group, collapsed, ..
@@ -11635,12 +12192,46 @@ mod tests {
     #[test]
     fn task_row_label_reserves_a_fixed_width_marker_for_a_pending_proposal() {
         let summary = task_summary("0100", DerivedStatus::Ready);
-        let without = task_row_label(&summary, false, false, true);
-        let with = task_row_label(&summary, true, false, true);
+        let without = task_row_label(&summary, false, false, None, true);
+        let with = task_row_label(&summary, true, false, None, true);
         assert_eq!(tui::display_width(&without), LIST_LABEL_WIDTH);
         assert_eq!(tui::display_width(&with), LIST_LABEL_WIDTH);
         assert_ne!(without, with);
         assert!(with.contains('!'));
+    }
+
+    /// Review blocker `task-row-long-branch-overflow`: the maximum
+    /// supported 64-character worktree id yields a `ctx/run/<id>` branch
+    /// (72 cells) that must not push `task_row_label` past
+    /// `LIST_LABEL_WIDTH` — the status column borrows from `title` only up
+    /// to `title`'s own budget, never beyond it.
+    #[test]
+    fn task_row_label_bounds_a_maximum_length_worktree_branch() {
+        let session = not_merged_session_fixture(
+            "r-max-branch",
+            &format!("ctx/run/{}", "w".repeat(64)),
+            None,
+        );
+        let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
+        let summary = task_summary("0197", DerivedStatus::Ready);
+        let label = task_row_label(&summary, false, false, Some(&fact), true);
+        assert_eq!(tui::display_width(&label), LIST_LABEL_WIDTH);
+
+        // The fixed-width row necessarily truncates the branch, but the
+        // TASKS preview — never row-width bounded — must still carry the
+        // exact full branch `task_row_label` cannot fit.
+        let mut resolved = resolved_task("0197", DerivedStatus::Ready);
+        resolved.document.title = summary.title.clone();
+        let mut board_resolved = BTreeMap::new();
+        board_resolved.insert("0197".to_string(), resolved);
+        let board = board_with(vec![summary.clone()], board_resolved);
+        let preview = build_task_preview(&summary, &board, &[], None, Some(&fact), 200, true);
+        let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
+        assert!(
+            texts.iter().any(|t| t.contains(&fact.branch)),
+            "expected the TASKS preview to carry the full branch {:?}, got {texts:?}",
+            fact.branch
+        );
     }
 
     #[test]
@@ -11780,6 +12371,7 @@ mod tests {
             &board,
             &[],
             None,
+            None,
             40,
             true,
         );
@@ -11829,6 +12421,7 @@ mod tests {
             &task_summary("0001", DerivedStatus::Ready),
             &board,
             &[],
+            None,
             None,
             200,
             true,

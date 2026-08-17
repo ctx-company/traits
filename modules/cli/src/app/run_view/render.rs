@@ -1159,16 +1159,13 @@ pub(super) fn journey_lines_with_active_row(
         line.push("digest-stamped ", tui::Tone::Muted);
         line.push(view.header.state_digest.clone(), tui::Tone::Default);
         lines.push(JourneyRow(JourneyRowKind::Line(line)));
-        if let Some(fact) = &view.header.landing_not_merged {
-            let mut line = tui::Line::blank();
-            line.push(
-                format!("committed on `{}` — NOT merged into main", fact.branch),
-                tui::Tone::Warn,
-            );
-            line.push("; next: ", tui::Tone::Muted);
-            line.push(format!("`{}`", fact.merge_command), tui::Tone::Default);
-            lines.push(JourneyRow(JourneyRowKind::Line(line)));
-        }
+        // The not-merged fact is rendered exactly once, by
+        // `landing_lines_from_frames` into the dedicated landing content
+        // (`LedgerPaneProjection::landing` / `AttachedView::landing`), never
+        // here — embedding it in both would duplicate it wherever a caller
+        // folds both journey and landing into one column (e.g. the ordinary
+        // Sessions preview), and it would go stale here on an
+        // unchanged-`state_digest` refresh, which only re-derives `landing`.
         lines.push(JourneyRow(JourneyRowKind::Line(tui::Line::blank())));
         let mut outputs = Vec::new();
         render_outputs_box(&mut outputs, &view.outputs);
@@ -1181,12 +1178,32 @@ pub(super) fn journey_lines_with_active_row(
     (lines, active_row, ladder)
 }
 
-/// The completed-run morph requires both a completed journey and actual,
-/// observed merge activity. `merge_rows` is retained for the panel lifetime,
-/// so terminal transitions cannot rotate the pane tree back to history/current.
+/// Single source for the committed-but-not-merged fact line, shared by the
+/// live `RunPanel` (below) and the reconstructed-session projection
+/// (`projection::landing_lines_from_frames`) so the two render paths never
+/// diverge on branch/command text.
+pub(super) fn not_merged_landing_line(fact: &super::super::run::NotMergedFact) -> tui::Line {
+    let mut line = tui::Line::blank();
+    line.push(
+        format!("committed on `{}` — NOT merged into main", fact.branch),
+        tui::Tone::Warn,
+    );
+    line.push("; next: ", tui::Tone::Muted);
+    line.push(format!("`{}`", fact.merge_command), tui::Tone::Default);
+    line
+}
+
+/// The completed-run morph requires a completed journey and either observed
+/// merge activity or a still-open not-merged fact. `merge_rows` is retained
+/// for the panel lifetime, so terminal transitions cannot rotate the pane
+/// tree back to history/current.
 pub(super) fn landing_lines(view: &RunView) -> Option<Vec<tui::Line>> {
-    (view.header.completed && !view.merge_rows.is_empty()).then(|| {
+    let has_fact = view.header.landing_not_merged.is_some();
+    (view.header.completed && (!view.merge_rows.is_empty() || has_fact)).then(|| {
         let mut lines = Vec::new();
+        if let Some(fact) = view.header.landing_not_merged.as_ref() {
+            lines.push(not_merged_landing_line(fact));
+        }
         for row in &view.merge_rows {
             render_merge_row(&mut lines, row);
         }
@@ -1420,7 +1437,7 @@ pub(super) fn narration_line(narration: &RunNarration) -> tui::Line {
     line
 }
 
-pub(super) fn journey_row_lines(rows: &[JourneyRow], width: u16) -> Vec<tui::Line> {
+pub(crate) fn journey_row_lines(rows: &[JourneyRow], width: u16) -> Vec<tui::Line> {
     rows.iter()
         .map(|row| match &row.0 {
             JourneyRowKind::Step(step) => journey_step_line(step, width),
@@ -2020,6 +2037,41 @@ mod tests {
 
         incomplete.header.completed = true;
         assert!(landing_lines(&incomplete).is_some());
+    }
+
+    #[test]
+    fn completed_not_merged_live_view_keeps_branch_and_merge_command() {
+        let mut view = view_with(Vec::new());
+        view.header.completed = true;
+        view.header.landing_not_merged = Some(crate::app::run::NotMergedFact {
+            branch: "run/abc123".to_string(),
+            merge_command: "ctx traits merge abc123".to_string(),
+        });
+
+        let lines =
+            landing_lines(&view).expect("completed view with an open fact has landing content");
+        let occurrences = lines
+            .iter()
+            .filter(|line| {
+                let text = line_text(line);
+                text.contains("run/abc123") && text.contains("ctx traits merge abc123")
+            })
+            .count();
+        assert_eq!(occurrences, 1);
+
+        let (journey, _active_row, _ladder) = journey_lines_with_active_row(&view);
+        let journey_text: String = journey
+            .iter()
+            .map(|row| match &row.0 {
+                JourneyRowKind::Line(line) => line_text(line),
+                JourneyRowKind::Step(_) => String::new(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !journey_text.contains("run/abc123"),
+            "the fact must render exactly once, via landing_lines, not duplicated into the journey"
+        );
     }
 
     #[test]
