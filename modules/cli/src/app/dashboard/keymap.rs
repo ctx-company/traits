@@ -89,6 +89,10 @@ const TRAITS: &[Binding] = &[
 
 const MERGES: &[Binding] = &[
     Binding {
+        key: "Enter",
+        hint: "merge",
+    },
+    Binding {
         key: "m",
         hint: "merge",
     },

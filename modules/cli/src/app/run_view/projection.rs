@@ -167,12 +167,7 @@ pub(super) fn run_view(
         total,
         phase: phase_text(session),
         completed: session.completion.is_some(),
-        landing_not_merged: matches!(
-            ctx_traits_core::procedure::session::landing_state(session),
-            Some(ctx_traits_core::procedure::session::LandingState::NotMerged)
-        )
-        .then(|| crate::app::run::not_merged_fact(session))
-        .flatten(),
+        landing_not_merged: crate::app::run::unmerged_fact(session),
         stopped: session
             .stop_reason
             .as_ref()
@@ -692,7 +687,11 @@ pub(crate) fn render_ledger_run_view(
     LedgerPaneProjection {
         progress: progress_lines(&view),
         journey: journey_lines(&view),
-        landing: landing_lines_from_frames(view.header.completed, &session.provenance.merge_frames),
+        landing: landing_lines_from_frames(
+            view.header.completed,
+            &session.provenance.merge_frames,
+            view.header.landing_not_merged.as_ref(),
+        ),
         history,
         current,
         activity_available: seed.activity.is_some(),
@@ -708,9 +707,14 @@ pub(crate) fn render_ledger_run_view(
 pub(crate) fn landing_lines_from_frames(
     completed: bool,
     frames: &[ctx_traits_core::procedure::session::MergeFrame],
+    not_merged: Option<&crate::app::run::NotMergedFact>,
 ) -> Vec<tui::Line> {
-    if !completed || frames.is_empty() {
+    if !completed || (frames.is_empty() && not_merged.is_none()) {
         return Vec::new();
+    }
+    let mut lines = Vec::new();
+    if let Some(fact) = not_merged {
+        lines.push(super::render::not_merged_landing_line(fact));
     }
     let mut latest_frames: Vec<&ctx_traits_core::procedure::session::MergeFrame> = Vec::new();
     for frame in frames {
@@ -723,32 +727,30 @@ pub(crate) fn landing_lines_from_frames(
             latest_frames.push(frame);
         }
     }
-    latest_frames
-        .into_iter()
-        .map(|frame| {
-            use ctx_traits_core::procedure::session::MergeStatus;
-            let failed = matches!(
-                frame.status,
-                MergeStatus::Parked
-                    | MergeStatus::PostMergeCleanupFailure
-                    | MergeStatus::RecoveryFailure
-            );
-            let tone = if failed {
-                tui::Tone::Fail
-            } else {
-                tui::Tone::Pass
-            };
-            let mut line = tui::Line::blank();
-            line.push(if failed { "× " } else { "✓ " }, tone);
-            line.push(merge_story::stage_text(frame.stage).to_string(), tone);
-            line.push("   ", tui::Tone::Muted);
-            line.push(
-                merge_story::explain_frame(frame).sentence,
-                tui::Tone::Default,
-            );
-            line
-        })
-        .collect()
+    lines.extend(latest_frames.into_iter().map(|frame| {
+        use ctx_traits_core::procedure::session::MergeStatus;
+        let failed = matches!(
+            frame.status,
+            MergeStatus::Parked
+                | MergeStatus::PostMergeCleanupFailure
+                | MergeStatus::RecoveryFailure
+        );
+        let tone = if failed {
+            tui::Tone::Fail
+        } else {
+            tui::Tone::Pass
+        };
+        let mut line = tui::Line::blank();
+        line.push(if failed { "× " } else { "✓ " }, tone);
+        line.push(merge_story::stage_text(frame.stage).to_string(), tone);
+        line.push("   ", tui::Tone::Muted);
+        line.push(
+            merge_story::explain_frame(frame).sentence,
+            tui::Tone::Default,
+        );
+        line
+    }));
+    lines
 }
 
 /// The sidecar-only slice of [`LedgerPaneProjection`]: `current`/`history`
@@ -1641,6 +1643,7 @@ mod tests {
                 frame(MergeStage::Rebase, MergeStatus::RecoveryFailure),
                 frame(MergeStage::Landing, MergeStatus::Merged),
             ],
+            None,
         );
         assert_eq!(rows.len(), 4, "repeated stages update one logical row");
         assert!(line_text(&rows[0]).starts_with("× gates"));

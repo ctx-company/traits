@@ -4065,15 +4065,7 @@ pub fn print_report(
             RowTone::Default,
         ));
     }
-    if let Some(fact) = session
-        .filter(|session| {
-            matches!(
-                ctx_traits_core::procedure::session::landing_state(session),
-                Some(ctx_traits_core::procedure::session::LandingState::NotMerged)
-            )
-        })
-        .and_then(crate::app::run::not_merged_fact)
-    {
+    if let Some(fact) = session.and_then(crate::app::run::unmerged_fact) {
         panel = panel.row(PanelRow::toned(
             "landing",
             format!(
