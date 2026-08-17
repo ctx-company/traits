@@ -3570,19 +3570,44 @@ fn merged_lower_tier_candidates(
             origin: format!("built-in ({origin})"),
         });
     }
-    if alias_valid
-        && let Some(package_root) =
-            crate::builtin_store::resolve_builtin_package_root(repo_root, family)?
-        && let Some((path, origin)) = resolve_family_alias_at_package_root(&package_root, alias)?
-    {
-        candidates.push(crate::inventory::Candidate {
-            tier: crate::inventory::Tier::BuiltIn,
-            path,
-            origin: format!("built-in ({origin})"),
-        });
+    if alias_valid {
+        for candidate_id in builtin_alias_package_candidates(alias, |id| {
+            ctx_traits_core::builtin_trait_packages::package(id).is_some()
+        }) {
+            if let Some(package_root) =
+                crate::builtin_store::resolve_builtin_package_root(repo_root, &candidate_id)?
+                && let Some((path, origin)) =
+                    resolve_family_alias_at_package_root(&package_root, alias)?
+            {
+                candidates.push(crate::inventory::Candidate {
+                    tier: crate::inventory::Tier::BuiltIn,
+                    path,
+                    origin: format!("built-in ({origin})"),
+                });
+                break;
+            }
+        }
     }
 
     Ok(candidates)
+}
+
+/// Derive the built-in package id(s) that could own a colon-less alias like
+/// `implement-quick`, where `try_resolve_trait_id` sets `family` to the
+/// *entire* alias (splitn(2, ':') on a colon-less id yields the whole
+/// string), so `family` can never itself equal the owning package's shorter
+/// id. Each strict hyphen-prefix of `alias` is checked against `exists`
+/// (normally [`builtin_trait_packages::package`]) — the vendored analog
+/// ([`crate::distribution::resolve_vendored_trait_alias`]) discovers the
+/// owning package by scanning lock entries instead, since a vendored alias
+/// has no compiled-in registry to prefix-match against.
+fn builtin_alias_package_candidates(alias: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    alias
+        .match_indices('-')
+        .map(|(index, _)| &alias[..index])
+        .filter(|prefix| exists(prefix))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Given a package root, resolve a legacy hyphenated `alias` through that
@@ -5649,5 +5674,27 @@ aliases = ["family-demo-quick"]
             .expect("resolves without error")
             .expect("alias is declared");
         assert_eq!(resolved.0, root.join("generated/quick/index.toml"));
+    }
+
+    #[test]
+    fn builtin_alias_candidates_matches_a_known_hyphen_prefix() {
+        let candidates =
+            builtin_alias_package_candidates("demo-family-quick", |id| id == "demo-family");
+        assert_eq!(candidates, vec!["demo-family".to_string()]);
+    }
+
+    #[test]
+    fn builtin_alias_candidates_is_empty_for_no_known_prefix() {
+        let candidates = builtin_alias_package_candidates("demo-family-quick", |_id| false);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn builtin_alias_candidates_is_empty_when_the_alias_itself_is_a_known_id() {
+        // A bare id equal to a known package id is resolved by ordinary
+        // desugared-id resolution, not the alias path — it has no hyphen
+        // split, so it must never appear as a derived candidate here.
+        let candidates = builtin_alias_package_candidates("demo-family", |id| id == "demo-family");
+        assert!(candidates.is_empty());
     }
 }
