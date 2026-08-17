@@ -2403,7 +2403,7 @@ pub struct SessionStartArgs {
     #[arg(
         long = "task",
         value_delimiter = ',',
-        conflicts_with = "task_dispatch"
+        conflicts_with_all = ["task_dispatch", "trait_id", "file", "input", "sets", "trait_args"]
     )]
     pub task: Vec<String>,
 
@@ -3063,6 +3063,82 @@ fn parse_positive_max_in_flight(raw: &str) -> Result<usize, String> {
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Option<Command>, clap::Error> {
     let cli = Cli::try_parse_from(args)?;
     Ok(cli.command)
+}
+
+#[cfg(test)]
+mod task_flag_conflict_tests {
+    use super::parse;
+
+    /// 0195: `--task` supersedes the single-run invocation shape, so every
+    /// `SessionStartArgs` field it cannot honor is refused at parse time —
+    /// never silently discarded (the phantom-scope bug this proves against:
+    /// a positional trait, `--file`, `--set`, `--input`, or trailing trait
+    /// args silently ignored while `--task` drives the actual dispatch).
+    /// Runs on a dedicated thread with a generous stack: clap's derived
+    /// error-path rendering for this CLI's large subcommand tree needs more
+    /// than the default per-test-thread stack.
+    fn assert_task_conflict_refused(argv: &[&str]) {
+        let owned: Vec<std::ffi::OsString> = argv.iter().map(std::ffi::OsString::from).collect();
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || parse(owned).is_err())
+            .expect("spawn conflict-check thread");
+        assert!(
+            handle.join().expect("conflict-check thread panicked"),
+            "expected a clap conflict error for {argv:?}, parsed instead"
+        );
+    }
+
+    #[test]
+    fn positional_trait_conflicts_with_task() {
+        assert_task_conflict_refused(&["ctx", "traits", "run", "some-trait", "--task", "0001"]);
+    }
+
+    #[test]
+    fn task_dispatch_conflicts_with_task() {
+        assert_task_conflict_refused(&[
+            "ctx",
+            "traits",
+            "run",
+            "--task-dispatch",
+            "--task",
+            "0001",
+        ]);
+    }
+
+    #[test]
+    fn file_flag_conflicts_with_task() {
+        assert_task_conflict_refused(&[
+            "ctx", "traits", "run", "--file", "x.toml", "--task", "0001",
+        ]);
+    }
+
+    #[test]
+    fn set_flag_conflicts_with_task() {
+        assert_task_conflict_refused(&[
+            "ctx", "traits", "run", "--set", "foo=bar", "--task", "0001",
+        ]);
+    }
+
+    #[test]
+    fn input_flag_conflicts_with_task() {
+        assert_task_conflict_refused(&[
+            "ctx",
+            "traits",
+            "run",
+            "--input",
+            "ports.json",
+            "--task",
+            "0001",
+        ]);
+    }
+
+    #[test]
+    fn trailing_trait_args_conflict_with_task() {
+        assert_task_conflict_refused(&[
+            "ctx", "traits", "run", "--task", "0001", "--", "some", "args",
+        ]);
+    }
 }
 
 pub fn print_help() {

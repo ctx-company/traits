@@ -6623,9 +6623,14 @@ fn open_task_mark_done_modal_in(
     };
     // 0144: evaluate once against the latest cited sha — self-close skips
     // the modal entirely; a `Proposal` disposition strengthens it below.
-    let evaluation = evidence
-        .last()
-        .and_then(|latest| evaluate_task_close(&document, repo_root, &latest.sha));
+    let evaluation = evidence.last().and_then(|latest| {
+        super::task_proposals::evaluate_task_close(
+            &document,
+            &dashboard_config_root(),
+            repo_root,
+            &latest.sha,
+        )
+    });
     if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) = &evaluation
     {
         let _ = write_task_close(
@@ -6823,7 +6828,12 @@ fn open_next_reconcile_step_in(
             && let Ok(Some(resolved)) = FilesTaskBoard::open_read(dir.to_owned()).get(task_key)
             && let Some(latest) = evidence.last()
         {
-            evaluation = evaluate_task_close(&resolved.document, repo_root, &latest.sha);
+            evaluation = super::task_proposals::evaluate_task_close(
+                &resolved.document,
+                &dashboard_config_root(),
+                repo_root,
+                &latest.sha,
+            );
             if let Some((closure, super::task_proposals::CloseDisposition::AutoClose { .. })) =
                 &evaluation
             {
@@ -7241,79 +7251,13 @@ fn apply_task_action(
     }
 }
 
-/// 0144: the effective `auto-close` policy for one task — its own
-/// `auto_close` override wins over the `[tasks] auto-close` config leaf in
-/// either direction ([`super::task_proposals::resolve_auto_close_policy`]).
-/// `None` when neither is set — the existing confirm-only flow, unchanged.
-fn resolve_task_close_policy(
-    document: &ctx_traits_core::task::TaskDocument,
-) -> Option<ctx_traits_core::task::AutoClosePolicy> {
-    let config_default =
-        ctx_traits_io::harness_config::resolve_runtime_config(camino::Utf8Path::new("."))
-            .ok()
-            .and_then(|config| config.effective_auto_close());
-    super::task_proposals::resolve_auto_close_policy(document.auto_close, config_default)
-}
-
-/// Run `document.checks` against `sha` in a clean worktree, mapping a
-/// whole-set failure (`UnrunnableSet`) to a single `Unrunnable` record so
-/// [`super::task_proposals::close_disposition`] always has a uniform
-/// `Vec<CheckRecord>` to reason about. Only called when there is at least
-/// one declared check — the no-checks flow never reaches here.
-fn run_declared_checks(
-    checks: &[ctx_traits_core::task::Check],
-    repo_root: &camino::Utf8Path,
-    sha: &str,
-) -> Vec<ctx_traits_core::task::CheckRecord> {
-    match super::task_checks::run_checks(checks, repo_root, sha) {
-        Ok(records) => records,
-        Err(unrunnable) => vec![ctx_traits_core::task::CheckRecord {
-            name: "(check set)".to_string(),
-            command: String::new(),
-            outcome: ctx_traits_core::task::CheckOutcome::Unrunnable,
-            detail: unrunnable.reason,
-        }],
-    }
-}
-
-/// 0144: what a hardened `MarkDone` candidate's declared checks resolve to
-/// for one task document at proposal-build time, against the cited `sha` —
-/// the single evaluation both modal builders ([`open_task_mark_done_modal`],
-/// [`open_next_reconcile_step`]) run once and carry forward, so a later
-/// confirm never re-executes the commands (the double-execution risk the
-/// task's own draft calls out). `None` when no `auto-close` policy resolves
-/// for this document at all — the pre-0144 confirm-only flow, untouched.
-/// `Some` always carries a `Closure` (checks empty under `merge` with none
-/// declared, recording `unchecked` per the Done-when) alongside the
-/// disposition that decides whether a keypress is needed. `repo_root` is
-/// the checkout declared checks run against — production always resolves
-/// it fresh via [`super::command_handlers::resolve_repo_root`]; tests pass
-/// a scratch git repo, never the real one.
-fn evaluate_task_close(
-    document: &ctx_traits_core::task::TaskDocument,
-    repo_root: &camino::Utf8Path,
-    sha: &str,
-) -> Option<(Closure, super::task_proposals::CloseDisposition)> {
-    let policy = resolve_task_close_policy(document)?;
-    let results = if document.checks.is_empty() {
-        None
-    } else {
-        Some(run_declared_checks(&document.checks, repo_root, sha))
-    };
-    let disposition =
-        super::task_proposals::close_disposition(policy, &document.checks, results.as_deref());
-    let checks = match &disposition {
-        super::task_proposals::CloseDisposition::AutoClose { checks } => checks.clone(),
-        super::task_proposals::CloseDisposition::Proposal { .. } => results.unwrap_or_default(),
-    };
-    Some((
-        Closure {
-            mode: policy,
-            commit: Some(sha.to_string()),
-            checks,
-        },
-        disposition,
-    ))
+/// 0195: the dashboard always reads `[tasks] auto-close` from the current
+/// working directory's config root — the same root
+/// [`super::command_handlers::resolve_repo_root`] resolves for a live TUI
+/// session. The `--task` queue passes its own `repo_root` instead
+/// ([`super::task_queue::auto_close_landed_task`]).
+fn dashboard_config_root() -> camino::Utf8PathBuf {
+    camino::Utf8PathBuf::from(".")
 }
 
 /// Render `closure.checks`' per-check outcome into a modal body, plus the
@@ -7400,17 +7344,6 @@ fn write_task_close(
 ) -> crate::Result<()> {
     let latest = evidence.last();
     let provider = FilesTaskBoard::open_read_write(dir.to_owned());
-    let current = provider.get(key).ok().flatten();
-    let has_origin = current
-        .as_ref()
-        .is_some_and(|resolved| resolved.document.origin.is_some());
-    let set_origin = match (has_origin, latest) {
-        (false, Some(latest)) => Some(Some(format!(
-            "run {} merged as {}",
-            latest.run_id, latest.sha
-        ))),
-        _ => None,
-    };
     let checks_summary = closure.as_ref().map(|closure| {
         if closure.checks.is_empty() {
             "unchecked".to_string()
@@ -7424,15 +7357,15 @@ fn write_task_close(
         }
     });
 
-    match provider.update(
+    match super::task_proposals::write_task_close_core(
+        &provider,
         key,
-        TaskUpdate {
-            status: Some(TaskDocStatus::Done),
-            expected_digest: Some(digest),
-            set_origin,
-            set_closure: closure,
-            ..Default::default()
-        },
+        digest,
+        latest.map(|latest| super::task_proposals::TaskCloseOrigin {
+            run_id: &latest.run_id,
+            sha: &latest.sha,
+        }),
+        closure,
     ) {
         Ok(outcome) => {
             let verb = if self_closed {
