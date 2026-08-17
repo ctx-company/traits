@@ -713,6 +713,7 @@ pub(crate) struct TaskQueueInputs<'a> {
     pub(crate) story: Option<ctx_traits_core::procedure::story::StoryLevel>,
     pub(crate) repo_root: camino::Utf8PathBuf,
     pub(crate) board_dir: camino::Utf8PathBuf,
+    pub(crate) startup: Option<crate::app::run_startup_view::StartupView>,
 }
 
 /// `ctx traits run --task ...` (0195): drive a board-resolved queue of
@@ -728,6 +729,7 @@ pub(crate) struct TaskQueueInputs<'a> {
 pub(crate) fn handle_task_queue_run(
     input: TaskQueueInputs<'_>,
 ) -> crate::Result<CommandOutput<()>> {
+    let mut startup = input.startup;
     let (outcomes, halted) = drive_task_queue(&input.queue, input.continue_on_failure, |key| {
         let sets = vec![format!("task={key}")];
         let session_inputs = SessionStartInputs {
@@ -758,7 +760,7 @@ pub(crate) fn handle_task_queue_run(
             trait_args: &[],
             merge_rung: input.merge_rung,
             story: input.story,
-            startup: None,
+            startup: startup.take(),
         };
         match drive_session(session_inputs) {
             Ok(completion) => {
@@ -796,6 +798,12 @@ pub(crate) fn handle_task_queue_run(
             }
         }
     });
+
+    // An empty queue (every member closed before expansion) never invokes
+    // the closure above, so `startup.take()` never fires — drop it here
+    // unconditionally, before any report output, so a live pane can never
+    // survive to compete with `print_task_queue_report`'s plain-text rows.
+    drop(startup);
 
     if !input.json {
         print_task_queue_report(&outcomes, halted);

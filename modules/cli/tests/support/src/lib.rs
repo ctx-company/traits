@@ -25,6 +25,48 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// `ctx-traits-cli`'s own integration-test binaries — but Cargo does set it
 /// as a real process environment variable for those binaries at run time,
 /// which this crate's code executes inside once linked in.
+/// Strips ANSI escape sequences (CSI, OSC, and two-byte ESC forms) from a
+/// raw PTY stream, leaving only the printable payload. The pane renderer's
+/// cell diff may skip any cell whose content and style already match the
+/// screen — a plain-styled space over blank ground — so adjacent words can
+/// arrive split by a cursor move ("Run\x1b[1;6Hstartup"). PTY proofs run
+/// text assertions against this stripped form, never against the raw byte
+/// layout, which would freeze the diff accident of the moment (2026-08-04:
+/// dropping BOLD from focused pane titles made the title's space cell
+/// identical to blank ground and turned four of these proofs red).
+pub fn strip_escapes(raw: &str) -> String {
+    let mut text = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            text.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for follow in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&follow) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(follow) = chars.next() {
+                    if follow == '\u{7}' {
+                        break;
+                    }
+                    if follow == '\u{1b}' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
 pub fn ctx_bin() -> PathBuf {
     PathBuf::from(
         std::env::var("CARGO_BIN_EXE_ctx")

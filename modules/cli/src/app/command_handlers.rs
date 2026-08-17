@@ -867,34 +867,46 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                     });
                 }
                 if !args.task.is_empty() {
+                    let refuse = |message: String| {
+                        if let Some(view) = startup.as_ref() {
+                            view.fail(message.clone());
+                        }
+                        crate::Error::Command { message }
+                    };
                     if no_drive {
-                        return Err(crate::Error::Command {
-                            message: "--task requires a driven run; omit --no-drive".to_string(),
-                        });
+                        return Err(refuse(
+                            "--task requires a driven run; omit --no-drive".to_string(),
+                        ));
                     }
-                    let board_dir = crate::app::tasks::board_dir(None)?;
-                    let repo_root = resolve_repo_root(None)?;
-                    let provider = ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir.clone());
-                    let queue = crate::app::task_queue::expand_task_queue(&provider, &args.task)
-                        .map_err(|message| crate::Error::Command { message })?;
-                    let dispatch_trait = runtime.effective_dispatch_trait().ok_or_else(|| {
-                        crate::Error::Command {
-                            message:
-                                "--task requires [tasks] dispatch-trait to be configured"
-                                    .to_string(),
+                    let board_dir = crate::app::tasks::board_dir(None)
+                        .inspect_err(|error| {
+                            if let Some(view) = startup.as_ref() {
+                                view.fail(error.to_string());
+                            }
+                        })?;
+                    let repo_root = resolve_repo_root(None).inspect_err(|error| {
+                        if let Some(view) = startup.as_ref() {
+                            view.fail(error.to_string());
                         }
                     })?;
+                    let provider = ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir.clone());
+                    let queue = crate::app::task_queue::expand_task_queue(&provider, &args.task)
+                        .map_err(refuse)?;
+                    let dispatch_trait = runtime
+                        .effective_dispatch_trait()
+                        .ok_or_else(|| {
+                            refuse(
+                                "--task requires [tasks] dispatch-trait to be configured"
+                                    .to_string(),
+                            )
+                        })?;
                     let merge_policy = runtime.effective_merge_policy();
                     let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
                     let Some(merge_rung) = merge_rung else {
-                        return Err(crate::Error::Command {
-                            message: "--task is a merge-gated pipeline and requires an effective merge intent (add --merge, or configure [merge] auto = true)".to_string(),
-                        });
+                        return Err(refuse("--task is a merge-gated pipeline and requires an effective merge intent (add --merge, or configure [merge] auto = true)".to_string()));
                     };
                     if worktree.is_none() {
-                        return Err(crate::Error::Command {
-                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
-                        });
+                        return Err(refuse("an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string()));
                     }
                     let story = resolved_story_level(
                         policy.story,
@@ -933,6 +945,7 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                         story,
                         repo_root,
                         board_dir,
+                        startup,
                     })
                 } else if no_drive {
                     crate::app::run::handle_run(RunInputs {
