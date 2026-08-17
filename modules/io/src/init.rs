@@ -66,14 +66,19 @@ pub fn init(repo_root: &Utf8Path, name: Option<&str>) -> crate::Result<InitRepor
     Ok(InitReport { entries })
 }
 
-/// The npm package version `ctx traits init` pins the authoring packages to.
+/// The npm package version `ctx traits init` pins the authoring packages to:
+/// the binary's own version.
 ///
 /// Pinned, not `latest`: the CLI and the CDK agree on a canonical schema
 /// version, so an `init` that floats would eventually scaffold a package the
-/// installed binary cannot read. **This must move with every published release
-/// of the authoring packages** — there is no gate proving it, and a stale value
-/// here is only discovered by an author whose first build fails.
-const AUTHORING_PACKAGE_VERSION: &str = "0.1.0-alpha.0";
+/// installed binary cannot read. Deriving the pin from the crate version makes
+/// the release guard the gate that keeps it honest — every tag proves the
+/// workspace version equals every public `packages/*/package.json` version, so
+/// a released binary always scaffolds exactly the authoring-package version
+/// published alongside it. (A hardcoded string here once froze at
+/// `0.1.0-alpha.0` across four releases, which is precisely the silent
+/// staleness this derivation removes.)
+const AUTHORING_PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Scaffold `.ctx/package.json`, the manifest for authoring-time npm packages.
 ///
@@ -399,6 +404,31 @@ mod tests {
             ignore.lines().any(|line| line == "traits/runtime.toml"),
             "machine tier ignored from the first commit: {ignore}"
         );
+        let _ = std::fs::remove_dir_all(repo.as_std_path());
+    }
+
+    /// The authoring manifest pins `@ctx-traits/cdk`/`@ctx-traits/config` to
+    /// the binary's own version. The release guard proves that version equals
+    /// every published package version at each tag, so this assertion is what
+    /// keeps `init` from scaffolding a stale pin — a hardcoded one sat at
+    /// `0.1.0-alpha.0` across four releases before this.
+    #[test]
+    fn init_pins_authoring_packages_to_the_crate_version() {
+        let repo = scratch_repo("authoring-pin");
+        super::init(&repo, None).expect("init succeeds");
+        let manifest =
+            std::fs::read_to_string(repo.join(".ctx").join("package.json").as_std_path())
+                .expect("authoring manifest scaffolded");
+        for package in ["cdk", "config"] {
+            let expected = format!(
+                "\"@ctx-traits/{package}\": \"{}\"",
+                env!("CARGO_PKG_VERSION")
+            );
+            assert!(
+                manifest.contains(&expected),
+                "{package} must pin the crate's own version: {manifest}"
+            );
+        }
         let _ = std::fs::remove_dir_all(repo.as_std_path());
     }
 

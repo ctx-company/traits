@@ -433,11 +433,12 @@ pub(crate) fn handle_config_init(global: bool, json: bool) -> crate::Result<Comm
     let package_json_path = traits_dir.join("package.json");
 
     if !package_json_path.exists() {
-        // Pinned to `packages/config/package.json`'s current version; the
-        // operator resolves it through their package manager's usual
-        // registry/link configuration — this scaffold only makes the
+        // Pinned to the binary's own version, which the release guard proves
+        // equal to `packages/config/package.json`'s published version at
+        // every tag; the operator resolves it through their package manager's
+        // usual registry/link configuration — this scaffold only makes the
         // dependency declaration resolvable, it never runs the install.
-        const CONFIG_PACKAGE_VERSION: &str = "0.1.0-alpha.0";
+        const CONFIG_PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
         let contents = format!(
             "{{\n  \"private\": true,\n  \"dependencies\": {{\n    \"@ctx-traits/config\": \"{CONFIG_PACKAGE_VERSION}\"\n  }}\n}}\n",
         );
