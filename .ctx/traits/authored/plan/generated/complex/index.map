@@ -51,13 +51,13 @@
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 104,
-    "end": 104
+    "start": 125,
+    "end": 125
   },
   "schema:blocker-step": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 84,
-    "end": 84
+    "start": 91,
+    "end": 91
   },
   "schema:board-untouched": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -66,8 +66,8 @@
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 217,
-    "end": 217
+    "start": 238,
+    "end": 238
   },
   "schema:plan-slice": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
@@ -81,8 +81,8 @@
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 283,
-    "end": 283
+    "start": 322,
+    "end": 322
   },
   "schema:work-item": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",

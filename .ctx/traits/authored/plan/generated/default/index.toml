@@ -285,14 +285,23 @@ Write exactly one slice of the plan to the board — {slot:write-each-slice-item
     parent = "<NNNN>"
     depends-on = ["<key>", "<key>"]
 
+    [[checks]]
+    name = "<what this verifies>"
+    command = "<repo-relative shell command>"
+    # optional: timeout-ms = <n>, expect = "<regex the combined output must match>"
+
 Rules:
 - A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
 - Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
 - Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
 - Fold the grounding each task needs — its concrete files, validation gates with exact commands, invariants, constraints — into that task's own content/scope/validation, so every file stands alone.
 - Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
+- When a child's Done-when is mechanically checkable — a named test invocation, build gate, or grep for an artifact with a definite exit verdict — derive one [[checks]] entry per such criterion. The command must exist in the repo today, be repo-root-relative, and carry its whole verdict in the exit code; harden it with expect when needed — a check must pass on exit 0 AND a matching expect regex, so a test-filter command should declare expect to guard against passing by matching nothing.
+- Never fabricate a check: if no existing command verifies the Done-when, or verification is judgment-based, declare no checks — a wrong check that passes is worse than none; check-less tasks fall to the configured [tasks] auto-close policy.
+- At most a few checks per task (core hard-caps at 8; exceeding the cap makes the whole set un-runnable); the default timeout is 120s, so declare timeout-ms for any gate that runs slower than that.
+- Checks run later via "sh -c" in a clean detached worktree of the merged sha — no absolute paths, no state from this run, no interactive commands.
 - Never overwrite or renumber an existing file; keys are assigned once from the derived next-free key and are final.
-            Write the charter task first (the slice's key), then every child task from the slice's own plan, keeping each child's key, title, and depends-on exactly as planned. Stamp raised = {slot:raised-date} in every file. Ground each task's content/scope/validation in the work items {slot:work-items}, the done criteria {slot:done-criteria}, and the grounding notes {slot:grounding} — fold in what that task needs so it stands alone.
+            Write the charter task first (the slice's key), then every child task from the slice's own plan, keeping each child's key, title, and depends-on exactly as planned. Stamp raised = {slot:raised-date} in every file. Ground each task's content/scope/validation in the work items {slot:work-items}, the done criteria {slot:done-criteria}, and the grounding notes {slot:grounding} — fold in what that task needs so it stands alone. Derive each child's [[checks]] from its done criteria per the doctrine, sourcing commands from the grounding notes' validation gates.
             Do not implement anything. Return the receipt: the slice's key and the repo-relative path of every file you wrote.'''
 input = [
     "slot:write-each-slice-item",
