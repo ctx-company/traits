@@ -21,8 +21,8 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 108,
-    "end": 108
+    "start": 167,
+    "end": 167
   },
   "port:output-dir": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
@@ -31,18 +31,18 @@
   },
   "port:park-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 115,
-    "end": 115
+    "start": 174,
+    "end": 174
   },
   "port:report-path": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 133,
-    "end": 133
+    "start": 192,
+    "end": 192
   },
   "port:research-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 124,
-    "end": 124
+    "start": 183,
+    "end": 183
   },
   "port:topic": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
@@ -51,38 +51,43 @@
   },
   "prompt:building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 92,
-    "end": 92
+    "start": 127,
+    "end": 127
   },
   "prompt:building-review-1": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 102,
-    "end": 102
+    "start": 138,
+    "end": 138
   },
   "prompt:building-review-2": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 111,
-    "end": 111
+    "start": 147,
+    "end": 147
+  },
+  "prompt:ingest-the-brief": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 61,
+    "end": 61
   },
   "prompt:plan-the-streams": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 62,
-    "end": 62
+    "start": 87,
+    "end": 87
   },
-  "prompt:research-the-streams": {
+  "prompt:research-the-stream": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 74,
-    "end": 74
+    "start": 107,
+    "end": 107
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 132,
-    "end": 132
+    "start": 168,
+    "end": 168
   },
   "prompt:triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 82,
-    "end": 82
+    "start": 117,
+    "end": 117
   },
   "resource:citation-style": {
     "file": ".ctx/traits/authored/research/source/shared/resource.ts",
@@ -109,6 +114,16 @@
     "start": 84,
     "end": 84
   },
+  "schema:brief-track": {
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
+    "start": 21,
+    "end": 21
+  },
+  "schema:deliverable-section": {
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
+    "start": 35,
+    "end": 35
+  },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
     "start": 217,
@@ -116,33 +131,33 @@
   },
   "schema:research-stream": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 21,
-    "end": 21
+    "start": 49,
+    "end": 49
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
     "start": 283,
     "end": 283
   },
-  "schema:stream-finding": {
+  "schema:stream-dossier": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 35,
-    "end": 35
+    "start": 67,
+    "end": 67
   },
   "sequence:building-body/building-produce": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 91,
-    "end": 91
+    "start": 126,
+    "end": 126
   },
   "sequence:building-body/building-review-1": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 101,
-    "end": 101
+    "start": 137,
+    "end": 137
   },
   "sequence:building-body/building-review-2": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 110,
-    "end": 110
+    "start": 146,
+    "end": 146
   },
   "sequence:building-body/park-report-clear": {
     "file": "packages/toolkit/src/sequence/park-report.ts",
@@ -189,30 +204,45 @@
     "start": 48,
     "end": 48
   },
+  "sequence:ingest-body/ingest-the-brief": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 60,
+    "end": 60
+  },
   "sequence:planning-body/plan-the-streams": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 61,
-    "end": 61
+    "start": 86,
+    "end": 86
   },
   "sequence:procedure/building": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 88,
-    "end": 88
+    "start": 123,
+    "end": 123
+  },
+  "sequence:procedure/ingest": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 57,
+    "end": 57
   },
   "sequence:procedure/planning": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 58,
-    "end": 58
+    "start": 83,
+    "end": 83
   },
   "sequence:procedure/report-path": {
     "file": ".ctx/traits/authored/research/source/shared/stage/derive.ts",
     "start": 34,
     "end": 34
   },
-  "sequence:procedure/research-the-streams": {
+  "sequence:procedure/research-each-stream": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 73,
-    "end": 73
+    "start": 105,
+    "end": 105
+  },
+  "sequence:procedure/seed-dossiers": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 100,
+    "end": 100
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -231,38 +261,63 @@
   },
   "sequence:procedure/triangulate-the-findings": {
     "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
-    "start": 81,
-    "end": 81
+    "start": 116,
+    "end": 116
+  },
+  "sequence:research-each-stream-body/research-the-stream": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 106,
+    "end": 106
+  },
+  "slot:brief-tracks": {
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
+    "start": 94,
+    "end": 94
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 103,
-    "end": 103
+    "start": 162,
+    "end": 162
   },
-  "slot:findings": {
+  "slot:deliverable-sections": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 56,
-    "end": 56
+    "start": 99,
+    "end": 99
+  },
+  "slot:done-criteria": {
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
+    "start": 105,
+    "end": 105
+  },
+  "slot:dossiers": {
+    "file": ".ctx/traits/authored/research/source/shared/data.ts",
+    "start": 115,
+    "end": 115
   },
   "slot:park-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 86,
-    "end": 86
+    "start": 145,
+    "end": 145
   },
   "slot:report-path": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 98,
-    "end": 98
+    "start": 157,
+    "end": 157
+  },
+  "slot:research-each-stream-item": {
+    "file": ".ctx/traits/authored/research/source/variant/deep/index.ts",
+    "start": 105,
+    "end": 105
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 76,
-    "end": 76
+    "start": 135,
+    "end": 135
   },
   "slot:review-verdict-2": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 81,
-    "end": 81
+    "start": 140,
+    "end": 140
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",
@@ -286,23 +341,23 @@
   },
   "slot:stream-plan": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 46,
-    "end": 46
+    "start": 110,
+    "end": 110
   },
   "slot:topic-slug": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 93,
-    "end": 93
+    "start": 152,
+    "end": 152
   },
   "slot:triangulation": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 61,
-    "end": 61
+    "start": 120,
+    "end": 120
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 70,
-    "end": 70
+    "start": 129,
+    "end": 129
   },
   "trait:research": {
     "file": "[eval1]",

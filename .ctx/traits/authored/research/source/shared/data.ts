@@ -18,6 +18,34 @@ export const outputDir = port.input.text({
     'Repo-relative root directory research output is written under. Package-defaulted to ".internal/research" via [defaults.port] in runtime.toml; consuming repos override it in their own config.',
 });
 
+export const briefTrackSchema: SchemaHandle = schema.object(
+  "brief-track",
+  {
+    id: schema.field(schema.text(), { description: "Stable kebab-case slug for this track, unique within the brief." }),
+    title: schema.field(schema.text(), { description: "The track's short name, as the brief gives it." }),
+    question: schema.field(schema.text(), {
+      description: "What the brief wants answered or established for this track.",
+    }),
+  },
+  {
+    description:
+      "One research track the brief itself enumerates, or one distilled from its prose when it does not enumerate any.",
+  },
+);
+export const deliverableSectionSchema: SchemaHandle = schema.object(
+  "deliverable-section",
+  {
+    id: schema.field(schema.text(), { description: "Stable kebab-case slug for this section." }),
+    title: schema.field(schema.text(), { description: "The section heading, as the brief demands it." }),
+    expectation: schema.field(schema.text(), {
+      description: "What the brief expects this section to contain or establish.",
+    }),
+  },
+  {
+    description:
+      "One required top-level section of the final report, in the brief's own order — the report's structure is the brief's to dictate, never the run's.",
+  },
+);
 export const researchStreamSchema: SchemaHandle = schema.object(
   "research-stream",
   {
@@ -29,34 +57,65 @@ export const researchStreamSchema: SchemaHandle = schema.object(
       description:
         "primary investigates the topic directly; counterevidence deliberately searches for disconfirming evidence and competing conclusions against the other streams' emerging findings.",
     }),
+    covers: schema.field(schema.list(schema.text()), {
+      description:
+        "The brief-track ids this stream is responsible for covering. Every planned track must appear in at least one stream's covers; a counterevidence stream lists the tracks whose emerging conclusions it challenges.",
+    }),
   },
   { description: "One non-overlapping research stream: what it owns and what kind of evidence it is responsible for." },
 );
-export const streamFindingSchema: SchemaHandle = schema.object(
-  "stream-finding",
+export const streamDossierSchema: SchemaHandle = schema.object(
+  "stream-dossier",
   {
-    "stream-id": schema.field(schema.text(), { description: "The stream.id this finding set was produced by." }),
+    "stream-id": schema.field(schema.text(), { description: "The stream.id this dossier was produced by." }),
+    "notes-path": schema.field(schema.text(), {
+      description:
+        "Repo-relative path of this stream's full reading-notes file — the evidence corpus the dossier indexes.",
+    }),
     summary: schema.field(schema.text(), {
-      description: "Cited findings for this stream: claims, sources, and any counterevidence encountered.",
+      description: "Cited digest of the stream's findings: what was established, contested, and left open.",
+    }),
+    "key-claims": schema.field(schema.list(schema.text()), {
+      description: "The stream's load-bearing claims, each with its source-quality rating and citation inline.",
+    }),
+    sources: schema.field(schema.list(schema.text()), {
+      description: 'One entry per consulted source: "<A-E> | <citation or url> | <what it supports>".',
+    }),
+    "open-questions": schema.field(schema.list(schema.text()), {
+      description: "What this stream could not settle, each with why (source gap, conflict, access failure).",
     }),
   },
-  { description: "One stream's researched, cited findings." },
+  {
+    description:
+      "One stream's evidence dossier: the typed index over its reading-notes file, not a replacement for it.",
+  },
 );
 
+export const briefTracks = slot({
+  id: "brief-tracks",
+  schema: schema.list(briefTrackSchema),
+  description: "The brief's own research tracks, extracted at ingest — coverage is judged against these, not the plan.",
+});
+export const deliverableSections = slot({
+  id: "deliverable-sections",
+  schema: schema.list(deliverableSectionSchema),
+  description:
+    "The deliverable structure the brief demands for report.md, one entry per required top-level section in the brief's order.",
+});
+export const doneCriteria = slot({
+  id: "done-criteria",
+  schema: schema.list(schema.text()),
+  description: "The brief's explicit definition-of-done items, empty when it states none.",
+});
 export const streamPlan = slot({
   id: "stream-plan",
   schema: schema.list(researchStreamSchema),
-  description: "The typed list of non-overlapping research streams this run will investigate serially.",
+  description: "The typed list of non-overlapping research streams this run will investigate.",
 });
-export const currentStream = slot({
-  id: "current-stream",
-  schema: researchStreamSchema,
-  description: "The stream the per-item research step is currently working.",
-});
-export const findings = slot({
-  id: "findings",
-  schema: schema.list(streamFindingSchema),
-  description: "Cited findings accumulated one entry per completed research stream.",
+export const dossiers = slot({
+  id: "dossiers",
+  schema: schema.list(streamDossierSchema),
+  description: "One evidence dossier appended per completed stream by the per-stream research loop.",
 });
 export const triangulation = slot.text({
   id: "triangulation",

@@ -2,8 +2,8 @@ id = "research"
 schema-version = "0.4"
 version = "0.1.0"
 name = "Research (Default)"
-description = "Research one topic end to end: plan 2-4 non-overlapping streams, research each serially, triangulate the findings, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv."
-summary = "Surveyed dogfood research procedure: plan a cardinality-gated set of non-overlapping streams, research each serially, triangulate, then a bounded reviewer loop — then commit."
+description = "Research one topic end to end: extract the brief's tracks and demanded report structure, plan 2-5 non-overlapping streams covering every track, research each stream in its own frame (full reading notes on disk, typed dossier in the ledger), triangulate, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv following the brief's own structure."
+summary = "Surveyed dogfood research procedure: ingest the brief's contract, plan a track-covering set of streams, research each in its own frame with a notes file per stream, triangulate, then a bounded reviewer loop — then commit."
 variant = "default"
 
 [metadata]
@@ -104,14 +104,29 @@ schema = "schema:text"
 description = "The research topic or question to investigate."
 
 [[slot]]
+id = "brief-tracks"
+schema = "[schema:brief-track]"
+description = "The brief's own research tracks, extracted at ingest — coverage is judged against these, not the plan."
+
+[[slot]]
 id = "commit-output"
 schema = "schema:text"
 description = "Output evidence from the git commit command step: committed hash and subject."
 
 [[slot]]
-id = "findings"
-schema = "[schema:stream-finding]"
-description = "Cited findings accumulated one entry per completed research stream."
+id = "deliverable-sections"
+schema = "[schema:deliverable-section]"
+description = "The deliverable structure the brief demands for report.md, one entry per required top-level section in the brief's order."
+
+[[slot]]
+id = "done-criteria"
+schema = "[schema:text]"
+description = "The brief's explicit definition-of-done items, empty when it states none."
+
+[[slot]]
+id = "dossiers"
+schema = "[schema:stream-dossier]"
+description = "One evidence dossier appended per completed stream by the per-stream research loop."
 
 [[slot]]
 id = "park-report"
@@ -122,6 +137,11 @@ description = "This round's typed park record: empty when every verdict reviewed
 id = "report-path"
 schema = "schema:text"
 description = "Deterministic repo-relative path to this variant's primary deliverable, derived by a command step from port:output-dir and topic-slug."
+
+[[slot]]
+id = "research-each-stream-item"
+schema = "schema:research-stream"
+description = "Per-item value for the research-each-stream loop."
 
 [[slot]]
 id = "review-verdict-1"
@@ -152,7 +172,7 @@ description = "Verbatim output of the runtime-state unstage command (git reset -
 [[slot]]
 id = "stream-plan"
 schema = "[schema:research-stream]"
-description = "The typed list of non-overlapping research streams this run will investigate serially."
+description = "The typed list of non-overlapping research streams this run will investigate."
 
 [[slot]]
 id = "topic-slug"
@@ -257,6 +277,44 @@ required = true
 description = "The operation, frozen once written: imperative, concrete, one action. Carried verbatim across rounds."
 
 [[schema]]
+id = "brief-track"
+description = "One research track the brief itself enumerates, or one distilled from its prose when it does not enumerate any."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this track, unique within the brief."
+
+[schema.fields.question]
+schema = "schema:text"
+required = true
+description = "What the brief wants answered or established for this track."
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "The track's short name, as the brief gives it."
+
+[[schema]]
+id = "deliverable-section"
+description = "One required top-level section of the final report, in the brief's own order — the report's structure is the brief's to dictate, never the run's."
+
+[schema.fields.expectation]
+schema = "schema:text"
+required = true
+description = "What the brief expects this section to contain or establish."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this section."
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "The section heading, as the brief demands it."
+
+[[schema]]
 id = "owner-item"
 description = "A checklist item outside in-run capability or authority, with verified substitute evidence and the owner action that closes it."
 
@@ -294,6 +352,11 @@ description = 'The closest in-run verification actually produced and verified by
 [[schema]]
 id = "research-stream"
 description = "One non-overlapping research stream: what it owns and what kind of evidence it is responsible for."
+
+[schema.fields.covers]
+schema = "[schema:text]"
+required = true
+description = "The brief-track ids this stream is responsible for covering. Every planned track must appear in at least one stream's covers; a counterevidence stream lists the tracks whose emerging conclusions it challenges."
 
 [schema.fields.focus]
 schema = "schema:text"
@@ -364,18 +427,38 @@ required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
 [[schema]]
-id = "stream-finding"
-description = "One stream's researched, cited findings."
+id = "stream-dossier"
+description = "One stream's evidence dossier: the typed index over its reading-notes file, not a replacement for it."
+
+[schema.fields.key-claims]
+schema = "[schema:text]"
+required = true
+description = "The stream's load-bearing claims, each with its source-quality rating and citation inline."
+
+[schema.fields.notes-path]
+schema = "schema:text"
+required = true
+description = "Repo-relative path of this stream's full reading-notes file — the evidence corpus the dossier indexes."
+
+[schema.fields.open-questions]
+schema = "[schema:text]"
+required = true
+description = "What this stream could not settle, each with why (source gap, conflict, access failure)."
+
+[schema.fields.sources]
+schema = "[schema:text]"
+required = true
+description = 'One entry per consulted source: "<A-E> | <citation or url> | <what it supports>".'
 
 [schema.fields.stream-id]
 schema = "schema:text"
 required = true
-description = "The stream.id this finding set was produced by."
+description = "The stream.id this dossier was produced by."
 
 [schema.fields.summary]
 schema = "schema:text"
 required = true
-description = "Cited findings for this stream: claims, sources, and any counterevidence encountered."
+description = "Cited digest of the stream's findings: what was established, contested, and left open."
 
 [[agent]]
 id = "scribe"
@@ -384,69 +467,94 @@ summary = "Commit-message role."
 
 [[agent]]
 id = "smart-1"
-description = "Plans the research streams and is the sole reviewer of the delivered research."
+description = "Ingests the brief, plans the research streams, and is the sole reviewer of the delivered research."
 summary = "Planning and reviewer role."
 
 [[agent]]
 id = "worker"
-description = "Researches each stream, triangulates, drafts the report, and applies reviewer fixes."
+description = "Researches each stream in its own frame, triangulates, drafts the report, and applies reviewer fixes."
 summary = "Implementation role."
 
 [prompt.building-produce]
 text = """
 
-                    Produce the research delivery for {port:topic} from the plan {slot:stream-plan}, findings {slot:findings}, and triangulation {slot:triangulation}. Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory — no numbered subfolders, no manifests): report.md, bibliography.md, and evidence.csv (claim, source, rating, url).
+                    Produce the research delivery for {port:topic} from the dossiers {slot:dossiers} and triangulation {slot:triangulation} — reading each dossier's notes file for full depth. The dossiers are the index; the notes files are the evidence. Never write a section from dossier summaries alone.
+                    Write under {port:output-dir}/{slot:topic-slug}/ (a flat directory apart from notes/ — no numbered subfolders, no manifests): report.md, bibliography.md, and evidence.csv (claim, source, rating, url). report.md's top-level sections MUST be exactly {slot:deliverable-sections}, in that order — the structure is the brief's to dictate. Satisfy every entry of {slot:done-criteria}.
                     No reviewer verdict attached means this is round 1: implement the full delivery. On every later round a verdict IS attached — fix every blocker it names.
                     Return a work summary: what was written, how citations were verified, open concerns."""
 input = [
     "port:topic",
-    "slot:stream-plan",
-    "slot:findings",
+    "slot:dossiers",
     "slot:triangulation",
     "port:output-dir",
     "slot:topic-slug",
+    "slot:deliverable-sections",
+    "slot:done-criteria",
 ]
 output = ["slot:work-summary"]
 
 [prompt.building-review]
 text = """
 
-                    Review the research delivered for {port:topic} against the plan {slot:stream-plan} and triangulation {slot:triangulation}. Work summary: {slot:work-summary}.
-                    A BLOCKER is an uncited factual claim, a plan stream left uncovered, an unaddressed cross-stream contradiction, a source below C-rating used as sole support for a critical claim, or a file written outside the flat {port:output-dir}/{slot:topic-slug}/ layout. Everything else is advisory.
+                    Review the research delivered for {port:topic} against the brief's contract and the plan {slot:stream-plan}. Work summary: {slot:work-summary}.
+                    A BLOCKER is: a report.md whose top-level sections do not match {slot:deliverable-sections} one-to-one in order; a brief track in {slot:brief-tracks} the delivery leaves uncovered; an unmet entry of {slot:done-criteria}; a plan stream with no dossier or no readable notes file; a section written at dossier-summary depth when its notes file carries materially more evidence; an uncited factual claim; an unaddressed cross-stream contradiction; a source below C-rating used as sole support for a critical claim; or a file written outside {port:output-dir}/{slot:topic-slug}/ (notes/ inside it is part of the layout). Everything else is advisory.
                     Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify with your own tools, and flip to done only on confirmed evidence.
                     Set status to revise while any blocker remains, approved when none do."""
 input = [
     "port:topic",
     "slot:stream-plan",
-    "slot:triangulation",
     "slot:work-summary",
+    "slot:deliverable-sections",
+    "slot:brief-tracks",
+    "slot:done-criteria",
     "port:output-dir",
     "slot:topic-slug",
 ]
 output = ["slot:review-verdict-1"]
 
+[prompt.ingest-the-brief]
+text = """
+
+                Read the research brief for {port:topic}. When the topic names a brief file, read that file from the repository; otherwise the topic text itself is the brief.
+                Extract three things, faithful to the brief's own words — never your preferred framing:
+                1. Its research tracks: every enumerated track or area the brief wants investigated, with the brief's own question for each. When the brief does not enumerate tracks, distill them from its prose.
+                2. The deliverable structure it demands for the final report: one entry per required top-level section, in the brief's order. When the brief specifies no structure, propose one that fits its content — but when it does specify one, reproduce it exactly.
+                3. Its explicit definition-of-done items, empty when it states none."""
+input = ["port:topic"]
+output = [
+    "slot:brief-tracks",
+    "slot:deliverable-sections",
+    "slot:done-criteria",
+]
+
 [prompt.plan-the-streams]
 text = """
 
-                Plan two to four non-overlapping research streams for {port:topic}. Each stream gets a stable id, a complete non-overlapping focus question, and kind "primary".
-                This is the run's one and only executable stream list, consumed directly by serial per-stream research — do not propose more than four."""
-input = ["port:topic"]
+                Plan two to five non-overlapping research streams for {port:topic}, from the brief's tracks {slot:brief-tracks}. Each stream gets a stable id, a complete non-overlapping focus question, kind "primary", and covers: the brief-track ids it is responsible for. Every track MUST appear in at least one stream's covers; a stream may own several related tracks.
+                This is the run's one and only executable stream list, consumed directly by per-stream research — do not propose more than five."""
+input = [
+    "port:topic",
+    "slot:brief-tracks",
+]
 output = ["slot:stream-plan"]
 
-[prompt.research-the-streams]
+[prompt.research-the-stream]
 text = """
 
-                Research every stream in the plan {slot:stream-plan} for the topic {port:topic}, one stream at a time and in the order planned — never merge two streams' evidence together.
+                Research exactly one stream — {slot:research-each-stream-item} — for the topic {port:topic}. Do not research any other stream's focus; other streams run in their own frames.
                 Apply {resource:research-standards}: cite every factual claim, rate sources per the canonical A-E scale ({resource:source-quality-guide}), format citations per {resource:citation-style}, and note any counterevidence encountered.
-                Return exactly one stream-finding per planned stream (same order, same ids): the stream's id and its cited findings summary. Write nothing to disk yet — this is evidence gathering only."""
+                As you read, accumulate full reading notes in {port:output-dir}/{slot:topic-slug}/notes/<stream-id>.md (create directories as needed): quotes with attribution, per-source assessments, dead ends, and everything a later writer needs to reconstruct your reasoning. Write the notes file incrementally as you research — it is the stream's evidence corpus, never an after-the-fact summary.
+                Return the stream's dossier: its stream-id, the notes file's repo-relative path, a cited summary, key claims (each with rating and citation inline), one sources entry per consulted source ("<A-E> | <citation or url> | <what it supports>"), and open questions."""
 input = [
-    "slot:stream-plan",
+    "slot:research-each-stream-item",
     "port:topic",
     "resource:research-standards",
     "resource:source-quality-guide",
     "resource:citation-style",
+    "port:output-dir",
+    "slot:topic-slug",
 ]
-output = ["slot:findings"]
+output = ["slot:dossiers"]
 
 [prompt.shipping-message]
 text = """
@@ -465,11 +573,11 @@ output = ["slot:shipping-message"]
 [prompt.triangulate-the-findings]
 text = """
 
-                Triangulate the researched findings {slot:findings} for {port:topic}: where independent streams agree, where they conflict, source-quality ratings, and remaining gaps.
+                Triangulate the researched streams for {port:topic}: read every dossier in {slot:dossiers} and every notes file they point at, then report where independent streams agree, where they conflict, source-quality asymmetries (claims resting on materially weaker evidence than their neighbors), and remaining gaps.
                 Return the triangulation."""
 input = [
-    "slot:findings",
     "port:topic",
+    "slot:dossiers",
 ]
 output = ["slot:triangulation"]
 
@@ -480,11 +588,12 @@ agent = "agent:worker"
 prompt = "prompt:building-produce"
 input = [
     "port:topic",
-    "slot:stream-plan",
-    "slot:findings",
+    "slot:dossiers",
     "slot:triangulation",
     "port:output-dir",
     "slot:topic-slug",
+    "slot:deliverable-sections",
+    "slot:done-criteria",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:work-summary", optional = true },
 ]
@@ -498,8 +607,10 @@ prompt = "prompt:building-review"
 input = [
     "port:topic",
     "slot:stream-plan",
-    "slot:triangulation",
     "slot:work-summary",
+    "slot:deliverable-sections",
+    "slot:brief-tracks",
+    "slot:done-criteria",
     "port:output-dir",
     "slot:topic-slug",
     { slot = "slot:review-verdict-1", optional = true },
@@ -597,6 +708,23 @@ operation = "append"
 slot = "slot:park-report"
 operation = "append"
 
+[[sequence.ingest-body.sequence]]
+id = "ingest-the-brief"
+title = "Ingest the brief"
+agent = "agent:smart-1"
+prompt = "prompt:ingest-the-brief"
+input = [
+    "port:topic",
+    { slot = "slot:brief-tracks", optional = true },
+    { slot = "slot:deliverable-sections", optional = true },
+    { slot = "slot:done-criteria", optional = true },
+]
+output = [
+    "slot:brief-tracks",
+    "slot:deliverable-sections",
+    "slot:done-criteria",
+]
+
 [[sequence.planning-body.sequence]]
 id = "plan-the-streams"
 title = "Plan the streams"
@@ -604,12 +732,32 @@ agent = "agent:smart-1"
 prompt = "prompt:plan-the-streams"
 input = [
     "port:topic",
+    "slot:brief-tracks",
     { slot = "slot:stream-plan", optional = true },
 ]
 output = ["slot:stream-plan"]
 
+[[sequence.research-each-stream-body.sequence]]
+id = "research-the-stream"
+title = "Research the stream"
+agent = "agent:worker"
+prompt = "prompt:research-the-stream"
+input = [
+    "slot:research-each-stream-item",
+    "port:topic",
+    "resource:research-standards",
+    "resource:source-quality-guide",
+    "resource:citation-style",
+    "port:output-dir",
+    "slot:topic-slug",
+]
+
+[[sequence.research-each-stream-body.sequence.output]]
+slot = "slot:dossiers"
+operation = "append"
+
 [procedure]
-description = "Research one topic end to end: plan 2-4 non-overlapping streams, research each serially, triangulate the findings, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv."
+description = "Research one topic end to end: extract the brief's tracks and demanded report structure, plan 2-5 non-overlapping streams covering every track, research each stream in its own frame (full reading notes on disk, typed dossier in the ledger), triangulate, then a bounded single-reviewer refinement loop, then commit report.md, bibliography.md, and evidence.csv following the brief's own structure."
 input = [
     "port:output-dir",
     "port:topic",
@@ -654,6 +802,22 @@ argv = [
 ]
 
 [[procedure.sequence]]
+id = "ingest"
+title = "Ingest"
+kind = "loop"
+sequence = "sequence:ingest-body"
+max-iterations = 3
+on-exhausted = "abort"
+
+[[procedure.sequence.until.all]]
+count = "slot:brief-tracks"
+at-least = 1
+
+[[procedure.sequence.until.all]]
+count = "slot:deliverable-sections"
+at-least = 1
+
+[[procedure.sequence]]
 id = "planning"
 title = "Planning"
 kind = "loop"
@@ -673,19 +837,30 @@ count = "slot:stream-plan"
 equals = 4
 count = "slot:stream-plan"
 
+[[procedure.sequence.until.any]]
+equals = 5
+count = "slot:stream-plan"
+
 [[procedure.sequence]]
-id = "research-the-streams"
-title = "Research the streams"
-agent = "agent:worker"
-prompt = "prompt:research-the-streams"
-input = [
-    "slot:stream-plan",
-    "port:topic",
-    "resource:research-standards",
-    "resource:source-quality-guide",
-    "resource:citation-style",
-]
-output = ["slot:findings"]
+id = "seed-dossiers"
+title = "Seed the dossiers"
+kind = "project"
+output = ["slot:dossiers"]
+
+[[procedure.sequence.projection]]
+destination = "slot:dossiers"
+
+[procedure.sequence.projection.source]
+literal = []
+
+[[procedure.sequence]]
+id = "research-each-stream"
+title = "Research each stream"
+kind = "for-each"
+sequence = "sequence:research-each-stream-body"
+over = "slot:stream-plan"
+item = "slot:research-each-stream-item"
+max-items = 5
 
 [[procedure.sequence]]
 id = "triangulate-the-findings"
@@ -693,8 +868,8 @@ title = "Triangulate the findings"
 agent = "agent:worker"
 prompt = "prompt:triangulate-the-findings"
 input = [
-    "slot:findings",
     "port:topic",
+    "slot:dossiers",
 ]
 output = ["slot:triangulation"]
 
