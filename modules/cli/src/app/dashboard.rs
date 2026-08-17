@@ -9483,6 +9483,137 @@ mod tests {
         session
     }
 
+    /// The same fixture shape core's own
+    /// `landing_state_is_not_merged_for_a_completed_worktree_run_with_a_commit_receipt`
+    /// uses (`session.rs`'s `FIXTURE`/`completed_worktree_session`), started
+    /// through the real [`ctx_traits_core::procedure::session::start_run_session`]
+    /// and pinned to a real on-disk trait file — so `reconstruct_panes`
+    /// resolves it through [`reconstruct_projection`]'s success branch
+    /// (`trait_degraded: None`) rather than the degraded fallback.
+    fn reconstructable_not_merged_session_fixture(
+        run_id: &str,
+        branch: &str,
+        ledger_path: &camino::Utf8Path,
+    ) -> ctx_traits_core::procedure::session::Session {
+        use ctx_traits_core::digest::Digest;
+        use ctx_traits_core::procedure::runtime::CommandExecutionEvidence;
+        use ctx_traits_core::procedure::runtime::SlotRevision;
+        use ctx_traits_core::procedure::session::DriveOutcome;
+        use ctx_traits_core::procedure::session::DriveOutcomeKind;
+        use ctx_traits_core::procedure::session::Status;
+        use ctx_traits_core::procedure::session::TraitSource;
+        use ctx_traits_core::procedure::session::WorktreeProvenance;
+        use ctx_traits_core::reference::Reference;
+
+        const FIXTURE_TRAIT: &str = r#"
+id = "dashboard-not-merged-fixture"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Dashboard Not-Merged Fixture"
+description = "0197 successful-reconstruction fixture: one command step."
+
+[[slot]]
+id = "commit-output"
+schema = "schema:text"
+
+[procedure]
+description = "One command step, standing in for a commit tail."
+
+[[procedure.sequence]]
+id = "commit"
+title = "Commit"
+kind = "command"
+output = ["slot:commit-output"]
+
+[procedure.sequence.command]
+argv = ["git", "commit", "-m", "fixture"]
+"#;
+
+        let trait_path = ledger_path
+            .parent()
+            .expect("ledger path has a parent")
+            .join(format!("{run_id}-trait.toml"));
+        std::fs::write(trait_path.as_std_path(), FIXTURE_TRAIT).expect("write fixture trait");
+        let trait_ref: ctx_traits_core::Trait =
+            toml::from_str(FIXTURE_TRAIT).expect("fixture trait parses");
+        let request: ctx_traits_core::procedure::session::StartRequest =
+            serde_json::from_value(serde_json::json!({
+                "session-id": format!("session-{run_id}"),
+                "run-id": run_id,
+                "provenance": {
+                    "started-by": { "surface": "test", "caller": "dashboard-not-merged-fixture" },
+                    "state-source": "test",
+                },
+            }))
+            .expect("start request");
+        let mut session = ctx_traits_core::procedure::session::start_run_session(
+            &trait_ref,
+            &ctx_traits_core::manifest::PackageStatus::Ready,
+            &ctx_traits_core::r#trait::TrustVerdict::Verified,
+            request,
+        )
+        .expect("session starts");
+        session.provenance.trait_source = Some(TraitSource {
+            kind: "file".to_string(),
+            path: trait_path.to_string(),
+            repository_root: None,
+            document: None,
+        });
+        session.provenance.started_at_epoch = Some(0);
+        session.status = Status::Completed;
+        session.completion = Some(
+            ctx_traits_core::procedure::session::CompletionNotification {
+                status: Status::Completed,
+                event_code: "completed".to_string(),
+                final_outputs: Vec::new(),
+                final_session_digest: session.state_digest.clone(),
+            },
+        );
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::Completed,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            tokens_by_model: None,
+        });
+        session.provenance.worktree = Some(WorktreeProvenance {
+            id: format!("wt-{run_id}"),
+            branch: branch.to_string(),
+            seed_snapshots: Vec::new(),
+            path: None,
+        });
+        session.ledger.slot_revisions.push(SlotRevision {
+            slot_ref: Reference::parse("slot:commit-output").expect("slot ref parses"),
+            value_digest: Digest::source("commit"),
+            acceptance_order: 0,
+            operation: None,
+            submitted_payload: None,
+            prior_value_digest: None,
+            prior_value: None,
+            source: None,
+            command_execution: Some(CommandExecutionEvidence {
+                argv: vec!["git".to_string(), "commit".to_string(), "-m".to_string()],
+                output_slot: "slot:commit-output".to_string(),
+                executable_digest: None,
+                exit_code: Some(0),
+                timed_out: false,
+                output_tail: None,
+            }),
+            runtime_binding: false,
+            projection: None,
+            position_path: Vec::new(),
+            loop_id: None,
+            iteration_index: None,
+            for_each_id: None,
+            item_index: None,
+        });
+        session
+    }
+
     fn append_activity_event(ledger_path: &camino::Utf8Path, frame_id: &str, text: &str) {
         // `StreamingOutput`, not `RunningTool`: P146 fallback rendering
         // drops a `RunningTool` row's raw `text` (it is the adapter's raw
@@ -11850,10 +11981,21 @@ mod tests {
         use ctx_traits_core::procedure::session::MergeStatus;
 
         let ledger_path = scratch_ledger_path("unchanged-digest-not-merged");
-        let session = not_merged_session_fixture("r-unchanged", "ctx/run/wt-unchanged", None);
+        let session = reconstructable_not_merged_session_fixture(
+            "r-unchanged",
+            "ctx/run/wt-unchanged",
+            &ledger_path,
+        );
         let fact = crate::app::run::unmerged_fact(&session).expect("fact for a not-merged session");
         ctx_traits_io::run_session::write_run_session(&ledger_path, &session)
             .expect("write session");
+
+        let reconstruction = reconstruct_panes(&session, &ledger_path);
+        assert!(
+            reconstruction.trait_degraded.is_none(),
+            "fixture must reconstruct successfully, not via the degraded fallback: {:?}",
+            reconstruction.trait_degraded
+        );
 
         let mut view = attached_view_for("r-unchanged");
         view.ledger_path = ledger_path.clone();
@@ -11866,9 +12008,14 @@ mod tests {
             .iter()
             .map(text_of)
             .collect();
-        assert!(
-            rendered.iter().any(|line| line.contains(&fact.branch)),
-            "initial list-visible Sessions preview {rendered:?} dropped the not-merged fact"
+        let occurrences = rendered
+            .iter()
+            .filter(|line| line.contains(&fact.branch) && line.contains(&fact.merge_command))
+            .count();
+        assert_eq!(
+            occurrences, 1,
+            "initial list-visible Sessions preview {rendered:?} must show the not-merged fact \
+             exactly once, got {occurrences}"
         );
 
         let mut landed = session.clone();

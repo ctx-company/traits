@@ -106,15 +106,7 @@ pub(super) fn render_locked(state: &mut RunPanelState) {
     // event-by-event tree stays available through the story surfaces; the
     // terminal record after a long run should be the important details, not
     // hundreds of iteration rows.
-    let folded: Vec<JourneyRow> = journey_lines
-        .iter()
-        .filter(|row| match &row.0 {
-            JourneyRowKind::Step(step) => journey_step_depth(step) == 0,
-            JourneyRowKind::Line(_) => true,
-        })
-        .cloned()
-        .collect();
-    state.last_tree_lines = journey_row_lines(&folded, 80);
+    state.last_tree_lines = teardown_scrollback_lines(&journey_lines, landing_lines.as_deref());
     state
         .handled_generation
         .fetch_max(input_generation, Ordering::Release);
@@ -1178,6 +1170,31 @@ pub(super) fn journey_lines_with_active_row(
     (lines, active_row, ladder)
 }
 
+/// The FOLDED journey (top-level steps and loop containers, never the
+/// per-iteration walk) plus the landing pane's own lines — `RunPanel::close`
+/// commits exactly this as the terminal record, so the landing pane's
+/// committed-but-not-merged fact must be folded in here or teardown loses it
+/// the moment the TUI exits, even though it was visible while the pane was
+/// open.
+fn teardown_scrollback_lines(
+    journey_lines: &[JourneyRow],
+    landing_lines: Option<&[tui::Line]>,
+) -> Vec<tui::Line> {
+    let folded: Vec<JourneyRow> = journey_lines
+        .iter()
+        .filter(|row| match &row.0 {
+            JourneyRowKind::Step(step) => journey_step_depth(step) == 0,
+            JourneyRowKind::Line(_) => true,
+        })
+        .cloned()
+        .collect();
+    let mut lines = journey_row_lines(&folded, 80);
+    if let Some(landing) = landing_lines {
+        lines.extend(landing.iter().cloned());
+    }
+    lines
+}
+
 /// Single source for the committed-but-not-merged fact line, shared by the
 /// live `RunPanel` (below) and the reconstructed-session projection
 /// (`projection::landing_lines_from_frames`) so the two render paths never
@@ -2071,6 +2088,20 @@ mod tests {
         assert!(
             !journey_text.contains("run/abc123"),
             "the fact must render exactly once, via landing_lines, not duplicated into the journey"
+        );
+
+        let teardown = teardown_scrollback_lines(&journey, Some(&lines));
+        let teardown_occurrences = teardown
+            .iter()
+            .filter(|line| {
+                let text = line_text(line);
+                text.contains("run/abc123") && text.contains("ctx traits merge abc123")
+            })
+            .count();
+        assert_eq!(
+            teardown_occurrences, 1,
+            "the committed teardown scrollback (what `RunPanel::close` writes on exit) must \
+             carry the branch and merge command exactly once"
         );
     }
 
