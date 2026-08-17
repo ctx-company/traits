@@ -66,6 +66,7 @@ pub mod surface;
 mod task;
 mod task_checks;
 mod task_proposals;
+mod task_queue;
 mod tasks;
 mod trait_editor;
 mod trust_story;
