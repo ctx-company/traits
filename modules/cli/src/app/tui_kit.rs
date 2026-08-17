@@ -448,9 +448,11 @@ impl Modal {
     }
 
     /// Routes one key. Esc always cancels; a confirm dialog accepts
-    /// `y`/enter to confirm and `n`/esc to cancel; a single-line input
-    /// submits on enter; a multi-line input inserts a newline on enter and
-    /// submits on `ctrl-d` (hinted in the modal's own footer row).
+    /// `y`/enter to confirm and `n`/esc to cancel; enter submits in every
+    /// modal, single-line or multi-line. A multi-line input inserts a
+    /// newline on alt+enter (and shift+enter where the terminal reports it)
+    /// instead of submitting; `ctrl-d` remains a legacy submit alias, no
+    /// longer hinted in the modal's footer row.
     pub(crate) fn handle_key(&mut self, key: &KeyEvent) -> ModalOutcome {
         match self {
             Modal::Confirm { .. } => match key.code {
@@ -496,11 +498,16 @@ fn text_input_key(
 ) -> ModalOutcome {
     match key.code {
         KeyCode::Esc => ModalOutcome::Cancelled,
-        KeyCode::Enter if !multiline => ModalOutcome::Submitted(buffer.clone()),
-        KeyCode::Enter if multiline => {
+        KeyCode::Enter
+            if multiline
+                && key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
             insert_char(buffer, cursor, '\n');
             ModalOutcome::Pending
         }
+        KeyCode::Enter => ModalOutcome::Submitted(buffer.clone()),
         KeyCode::Char('d') if multiline && key.modifiers.contains(KeyModifiers::CONTROL) => {
             ModalOutcome::Submitted(buffer.clone())
         }
@@ -1045,7 +1052,7 @@ pub(crate) fn render_modal(frame: &mut ratatui::Frame<'_>, area: Rect, modal: &M
             ..
         } => {
             let hint = if *multiline {
-                "ctrl-d submit  esc cancel"
+                "enter submit  alt+enter newline  esc cancel"
             } else {
                 "enter submit  esc cancel"
             };
@@ -1274,6 +1281,14 @@ mod tests {
 
     fn ctrl(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn alt(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    fn shift(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
     }
 
     #[test]
@@ -1718,21 +1733,40 @@ mod tests {
     }
 
     #[test]
-    fn multiline_input_enter_inserts_newline_and_ctrl_d_submits() {
+    fn multiline_input_enter_submits_and_modified_enter_inserts_newline() {
         let mut modal = Modal::text_input("title", "", true);
         for ch in "a".chars() {
             modal.handle_key(&key(KeyCode::Char(ch)));
         }
         assert_eq!(
-            modal.handle_key(&key(KeyCode::Enter)),
+            modal.handle_key(&alt(KeyCode::Enter)),
             ModalOutcome::Pending
         );
         for ch in "b".chars() {
             modal.handle_key(&key(KeyCode::Char(ch)));
         }
         assert_eq!(
+            modal.handle_key(&shift(KeyCode::Enter)),
+            ModalOutcome::Pending
+        );
+        for ch in "c".chars() {
+            modal.handle_key(&key(KeyCode::Char(ch)));
+        }
+        assert_eq!(
+            modal.handle_key(&key(KeyCode::Enter)),
+            ModalOutcome::Submitted("a\nb\nc".to_string())
+        );
+    }
+
+    #[test]
+    fn multiline_input_ctrl_d_submits_as_legacy_alias() {
+        let mut modal = Modal::text_input("title", "", true);
+        for ch in "a".chars() {
+            modal.handle_key(&key(KeyCode::Char(ch)));
+        }
+        assert_eq!(
             modal.handle_key(&ctrl(KeyCode::Char('d'))),
-            ModalOutcome::Submitted("a\nb".to_string())
+            ModalOutcome::Submitted("a".to_string())
         );
     }
 
