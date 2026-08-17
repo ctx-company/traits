@@ -16,8 +16,8 @@
   },
   "port:commit-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 167,
-    "end": 167
+    "start": 166,
+    "end": 166
   },
   "port:output-dir": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
@@ -26,18 +26,18 @@
   },
   "port:park-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 174,
-    "end": 174
+    "start": 173,
+    "end": 173
   },
   "port:report-path": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 192,
-    "end": 192
+    "start": 191,
+    "end": 191
   },
   "port:research-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 183,
-    "end": 183
+    "start": 182,
+    "end": 182
   },
   "port:topic": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
@@ -176,23 +176,23 @@
   },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 162,
-    "end": 162
+    "start": 161,
+    "end": 161
   },
   "slot:park-report": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 145,
-    "end": 145
+    "start": 144,
+    "end": 144
   },
   "slot:report-path": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 157,
-    "end": 157
+    "start": 156,
+    "end": 156
   },
   "slot:review-verdict-1": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 135,
-    "end": 135
+    "start": 134,
+    "end": 134
   },
   "slot:scope-note": {
     "file": ".ctx/traits/authored/research/source/variant/quick/data.ts",
@@ -221,13 +221,13 @@
   },
   "slot:topic-slug": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 152,
-    "end": 152
+    "start": 151,
+    "end": 151
   },
   "slot:work-summary": {
     "file": ".ctx/traits/authored/research/source/shared/data.ts",
-    "start": 129,
-    "end": 129
+    "start": 128,
+    "end": 128
   },
   "trait:research": {
     "file": "[eval1]",
