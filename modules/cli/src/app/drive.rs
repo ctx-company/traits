@@ -3606,6 +3606,8 @@ fn drive_loop(
                     fallback_version: Some(probe.version.clone()),
                     transport: "cli",
                     duration_ms: run.duration_ms,
+                    model: plan.model.clone(),
+                    reasoning_effort: plan.reasoning_effort.clone(),
                 },
                 parsed.slots,
                 &worktree_env,
@@ -9609,6 +9611,11 @@ struct HarnessSubmissionEvidence<'a> {
     fallback_version: Option<String>,
     transport: &'a str,
     duration_ms: u128,
+    /// The resolved seat's model and reasoning effort, recorded so a ledger
+    /// stays attributable after any config change — without these, "which
+    /// model produced this slot" is unanswerable once runtime.toml moves on.
+    model: Option<String>,
+    reasoning_effort: Option<String>,
 }
 
 fn submit_harness_output(
@@ -9626,7 +9633,7 @@ fn submit_harness_output(
         .ok_or_else(|| crate::Error::Command {
             message: "current frame has no call template".to_string(),
         })?;
-    let evidence = format!(
+    let mut evidence = format!(
         "harness={} version={} transport={} duration-ms={}",
         evidence_input.harness_id,
         evidence_input
@@ -9637,6 +9644,15 @@ fn submit_harness_output(
         evidence_input.transport,
         evidence_input.duration_ms
     );
+    // Appended (never inserted) so anything matching the historical prefix
+    // keeps parsing; absent fields are omitted rather than written as
+    // "unknown", matching how pre-existing ledgers read.
+    if let Some(model) = evidence_input.model.as_deref() {
+        evidence.push_str(&format!(" model={model}"));
+    }
+    if let Some(effort) = evidence_input.reasoning_effort.as_deref() {
+        evidence.push_str(&format!(" reasoning-effort={effort}"));
+    }
     Ok(ctx_traits_io::run::call(ctx_traits_io::run::CallRequest {
         trait_file: input.file,
         trait_id: None,

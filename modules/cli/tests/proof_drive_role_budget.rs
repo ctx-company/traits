@@ -94,6 +94,7 @@ version-probe = ["--fixture-probe"]
 argv = []
 prompt-via = "stdin"
 output = "raw-json"
+model-flag = "--model"
 
 [agent.role.worker]
 harness = "budget-worker"
@@ -293,5 +294,68 @@ printf '{"answer":"fast"}'
         worker_row.get("budget").is_none(),
         "an undeclared role budget must leave the ledger row byte-identical to pre-P475 \
          (no budget key at all), not an empty budget object: {worker_row}"
+    );
+}
+
+/// The resolved seat's model and reasoning effort are stamped into every
+/// accepted slot value's producer evidence — without them, "which model
+/// produced this" is unanswerable the moment runtime.toml moves on (which is
+/// exactly how a sonnet-low research run became unattributable on 2026-08-17).
+#[test]
+fn producer_evidence_records_the_resolved_seat_model_and_effort() {
+    let scratch = ScratchRoot::new("producer-evidence-model");
+    let repo = scratch.home().join("repo");
+    let home = scratch.home();
+    let ledger = repo.join(".ctx/runs/fixture.json");
+    fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+    let script = home.join("budget-worker.sh");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-worker-1.0\n'
+  exit 0
+fi
+printf '{"answer":"fast"}'
+"#,
+    );
+    init_fixture_repo(
+        &repo,
+        &home,
+        &script,
+        "model = \"fixture-model-x\"\nreasoning-effort = \"low\"\n",
+    );
+
+    let output = run_ctx(
+        &[
+            "traits",
+            "run",
+            "--file",
+            ".ctx/traits/fixture-p475-budget/generated/index.toml",
+            "--out",
+            &ledger.to_string_lossy(),
+            "--json",
+            "--progress",
+            "none",
+        ],
+        &repo,
+        &home,
+    );
+    assert_exit_code(&output, 0);
+    let envelope = value_json(&output);
+    assert_eq!(
+        envelope["value"]["drive"]["status"], "completed",
+        "report: {}",
+        envelope["value"]["drive"]
+    );
+
+    let ledger_bytes = fs::read_to_string(&ledger).unwrap();
+    assert!(
+        ledger_bytes.contains("model=fixture-model-x"),
+        "producer evidence must name the resolved seat's model: {ledger_bytes}"
+    );
+    assert!(
+        ledger_bytes.contains("reasoning-effort=low"),
+        "producer evidence must name the resolved seat's reasoning effort: {ledger_bytes}"
     );
 }
