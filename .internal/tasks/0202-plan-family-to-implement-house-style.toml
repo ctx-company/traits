@@ -1,0 +1,40 @@
+schema-version = "0.2"
+key = "0202"
+title = "Bring the plan family to the implement house style"
+status = "ready"
+raised = "2026-08-18"
+content = """
+The house style, defined by the implement trait (source/ as of 6d1a448f, the canonical example):
+namespace imports only (import * as cdk/agents/shared, every call qualified); shared/index.ts is
+the barrel and declares the family-wide BEHAVIOR and INTENT consts; data.ts ends in
+`export const port = {...}` / `export const slot = {...}` aggregates; useIntent/useBehavior/
+useResource once at trait level, never in variants; `include:` eliminated — optional prior-round
+attachments interpolate inline as ${slot.x.optional()} in the prompt text; output ports written
+directly by steps (no echo slots); one stage file per concern via cdk.stage; prompts are tagged
+templates, one clause per line, 4-space indent, no line past ~120 chars, outputs via
+cdk.output.prompt naming the destination; variants are a uniform skeleton — defineVariant
+(one-line description, tag), stages by title, loop bounds inside the loop body, git tail under
+flow.when("Maybe Commit"), one return of ports.
+
+Function-form prompts with placeholder maps become tagged templates (TASK_FORMAT_DOCTRINE
+interpolates via a const inside the template file, split to width); include: sites become inline
+.optional() interpolations; per-variant agent factories (smart1/smart2 wrappers) become direct
+role consts like implement's agent.ts; data.ts gains port/slot aggregates; trait-level
+INTENT/BEHAVIOR; the board-guard check + errorWhen and the slice forEach keep their exact
+semantics under the new style.
+"""
+validation = """
+## Watch
+- The pre-write board guard (snapshot, check, flow.errorWhen) is a deliberate enforcement
+  mechanism — restyle, never weaken.
+- MAX_SLICES stays one shared constant read by both the gate and the forEach bound.
+- Behavior must not change except where the style contract demands it (include-elimination,
+  trait-level intent); prompts may be tightened but every load-bearing instruction survives.
+- Rebuild via `just ts-build` (if packages changed) then `ctx traits build <family>` and
+  `ctx traits export <family> --update-skill-lock`; `ctx traits check <family>` must pass.
+
+## Done when
+The family builds, exports, and checks clean; no `include:` fields remain; no per-variant
+intent/behavior declarations remain; every prompt line holds the one-clause-per-line and width
+rules; imports are namespace-form throughout; data.ts ends in port/slot aggregates.
+"""

@@ -1,0 +1,38 @@
+schema-version = "0.2"
+key = "0204"
+title = "Bring the optimize family to the implement house style"
+status = "ready"
+raised = "2026-08-18"
+content = """
+The house style, defined by the implement trait (source/ as of 6d1a448f, the canonical example):
+namespace imports only (import * as cdk/agents/shared, every call qualified); shared/index.ts is
+the barrel and declares the family-wide BEHAVIOR and INTENT consts; data.ts ends in
+`export const port = {...}` / `export const slot = {...}` aggregates; useIntent/useBehavior/
+useResource once at trait level, never in variants; `include:` eliminated — optional prior-round
+attachments interpolate inline as ${slot.x.optional()} in the prompt text; output ports written
+directly by steps (no echo slots); one stage file per concern via cdk.stage; prompts are tagged
+templates, one clause per line, 4-space indent, no line past ~120 chars, outputs via
+cdk.output.prompt naming the destination; variants are a uniform skeleton — defineVariant
+(one-line description, tag), stages by title, loop bounds inside the loop body, git tail under
+flow.when("Maybe Commit"), one return of ports.
+
+Largest structural distance: object-layer cdk.step.project seeding, per-variant stage trees,
+review-history appends. Restyle to namespace imports, trait-level intent/behavior, port/slot
+aggregates, tagged templates at width, include-elimination; keep the benchmark variant's
+seed/decide project steps exactly as they are semantically (operation.literal seeding is the
+proven idiom the validator requires).
+"""
+validation = """
+## Watch
+- The Append/Increment projection destinations are runtime contracts — do not rename their
+  slots without updating every reader.
+- Behavior must not change except where the style contract demands it (include-elimination,
+  trait-level intent); prompts may be tightened but every load-bearing instruction survives.
+- Rebuild via `just ts-build` (if packages changed) then `ctx traits build <family>` and
+  `ctx traits export <family> --update-skill-lock`; `ctx traits check <family>` must pass.
+
+## Done when
+The family builds, exports, and checks clean; no `include:` fields remain; no per-variant
+intent/behavior declarations remain; every prompt line holds the one-clause-per-line and width
+rules; imports are namespace-form throughout; data.ts ends in port/slot aggregates.
+"""
