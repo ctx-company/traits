@@ -461,6 +461,11 @@ required = true
 description = "Cited digest of the stream's findings: what was established, contested, and left open."
 
 [[agent]]
+id = "researcher"
+description = "Researches each stream in its own frame, triangulates, drafts the report, and applies reviewer fixes."
+summary = "Implementation role."
+
+[[agent]]
 id = "scribe"
 description = "Writes the commit message for the completed research from the plan and verdict; git staging and committing run as command steps."
 summary = "Commit-message role."
@@ -469,11 +474,6 @@ summary = "Commit-message role."
 id = "smart-1"
 description = "Ingests the brief, plans the research streams, and is the sole reviewer of the delivered research."
 summary = "Planning and reviewer role."
-
-[[agent]]
-id = "worker"
-description = "Researches each stream in its own frame, triangulates, drafts the report, and applies reviewer fixes."
-summary = "Implementation role."
 
 [prompt.building-produce]
 text = """
@@ -584,7 +584,7 @@ output = ["slot:triangulation"]
 [[sequence.building-body.sequence]]
 id = "building-produce"
 title = "Building Produce"
-agent = "agent:worker"
+agent = "agent:researcher"
 prompt = "prompt:building-produce"
 input = [
     "port:topic",
@@ -740,7 +740,7 @@ output = ["slot:stream-plan"]
 [[sequence.research-each-stream-body.sequence]]
 id = "research-the-stream"
 title = "Research the stream"
-agent = "agent:worker"
+agent = "agent:researcher"
 prompt = "prompt:research-the-stream"
 input = [
     "slot:research-each-stream-item",
@@ -865,7 +865,7 @@ max-items = 5
 [[procedure.sequence]]
 id = "triangulate-the-findings"
 title = "Triangulate the findings"
-agent = "agent:worker"
+agent = "agent:researcher"
 prompt = "prompt:triangulate-the-findings"
 input = [
     "port:topic",

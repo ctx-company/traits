@@ -37,7 +37,7 @@ export default function () {
     "Second-reviewer role.",
   );
   const worker = workerRole(
-    "worker",
+    "researcher",
     "Researches each stream in its own frame, triangulates, drafts and verifies the report, and applies reviewer fixes.",
   );
   const scribe = scribeRole("scribe", "Writes the commit message for the completed research from the plan and verdicts");

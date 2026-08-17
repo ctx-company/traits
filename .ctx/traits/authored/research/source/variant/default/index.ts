@@ -37,7 +37,7 @@ export default function () {
     "Planning and reviewer role.",
   );
   const worker = workerRole(
-    "worker",
+    "researcher",
     "Researches each stream in its own frame, triangulates, drafts the report, and applies reviewer fixes.",
   );
   const scribe = scribeRole("scribe", "Writes the commit message for the completed research from the plan and verdict");
