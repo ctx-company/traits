@@ -14,7 +14,7 @@
 // 0153-era single-turn research step, whose one findings slot compressed an
 // entire campaign into one model answer (~18KB observed) before the report
 // was written.
-import { deriveParkReportStep, reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
+import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
 import { condition, defineVariant, flow, input, operation, step, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
@@ -136,7 +136,6 @@ export default function () {
       include: [shared.data.verdict1.optional()],
     });
 
-    deriveParkReportStep(shared.data.verdict1, { parkReportSlot: shared.data.parkReport });
 
     flow.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
@@ -151,7 +150,6 @@ export default function () {
 
   return {
     commitReport: shared.data.commitReport,
-    parkReportPort: shared.data.parkReportPort,
     researchReportPort: shared.data.researchReportPort,
     reportPathPort: shared.data.reportPathPort,
   };

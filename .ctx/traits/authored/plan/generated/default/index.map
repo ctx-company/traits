@@ -11,8 +11,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 153,
-    "end": 153
+    "start": 146,
+    "end": 146
   },
   "prompt:ingest": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/ingest.ts",

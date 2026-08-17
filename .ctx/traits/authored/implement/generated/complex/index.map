@@ -4,6 +4,16 @@
     "start": 21,
     "end": 21
   },
+  "agent:smart-1": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
+  "agent:smart-2": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
   "agent:worker": {
     "file": "packages/toolkit/src/agent.ts",
     "start": 11,
@@ -19,15 +29,65 @@
     "start": 12,
     "end": 12
   },
-  "prompt:implement-the-task": {
+  "prompt:building-produce": {
     "file": ".ctx/traits/authored/implement/source/shared/stage/implement.ts",
     "start": 10,
     "end": 10
+  },
+  "prompt:building-review-1": {
+    "file": ".ctx/traits/authored/implement/source/shared/stage/review.ts",
+    "start": 12,
+    "end": 12
+  },
+  "prompt:building-review-2": {
+    "file": ".ctx/traits/authored/implement/source/shared/stage/review.ts",
+    "start": 24,
+    "end": 24
   },
   "prompt:shipping-message": {
     "file": ".ctx/traits/authored/implement/source/shared/stage/git.ts",
     "start": 5,
     "end": 5
+  },
+  "schema:blocker": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 104,
+    "end": 104
+  },
+  "schema:blocker-step": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 84,
+    "end": 84
+  },
+  "schema:owner-item": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 217,
+    "end": 217
+  },
+  "schema:review-verdict": {
+    "file": "packages/toolkit/src/schema.ts",
+    "start": 283,
+    "end": 283
+  },
+  "sequence:building-body/building-produce": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 22,
+    "end": 22
+  },
+  "sequence:building-body/building-review-1": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 24,
+    "end": 24
+  },
+  "sequence:building-body/building-review-2": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 25,
+    "end": 25
+  },
+  "sequence:building-body/changed-files": {
+    "file": ".ctx/traits/authored/implement/source/shared/stage/diff.ts",
+    "start": 11,
+    "end": 11
   },
   "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then/shipping-commit": {
     "file": "packages/agents/src/process.ts",
@@ -49,10 +109,10 @@
     "start": 82,
     "end": 82
   },
-  "sequence:procedure/implement-the-task": {
-    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 18,
-    "end": 18
+  "sequence:procedure/building": {
+    "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
+    "start": 19,
+    "end": 19
   },
   "sequence:procedure/shipping-maybe-commit": {
     "file": "packages/agents/src/process.ts",
@@ -64,10 +124,25 @@
     "start": 57,
     "end": 57
   },
+  "slot:changed-files": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 24,
+    "end": 24
+  },
   "slot:commit-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
     "start": 42,
     "end": 42
+  },
+  "slot:review-verdict-1": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 31,
+    "end": 31
+  },
+  "slot:review-verdict-2": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 36,
+    "end": 36
   },
   "slot:shipping-message": {
     "file": "packages/agents/src/process.ts",

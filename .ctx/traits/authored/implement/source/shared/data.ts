@@ -1,46 +1,42 @@
-// Cross-variant primitives every implement variant's build loop shares
-// unchanged.
-import { leftoverSchema, reviewVerdictSchema } from "@ctx-traits/agents";
-import { condition, port, schema, signal, slot } from "@ctx-traits/cdk";
+// Cross-variant ports and slots. Deliberately small (owner ruling
+// 2026-08-17): no repository-gate machinery, no park report, no leftovers
+// adjudication — the review loop IS the mechanism, and an exhausted loop
+// aborts with its stop reason. The board task file is the contract; runs
+// read it and never write it.
+import { reviewVerdictSchema } from "@ctx-traits/agents";
+import { port, slot } from "@ctx-traits/cdk";
 
-// P450 S3, repointed at the task board (2026-07-31): the board is the
-// owner's status surface (P486) — a run never writes it at all. Progress
-// lives in the work summary and the commit message.
+// P450 S3: the board is the owner's status surface — a run never writes it.
 export const TASK_WRITE_SCOPE_RIDER = `Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.`;
-// P450 S4 (P427): the model-side half of the one-turn-discipline fix.
-export const ONE_TURN_DISCIPLINE = `End this turn with the structured output and nothing else — no prose status line after the payload.`;
 
 export const task = port.input.text({
   id: "task",
   description:
-    'Task to implement, named by its file in .internal/tasks/ — the number ("0044"), the full name ("0044-live-view-pane-polish"), or the filename.',
-});
-
-export const taskBrief = slot.text({
-  id: "task-brief",
-  description:
-    "The task file's contents, copied exactly as written — the scope contract every later step works from instead of the board.",
-  hint: "Verbatim copy of the whole task file: title, status line, body, Watch, and Done when. No paraphrasing.",
-});
-
-export const draft = slot.text({
-  id: "draft",
-  description: "The implementation draft for the task — the contract the produce-first build loop implements.",
-  hint: "Scope, files to touch, approach, reuse/abstraction opportunities, validation plan, risks. A plan, not an implementation.",
+    'Task to implement, named by its file in .internal/tasks/ — the key ("0044" or "0044.2"), the full name, or the filename.',
 });
 
 export const workSummary = slot.text({
   id: "work-summary",
   description:
-    "Worker's cumulative account of the implemented state, extended each produce round — the worker's cross-round memory.",
-  hint: "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round, append: what changed (files), how it was validated, open concerns, and per-blocker progress against the verdict's step list (which step, what changed, evidence). Compact rounds older than the attached verdict to a line each so the document stays bounded.",
+    "Worker's cumulative account of the implemented state, extended each round — the worker's cross-round memory.",
+  hint: "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict.",
+});
+export const changedFiles = slot.text({
+  id: "changed-files",
+  description:
+    "Names and change-kinds of every file changed this round — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools.",
+  hint: "git diff --name-status output, excluding runtime state; it omits untracked files.",
 });
 
-export const leftovers = slot({
-  id: "leftovers",
-  schema: schema.list(leftoverSchema),
-  description:
-    "Adjudicated leftovers: legitimate follow-on work the shipped result does not require, surviving the reviewer's two-question test. Replaced by each review step; an empty list is a valid, signed claim that none exist.",
+export const verdict1 = slot({
+  id: "review-verdict-1",
+  schema: reviewVerdictSchema,
+  description: "First reviewer's verdict for the current work state.",
+});
+export const verdict2 = slot({
+  id: "review-verdict-2",
+  schema: reviewVerdictSchema,
+  description: "Second, independent reviewer's verdict for the current work state.",
 });
 
 export const commitOutput = slot.text({
@@ -54,123 +50,3 @@ export const commitReport = port.output.text({
   optional: true,
   value: commitOutput,
 });
-
-/**
- * Terminal typed boundary for the adjudicated leftover list (P409): the same
- * `leftovers` slot each build round's review replaces, exposed as an
- * optional structured output port. `slot:leftovers` stays the required
- * reviewer output — an empty list remains an explicit signed ledger claim —
- * while this port only ever surfaces in the run's structured final outputs
- * when the adjudicated list is non-empty (runtime-enforced, not
- * schema-enforced: see `session.rs::final_outputs`'s empty-array omission).
- */
-export const leftoversPort = port.output.of(schema.list(leftoverSchema), {
-  id: "leftovers",
-  title: "Leftovers",
-  description:
-    "Adjudicated leftovers: legitimate follow-on work the shipped result does not require, surviving the reviewer's two-question test. Omitted from the run's structured final outputs when empty; slot:leftovers always carries the signed evidence either way.",
-  optional: true,
-  value: leftovers,
-  format: ["structured", "table"],
-});
-
-/**
- * This round's typed park record (P414): empty when every reviewed verdict
- * this round is approved; one entry — the whole `reviewVerdictSchema`-shaped
- * verdict object, copied unchanged — per reviewed verdict that is revise
- * (default/smart/strict/phase review twice a round and so may record up to
- * two; quick reviews once and records at most one). Written each round by
- * `deriveParkReportStep`'s deterministic `project` steps, never
- * model-authored, so it can never disagree with the verdict(s) it comes from
- * (see the P414 doc comment in `@ctx-traits/agents` for why the list
- * element reuses the verdict schema itself rather than a separate
- * hand-declared shape). The run parks on these entries when the build loop
- * exhausts unapproved — no commit is ever created while any reviewed
- * verdict this round is still revise.
- */
-export const parkReport = slot({
-  id: "park-report",
-  schema: schema.list(reviewVerdictSchema),
-  description:
-    "This round's typed park record (P414): empty when every verdict reviewed this round is approved; one entry per reviewed verdict that is revise, each copied unchanged. Written each round by deterministic project steps (deriveParkReportStep), never model-authored, so it can never disagree with the verdict(s) it comes from. The run parks on these entries when the build loop exhausts unapproved — no commit is ever created while any reviewed verdict this round is still revise.",
-});
-
-/**
- * Terminal typed boundary for the park report (P414): the same `parkReport`
- * slot each review step replaces, exposed as an optional structured output
- * port. Non-empty only when the build loop exhausted unapproved — the run
- * then parks (`onExhausted: "abort"` halts before the commit tail ever
- * runs) and this port is the durable, dispatch-preflight-readable evidence
- * of why. Empty (and thus omitted from structured final outputs) on every
- * approved run.
- */
-export const parkReportPort = port.output.of(schema.list(reviewVerdictSchema), {
-  id: "park-report",
-  title: "Park Report",
-  description:
-    "Typed park record for an unapproved run (P414): one entry per reviewed verdict that was still revise in the final round, each with the wall citation (if any), the exact blockers, and escalation state. Present in the run's persisted output-port evidence only when the build loop exhausted without approval — the run parks and no commit is created. A dispatch-time preflight refuses a sibling task that explicitly cites the same wall-id while this stands unforced.",
-  optional: true,
-  value: parkReport,
-  format: ["structured", "table"],
-});
-
-export const reviewDiff = slot.text({
-  id: "review-diff",
-  description:
-    "Inventory of every file changed this round with its insertion/deletion counts — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools.",
-  hint: "git diff --stat output, excluding runtime state. No patch bodies: a deleted generated artifact would otherwise contribute its entire content.",
-});
-
-// P565: a check reports the verdict AND the argv that produced it. A bare
-// boolean cost three runs (P535, P552 twice): handed only `false`, the worker
-// re-validated with whatever command the surrounding prose named — and when
-// the docs and the declared check disagree, every round proves the wrong
-// thing. The argv makes the gate self-describing, so there is no second
-// source of truth for "what proves this done".
-export const repoGatesPassed = slot({
-  id: "repo-gates-passed",
-  description:
-    "This round's repository gate result: whether the repository gate chain passed, and the exact command that decided it.",
-  schema: schema.object("repo-gates-result", {
-    ok: schema.field(schema.boolean(), {
-      description: "True when the gate command exited successfully.",
-    }),
-    argv: schema.field(schema.list(schema.text()), {
-      description:
-        "The exact argv the gate ran. This is the command that decides done-ness — re-run THIS, not a command named anywhere else.",
-    }),
-    "exit-code": schema.field(schema.number(), {
-      required: false,
-      description:
-        "The gate command's exit status. Absent when the command never produced one, which itself means it could not be executed.",
-    }),
-    "timed-out": schema.field(schema.boolean(), {
-      required: false,
-      description:
-        "Present and true only when the gate was killed by its own timeout rather than exiting. A timed-out gate proves nothing about the work.",
-    }),
-    tail: schema.field(schema.text(), {
-      required: false,
-      description:
-        "The end of the failed gate's output — stderr when it said anything, otherwise stdout. Present ONLY when ok is false. This is the reason the gate failed: read it before attributing the failure to anything else, and never infer a cause the tail does not state.",
-    }),
-  }),
-});
-
-/**
- * 0047 mechanism 4: a gate the exit guard forced to `ok=false` purely by
- * timing out is a REPO CONDITION no worker round can fix — the ceiling is
- * fixed in the trait, not a defect in the work. Every family variant's
- * build loop stops on this arm the round a gate times out rather than
- * grinding toward a doomed park (measured: run-f60c3ef5's undeclared
- * check-step timeout). `gateTimedOutAbortIf` is provably mutually exclusive
- * with every `guardedProduction` `until` — each conjoins `repoGatesPassed.ok
- * == true`, which a timed-out gate (`command_execution_succeeded` forces
- * `ok=false` whenever `timed_out` is true) always falsifies — so no
- * `guard-conflict` diagnostic is reachable.
- */
-export const gateTimedOut = signal({
-  id: "gate-timed-out",
-  description: "The repository gate exceeded its declared ceiling — a repo condition no worker round can fix.",
-});
-export const gateTimedOutAbortIf = condition.fieldEquals(repoGatesPassed, "timed-out", true);

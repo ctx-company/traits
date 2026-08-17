@@ -2,7 +2,7 @@
 // then a single-reviewer grind loop until approved — then commit. Lean, like
 // implement-quick: no leftovers adjudication, no dual review. The reviewer
 // loop is bounded and parks honestly (typed park report) on exhaustion.
-import { deriveParkReportStep, reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
+import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
 import { condition, defineVariant, flow, input, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
@@ -64,8 +64,6 @@ export default function () {
       include: [shared.data.verdict1.optional()],
     });
 
-    deriveParkReportStep(shared.data.verdict1, { parkReportSlot: shared.data.parkReport });
-
     flow.until(condition.equals(shared.data.verdict1.status, "approved"));
   });
 
@@ -79,7 +77,6 @@ export default function () {
 
   return {
     commitReport: shared.data.commitReport,
-    parkReportPort: shared.data.parkReportPort,
     researchReportPort: shared.data.researchReportPort,
     reportPathPort: shared.data.reportPathPort,
   };

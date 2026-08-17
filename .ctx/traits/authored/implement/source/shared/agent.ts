@@ -1,17 +1,17 @@
-// Cross-variant agent roles every implement variant's build loop shares
-// unchanged.
-import { clerkRole, reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
-import type { AgentHandle } from "@ctx-traits/cdk";
+// Cross-variant agent roles. The worker implements; smart-1 reviews (and
+// smart-2 independently cross-reviews in complex); the scribe only writes
+// the commit message.
+import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
 
-export function smart1Role(description: string): AgentHandle {
-  return reviewerRole("smart-1", description, "Drafting and first-reviewer role.");
-}
-export function smart2Role(description: string): AgentHandle {
-  return reviewerRole("smart-2", description, "Second-reviewer role.");
-}
-export const worker = workerRole("worker", "Implements the draft and applies reviewer fixes.");
-export const scribe = scribeRole("scribe", "Writes the commit message for the completed task from the task contract");
-export const clerk = clerkRole(
-  "clerk",
-  "Fast extraction model: copies the task file out of the task board verbatim, so no later step re-reads the board.",
+export const worker = workerRole("worker", "Implements the task and applies reviewer fixes.");
+export const smart1 = reviewerRole(
+  "smart-1",
+  "Strong model: reviews the implemented state each refinement round.",
+  "Reviewer role.",
 );
+export const smart2 = reviewerRole(
+  "smart-2",
+  "Independent strong model: cross-reviews the implemented state each round, separately from smart-1.",
+  "Second-reviewer role.",
+);
+export const scribe = scribeRole("scribe", "Writes the commit message for the completed task from the work summary");
