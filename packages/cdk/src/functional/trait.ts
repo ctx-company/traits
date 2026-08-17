@@ -145,7 +145,14 @@ export interface DefineVariantFields {
   readonly metadata?: TraitMetadata;
 }
 
-const DEFINE_VARIANT_KEYS: readonly string[] = ["id", "name", "description", "procedureDescription", "summary", "metadata"];
+const DEFINE_VARIANT_KEYS: readonly string[] = [
+  "id",
+  "name",
+  "description",
+  "procedureDescription",
+  "summary",
+  "metadata",
+];
 
 /**
  * Declares a hook-style variant module's identity — exactly once, inside a
