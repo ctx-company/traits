@@ -102,9 +102,8 @@ export const deliverableSections = slot({
   description:
     "The deliverable structure the brief demands for report.md, one entry per required top-level section in the brief's order.",
 });
-export const doneCriteria = slot({
+export const doneCriteria = slot.texts({
   id: "done-criteria",
-  schema: schema.list(schema.text()),
   description: "The brief's explicit definition-of-done items, empty when it states none.",
 });
 export const streamPlan = slot({

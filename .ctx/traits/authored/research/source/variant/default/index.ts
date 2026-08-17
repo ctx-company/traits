@@ -63,18 +63,11 @@ export default function () {
                 2. The deliverable structure it demands for the final report: one entry per required top-level section, in the brief's order. When the brief specifies no structure, propose one that fits its content — but when it does specify one, reproduce it exactly.
                 3. Its explicit definition-of-done items, empty when it states none.`,
       output: [shared.data.briefTracks, shared.data.deliverableSections, shared.data.doneCriteria],
-      include: [
-        shared.data.briefTracks.optional(),
-        shared.data.deliverableSections.optional(),
-        shared.data.doneCriteria.optional(),
-      ],
+      include: [shared.data.briefTracks.optional(), shared.data.deliverableSections.optional(), shared.data.doneCriteria.optional()],
     });
 
     flow.until(
-      condition.all([
-        condition.count(shared.data.briefTracks).atLeast(1),
-        condition.count(shared.data.deliverableSections).atLeast(1),
-      ]),
+      condition.all([condition.count(shared.data.briefTracks).atLeast(1), condition.count(shared.data.deliverableSections).atLeast(1)]),
     );
   });
 
