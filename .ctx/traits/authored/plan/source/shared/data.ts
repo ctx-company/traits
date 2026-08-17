@@ -143,26 +143,10 @@ export const revisionLog = slot.text({
   id: "revision-log",
   description: "The revise pass's account of the task files it changed or added, one path per line.",
 });
-export const parkReport = slot({
-  id: "park-report",
-  schema: schema.list(reviewVerdictSchema),
-  description:
-    "Typed park record: empty when the reviewed verdict is approved; the revise verdict copied unchanged otherwise. Written each round by deriveParkReportStep, never model-authored.",
-});
-
 export const writtenFiles = port.output.of(schema.list(writeReceiptSchema), {
   id: "written-files",
   title: "Written Task Files",
   description: "Per-slice receipts naming every task file written under .internal/tasks/.",
   value: receipts,
-  format: ["structured", "table"],
-});
-export const parkReportPort = port.output.of(schema.list(reviewVerdictSchema), {
-  id: "park-report",
-  title: "Park Report",
-  description:
-    "Present only when the review loop exhausted without approval — the run parks with the final revise verdict.",
-  optional: true,
-  value: parkReport,
   format: ["structured", "table"],
 });

@@ -1,15 +1,14 @@
-import { deriveParkReportStep } from "@ctx-traits/agents";
 import type { AgentHandle } from "@ctx-traits/cdk";
 import { condition, flow, input } from "@ctx-traits/cdk";
 
-import { doneCriteria, parkReport, receipts, revisionLog, slicePlan, taskInput, verdict, workItems } from "../data.ts";
+import { doneCriteria, receipts, revisionLog, slicePlan, taskInput, verdict, workItems } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
  * The complex variant's work -> review -> improve loop: an independent
  * reviewer issues a typed verdict against the written board, the composing
- * seat applies every blocker, and the loop runs until approved — parking
- * with a typed record on exhaustion, exactly like the research family.
+ * seat applies every blocker, and the loop runs until approved; an
+ * exhausted loop aborts with its stop reason.
  */
 export function loop(reviewer: AgentHandle, composer: AgentHandle) {
   flow.loop("Reviewing", (reviewLoop) => {
@@ -33,8 +32,6 @@ export function loop(reviewer: AgentHandle, composer: AgentHandle) {
       output: verdict,
       include: [verdict.optional()],
     });
-
-    deriveParkReportStep(verdict, { parkReportSlot: parkReport });
 
     flow.when("Apply the review", condition.equals(verdict.status, "revise"), () => {
       composer.prompt("Revise the board", {

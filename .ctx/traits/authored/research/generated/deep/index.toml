@@ -66,19 +66,6 @@ optional = true
 description = 'Repo-relative root directory research output is written under. Package-defaulted to ".internal/research" via [defaults.port] in runtime.toml; consuming repos override it in their own config.'
 
 [[port]]
-id = "park-report"
-direction = "output"
-schema = "[schema:review-verdict]"
-optional = true
-description = "Typed park record for an unapproved run: one entry per reviewed verdict still revise in the final round. Present only when the build loop exhausted without approval — the run parks and no commit is created."
-title = "Park Report"
-format = [
-    "structured",
-    "table",
-]
-value = "slot:park-report"
-
-[[port]]
 id = "report-path"
 direction = "output"
 schema = "schema:text"
@@ -127,11 +114,6 @@ description = "The brief's explicit definition-of-done items, empty when it stat
 id = "dossiers"
 schema = "[schema:stream-dossier]"
 description = "One evidence dossier appended per completed stream by the per-stream research loop."
-
-[[slot]]
-id = "park-report"
-schema = "[schema:review-verdict]"
-description = "This round's typed park record: empty when every verdict reviewed this round is approved; one entry per reviewed verdict that is revise, each copied unchanged. Written each round by deriveParkReportStep, never model-authored."
 
 [[slot]]
 id = "report-path"
@@ -592,7 +574,7 @@ output = ["slot:dossiers"]
 [prompt.shipping-message]
 text = """
 
-                The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
+                The dual review for the research on {port:topic} has ended in agreement and the work is being committed. The final verdicts are {slot:review-verdict-1} and {slot:review-verdict-2} (unreachable while either status is still revise — an exhausted loop aborts with its stop reason and never reaches here).
                 Write a concise commit message from the work summary {slot:work-summary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at {slot:report-path}.
                 Return exactly that message. Do not run git commands and do not write files."""
 input = [
@@ -671,40 +653,6 @@ input = [
 ]
 output = ["slot:review-verdict-2"]
 
-[[sequence.building-body.sequence]]
-id = "park-report-clear"
-title = "Park Report Clear"
-kind = "project"
-output = ["slot:park-report"]
-
-[[sequence.building-body.sequence.projection]]
-destination = "slot:park-report"
-
-[sequence.building-body.sequence.projection.source]
-literal = []
-
-[[sequence.building-body.sequence]]
-id = "park-report-record-1"
-title = "Park Report Record 1"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-1-then"
-
-[sequence.building-body.sequence.when]
-slot = "slot:review-verdict-1"
-field = "status"
-equals = "revise"
-
-[[sequence.building-body.sequence]]
-id = "park-report-record-2"
-title = "Park Report Record 2"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-13-building-body-20-park-report-record-2-then"
-
-[sequence.building-body.sequence.when]
-slot = "slot:review-verdict-2"
-field = "status"
-equals = "revise"
-
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-message"
 title = "Write the commit message (scribe)"
@@ -758,36 +706,6 @@ argv = [
     "-m",
     "{slot:shipping-message}",
 ]
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-1-then.sequence]]
-id = "park-report-append-1"
-title = "Park Report Append 1"
-kind = "project"
-input = ["slot:review-verdict-1"]
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-1-then.sequence.projection]]
-source = "slot:review-verdict-1"
-destination = "slot:park-report"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-1-then.sequence.output]]
-slot = "slot:park-report"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-2-then.sequence]]
-id = "park-report-append-2"
-title = "Park Report Append 2"
-kind = "project"
-input = ["slot:review-verdict-2"]
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-2-then.sequence.projection]]
-source = "slot:review-verdict-2"
-destination = "slot:park-report"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-13-building-body-20-park-report-record-2-then.sequence.output]]
-slot = "slot:park-report"
-operation = "append"
 
 [[sequence.ingest-body.sequence]]
 id = "ingest-the-brief"
@@ -845,7 +763,6 @@ input = [
 ]
 output = [
     "port:commit-report",
-    "port:park-report",
     "port:report-path",
     "port:research-report",
 ]

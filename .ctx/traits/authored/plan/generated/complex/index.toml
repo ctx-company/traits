@@ -39,19 +39,6 @@ id = "evidence-first"
 id = "brief"
 
 [[port]]
-id = "park-report"
-direction = "output"
-schema = "[schema:review-verdict]"
-optional = true
-description = "Present only when the review loop exhausted without approval — the run parks with the final revise verdict."
-title = "Park Report"
-format = [
-    "structured",
-    "table",
-]
-value = "slot:park-report"
-
-[[port]]
 id = "task"
 direction = "input"
 schema = "schema:text"
@@ -94,11 +81,6 @@ hint = "Grounded in the codebase: what the project is, its build/test/lint gates
 id = "next-key"
 schema = "schema:text"
 description = "Deterministic zero-padded next free board key, derived by a command step scanning .internal/tasks/ (archived/ included) — never agent arithmetic against the directory."
-
-[[slot]]
-id = "park-report"
-schema = "[schema:review-verdict]"
-description = "Typed park record: empty when the reviewed verdict is approved; the revise verdict copied unchanged otherwise. Written each round by deriveParkReportStep, never model-authored."
 
 [[slot]]
 id = "raised-date"
@@ -589,21 +571,6 @@ prompt = "prompt:revise-the-board"
 input = ["slot:review-verdict"]
 output = ["slot:revision-log"]
 
-[[sequence.ctx-branch-arm-s-14-reviewing-body-18-park-report-record-then.sequence]]
-id = "park-report-append"
-title = "Park Report Append"
-kind = "project"
-input = ["slot:review-verdict"]
-
-[[sequence.ctx-branch-arm-s-14-reviewing-body-18-park-report-record-then.sequence.projection]]
-source = "slot:review-verdict"
-destination = "slot:park-report"
-operation = "append"
-
-[[sequence.ctx-branch-arm-s-14-reviewing-body-18-park-report-record-then.sequence.output]]
-slot = "slot:park-report"
-operation = "append"
-
 [[sequence.planning-body.sequence]]
 id = "split"
 title = "Split the work into slices"
@@ -635,29 +602,6 @@ input = [
 output = ["slot:review-verdict"]
 
 [[sequence.reviewing-body.sequence]]
-id = "park-report-clear"
-title = "Park Report Clear"
-kind = "project"
-output = ["slot:park-report"]
-
-[[sequence.reviewing-body.sequence.projection]]
-destination = "slot:park-report"
-
-[sequence.reviewing-body.sequence.projection.source]
-literal = []
-
-[[sequence.reviewing-body.sequence]]
-id = "park-report-record"
-title = "Park Report Record"
-kind = "branch"
-sequence = "sequence:ctx-branch-arm-s-14-reviewing-body-18-park-report-record-then"
-
-[sequence.reviewing-body.sequence.when]
-slot = "slot:review-verdict"
-field = "status"
-equals = "revise"
-
-[[sequence.reviewing-body.sequence]]
 id = "apply-the-review"
 title = "Apply the review"
 kind = "branch"
@@ -686,12 +630,9 @@ slot = "slot:receipts"
 operation = "append"
 
 [procedure]
-description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, then loop an independent typed-verdict review with composer-applied fixes until approved (parking with a typed record on exhaustion)."
+description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, then loop an independent typed-verdict review with composer-applied fixes until approved (exhaustion aborts with its stop reason)."
 input = ["port:task"]
-output = [
-    "port:park-report",
-    "port:written-files",
-]
+output = ["port:written-files"]
 
 [[procedure.sequence]]
 id = "board-snapshot"

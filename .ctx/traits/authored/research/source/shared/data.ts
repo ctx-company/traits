@@ -141,13 +141,6 @@ export const verdict2 = slot({
   schema: reviewVerdictSchema,
   description: "Second, independent reviewer's verdict for the current research state.",
 });
-export const parkReport = slot({
-  id: "park-report",
-  schema: schema.list(reviewVerdictSchema),
-  description:
-    "This round's typed park record: empty when every verdict reviewed this round is approved; one entry per reviewed verdict that is revise, each copied unchanged. Written each round by deriveParkReportStep, never model-authored.",
-});
-
 export const topicSlug = slot.text({
   id: "topic-slug",
   description:
@@ -169,15 +162,6 @@ export const commitReport = port.output.text({
     "Final commit evidence from the git commit command step. Absent when the clean-tree gate skipped the commit tail entirely.",
   optional: true,
   value: commitOutput,
-});
-export const parkReportPort = port.output.of(schema.list(reviewVerdictSchema), {
-  id: "park-report",
-  title: "Park Report",
-  description:
-    "Typed park record for an unapproved run: one entry per reviewed verdict still revise in the final round. Present only when the build loop exhausted without approval — the run parks and no commit is created.",
-  optional: true,
-  value: parkReport,
-  format: ["structured", "table"],
 });
 export const researchReportPort = port.output.text({
   id: "research-report",

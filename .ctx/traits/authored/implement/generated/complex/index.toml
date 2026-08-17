@@ -1,15 +1,16 @@
 id = "implement"
 schema-version = "0.4"
 version = "0.25.0"
-name = "Implement"
-description = "Reviewed implementation: the worker implements the board task, a reviewer grinds a bounded refinement loop against the task's own Done when until approved — then commit."
-variant = "default"
+name = "Implement (Complex)"
+description = "Doubly-reviewed implementation: the worker implements the board task and two independent reviewers must both approve against the task's own Done when — then commit."
+variant = "complex"
 
 [metadata]
 tag = [
     "dogfood",
     "implementation",
     "review",
+    "multi-agent",
 ]
 
 [[intent.require]]
@@ -86,6 +87,11 @@ description = "Output evidence from the git commit command step: committed hash 
 id = "review-verdict-1"
 schema = "schema:review-verdict"
 description = "First reviewer's verdict for the current work state."
+
+[[slot]]
+id = "review-verdict-2"
+schema = "schema:review-verdict"
+description = "Second, independent reviewer's verdict for the current work state."
 
 [[slot]]
 id = "shipping-message"
@@ -278,6 +284,11 @@ description = "Strong model: reviews the implemented state each refinement round
 summary = "Reviewer role."
 
 [[agent]]
+id = "smart-2"
+description = "Independent strong model: cross-reviews the implemented state each round, separately from smart-1."
+summary = "Second-reviewer role."
+
+[[agent]]
 id = "worker"
 description = "Implements the task and applies reviewer fixes."
 summary = "Implementation role."
@@ -292,7 +303,7 @@ Implement {port:task}.
 input = ["port:task"]
 output = ["slot:work-summary"]
 
-[prompt.building-review]
+[prompt.building-review-1]
 text = """
 Review the working tree's implemented state for {port:task} against the task file's own contract — read the task file and the changed code with your tools. Work summary: {slot:work-summary}. {slot:changed-files} names every file changed this round (an index, not the change; it omits untracked files).
     A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
@@ -305,6 +316,20 @@ input = [
     "slot:changed-files",
 ]
 output = ["slot:review-verdict-1"]
+
+[prompt.building-review-2]
+text = """
+Independently review the working tree's implemented state for {port:task} against the task file's own contract. Do not trust the work summary {slot:work-summary} or the first reviewer's verdict — read the task file and inspect the changed code yourself ({slot:changed-files} is the index of this round's changes; it omits untracked files).
+    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
+    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify each with your own tools, and flip to done only on confirmed evidence.
+    Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
+    Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file."""
+input = [
+    "port:task",
+    "slot:work-summary",
+    "slot:changed-files",
+]
+output = ["slot:review-verdict-2"]
 
 [prompt.shipping-message]
 text = """
@@ -325,6 +350,7 @@ prompt = "prompt:building-produce"
 input = [
     "port:task",
     { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
     { slot = "slot:work-summary", optional = true },
 ]
 output = ["slot:work-summary"]
@@ -346,10 +372,10 @@ argv = [
 ]
 
 [[sequence.building-body.sequence]]
-id = "building-review"
-title = "Building Review"
+id = "building-review-1"
+title = "Building Review 1"
 agent = "agent:smart-1"
-prompt = "prompt:building-review"
+prompt = "prompt:building-review-1"
 input = [
     "port:task",
     "slot:work-summary",
@@ -357,6 +383,19 @@ input = [
     { slot = "slot:review-verdict-1", optional = true },
 ]
 output = ["slot:review-verdict-1"]
+
+[[sequence.building-body.sequence]]
+id = "building-review-2"
+title = "Building Review 2"
+agent = "agent:smart-2"
+prompt = "prompt:building-review-2"
+input = [
+    "port:task",
+    "slot:work-summary",
+    "slot:changed-files",
+    { slot = "slot:review-verdict-2", optional = true },
+]
+output = ["slot:review-verdict-2"]
 
 [[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
 id = "shipping-message"
@@ -410,7 +449,7 @@ argv = [
 ]
 
 [procedure]
-description = "Reviewed implementation: the worker implements the board task, a reviewer grinds a bounded refinement loop against the task's own Done when until approved — then commit."
+description = "Doubly-reviewed implementation: the worker implements the board task and two independent reviewers must both approve against the task's own Done when — then commit."
 input = ["port:task"]
 output = ["port:commit-report"]
 
@@ -419,11 +458,16 @@ id = "building"
 title = "Building"
 kind = "loop"
 sequence = "sequence:building-body"
-max-iterations = 6
+max-iterations = 8
 on-exhausted = "abort"
 
-[procedure.sequence.until]
+[[procedure.sequence.until.all]]
 slot = "slot:review-verdict-1"
+field = "status"
+equals = "approved"
+
+[[procedure.sequence.until.all]]
+slot = "slot:review-verdict-2"
 field = "status"
 equals = "approved"
 

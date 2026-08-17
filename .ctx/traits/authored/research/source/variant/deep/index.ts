@@ -9,7 +9,7 @@
 // The evidence artery is files + dossiers, not slot prose — see the
 // identical note in variant/default/index.ts. This replaces the 0153-era
 // single-turn research step and its one campaign-wide findings slot.
-import { deriveParkReportStep, reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
+import { reviewerRole, scribeRole, workerRole } from "@ctx-traits/agents";
 import { condition, defineVariant, flow, input, operation, step, useBehavior, useIntent } from "@ctx-traits/cdk";
 
 import * as shared from "#trait/shared/index.ts";
@@ -154,7 +154,6 @@ export default function () {
       include: [shared.data.verdict2.optional()],
     });
 
-    deriveParkReportStep([shared.data.verdict1, shared.data.verdict2], { parkReportSlot: shared.data.parkReport });
 
     flow.until(
       condition.all([
@@ -167,14 +166,13 @@ export default function () {
   shared.stage.commit.shippingCommitTail({
     agent: scribe,
     text: input.prompt`
-                The dual review for the research on ${shared.data.topic} has ended in agreement and the work is being committed. The final verdicts are ${shared.data.verdict1} and ${shared.data.verdict2} (P414: this step is unreachable while either status is still revise; that case parks instead, with a typed park report, and never reaches here).
+                The dual review for the research on ${shared.data.topic} has ended in agreement and the work is being committed. The final verdicts are ${shared.data.verdict1} and ${shared.data.verdict2} (unreachable while either status is still revise — an exhausted loop aborts with its stop reason and never reaches here).
                 Write a concise commit message from the work summary ${shared.data.workSummary} and those verdicts: a short subject line naming the topic, then one paragraph on what was researched, verified, and delivered at ${shared.data.reportPath}.
                 Return exactly that message. Do not run git commands and do not write files.`,
   });
 
   return {
     commitReport: shared.data.commitReport,
-    parkReportPort: shared.data.parkReportPort,
     researchReportPort: shared.data.researchReportPort,
     reportPathPort: shared.data.reportPathPort,
   };
