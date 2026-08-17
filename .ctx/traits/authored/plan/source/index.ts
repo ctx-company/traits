@@ -4,7 +4,7 @@ import * as shared from "#trait/shared/index.ts";
 import variants from "#trait/variant/index.ts";
 
 export default function () {
-  defineTrait("plan", { version: "0.4.0" });
+  defineTrait("plan", { version: "0.5.0" });
   useIntent(shared.intent);
   useResource([]);
 

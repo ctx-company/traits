@@ -1,8 +1,8 @@
 id = "plan"
 schema-version = "0.4"
-version = "0.4.0"
+version = "0.5.0"
 name = "Plan"
-description = "Turn a described task into codebase-grounded, house-format task files in .internal/tasks/ — the board the implement family runs from in any repo."
+description = "Turn described work into board-ready TaskDocument TOML task files in .internal/tasks/ — charters plus 10-15-minute children with typed relations, the format the board dispatch machinery actually resolves."
 variant = "default"
 
 [metadata]
@@ -41,14 +41,24 @@ id = "brief"
 id = "task"
 direction = "input"
 schema = "schema:text"
-description = "The task you describe, in your own words — rough is fine."
+description = "The work you describe, in your own words — rough is fine. May reference a source document (a research report, an MVP plan) by repo-relative path."
 
 [[port]]
 id = "written-files"
 direction = "output"
-schema = "schema:text"
-description = "Paths of the task files written under .internal/tasks/."
-value = "slot:result"
+schema = "[schema:write-receipt]"
+description = "Per-slice receipts naming every task file written under .internal/tasks/."
+title = "Written Task Files"
+format = [
+    "structured",
+    "table",
+]
+value = "slot:receipts"
+
+[[slot]]
+id = "done-criteria"
+schema = "[schema:text]"
+description = "The source's explicit definition-of-done items, empty when it states none."
 
 [[slot]]
 id = "grounding"
@@ -57,25 +67,134 @@ description = "Codebase grounding for the described work: the concrete files and
 hint = "Grounded in the codebase: what the project is, its build/test/lint gates (exact invocations), architectural invariants, dependency rules, and constraints an implementer and reviewer must honor. Context the tasks carry, not the step-by-step plan."
 
 [[slot]]
-id = "result"
+id = "next-key"
 schema = "schema:text"
-description = "Confirmation of the task files written (paths)."
+description = "Deterministic zero-padded next free board key, derived by a command step scanning .internal/tasks/ (archived/ included) — never agent arithmetic against the directory."
 
 [[slot]]
-id = "task-files"
+id = "raised-date"
 schema = "schema:text"
-description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
-hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
+description = "Today's date (YYYY-MM-DD), derived by a command step — the Raised stamp every written task carries."
 
-[[agent]]
-id = "scribe"
-description = "Writes the task files to .internal/tasks/."
-summary = "Bootstrap-writer role."
+[[slot]]
+id = "receipts"
+schema = "[schema:write-receipt]"
+description = "One write receipt appended per slice frame (or produced whole by a single-frame variant)."
+
+[[slot]]
+id = "slice-plan"
+schema = "[schema:plan-slice]"
+description = "The typed plan: parent charter keys with their child tasks, final keys already assigned from slot:next-key."
+
+[[slot]]
+id = "work-items"
+schema = "[schema:work-item]"
+description = "The source's own units of demanded work — coverage is judged against these, not the slice plan."
+
+[[slot]]
+id = "write-each-slice-item"
+schema = "schema:plan-slice"
+description = "Per-item value for the write-each-slice loop."
+
+[[schema]]
+id = "plan-slice"
+description = "One dependency-ordered slice of the plan: a parent charter key plus its child tasks."
+
+[schema.fields.covers]
+schema = "[schema:text]"
+required = true
+description = "work-item ids this slice is responsible for. Every extracted work item must appear in at least one slice's covers."
+
+[schema.fields.key]
+schema = "schema:text"
+required = true
+description = "Final board key of the slice's parent charter task: bare zero-padded NNNN."
+
+[schema.fields.tasks]
+schema = "[schema:plan-task]"
+required = true
+description = """The slice's child tasks in dependency order, keys "NNNN.1", "NNNN.2", ..."""
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "The slice's goal, as a short title."
+
+[[schema]]
+id = "plan-task"
+description = "One child task in a slice's plan — the index entry; the full TaskDocument body is composed by the slice's own frame."
+
+[schema.fields.depends-on]
+schema = "[schema:text]"
+required = true
+description = "Keys of earlier tasks this one needs completed first; empty when independent."
+
+[schema.fields.key]
+schema = "schema:text"
+required = true
+description = """Final board key: the parent slice's NNNN plus a child ordinal, e.g. "0150.2"."""
+
+[schema.fields.summary]
+schema = "schema:text"
+required = true
+description = "One-paragraph account of the task's work, sized to roughly 10-15 minutes of focused agent effort."
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "Short imperative title."
+
+[[schema]]
+id = "work-item"
+description = "One unit of demanded work, extracted from the source document (or distilled from the described task when no document is referenced). Coverage is judged against these."
+
+[schema.fields.id]
+schema = "schema:text"
+required = true
+description = "Stable kebab-case slug for this work item, unique within the plan."
+
+[schema.fields.requirement]
+schema = "schema:text"
+required = true
+description = "What the source demands this item deliver or establish."
+
+[schema.fields.title]
+schema = "schema:text"
+required = true
+description = "The work item's short name, in the source's own words where a source document exists."
+
+[[schema]]
+id = "write-receipt"
+description = "One slice frame's account of the task files it wrote to the board."
+
+[schema.fields.files]
+schema = "[schema:text]"
+required = true
+description = "Repo-relative paths of every task file this slice's frame wrote."
+
+[schema.fields.slice-key]
+schema = "schema:text"
+required = true
+description = "The slice charter's key."
 
 [[agent]]
 id = "smart-1"
-description = "Strong model: refines the task, grounds it in the codebase, and splits it into task files."
-summary = "Refinement + grounding role."
+description = "Strong model: extracts the source contract, grounds the work in the codebase, plans the slices, and writes each slice's task files in its own frame."
+summary = "Contract + grounding + planning + composition role."
+
+[prompt.ingest]
+text = """
+
+            Read the source of the described work: {port:task}. When it references a document (a research report, an MVP plan, a spec) by path, read that document from the repository; otherwise the description itself is the source.
+            Extract two things, faithful to the source's own words — never your preferred framing:
+            1. Its work items: every unit of work the source demands (an MVP slice, an enumerated deliverable, a named milestone), each with the source's own requirement for it. When the source does not enumerate, distill 2-8 items from its prose.
+            2. Its explicit definition-of-done items (a stop condition, acceptance criteria), empty when it states none.
+            Do not implement anything and do not plan yet — this step only records what the source demands."""
+input = ["port:task"]
+output = [
+    "slot:work-items",
+    "slot:done-criteria",
+]
 
 [prompt.refine-task]
 text = """
@@ -98,40 +217,125 @@ output = ["slot:grounding"]
 
 [prompt.split]
 text = """
-Task format doctrine: Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>"
-    heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:**
-    ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an
-    optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing
-    "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every
-    task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task
-    would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any
-    prerequisite task explicitly in the body.
+
+            Break the described work into dependency-ordered slices with child tasks, as the typed plan.
             The work, as described: {port:task}
+            The source's work items: {slot:work-items}
+            The source's done criteria: {slot:done-criteria}
             Grounding notes: {slot:grounding}
-            Break the refined work into small, ordered task files.
-            Fold the grounding each task needs — its files, gates, invariants, constraints — into that task's own body and Watch section, so every file stands alone.
-            Do not implement anything."""
+            Assign final board keys now, starting at {slot:next-key}: the first slice's charter takes that key, the next slice the following number, and so on; children are "<charter-key>.1", "<charter-key>.2", ... in dependency order. Keys are final — no placeholders.
+            Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly 10-15 minutes of focused agent work; a slice with more than nine children is too big — split the slice. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
+            Do not implement anything and do not write any files yet — return only the plan."""
 input = [
     "port:task",
+    "slot:work-items",
+    "slot:done-criteria",
+    "slot:grounding",
+    "slot:next-key",
+]
+output = ["slot:slice-plan"]
+
+[prompt.write-the-slice]
+text = '''
+Write exactly one slice of the plan to the board — {slot:write-each-slice-item} — as TaskDocument TOML files in .internal/tasks/ (create the directory if missing). Do not write any other slice's files; other slices run in their own frames.
+            Write each task as one TaskDocument TOML file in .internal/tasks/, named <key>-<kebab-slug-of-title>.toml, in exactly this shape:
+
+    schema-version = "0.2"
+    key = "<NNNN or NNNN.X>"
+    title = "<short imperative title>"
+    status = "ready"
+    raised = "<YYYY-MM-DD>"
+    content = """
+    What this task is and why it exists — grounded, concrete, standalone.
+    """
+    scope = """
+    ## Decisions
+    The rulings made; what is in scope and what is explicitly out.
+    """
+    validation = """
+    ## Watch
+    Hazards and constraints an implementer must not trip.
+    ## Done when
+    The observable, verifiable condition proving the task is complete.
+    """
+    [relations]
+    parent = "<NNNN>"
+    depends-on = ["<key>", "<key>"]
+
+Rules:
+- A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
+- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Fold the grounding each task needs — its concrete files, validation gates with exact commands, invariants, constraints — into that task's own content/scope/validation, so every file stands alone.
+- Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
+- Never overwrite or renumber an existing file; keys are assigned once from the derived next-free key and are final.
+            Write the charter task first (the slice's key), then every child task from the slice's own plan, keeping each child's key, title, and depends-on exactly as planned. Stamp raised = {slot:raised-date} in every file. Ground each task's content/scope/validation in the work items {slot:work-items}, the done criteria {slot:done-criteria}, and the grounding notes {slot:grounding} — fold in what that task needs so it stands alone.
+            Do not implement anything. Return the receipt: the slice's key and the repo-relative path of every file you wrote.'''
+input = [
+    "slot:write-each-slice-item",
+    "slot:raised-date",
+    "slot:work-items",
+    "slot:done-criteria",
     "slot:grounding",
 ]
-output = ["slot:task-files"]
+output = ["slot:receipts"]
 
-[prompt.write]
-text = """
+[[sequence.write-each-slice-body.sequence]]
+id = "write-the-slice"
+title = "Write the slice"
+agent = "agent:smart-1"
+prompt = "prompt:write-the-slice"
+input = [
+    "slot:write-each-slice-item",
+    "slot:raised-date",
+    "slot:work-items",
+    "slot:done-criteria",
+    "slot:grounding",
+]
 
-                    Write each task below to .internal/tasks/ at the repo root, one file per task.
-                    Tasks: {slot:task-files}
-                    Create the directory if missing. List the directory first and continue its numbering: name each new file NNNN-<kebab-slug>.md, where NNNN is the next free zero-padded number after the highest one already present (count archived/ too), and stamp that number into the task's own heading in place of its placeholder. Fill the Raised date from today's date.
-                    Never overwrite or renumber an existing file. Keep each task's content faithful — do not add or drop material.
-                    Return one line per file naming the path you wrote."""
-input = ["slot:task-files"]
-output = ["slot:result"]
+[[sequence.write-each-slice-body.sequence.output]]
+slot = "slot:receipts"
+operation = "append"
 
 [procedure]
-description = "Refine the described task against the codebase, split it into small task files, and write them to .internal/tasks/ so the implement family can run."
+description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, and return the receipts."
 input = ["port:task"]
 output = ["port:written-files"]
+
+[[procedure.sequence]]
+id = "next-key"
+title = "Derive next board key"
+output = ["slot:next-key"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """ls .internal/tasks .internal/tasks/archived 2>/dev/null | awk -F'[.-]' '{n=$1+0; if (n>m) m=n} END {printf "%04d", m+1}'""",
+]
+
+[[procedure.sequence]]
+id = "raised-date"
+title = "Derive raised date"
+output = ["slot:raised-date"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    "date +%Y-%m-%d",
+]
+
+[[procedure.sequence]]
+id = "ingest"
+title = "Ingest the work source"
+agent = "agent:smart-1"
+prompt = "prompt:ingest"
+input = ["port:task"]
+output = [
+    "slot:work-items",
+    "slot:done-criteria",
+]
 
 [[procedure.sequence]]
 id = "refine-task"
@@ -143,19 +347,35 @@ output = ["slot:grounding"]
 
 [[procedure.sequence]]
 id = "split"
-title = "Split the work into task files"
+title = "Split the work into slices"
 agent = "agent:smart-1"
 prompt = "prompt:split"
 input = [
     "port:task",
+    "slot:work-items",
+    "slot:done-criteria",
     "slot:grounding",
+    "slot:next-key",
 ]
-output = ["slot:task-files"]
+output = ["slot:slice-plan"]
 
 [[procedure.sequence]]
-id = "write"
-title = "Write the task files (scribe)"
-agent = "agent:scribe"
-prompt = "prompt:write"
-input = ["slot:task-files"]
-output = ["slot:result"]
+id = "seed-receipts"
+title = "Seed the receipts"
+kind = "project"
+output = ["slot:receipts"]
+
+[[procedure.sequence.projection]]
+destination = "slot:receipts"
+
+[procedure.sequence.projection.source]
+literal = []
+
+[[procedure.sequence]]
+id = "write-each-slice"
+title = "Write each slice"
+kind = "for-each"
+sequence = "sequence:write-each-slice-body"
+over = "slot:slice-plan"
+item = "slot:write-each-slice-item"
+max-items = 6

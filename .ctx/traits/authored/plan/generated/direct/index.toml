@@ -1,8 +1,8 @@
 id = "plan"
 schema-version = "0.4"
-version = "0.4.0"
+version = "0.5.0"
 name = "Plan (Direct)"
-description = "Format a described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/ — no refinement, no invention, the fastest path to just implement."
+description = "Format described work into one well-formed board TaskDocument TOML file with wording kept near-verbatim — no refinement, no invention, the fastest path to just implement."
 variant = "direct"
 
 [metadata]
@@ -41,81 +41,136 @@ id = "brief"
 id = "task"
 direction = "input"
 schema = "schema:text"
-description = "The task you describe, in your own words — rough is fine."
+description = "The work you describe, in your own words — rough is fine. May reference a source document (a research report, an MVP plan) by repo-relative path."
 
 [[port]]
 id = "written-files"
 direction = "output"
-schema = "schema:text"
-description = "Paths of the task files written under .internal/tasks/."
-value = "slot:result"
+schema = "[schema:write-receipt]"
+description = "Per-slice receipts naming every task file written under .internal/tasks/."
+title = "Written Task Files"
+format = [
+    "structured",
+    "table",
+]
+value = "slot:receipts"
 
 [[slot]]
-id = "result"
+id = "next-key"
 schema = "schema:text"
-description = "Confirmation of the task files written (paths)."
+description = "Deterministic zero-padded next free board key, derived by a command step scanning .internal/tasks/ (archived/ included) — never agent arithmetic against the directory."
 
 [[slot]]
-id = "task-files"
+id = "raised-date"
 schema = "schema:text"
-description = "The house-format task file(s) to add to .internal/tasks/ — one or more standalone, dependency-ordered markdown tasks."
-hint = "Each task: '# NNNN — <title>' placeholder heading, a Status/Raised line, a grounded body, optional '## Watch' hazards, and a verifiable '## Done when'."
+description = "Today's date (YYYY-MM-DD), derived by a command step — the Raised stamp every written task carries."
 
-[[agent]]
-id = "scribe"
-description = "Writes the task file to .internal/tasks/."
-summary = "Write role."
+[[slot]]
+id = "receipts"
+schema = "[schema:write-receipt]"
+description = "One write receipt appended per slice frame (or produced whole by a single-frame variant)."
+
+[[schema]]
+id = "write-receipt"
+description = "One slice frame's account of the task files it wrote to the board."
+
+[schema.fields.files]
+schema = "[schema:text]"
+required = true
+description = "Repo-relative paths of every task file this slice's frame wrote."
+
+[schema.fields.slice-key]
+schema = "schema:text"
+required = true
+description = "The slice charter's key."
 
 [[agent]]
 id = "smart-1"
-description = "Formats the task text into one well-formed task file, near-verbatim."
-summary = "Format role."
+description = "Formats the described work into one well-formed board task file, near-verbatim."
+summary = "Format-and-write role."
 
 [prompt.format]
-text = """
-Format the task below into exactly one well-formed task file for .internal/tasks/.
-            Task as described: {port:task}
-            Keep the task's own wording near-verbatim. Do NOT refine, invent, or add requirements the task does not state; do not read the codebase or ground it in anything beyond the task text itself.
-            Format each task as one standalone Markdown file for .internal/tasks/: a "# NNNN — <short title>"
-    heading (leave NNNN as a placeholder; the write step assigns the real number), then a "**Status:**
-    ready to implement · **Raised:** <date>" line, then a body grounding the task in concrete detail, then an
-    optional "## Watch" section naming hazards and constraints an implementer must not trip, and a closing
-    "## Done when" section stating the observable, verifiable condition proving the task is complete. Size every
-    task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; if a task
-    would be larger, split it into several files. Order tasks so each depends only on earlier ones, and name any
-    prerequisite task explicitly in the body.
-            Do not implement anything."""
-input = ["port:task"]
-output = ["slot:task-files"]
+text = '''
+Format the described work into exactly one well-formed TaskDocument TOML task file on the board.
+            The work, as described: {port:task}
+            Keep the work's own wording near-verbatim. Do NOT refine, invent, or add requirements the description does not state; do not read the codebase or ground it in anything beyond the description itself.
+            Write each task as one TaskDocument TOML file in .internal/tasks/, named <key>-<kebab-slug-of-title>.toml, in exactly this shape:
 
-[prompt.write]
-text = """
+    schema-version = "0.2"
+    key = "<NNNN or NNNN.X>"
+    title = "<short imperative title>"
+    status = "ready"
+    raised = "<YYYY-MM-DD>"
+    content = """
+    What this task is and why it exists — grounded, concrete, standalone.
+    """
+    scope = """
+    ## Decisions
+    The rulings made; what is in scope and what is explicitly out.
+    """
+    validation = """
+    ## Watch
+    Hazards and constraints an implementer must not trip.
+    ## Done when
+    The observable, verifiable condition proving the task is complete.
+    """
+    [relations]
+    parent = "<NNNN>"
+    depends-on = ["<key>", "<key>"]
 
-                    Write each task below to .internal/tasks/ at the repo root, one file per task.
-                    Tasks: {slot:task-files}
-                    Create the directory if missing. List the directory first and continue its numbering: name each new file NNNN-<kebab-slug>.md, where NNNN is the next free zero-padded number after the highest one already present (count archived/ too), and stamp that number into the task's own heading in place of its placeholder. Fill the Raised date from today's date.
-                    Never overwrite or renumber an existing file. Keep each task's content faithful — do not add or drop material.
-                    Return one line per file naming the path you wrote."""
-input = ["slot:task-files"]
-output = ["slot:result"]
+Rules:
+- A parent charter task uses a bare "NNNN" key and holds the slice's goal, the work items it covers, and the slice's stop condition; its Done when is "every child task is closed and the stop condition holds". A charter has no [relations].parent (it may still declare depends-on toward earlier slices' charters).
+- Child tasks are keyed "NNNN.1", "NNNN.2", ... in dependency order; every child sets [relations].parent to its charter's key, and names any prerequisite task explicitly in depends-on — a child may depend only on tasks with earlier keys.
+- Size every child task to roughly 10-15 minutes of focused agent work — small enough to finish in one short pass; split anything larger into more children.
+- Fold the grounding each task needs — its concrete files, validation gates with exact commands, invariants, constraints — into that task's own content/scope/validation, so every file stands alone.
+- Omit [relations] entirely when a task has neither parent nor dependencies; never emit empty tables or empty arrays.
+- Never overwrite or renumber an existing file; keys are assigned once from the derived next-free key and are final.
+            Key the file {slot:next-key} and stamp raised = {slot:raised-date}.
+            Do not implement anything. Return the receipt: one entry naming the file written.'''
+input = [
+    "port:task",
+    "slot:next-key",
+    "slot:raised-date",
+]
+output = ["slot:receipts"]
 
 [procedure]
-description = "Format the described task into one well-formed house-format task file with wording kept near-verbatim, then add it to .internal/tasks/."
+description = "Derive the next board key and date, then format the described work near-verbatim into one TaskDocument TOML file on the board."
 input = ["port:task"]
 output = ["port:written-files"]
 
 [[procedure.sequence]]
-id = "format"
-title = "Format into a task file (smart-1)"
-agent = "agent:smart-1"
-prompt = "prompt:format"
-input = ["port:task"]
-output = ["slot:task-files"]
+id = "next-key"
+title = "Derive next board key"
+output = ["slot:next-key"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    """ls .internal/tasks .internal/tasks/archived 2>/dev/null | awk -F'[.-]' '{n=$1+0; if (n>m) m=n} END {printf "%04d", m+1}'""",
+]
 
 [[procedure.sequence]]
-id = "write"
-title = "Write the task files (scribe)"
-agent = "agent:scribe"
-prompt = "prompt:write"
-input = ["slot:task-files"]
-output = ["slot:result"]
+id = "raised-date"
+title = "Derive raised date"
+output = ["slot:raised-date"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    "date +%Y-%m-%d",
+]
+
+[[procedure.sequence]]
+id = "format"
+title = "Format into a task file"
+agent = "agent:smart-1"
+prompt = "prompt:format"
+input = [
+    "port:task",
+    "slot:next-key",
+    "slot:raised-date",
+]
+output = ["slot:receipts"]

@@ -1,9 +1,4 @@
 {
-  "agent:scribe": {
-    "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
-    "start": 4,
-    "end": 4
-  },
   "agent:smart-1": {
     "file": ".ctx/traits/authored/plan/source/shared/agent.ts",
     "start": 3,
@@ -11,11 +6,16 @@
   },
   "port:task": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 3,
-    "end": 3
+    "start": 11,
+    "end": 11
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 135,
+    "end": 135
+  },
+  "prompt:ingest": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/ingest.ts",
     "start": 14,
     "end": 14
   },
@@ -26,43 +26,113 @@
   },
   "prompt:split": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
-    "start": 7,
-    "end": 7
+    "start": 15,
+    "end": 15
   },
-  "prompt:write": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
-    "start": 6,
-    "end": 6
+  "prompt:write-the-slice": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
+    "start": 23,
+    "end": 23
+  },
+  "schema:plan-slice": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 54,
+    "end": 54
+  },
+  "schema:plan-task": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 35,
+    "end": 35
+  },
+  "schema:work-item": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 17,
+    "end": 17
+  },
+  "schema:write-receipt": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 71,
+    "end": 71
+  },
+  "sequence:procedure/ingest": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/ingest.ts",
+    "start": 12,
+    "end": 12
+  },
+  "sequence:procedure/next-key": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/derive.ts",
+    "start": 17,
+    "end": 17
+  },
+  "sequence:procedure/raised-date": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/derive.ts",
+    "start": 26,
+    "end": 26
   },
   "sequence:procedure/refine-task": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/refine.ts",
     "start": 6,
     "end": 6
   },
+  "sequence:procedure/seed-receipts": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
+    "start": 16,
+    "end": 16
+  },
   "sequence:procedure/split": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/split.ts",
-    "start": 7,
-    "end": 7
-  },
-  "sequence:procedure/write": {
-    "file": ".ctx/traits/authored/plan/source/shared/stage/write.ts",
-    "start": 6,
-    "end": 6
-  },
-  "slot:grounding": {
-    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 19,
-    "end": 19
-  },
-  "slot:result": {
-    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
     "start": 13,
     "end": 13
   },
-  "slot:task-files": {
+  "sequence:procedure/write-each-slice": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
+    "start": 21,
+    "end": 21
+  },
+  "sequence:write-each-slice-body/write-the-slice": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
+    "start": 22,
+    "end": 22
+  },
+  "slot:done-criteria": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 7,
-    "end": 7
+    "start": 87,
+    "end": 87
+  },
+  "slot:grounding": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 112,
+    "end": 112
+  },
+  "slot:next-key": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 92,
+    "end": 92
+  },
+  "slot:raised-date": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 97,
+    "end": 97
+  },
+  "slot:receipts": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 107,
+    "end": 107
+  },
+  "slot:slice-plan": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 101,
+    "end": 101
+  },
+  "slot:work-items": {
+    "file": ".ctx/traits/authored/plan/source/shared/data.ts",
+    "start": 82,
+    "end": 82
+  },
+  "slot:write-each-slice-item": {
+    "file": ".ctx/traits/authored/plan/source/shared/stage/writeSlices.ts",
+    "start": 21,
+    "end": 21
   },
   "trait:plan": {
     "file": "[eval1]",
