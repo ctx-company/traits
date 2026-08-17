@@ -45,7 +45,7 @@ export function tasks(agent: AgentHandle, maxSlices: number) {
       input: input.prompt(
         `Write exactly one slice of the plan to the board — {slice} — as TaskDocument TOML files in .internal/tasks/ (create the directory if missing). Do not write any other slice's files; other slices run in their own frames.
             ${TASK_FORMAT_DOCTRINE}
-            Write the charter task first (the slice's key), then every child task from the slice's own plan, keeping each child's key, title, and depends-on exactly as planned. Stamp raised = {raised-date} in every file. Ground each task's content/scope/validation in the work items {work-items}, the done criteria {done-criteria}, and the grounding notes {grounding} — fold in what that task needs so it stands alone.
+            Write the charter task first (the slice's key), then every child task from the slice's own plan, keeping each child's key, title, and depends-on exactly as planned. Stamp raised = {raised-date} in every file. Ground each task's content/scope/validation in the work items {work-items}, the done criteria {done-criteria}, and the grounding notes {grounding} — fold in what that task needs so it stands alone. Derive each child's [[checks]] from its done criteria per the doctrine, sourcing commands from the grounding notes' validation gates.
             Do not implement anything. Return the receipt: the slice's key and the repo-relative path of every file you wrote.`,
         {
           slice,

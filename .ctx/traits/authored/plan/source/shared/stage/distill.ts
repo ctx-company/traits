@@ -16,7 +16,7 @@ export function tasks(agent: AgentHandle) {
       `Turn the described work directly into TaskDocument TOML task files on the board — skip deriving separate grounding notes, but read the relevant parts of the repository with your tools so every task is grounded in this codebase's concrete files, modules, and validation gates.
             The work, as described: {task}
             ${TASK_FORMAT_DOCTRINE}
-            Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks; a single bare-key task when it does not). Stamp raised = {raised-date} in every file.
+            Key the first file {next-key} and continue from there ("<key>.1", "<key>.2", ... under one charter when the work needs several tasks; a single bare-key task when it does not). Stamp raised = {raised-date} in every file. Derive each task's [[checks]] from its done criteria per the doctrine, confirming with your tools that any command you name actually exists in the repo before declaring it.
             Do not implement anything. Return the receipts: one entry per charter (or standalone task) naming every file written.`,
       { task: taskInput, "next-key": nextKey, "raised-date": raisedDate },
     ),
