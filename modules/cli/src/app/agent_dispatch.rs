@@ -595,6 +595,7 @@ mod tests {
                 "codex",
                 "exec",
                 "--json",
+                "--skip-git-repo-check",
                 "--config",
                 "approval_policy=\"never\"",
                 "--config",
