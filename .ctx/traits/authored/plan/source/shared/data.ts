@@ -89,6 +89,24 @@ export const doneCriteria = slot({
   schema: schema.list(schema.text()),
   description: "The source's explicit definition-of-done items, empty when it states none.",
 });
+export const boardSnapshot = slot.text({
+  id: "board-snapshot",
+  description:
+    "Deterministic checksum of the board listing at run start — the reference the pre-write guard compares against, so a frame that writes task files before the write phase fails the run instead of merging out-of-plan files.",
+});
+// The runtime's own `check`-step contract (P565): a check step's output
+// slot must declare `ok` (schema:boolean) plus `argv` (schema:text list).
+const boardCheckSchema = schema.object("board-untouched", {
+  ok: schema.field(schema.boolean(), {
+    description: "True when the board listing still matches the run-start snapshot at the write boundary.",
+  }),
+  argv: schema.field(schema.list(schema.text()), { description: "The exact argv that decided it." }),
+});
+export const boardCheck = slot({
+  id: "board-check",
+  schema: boardCheckSchema,
+  description: "The pre-write board guard's verdict: detection that no earlier step wrote to the board.",
+});
 export const nextKey = slot.text({
   id: "next-key",
   description:

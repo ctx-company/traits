@@ -16,5 +16,5 @@ export function task(agent: AgentHandle) {
                 - validation gates (exact commands)
                 - constraints specific to this task.
             This is the context the task files carry, not the step-by-step plan.
-            Do not implement anything.`, output: grounding });
+            Do not implement anything, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted.`, output: grounding });
 }

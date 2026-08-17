@@ -63,7 +63,8 @@ export default function () {
                 Extract three things, faithful to the brief's own words — never your preferred framing:
                 1. Its research tracks: every enumerated track or area the brief wants investigated, with the brief's own question for each. When the brief does not enumerate tracks, distill them from its prose.
                 2. The deliverable structure it demands for the final report: one entry per required top-level section, in the brief's order. When the brief specifies no structure, propose one that fits its content — but when it does specify one, reproduce it exactly.
-                3. Its explicit definition-of-done items, empty when it states none.`,
+                3. Its explicit definition-of-done items, empty when it states none.
+                Write nothing to disk in this step — later steps own every file this run produces.`,
       output: [shared.data.briefTracks, shared.data.deliverableSections, shared.data.doneCriteria],
       include: [
         shared.data.briefTracks.optional(),

@@ -56,6 +56,16 @@ format = [
 value = "slot:receipts"
 
 [[slot]]
+id = "board-check"
+schema = "schema:board-untouched"
+description = "The pre-write board guard's verdict: detection that no earlier step wrote to the board."
+
+[[slot]]
+id = "board-snapshot"
+schema = "schema:text"
+description = "Deterministic checksum of the board listing at run start — the reference the pre-write guard compares against, so a frame that writes task files before the write phase fails the run instead of merging out-of-plan files."
+
+[[slot]]
 id = "done-criteria"
 schema = "[schema:text]"
 description = "The source's explicit definition-of-done items, empty when it states none."
@@ -95,6 +105,19 @@ description = "The source's own units of demanded work — coverage is judged ag
 id = "write-each-slice-item"
 schema = "schema:plan-slice"
 description = "Per-item value for the write-each-slice loop."
+
+[[schema]]
+id = "board-untouched"
+
+[schema.fields.argv]
+schema = "[schema:text]"
+required = true
+description = "The exact argv that decided it."
+
+[schema.fields.ok]
+schema = "schema:boolean"
+required = true
+description = "True when the board listing still matches the run-start snapshot at the write boundary."
 
 [[schema]]
 id = "plan-slice"
@@ -189,7 +212,7 @@ text = """
             Extract two things, faithful to the source's own words — never your preferred framing:
             1. Its work items: every unit of work the source demands (an MVP slice, an enumerated deliverable, a named milestone), each with the source's own requirement for it. When the source does not enumerate, distill 2-8 items from its prose.
             2. Its explicit definition-of-done items (a stop condition, acceptance criteria), empty when it states none.
-            Do not implement anything and do not plan yet — this step only records what the source demands."""
+            Do not implement anything, do not plan yet, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted."""
 input = ["port:task"]
 output = [
     "slot:work-items",
@@ -211,7 +234,7 @@ text = """
                 - validation gates (exact commands)
                 - constraints specific to this task.
             This is the context the task files carry, not the step-by-step plan.
-            Do not implement anything."""
+            Do not implement anything, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted."""
 input = ["port:task"]
 output = ["slot:grounding"]
 
@@ -224,8 +247,8 @@ text = """
             The source's done criteria: {slot:done-criteria}
             Grounding notes: {slot:grounding}
             Assign final board keys now, starting at {slot:next-key}: the first slice's charter takes that key, the next slice the following number, and so on; children are "<charter-key>.1", "<charter-key>.2", ... in dependency order. Keys are final — no placeholders.
-            Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly 10-15 minutes of focused agent work; a slice with more than nine children is too big — split the slice. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
-            Do not implement anything and do not write any files yet — return only the plan."""
+            Plan at most eight slices — consolidate related work items into one slice rather than exceeding the cap. Every work item MUST appear in at least one slice's covers; a slice may own several related items. Size every child task to roughly 10-15 minutes of focused agent work; a slice with more than nine children is too big — split the slice. Order slices and children so each depends only on earlier keys, and record real dependencies explicitly in each task's depends-on.
+            Do not implement anything, and write nothing to disk in this step — not task files, not notes; return only the plan. A later step writes the board from it; any file created here is out-of-plan and will not be adopted."""
 input = [
     "port:task",
     "slot:work-items",
@@ -280,6 +303,28 @@ input = [
 ]
 output = ["slot:receipts"]
 
+[[sequence.ctx-branch-arm-p-21-premature-board-write-then.sequence]]
+id = "premature-board-write-exit"
+title = "Premature board write"
+kind = "terminal"
+outcome = "error"
+message = "an early step wrote to .internal/tasks before the write phase; ingest/refine/split must leave the board untouched, so the run fails rather than adopting out-of-plan files"
+
+[[sequence.planning-body.sequence]]
+id = "split"
+title = "Split the work into slices"
+agent = "agent:smart-1"
+prompt = "prompt:split"
+input = [
+    "port:task",
+    "slot:work-items",
+    "slot:done-criteria",
+    "slot:grounding",
+    "slot:next-key",
+    { slot = "slot:slice-plan", optional = true },
+]
+output = ["slot:slice-plan"]
+
 [[sequence.write-each-slice-body.sequence]]
 id = "write-the-slice"
 title = "Write the slice"
@@ -301,6 +346,18 @@ operation = "append"
 description = "Extract the source's work items and done criteria, ground the work in the codebase, split it into a typed slice plan with final keys, write each slice's TaskDocument TOML files in its own frame, and return the receipts."
 input = ["port:task"]
 output = ["port:written-files"]
+
+[[procedure.sequence]]
+id = "board-snapshot"
+title = "Snapshot the board"
+output = ["slot:board-snapshot"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    "ls .internal/tasks .internal/tasks/archived 2>/dev/null | sort | cksum",
+]
 
 [[procedure.sequence]]
 id = "next-key"
@@ -346,18 +403,71 @@ input = ["port:task"]
 output = ["slot:grounding"]
 
 [[procedure.sequence]]
-id = "split"
-title = "Split the work into slices"
-agent = "agent:smart-1"
-prompt = "prompt:split"
-input = [
-    "port:task",
-    "slot:work-items",
-    "slot:done-criteria",
-    "slot:grounding",
-    "slot:next-key",
+id = "planning"
+title = "Planning"
+kind = "loop"
+sequence = "sequence:planning-body"
+max-iterations = 3
+on-exhausted = "abort"
+
+[[procedure.sequence.until.any]]
+equals = 1
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 2
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 3
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 4
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 5
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 6
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 7
+count = "slot:slice-plan"
+
+[[procedure.sequence.until.any]]
+equals = 8
+count = "slot:slice-plan"
+
+[[procedure.sequence]]
+id = "board-untouched"
+title = "Board untouched before write"
+kind = "check"
+input = ["slot:board-snapshot"]
+output = ["slot:board-check"]
+
+[procedure.sequence.command]
+argv = [
+    "sh",
+    "-c",
+    'ls .internal/tasks .internal/tasks/archived 2>/dev/null | sort | cksum | grep -qxF -- "$1"',
+    "_",
+    "{slot:board-snapshot}",
 ]
-output = ["slot:slice-plan"]
+
+[[procedure.sequence]]
+id = "premature-board-write"
+title = "Premature board write"
+kind = "branch"
+sequence = "sequence:ctx-branch-arm-p-21-premature-board-write-then"
+
+[procedure.sequence.when]
+slot = "slot:board-check"
+field = "ok"
+equals = false
 
 [[procedure.sequence]]
 id = "seed-receipts"
@@ -378,4 +488,4 @@ kind = "for-each"
 sequence = "sequence:write-each-slice-body"
 over = "slot:slice-plan"
 item = "slot:write-each-slice-item"
-max-items = 6
+max-items = 8
