@@ -630,7 +630,10 @@ fn item_activity(
 }
 
 /// Progress text for a container mid-execution, from the control stack entry
-/// it opened (1-based for display).
+/// it opened (1-based for display): `iteration k/max` for a loop, `item
+/// k/total` for a for-each (total is the resolved list length, not the
+/// structural `max-items` bound — the run iterates the list, so the list is
+/// what progress is measured against).
 fn container_progress_text(
     session: &ctx_traits_core::procedure::session::Session,
     item: &ctx_traits_core::procedure::run::PlannedSequenceItem,
@@ -642,6 +645,13 @@ fn container_progress_text(
     if frame.control_item_id.as_deref() != Some(item_id) || frame.parent_run_index != item.run_index
     {
         return None;
+    }
+    if frame.kind == ctx_traits_core::procedure::runtime::ControlKind::ForEach {
+        let index = frame.item_index? + 1;
+        return match frame.item_total {
+            Some(total) => Some(format!("item {index}/{total}")),
+            None => Some(format!("item {index}")),
+        };
     }
     let iteration = frame.iteration_index? + 1;
     match frame.max_iterations {
