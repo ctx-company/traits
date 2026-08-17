@@ -30,12 +30,13 @@ export default function () {
     "Independent review role.",
   );
 
+  shared.stage.derive.boardSnapshotStep();
   shared.stage.derive.nextKeyStep();
   shared.stage.derive.raisedDateStep();
   shared.stage.ingest.contract(smart1);
   shared.stage.refine.task(smart1);
   shared.stage.split.slices(smart1);
-  shared.stage.writeSlices.tasks(smart1, 6);
+  shared.stage.writeSlices.tasks(smart1, shared.stage.split.MAX_SLICES);
   shared.stage.review.loop(smart2, smart1);
 
   return { writtenFiles: shared.data.writtenFiles, parkReport: shared.data.parkReportPort };

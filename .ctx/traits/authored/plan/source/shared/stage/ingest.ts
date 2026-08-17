@@ -16,7 +16,7 @@ export function contract(agent: AgentHandle) {
             Extract two things, faithful to the source's own words — never your preferred framing:
             1. Its work items: every unit of work the source demands (an MVP slice, an enumerated deliverable, a named milestone), each with the source's own requirement for it. When the source does not enumerate, distill 2-8 items from its prose.
             2. Its explicit definition-of-done items (a stop condition, acceptance criteria), empty when it states none.
-            Do not implement anything and do not plan yet — this step only records what the source demands.`,
+            Do not implement anything, do not plan yet, and write nothing to disk in this step — not task files, not notes. A later step writes the board from the reviewed plan; any file created here is out-of-plan and will not be adopted.`,
     output: [workItems, doneCriteria],
   });
 }

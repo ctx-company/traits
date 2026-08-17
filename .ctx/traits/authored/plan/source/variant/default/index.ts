@@ -27,12 +27,13 @@ export default function () {
     "Contract + grounding + planning + composition role.",
   );
 
+  shared.stage.derive.boardSnapshotStep();
   shared.stage.derive.nextKeyStep();
   shared.stage.derive.raisedDateStep();
   shared.stage.ingest.contract(smart1);
   shared.stage.refine.task(smart1);
   shared.stage.split.slices(smart1);
-  shared.stage.writeSlices.tasks(smart1, 6);
+  shared.stage.writeSlices.tasks(smart1, shared.stage.split.MAX_SLICES);
 
   return { writtenFiles: shared.data.writtenFiles };
 }

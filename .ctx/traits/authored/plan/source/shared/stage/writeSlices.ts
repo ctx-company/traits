@@ -1,7 +1,7 @@
 import type { AgentHandle } from "@ctx-traits/cdk";
-import { input, operation, step } from "@ctx-traits/cdk";
+import { condition, flow, input, operation, step } from "@ctx-traits/cdk";
 
-import { doneCriteria, grounding, raisedDate, receipts, slicePlan, workItems } from "../data.ts";
+import { boardCheck, boardSnapshot, doneCriteria, grounding, raisedDate, receipts, slicePlan, workItems } from "../data.ts";
 import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
 
 /**
@@ -13,6 +13,28 @@ import { TASK_FORMAT_DOCTRINE } from "../resource.ts";
  * reader needs must sit before the loop.
  */
 export function tasks(agent: AgentHandle, maxSlices: number) {
+  // The pre-write board guard: the prompts above forbid early writes, but a
+  // prompt is advisory — this check re-lists the board and compares against
+  // the run-start snapshot, and the authored error terminal fails the run
+  // (typed, nonzero) rather than letting out-of-plan files ride the merge.
+  // Detection at the one boundary that matters, not prevention: the harness
+  // confinement layer deliberately allows writes inside the run worktree.
+  step.check("Board untouched before write", {
+    id: "board-untouched",
+    argv: [
+      "sh",
+      "-c",
+      'ls .internal/tasks .internal/tasks/archived 2>/dev/null | sort | cksum | grep -qxF -- "$1"',
+      "_",
+      boardSnapshot,
+    ],
+    output: boardCheck,
+  });
+  flow.errorWhen("Premature board write", condition.isFalse(boardCheck.ok), {
+    message:
+      "an early step wrote to .internal/tasks before the write phase; ingest/refine/split must leave the board untouched, so the run fails rather than adopting out-of-plan files",
+  });
+
   step.project("Seed the receipts", {
     id: "seed-receipts",
     projections: [{ source: operation.literal([]), destination: receipts }],

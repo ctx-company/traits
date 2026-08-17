@@ -11,8 +11,8 @@
   },
   "port:written-files": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 135,
-    "end": 135
+    "start": 153,
+    "end": 153
   },
   "prompt:distill": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/distill.ts",
@@ -36,23 +36,23 @@
   },
   "sequence:procedure/raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/stage/derive.ts",
-    "start": 26,
-    "end": 26
+    "start": 40,
+    "end": 40
   },
   "slot:next-key": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 92,
-    "end": 92
+    "start": 110,
+    "end": 110
   },
   "slot:raised-date": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 97,
-    "end": 97
+    "start": 115,
+    "end": 115
   },
   "slot:receipts": {
     "file": ".ctx/traits/authored/plan/source/shared/data.ts",
-    "start": 107,
-    "end": 107
+    "start": 125,
+    "end": 125
   },
   "trait:plan": {
     "file": "[eval1]",
