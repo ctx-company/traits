@@ -1,0 +1,43 @@
+schema-version = "0.2"
+key = "0199"
+title = "Startup-to-run-pane input handoff race breaks inline TUI"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Live repro (2026-08-18, ctx-notify, real interactive terminal): a
+--task queue run reached "creating worktree", then fell back — "run tui
+unavailable; falling back to status progress: start ratatui run pane:
+The cursor position could not be read within a normal duration". The run
+continued degraded (status progress), so this is resilience working, but
+the inline pane should not have failed on a live TTY.
+
+Mechanism (already half-documented in tui_ratatui.rs ~277-301): building
+the inline viewport costs a crossterm ESC[6n cursor query. The known
+repro is stdin-not-a-tty; this NEW repro is a live terminal where the
+STARTUP pane's input reader has not fully released the terminal when the
+run pane issues its query — the reply is consumed by the dying reader
+and the query times out. The screen fragment ("└─...┘ctx run · creating
+worktree" on one line) shows the startup pane teardown racing the run
+header. The --task queue path re-initializes panes per member, widening
+the window; single runs rarely hit it.
+"""
+scope = """
+## Decisions
+- Serialize the handoff: the startup pane's reader must be provably shut
+  down (joined, terminal modes restored) before the run pane's cursor
+  query is issued — never a sleep, an actual join/handshake.
+- Keep the existing fallback exactly as-is for genuinely headless
+  invocations; this task only removes the false-negative on live TTYs.
+"""
+validation = """
+## Watch
+- adopt_controlling_terminal (tui_ratatui.rs ~342) and the documented
+  crossterm poll-swallow hazard: do not reintroduce the unbounded spin.
+- Reproduction needs a PTY harness; the queue path (pane per member) is
+  the case to exercise.
+
+## Done when
+A --task queue run on a PTY brings up the inline run pane for each
+member without the cursor-position fallback firing; the fallback still
+engages when stdin and stderr are both non-TTY.
+"""

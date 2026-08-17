@@ -1,0 +1,42 @@
+schema-version = "0.2"
+key = "0198"
+title = "Queue and dispatch refusals must survive TUI teardown"
+status = "ready"
+raised = "2026-08-18"
+content = """
+Live repro (2026-08-18, ctx-notify): `ctx traits run --worktree --merge
+--task 0003` under TUI progress refused pre-session (first with the
+missing task-board binding, later with a dependency refusal) — exit code
+7 and the full error text were correct on the plain path, but under the
+TUI the operator saw a bare "exits immediately": the refusal lines print
+while the startup/run pane owns the screen, and the pane's teardown or
+repaint clears them before a human can read them.
+
+The queue's own reporting (per-member error line, outcome table, the
+"halted — pass --continue-on-failure" hint, handle_task_queue_run in
+run.rs ~728-815) is complete; the defect is purely that it can be
+painted over. Every pre-session refusal (task-binding, board-resolution,
+wall/closed/dependency preflights) and the queue outcome table must land
+where they survive: emitted after the pane has fully torn down, or
+committed into the pane's scrollback the way run panes commit their
+final frame.
+"""
+scope = """
+## Decisions
+- No new message content — the existing text is right; this is a
+  visibility/ordering fix only.
+- Applies to both the single-run refusal path and the --task queue
+  report, under every progress mode.
+"""
+validation = """
+## Watch
+- The plain (non-TTY) path already behaves; do not double-print there.
+- 0193's dashboard feedback fix is the sibling surface — reuse its
+  approach where the code overlaps, never a parallel mechanism.
+
+## Done when
+A TUI-mode dispatch refused pre-session leaves the refusal text and (for
+queues) the outcome table visible in the terminal after ctx exits; a
+proof drives a refusal under a PTY and asserts the text survives in the
+final screen contents.
+"""

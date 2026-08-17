@@ -1,39 +1,33 @@
-// implement-complex: worker -> two INDEPENDENT reviewers, both must approve
-// each round before the loop exits — then commit. Same shape as default
-// with a second, independent verdict; exhaustion aborts with its stop
-// reason, commits nothing.
-import { condition, defineVariant, flow, useBehavior, useIntent } from "@ctx-traits/cdk";
-
+import * as cdk from "@ctx-traits/cdk";
 import * as shared from "#trait/shared/index.ts";
 
 export default function () {
-  defineVariant("Complex", {
-    name: "Implement (Complex)",
-    description:
-      "Doubly-reviewed implementation: the worker implements the board task and two independent reviewers must both approve against the task's own Done when — then commit.",
+  cdk.defineVariant("Complex", {
+    description: "Reviewed implementation: implement, review, refine & commit.",
     metadata: { tag: [...shared.metadata.tag, "multi-agent"] },
   });
-  useBehavior(shared.metadata.FAMILY_BEHAVIOR);
-  useIntent(shared.intent.REVIEWED_INTENT);
 
-  flow.loop("Building", (loop) => {
-    loop.maxIterations(8, { onExhausted: "abort" });
+  shared.stage.draft.compose("Draft the implementation plan");
 
-    shared.stage.implement.applyDualReviewed("Building Produce");
-    shared.stage.diff.changedFilesStep();
-    shared.stage.review.first("Building Review 1");
-    shared.stage.review.second("Building Review 2");
+  cdk.flow.loop("Doubly-reviewed refinement", (loop) => {
+    loop.maxIterations(10, { onExhausted: "abort" });
 
-    flow.untilAll([
-      condition.equals(shared.data.verdict1.status, "approved"),
-      condition.equals(shared.data.verdict2.status, "approved"),
+    shared.stage.work.implement("Implement the task");
+    shared.stage.diff.capture("Capture the changed files");
+    shared.stage.review.primary("Review the implementation");
+    shared.stage.review.secondary("Cross-review the implementation");
+
+    cdk.flow.untilAll([
+      cdk.condition.equals(shared.data.verdict1.status, "approved"),
+      cdk.condition.equals(shared.data.verdict2.status, "approved"),
     ]);
   });
 
-  shared.familyCommitTail({
-    id: "shipping",
-    scribe: { agent: shared.agent.scribe, text: shared.stage.git.scribeText },
-    receipt: shared.data.commitOutput,
+  shared.stage.git.status("Check working tree status");
+  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.stage.git.status.output), () => {
+    shared.stage.git.commitMessage("Write the commit message");
+    shared.stage.git.commitStage("Stage all changes");
+    shared.stage.git.commitSubmit("Commit the work");
   });
 
   return { commitReport: shared.data.commitReport };

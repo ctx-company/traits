@@ -657,6 +657,42 @@ describe("defineVariant/useVariant hook-style families", () => {
     expect((draft?.["procedure"] as JsonObject | undefined)?.["description"]).toBe("One step.");
   });
 
+  it("an explicit id keeps the display-form first argument off the public variant key", async () => {
+    const displayVariant = (ctx: unknown) => {
+      void ctx;
+      defineVariant("Family (Quick)", { id: "quick", description: "One step." });
+      const out = slot.text("display-result");
+      agent.worker("display-worker", { description: "Does the step." }).prompt("Do the step", {
+        input: input.prompt`Do it.`,
+        output: out,
+      });
+      return { result: out };
+    };
+    const family = evaluateTraitFunction(function () {
+      defineTrait("display-family", { version: "0.1.0" });
+      useVariant(displayVariant).default();
+    });
+    if (!isTraitFamilyHandle(family)) {
+      throw new Error("expected a trait family handle");
+    }
+    const resolved = await resolveTraitFamily(family);
+    const quick = resolved.variants.find((entry) => entry.path === "quick");
+    expect(quick, "variant key must be the explicit id, never the slugged display form").toBeDefined();
+    expect((quick?.draft as JsonObject | undefined)?.["name"]).toBe("Family (Quick)");
+  });
+
+  it("a non-slug explicit id is a build error", () => {
+    expect(() =>
+      evaluateTraitFunction(function () {
+        defineTrait("bad-id-family", { version: "0.1.0" });
+        useVariant((ctx: unknown) => {
+          void ctx;
+          defineVariant("Whatever", { id: "Not A Slug" });
+        }).default();
+      }),
+    ).toThrow(/id "Not A Slug" is not a kebab slug/);
+  });
+
   it("defineVariant inside a trait frame is a build error", () => {
     expect(() =>
       evaluateTraitFunction(() => {

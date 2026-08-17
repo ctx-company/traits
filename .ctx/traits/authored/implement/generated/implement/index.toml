@@ -1,16 +1,14 @@
 id = "implement"
 schema-version = "0.4"
 version = "0.25.0"
-name = "Implement (Complex)"
-description = "Doubly-reviewed implementation: the worker implements the board task and two independent reviewers must both approve against the task's own Done when — then commit."
-variant = "complex"
+name = "Implement"
+description = "Reviewed implementation: implement, review, refine & commit."
+variant = "implement"
 
 [metadata]
 tag = [
-    "dogfood",
     "implementation",
     "review",
-    "multi-agent",
 ]
 
 [[intent.require]]
@@ -79,9 +77,25 @@ description = "Names and change-kinds of every file changed this round — an in
 hint = "git diff --name-status output, excluding runtime state; it omits untracked files."
 
 [[slot]]
+id = "commit-message"
+schema = "schema:text"
+description = "Commit message for the completed task; injected directly into the git commit command step."
+
+[[slot]]
 id = "commit-output"
 schema = "schema:text"
 description = "Output evidence from the git commit command step: committed hash and subject."
+
+[[slot]]
+id = "draft"
+schema = "schema:text"
+description = "smart-1's implementation draft for the task — the plan the worker implements."
+hint = "Scope (restated from the task file), files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation."
+
+[[slot]]
+id = "git-status"
+schema = "schema:text"
+description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
 id = "review-verdict-1"
@@ -94,31 +108,22 @@ schema = "schema:review-verdict"
 description = "Second, independent reviewer's verdict for the current work state."
 
 [[slot]]
-id = "shipping-message"
+id = "stage-output"
 schema = "schema:text"
-description = "The commit message the scribe writes for the completed work."
-
-[[slot]]
-id = "shipping-stage-output"
-schema = "schema:text"
-description = "Verbatim output of the git-add staging command."
-
-[[slot]]
-id = "shipping-status"
-schema = "schema:text"
-description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
-hint = "Empty exactly when the tree is clean; the commit tail is skipped entirely in that case, so no commit is attempted and the scribe never runs."
-
-[[slot]]
-id = "shipping-unstage-output"
-schema = "schema:text"
-description = "Verbatim output of the runtime-state unstage command (git reset -- .agents/runs); empty when nothing was staged there."
+description = "Output evidence from the git add command step."
 
 [[slot]]
 id = "work-summary"
 schema = "schema:text"
 description = "Worker's cumulative account of the implemented state, extended each round — the worker's cross-round memory."
 hint = "Cumulative across rounds: your own summary from the previous round arrives as input — extend it, never restart it. Per round: what changed (files), how it was validated, open concerns, and per-blocker progress against the attached verdict."
+
+[[resource]]
+id = "task-board"
+path = ".internal/tasks"
+root = "repo"
+hint = "Repo-root directory for the task board: one TaskDocument TOML file per task, named <key>-kebab-slug.toml; agents read task files with their own tools and never inline them."
+trigger = "on-demand"
 
 [[schema]]
 id = "blocker"
@@ -275,41 +280,58 @@ description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" 
 
 [[agent]]
 id = "scribe"
-description = "Writes the commit message for the completed task from the work summary; git staging and committing run as command steps."
+description = "Commit & Summary Writing; git staging and committing run as command steps."
 summary = "Commit-message role."
 
 [[agent]]
-id = "smart-1"
-description = "Strong model: reviews the implemented state each refinement round."
-summary = "Reviewer role."
-
-[[agent]]
-id = "smart-2"
-description = "Independent strong model: cross-reviews the implemented state each round, separately from smart-1."
-summary = "Second-reviewer role."
+id = "smart"
+description = "Plan Drafting and Review"
+summary = "Review role."
 
 [[agent]]
 id = "worker"
-description = "Implements the task and applies reviewer fixes."
+description = "Implementation Work"
 summary = "Implementation role."
 
-[prompt.building-produce]
+[prompt.draft-the-implementation-plan]
 text = """
-Implement {port:task}.
-    The task's file lives in .internal/tasks/ (matched by key, name, or filename) — read it with your tools; its content, scope, and validation sections are the contract. Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
-    No reviewer verdict attached means this is round 1: implement the task in full. On every later round a verdict IS attached and redefines your work: fix its blockers, largest first. Your own work summary from the previous round is your memory of what prior rounds did — extend it, never restart it.
-    Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file.
-    Return the cumulative work summary: what changed (files), how it was validated, open concerns."""
+
+    Draft the implementation plan for {port:task} — its file lives in .internal/tasks/ (matched by key, name, or filename); read it and the relevant code with your tools.
+    Scope, files to touch, approach, reuse opportunities, validation plan, risks. A plan, not an implementation.
+"""
 input = ["port:task"]
+output = ["slot:draft"]
+
+[prompt.implement-the-task]
+text = """
+
+    Implement {port:task} following the draft {slot:draft} — the task's file lives in .internal/tasks/ (matched by key, name, or filename).
+    Honor Watch, and treat Done when as the definition of done: run the checks it names before reporting.
+    If a reviewer verdict from the previous round is present, fix the blockers it names, largest first.
+
+
+
+    Return the cumulative work summary (what changed, how it was validated & open concerns): slot:work-summary
+"""
+input = [
+    "port:task",
+    "slot:draft",
+]
 output = ["slot:work-summary"]
 
-[prompt.building-review-1]
+[prompt.review-the-implementation]
 text = """
-Review the working tree's implemented state for {port:task} against the task file's own contract — read the task file and the changed code with your tools. Work summary: {slot:work-summary}. {slot:changed-files} names every file changed this round (an index, not the change; it omits untracked files).
-    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
-    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify each with your own tools, and flip to done only on confirmed evidence.
-    Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
-    Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file."""
+
+    Review the working tree's implemented state for {port:task} against the task file's own contract as source of truth.
+    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication.
+    Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
+    Optionally attached verdicts from previous rounds: {slot:review-verdict-1} & {slot:review-verdict-2}
+    Worker's summary: {slot:work-summary}, Changed files {slot:changed-files}.
+  
+
+
+    Return the typed review verdict — status is revise while any blocker remains, approved when none do (slot:review-verdict-1)
+  """
 input = [
     "port:task",
     "slot:work-summary",
@@ -317,50 +339,79 @@ input = [
 ]
 output = ["slot:review-verdict-1"]
 
-[prompt.building-review-2]
+[prompt.write-the-commit-message]
 text = """
-Independently review the working tree's implemented state for {port:task} against the task file's own contract. Do not trust the work summary {slot:work-summary} or the first reviewer's verdict — read the task file and inspect the changed code yourself ({slot:changed-files} is the index of this round's changes; it omits untracked files).
-    A BLOCKER is a correctness bug, an unmet item of the task's own Done when, clear over-build, or un-abstracted duplication. Everything else is advisory and never blocks.
-    Your own verdict from last round is attached when one exists: carry every open blocker forward verbatim, verify each with your own tools, and flip to done only on confirmed evidence.
-    Set status to revise while any blocker remains, approved when none do. Say "not yet" as many rounds as it takes; do not approve to end the loop, and do not invent a blocker to extend it.
-    Never edit files under .internal/tasks/ — the task board is owner-maintained; a run records its progress in the work summary and the commit message, never in a task file."""
-input = [
-    "port:task",
-    "slot:work-summary",
-    "slot:changed-files",
-]
-output = ["slot:review-verdict-2"]
 
-[prompt.shipping-message]
-text = """
-The work for {port:task} is being committed.
-    Write a concise commit message from the work summary {slot:work-summary}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
-    Return exactly that message. Do not run git commands and do not write files."""
+        The work for {port:task} is being committed.
+        Write a concise commit message from the work summary {slot:work-summary}: a short subject line naming the change, then one paragraph on what was implemented and how it was validated.
+    
+
+
+    Return exactly the finished commit message — the runtime injects it into the git commit step (slot:commit-message)
+"""
 input = [
     "port:task",
     "slot:work-summary",
 ]
-output = ["slot:shipping-message"]
+output = ["slot:commit-message"]
 
-[[sequence.building-body.sequence]]
-id = "building-produce"
-title = "Building Produce"
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "write-the-commit-message"
+title = "Write the commit message"
+agent = "agent:scribe"
+prompt = "prompt:write-the-commit-message"
+input = [
+    "port:task",
+    "slot:work-summary",
+]
+output = ["slot:commit-message"]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "stage-all-changes"
+title = "Stage all changes"
+output = ["slot:stage-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "add",
+    "-A",
+]
+
+[[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence]]
+id = "commit-the-work"
+title = "Commit the work"
+input = ["slot:commit-message"]
+output = ["slot:commit-output"]
+
+[sequence.ctx-branch-arm-p-12-maybe-commit-then.sequence.command]
+argv = [
+    "git",
+    "commit",
+    "-m",
+    "{slot:commit-message}",
+]
+
+[[sequence.reviewed-refinement-body.sequence]]
+id = "implement-the-task"
+title = "Implement the task"
 agent = "agent:worker"
-prompt = "prompt:building-produce"
+prompt = "prompt:implement-the-task"
 input = [
     "port:task",
+    "slot:draft",
     { slot = "slot:review-verdict-1", optional = true },
     { slot = "slot:review-verdict-2", optional = true },
     { slot = "slot:work-summary", optional = true },
 ]
 output = ["slot:work-summary"]
 
-[[sequence.building-body.sequence]]
-id = "changed-files"
+[[sequence.reviewed-refinement-body.sequence]]
+id = "capture-the-changed-files"
 title = "Capture the changed files"
 output = ["slot:changed-files"]
 
-[sequence.building-body.sequence.command]
+[sequence.reviewed-refinement-body.sequence.command]
 argv = [
     "git",
     "diff",
@@ -371,110 +422,50 @@ argv = [
     ":(exclude).agents/runs",
 ]
 
-[[sequence.building-body.sequence]]
-id = "building-review-1"
-title = "Building Review 1"
-agent = "agent:smart-1"
-prompt = "prompt:building-review-1"
+[[sequence.reviewed-refinement-body.sequence]]
+id = "review-the-implementation"
+title = "Review the implementation"
+agent = "agent:smart"
+prompt = "prompt:review-the-implementation"
 input = [
     "port:task",
+    { slot = "slot:review-verdict-1", optional = true },
+    { slot = "slot:review-verdict-2", optional = true },
     "slot:work-summary",
     "slot:changed-files",
-    { slot = "slot:review-verdict-1", optional = true },
 ]
 output = ["slot:review-verdict-1"]
 
-[[sequence.building-body.sequence]]
-id = "building-review-2"
-title = "Building Review 2"
-agent = "agent:smart-2"
-prompt = "prompt:building-review-2"
-input = [
-    "port:task",
-    "slot:work-summary",
-    "slot:changed-files",
-    { slot = "slot:review-verdict-2", optional = true },
-]
-output = ["slot:review-verdict-2"]
-
-[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "shipping-message"
-title = "Write the commit message (scribe)"
-agent = "agent:scribe"
-prompt = "prompt:shipping-message"
-input = [
-    "port:task",
-    "slot:work-summary",
-]
-output = ["slot:shipping-message"]
-
-[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "shipping-stage"
-title = "Stage all changes"
-output = ["slot:shipping-stage-output"]
-
-[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "add",
-    "-A",
-]
-
-[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "shipping-unstage-runtime"
-title = "Unstage runtime state"
-output = ["slot:shipping-unstage-output"]
-
-[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "reset",
-    "-q",
-    "--",
-    ".agents/runs",
-]
-
-[[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence]]
-id = "shipping-commit"
-title = "Commit the work"
-input = ["slot:shipping-message"]
-output = ["slot:commit-output"]
-
-[sequence.ctx-branch-arm-p-21-shipping-maybe-commit-then.sequence.command]
-argv = [
-    "git",
-    "commit",
-    "-m",
-    "{slot:shipping-message}",
-]
-
 [procedure]
-description = "Doubly-reviewed implementation: the worker implements the board task and two independent reviewers must both approve against the task's own Done when — then commit."
+description = "Reviewed implementation: implement, review, refine & commit."
 input = ["port:task"]
 output = ["port:commit-report"]
 
 [[procedure.sequence]]
-id = "building"
-title = "Building"
+id = "draft-the-implementation-plan"
+title = "Draft the implementation plan"
+agent = "agent:smart"
+prompt = "prompt:draft-the-implementation-plan"
+input = ["port:task"]
+output = ["slot:draft"]
+
+[[procedure.sequence]]
+id = "reviewed-refinement"
+title = "Reviewed refinement"
 kind = "loop"
-sequence = "sequence:building-body"
-max-iterations = 8
+sequence = "sequence:reviewed-refinement-body"
+max-iterations = 10
 on-exhausted = "abort"
 
-[[procedure.sequence.until.all]]
+[procedure.sequence.until]
 slot = "slot:review-verdict-1"
 field = "status"
 equals = "approved"
 
-[[procedure.sequence.until.all]]
-slot = "slot:review-verdict-2"
-field = "status"
-equals = "approved"
-
 [[procedure.sequence]]
-id = "shipping-status"
+id = "check-working-tree-status"
 title = "Check working tree status"
-output = ["slot:shipping-status"]
+output = ["slot:git-status"]
 
 [procedure.sequence.command]
 argv = [
@@ -484,11 +475,10 @@ argv = [
 ]
 
 [[procedure.sequence]]
-id = "shipping-maybe-commit"
-title = "Shipping Maybe Commit"
+id = "maybe-commit"
+title = "Maybe Commit"
 kind = "branch"
-sequence = "sequence:ctx-branch-arm-p-21-shipping-maybe-commit-then"
+sequence = "sequence:ctx-branch-arm-p-12-maybe-commit-then"
 
 [procedure.sequence.when.not]
-slot = "slot:shipping-status"
-equals = ""
+empty = "slot:git-status"
