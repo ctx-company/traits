@@ -7938,7 +7938,15 @@ fn built_in_harness_definitions() -> Vec<(&'static str, HarnessDefinition)> {
                     model_flag: Some("--model".to_string()),
                     reasoning_effort_flag: Some("--config".to_string()),
                     system_prompt_flag: None,
-                    resume_flag: None,
+                    // `exec resume <thread-id> "<prompt>"` — a bare
+                    // subcommand word, not a dashed flag: clap accepts the
+                    // parent `exec` flags before it, so the ordinary
+                    // append-flag-then-value argv builder produces exactly
+                    // the documented form. Verified live 2026-08-19
+                    // (codex-cli 0.147.0): the resumed turn re-emits the
+                    // same thread_id in `thread.started` and carries prior
+                    // context.
+                    resume_flag: Some("resume".to_string()),
                     session_flag: None,
                     dir_flag: Some("--cd".to_string()),
                     prompt_via: Some("arg".to_string()),
@@ -8251,7 +8259,10 @@ mod config_tests {
         assert!(cli.json_schema_flag.is_none());
         assert_eq!(cli.reasoning_effort_flag.as_deref(), Some("--config"));
         assert!(cli.system_prompt_flag.is_none());
-        assert!(cli.resume_flag.is_none());
+        // The bare `resume` subcommand word — appended as flag-then-value it
+        // yields `codex exec <flags> resume <thread-id> "<prompt>"`, the
+        // documented non-interactive resume form (verified live, 0147.0).
+        assert_eq!(cli.resume_flag.as_deref(), Some("resume"));
         assert!(cli.session_flag.is_none());
 
         let registry = HarnessRegistry {
