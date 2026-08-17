@@ -5,7 +5,7 @@ use std::process::Command;
 
 use std::path::PathBuf;
 
-use support::{ScratchRoot, ctx_bin, git_init, require_success};
+use support::{ScratchRoot, ctx_bin, git_init, require_success, strip_escapes};
 
 struct Fixture {
     _scratch: ScratchRoot,
@@ -106,49 +106,6 @@ fn make_delayed_config_fifo(fixture: &Fixture) {
         .status()
         .unwrap();
     assert!(status.success(), "could not create delayed config FIFO");
-}
-
-/// Strips ANSI escape sequences (CSI, OSC, and two-byte ESC forms) from a
-/// raw PTY stream, leaving only the printable payload. The pane renderer's
-/// cell diff may skip any cell whose content and style already match the
-/// screen — a plain-styled space over blank ground — so adjacent words can
-/// arrive split by a cursor move ("Run\x1b[1;6Hstartup"). Text assertions
-/// therefore run against this stripped form via [`saw_startup_pane`], never
-/// against the raw byte layout, which would freeze the diff accident of the
-/// moment (2026-08-04: dropping BOLD from focused pane titles made the
-/// title's space cell identical to blank ground and turned four of these
-/// proofs red).
-fn strip_escapes(raw: &str) -> String {
-    let mut text = String::with_capacity(raw.len());
-    let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            text.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('[') => {
-                for follow in chars.by_ref() {
-                    if ('\u{40}'..='\u{7e}').contains(&follow) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                while let Some(follow) = chars.next() {
-                    if follow == '\u{7}' {
-                        break;
-                    }
-                    if follow == '\u{1b}' {
-                        chars.next();
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    text
 }
 
 /// True once the startup pane's title reached the PTY — whether or not the
