@@ -3065,6 +3065,30 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Option<Command>
     Ok(cli.command)
 }
 
+pub fn print_help() {
+    let _ = Cli::command().print_help();
+}
+
+/// Prints the same release help shown by `ctx traits -h`: locates the
+/// `traits` subcommand in the derived tree and renders its own
+/// (`override_help`-driven) help, rather than the top-level `ctx` command's
+/// — used by bare `ctx traits help` so it matches `-h` instead of falling
+/// back to unrelated top-level `ctx` help.
+pub fn print_traits_help() {
+    let mut traits_command = Cli::command()
+        .find_subcommand("traits")
+        .cloned()
+        .expect("`traits` subcommand always exists in the derived Cli tree");
+    let _ = traits_command.print_help();
+}
+
+/// The full derived Clap command tree, for `ctx traits help --json`
+/// (P453): the source of truth this reference is generated from, rather
+/// than a hand-copied inventory.
+pub fn command() -> clap::Command {
+    Cli::command()
+}
+
 #[cfg(test)]
 mod task_flag_conflict_tests {
     use super::parse;
@@ -3139,28 +3163,4 @@ mod task_flag_conflict_tests {
             "ctx", "traits", "run", "--task", "0001", "--", "some", "args",
         ]);
     }
-}
-
-pub fn print_help() {
-    let _ = Cli::command().print_help();
-}
-
-/// Prints the same release help shown by `ctx traits -h`: locates the
-/// `traits` subcommand in the derived tree and renders its own
-/// (`override_help`-driven) help, rather than the top-level `ctx` command's
-/// — used by bare `ctx traits help` so it matches `-h` instead of falling
-/// back to unrelated top-level `ctx` help.
-pub fn print_traits_help() {
-    let mut traits_command = Cli::command()
-        .find_subcommand("traits")
-        .cloned()
-        .expect("`traits` subcommand always exists in the derived Cli tree");
-    let _ = traits_command.print_help();
-}
-
-/// The full derived Clap command tree, for `ctx traits help --json`
-/// (P453): the source of truth this reference is generated from, rather
-/// than a hand-copied inventory.
-pub fn command() -> clap::Command {
-    Cli::command()
 }
