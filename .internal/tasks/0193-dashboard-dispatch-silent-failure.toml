@@ -1,0 +1,44 @@
+schema-version = "0.2"
+key = "0193"
+title = "Dashboard dispatch: surface child failures, fix dispatch-trait resolution"
+status = "ready"
+raised = "2026-08-17"
+content = """
+Live repro (2026-08-17, ctx-codecheck): D → spawn modal → ctrl-d → modal closed,
+nothing ran. Two stacked defects:
+
+1. Silent child death. `apply_spawn_request` (dashboard.rs ~5620-5685) validates via
+   clap and detaches a `ctx traits run` child; `spawn_detached` only errors if the
+   LAUNCH fails. A child that dies milliseconds later writes its error to
+   `~/.config/ctx/debug/<repo-key>/dashboard-spawn-pid-<pid>.log` and nothing ever
+   reads it back — the modal closes, the dashboard stays quiet.
+
+2. The actual child error, from that log: `invalid manifest at run.trait-id: trait ID
+   "implement-quick" did not resolve to ./.ctx/traits/authored/implement-quick/...`.
+   The `[tasks] dispatch-trait = "implement:quick"` seed resolved only against the
+   repo-authored path and never consulted the built-in tier — yet ctx-notify
+   dispatches of the same `implement:quick` resolved and ran fine the same day. Find
+   the divergence (seed formatting? family:variant alias resolution path? invocation
+   context) and fix resolution so a built-in dispatch-trait resolves from any repo.
+"""
+scope = """
+## Decisions
+- Feedback fix: after detaching, the dashboard must observe the outcome — poll for the
+  child's session mint (or tail the spawn log) for a short grace window; on failure,
+  put the child's first error line in `state.message`; on success, mark the task row
+  "dispatched" immediately (optimistic state, upgraded to running by the next sync).
+- Resolution fix is in-scope; a regression proof covering "dispatch-trait names a
+  built-in family:variant from a repo with no authored/vendored copy" is required.
+"""
+validation = """
+## Watch
+- Never block the dashboard event loop while waiting on the child — the grace window
+  must be async/polled.
+- The pid-keyed log naming means consecutive spawns from one dashboard overwrite the
+  same file; if the feedback mechanism reads it, key it per spawn.
+
+## Done when
+A dispatch whose child dies shows the child's error in the dashboard within seconds;
+`implement:quick` dispatch works from ctx-codecheck; the dispatched task row shows
+"dispatched" immediately after submit; a proof pins built-in dispatch-trait resolution.
+"""

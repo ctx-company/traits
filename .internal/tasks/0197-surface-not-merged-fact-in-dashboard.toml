@@ -1,0 +1,42 @@
+schema-version = "0.2"
+key = "0197"
+title = "Surface the committed-but-not-merged fact on every dashboard surface"
+status = "ready"
+raised = "2026-08-17"
+content = """
+`not_merged_fact` (run.rs ~697, 0151) — the branch name plus the exact `ctx traits
+merge <run-id>` command — renders in the story pane, the live run TUI, and the plain
+drive report. A detached dispatch run has none of those: it completes unmerged and the
+only trace is a session row that looks finished. The operator asked for exactly this:
+"tell me it needs merging, in the dashboard or via command, and which branch it is on."
+
+Full build (owner ruling 2026-08-17): one fact, three dashboard surfaces, all reading
+the same helper so they cannot drift:
+
+1. Sessions screen — completed-not-merged worktree runs get a "needs merge - <branch>"
+   badge on the row and the merge command in the detail pane.
+2. Merges screen — such runs appear as pending entries with enter-to-merge (the retry
+   modal machinery already on that screen).
+3. Tasks screen — a task whose run completed unmerged shows "awaiting merge", distinct
+   from ready and from running (composes with 0194's status overlay and 0195's
+   close-on-landing: an awaiting-merge task is not done and not re-dispatchable).
+"""
+scope = """
+## Decisions
+- All three surfaces derive from `not_merged_fact` — no re-derivation of branch or
+  command strings per screen.
+- Landing state comes from `session::landing_state` (NotMerged) — no new session
+  fields.
+"""
+validation = """
+## Watch
+- A run whose worktree was pruned but branch survives must still render the fact; a
+  run whose branch was already merged manually must not (landing_state is the
+  authority, not branch existence).
+
+## Done when
+A detached run finishing unmerged is visibly flagged on Sessions, Merges, and Tasks
+with the branch name; enter-to-merge works from the Merges row; task rows distinguish
+awaiting-merge from ready; a projection test pins all three renderings to the one
+helper.
+"""

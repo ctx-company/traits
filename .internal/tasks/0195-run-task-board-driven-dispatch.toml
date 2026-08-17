@@ -1,0 +1,49 @@
+schema-version = "0.2"
+key = "0195"
+title = "ctx traits run --task: board-driven dispatch with charter expansion and auto-close"
+status = "ready"
+raised = "2026-08-17"
+content = """
+CLI-first dispatch, so the board pipeline does not require the TUI. Shape:
+
+- `ctx traits run --task 0001.2` — resolve `[tasks] dispatch-trait`, run the existing
+  ready/wall/dependency preflights, bind `port:task`, run.
+- `--task 0001.2,0001.5` — comma-separated list, run sequentially in the given order
+  (also accept a repeated `--task` flag; both spellings normalize to one queue).
+- `--task 0001` where 0001 is a parent charter — expand to its non-closed children in
+  dependency order and run them as the queue.
+- Each queued run carries merge intent: child N+1 builds on child N's landed work, so
+  the queue is a merge-gated pipeline. A failed run or a parked merge halts the queue
+  (later children must not build on a phantom landing) unless `--continue-on-failure`
+  is passed (owner ruling 2026-08-17), which skips to the next task and reports the
+  full per-task outcome table at the end.
+- On a landed run, close the task via the 0144 auto-close machinery (`[tasks]
+  auto-close` config beneath each document's own `auto_close` override), recording the
+  run id in the closure proof. Check-less tasks follow the configured policy.
+"""
+scope = """
+## Decisions
+- Sequential only — no parallel children in this task (worktree/merge contention is a
+  separate design).
+- Attached by default (the operator watches the queue in the run TUI, which shows the
+  queue position); detaching stays the dashboard's job.
+- `--override-dependencies` composes with `--task` exactly as it does with the spawn
+  modal seed.
+- Charter tasks themselves are not dispatched (they are tracking documents); expansion
+  covers children only, and the charter's own closure remains manual or
+  checks-driven (see 0196).
+"""
+validation = """
+## Watch
+- Dotted-key ordering: children sort by numeric ordinal (0001.10 after 0001.9), never
+  lexicographically.
+- A queue member whose preflight refuses (unmet dependency, wall, closed) must report
+  and halt (or skip under --continue-on-failure) BEFORE spending a model call.
+- Reuse dispatch_preflight and the 0144 close path — no parallel implementations.
+
+## Done when
+A single --task run lands and auto-closes its task; a charter expands and runs children
+in dependency order, halting on a parked merge; --continue-on-failure completes the
+remainder and reports per-task outcomes; comma and repeated-flag spellings both work;
+proofs cover expansion order, halt, and continue paths with fixture harnesses.
+"""
