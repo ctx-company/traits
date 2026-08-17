@@ -563,11 +563,15 @@ struct TasksBoardSnapshot {
     fingerprint: BoardFingerprint,
 }
 
-/// The five fixed TASKS groups (0063's own "Done when": "blocked, ready,
-/// in-flight, parked, done"). `Done`/`Cancelled` both land in `Done` — the
-/// spec names exactly five groups, not six.
+/// The TASKS groups (0063's own "Done when": "blocked, ready, in-flight,
+/// parked, done"). `Done`/`Cancelled` both land in `Done`. `Syncing` (0194)
+/// is a sixth, pre-first-snapshot-only group: before the session-link
+/// overlay has been computed even once, a board-derived status cannot be
+/// trusted as current, so every task lands here instead of being shown
+/// under its (possibly stale) board status.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum TaskGroup {
+    Syncing,
     InFlight,
     Parked,
     Blocked,
@@ -576,8 +580,9 @@ enum TaskGroup {
 }
 
 impl TaskGroup {
-    fn order() -> [TaskGroup; 5] {
+    fn order() -> [TaskGroup; 6] {
         [
+            TaskGroup::Syncing,
             TaskGroup::InFlight,
             TaskGroup::Parked,
             TaskGroup::Blocked,
@@ -588,6 +593,7 @@ impl TaskGroup {
 
     fn label(self) -> &'static str {
         match self {
+            TaskGroup::Syncing => "syncing",
             TaskGroup::InFlight => "in-flight",
             TaskGroup::Parked => "parked",
             TaskGroup::Blocked => "blocked",
@@ -5940,7 +5946,16 @@ fn rebuild_visible_tasks(state: &mut State) {
             .flatten()
             .filter_map(|idx| state.sessions.get(*idx))
             .collect();
-        let group = task_group(summary.derived_status, &joined_rows);
+        // 0194: before the first worker snapshot lands, `state.sessions` is
+        // empty by construction, not because nothing is live — presenting
+        // the board-only status as current would relabel a running task
+        // "ready". Every task goes to `Syncing` instead until the
+        // session-link overlay has been computed at least once.
+        let group = if state.has_snapshot {
+            task_group(summary.derived_status, &joined_rows)
+        } else {
+            TaskGroup::Syncing
+        };
         if let Some((_, keys)) = buckets.iter_mut().find(|(g, _)| *g == group) {
             keys.push(summary.key.clone());
         }
@@ -6256,6 +6271,7 @@ fn refresh_task_preview_for_selection(state: &mut State) {
         &joined_rows,
         proposal,
         wrap_width,
+        state.has_snapshot,
     ));
 }
 
@@ -6271,6 +6287,7 @@ fn build_task_preview(
     joined: &[&SessionRow],
     proposal: Option<&super::task_proposals::DoneProposal>,
     wrap_width: u16,
+    has_snapshot: bool,
 ) -> TaskPreview {
     let mut lines = Vec::new();
     let mut header = tui::Line::blank();
@@ -6281,7 +6298,11 @@ fn build_task_preview(
     let mut status_line = tui::Line::blank();
     status_line.push("status: ", tui::Tone::Muted);
     status_line.push(
-        super::tasks::status_text(summary.derived_status),
+        if has_snapshot {
+            super::tasks::status_text(summary.derived_status)
+        } else {
+            "syncing"
+        },
         tui::Tone::Default,
     );
     lines.push(status_line);
@@ -8308,6 +8329,7 @@ fn render_tasks_list_pane(frame: &mut ratatui::Frame<'_>, inner: Rect, state: &S
                 summaries,
                 &state.task_proposals,
                 &state.optimistic_dispatched,
+                state.has_snapshot,
             )
         },
         |_| false,
@@ -8319,6 +8341,7 @@ fn task_visible_row_label(
     summaries: &[TaskSummary],
     proposals: &HashMap<String, super::task_proposals::DoneProposal>,
     optimistic_dispatched: &HashMap<String, std::time::Instant>,
+    has_snapshot: bool,
 ) -> String {
     match row {
         TaskVisibleRow::GroupHeader {
@@ -8337,6 +8360,7 @@ fn task_visible_row_label(
                 summary,
                 proposals.contains_key(key),
                 optimistic_dispatched.contains_key(key),
+                has_snapshot,
             )
         }
     }
@@ -8349,9 +8373,16 @@ fn task_visible_row_label(
 /// overrides the derived status text until a joined session row lands or
 /// the pending spawn fails/expires (P0193 §Part A) — presentation only,
 /// [`task_group`]'s own group precedence is untouched.
-fn task_row_label(summary: &TaskSummary, has_proposal: bool, dispatched: bool) -> String {
+fn task_row_label(
+    summary: &TaskSummary,
+    has_proposal: bool,
+    dispatched: bool,
+    has_snapshot: bool,
+) -> String {
     let status_text = if dispatched {
         "dispatched"
+    } else if !has_snapshot {
+        "syncing"
     } else {
         super::tasks::status_text(summary.derived_status)
     };
@@ -11463,6 +11494,85 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_visible_tasks_shows_syncing_not_board_status_before_the_first_snapshot() {
+        // 0194: `has_snapshot` false means the session-link overlay has
+        // never been computed — a board-derived "ready" would misrepresent
+        // a task whose run is, in fact, live right now.
+        let mut state = State::new_without_worker();
+        assert!(!state.has_snapshot);
+        state.tasks_board = Some(board_with(
+            vec![
+                task_summary("0001", DerivedStatus::Ready),
+                task_summary("0002", DerivedStatus::Blocked),
+            ],
+            BTreeMap::new(),
+        ));
+        rebuild_visible_tasks(&mut state);
+        let groups: Vec<TaskGroup> = state
+            .tasks_visible
+            .iter()
+            .filter_map(|row| match row {
+                TaskVisibleRow::GroupHeader { group, count, .. } if *count > 0 => Some(*group),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            groups,
+            vec![TaskGroup::Syncing],
+            "every task lands in Syncing, never its (possibly stale) board status"
+        );
+
+        let ready_summary = task_summary("0001", DerivedStatus::Ready);
+        let row_label = task_row_label(&ready_summary, false, false, state.has_snapshot);
+        assert!(
+            row_label.contains("syncing"),
+            "row label must not present the board-derived status pre-snapshot: {row_label}"
+        );
+        let board = state.tasks_board.as_ref().unwrap();
+        let preview = build_task_preview(&ready_summary, board, &[], None, 80, state.has_snapshot);
+        let preview_texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
+        let status_line = preview_texts
+            .iter()
+            .find(|t| t.contains("status:"))
+            .expect("status line");
+        assert!(
+            status_line.contains("syncing"),
+            "preview status line must not present the board-derived status pre-snapshot: {status_line}"
+        );
+
+        // The first snapshot lands: the same tasks now resolve to their real
+        // groups and the row/preview surfaces show the true derived status.
+        state.has_snapshot = true;
+        rebuild_visible_tasks(&mut state);
+        let groups: Vec<TaskGroup> = state
+            .tasks_visible
+            .iter()
+            .filter_map(|row| match row {
+                TaskVisibleRow::GroupHeader { group, count, .. } if *count > 0 => Some(*group),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(groups, vec![TaskGroup::Blocked, TaskGroup::Ready]);
+
+        let row_label = task_row_label(&ready_summary, false, false, state.has_snapshot);
+        assert!(
+            row_label.contains("ready"),
+            "row label must show the true derived status once the snapshot has landed: {row_label}"
+        );
+        let board = state.tasks_board.as_ref().unwrap();
+        let preview = build_task_preview(&ready_summary, board, &[], None, 80, state.has_snapshot);
+        let preview_texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
+        let status_line = preview_texts
+            .iter()
+            .find(|t| t.contains("status:"))
+            .expect("status line");
+        assert!(
+            status_line.contains("ready"),
+            "preview status line must show the true derived status once the snapshot has landed: {status_line}"
+        );
+    }
+
+    #[test]
     fn task_session_join_is_many_to_many_and_a_parent_keyed_run_leaves_the_child_idle() {
         let mut state = State::new_without_worker();
         let mut run_a = row_with_id("run-a", SessionClass::Live);
@@ -11482,6 +11592,9 @@ mod tests {
     #[test]
     fn rebuild_visible_tasks_emits_five_headers_and_collapse_toggles_persist_across_a_resync() {
         let mut state = State::new_without_worker();
+        // Post-sync grouping is under test here, not first-paint (0194
+        // covers that separately) — pretend a snapshot already landed.
+        state.has_snapshot = true;
         state.tasks_board = Some(board_with(
             vec![
                 task_summary("0001", DerivedStatus::Ready),
@@ -11490,13 +11603,14 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        // Five groups always render a header, including empty ones; Done
-        // starts collapsed (0182), the other four start expanded.
+        // Six groups always render a header, including empty ones (0194
+        // adds `Syncing` to the fixed five); Done starts collapsed (0182),
+        // the other five start expanded.
         assert_eq!(
             state.collapsed_task_groups,
             HashSet::from([TaskGroup::Done])
         );
-        assert_eq!(state.tasks_visible.len(), 5 + 2);
+        assert_eq!(state.tasks_visible.len(), 6 + 2);
         for group in TaskGroup::order() {
             let index = state
                 .tasks_visible
@@ -11509,17 +11623,18 @@ mod tests {
             toggle_selected_task_group(&mut state);
         }
         // Toggling every group once flips Done to expanded and the other
-        // four to collapsed.
+        // five to collapsed.
         assert_eq!(
             state.collapsed_task_groups,
             HashSet::from([
+                TaskGroup::Syncing,
                 TaskGroup::InFlight,
                 TaskGroup::Parked,
                 TaskGroup::Blocked,
                 TaskGroup::Ready
             ])
         );
-        assert_eq!(state.tasks_visible.len(), 5);
+        assert_eq!(state.tasks_visible.len(), 6);
 
         // A resync (new summaries, same collapse set) keeps every group's
         // collapse state rather than resetting it: the four toggled groups
@@ -11533,7 +11648,7 @@ mod tests {
             BTreeMap::new(),
         ));
         rebuild_visible_tasks(&mut state);
-        assert_eq!(state.tasks_visible.len(), 5 + 1);
+        assert_eq!(state.tasks_visible.len(), 6 + 1);
         for row in &state.tasks_visible {
             if let TaskVisibleRow::GroupHeader {
                 group, collapsed, ..
@@ -11587,8 +11702,8 @@ mod tests {
     #[test]
     fn task_row_label_reserves_a_fixed_width_marker_for_a_pending_proposal() {
         let summary = task_summary("0100", DerivedStatus::Ready);
-        let without = task_row_label(&summary, false, false);
-        let with = task_row_label(&summary, true, false);
+        let without = task_row_label(&summary, false, false, true);
+        let with = task_row_label(&summary, true, false, true);
         assert_eq!(tui::display_width(&without), LIST_LABEL_WIDTH);
         assert_eq!(tui::display_width(&with), LIST_LABEL_WIDTH);
         assert_ne!(without, with);
@@ -11733,6 +11848,7 @@ mod tests {
             &[],
             None,
             40,
+            true,
         );
         let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
 
@@ -11782,6 +11898,7 @@ mod tests {
             &[],
             None,
             200,
+            true,
         );
         let texts: Vec<String> = preview.lines.iter().map(rline_text).collect();
         assert!(!texts.iter().any(|t| t.contains("content:")));
@@ -12494,6 +12611,9 @@ mod tests {
         );
 
         let mut state = state_with_scratch_cache();
+        // Post-sync grouping is under test here, not first-paint (0194
+        // covers that separately) — pretend a snapshot already landed.
+        state.has_snapshot = true;
         state.tasks_board = Some(snapshot);
         rebuild_visible_tasks(&mut state);
 
