@@ -2392,6 +2392,27 @@ pub struct SessionStartArgs {
     #[arg(long = "task-dispatch")]
     pub task_dispatch: bool,
 
+    /// Board-driven dispatch (0195): run a queue of tasks through `[tasks]
+    /// dispatch-trait` instead of a single trait invocation. Each value is a
+    /// bare/dotted task key, or a charter key (a task with children), which
+    /// expands to its own non-closed children in dotted-ordinal order.
+    /// Comma-separated values and repeated `--task` flags both normalize to
+    /// one flattened queue, run sequentially in the order given. Conflicts
+    /// with the positional trait/query and with `--task-dispatch`, which a
+    /// resolved queue member sets on its own behalf.
+    #[arg(
+        long = "task",
+        value_delimiter = ',',
+        conflicts_with = "task_dispatch"
+    )]
+    pub task: Vec<String>,
+
+    /// With `--task`: keep running the remaining queue after a failed run
+    /// or a parked merge instead of halting, reporting every task's outcome
+    /// in a table at the end.
+    #[arg(long = "continue-on-failure", requires = "task")]
+    pub continue_on_failure: bool,
+
     /// Open a scrollable run-story pane at termination, after the merge
     /// report when one runs. Bare `--story` renders the free `default`
     /// level; `--story=assisted` spends narrator model calls — the only

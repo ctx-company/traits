@@ -866,7 +866,71 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                             .to_string(),
                     });
                 }
-                if no_drive {
+                if !args.task.is_empty() {
+                    if no_drive {
+                        return Err(crate::Error::Command {
+                            message: "--task requires a driven run; omit --no-drive".to_string(),
+                        });
+                    }
+                    let board_dir = crate::app::tasks::board_dir(None)?;
+                    let repo_root = resolve_repo_root(None)?;
+                    let provider = ctx_traits_io::task_files::FilesTaskBoard::open_read(board_dir.clone());
+                    let queue = crate::app::task_queue::expand_task_queue(&provider, &args.task)
+                        .map_err(|message| crate::Error::Command { message })?;
+                    let dispatch_trait = runtime.effective_dispatch_trait().ok_or_else(|| {
+                        crate::Error::Command {
+                            message:
+                                "--task requires [tasks] dispatch-trait to be configured"
+                                    .to_string(),
+                        }
+                    })?;
+                    let merge_policy = runtime.effective_merge_policy();
+                    let merge_rung = resolved_merge_intent(merge_policy, args.merge, args.no_merge);
+                    if merge_rung.is_some() && worktree.is_none() {
+                        return Err(crate::Error::Command {
+                            message: "an effective merge request requires an effective worktree (add --worktree, or configure [worktree] enabled = true)".to_string(),
+                        });
+                    }
+                    let story = resolved_story_level(
+                        policy.story,
+                        args.story
+                            .as_ref()
+                            .map(|value| value.as_ref().map(String::as_str)),
+                        args.no_story,
+                    )?;
+                    crate::app::run::handle_task_queue_run(crate::app::run::TaskQueueInputs {
+                        queue,
+                        continue_on_failure: args.continue_on_failure,
+                        dispatch_trait,
+                        file: args.file.as_deref(),
+                        session_store: args.session_store.as_deref(),
+                        assignments: &args.assignments,
+                        resource_root: args.resource_root.as_deref(),
+                        out: args.out.as_deref(),
+                        max_frames: budget.max_frames,
+                        frame_seconds: budget.frame_seconds,
+                        total_seconds: budget.total_seconds,
+                        max_retries: budget.max_retries,
+                        attach_wait_seconds: budget.attach_wait_seconds,
+                        idle_seconds: budget.idle_seconds,
+                        max_in_flight: budget.max_in_flight,
+                        wait: resolved_run_wait(policy.wait, args.wait, args.no_wait),
+                        progress,
+                        worktree,
+                        strict_loops: resolved_strict_loops(
+                            policy.strict_loops,
+                            args.strict_loops,
+                            args.no_strict_loops,
+                        ),
+                        override_dependencies: args.override_dependencies,
+                        json: args.json,
+                        verbose: args.verbose,
+                        merge_rung,
+                        story,
+                        repo_root,
+                        board_dir,
+                    })
+                } else if no_drive {
                     crate::app::run::handle_run(RunInputs {
                         trait_id: args.trait_id.as_deref(),
                         file: args.file.as_deref(),
