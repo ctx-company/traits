@@ -81,7 +81,14 @@ export const feasibilityVerdictSchema: SchemaHandle<FeasibilityVerdictValue> = s
  * The step list is the loop's cross-round progress ledger: text is frozen
  * once written, status is what moves, evidence is what justifies the move.
  */
-export const blockerStepSchema: SchemaHandle = schema.object(
+/** One step of a blocker's required fix, as accepted values. */
+export type BlockerStepValue = {
+  readonly step: string;
+  readonly status: string;
+  readonly evidence?: string;
+};
+
+export const blockerStepSchema: SchemaHandle<BlockerStepValue> = schema.object(
   "blocker-step",
   {
     step: schema.field(schema.text(), {
@@ -101,7 +108,21 @@ export const blockerStepSchema: SchemaHandle = schema.object(
   { description: "One step of a blocker's required fix, with verified progress state." },
 );
 
-export const blockerSchema: SchemaHandle = schema.object(
+/** One blocking defect, as accepted values. */
+export type BlockerValue = {
+  readonly id: string;
+  readonly where: string;
+  readonly what: string;
+  readonly "root-cause": string;
+  readonly "required-fix": string;
+  readonly steps: readonly BlockerStepValue[];
+  readonly "done-when": string;
+  readonly "recurrence-of"?: string;
+  readonly "rule-source"?: string;
+  readonly "rule-quote"?: string;
+};
+
+export const blockerSchema: SchemaHandle<BlockerValue> = schema.object(
   "blocker",
   {
     id: schema.field(schema.text(), {
@@ -280,7 +301,25 @@ export const leftoverSchema: SchemaHandle = schema.object(
  * defect list against the shared blocker schema, non-blocking advisory notes, owner-triage
  * escalation, and the owner-items remainder accepted per the draft's scope split.
  */
-export const reviewVerdictSchema: SchemaHandle = schema.object(
+/**
+ * The family review verdict, as accepted values. Typing the handle is what
+ * gives `slot({ schema: reviewVerdictSchema }).status` a real `FieldRef`
+ * instead of `unknown` — the bare `SchemaHandle` annotation silently threw
+ * the inference away and broke `condition.equals(verdict.status, ...)`
+ * under tsc in every consuming trait package.
+ */
+export type ReviewVerdictValue = {
+  readonly status: "approved" | "revise";
+  readonly blockers: readonly BlockerValue[];
+  readonly advisory?: string;
+  readonly escalation: "none" | "needs-owner";
+  readonly "escalation-reason": string;
+  readonly "wall-id": string;
+  readonly remaining?: string;
+  readonly "owner-items"?: readonly unknown[];
+};
+
+export const reviewVerdictSchema: SchemaHandle<ReviewVerdictValue> = schema.object(
   "review-verdict",
   {
     status: schema.field(schema.enum(["approved", "revise"] as const), {

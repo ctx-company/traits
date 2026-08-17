@@ -27,6 +27,7 @@ export {
   STRICT_VARIANT_DOCTRINE,
   workerRole,
 } from "@ctx-traits/toolkit";
+export type { BlockerStepValue, BlockerValue, ReviewVerdictValue } from "@ctx-traits/toolkit";
 export { FEASIBILITY_DOCTRINE, feasibilityGate, feasibilityVerdictSchema } from "./feasibility.ts";
 export type { FeasibilityGateOptions, FeasibilityVerdictValue } from "./feasibility.ts";
 export { commitTail, deriveParkReportStep, familyCommitTail, guardedProduction, reviewerVerdict } from "./process.ts";
