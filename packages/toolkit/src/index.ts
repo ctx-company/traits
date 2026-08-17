@@ -30,7 +30,13 @@ export {
   reviewerVerdict,
   reviewVerdictSchema,
 } from "./schema.ts";
-export type { FeasibilityVerdictValue, ReviewerVerdictValue } from "./schema.ts";
+export type {
+  BlockerStepValue,
+  BlockerValue,
+  FeasibilityVerdictValue,
+  ReviewerVerdictValue,
+  ReviewVerdictValue,
+} from "./schema.ts";
 export { cargoDiagnosticSchema, cargoFixLoop } from "./sequence/cargo-fix.ts";
 export type { CargoDiagnostic, CargoFixLoopOptions, CargoFixLoopScope } from "./sequence/cargo-fix.ts";
 export { commitTail } from "./sequence/commit-tail.ts";
