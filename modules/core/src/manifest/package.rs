@@ -81,7 +81,9 @@ pub struct PackageManifest {
 pub struct ForkedFrom {
     /// The vendored package's `[package].id`.
     pub id: String,
-    /// The vendored package's locked `resolved-version` at fork time.
+    /// The vendored package's own `[package].version` at fork time (not the
+    /// project lock's `resolved-version`, which is empty for path/git
+    /// transports; the package manifest's version is always present).
     pub version: String,
     /// The vendored package's locked default-variant canonical digest at
     /// fork time.

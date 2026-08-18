@@ -101,7 +101,6 @@ pub(crate) fn handle_fork(id: &str, json: bool) -> crate::Result<CommandOutput<(
     }
 
     match fork_after_claim(
-        &repo_root,
         &scope,
         &alias,
         &vendored_root,
@@ -153,7 +152,6 @@ fn default_variant_trait(traits: &[TraitLockEntry]) -> crate::Result<&TraitLockE
 
 #[allow(clippy::too_many_arguments)]
 fn fork_after_claim(
-    repo_root: &Utf8Path,
     scope: &DistributionScope,
     alias: &str,
     vendored_root: &Utf8Path,
@@ -170,16 +168,12 @@ fn fork_after_claim(
             message: format!("{authored_root} has no CDK authoring source after copy"),
         })?;
 
-    let (generated, lock, rebuilt_canonical_digest) =
+    // Route determination (single vs. family) and the digest needed for the
+    // trust check below never touch `dependency::sync`'s project-dependency
+    // merge, so both are safe to resolve before the alias is detached.
+    let (generated, family_variant_targets, rebuilt_canonical_digest) =
         match route_cdk_build(source_path.as_str(), "toml", None)? {
             CdkBuildRouted::Single(evidence) => {
-                let sync_report =
-                    ctx_traits_io::dependency::sync(ctx_traits_io::dependency::SyncRequest {
-                        repo_root,
-                        manifest_path: None,
-                        trait_file: Some(evidence.target_path.as_path()),
-                        mode: ctx_traits_io::dependency::SyncMode::Write,
-                    })?;
                 let canonical_digest = evidence
                     .outcome
                     .response
@@ -189,11 +183,20 @@ fn fork_after_claim(
                     .to_string();
                 (
                     vec![evidence.target_path.to_string()],
-                    sync_report.lockfile,
+                    None,
                     canonical_digest,
                 )
             }
             CdkBuildRouted::Family(family_report) => {
+                // `route_cdk_build`'s family report does not carry each
+                // variant's canonical digest, so an interim lock sync reads
+                // it back off the just-written `trait.lock`. This first sync
+                // still runs while the forked alias is a live project
+                // dependency, so its `dependencies` rows are provisional —
+                // the post-detach `record_lock_evidence` pass below re-syncs
+                // every variant once more after detach to reconcile that
+                // away; upsert-by-`(id, variant)` semantics make the second
+                // pass authoritative.
                 for variant in &family_report.variants {
                     record_lock_evidence(Utf8Path::new(&variant.target), false)?;
                 }
@@ -229,13 +232,18 @@ fn fork_after_claim(
                     .ok_or_else(|| crate::Error::Command {
                         message: "default-variant lock entry has no canonical digest".to_string(),
                     })?;
+                let targets: Vec<camino::Utf8PathBuf> = family_report
+                    .variants
+                    .iter()
+                    .map(|variant| camino::Utf8PathBuf::from(&variant.target))
+                    .collect();
                 (
                     family_report
                         .variants
                         .iter()
                         .map(|variant| variant.target.clone())
                         .collect(),
-                    ctx_traits_io::layout::package_lock_path(authored_root).to_string(),
+                    Some(targets),
                     canonical_digest,
                 )
             }
@@ -251,12 +259,41 @@ fn fork_after_claim(
         },
     )?;
 
-    let remove_report = ctx_traits_io::distribution::remove(scope, alias)?;
-
+    // Trust resolution is a fallible read (trust-store decode can fail) with
+    // no side effects; it must happen before the irreversible detach below
+    // so a read failure here leaves the original dependency installed
+    // instead of stranding the fork half-detached (the outer error handler
+    // can only remove the authored root it claimed, not undo
+    // `distribution::remove`).
     let trust = ctx_traits_io::lifecycle::resolve_trust_verdict_for_trait(
         package_id,
         &rebuilt_canonical_digest,
     )?;
+
+    let remove_report = ctx_traits_io::distribution::remove(scope, alias)?;
+
+    // Lock finalization happens only now, after the alias is gone from
+    // project configuration: `dependency::sync` merges the *current*
+    // project-level `[dependencies]` into every package's own `trait.lock`,
+    // so finalizing before detach would freeze a stale row for the very
+    // dependency this command just removed. Running it here instead means
+    // the authored package's lock reflects the post-detach dependency set —
+    // the forked alias absent, everything else the package (or project)
+    // still legitimately depends on still represented — while build-derived
+    // pins (`sync_derived_dependency_locks`) are unaffected by detach and
+    // stay correct either way.
+    let lock = match &family_variant_targets {
+        None => {
+            record_lock_evidence(camino::Utf8Path::new(&generated[0]), false)?;
+            ctx_traits_io::layout::package_lock_path(authored_root).to_string()
+        }
+        Some(targets) => {
+            for target in targets {
+                record_lock_evidence(target, false)?;
+            }
+            ctx_traits_io::layout::package_lock_path(authored_root).to_string()
+        }
+    };
 
     Ok(ForkReport {
         id: package_id.to_string(),
