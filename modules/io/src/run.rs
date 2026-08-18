@@ -3794,15 +3794,25 @@ fn load_trait_text(
     ctx_traits_core::digest::Digest,
     ctx_traits_core::digest::Digest,
 )> {
-    load_trait_text_with_context(path, path, text)
+    load_trait_text_with_context(path, path, text, true)
 }
 
 /// Decode `text` with the recorded document's encoding while resolving package
 /// resources from the source path supplied by the current resume caller.
+///
+/// `print_warnings` gates the transition-period decode advisories ("migrate
+/// to 0.4", deprecated-key notices). A LIVE file load warns — the operator
+/// can act on the advice. A ledger-EMBEDDED document replayed for history
+/// (the dashboard's drift check over every past session) must not: the
+/// document is immutable provenance, the recorded path may no longer exist,
+/// and replaying authoring advice against a museum piece on every dashboard
+/// exit is pure noise (2026-08-18 owner report: six pre-0.4 warnings on
+/// every `ctx traits` quit, naming a directory layout retired weeks ago).
 fn load_trait_text_with_context(
     encoding_path: &Utf8Path,
     package_path: &Utf8Path,
     text: &str,
+    print_warnings: bool,
 ) -> crate::Result<(
     ctx_traits_core::Trait,
     Utf8PathBuf,
@@ -3812,7 +3822,9 @@ fn load_trait_text_with_context(
     let encoding = ctx_traits_core::encoding::Encoding::from_path(encoding_path)?;
     let (trait_ref, warnings) =
         ctx_traits_core::encoding::decode_trait_with_warnings(encoding, text)?;
-    crate::decode_diagnostics::print_decode_warnings(encoding_path.as_str(), &warnings);
+    if print_warnings {
+        crate::decode_diagnostics::print_decode_warnings(encoding_path.as_str(), &warnings);
+    }
     let trait_root = crate::layout::package_root_for_manifest(package_path)
         .map(Utf8Path::to_path_buf)
         .ok_or_else(|| crate::environment::Error::Filesystem {
@@ -3876,7 +3888,7 @@ pub fn load_trait_for_session(
             .map(|loaded| loaded.path.as_path())
             .unwrap_or(path.as_path())
         && let Ok((trait_ref, trait_root, source_digest, canonical_digest)) =
-            load_trait_text_with_context(&path, package_path, pinned)
+            load_trait_text_with_context(&path, package_path, pinned, false)
     {
         let pinned = from_parts(trait_ref, trait_root, source_digest, canonical_digest);
         if verify_loaded_trait_matches_session(&pinned, session, field_prefix).is_ok() {
@@ -3970,7 +3982,7 @@ pub fn trait_source_drift_from(
     let valid_pin = source.document.as_deref().is_some_and(|document| {
         // `path` is rooted at the repository that owns this session. Keep the
         // ledger path only for selecting its original encoding.
-        load_trait_text_with_context(source_path, &path, document)
+        load_trait_text_with_context(source_path, &path, document, false)
             .map(|(trait_ref, _, source_digest, canonical_digest)| {
                 trait_ref.id.as_str() == session.trait_id
                     && session
